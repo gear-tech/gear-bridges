@@ -1,0 +1,10 @@
+[package]
+name = "relayer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gear-rpc-client.workspace = true
+prover.workspace = true
+
+tokio = { version = "1.23.0", features = ["full"] }

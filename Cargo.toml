@@ -1,0 +1,47 @@
+[workspace]
+
+members = [
+    "gear-rpc-client",
+    "prover",
+    "relayer",
+    "circuits/plonky2_ed25519",
+    "circuits/plonky2_sha256",
+    "circuits/plonky2_sha512",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+gear-rpc-client = { path = "./gear-rpc-client" }
+prover = { path = "./prover" }
+plonky2_sha256 = { path = "./circuits/plonky2_sha256" }
+plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
+plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
+
+anyhow = "1.0.40"
+curve25519-dalek = { git = "https://github.com/tikhono/curve25519-dalek", rev = "c87a7edfbc5694a581ef30e39673622fabe0c7c5" }
+env_logger = "0.9.0"
+itertools = "0.10.5"
+jemallocator = "0.5.0"
+keccak-hash = "0.8.0"
+log = "0.4.14"
+num = { version = "0.4", features = ["rand"] }
+plonky2 = { git = "https://github.com/tikhono/plonky2", rev = "066c82b91e09272560d0e3154b971a73339611d5" }
+plonky2_ecdsa = { git = "https://github.com/tikhono/plonky2", rev = "066c82b91e09272560d0e3154b971a73339611d5" }
+plonky2_field = { git = "https://github.com/tikhono/plonky2", rev = "066c82b91e09272560d0e3154b971a73339611d5" }
+plonky2_u32 = { git = "https://github.com/tikhono/plonky2", rev = "066c82b91e09272560d0e3154b971a73339611d5" }
+plonky2_util = { git = "https://github.com/tikhono/plonky2", rev = "066c82b91e09272560d0e3154b971a73339611d5" }
+rand_chacha = "0.3.1"
+rayon = "1.5.3"
+serde = { version = "1.0", features = ["alloc", "derive"] }
+sha2 = "0.10"
+static_assertions = "1.1.0"
+unroll = "0.1.5"
+rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
+
+[patch.crates-io]
+parity-wasm = { version = "0.45.0", git = "https://github.com/gear-tech/parity-wasm", branch = "v0.45.0-sign-ext" }
+wasmi-validation = { version = "0.5.0", git = "https://github.com/gear-tech/wasmi", branch = "v0.13.2-sign-ext" }
+wasm-instrument = { version = "0.3.0", git = "https://github.com/gear-tech/wasm-instrument", branch = "v0.3.0-sign-ext" }

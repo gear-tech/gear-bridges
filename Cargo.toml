@@ -7,6 +7,7 @@ members = [
     "circuits/plonky2_ed25519",
     "circuits/plonky2_sha256",
     "circuits/plonky2_sha512",
+    "circuits/plonky2_blake2b256",
 ]
 
 [workspace.package]
@@ -19,6 +20,7 @@ prover = { path = "./prover" }
 plonky2_sha256 = { path = "./circuits/plonky2_sha256" }
 plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
 plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
+plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
 
 anyhow = "1.0.40"
 curve25519-dalek = { git = "https://github.com/tikhono/curve25519-dalek", rev = "c87a7edfbc5694a581ef30e39673622fabe0c7c5" }
@@ -40,6 +42,7 @@ sha2 = "0.10"
 static_assertions = "1.1.0"
 unroll = "0.1.5"
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
+blake2 = "0.10.6"
 
 [patch.crates-io]
 parity-wasm = { version = "0.45.0", git = "https://github.com/gear-tech/parity-wasm", branch = "v0.45.0-sign-ext" }

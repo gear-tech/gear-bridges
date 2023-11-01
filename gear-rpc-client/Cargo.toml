@@ -9,9 +9,15 @@ subxt = { version = "0.29.0", git = "https://github.com/gear-tech/subxt", branch
 pallet-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", features = [
     "std",
 ] }
+pallet-babe = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false, features = [
+    "std",
+] }
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox" }
 sp-runtime = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", default-features = false }
 sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", features = [
+    "std",
+] }
+sp-consensus-babe = { version = "0.10.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", features = [
     "std",
 ] }
 sp-trie = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", default-features = false }

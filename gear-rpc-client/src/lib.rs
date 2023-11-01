@@ -1,4 +1,4 @@
-use gsdk::metadata::storage::GrandpaStorage;
+use gsdk::metadata::storage::{BabeStorage, GrandpaStorage};
 use parity_scale_codec::Decode;
 use sc_consensus_grandpa::FinalityProof;
 use sp_core::crypto::Wraps;
@@ -64,7 +64,10 @@ impl GearApi {
         println!("proof validity: {}", valid.is_ok());
     }
 
-    pub async fn fetch_justification(&self, block: H256) -> prover::BlockJustification {
+    pub async fn fetch_justification(
+        &self,
+        block: H256,
+    ) -> prover::block_justification::BlockJustification {
         let block = (*self.api).blocks().at(block).await.unwrap();
 
         let finality: Option<String> = self
@@ -98,20 +101,43 @@ impl GearApi {
         let signed_data = sp_consensus_grandpa::localized_payload(
             justification.round,
             set_id,
-            &sp_consensus_grandpa::Message::<GearHeader>::Precommit(pre_commit.precommit.clone()),
+            &sp_consensus_grandpa::Message::<GearHeader>::Precommit(pre_commit.precommit),
         );
 
-        prover::BlockJustification {
+        prover::block_justification::BlockJustification {
             msg: signed_data,
             pre_commits: justification
                 .commit
                 .precommits
                 .into_iter()
-                .map(|pc| prover::PreCommit {
+                .map(|pc| prover::block_justification::PreCommit {
                     public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                     signature: pc.signature.as_inner_ref().0.to_owned(),
                 })
                 .collect(),
         }
+    }
+
+    pub async fn fetch_authorities(&self, block: H256) {
+        let block = (*self.api).blocks().at(block).await.unwrap();
+        let storage = block.storage();
+
+        let address = gsdk::Api::storage_root(BabeStorage::Authorities);
+        let authorities = storage.fetch(&address).await.unwrap();
+        let authorities = Vec::<(
+            pallet_babe::AuthorityId,
+            sp_consensus_babe::BabeAuthorityWeight,
+        )>::decode(&mut authorities.unwrap().encoded())
+        .unwrap();
+
+        let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities);
+        let next_authorities = storage.fetch(&address).await.unwrap();
+        let next_authorities = Vec::<(
+            pallet_babe::AuthorityId,
+            sp_consensus_babe::BabeAuthorityWeight,
+        )>::decode(&mut next_authorities.unwrap().encoded())
+        .unwrap();
+
+        println!("AUTH: {} {}", authorities.len(), next_authorities.len());
     }
 }

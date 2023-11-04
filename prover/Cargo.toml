@@ -26,3 +26,6 @@ serde.workspace = true
 sha2.workspace = true
 static_assertions.workspace = true
 unroll.workspace = true
+
+# temporary
+sp-core.workspace = true

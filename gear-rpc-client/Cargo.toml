@@ -24,10 +24,9 @@ sp-state-machine = { version = "0.13.0", git = "https://github.com/gear-tech/sub
 parity-scale-codec = { version = "3.6.4", default-features = false }
 trie-db = { version = "0.27.0", default-features = false }
 sp-trie = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", default-features = false }
+sp-core = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox", default-features = false }
 
 hex = "0.4.3"
 futures-util = "0.3.28"
-
-sp-core.workspace = true
 
 prover.workspace = true

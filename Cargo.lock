@@ -5104,6 +5104,7 @@ dependencies = [
  "log",
  "num",
  "plonky2",
+ "plonky2_blake2b256",
  "plonky2_ecdsa",
  "plonky2_ed25519",
  "plonky2_field",
@@ -5115,7 +5116,6 @@ dependencies = [
  "rayon",
  "serde",
  "sha2 0.10.8",
- "sp-core 7.0.0 (git+https://github.com/gear-tech/substrate.git?branch=gear-polkadot-v0.9.41-canary-no-sandbox)",
  "static_assertions",
  "unroll",
 ]

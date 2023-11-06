@@ -62,21 +62,40 @@ pub fn blake2_circuit<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     msg_len: usize,
 ) -> Blake2Targets {
-    let msg_len_in_bits = msg_len * 8;
+    let message = std::iter::repeat(())
+        .take(msg_len * 8)
+        .map(|_| builder.add_virtual_bool_target_safe())
+        .collect::<Vec<_>>();
+
+    let digest = blake2_circuit_from_targets(builder, message.clone());
+
+    for bit in &message {
+        builder.register_public_input(bit.target);
+    }
+
+    for bit in &digest {
+        builder.register_public_input(bit.target);
+    }
+
+    Blake2Targets { message, digest }
+}
+
+pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    mut message: Vec<BoolTarget>,
+) -> [BoolTarget; HASH_BITS] {
+    assert!(message.len() % 8 == 0);
+
+    let msg_len_in_bits = message.len();
     let dd = msg_len_in_bits / BLOCK_BITS + (msg_len_in_bits % BLOCK_BITS != 0) as usize;
     let dd = dd.max(1);
 
     let msg_len_rem = (dd * BLOCK_BITS) - msg_len_in_bits;
 
-    let mut message = std::iter::repeat(())
-        .take(msg_len_in_bits)
-        .map(|_| builder.add_virtual_bool_target_safe())
-        .collect::<Vec<_>>();
     let mut message_rem = std::iter::repeat(())
         .map(|_| builder.constant_bool(false))
         .take(msg_len_rem)
         .collect();
-
     message.append(&mut message_rem);
 
     let message_blocks: Vec<[WordTargets; BLOCK_WORDS]> = message
@@ -127,30 +146,19 @@ pub fn blake2_circuit<F: RichField + Extendable<D>, const D: usize>(
             &iv,
             h,
             &message_blocks[dd - 1],
-            msg_len as Word,
+            (msg_len_in_bits / 8) as Word,
             true,
         );
     } else {
         unimplemented!("Hashing with key is not implemented");
     }
 
-    let digest: [BoolTarget; HASH_BITS] = h
-        .into_iter()
+    h.into_iter()
         .flatten()
         .take(HASH_BITS)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap();
-
-    for bit in message.iter().take(msg_len_in_bits) {
-        builder.register_public_input(bit.target);
-    }
-
-    for bit in &digest {
-        builder.register_public_input(bit.target);
-    }
-
-    Blake2Targets { message, digest }
+        .unwrap()
 }
 
 #[allow(non_snake_case)]

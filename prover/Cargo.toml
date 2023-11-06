@@ -19,6 +19,7 @@ plonky2_field.workspace = true
 plonky2_sha512.workspace = true
 plonky2_u32.workspace = true
 plonky2_util.workspace = true
+plonky2_blake2b256.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rayon.workspace = true
@@ -26,6 +27,3 @@ serde.workspace = true
 sha2.workspace = true
 static_assertions.workspace = true
 unroll.workspace = true
-
-# temporary
-sp-core.workspace = true

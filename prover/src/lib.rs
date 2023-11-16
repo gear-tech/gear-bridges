@@ -6,9 +6,11 @@ use jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-pub mod block_justification;
+pub mod block_finality;
 mod common;
 pub mod merkle_proof;
+
+pub use common::ProofWithCircuitData;
 
 mod prelude {
     use plonky2::field::goldilocks_field::GoldilocksField;
@@ -17,6 +19,4 @@ mod prelude {
     pub type F = GoldilocksField;
     pub type C = PoseidonGoldilocksConfig;
     pub const D: usize = 2;
-
-    pub use super::common::compose_circuits;
 }

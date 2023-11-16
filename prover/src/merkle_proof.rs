@@ -9,7 +9,7 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 
-use crate::prelude::*;
+use crate::{common::array_to_bits, prelude::*, ProofWithCircuitData};
 
 pub struct TrieNodeData {
     pub left_data: Vec<u8>,
@@ -24,7 +24,7 @@ pub struct MerkleProof {
 }
 
 impl MerkleProof {
-    pub fn prove(&self) {
+    pub fn prove(&self) -> ProofWithCircuitData {
         // order of public inputs:
         // - leaf data
         // - node #0 left data
@@ -96,14 +96,10 @@ impl MerkleProof {
 
         let proof = circuit.prove(pw).unwrap();
 
-        let computed_root = &proof.public_inputs[proof.public_inputs.len() - 256..];
-        println!(
-            "computed root: {:?}",
-            computed_root
-                .iter()
-                .map(|f| f.to_canonical_u64() % GoldilocksField::ORDER)
-                .collect::<Vec<_>>()
-        );
+        ProofWithCircuitData {
+            proof,
+            circuit_data: circuit,
+        }
     }
 }
 
@@ -119,17 +115,4 @@ fn create_bool_public_inputs(
             target
         })
         .collect()
-}
-
-fn array_to_bits(data: &[u8]) -> Vec<bool> {
-    data.iter().copied().flat_map(byte_to_bits).collect()
-}
-
-fn byte_to_bits(byte: u8) -> [bool; 8] {
-    (0..8)
-        .rev()
-        .map(move |bit_idx| (byte >> bit_idx) % 2 == 1)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
 }

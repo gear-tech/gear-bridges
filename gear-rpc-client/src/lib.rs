@@ -21,14 +21,24 @@ impl GearApi {
         }
     }
 
+    pub async fn block_hash_to_number(&self, block: H256) -> u32 {
+        self.api.gear_block_number(Some(block)).await.unwrap()
+    }
+
+    pub async fn block_number_to_hash(&self, block: u32) -> H256 {
+        self.api
+            .rpc()
+            .block_hash(Some(block.into()))
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
     pub async fn latest_finalized_block(&self) -> H256 {
         self.api.rpc().finalized_head().await.unwrap()
     }
 
-    pub async fn fetch_justification(
-        &self,
-        block: H256,
-    ) -> prover::block_justification::BlockJustification {
+    pub async fn fetch_finality_proof(&self, block: H256) -> prover::block_finality::BlockFinality {
         let block = (*self.api).blocks().at(block).await.unwrap();
 
         let finality: Option<String> = self
@@ -65,13 +75,13 @@ impl GearApi {
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(pre_commit.precommit),
         );
 
-        prover::block_justification::BlockJustification {
-            msg: signed_data,
+        prover::block_finality::BlockFinality {
+            message: signed_data,
             pre_commits: justification
                 .commit
                 .precommits
                 .into_iter()
-                .map(|pc| prover::block_justification::PreCommit {
+                .map(|pc| prover::block_finality::PreCommit {
                     public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                     signature: pc.signature.as_inner_ref().0.to_owned(),
                 })
@@ -79,7 +89,7 @@ impl GearApi {
         }
     }
 
-    pub async fn fetch_next_authorities(&self, block: H256) {
+    pub async fn fetch_babe_authorities(&self, block: H256) -> Vec<[u8; 32]> {
         let block = (*self.api).blocks().at(block).await.unwrap();
         let storage = block.storage();
 
@@ -91,15 +101,10 @@ impl GearApi {
         )>::decode(&mut authorities.unwrap().encoded())
         .unwrap();
 
-        let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities);
-        let next_authorities = storage.fetch(&address).await.unwrap();
-        let next_authorities = Vec::<(
-            pallet_babe::AuthorityId,
-            sp_consensus_babe::BabeAuthorityWeight,
-        )>::decode(&mut next_authorities.unwrap().encoded())
-        .unwrap();
-
-        println!("AUTH: {} {}", authorities.len(), next_authorities.len());
+        authorities
+            .into_iter()
+            .map(|(pk, _)| pk.encode().try_into().unwrap())
+            .collect()
     }
 
     pub async fn fetch_next_authorities_merkle_proof(&self, block: H256) -> MerkleProof {

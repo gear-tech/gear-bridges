@@ -75,7 +75,16 @@ impl GearApi {
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(pre_commit.precommit),
         );
 
+        // TODO: Replace with actual validator set.
+        let validator_set = justification
+            .commit
+            .precommits
+            .iter()
+            .map(|pc| pc.id.as_inner_ref().as_array_ref().to_owned())
+            .collect();
+
         prover::block_finality::BlockFinality {
+            validator_set,
             message: signed_data,
             pre_commits: justification
                 .commit
@@ -109,7 +118,42 @@ impl GearApi {
 
     pub async fn fetch_next_authorities_merkle_proof(&self, block: H256) -> MerkleProof {
         let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
-        self.fetch_merkle_proof(block, &address).await
+        self.fetch_merkle_proof_including_block_header(block, &address)
+            .await
+    }
+
+    async fn fetch_merkle_proof_including_block_header(
+        &self,
+        block: H256,
+        address: &[u8],
+    ) -> MerkleProof {
+        let merkle_proof = self.fetch_merkle_proof(block, address).await;
+
+        let block = (*self.api).blocks().at(block).await.unwrap();
+        let encoded_header = block.header().encode();
+
+        // Assume that encoded_header have the folowing structure:
+        // - previous block hash    (32 bytes)
+        // - block number           (4 bytes)
+        // - merkle state root      (32 bytes)
+        // - ...
+
+        let (left_data, rem) = encoded_header.split_at(32 + 4);
+        let (state_root_hash, right_data) = rem.split_at(32);
+
+        assert_eq!(state_root_hash, merkle_proof.root_hash);
+
+        let mut merkle_proof_nodes = merkle_proof.nodes;
+        merkle_proof_nodes.push(TrieNodeData {
+            left_data: left_data.to_vec(),
+            right_data: right_data.to_vec(),
+        });
+
+        MerkleProof {
+            leaf_data: merkle_proof.leaf_data,
+            root_hash: block.hash().as_bytes().try_into().unwrap(),
+            nodes: merkle_proof_nodes,
+        }
     }
 
     async fn fetch_merkle_proof(&self, block: H256, address: &[u8]) -> MerkleProof {

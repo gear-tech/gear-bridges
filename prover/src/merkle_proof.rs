@@ -2,8 +2,6 @@ use std::iter;
 
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-use plonky2_field::goldilocks_field::GoldilocksField;
-use plonky2_field::types::{Field64, PrimeField64};
 
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
@@ -11,11 +9,13 @@ use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 
 use crate::{common::array_to_bits, prelude::*, ProofWithCircuitData};
 
+#[derive(Clone)]
 pub struct TrieNodeData {
     pub left_data: Vec<u8>,
     pub right_data: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub struct MerkleProof {
     /// Ordered from leaf to the root.
     pub nodes: Vec<TrieNodeData>,

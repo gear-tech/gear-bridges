@@ -7,12 +7,11 @@ use plonky2::{
 };
 use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
 use plonky2_field::types::Field;
-use plonky2_sha256::circuit::sha256_circuit;
-use sha2::{Digest, Sha256};
 
 use crate::{
     common::{array_to_bits, ProofCompositionTargets},
     prelude::*,
+    validator_set_hash::ValidatorSetHash,
     ProofWithCircuitData,
 };
 
@@ -24,6 +23,7 @@ const SIGNATURE_SIZE: usize = 64;
 const SHA256_DIGEST_SIZE: usize = 32;
 const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
 
+#[derive(Clone)]
 pub struct PreCommit {
     pub public_key: [u8; PUBLIC_KEY_SIZE],
     pub signature: [u8; SIGNATURE_SIZE],
@@ -32,26 +32,22 @@ pub struct PreCommit {
 /// Public inputs:
 /// - validator set hash
 /// - message
+#[derive(Clone)]
 pub struct BlockFinality {
+    pub validator_set: Vec<[u8; PUBLIC_KEY_SIZE]>,
     pub pre_commits: Vec<PreCommit>,
     pub message: Vec<u8>,
 }
 
 impl BlockFinality {
     pub fn prove(&self) -> ProofWithCircuitData {
-        // NOTE: Temporary solution.
-        let validator_set = self
-            .pre_commits
-            .iter()
-            .map(|pc| pc.public_key)
-            .collect::<Vec<_>>();
-
         let processed_pre_commits = self
             .pre_commits
             .iter()
-            .take(3) // NOTE: For test purposes.
+            .take(1) // NOTE: For test purposes.
             .map(|pc| ProcessedPreCommit {
-                validator_idx: validator_set
+                validator_idx: self
+                    .validator_set
                     .iter()
                     .position(|v| v == &pc.public_key)
                     .unwrap(),
@@ -60,12 +56,12 @@ impl BlockFinality {
             .collect();
 
         let validator_set_hash_proof = ValidatorSetHash {
-            validator_set: validator_set.clone(),
+            validator_set: self.validator_set.clone(),
         }
         .prove();
 
         let validator_signs_proof = ValidatorSignsChain {
-            validator_set: validator_set.clone(),
+            validator_set: self.validator_set.clone(),
             pre_commits: processed_pre_commits,
             message: self.message.clone(),
         }
@@ -81,9 +77,9 @@ impl BlockFinality {
             }
 
             // Set message as public input.
-            for target in &validator_signs_public_inputs[1 + validator_set.len()
+            for target in &validator_signs_public_inputs[1 + self.validator_set.len()
                 * PUBLIC_KEY_SIZE_IN_BITS
-                ..1 + validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS + self.message.len() * 8]
+                ..1 + self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS + self.message.len() * 8]
             {
                 builder.register_public_input(*target);
             }
@@ -91,9 +87,10 @@ impl BlockFinality {
             // Assert that validator sets are matching.
             let validator_set_targets_0 = &validator_set_hash_public_inputs
                 [SHA256_DIGEST_SIZE_IN_BITS
-                    ..SHA256_DIGEST_SIZE_IN_BITS + validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS];
+                    ..SHA256_DIGEST_SIZE_IN_BITS
+                        + self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS];
             let validator_set_targets_1 = &validator_signs_public_inputs
-                [1..1 + validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS];
+                [1..1 + self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS];
             for (target_0, target_1) in validator_set_targets_0
                 .iter()
                 .zip(validator_set_targets_1.iter())
@@ -107,63 +104,6 @@ impl BlockFinality {
             &validator_signs_proof,
             targets_op,
         )
-    }
-}
-
-/// Public inputs:
-/// - hash
-/// - validator set
-struct ValidatorSetHash {
-    validator_set: Vec<[u8; PUBLIC_KEY_SIZE]>,
-}
-
-impl ValidatorSetHash {
-    fn prove(&self) -> ProofWithCircuitData {
-        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-
-        let targets = sha256_circuit(
-            &mut builder,
-            self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS,
-        );
-
-        for target in &targets.digest {
-            builder.register_public_input(target.target);
-        }
-
-        for target in &targets.message {
-            builder.register_public_input(target.target);
-        }
-
-        let circuit_data = builder.build::<C>();
-
-        let mut pw = PartialWitness::new();
-
-        let mut hasher = Sha256::new();
-        hasher.update(
-            &self
-                .validator_set
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let hash = hasher.finalize();
-        let hash_bits = array_to_bits(&hash);
-        for (target, value) in targets.digest.iter().zip(hash_bits) {
-            pw.set_bool_target(*target, value);
-        }
-
-        let validator_set_bits = self.validator_set.iter().flat_map(|v| array_to_bits(v));
-        for (target, value) in targets.message.iter().zip(validator_set_bits) {
-            pw.set_bool_target(*target, value);
-        }
-
-        let proof = circuit_data.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
     }
 }
 

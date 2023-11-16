@@ -3,26 +3,35 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierCircuitTarget},
-    },
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
 use plonky2_field::types::Field;
+use plonky2_sha256::circuit::sha256_circuit;
+use sha2::{Digest, Sha256};
 
-use crate::{common::array_to_bits, prelude::*, ProofWithCircuitData};
+use crate::{
+    common::{array_to_bits, ProofCompositionTargets},
+    prelude::*,
+    ProofWithCircuitData,
+};
 
 const PUBLIC_KEY_SIZE: usize = 32;
 const PUBLIC_KEY_SIZE_IN_BITS: usize = PUBLIC_KEY_SIZE * 8;
 
 const SIGNATURE_SIZE: usize = 64;
 
+const SHA256_DIGEST_SIZE: usize = 32;
+const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
+
 pub struct PreCommit {
     pub public_key: [u8; PUBLIC_KEY_SIZE],
     pub signature: [u8; SIGNATURE_SIZE],
 }
 
+/// Public inputs:
+/// - validator set hash
+/// - message
 pub struct BlockFinality {
     pub pre_commits: Vec<PreCommit>,
     pub message: Vec<u8>,
@@ -30,26 +39,173 @@ pub struct BlockFinality {
 
 impl BlockFinality {
     pub fn prove(&self) -> ProofWithCircuitData {
+        // NOTE: Temporary solution.
         let validator_set = self
             .pre_commits
             .iter()
             .map(|pc| pc.public_key)
             .collect::<Vec<_>>();
 
-        self.pre_commits
+        let processed_pre_commits = self
+            .pre_commits
             .iter()
-            .enumerate()
-            .map(|(index, pre_commit)| {
+            .take(3) // NOTE: For test purposes.
+            .map(|pc| ProcessedPreCommit {
+                validator_idx: validator_set
+                    .iter()
+                    .position(|v| v == &pc.public_key)
+                    .unwrap(),
+                signature: pc.signature.clone(),
+            })
+            .collect();
+
+        let validator_set_hash_proof = ValidatorSetHash {
+            validator_set: validator_set.clone(),
+        }
+        .prove();
+
+        let validator_signs_proof = ValidatorSignsChain {
+            validator_set: validator_set.clone(),
+            pre_commits: processed_pre_commits,
+            message: self.message.clone(),
+        }
+        .prove();
+
+        let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
+            let validator_set_hash_public_inputs = targets.first_proof_public_input_targets;
+            let validator_signs_public_inputs = targets.second_proof_public_input_targets;
+
+            // Set validator set hash as public input.
+            for target in &validator_set_hash_public_inputs[..SHA256_DIGEST_SIZE_IN_BITS] {
+                builder.register_public_input(*target);
+            }
+
+            // Set message as public input.
+            for target in &validator_signs_public_inputs[1 + validator_set.len()
+                * PUBLIC_KEY_SIZE_IN_BITS
+                ..1 + validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS + self.message.len() * 8]
+            {
+                builder.register_public_input(*target);
+            }
+
+            // Assert that validator sets are matching.
+            let validator_set_targets_0 = &validator_set_hash_public_inputs
+                [SHA256_DIGEST_SIZE_IN_BITS
+                    ..SHA256_DIGEST_SIZE_IN_BITS + validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS];
+            let validator_set_targets_1 = &validator_signs_public_inputs
+                [1..1 + validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS];
+            for (target_0, target_1) in validator_set_targets_0
+                .iter()
+                .zip(validator_set_targets_1.iter())
+            {
+                builder.connect(*target_0, *target_1);
+            }
+        };
+
+        ProofWithCircuitData::compose(
+            &validator_set_hash_proof,
+            &validator_signs_proof,
+            targets_op,
+        )
+    }
+}
+
+/// Public inputs:
+/// - hash
+/// - validator set
+struct ValidatorSetHash {
+    validator_set: Vec<[u8; PUBLIC_KEY_SIZE]>,
+}
+
+impl ValidatorSetHash {
+    fn prove(&self) -> ProofWithCircuitData {
+        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+
+        let targets = sha256_circuit(
+            &mut builder,
+            self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS,
+        );
+
+        for target in &targets.digest {
+            builder.register_public_input(target.target);
+        }
+
+        for target in &targets.message {
+            builder.register_public_input(target.target);
+        }
+
+        let circuit_data = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+
+        let mut hasher = Sha256::new();
+        hasher.update(
+            &self
+                .validator_set
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        let hash = hasher.finalize();
+        let hash_bits = array_to_bits(&hash);
+        for (target, value) in targets.digest.iter().zip(hash_bits) {
+            pw.set_bool_target(*target, value);
+        }
+
+        let validator_set_bits = self.validator_set.iter().flat_map(|v| array_to_bits(v));
+        for (target, value) in targets.message.iter().zip(validator_set_bits) {
+            pw.set_bool_target(*target, value);
+        }
+
+        let proof = circuit_data.prove(pw).unwrap();
+
+        ProofWithCircuitData {
+            proof,
+            circuit_data,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ProcessedPreCommit {
+    validator_idx: usize,
+    signature: [u8; SIGNATURE_SIZE],
+}
+
+/// Public inputs order:
+/// - latest proven index
+/// - validator set
+/// - message
+struct ValidatorSignsChain {
+    validator_set: Vec<[u8; PUBLIC_KEY_SIZE]>,
+    pre_commits: Vec<ProcessedPreCommit>,
+    message: Vec<u8>,
+}
+
+impl ValidatorSignsChain {
+    pub fn prove(&self) -> ProofWithCircuitData {
+        let mut pre_commits = self.pre_commits.clone();
+        pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
+
+        pre_commits
+            .iter()
+            .map(|pre_commit| {
                 IndexedValidatorSign {
-                    validator_set: validator_set.clone(),
-                    index,
+                    validator_set: self.validator_set.clone(),
+                    index: pre_commit.validator_idx,
                     signature: pre_commit.signature,
                     message: self.message.clone(),
                 }
                 .prove()
             })
             .reduce(|acc, x| {
-                ComposedValidatorSigns {}.prove(acc, x, self.message.len() * 8, validator_set.len())
+                ComposedValidatorSigns {}.prove(
+                    acc,
+                    x,
+                    self.message.len() * 8,
+                    self.validator_set.len(),
+                )
             })
             .unwrap()
     }
@@ -69,130 +225,55 @@ impl ComposedValidatorSigns {
         message_size_in_bits: usize,
         validator_set_length: usize,
     ) -> ProofWithCircuitData {
-        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
+            let previous_composed_proof_public_inputs = targets.first_proof_public_input_targets;
+            let indexed_sign_proof_public_inputs = targets.second_proof_public_input_targets;
 
-        let previous_composed_proof_target =
-            builder.add_virtual_proof_with_pis(&previous_composed_proof.circuit_data.common);
-        let indexed_sign_proof_target =
-            builder.add_virtual_proof_with_pis(&indexed_sign_proof.circuit_data.common);
+            // Set latest proven index as public input.
+            builder.register_public_input(indexed_sign_proof_public_inputs[0]);
 
-        // Set latest proven index as public input.
-        builder.register_public_input(indexed_sign_proof_target.public_inputs[0]);
+            // Set validator set and message as public inputs.
+            for target in &indexed_sign_proof_public_inputs
+                [1..1 + message_size_in_bits + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS]
+            {
+                builder.register_public_input(*target);
+            }
 
-        // Set validator set and message as public inputs.
-        for target in &indexed_sign_proof_target.public_inputs
-            [1..1 + message_size_in_bits + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS]
-        {
-            builder.register_public_input(*target);
-        }
+            // Assert that messages are matching.
+            let message_targets_composed = previous_composed_proof_public_inputs[1
+                + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS
+                ..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS + message_size_in_bits]
+                .iter();
+            let message_targets_new = indexed_sign_proof_public_inputs[1 + validator_set_length
+                * PUBLIC_KEY_SIZE_IN_BITS
+                ..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS + message_size_in_bits]
+                .iter();
+            for (target_0, target_1) in message_targets_composed.zip(message_targets_new) {
+                builder.connect(*target_0, *target_1);
+            }
 
-        // Assert that messages are matching.
-        let message_targets_composed = previous_composed_proof_target.public_inputs[1
-            + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS
-            ..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS + message_size_in_bits]
-            .iter();
-        let message_targets_new = indexed_sign_proof_target.public_inputs[1 + validator_set_length
-            * PUBLIC_KEY_SIZE_IN_BITS
-            ..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS + message_size_in_bits]
-            .iter();
-        for (target_0, target_1) in message_targets_composed.zip(message_targets_new) {
-            builder.connect(*target_0, *target_1);
-        }
+            // Assert that validator set is matching.
+            let message_targets_composed = previous_composed_proof_public_inputs
+                [1..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS]
+                .iter();
+            let message_targets_new = indexed_sign_proof_public_inputs
+                [1..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS]
+                .iter();
+            for (target_0, target_1) in message_targets_composed.zip(message_targets_new) {
+                builder.connect(*target_0, *target_1);
+            }
 
-        // Assert that validator set is matching.
-        let message_targets_composed = previous_composed_proof_target.public_inputs
-            [1..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS]
-            .iter();
-        let message_targets_new = indexed_sign_proof_target.public_inputs
-            [1..1 + validator_set_length * PUBLIC_KEY_SIZE_IN_BITS]
-            .iter();
-        for (target_0, target_1) in message_targets_composed.zip(message_targets_new) {
-            builder.connect(*target_0, *target_1);
-        }
-
-        // Assert that newly proven index > latest proven.
-        let new_index_sub_latest = builder.sub(
-            indexed_sign_proof_target.public_inputs[0],
-            previous_composed_proof_target.public_inputs[0],
-        );
-        let one = builder.one();
-        let to_compare_with_0 = builder.sub(new_index_sub_latest, one); // assert >= 0.
-        builder.range_check(to_compare_with_0, 32);
-
-        let previous_composed_verifier_circuit_target = VerifierCircuitTarget {
-            constants_sigmas_cap: builder.add_virtual_cap(
-                previous_composed_proof
-                    .circuit_data
-                    .common
-                    .config
-                    .fri_config
-                    .cap_height,
-            ),
-            circuit_digest: builder.add_virtual_hash(),
-        };
-        let indexed_sign_verifier_circuit_target = VerifierCircuitTarget {
-            constants_sigmas_cap: builder.add_virtual_cap(
-                indexed_sign_proof
-                    .circuit_data
-                    .common
-                    .config
-                    .fri_config
-                    .cap_height,
-            ),
-            circuit_digest: builder.add_virtual_hash(),
+            // Assert that newly proven index > latest proven.
+            let new_index_sub_latest = builder.sub(
+                indexed_sign_proof_public_inputs[0],
+                previous_composed_proof_public_inputs[0],
+            );
+            let one = builder.one();
+            let to_compare_with_0 = builder.sub(new_index_sub_latest, one); // assert >= 0.
+            builder.range_check(to_compare_with_0, 32);
         };
 
-        builder.verify_proof::<C>(
-            &previous_composed_proof_target,
-            &previous_composed_verifier_circuit_target,
-            &previous_composed_proof.circuit_data.common,
-        );
-        builder.verify_proof::<C>(
-            &indexed_sign_proof_target,
-            &indexed_sign_verifier_circuit_target,
-            &indexed_sign_proof.circuit_data.common,
-        );
-
-        let circuit_data = builder.build::<C>();
-
-        let mut pw = PartialWitness::new();
-        pw.set_proof_with_pis_target(
-            &previous_composed_proof_target,
-            &previous_composed_proof.proof,
-        );
-        pw.set_proof_with_pis_target(&indexed_sign_proof_target, &indexed_sign_proof.proof);
-        pw.set_cap_target(
-            &previous_composed_verifier_circuit_target.constants_sigmas_cap,
-            &previous_composed_proof
-                .circuit_data
-                .verifier_only
-                .constants_sigmas_cap,
-        );
-        pw.set_cap_target(
-            &indexed_sign_verifier_circuit_target.constants_sigmas_cap,
-            &indexed_sign_proof
-                .circuit_data
-                .verifier_only
-                .constants_sigmas_cap,
-        );
-        pw.set_hash_target(
-            previous_composed_verifier_circuit_target.circuit_digest,
-            previous_composed_proof
-                .circuit_data
-                .verifier_only
-                .circuit_digest,
-        );
-        pw.set_hash_target(
-            indexed_sign_verifier_circuit_target.circuit_digest,
-            indexed_sign_proof.circuit_data.verifier_only.circuit_digest,
-        );
-
-        let proof = circuit_data.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
+        ProofWithCircuitData::compose(&previous_composed_proof, &indexed_sign_proof, targets_op)
     }
 }
 
@@ -223,98 +304,40 @@ impl IndexedValidatorSign {
         }
         .prove();
 
-        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
+            let selector_proof_public_inputs = targets.first_proof_public_input_targets;
+            let sign_proof_public_inputs = targets.second_proof_public_input_targets;
 
-        let selector_proof_target =
-            builder.add_virtual_proof_with_pis(&selector_proof.circuit_data.common);
-        let sign_proof_target = builder.add_virtual_proof_with_pis(&sign_proof.circuit_data.common);
+            // Set index and validator set as public inputs.
+            for target in &selector_proof_public_inputs
+                [..1 + self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS]
+            {
+                builder.register_public_input(*target);
+            }
 
-        // Set index and validator set as public inputs.
-        for target in &selector_proof_target.public_inputs
-            [..1 + self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS]
-        {
-            builder.register_public_input(*target);
-        }
+            // Set message as public input.
+            for target in &sign_proof_public_inputs[..self.message.len() * 8] {
+                builder.register_public_input(*target);
+            }
 
-        // Set message as public input.
-        for target in &sign_proof_target.public_inputs[..self.message.len() * 8] {
-            builder.register_public_input(*target);
-        }
-
-        // Assert that validator that signed message is at correct index.
-        let selector_proof_validator_targets =
-            &selector_proof_target.public_inputs[1 + self.validator_set.len()
+            // Assert that validator that signed message is at correct index.
+            let selector_proof_validator_targets = &selector_proof_public_inputs[1 + self
+                .validator_set
+                .len()
                 * PUBLIC_KEY_SIZE_IN_BITS
                 ..1 + self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS + PUBLIC_KEY_SIZE_IN_BITS];
-        let sign_proof_validator_targets = &sign_proof_target.public_inputs
-            [self.message.len() * 8..self.message.len() * 8 + PUBLIC_KEY_SIZE_IN_BITS];
+            let sign_proof_validator_targets = &sign_proof_public_inputs
+                [self.message.len() * 8..self.message.len() * 8 + PUBLIC_KEY_SIZE_IN_BITS];
 
-        for (target_0, target_1) in selector_proof_validator_targets
-            .iter()
-            .zip(sign_proof_validator_targets.iter())
-        {
-            builder.connect(*target_0, *target_1);
-        }
-
-        let selector_verifier_circuit_target = VerifierCircuitTarget {
-            constants_sigmas_cap: builder.add_virtual_cap(
-                selector_proof
-                    .circuit_data
-                    .common
-                    .config
-                    .fri_config
-                    .cap_height,
-            ),
-            circuit_digest: builder.add_virtual_hash(),
-        };
-        let sign_verifier_circuit_target = VerifierCircuitTarget {
-            constants_sigmas_cap: builder
-                .add_virtual_cap(sign_proof.circuit_data.common.config.fri_config.cap_height),
-            circuit_digest: builder.add_virtual_hash(),
+            for (target_0, target_1) in selector_proof_validator_targets
+                .iter()
+                .zip(sign_proof_validator_targets.iter())
+            {
+                builder.connect(*target_0, *target_1);
+            }
         };
 
-        builder.verify_proof::<C>(
-            &selector_proof_target,
-            &selector_verifier_circuit_target,
-            &selector_proof.circuit_data.common,
-        );
-        builder.verify_proof::<C>(
-            &sign_proof_target,
-            &sign_verifier_circuit_target,
-            &sign_proof.circuit_data.common,
-        );
-
-        let circuit_data = builder.build::<C>();
-
-        let mut pw = PartialWitness::new();
-        pw.set_proof_with_pis_target(&selector_proof_target, &selector_proof.proof);
-        pw.set_proof_with_pis_target(&sign_proof_target, &sign_proof.proof);
-        pw.set_cap_target(
-            &selector_verifier_circuit_target.constants_sigmas_cap,
-            &selector_proof
-                .circuit_data
-                .verifier_only
-                .constants_sigmas_cap,
-        );
-        pw.set_cap_target(
-            &sign_verifier_circuit_target.constants_sigmas_cap,
-            &sign_proof.circuit_data.verifier_only.constants_sigmas_cap,
-        );
-        pw.set_hash_target(
-            selector_verifier_circuit_target.circuit_digest,
-            selector_proof.circuit_data.verifier_only.circuit_digest,
-        );
-        pw.set_hash_target(
-            sign_verifier_circuit_target.circuit_digest,
-            sign_proof.circuit_data.verifier_only.circuit_digest,
-        );
-
-        let proof = circuit_data.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
+        ProofWithCircuitData::compose(&selector_proof, &sign_proof, targets_op)
     }
 }
 

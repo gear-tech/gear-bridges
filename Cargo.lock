@@ -5108,7 +5108,7 @@ dependencies = [
  "plonky2_ecdsa",
  "plonky2_ed25519",
  "plonky2_field",
- "plonky2_sha512",
+ "plonky2_sha256",
  "plonky2_u32",
  "plonky2_util",
  "rand 0.8.5",

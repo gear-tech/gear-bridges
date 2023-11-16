@@ -1,19 +1,35 @@
 use crate::prelude::*;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget};
-use plonky2::plonk::proof::ProofWithPublicInputs;
+use plonky2::{
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget},
+        proof::ProofWithPublicInputs,
+    },
+};
 
 pub struct ProofWithCircuitData {
     pub(crate) proof: ProofWithPublicInputs<F, C, D>,
     pub(crate) circuit_data: CircuitData<F, C, D>,
 }
 
+pub struct ProofCompositionTargets {
+    pub first_proof_public_input_targets: Vec<Target>,
+    pub second_proof_public_input_targets: Vec<Target>,
+}
+
 impl ProofWithCircuitData {
-    pub fn compose(
+    pub fn compose<O>(
         first: &ProofWithCircuitData,
         second: &ProofWithCircuitData,
-    ) -> ProofWithCircuitData {
+        operation_with_targets: O,
+    ) -> ProofWithCircuitData
+    where
+        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets),
+    {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let proof_with_pis_target_1 =
             builder.add_virtual_proof_with_pis(&first.circuit_data.common);
@@ -60,6 +76,14 @@ impl ProofWithCircuitData {
             &proof_with_pis_target_2,
             &verifier_circuit_target_2,
             &second.circuit_data.common,
+        );
+
+        operation_with_targets(
+            &mut builder,
+            ProofCompositionTargets {
+                first_proof_public_input_targets: proof_with_pis_target_1.public_inputs.clone(),
+                second_proof_public_input_targets: proof_with_pis_target_2.public_inputs.clone(),
+            },
         );
 
         let circuit_data = builder.build::<C>();

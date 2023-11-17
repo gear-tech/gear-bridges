@@ -116,6 +116,13 @@ impl GearApi {
             .collect()
     }
 
+    /// NOTE: mock for now, returns some data with constant position in merkle trie.
+    pub async fn fetch_sent_message_merkle_proof(&self, block: H256) -> MerkleProof {
+        let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
+        self.fetch_merkle_proof_including_block_header(block, &address)
+            .await
+    }
+
     pub async fn fetch_next_authorities_merkle_proof(&self, block: H256) -> MerkleProof {
         let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
         self.fetch_merkle_proof_including_block_header(block, &address)

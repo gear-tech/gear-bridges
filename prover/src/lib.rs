@@ -9,6 +9,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 pub mod block_finality;
 mod common;
 pub mod merkle_proof;
+pub mod message_sent;
 pub mod next_validator_set;
 pub mod validator_set_hash;
 

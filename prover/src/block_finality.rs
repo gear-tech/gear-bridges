@@ -44,7 +44,6 @@ impl BlockFinality {
         let processed_pre_commits = self
             .pre_commits
             .iter()
-            .take(1) // NOTE: For test purposes.
             .map(|pc| ProcessedPreCommit {
                 validator_idx: self
                     .validator_set

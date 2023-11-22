@@ -206,7 +206,7 @@ impl GearApi {
         let leaf = TrieCodec::decode(&leaf).unwrap();
 
         let leaf_node_data = if let Node::Leaf(nibbles, value) = leaf {
-            assert!(matches!(value.clone(), Value::Inline(b) if b.len() == 0));
+            assert!(matches!(value.clone(), Value::Inline(b) if b.is_empty()));
             let mut leaf_data =
                 TrieCodec::leaf_node(nibbles.right_iter(), nibbles.len(), Value::Node(&[0; 32]));
             assert_eq!(leaf_data[leaf_data.len() - 32..], [0; 32]);
@@ -249,6 +249,7 @@ impl GearApi {
 
                 let mut target_child_offset_from_end = 0;
 
+                #[allow(clippy::needless_range_loop)]
                 for child_idx in target_child_idx..children.len() {
                     let serialized_size = match children[child_idx] {
                         Some(ChildReference::Hash(hash)) => hash.as_bytes().encode().len(),

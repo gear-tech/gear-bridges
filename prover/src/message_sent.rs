@@ -1,8 +1,11 @@
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::{
-    block_finality::BlockFinality, common::ProofCompositionTargets, merkle_proof::MerkleProof,
-    prelude::*, ProofWithCircuitData,
+    block_finality::BlockFinality,
+    common::{ProofCompositionBuilder, ProofCompositionTargets},
+    merkle_proof::MerkleProof,
+    prelude::*,
+    ProofWithCircuitData,
 };
 
 const SHA256_DIGEST_SIZE: usize = 32;
@@ -23,6 +26,8 @@ impl MessageSent {
     pub fn prove(&self) -> ProofWithCircuitData {
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
+
+        let composition_builder = ProofCompositionBuilder::new(inclusion_proof, finality_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
             let inclusion_proof_public_inputs = targets.first_proof_public_input_targets;
@@ -50,8 +55,8 @@ impl MessageSent {
             }
         };
 
-        let proof = ProofWithCircuitData::compose(&inclusion_proof, &finality_proof, targets_op);
-
-        proof
+        composition_builder
+            .operation_with_targets(targets_op)
+            .build()
     }
 }

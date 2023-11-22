@@ -9,7 +9,7 @@ use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
 use plonky2_field::types::Field;
 
 use crate::{
-    common::{array_to_bits, ProofCompositionTargets},
+    common::{array_to_bits, ProofCompositionBuilder, ProofCompositionTargets},
     prelude::*,
     validator_set_hash::ValidatorSetHash,
     ProofWithCircuitData,
@@ -50,7 +50,7 @@ impl BlockFinality {
                     .iter()
                     .position(|v| v == &pc.public_key)
                     .unwrap(),
-                signature: pc.signature.clone(),
+                signature: pc.signature,
             })
             .collect();
 
@@ -65,6 +65,9 @@ impl BlockFinality {
             message: self.message.clone(),
         }
         .prove();
+
+        let composition_builder =
+            ProofCompositionBuilder::new(validator_set_hash_proof, validator_signs_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
             let validator_set_hash_public_inputs = targets.first_proof_public_input_targets;
@@ -98,11 +101,9 @@ impl BlockFinality {
             }
         };
 
-        ProofWithCircuitData::compose(
-            &validator_set_hash_proof,
-            &validator_signs_proof,
-            targets_op,
-        )
+        composition_builder
+            .operation_with_targets(targets_op)
+            .build()
     }
 }
 
@@ -164,6 +165,9 @@ impl ComposedValidatorSigns {
         message_size_in_bits: usize,
         validator_set_length: usize,
     ) -> ProofWithCircuitData {
+        let composition_builder =
+            ProofCompositionBuilder::new(previous_composed_proof, indexed_sign_proof);
+
         let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
             let previous_composed_proof_public_inputs = targets.first_proof_public_input_targets;
             let indexed_sign_proof_public_inputs = targets.second_proof_public_input_targets;
@@ -212,7 +216,9 @@ impl ComposedValidatorSigns {
             builder.range_check(to_compare_with_0, 32);
         };
 
-        ProofWithCircuitData::compose(&previous_composed_proof, &indexed_sign_proof, targets_op)
+        composition_builder
+            .operation_with_targets(targets_op)
+            .build()
     }
 }
 
@@ -242,6 +248,8 @@ impl IndexedValidatorSign {
             message: self.message.clone(),
         }
         .prove();
+
+        let composition_builder = ProofCompositionBuilder::new(selector_proof, sign_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
             let selector_proof_public_inputs = targets.first_proof_public_input_targets;
@@ -276,7 +284,9 @@ impl IndexedValidatorSign {
             }
         };
 
-        ProofWithCircuitData::compose(&selector_proof, &sign_proof, targets_op)
+        composition_builder
+            .operation_with_targets(targets_op)
+            .build()
     }
 }
 
@@ -308,8 +318,6 @@ impl SingleValidatorSign {
             builder.register_public_input(target.target);
         }
 
-        let circuit_data = builder.build::<C>();
-
         let mut pw = PartialWitness::new();
 
         let pk_bits = array_to_bits(&self.public_key).into_iter();
@@ -327,12 +335,7 @@ impl SingleValidatorSign {
             pw.set_bool_target(*target, value);
         }
 
-        let proof = circuit_data.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
+        ProofWithCircuitData::from_builder(builder, pw)
     }
 }
 
@@ -362,8 +365,6 @@ impl ValidatorSelector {
             builder.register_public_input(target.target);
         }
 
-        let circuit_data = builder.build::<C>();
-
         let mut pw = PartialWitness::new();
 
         pw.set_target(targets.index, F::from_canonical_u32(self.index as u32));
@@ -383,12 +384,7 @@ impl ValidatorSelector {
             pw.set_bool_target(*target, value);
         }
 
-        let proof = circuit_data.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
+        ProofWithCircuitData::from_builder(builder, pw)
     }
 }
 
@@ -405,7 +401,6 @@ fn validator_selector_circuit(
     let mut validator_set_targets = Vec::with_capacity(validator_count);
     for _ in 0..validator_count {
         let pk_targets: [BoolTarget; PUBLIC_KEY_SIZE_IN_BITS] = (0..PUBLIC_KEY_SIZE_IN_BITS)
-            .into_iter()
             .map(|_| builder.add_virtual_bool_target_safe())
             .collect::<Vec<_>>()
             .try_into()
@@ -460,7 +455,8 @@ mod tests {
             validator: [11; PUBLIC_KEY_SIZE],
         };
         let proof = validator_selector.prove();
-        proof.circuit_data.verify(proof.proof).unwrap();
+
+        assert!(proof.verify());
     }
 
     #[test]

@@ -1,8 +1,12 @@
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::{
-    block_finality::BlockFinality, common::ProofCompositionTargets, merkle_proof::MerkleProof,
-    prelude::*, validator_set_hash::ValidatorSetHash, ProofWithCircuitData,
+    block_finality::BlockFinality,
+    common::{ProofCompositionBuilder, ProofCompositionTargets},
+    merkle_proof::MerkleProof,
+    prelude::*,
+    validator_set_hash::ValidatorSetHash,
+    ProofWithCircuitData,
 };
 
 const PUBLIC_KEY_SIZE: usize = 32;
@@ -52,6 +56,11 @@ impl NextValidatorSet {
         }
         .prove();
 
+        let composition_builder = ProofCompositionBuilder::new(
+            validator_set_hash_proof,
+            non_hashed_next_validator_set_proof,
+        );
+
         let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
             let validator_set_hash_public_inputs = targets.first_proof_public_input_targets;
             let next_validator_set_public_inputs = targets.second_proof_public_input_targets;
@@ -77,11 +86,9 @@ impl NextValidatorSet {
             }
         };
 
-        ProofWithCircuitData::compose(
-            &validator_set_hash_proof,
-            &non_hashed_next_validator_set_proof,
-            targets_op,
-        )
+        composition_builder
+            .operation_with_targets(targets_op)
+            .build()
     }
 }
 
@@ -109,6 +116,9 @@ impl NextValidatorSetNonHashed {
         // - validator set hash
         // - message
         let block_finality_proof = self.current_epoch_block_finality.prove();
+
+        let composition_builder =
+            ProofCompositionBuilder::new(merkle_tree_proof, block_finality_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
             let merkle_proof_public_inputs = targets.first_proof_public_input_targets;
@@ -159,6 +169,8 @@ impl NextValidatorSetNonHashed {
             }
         };
 
-        ProofWithCircuitData::compose(&merkle_tree_proof, &block_finality_proof, targets_op)
+        composition_builder
+            .operation_with_targets(targets_op)
+            .build()
     }
 }

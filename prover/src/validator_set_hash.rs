@@ -34,8 +34,6 @@ impl ValidatorSetHash {
             builder.register_public_input(target.target);
         }
 
-        let circuit_data = builder.build::<C>();
-
         let mut pw = PartialWitness::new();
 
         let mut hasher = Sha256::new();
@@ -58,11 +56,6 @@ impl ValidatorSetHash {
             pw.set_bool_target(*target, value);
         }
 
-        let proof = circuit_data.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
+        ProofWithCircuitData::from_builder(builder, pw)
     }
 }

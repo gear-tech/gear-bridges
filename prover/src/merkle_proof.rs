@@ -1,10 +1,12 @@
 use std::iter;
 
-use plonky2::iop::target::BoolTarget;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::CircuitConfig;
+use plonky2::{
+    iop::{
+        target::BoolTarget,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+};
 use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 
 use crate::{common::array_to_bits, prelude::*, ProofWithCircuitData};
@@ -69,8 +71,6 @@ impl MerkleProof {
             builder.register_public_input(target.target);
         }
 
-        let circuit = builder.build::<C>();
-
         // Set public inputs.
         let mut pw = PartialWitness::new();
 
@@ -94,12 +94,7 @@ impl MerkleProof {
             }
         }
 
-        let proof = circuit.prove(pw).unwrap();
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data: circuit,
-        }
+        ProofWithCircuitData::from_builder(builder, pw)
     }
 }
 

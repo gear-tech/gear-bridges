@@ -20,7 +20,7 @@ async fn main() {
     let message_sent_epoch =
         (message_sent_block_no - message_sent_from_epoch_start - 1) / EPOCH_DURATION;
 
-    let mut last_known_authorities = genesis_authorities;
+    let _last_known_authorities = genesis_authorities;
     let mut last_proven_epoch = genesis_epoch;
 
     while last_proven_epoch != message_sent_epoch {

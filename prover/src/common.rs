@@ -7,13 +7,41 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget},
-        proof::ProofWithPublicInputs,
+        proof::{Proof, ProofWithPublicInputs},
     },
 };
 
 pub struct ProofWithCircuitData {
-    pub(crate) proof: ProofWithPublicInputs<F, C, D>,
-    pub(crate) circuit_data: CircuitData<F, C, D>,
+    proof: Proof<F, C, D>,
+    public_inputs: Vec<F>,
+    circuit_data: CircuitData<F, C, D>,
+}
+
+impl ProofWithCircuitData {
+    pub fn from_builder(
+        builder: CircuitBuilder<F, D>,
+        witness: PartialWitness<F>,
+    ) -> ProofWithCircuitData {
+        let circuit_data = builder.build::<C>();
+        let ProofWithPublicInputs {
+            proof,
+            public_inputs,
+        } = circuit_data.prove(witness).unwrap();
+        ProofWithCircuitData {
+            proof,
+            public_inputs,
+            circuit_data,
+        }
+    }
+
+    pub fn verify(&self) -> bool {
+        self.circuit_data
+            .verify(ProofWithPublicInputs {
+                proof: self.proof.clone(),
+                public_inputs: self.public_inputs.clone(),
+            })
+            .is_ok()
+    }
 }
 
 pub struct ProofCompositionTargets {
@@ -21,15 +49,18 @@ pub struct ProofCompositionTargets {
     pub second_proof_public_input_targets: Vec<Target>,
 }
 
-impl ProofWithCircuitData {
-    pub fn compose<O>(
-        first: &ProofWithCircuitData,
-        second: &ProofWithCircuitData,
-        operation_with_targets: O,
-    ) -> ProofWithCircuitData
-    where
-        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets),
-    {
+pub struct ProofCompositionBuilder {
+    circuit_builder: CircuitBuilder<F, D>,
+    witness: PartialWitness<F>,
+    first_public_inputs: Vec<Target>,
+    second_public_inputs: Vec<Target>,
+}
+
+impl ProofCompositionBuilder {
+    pub fn new(
+        first: ProofWithCircuitData,
+        second: ProofWithCircuitData,
+    ) -> ProofCompositionBuilder {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let proof_with_pis_target_1 =
             builder.add_virtual_proof_with_pis(&first.circuit_data.common);
@@ -48,8 +79,20 @@ impl ProofWithCircuitData {
         };
 
         let mut pw = PartialWitness::new();
-        pw.set_proof_with_pis_target(&proof_with_pis_target_1, &first.proof);
-        pw.set_proof_with_pis_target(&proof_with_pis_target_2, &second.proof);
+        pw.set_proof_with_pis_target(
+            &proof_with_pis_target_1,
+            &ProofWithPublicInputs {
+                proof: first.proof,
+                public_inputs: first.public_inputs,
+            },
+        );
+        pw.set_proof_with_pis_target(
+            &proof_with_pis_target_2,
+            &ProofWithPublicInputs {
+                proof: second.proof,
+                public_inputs: second.public_inputs,
+            },
+        );
         pw.set_cap_target(
             &verifier_circuit_target_1.constants_sigmas_cap,
             &first.circuit_data.verifier_only.constants_sigmas_cap,
@@ -78,21 +121,31 @@ impl ProofWithCircuitData {
             &second.circuit_data.common,
         );
 
-        operation_with_targets(
-            &mut builder,
+        ProofCompositionBuilder {
+            circuit_builder: builder,
+            witness: pw,
+            first_public_inputs: proof_with_pis_target_1.public_inputs,
+            second_public_inputs: proof_with_pis_target_2.public_inputs,
+        }
+    }
+
+    pub fn operation_with_targets<O>(mut self, op: O) -> ProofCompositionBuilder
+    where
+        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets),
+    {
+        op(
+            &mut self.circuit_builder,
             ProofCompositionTargets {
-                first_proof_public_input_targets: proof_with_pis_target_1.public_inputs.clone(),
-                second_proof_public_input_targets: proof_with_pis_target_2.public_inputs.clone(),
+                first_proof_public_input_targets: self.first_public_inputs.clone(),
+                second_proof_public_input_targets: self.second_public_inputs.clone(),
             },
         );
 
-        let circuit_data = builder.build::<C>();
-        let proof = circuit_data.prove(pw).unwrap();
+        self
+    }
 
-        ProofWithCircuitData {
-            proof,
-            circuit_data,
-        }
+    pub fn build(self) -> ProofWithCircuitData {
+        ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
     }
 }
 

@@ -2,14 +2,37 @@ use std::iter;
 
 use plonky2::{
     iop::{
-        target::BoolTarget,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 
-use crate::{common::array_to_bits, prelude::*, ProofWithCircuitData};
+use crate::{
+    common::{
+        array_to_bits,
+        targets::{BitArrayTarget, Blake2Target},
+        TargetSet,
+    },
+    prelude::*,
+    ProofWithCircuitData,
+};
+
+#[derive(Clone)]
+pub struct MerkleProofTarget<const LEAF_DATA_LENGTH: usize> {
+    pub leaf_data: BitArrayTarget<LEAF_DATA_LENGTH>,
+    pub root_hash: Blake2Target,
+}
+
+impl<const LEAF_DATA_LENGTH: usize> TargetSet for MerkleProofTarget<LEAF_DATA_LENGTH> {
+    fn parse(targets: &mut impl Iterator<Item = Target>) -> Self {
+        Self {
+            leaf_data: BitArrayTarget::<LEAF_DATA_LENGTH>::parse(targets),
+            root_hash: Blake2Target::parse(targets),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct TrieNodeData {
@@ -18,24 +41,21 @@ pub struct TrieNodeData {
 }
 
 #[derive(Clone)]
-pub struct MerkleProof {
+pub struct MerkleProof<const LEAF_DATA_LENGTH_IN_BITS: usize>
+where
+    [(); LEAF_DATA_LENGTH_IN_BITS / 8]:,
+{
     /// Ordered from leaf to the root.
     pub nodes: Vec<TrieNodeData>,
-    pub leaf_data: Vec<u8>,
+    pub leaf_data: [u8; LEAF_DATA_LENGTH_IN_BITS / 8],
     pub root_hash: [u8; 32],
 }
 
-impl MerkleProof {
-    pub fn prove(&self) -> ProofWithCircuitData {
-        // order of public inputs:
-        // - leaf data
-        // - node #0 left data
-        // - node #0 right data
-        // - node #1 left data
-        // - ...
-        // - node #n right data
-        // - root hash
-
+impl<const LEAF_DATA_LENGTH_IN_BITS: usize> MerkleProof<LEAF_DATA_LENGTH_IN_BITS>
+where
+    [(); LEAF_DATA_LENGTH_IN_BITS / 8]:,
+{
+    pub fn prove(&self) -> ProofWithCircuitData<MerkleProofTarget<LEAF_DATA_LENGTH_IN_BITS>> {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
 
         let leaf_targets = create_bool_public_inputs(&mut builder, self.leaf_data.len() * 8);
@@ -44,11 +64,9 @@ impl MerkleProof {
 
         let mut all_node_targets = vec![];
         for node in &self.nodes {
-            let left_data_targets =
-                create_bool_public_inputs(&mut builder, node.left_data.len() * 8);
+            let left_data_targets = create_bool_targets(&mut builder, node.left_data.len() * 8);
 
-            let right_data_targets =
-                create_bool_public_inputs(&mut builder, node.right_data.len() * 8);
+            let right_data_targets = create_bool_targets(&mut builder, node.right_data.len() * 8);
 
             all_node_targets.push(
                 left_data_targets
@@ -71,7 +89,6 @@ impl MerkleProof {
             builder.register_public_input(target.target);
         }
 
-        // Set public inputs.
         let mut pw = PartialWitness::new();
 
         let leaf_data_bits = array_to_bits(&self.leaf_data).into_iter();
@@ -98,16 +115,23 @@ impl MerkleProof {
     }
 }
 
-fn create_bool_public_inputs(
+fn create_bool_targets(
     builder: &mut CircuitBuilder<F, D>,
     length_in_bits: usize,
 ) -> Vec<BoolTarget> {
     iter::repeat(())
         .take(length_in_bits)
-        .map(|_| {
-            let target = builder.add_virtual_bool_target_safe();
-            builder.register_public_input(target.target);
-            target
-        })
+        .map(|_| builder.add_virtual_bool_target_safe())
         .collect()
+}
+
+fn create_bool_public_inputs(
+    builder: &mut CircuitBuilder<F, D>,
+    length_in_bits: usize,
+) -> Vec<BoolTarget> {
+    let targets = create_bool_targets(builder, length_in_bits);
+    for target in &targets {
+        builder.register_public_input(target.target);
+    }
+    targets
 }

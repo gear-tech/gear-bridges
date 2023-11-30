@@ -1,7 +1,15 @@
-use crate::prelude::*;
+use std::marker::PhantomData;
+
+use crate::{
+    consts::{
+        BLAKE2_DIGEST_SIZE_IN_BITS, ED25519_PUBLIC_KEY_SIZE_IN_BITS,
+        ED25519_SIGNATURE_SIZE_IN_BITS, SHA256_DIGEST_SIZE_IN_BITS,
+    },
+    prelude::*,
+};
 use plonky2::{
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -10,27 +18,248 @@ use plonky2::{
         proof::{Proof, ProofWithPublicInputs},
     },
 };
+pub use targets::TargetSet;
 
-pub struct ProofWithCircuitData {
-    proof: Proof<F, C, D>,
-    public_inputs: Vec<F>,
-    circuit_data: CircuitData<F, C, D>,
+pub mod targets {
+    use std::fmt::Debug;
+    use std::ops::Deref;
+
+    use super::*;
+
+    pub trait TargetSet: Clone {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
+    }
+
+    pub trait TargetSetOperations {
+        fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>);
+        fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>);
+        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>);
+    }
+
+    pub type CompositeTarget<T, const N: usize> = [T; N];
+
+    impl<const N: usize> TargetSet for CompositeTarget<BoolTarget, N> {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            parse_composite_target(raw, BoolTarget::new_unsafe)
+        }
+    }
+
+    impl<const N: usize> TargetSet for CompositeTarget<Target, N> {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            parse_composite_target(raw, |t| t)
+        }
+    }
+
+    fn parse_composite_target<T: Debug, const N: usize>(
+        raw: &mut impl Iterator<Item = Target>,
+        mapping: impl Fn(Target) -> T,
+    ) -> CompositeTarget<T, N> {
+        raw.take(N)
+            .map(mapping)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    impl<T, const N: usize> TargetSetOperations for T
+    where
+        T: Deref<Target = CompositeTarget<BoolTarget, N>>,
+    {
+        fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
+            for (target_1, target_2) in self.iter().zip(other.iter()) {
+                builder.connect(target_1.target, target_2.target);
+            }
+        }
+
+        fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
+            for target in self.iter() {
+                builder.register_public_input(target.target);
+            }
+        }
+
+        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
+            let data = array_to_bits(data);
+            for (target, bit) in self.iter().zip(data.into_iter()) {
+                witness.set_bool_target(*target, bit);
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct SingleTarget(Target);
+
+    impl SingleTarget {
+        pub fn to_target(&self) -> Target {
+            self.0
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct Sha256Target(CompositeTarget<BoolTarget, SHA256_DIGEST_SIZE_IN_BITS>);
+
+    #[derive(Clone, Debug)]
+    pub struct Blake2Target(CompositeTarget<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>);
+
+    #[derive(Clone, Debug)]
+    pub struct Ed25519PublicKeyTarget(CompositeTarget<BoolTarget, ED25519_PUBLIC_KEY_SIZE_IN_BITS>);
+
+    #[derive(Clone, Debug)]
+    pub struct Ed25519SignatreTarget(CompositeTarget<BoolTarget, ED25519_SIGNATURE_SIZE_IN_BITS>);
+
+    #[derive(Clone, Debug)]
+    pub struct BitArrayTarget<const N: usize>(CompositeTarget<BoolTarget, N>);
+
+    impl Deref for Sha256Target {
+        type Target = CompositeTarget<BoolTarget, SHA256_DIGEST_SIZE_IN_BITS>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl Deref for Blake2Target {
+        type Target = CompositeTarget<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl Deref for Ed25519PublicKeyTarget {
+        type Target = CompositeTarget<BoolTarget, ED25519_PUBLIC_KEY_SIZE_IN_BITS>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl Deref for Ed25519SignatreTarget {
+        type Target = CompositeTarget<BoolTarget, ED25519_SIGNATURE_SIZE_IN_BITS>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl<const N: usize> Deref for BitArrayTarget<N> {
+        type Target = CompositeTarget<BoolTarget, N>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl TargetSetOperations for SingleTarget {
+        fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
+            builder.connect(self.0, other.0)
+        }
+
+        fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
+            builder.register_public_input(self.0)
+        }
+
+        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
+            unimplemented!("Set SingleTarget manually by calling .to_target()");
+        }
+    }
+
+    impl TargetSet for SingleTarget {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(raw.next().unwrap())
+        }
+    }
+
+    impl TargetSet for Sha256Target {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(TargetSet::parse(raw))
+        }
+    }
+
+    impl TargetSet for Blake2Target {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(TargetSet::parse(raw))
+        }
+    }
+
+    impl TargetSet for Ed25519PublicKeyTarget {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(TargetSet::parse(raw))
+        }
+    }
+
+    impl TargetSet for Ed25519SignatreTarget {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(TargetSet::parse(raw))
+        }
+    }
+
+    impl<const N: usize> TargetSet for BitArrayTarget<N> {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(TargetSet::parse(raw))
+        }
+    }
+
+    impl From<Target> for SingleTarget {
+        fn from(value: Target) -> Self {
+            Self(value)
+        }
+    }
+
+    impl From<[BoolTarget; SHA256_DIGEST_SIZE_IN_BITS]> for Sha256Target {
+        fn from(value: [BoolTarget; SHA256_DIGEST_SIZE_IN_BITS]) -> Self {
+            Self(value)
+        }
+    }
+
+    impl From<[BoolTarget; BLAKE2_DIGEST_SIZE_IN_BITS]> for Blake2Target {
+        fn from(value: [BoolTarget; BLAKE2_DIGEST_SIZE_IN_BITS]) -> Self {
+            Self(value)
+        }
+    }
+
+    impl From<[BoolTarget; ED25519_PUBLIC_KEY_SIZE_IN_BITS]> for Ed25519PublicKeyTarget {
+        fn from(value: [BoolTarget; ED25519_PUBLIC_KEY_SIZE_IN_BITS]) -> Self {
+            Self(value)
+        }
+    }
+
+    impl From<[BoolTarget; ED25519_SIGNATURE_SIZE_IN_BITS]> for Ed25519SignatreTarget {
+        fn from(value: [BoolTarget; ED25519_SIGNATURE_SIZE_IN_BITS]) -> Self {
+            Self(value)
+        }
+    }
 }
 
-impl ProofWithCircuitData {
+pub struct ProofWithCircuitData<TS>
+where
+    TS: TargetSet,
+{
+    proof: Proof<F, C, D>,
+    circuit_data: CircuitData<F, C, D>,
+
+    public_inputs: Vec<F>,
+    public_inputs_parser: PhantomData<TS>,
+}
+
+impl<TS> ProofWithCircuitData<TS>
+where
+    TS: TargetSet,
+{
     pub fn from_builder(
         builder: CircuitBuilder<F, D>,
         witness: PartialWitness<F>,
-    ) -> ProofWithCircuitData {
+    ) -> ProofWithCircuitData<TS> {
         let circuit_data = builder.build::<C>();
         let ProofWithPublicInputs {
             proof,
             public_inputs,
         } = circuit_data.prove(witness).unwrap();
+
         ProofWithCircuitData {
             proof,
-            public_inputs,
             circuit_data,
+            public_inputs,
+            public_inputs_parser: PhantomData,
         }
     }
 
@@ -44,23 +273,36 @@ impl ProofWithCircuitData {
     }
 }
 
-pub struct ProofCompositionTargets {
-    pub first_proof_public_input_targets: Vec<Target>,
-    pub second_proof_public_input_targets: Vec<Target>,
+pub struct ProofCompositionTargets<TS1, TS2>
+where
+    TS1: TargetSet,
+    TS2: TargetSet,
+{
+    pub first_proof_public_inputs: TS1,
+    pub second_proof_public_inputs: TS2,
 }
 
-pub struct ProofCompositionBuilder {
+pub struct ProofCompositionBuilder<TS1, TS2>
+where
+    TS1: TargetSet,
+    TS2: TargetSet,
+{
     circuit_builder: CircuitBuilder<F, D>,
     witness: PartialWitness<F>,
-    first_public_inputs: Vec<Target>,
-    second_public_inputs: Vec<Target>,
+
+    first_public_inputs: TS1,
+    second_public_inputs: TS2,
 }
 
-impl ProofCompositionBuilder {
+impl<TS1, TS2> ProofCompositionBuilder<TS1, TS2>
+where
+    TS1: TargetSet,
+    TS2: TargetSet,
+{
     pub fn new(
-        first: ProofWithCircuitData,
-        second: ProofWithCircuitData,
-    ) -> ProofCompositionBuilder {
+        first: ProofWithCircuitData<TS1>,
+        second: ProofWithCircuitData<TS2>,
+    ) -> ProofCompositionBuilder<TS1, TS2> {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let proof_with_pis_target_1 =
             builder.add_virtual_proof_with_pis(&first.circuit_data.common);
@@ -124,27 +366,33 @@ impl ProofCompositionBuilder {
         ProofCompositionBuilder {
             circuit_builder: builder,
             witness: pw,
-            first_public_inputs: proof_with_pis_target_1.public_inputs,
-            second_public_inputs: proof_with_pis_target_2.public_inputs,
+
+            first_public_inputs: TS1::parse(&mut proof_with_pis_target_1.public_inputs.into_iter()),
+            second_public_inputs: TS2::parse(
+                &mut proof_with_pis_target_2.public_inputs.into_iter(),
+            ),
         }
     }
 
-    pub fn operation_with_targets<O>(mut self, op: O) -> ProofCompositionBuilder
+    pub fn operation_with_targets<O>(mut self, op: O) -> ProofCompositionBuilder<TS1, TS2>
     where
-        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets),
+        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets<TS1, TS2>),
     {
         op(
             &mut self.circuit_builder,
             ProofCompositionTargets {
-                first_proof_public_input_targets: self.first_public_inputs.clone(),
-                second_proof_public_input_targets: self.second_public_inputs.clone(),
+                first_proof_public_inputs: self.first_public_inputs.clone(),
+                second_proof_public_inputs: self.second_public_inputs.clone(),
             },
         );
 
         self
     }
 
-    pub fn build(self) -> ProofWithCircuitData {
+    pub fn build<TS>(self) -> ProofWithCircuitData<TS>
+    where
+        TS: TargetSet,
+    {
         ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
     }
 }

@@ -1,3 +1,5 @@
+#![feature(generic_const_exprs)]
+
 use gsdk::metadata::storage::{BabeStorage, GrandpaStorage};
 use parity_scale_codec::{Decode, Encode};
 use prover::merkle_proof::{MerkleProof, TrieNodeData};
@@ -5,6 +7,12 @@ use sc_consensus_grandpa::FinalityProof;
 use sp_core::crypto::Wraps;
 use subxt::{ext::sp_core::H256, rpc_params};
 use trie_db::{node::NodeHandle, ChildReference};
+
+const VALIDATOR_SET_DATA_LENGTH_IN_BITS: usize = 2121 * 8;
+const VOTE_LENGTH_IN_BITS: usize = 424;
+const VALIDATOR_COUNT: usize = 53;
+const PROCESSED_VALIDATOR_COUNT: usize = 36;
+const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = 16968;
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -80,16 +88,25 @@ impl GearApi {
             .commit
             .precommits
             .iter()
+            .take(VALIDATOR_COUNT)
             .map(|pc| pc.id.as_inner_ref().as_array_ref().to_owned())
-            .collect();
+            .chain(vec![[0; 32]; 53 - 36])
+            .collect::<Vec<_>>();
+
+        assert_eq!(VALIDATOR_COUNT, validator_set.len());
+
+        let validator_set = validator_set.try_into().unwrap();
+
+        assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
 
         prover::block_finality::BlockFinality {
             validator_set,
-            message: signed_data,
+            message: signed_data.try_into().unwrap(),
             pre_commits: justification
                 .commit
                 .precommits
                 .into_iter()
+                .take(PROCESSED_VALIDATOR_COUNT)
                 .map(|pc| prover::block_finality::PreCommit {
                     public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                     signature: pc.signature.as_inner_ref().0.to_owned(),
@@ -117,23 +134,32 @@ impl GearApi {
     }
 
     /// NOTE: mock for now, returns some data with constant position in merkle trie.
-    pub async fn fetch_sent_message_merkle_proof(&self, block: H256) -> MerkleProof {
+    pub async fn fetch_sent_message_merkle_proof(
+        &self,
+        block: H256,
+    ) -> MerkleProof<CURRENT_TEST_MESSAGE_LEN_IN_BITS> {
         let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
         self.fetch_merkle_proof_including_block_header(block, &address)
             .await
     }
 
-    pub async fn fetch_next_authorities_merkle_proof(&self, block: H256) -> MerkleProof {
+    pub async fn fetch_next_authorities_merkle_proof(
+        &self,
+        block: H256,
+    ) -> MerkleProof<VALIDATOR_SET_DATA_LENGTH_IN_BITS> {
         let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
         self.fetch_merkle_proof_including_block_header(block, &address)
             .await
     }
 
-    async fn fetch_merkle_proof_including_block_header(
+    async fn fetch_merkle_proof_including_block_header<const LEAF_DATA_LEN_IN_BITS: usize>(
         &self,
         block: H256,
         address: &[u8],
-    ) -> MerkleProof {
+    ) -> MerkleProof<LEAF_DATA_LEN_IN_BITS>
+    where
+        [(); LEAF_DATA_LEN_IN_BITS / 8]:,
+    {
         let merkle_proof = self.fetch_merkle_proof(block, address).await;
 
         let block = (*self.api).blocks().at(block).await.unwrap();
@@ -156,14 +182,23 @@ impl GearApi {
             right_data: right_data.to_vec(),
         });
 
+        assert_eq!(merkle_proof.leaf_data.len() * 8, LEAF_DATA_LEN_IN_BITS);
+
         MerkleProof {
-            leaf_data: merkle_proof.leaf_data,
+            leaf_data: merkle_proof.leaf_data.try_into().unwrap(),
             root_hash: block.hash().as_bytes().try_into().unwrap(),
             nodes: merkle_proof_nodes,
         }
     }
 
-    async fn fetch_merkle_proof(&self, block: H256, address: &[u8]) -> MerkleProof {
+    async fn fetch_merkle_proof<const LEAF_DATA_LEN_IN_BITS: usize>(
+        &self,
+        block: H256,
+        address: &[u8],
+    ) -> MerkleProof<LEAF_DATA_LEN_IN_BITS>
+    where
+        [(); LEAF_DATA_LEN_IN_BITS / 8]:,
+    {
         use trie_db::{
             node::{Node, Value},
             NodeCodec, TrieLayout,
@@ -286,9 +321,11 @@ impl GearApi {
             nodes.push(branch_node_data);
         }
 
+        assert_eq!(storage_data.len() * 8, LEAF_DATA_LEN_IN_BITS);
+
         MerkleProof {
             nodes,
-            leaf_data: storage_data,
+            leaf_data: storage_data.try_into().unwrap(),
             root_hash: state_root.0,
         }
     }

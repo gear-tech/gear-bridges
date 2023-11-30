@@ -1,58 +1,70 @@
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::{
-    block_finality::BlockFinality,
-    common::{ProofCompositionBuilder, ProofCompositionTargets},
-    merkle_proof::MerkleProof,
+    block_finality::{BlockFinality, BlockFinalityTarget},
+    common::{
+        targets::{BitArrayTarget, Sha256Target, TargetSetOperations},
+        ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
+    },
+    merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,
     ProofWithCircuitData,
 };
 
-const SHA256_DIGEST_SIZE: usize = 32;
-const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
-
-const BLAKE2_DIGEST_SIZE: usize = 32;
-const BLAKE2_DIGEST_SIZE_IN_BITS: usize = BLAKE2_DIGEST_SIZE * 8;
-
-/// Public inputs:
-/// - validator set hash
-/// - message contents
-pub struct MessageSent {
-    pub block_finality: BlockFinality,
-    pub inclusion_proof: MerkleProof,
+#[derive(Clone)]
+pub struct MessageSentTarget<const MESSAGE_LENGTH_IN_BITS: usize> {
+    validator_set_hash: Sha256Target,
+    message_contents: BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
 }
 
-impl MessageSent {
-    pub fn prove(&self) -> ProofWithCircuitData {
+impl<const MESSAGE_LENGTH_IN_BITS: usize> TargetSet for MessageSentTarget<MESSAGE_LENGTH_IN_BITS>
+where
+    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
+{
+    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+        Self {
+            validator_set_hash: Sha256Target::parse(raw),
+            message_contents: BitArrayTarget::parse(raw),
+        }
+    }
+}
+
+pub struct MessageSent<const MESSAGE_LENGTH_IN_BITS: usize>
+where
+    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
+{
+    pub block_finality: BlockFinality,
+    pub inclusion_proof: MerkleProof<MESSAGE_LENGTH_IN_BITS>,
+}
+
+impl<const MESSAGE_LENGTH_IN_BITS: usize> MessageSent<MESSAGE_LENGTH_IN_BITS>
+where
+    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
+{
+    pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget<MESSAGE_LENGTH_IN_BITS>> {
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
 
         let composition_builder = ProofCompositionBuilder::new(inclusion_proof, finality_proof);
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>, targets: ProofCompositionTargets| {
-            let inclusion_proof_public_inputs = targets.first_proof_public_input_targets;
-            let finality_proof_public_inputs = targets.second_proof_public_input_targets;
+        let targets_op = |builder: &mut CircuitBuilder<F, D>,
+                          targets: ProofCompositionTargets<_, _>| {
+            let inclusion_proof_public_inputs: MerkleProofTarget<MESSAGE_LENGTH_IN_BITS> =
+                targets.first_proof_public_inputs;
+            let finality_proof_public_inputs: BlockFinalityTarget =
+                targets.second_proof_public_inputs;
 
-            // Register validator set hash as public input.
-            for target in &finality_proof_public_inputs[..SHA256_DIGEST_SIZE_IN_BITS] {
-                builder.register_public_input(*target);
-            }
+            finality_proof_public_inputs
+                .validator_set_hash
+                .register_as_public_inputs(builder);
 
-            // Register message contents as pblic input.
-            let message_len_in_bits = self.inclusion_proof.leaf_data.len() * 8;
-            for target in &inclusion_proof_public_inputs[..message_len_in_bits] {
-                builder.register_public_input(*target);
-            }
+            inclusion_proof_public_inputs
+                .leaf_data
+                .register_as_public_inputs(builder);
 
-            // Assert that merkle trie root hash == block hash from message.
-            let message_block_hash = &finality_proof_public_inputs[SHA256_DIGEST_SIZE_IN_BITS + 8
-                ..SHA256_DIGEST_SIZE_IN_BITS + 8 + BLAKE2_DIGEST_SIZE_IN_BITS];
-            let merkle_tree_root_hash = &inclusion_proof_public_inputs
-                [inclusion_proof_public_inputs.len() - BLAKE2_DIGEST_SIZE_IN_BITS..];
-            for (target_0, target_1) in message_block_hash.iter().zip(merkle_tree_root_hash.iter())
-            {
-                builder.connect(*target_0, *target_1);
-            }
+            inclusion_proof_public_inputs
+                .root_hash
+                .connect(&finality_proof_public_inputs.message.block_hash, builder);
         };
 
         composition_builder

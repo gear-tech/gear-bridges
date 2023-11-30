@@ -1,29 +1,54 @@
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_sha256::circuit::sha256_circuit;
 use sha2::{Digest, Sha256};
 
-use crate::{common::array_to_bits, prelude::*, ProofWithCircuitData};
+use crate::{
+    common::{
+        array_to_bits,
+        targets::{Ed25519PublicKeyTarget, Sha256Target},
+        TargetSet,
+    },
+    consts::VALIDATOR_COUNT,
+    prelude::*,
+    ProofWithCircuitData,
+};
 
-const PUBLIC_KEY_SIZE: usize = 32;
-const PUBLIC_KEY_SIZE_IN_BITS: usize = PUBLIC_KEY_SIZE * 8;
+#[derive(Clone)]
+pub struct ValidatorSetHashTarget {
+    pub hash: Sha256Target,
+    pub validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
+}
 
-/// Public inputs:
-/// - hash
-/// - validator set
+impl TargetSet for ValidatorSetHashTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self {
+            hash: Sha256Target::parse(raw),
+            validator_set: (0..VALIDATOR_COUNT)
+                .map(|_| Ed25519PublicKeyTarget::parse(raw))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
+    }
+}
+
 pub struct ValidatorSetHash {
-    pub validator_set: Vec<[u8; PUBLIC_KEY_SIZE]>,
+    pub validator_set: [[u8; consts::ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
 }
 
 impl ValidatorSetHash {
-    pub fn prove(&self) -> ProofWithCircuitData {
+    pub fn prove(&self) -> ProofWithCircuitData<ValidatorSetHashTarget> {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
 
         let targets = sha256_circuit(
             &mut builder,
-            self.validator_set.len() * PUBLIC_KEY_SIZE_IN_BITS,
+            self.validator_set.len() * consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS,
         );
 
         for target in &targets.digest {

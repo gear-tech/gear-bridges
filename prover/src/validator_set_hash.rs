@@ -44,6 +44,8 @@ pub struct ValidatorSetHash {
 
 impl ValidatorSetHash {
     pub fn prove(&self) -> ProofWithCircuitData<ValidatorSetHashTarget> {
+        log::info!("Proving correct hashing of validator set...");
+
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
 
         let targets = sha256_circuit(

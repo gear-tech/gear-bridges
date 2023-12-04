@@ -6,5 +6,7 @@ edition.workspace = true
 [dependencies]
 gear-rpc-client.workspace = true
 prover.workspace = true
+log.workspace = true
 
 tokio = { version = "1.23.0", features = ["full"] }
+pretty_env_logger = "*"

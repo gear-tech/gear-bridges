@@ -5,14 +5,15 @@ use parity_scale_codec::{Decode, Encode};
 use prover::merkle_proof::{MerkleProof, TrieNodeData};
 use sc_consensus_grandpa::FinalityProof;
 use sp_core::crypto::Wraps;
-use subxt::{ext::sp_core::H256, rpc_params};
+use sp_runtime::traits::AppVerify;
+use subxt::{rpc_params, utils::H256};
 use trie_db::{node::NodeHandle, ChildReference};
 
-const VALIDATOR_SET_DATA_LENGTH_IN_BITS: usize = 2121 * 8;
+const VALIDATOR_SET_DATA_LENGTH_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const VALIDATOR_COUNT: usize = 53;
+const VALIDATOR_COUNT: usize = 54;
 const PROCESSED_VALIDATOR_COUNT: usize = 36;
-const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = 16968;
+const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = VALIDATOR_SET_DATA_LENGTH_IN_BITS;
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -36,17 +37,18 @@ impl GearApi {
     pub async fn block_number_to_hash(&self, block: u32) -> H256 {
         self.api
             .rpc()
-            .block_hash(Some(block.into()))
+            .chain_get_block_hash(Some(block.into()))
             .await
             .unwrap()
             .unwrap()
     }
 
     pub async fn latest_finalized_block(&self) -> H256 {
-        self.api.rpc().finalized_head().await.unwrap()
+        self.api.rpc().chain_get_finalized_head().await.unwrap()
     }
 
     pub async fn fetch_finality_proof(&self, block: H256) -> prover::block_finality::BlockFinality {
+        let block_hash = block;
         let block = (*self.api).blocks().at(block).await.unwrap();
 
         let finality: Option<String> = self
@@ -76,6 +78,15 @@ impl GearApi {
         let set_id = u64::decode(&mut &*set_id).unwrap();
 
         let pre_commit = justification.commit.precommits[0].clone();
+        assert_eq!(pre_commit.precommit.target_hash, block_hash);
+
+        for pc in &justification.commit.precommits {
+            assert_eq!(pc.precommit.target_hash, pre_commit.precommit.target_hash);
+            assert_eq!(
+                pc.precommit.target_number,
+                pre_commit.precommit.target_number
+            );
+        }
 
         let signed_data = sp_consensus_grandpa::localized_payload(
             justification.round,
@@ -88,9 +99,10 @@ impl GearApi {
             .commit
             .precommits
             .iter()
-            .take(VALIDATOR_COUNT)
+            .filter(|pc| pc.signature.verify(&signed_data[..], &pc.id))
+            .take(PROCESSED_VALIDATOR_COUNT)
             .map(|pc| pc.id.as_inner_ref().as_array_ref().to_owned())
-            .chain(vec![[0; 32]; 53 - 36])
+            .chain(vec![[0; 32]; VALIDATOR_COUNT - PROCESSED_VALIDATOR_COUNT])
             .collect::<Vec<_>>();
 
         assert_eq!(VALIDATOR_COUNT, validator_set.len());
@@ -212,7 +224,7 @@ impl GearApi {
         let storage_proof = self
             .api
             .rpc()
-            .read_proof(storage_keys.clone(), Some(block.hash()))
+            .state_get_read_proof(storage_keys.clone(), Some(block.hash()))
             .await
             .unwrap()
             .proof

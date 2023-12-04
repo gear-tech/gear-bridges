@@ -1,8 +1,12 @@
+extern crate pretty_env_logger;
+
 use gear_rpc_client::GearApi;
 use prover::{message_sent::MessageSent, next_validator_set::NextValidatorSet};
 
 #[tokio::main]
 async fn main() {
+    pretty_env_logger::init();
+
     let api = GearApi::new().await;
 
     let block = api.latest_finalized_block().await;
@@ -13,7 +17,7 @@ async fn main() {
     }
     .prove();
 
-    println!("verified: {}", proof.verify());
+    panic!("verified: {}", proof.verify());
 
     let now = std::time::Instant::now();
 

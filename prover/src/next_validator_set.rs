@@ -41,6 +41,8 @@ pub struct NextValidatorSet {
 
 impl NextValidatorSet {
     pub fn prove(&self) -> ProofWithCircuitData<NextValidatorSetTarget> {
+        log::info!("Proving validator set hash change...");
+
         let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data.clone();
         let next_validator_set_len = (next_validator_set_data.len() - 1)
             / (consts::ED25519_PUBLIC_KEY_SIZE + AUTHORITY_WEIGHT_SIZE);
@@ -131,7 +133,7 @@ impl TargetSet for NextValidatorSetNonHashedTarget {
 // - authority weight #N    (8 bytes)
 #[derive(Clone)]
 struct ValidatorSetInStorageTarget {
-    length: BitArrayTarget<8>,
+    _length: BitArrayTarget<8>,
     validators: [(
         Ed25519PublicKeyTarget,
         BitArrayTarget<AUTHORITY_WEIGHT_SIZE_IN_BITS>,
@@ -141,7 +143,7 @@ struct ValidatorSetInStorageTarget {
 impl TargetSet for ValidatorSetInStorageTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
-            length: BitArrayTarget::parse(raw),
+            _length: BitArrayTarget::parse(raw),
             validators: (0..VALIDATOR_COUNT)
                 .map(|_| {
                     (
@@ -163,6 +165,8 @@ struct NextValidatorSetNonHashed {
 
 impl NextValidatorSetNonHashed {
     pub fn prove(&self) -> ProofWithCircuitData<NextValidatorSetNonHashedTarget> {
+        log::info!("Proving validator set change...");
+
         let merkle_tree_proof = self.next_validator_set_inclusion_proof.prove();
         let block_finality_proof = self.current_epoch_block_finality.prove();
 

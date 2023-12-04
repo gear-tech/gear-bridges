@@ -42,8 +42,12 @@ where
     [(); MESSAGE_LENGTH_IN_BITS / 8]:,
 {
     pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget<MESSAGE_LENGTH_IN_BITS>> {
+        log::info!("Proving message presense in finalized block...");
+
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
+
+        log::info!("Composing inclusion and finality proofs...");
 
         let composition_builder = ProofCompositionBuilder::new(inclusion_proof, finality_proof);
 

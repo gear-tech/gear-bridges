@@ -56,6 +56,8 @@ where
     [(); LEAF_DATA_LENGTH_IN_BITS / 8]:,
 {
     pub fn prove(&self) -> ProofWithCircuitData<MerkleProofTarget<LEAF_DATA_LENGTH_IN_BITS>> {
+        log::info!("Proving merkle inclusion...");
+
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
 
         let leaf_targets = create_bool_public_inputs(&mut builder, self.leaf_data.len() * 8);

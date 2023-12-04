@@ -12,8 +12,8 @@ use crate::{
     common::{
         array_to_bits,
         targets::{
-            BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Ed25519SignatreTarget,
-            Sha256Target, SingleTarget, TargetSetOperations,
+            BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target, SingleTarget,
+            TargetSetOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -79,6 +79,8 @@ pub struct BlockFinality {
 
 impl BlockFinality {
     pub fn prove(&self) -> ProofWithCircuitData<BlockFinalityTarget> {
+        log::info!("Proving block finality...");
+
         let processed_pre_commits: Vec<_> = self
             .pre_commits
             .iter()
@@ -105,6 +107,8 @@ impl BlockFinality {
             message: self.message.clone(),
         }
         .prove();
+
+        log::info!("Composing block finality and validator set hash proofs...");
 
         let composition_builder =
             ProofCompositionBuilder::new(validator_set_hash_proof, validator_signs_proof);
@@ -174,6 +178,8 @@ struct ValidatorSignsChain {
 
 impl ValidatorSignsChain {
     pub fn prove(&self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+        log::info!("Proving validator signs chain...");
+
         let mut pre_commits = self.pre_commits.clone();
         pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
 
@@ -201,6 +207,8 @@ impl ComposedValidatorSigns {
         previous_composed_proof: ProofWithCircuitData<ValidatorSignsChainTarget>,
         indexed_sign_proof: ProofWithCircuitData<ValidatorSignsChainTarget>,
     ) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+        log::info!("    Proving validator signs composition...");
+
         let composition_builder =
             ProofCompositionBuilder::new(previous_composed_proof, indexed_sign_proof);
 
@@ -260,10 +268,11 @@ struct IndexedValidatorSign {
 
 impl IndexedValidatorSign {
     fn prove(&self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+        log::info!("    Proving indexed validator sign...");
+
         let selector_proof = ValidatorSelector {
             validator_set: self.validator_set.clone(),
             index: self.index,
-            validator: self.validator_set[self.index],
         }
         .prove();
 
@@ -309,7 +318,6 @@ impl IndexedValidatorSign {
 struct SingleValidatorSignTarget {
     message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
     public_key: Ed25519PublicKeyTarget,
-    signature: Ed25519SignatreTarget,
 }
 
 impl TargetSet for SingleValidatorSignTarget {
@@ -317,7 +325,6 @@ impl TargetSet for SingleValidatorSignTarget {
         Self {
             message: BitArrayTarget::parse(raw),
             public_key: Ed25519PublicKeyTarget::parse(raw),
-            signature: Ed25519SignatreTarget::parse(raw),
         }
     }
 }
@@ -330,6 +337,8 @@ struct SingleValidatorSign {
 
 impl SingleValidatorSign {
     fn prove(&self) -> ProofWithCircuitData<SingleValidatorSignTarget> {
+        log::info!("        Proving single validator sign...");
+
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
 
         let targets = ed25519_circuit(&mut builder, self.message.len() * 8);
@@ -339,10 +348,6 @@ impl SingleValidatorSign {
         }
 
         for target in &targets.pk {
-            builder.register_public_input(target.target);
-        }
-
-        for target in &targets.sig {
             builder.register_public_input(target.target);
         }
 
@@ -391,11 +396,12 @@ impl TargetSet for ValidatorSelectorTarget {
 struct ValidatorSelector {
     validator_set: [[u8; consts::ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
     index: usize,
-    validator: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
 }
 
 impl ValidatorSelector {
     fn prove(&self) -> ProofWithCircuitData<ValidatorSelectorTarget> {
+        log::info!("        Proving validator selection...");
+
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
 
         let targets: ValidatorSelectorTarget =
@@ -422,10 +428,9 @@ impl ValidatorSelector {
             validator_target.set_partial_witness(validator_data, &mut pw);
         }
 
-        let validator_bits = array_to_bits(&self.validator).into_iter();
-        for (target, value) in targets.validator.iter().zip(validator_bits) {
-            pw.set_bool_target(*target, value);
-        }
+        targets
+            .validator
+            .set_partial_witness(&self.validator_set[self.index], &mut pw);
 
         ProofWithCircuitData::from_builder(builder, pw)
     }
@@ -481,57 +486,5 @@ fn validator_selector_circuit(
             .unwrap(),
         index: index_target.into(),
         validator: validator_targets.into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::iter;
-
-    use super::*;
-
-    #[test]
-    fn test_validator_selector() {
-        let validator_selector = ValidatorSelector {
-            validator_set: vec![
-                [10; consts::ED25519_PUBLIC_KEY_SIZE],
-                [20; consts::ED25519_PUBLIC_KEY_SIZE],
-                [11; consts::ED25519_PUBLIC_KEY_SIZE],
-                [193; consts::ED25519_PUBLIC_KEY_SIZE],
-            ]
-            .into_iter()
-            .chain(iter::repeat([111; consts::ED25519_PUBLIC_KEY_SIZE]))
-            .take(VALIDATOR_COUNT)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-            index: 2,
-            validator: [11; consts::ED25519_PUBLIC_KEY_SIZE],
-        };
-        let proof = validator_selector.prove();
-
-        assert!(proof.verify());
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_incorrect_validator_selector_fails() {
-        let validator_selector = ValidatorSelector {
-            validator_set: vec![
-                [0; consts::ED25519_PUBLIC_KEY_SIZE],
-                [0; consts::ED25519_PUBLIC_KEY_SIZE],
-                [1; consts::ED25519_PUBLIC_KEY_SIZE],
-                [0; consts::ED25519_PUBLIC_KEY_SIZE],
-            ]
-            .into_iter()
-            .chain(iter::repeat([111; consts::ED25519_PUBLIC_KEY_SIZE]))
-            .take(VALIDATOR_COUNT)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
-            index: 2,
-            validator: [0; consts::ED25519_PUBLIC_KEY_SIZE],
-        };
-        validator_selector.prove();
     }
 }

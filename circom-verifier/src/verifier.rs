@@ -1,6 +1,5 @@
 use std::fmt::Write;
 
-use crate::prelude::*;
 use anyhow::Result;
 use log::Level;
 use plonky2::field::extension::{Extendable, FieldExtension};
@@ -20,8 +19,8 @@ use plonky2::util::timing::TimingTree;
 use plonky2_util::log2_strict;
 use serde::Serialize;
 
-const TEMPLATE_CONSTANTS: &str = include_str!("template_constants.circom");
-const TEMPLATE_GATES: &str = include_str!("template_gates.circom");
+const TEMPLATE_CONSTANTS: &str = include_str!("../circom/circuits/template_constants.circom");
+const TEMPLATE_GATES: &str = include_str!("../circom/circuits/template_gates.circom");
 
 pub fn encode_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -31,7 +30,7 @@ pub fn encode_hex(bytes: &[u8]) -> String {
     s
 }
 
-fn recursive_proof<
+pub fn recursive_proof<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     InnerC: GenericConfig<D, F = F>,
@@ -1120,44 +1119,4 @@ pub fn generate_circom_verifier_inner<
     constants = constants.replace("  $SET_SIGMA_CAP;\n", &*sigma_cap_str);
 
     Ok((constants, gates_lib))
-}
-
-pub struct CircomVerifierData {
-    pub constants_circom: String,
-    pub gates_circom: String,
-    pub proof: String,
-    pub config: String,
-}
-
-pub fn generate_circom_verifier(
-    conf: VerifierConfig,
-    common: CommonCircuitData<F, 2>,
-    verifier_only: VerifierOnlyCircuitData<C, 2>,
-    proof: ProofWithPublicInputs<F, C, 2>,
-) -> anyhow::Result<CircomVerifierData> {
-    use crate::circom_verifier::config::PoseidonBN128GoldilocksConfig as CBn128;
-
-    let standard_config = CircuitConfig::standard_recursion_config();
-    let (proof, vd, cd) = recursive_proof::<F, CBn128, C, 2>(
-        proof,
-        verifier_only,
-        common,
-        &standard_config,
-        None,
-        true,
-        true,
-    )?;
-
-    let conf = generate_verifier_config(&proof)?;
-    let (constants_circom, gates_circom) = generate_circom_verifier_inner(&conf, &cd, &vd)?;
-
-    let proof = generate_proof_base64(&proof, &conf)?;
-    let config = serde_json::to_string(&conf)?;
-
-    Ok(CircomVerifierData {
-        constants_circom,
-        gates_circom,
-        proof: proof,
-        config: config,
-    })
 }

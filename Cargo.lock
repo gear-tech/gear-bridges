@@ -1008,6 +1008,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "circom_verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "keccak-hash 0.8.0",
+ "log",
+ "num",
+ "plonky2",
+ "plonky2_field",
+ "plonky2_util",
+ "poseidon-permutation",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "unroll",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5518,6 +5540,7 @@ name = "prover"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "circom_verifier",
  "env_logger 0.9.3",
  "itertools",
  "jemallocator",
@@ -5532,7 +5555,6 @@ dependencies = [
  "plonky2_sha256",
  "plonky2_u32",
  "plonky2_util",
- "poseidon-permutation",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
@@ -5863,6 +5885,7 @@ dependencies = [
 name = "relayer"
 version = "0.1.0"
 dependencies = [
+ "circom_verifier",
  "gear-rpc-client",
  "log",
  "pretty_env_logger",

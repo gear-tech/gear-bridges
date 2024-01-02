@@ -9,7 +9,6 @@ use jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 pub mod block_finality;
-mod circom_verifier;
 pub mod common;
 pub mod merkle_proof;
 pub mod message_sent;

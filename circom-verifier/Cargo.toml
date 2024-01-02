@@ -1,30 +1,23 @@
 [package]
-name = "prover"
+name = "circom_verifier"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-env_logger.workspace = true
 itertools.workspace = true
-jemallocator.workspace = true
 keccak-hash.workspace = true
 log.workspace = true
 num.workspace = true
 plonky2.workspace = true
-plonky2_ecdsa.workspace = true
-plonky2_ed25519.workspace = true
 plonky2_field.workspace = true
-plonky2_sha256.workspace = true
-plonky2_u32.workspace = true
 plonky2_util.workspace = true
-plonky2_blake2b256.workspace = true
-rand.workspace = true
 rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 static_assertions.workspace = true
 unroll.workspace = true
-circom_verifier.workspace = true
+rand.workspace = true
+
+poseidon-permutation = { path = "./poseidon-permutation-rs" }

@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -7,6 +8,11 @@ use plonky2::{
 };
 use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
 use plonky2_field::types::Field;
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    ThreadPoolBuilder,
+};
+use std::sync::mpsc::channel;
 
 use crate::{
     common::{
@@ -25,6 +31,8 @@ use crate::{
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
     ProofWithCircuitData,
 };
+
+const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
 #[derive(Clone)]
 pub struct BlockFinalityTarget {
@@ -183,17 +191,35 @@ impl ValidatorSignsChain {
         let mut pre_commits = self.pre_commits.clone();
         pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
 
-        pre_commits
+        let (sender, receiver) = channel();
+
+        let thread_pool = ThreadPoolBuilder::new()
+            .stack_size(VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE)
+            .build()
+            .unwrap();
+
+        pre_commits.into_par_iter().enumerate().for_each_with(
+            sender,
+            |sender, (id, pre_commit)| {
+                thread_pool.scope(|_| {
+                    let proof = IndexedValidatorSign {
+                        validator_set: self.validator_set.clone(),
+                        index: pre_commit.validator_idx,
+                        signature: pre_commit.signature,
+                        message: self.message.clone(),
+                    }
+                    .prove();
+
+                    sender.send((id, proof)).unwrap();
+                });
+            },
+        );
+
+        receiver
             .iter()
-            .map(|pre_commit| {
-                IndexedValidatorSign {
-                    validator_set: self.validator_set.clone(),
-                    index: pre_commit.validator_idx,
-                    signature: pre_commit.signature,
-                    message: self.message.clone(),
-                }
-                .prove()
-            })
+            .sorted_by(|a, b| a.0.cmp(&b.0))
+            .into_iter()
+            .map(|(_, proof)| proof)
             .reduce(|acc, x| ComposedValidatorSigns {}.prove(acc, x))
             .unwrap()
     }
@@ -368,7 +394,11 @@ impl SingleValidatorSign {
             pw.set_bool_target(*target, value);
         }
 
-        ProofWithCircuitData::from_builder(builder, pw)
+        let proof = ProofWithCircuitData::from_builder(builder, pw);
+
+        log::info!("        Proven single validator sign...");
+
+        proof
     }
 }
 

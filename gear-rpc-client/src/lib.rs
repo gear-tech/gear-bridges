@@ -11,8 +11,8 @@ use trie_db::{node::NodeHandle, ChildReference};
 
 const VALIDATOR_SET_DATA_LENGTH_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const VALIDATOR_COUNT: usize = 54;
-const PROCESSED_VALIDATOR_COUNT: usize = 36;
+const VALIDATOR_COUNT: usize = 55;
+const PROCESSED_VALIDATOR_COUNT: usize = 37;
 const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = VALIDATOR_SET_DATA_LENGTH_IN_BITS;
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;

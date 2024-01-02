@@ -1,5 +1,6 @@
 use std::fmt::Write;
 
+use crate::prelude::*;
 use anyhow::Result;
 use log::Level;
 use plonky2::field::extension::{Extendable, FieldExtension};
@@ -18,6 +19,9 @@ use plonky2::plonk::prover::prove;
 use plonky2::util::timing::TimingTree;
 use plonky2_util::log2_strict;
 use serde::Serialize;
+
+const TEMPLATE_CONSTANTS: &str = include_str!("template_constants.circom");
+const TEMPLATE_GATES: &str = include_str!("template_gates.circom");
 
 pub fn encode_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -212,7 +216,7 @@ fn fib_proof<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: 
 
     // Provide initial values.
     let mut pw = PartialWitness::new();
-    if (input == 1) {
+    if input == 1 {
         pw.set_target(initial_a, F::ZERO);
         pw.set_target(initial_b, F::ONE);
     } else {
@@ -776,7 +780,7 @@ pub fn generate_proof_base64<
     Ok(serde_json::to_string(&circom_proof).unwrap())
 }
 
-pub fn generate_circom_verifier<
+pub fn generate_circom_verifier_inner<
     F: RichField + Extendable<D>,
     C: GenericConfig<D, F = F>,
     const D: usize,
@@ -790,8 +794,7 @@ pub fn generate_circom_verifier<
     println!("Generating Circom files ...");
 
     // Load template contract
-    let mut constants = std::fs::read_to_string("./src/template_constants.circom")
-        .expect("Something went wrong reading the file");
+    let mut constants = TEMPLATE_CONSTANTS.to_string();
 
     let k_is = &common.k_is;
     let mut k_is_str = "".to_owned();
@@ -986,8 +989,7 @@ pub fn generate_circom_verifier<
     constants = constants.replace("$G_ARITY_BITS_4", &g.to_string());
 
     // Load gate template
-    let mut gates_lib = std::fs::read_to_string("./src/template_gates.circom")
-        .expect("Something went wrong reading the file");
+    let mut gates_lib = TEMPLATE_GATES.to_string();
 
     let num_selectors = common.selectors_info.num_selectors();
     constants = constants.replace("$NUM_SELECTORS", &num_selectors.to_string());
@@ -1118,4 +1120,44 @@ pub fn generate_circom_verifier<
     constants = constants.replace("  $SET_SIGMA_CAP;\n", &*sigma_cap_str);
 
     Ok((constants, gates_lib))
+}
+
+pub struct CircomVerifierData {
+    pub constants_circom: String,
+    pub gates_circom: String,
+    pub proof: String,
+    pub config: String,
+}
+
+pub fn generate_circom_verifier(
+    conf: VerifierConfig,
+    common: CommonCircuitData<F, 2>,
+    verifier_only: VerifierOnlyCircuitData<C, 2>,
+    proof: ProofWithPublicInputs<F, C, 2>,
+) -> anyhow::Result<CircomVerifierData> {
+    use crate::circom_verifier::config::PoseidonBN128GoldilocksConfig as CBn128;
+
+    let standard_config = CircuitConfig::standard_recursion_config();
+    let (proof, vd, cd) = recursive_proof::<F, CBn128, C, 2>(
+        proof,
+        verifier_only,
+        common,
+        &standard_config,
+        None,
+        true,
+        true,
+    )?;
+
+    let conf = generate_verifier_config(&proof)?;
+    let (constants_circom, gates_circom) = generate_circom_verifier_inner(&conf, &cd, &vd)?;
+
+    let proof = generate_proof_base64(&proof, &conf)?;
+    let config = serde_json::to_string(&conf)?;
+
+    Ok(CircomVerifierData {
+        constants_circom,
+        gates_circom,
+        proof: proof,
+        config: config,
+    })
 }

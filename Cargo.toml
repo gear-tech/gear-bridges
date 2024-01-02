@@ -5,6 +5,7 @@ members = [
     "prover",
     "relayer",
     "circuits/plonky2_blake2b256",
+    "poseidon-permutation-rs",
 ]
 
 [workspace.package]
@@ -15,6 +16,7 @@ edition = "2021"
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
+poseidon-permutation = { path = "./poseidon-permutation-rs" }
 
 anyhow = "1.0.40"
 env_logger = "0.9.0"

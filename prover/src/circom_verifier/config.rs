@@ -156,7 +156,7 @@ mod tests {
     use plonky2::field::types::Field;
     use plonky2::plonk::config::{GenericConfig, Hasher, PoseidonGoldilocksConfig};
 
-    use crate::config::PoseidonBN128Hash;
+    use super::super::config::PoseidonBN128Hash;
 
     #[test]
     fn test_poseidon_bn128() -> Result<()> {

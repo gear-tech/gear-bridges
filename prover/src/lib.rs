@@ -9,12 +9,12 @@ use jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 pub mod block_finality;
+mod circom_verifier;
 pub mod common;
 pub mod merkle_proof;
 pub mod message_sent;
 pub mod next_validator_set;
 pub mod validator_set_hash;
-// mod circom_verifier;
 
 pub use common::ProofWithCircuitData;
 
@@ -46,5 +46,5 @@ pub(crate) mod consts {
     pub const GRANDPA_VOTE_LENGTH_IN_BITS: usize = GRANDPA_VOTE_LENGTH * 8;
 
     pub const VALIDATOR_COUNT: usize = 55;
-    pub const PROCESSED_VALIDATOR_COUNT: usize = 37;
+    pub const PROCESSED_VALIDATOR_COUNT: usize = 3;
 }

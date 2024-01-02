@@ -6,7 +6,8 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
-use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
+
+use plonky2_ed25519::gadgets::eddsa::make_verify_circuits as ed25519_circuit;
 use plonky2_field::types::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
@@ -367,7 +368,7 @@ impl SingleValidatorSign {
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
 
-        let targets = ed25519_circuit(&mut builder, self.message.len() * 8);
+        let targets = ed25519_circuit(&mut builder, self.message.len());
 
         for target in &targets.msg {
             builder.register_public_input(target.target);
@@ -499,7 +500,12 @@ fn validator_selector_circuit(
             .map(|(validator, equality)| builder.and(validator[bit_idx], *equality))
             .collect::<Vec<_>>()
             .into_iter()
-            .reduce(|acc, x| builder.or(acc, x))
+            .reduce(|acc, x| {
+                let not_acc = builder.not(acc);
+                let not_x = builder.not(x);
+                let not_res = builder.and(not_acc, not_x);
+                builder.not(not_res)
+            })
             .unwrap();
 
         validator_targets.push(target);

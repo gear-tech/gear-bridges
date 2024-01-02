@@ -1,25 +1,28 @@
-use std::marker::PhantomData;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::marker::PhantomData;
 
 use num::{BigUint, Integer, One, Zero};
-use plonky2::field::types::PrimeField;
-use plonky2::field::{extension::Extendable, types::Field};
+use plonky2::field::extension::Extendable;
+use plonky2::field::types::{Field, PrimeField};
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartitionWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::util::ceil_div_usize;
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
 use plonky2_u32::witness::GeneratedValuesU32;
-use plonky2_util::ceil_div_usize;
 
-use plonky2_ecdsa::gadgets::biguint::{
+use crate::gadgets::biguint::{
     BigUintTarget, CircuitBuilderBiguint, GeneratedValuesBigUint, WitnessBigUint,
 };
 
 #[derive(Clone, Debug)]
 pub struct NonNativeTarget<FF: Field> {
-    pub value: BigUintTarget,
+    pub(crate) value: BigUintTarget,
     pub(crate) _phantom: PhantomData<FF>,
 }
 
@@ -752,18 +755,18 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use plonky2::field::secp256k1_base::Secp256K1Base;
     use plonky2::field::types::{Field, PrimeField, Sample};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
-    use crate::field::ed25519_base::Ed25519Base;
     use crate::gadgets::nonnative::CircuitBuilderNonNative;
 
     #[test]
     fn test_nonnative_add() -> Result<()> {
-        type FF = Ed25519Base;
+        type FF = Secp256K1Base;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -790,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_nonnative_many_adds() -> Result<()> {
-        type FF = Ed25519Base;
+        type FF = Secp256K1Base;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -830,7 +833,7 @@ mod tests {
 
     #[test]
     fn test_nonnative_sub() -> Result<()> {
-        type FF = Ed25519Base;
+        type FF = Secp256K1Base;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -860,7 +863,7 @@ mod tests {
 
     #[test]
     fn test_nonnative_mul() -> Result<()> {
-        type FF = Ed25519Base;
+        type FF = Secp256K1Base;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -886,7 +889,7 @@ mod tests {
 
     #[test]
     fn test_nonnative_neg() -> Result<()> {
-        type FF = Ed25519Base;
+        type FF = Secp256K1Base;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -910,7 +913,7 @@ mod tests {
 
     #[test]
     fn test_nonnative_inv() -> Result<()> {
-        type FF = Ed25519Base;
+        type FF = Secp256K1Base;
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;

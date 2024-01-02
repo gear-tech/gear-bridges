@@ -101,7 +101,13 @@ struct BaseSumGenerator<const B: usize> {
     limbs: Vec<BoolTarget>,
 }
 
-impl<F: Field, const B: usize> SimpleGenerator<F> for BaseSumGenerator<B> {
+impl<F: RichField + Extendable<D>, const B: usize, const D: usize> SimpleGenerator<F, D>
+    for BaseSumGenerator<B>
+{
+    fn id(&self) -> String {
+        unimplemented!()
+    }
+
     fn dependencies(&self) -> Vec<Target> {
         self.limbs.iter().map(|b| b.target).collect()
     }
@@ -117,6 +123,24 @@ impl<F: Field, const B: usize> SimpleGenerator<F> for BaseSumGenerator<B> {
             });
 
         out_buffer.set_target(Target::wire(self.row, BaseSumGate::<B>::WIRE_SUM), sum);
+    }
+
+    fn serialize(
+        &self,
+        dst: &mut Vec<u8>,
+        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+    ) -> plonky2::util::serialization::IoResult<()> {
+        unimplemented!()
+    }
+
+    fn deserialize(
+        src: &mut plonky2::util::serialization::Buffer,
+        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+    ) -> plonky2::util::serialization::IoResult<Self>
+    where
+        Self: Sized,
+    {
+        unimplemented!()
     }
 }
 

@@ -153,7 +153,6 @@ version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a824f2aa7e75a0c98c5a504fceb80649e9c35265d44525b5f94de4771a395cd"
 dependencies = [
- "const-random",
  "getrandom 0.2.10",
  "once_cell",
  "version_check",
@@ -166,6 +165,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91429305e9f0a25f6205c5b8e0d2db09e0708a7a6df0f42212bb56c32c8ac97a"
 dependencies = [
  "cfg-if",
+ "const-random",
  "getrandom 0.2.10",
  "once_cell",
  "version_check",
@@ -1115,7 +1115,7 @@ dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
  "cranelift-frontend",
- "itertools",
+ "itertools 0.10.5",
  "log",
  "smallvec",
  "wasmparser",
@@ -2142,7 +2142,7 @@ dependencies = [
  "cfg-expr",
  "derive-syn-parse",
  "frame-support-procedural-tools",
- "itertools",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -2451,8 +2451,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be4136b2a15dd319360be1c07d9933517ccf0be8f16bf62a3bee4f0d618df427"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2591,8 +2593,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 dependencies = [
  "ahash 0.7.7",
- "rayon",
- "serde",
 ]
 
 [[package]]
@@ -2612,6 +2612,7 @@ checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
+ "rayon",
  "serde",
 ]
 
@@ -3030,6 +3031,15 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
 dependencies = [
  "either",
 ]
@@ -4889,14 +4899,14 @@ checksum = "4503fa043bf02cee09a9582e9554b4c6403b2ef55e4612e96561d294419429f8"
 
 [[package]]
 name = "plonky2"
-version = "0.1.3"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+version = "0.1.4"
+source = "git+https://github.com/mertwole/plonky2#c3d707c1265abdb2fddf64cf74475471fd67a68d"
 dependencies = [
- "ahash 0.7.7",
+ "ahash 0.8.6",
  "anyhow",
- "dyn-clonable",
- "hashbrown 0.12.3",
- "itertools",
+ "getrandom 0.2.10",
+ "hashbrown 0.14.2",
+ "itertools 0.11.0",
  "keccak-hash",
  "log",
  "num",
@@ -4906,6 +4916,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
+ "serde_json",
  "static_assertions",
  "unroll",
 ]
@@ -4927,14 +4938,14 @@ dependencies = [
 [[package]]
 name = "plonky2_ecdsa"
 version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "num",
  "plonky2",
  "plonky2_maybe_rayon",
  "plonky2_u32",
+ "rand 0.8.5",
  "serde",
 ]
 
@@ -4944,7 +4955,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "curve25519-dalek 4.0.0-rc.1",
- "itertools",
+ "itertools 0.10.5",
  "keccak-hash",
  "log",
  "num",
@@ -4965,11 +4976,11 @@ dependencies = [
 
 [[package]]
 name = "plonky2_field"
-version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+version = "0.1.1"
+source = "git+https://github.com/mertwole/plonky2#c3d707c1265abdb2fddf64cf74475471fd67a68d"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.11.0",
  "num",
  "plonky2_util",
  "rand 0.8.5",
@@ -4980,8 +4991,8 @@ dependencies = [
 
 [[package]]
 name = "plonky2_maybe_rayon"
-version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+version = "0.1.1"
+source = "git+https://github.com/mertwole/plonky2#c3d707c1265abdb2fddf64cf74475471fd67a68d"
 dependencies = [
  "rayon",
 ]
@@ -4991,7 +5002,7 @@ name = "plonky2_sha256"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "keccak-hash",
  "log",
  "plonky2",
@@ -5006,7 +5017,7 @@ name = "plonky2_sha512"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "keccak-hash",
  "log",
  "num",
@@ -5026,18 +5037,18 @@ dependencies = [
 [[package]]
 name = "plonky2_u32"
 version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "num",
  "plonky2",
+ "rand 0.8.5",
 ]
 
 [[package]]
 name = "plonky2_util"
-version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+version = "0.1.1"
+source = "git+https://github.com/mertwole/plonky2#c3d707c1265abdb2fddf64cf74475471fd67a68d"
 
 [[package]]
 name = "polling"
@@ -5124,7 +5135,7 @@ checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
 dependencies = [
  "difflib",
  "float-cmp",
- "itertools",
+ "itertools 0.10.5",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -5287,7 +5298,7 @@ checksum = "119533552c9a7ffacc21e099c24a0ac8bb19c2a2a3f363de84cd9b844feab270"
 dependencies = [
  "bytes",
  "heck",
- "itertools",
+ "itertools 0.10.5",
  "lazy_static",
  "log",
  "multimap",
@@ -5321,7 +5332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -5343,7 +5354,7 @@ dependencies = [
  "anyhow",
  "curve25519-dalek 4.0.0-rc.1",
  "env_logger 0.9.3",
- "itertools",
+ "itertools 0.10.5",
  "jemallocator",
  "keccak-hash",
  "log",
@@ -6821,7 +6832,7 @@ dependencies = [
  "hashbrown 0.14.2",
  "hex",
  "hmac 0.12.1",
- "itertools",
+ "itertools 0.10.5",
  "libsecp256k1",
  "merlin 3.0.0",
  "no-std-net",
@@ -6865,7 +6876,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.14.2",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "log",
  "lru 0.10.1",
  "parking_lot 0.12.1",

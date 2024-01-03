@@ -212,6 +212,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "anstream"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d664a92ecae85fd0a7392615844904654d1d5f5514837f471ddef4a057aba1b6"
+dependencies = [
+ "anstyle",
+ "anstyle-parse",
+ "anstyle-query",
+ "anstyle-wincon",
+ "colorchoice",
+ "utf8parse",
+]
+
+[[package]]
+name = "anstyle"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7079075b41f533b8c61d2a4d073c4676e1f8b249ff94a393b0595db304e0dd87"
+
+[[package]]
+name = "anstyle-parse"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c75ac65da39e5fe5ab759307499ddad880d724eed2f6ce5b5e8a26f4f387928c"
+dependencies = [
+ "utf8parse",
+]
+
+[[package]]
+name = "anstyle-query"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e28923312444cdd728e4738b3f9c9cac739500909bb3d3c94b43551b16517648"
+dependencies = [
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "anstyle-wincon"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cd54b81ec8d6180e24654d0b371ad22fc3dd083b6ff8ba325b72e00c87660a7"
+dependencies = [
+ "anstyle",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -622,6 +670,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.69.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ffcebc3849946a7170a05992aac39da343a90676ab392c51a4280981d6379c2"
+dependencies = [
+ "bitflags 2.4.1",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "log",
+ "peeking_take_while",
+ "prettyplease 0.2.15",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.39",
+ "which",
+]
+
+[[package]]
 name = "bip39"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -846,6 +917,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cexpr"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "cfg-expr"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -926,6 +1006,85 @@ dependencies = [
  "crypto-common",
  "inout",
 ]
+
+[[package]]
+name = "circom_verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "keccak-hash 0.8.0",
+ "log",
+ "num",
+ "plonky2",
+ "plonky2_field",
+ "plonky2_util",
+ "poseidon-permutation",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "unroll",
+]
+
+[[package]]
+name = "clang-sys"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67523a3b4be3ce1989d607a828d036249522dd9c1c8de7f4dd2dae43a37369d1"
+dependencies = [
+ "glob",
+ "libc",
+ "libloading",
+]
+
+[[package]]
+name = "clap"
+version = "4.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcfab8ba68f3668e89f6ff60f5b205cea56aa7b769451a59f34b8682f51c056d"
+dependencies = [
+ "clap_builder",
+ "clap_derive",
+]
+
+[[package]]
+name = "clap_builder"
+version = "4.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb7fb5e4e979aec3be7791562fcba452f94ad85e954da024396433e0e25a79e9"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf9804afaaf59a91e75b022a30fb7229a7901f60c755489cc61c9b423b836442"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.39",
+]
+
+[[package]]
+name = "clap_lex"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "702fc72eb24e5a1e48ce58027a675bc24edd52096d5397d4aea7c6dd9eca0bd1"
+
+[[package]]
+name = "colorchoice"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
 name = "concurrent-queue"
@@ -1284,13 +1443,12 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.0.0-rc.1"
-source = "git+https://github.com/tikhono/curve25519-dalek?rev=c87a7edfbc5694a581ef30e39673622fabe0c7c5#c87a7edfbc5694a581ef30e39673622fabe0c7c5"
+version = "3.2.0"
+source = "git+https://github.com/mertwole/curve25519-dalek.git#c6c1cfff618a7d926b701fabb0be10682ccbf328"
 dependencies = [
- "cfg-if",
- "fiat-crypto 0.1.20",
- "packed_simd_2",
- "platforms",
+ "byteorder",
+ "digest 0.9.0",
+ "rand_core 0.5.1",
  "subtle",
  "zeroize",
 ]
@@ -1305,7 +1463,7 @@ dependencies = [
  "cpufeatures",
  "curve25519-dalek-derive",
  "digest 0.10.7",
- "fiat-crypto 0.2.1",
+ "fiat-crypto",
  "platforms",
  "rustc_version",
  "subtle",
@@ -1705,7 +1863,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c762bae6dcaf24c4c84667b8579785430908723d5c889f469d76a41d59cc7a9d"
 dependencies = [
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ed25519 1.5.3",
  "rand 0.7.3",
  "serde",
@@ -1733,7 +1891,7 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c24f403d068ad0b359e577a77f92392118be3f3c927538f2bb544a5ecd828c6"
 dependencies = [
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hashbrown 0.12.3",
  "hex",
  "rand_core 0.6.4",
@@ -1936,12 +2094,6 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
-
-[[package]]
-name = "fiat-crypto"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e825f6987101665dea6ec934c09ec6d721de7bc1bf92248e1d5810c8cd636b77"
 
 [[package]]
 name = "fiat-crypto"
@@ -2491,6 +2643,12 @@ name = "gimli"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fb8d784f27acf97159b40fc4db5ecd8aa23b9ad5ef69cdd136d3bc80665f0c0"
+
+[[package]]
+name = "glob"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
 name = "group"
@@ -3299,6 +3457,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak-hash"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b286e6b663fb926e1eeb68528e69cb70ed46c6d65871a21b2215ae8154c6d3c"
+dependencies = [
+ "primitive-types 0.12.2",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "kvdb"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3314,16 +3482,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
+name = "lazycell"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
+
+[[package]]
 name = "libc"
 version = "0.2.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a08173bc88b7955d1b3145aa561539096c421ac8debde8cbc3612ec635fee29b"
 
 [[package]]
-name = "libm"
-version = "0.1.4"
+name = "libloading"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
+checksum = "c571b676ddfc9a8c12f1f3d3085a7b163966a8fd8098a90640953ce5f6170161"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
+]
 
 [[package]]
 name = "libm"
@@ -3567,7 +3745,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a978cb57efe82e892ec6f348a536bfbd9fee677adbe5689d7a93ad3a9bffbf2e"
 dependencies = [
  "bytes",
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "libp2p-core 0.38.0",
  "log",
@@ -3963,6 +4141,14 @@ checksum = "7574c1cf36da4798ab73da5b215bbf444f50718207754cb522201d78d1cd0ff2"
 dependencies = [
  "autocfg",
  "rawpointer",
+]
+
+[[package]]
+name = "maybe_rayon"
+version = "0.1.0"
+source = "git+https://github.com/polymerdao/plonky2?rev=4cb0b48df1d227d5461a4c28ed025aaea64e2e62#4cb0b48df1d227d5461a4c28ed025aaea64e2e62"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -4538,16 +4724,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "packed_simd_2"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1914cd452d8fccd6f9db48147b29fd4ae05bea9dc5d9ad578509f72415de282"
-dependencies = [
- "cfg-if",
- "libm 0.1.4",
-]
-
-[[package]]
 name = "pallet-authorship"
 version = "4.0.0-dev"
 source = "git+https://github.com/gear-tech/substrate.git?branch=gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes#27779e0eaaa2161ba165ff8f0b0ff103bb63e5a1"
@@ -4773,6 +4949,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "peeking_take_while"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
+
+[[package]]
 name = "pem"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4889,19 +5071,18 @@ checksum = "4503fa043bf02cee09a9582e9554b4c6403b2ef55e4612e96561d294419429f8"
 
 [[package]]
 name = "plonky2"
-version = "0.1.3"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+version = "0.1.0"
+source = "git+https://github.com/polymerdao/plonky2?rev=4cb0b48df1d227d5461a4c28ed025aaea64e2e62#4cb0b48df1d227d5461a4c28ed025aaea64e2e62"
 dependencies = [
  "ahash 0.7.7",
  "anyhow",
- "dyn-clonable",
  "hashbrown 0.12.3",
  "itertools",
- "keccak-hash",
+ "keccak-hash 0.8.0",
  "log",
+ "maybe_rayon",
  "num",
  "plonky2_field",
- "plonky2_maybe_rayon",
  "plonky2_util",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
@@ -4927,13 +5108,13 @@ dependencies = [
 [[package]]
 name = "plonky2_ecdsa"
 version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+source = "git+https://github.com/polymerdao/plonky2?rev=4cb0b48df1d227d5461a4c28ed025aaea64e2e62#4cb0b48df1d227d5461a4c28ed025aaea64e2e62"
 dependencies = [
  "anyhow",
  "itertools",
+ "maybe_rayon",
  "num",
  "plonky2",
- "plonky2_maybe_rayon",
  "plonky2_u32",
  "serde",
 ]
@@ -4941,11 +5122,14 @@ dependencies = [
 [[package]]
 name = "plonky2_ed25519"
 version = "0.1.0"
+source = "git+https://github.com/polymerdao/plonky2-ed25519?rev=16b34149a838ce424133afd340c368088524d77b#16b34149a838ce424133afd340c368088524d77b"
 dependencies = [
  "anyhow",
- "curve25519-dalek 4.0.0-rc.1",
+ "clap",
+ "curve25519-dalek 3.2.0 (git+https://github.com/mertwole/curve25519-dalek.git)",
+ "env_logger 0.10.0",
  "itertools",
- "keccak-hash",
+ "keccak-hash 0.10.0",
  "log",
  "num",
  "plonky2",
@@ -4966,7 +5150,7 @@ dependencies = [
 [[package]]
 name = "plonky2_field"
 version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+source = "git+https://github.com/polymerdao/plonky2?rev=4cb0b48df1d227d5461a4c28ed025aaea64e2e62#4cb0b48df1d227d5461a4c28ed025aaea64e2e62"
 dependencies = [
  "anyhow",
  "itertools",
@@ -4979,35 +5163,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "plonky2_maybe_rayon"
-version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
-dependencies = [
- "rayon",
-]
-
-[[package]]
 name = "plonky2_sha256"
 version = "0.1.0"
+source = "git+https://github.com/polymerdao/plonky2-sha256?rev=06d128e78ed8d29b21d58294b069e852c1866f8d#06d128e78ed8d29b21d58294b069e852c1866f8d"
 dependencies = [
  "anyhow",
+ "env_logger 0.10.0",
  "itertools",
- "keccak-hash",
+ "keccak-hash 0.10.0",
  "log",
  "plonky2",
  "plonky2_field",
  "plonky2_u32",
  "plonky2_util",
  "rand 0.8.5",
+ "sha2 0.10.8",
 ]
 
 [[package]]
 name = "plonky2_sha512"
 version = "0.1.0"
+source = "git+https://github.com/polymerdao/plonky2-sha512?rev=6504a307448fdcc8c2daf000150a1f5691a4f8ef#6504a307448fdcc8c2daf000150a1f5691a4f8ef"
 dependencies = [
  "anyhow",
+ "env_logger 0.10.0",
  "itertools",
- "keccak-hash",
+ "keccak-hash 0.10.0",
  "log",
  "num",
  "plonky2",
@@ -5019,6 +5200,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
+ "sha2 0.10.8",
  "static_assertions",
  "unroll",
 ]
@@ -5026,7 +5208,7 @@ dependencies = [
 [[package]]
 name = "plonky2_u32"
 version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+source = "git+https://github.com/polymerdao/plonky2?rev=4cb0b48df1d227d5461a4c28ed025aaea64e2e62#4cb0b48df1d227d5461a4c28ed025aaea64e2e62"
 dependencies = [
  "anyhow",
  "itertools",
@@ -5037,7 +5219,7 @@ dependencies = [
 [[package]]
 name = "plonky2_util"
 version = "0.1.0"
-source = "git+https://github.com/tikhono/plonky2?rev=066c82b91e09272560d0e3154b971a73339611d5#066c82b91e09272560d0e3154b971a73339611d5"
+source = "git+https://github.com/polymerdao/plonky2?rev=4cb0b48df1d227d5461a4c28ed025aaea64e2e62#4cb0b48df1d227d5461a4c28ed025aaea64e2e62"
 
 [[package]]
 name = "polling"
@@ -5105,6 +5287,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "poseidon-permutation"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5164,6 +5353,16 @@ checksum = "6c8646e95016a7a6c4adea95bafa8a16baab64b583356217f2c85db4a39d9a86"
 dependencies = [
  "proc-macro2",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "prettyplease"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae005bd773ab59b4725093fd7df83fd7892f7d8eafb48dbd7de6e024e4215f9d"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.39",
 ]
 
 [[package]]
@@ -5292,7 +5491,7 @@ dependencies = [
  "log",
  "multimap",
  "petgraph",
- "prettyplease",
+ "prettyplease 0.1.25",
  "prost",
  "prost-types",
  "regex",
@@ -5341,11 +5540,11 @@ name = "prover"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "curve25519-dalek 4.0.0-rc.1",
+ "circom_verifier",
  "env_logger 0.9.3",
  "itertools",
  "jemallocator",
- "keccak-hash",
+ "keccak-hash 0.8.0",
  "log",
  "num",
  "plonky2",
@@ -5360,6 +5559,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
+ "serde_json",
  "sha2 0.10.8",
  "static_assertions",
  "unroll",
@@ -5685,6 +5885,7 @@ dependencies = [
 name = "relayer"
 version = "0.1.0"
 dependencies = [
+ "circom_verifier",
  "gear-rpc-client",
  "log",
  "pretty_env_logger",
@@ -6714,6 +6915,12 @@ checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
 ]
+
+[[package]]
+name = "shlex"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7cee0529a6d40f580e7a5e6c495c8fbfe21b7b52795ed4bb5e62cdf92bc6380"
 
 [[package]]
 name = "signal-hook-registry"
@@ -8394,6 +8601,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "utf8parse"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
 name = "uuid"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8595,7 +8808,7 @@ version = "0.2.1"
 source = "git+https://github.com/gear-tech/wasmi?branch=v0.13.2-sign-ext#3a0b1022377919e62aadf4d78b762abd1c3e9a04"
 dependencies = [
  "downcast-rs",
- "libm 0.2.8",
+ "libm",
  "memory_units",
  "num-rational",
  "num-traits",
@@ -8609,7 +8822,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624e6333e861ef49095d2d678b76ebf30b06bf37effca845be7e5b87c90071b7"
 dependencies = [
  "downcast-rs",
- "libm 0.2.8",
+ "libm",
  "num-traits",
  "paste",
 ]
@@ -8935,7 +9148,7 @@ dependencies = [
  "block-modes",
  "byteorder",
  "ccm",
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "der-parser 8.2.0",
  "elliptic-curve",
  "hkdf",
@@ -9390,7 +9603,7 @@ version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a0c105152107e3b96f6a00a65e86ce82d9b125230e1c4302940eca58ff71f4f"
 dependencies = [
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_core 0.5.1",
  "zeroize",
 ]

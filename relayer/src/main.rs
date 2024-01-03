@@ -1,5 +1,6 @@
 extern crate pretty_env_logger;
 
+use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{message_sent::MessageSent, next_validator_set::NextValidatorSet};
 
@@ -8,7 +9,6 @@ async fn main() {
     pretty_env_logger::init();
 
     let api = GearApi::new().await;
-
     let block = api.latest_finalized_block().await;
 
     let now = std::time::Instant::now();
@@ -19,11 +19,14 @@ async fn main() {
     }
     .prove();
 
-    panic!(
-        "verified: {} in {}ms",
-        proof.verify(),
-        now.elapsed().as_millis()
-    );
+    proof.generate_circom_verifier(CircomVerifierFilePaths {
+        constants: "./circom-verifier/circom/circuits/constants.circom".to_string(),
+        gates: "./circom-verifier/circom/circuits/gates.circom".to_string(),
+        proof: "./circom-verifier/circom/test/data/proof.json".to_string(),
+        config: "./circom-verifier/circom/test/data/conf.json".to_string(),
+    });
+
+    panic!("done in {}ms", now.elapsed().as_millis());
 
     let now = std::time::Instant::now();
 

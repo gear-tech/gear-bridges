@@ -5,7 +5,7 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
-use plonky2_sha256::circuit::sha256_circuit;
+use plonky2_sha256::circuit::make_circuits as sha256_circuit;
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -50,7 +50,7 @@ impl ValidatorSetHash {
 
         let targets = sha256_circuit(
             &mut builder,
-            self.validator_set.len() * consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS,
+            (self.validator_set.len() * consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS) as u64,
         );
 
         for target in &targets.digest {

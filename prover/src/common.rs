@@ -7,6 +7,7 @@ use crate::{
     },
     prelude::*,
 };
+use circom_verifier::CircomVerifierFilePaths;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -15,9 +16,11 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget},
+        config::PoseidonGoldilocksConfig,
         proof::{Proof, ProofWithPublicInputs},
     },
 };
+
 pub use targets::TargetSet;
 
 pub mod targets {
@@ -271,6 +274,18 @@ where
             })
             .is_ok()
     }
+
+    pub fn generate_circom_verifier(self, paths: CircomVerifierFilePaths) {
+        circom_verifier::write_circom_verifier_files(
+            paths,
+            self.circuit_data.common,
+            self.circuit_data.verifier_only,
+            ProofWithPublicInputs {
+                proof: self.proof,
+                public_inputs: self.public_inputs,
+            },
+        )
+    }
 }
 
 pub struct ProofCompositionTargets<TS1, TS2>
@@ -305,9 +320,9 @@ where
     ) -> ProofCompositionBuilder<TS1, TS2> {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let proof_with_pis_target_1 =
-            builder.add_virtual_proof_with_pis(&first.circuit_data.common);
+            builder.add_virtual_proof_with_pis::<C>(&first.circuit_data.common);
         let proof_with_pis_target_2 =
-            builder.add_virtual_proof_with_pis(&second.circuit_data.common);
+            builder.add_virtual_proof_with_pis::<C>(&second.circuit_data.common);
 
         let verifier_circuit_target_1 = VerifierCircuitTarget {
             constants_sigmas_cap: builder

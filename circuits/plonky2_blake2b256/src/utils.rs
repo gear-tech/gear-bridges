@@ -1,8 +1,9 @@
-use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{field::extension::Extendable, iop::target::Target};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
+use plonky2_util::log_floor;
 
 pub type Word = u64;
 pub const WORD_BITS: usize = 64;
@@ -33,6 +34,8 @@ pub trait CircuitBuilderExt {
     }
 
     fn add_words_wrapping(&mut self, a: WordTargets, b: WordTargets) -> WordTargets;
+
+    fn le_sum(&mut self, bits: impl Iterator<Item = BoolTarget>) -> Target;
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for CircuitBuilder<F, D> {
@@ -53,12 +56,16 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
             .unwrap()
     }
 
-    // (a | b) & !(a & b)
+    // !(!a & !b) & !(a & b)
     fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget {
-        let c = self.or(a, b);
+        let not_a = self.not(a);
+        let not_b = self.not(b);
+
+        let c = self.and(not_a, not_b);
+        let c = self.not(c);
         let d = self.and(a, b);
-        let e = self.not(d);
-        self.and(c, e)
+        let d = self.not(d);
+        self.and(c, d)
     }
 
     fn add_words_wrapping(&mut self, a: WordTargets, b: WordTargets) -> WordTargets {
@@ -80,6 +87,27 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
         let res_h = self.split_le(res_h.0, WORD_BITS / 2).try_into().unwrap();
 
         collect_word(res_l, res_h)
+    }
+
+    fn le_sum(&mut self, bits: impl Iterator<Item = BoolTarget>) -> Target {
+        let bits: Vec<_> = bits.collect();
+        let num_bits = bits.len();
+        assert!(
+            num_bits <= log_floor(F::ORDER, 2),
+            "{} bits may overflow the field",
+            num_bits
+        );
+        if num_bits == 0 {
+            return self.zero();
+        }
+
+        let two = self.two();
+        let mut rev_bits = bits.iter().rev();
+        let mut sum = rev_bits.next().unwrap().target;
+        for &bit in rev_bits {
+            sum = self.mul_add(two, sum, bit.target);
+        }
+        sum
     }
 }
 

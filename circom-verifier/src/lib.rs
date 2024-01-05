@@ -27,10 +27,10 @@ type C = PoseidonGoldilocksConfig;
 const D: usize = 2;
 
 pub struct CircomVerifierFilePaths {
-    pub constants: String,
-    pub gates: String,
-    pub proof: String,
-    pub config: String,
+    pub constants: PathBuf,
+    pub gates: PathBuf,
+    pub proof: PathBuf,
+    pub config: PathBuf,
 }
 
 pub fn write_circom_verifier_files(
@@ -63,8 +63,7 @@ pub fn write_circom_verifier_files(
     write_file(paths.config, config);
 }
 
-fn write_file(path: String, contents: String) {
-    let path = PathBuf::from(&path);
+fn write_file(path: PathBuf, contents: String) {
     create_dir_all(path.parent().unwrap()).unwrap();
     write(path, contents).unwrap();
 }

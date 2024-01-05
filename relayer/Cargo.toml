@@ -10,5 +10,6 @@ circom_verifier.workspace = true
 
 log.workspace = true
 
+clap = { version = "4.4.13", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }
 pretty_env_logger = "*"

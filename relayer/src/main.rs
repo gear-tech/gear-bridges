@@ -19,10 +19,12 @@ async fn main() {
     }
     .prove();
 
+    proof.verify();
+
     proof.generate_circom_verifier(CircomVerifierFilePaths {
         constants: "./circom-verifier/circom/circuits/constants.circom".to_string(),
         gates: "./circom-verifier/circom/circuits/gates.circom".to_string(),
-        proof: "./circom-verifier/circom/test/data/proof.json".to_string(),
+        proof: "./circom-verifier/plonky2_proof.json".to_string(),
         config: "./circom-verifier/circom/test/data/conf.json".to_string(),
     });
 

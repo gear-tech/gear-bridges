@@ -71,6 +71,8 @@ where
     for i in 0..builder.config.fri_config.num_cap_elements() {
         builder.register_public_inputs(&inner_data.constants_sigmas_cap.0[i].elements);
     }
+    builder.register_public_inputs(&pt.public_inputs[..16]);
+
     builder.verify_proof::<InnerC>(&pt, &inner_data, &inner_cd);
 
     if print_gate_counts {

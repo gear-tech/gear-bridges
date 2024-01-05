@@ -1,0 +1,62 @@
+FROM ubuntu:22.04
+SHELL ["/bin/bash", "-c"]
+
+RUN echo "Install deps"
+RUN apt-get update
+RUN apt-get install -y \
+    curl \
+    build-essential \
+    git
+
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN git clone https://github.com/iden3/circom.git
+WORKDIR /circom
+RUN git reset --hard v2.1.0
+RUN cargo install --path circom
+
+RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
+RUN apt-get install -y nodejs
+
+RUN npm install -g snarkjs@0.7.2
+
+RUN echo "Download initial trusted setup"
+RUN mkdir -p /verifier/trusted_setup
+WORKDIR /verifier/trusted_setup
+RUN curl https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_25.ptau -o ./final.ptau
+
+RUN echo "Compile circuit"
+COPY ./circom /verifier/circom
+WORKDIR /verifier/circom
+RUN npm install
+RUN circom ./circuits/plonky2.circom --wasm --r1cs -p bn128 --O2=full -o ./test/data
+
+ENV NODE_OPTIONS="--max-old-space-size=65536"
+
+RUN echo "Circuit-specific setup"
+RUN snarkjs groth16 setup ./test/data/plonky2.r1cs ../trusted_setup/final.ptau ./test/data/g16.zkey -v
+
+RUN echo "Prove"
+COPY ./plonky2_proof.json /verifier/circom/test/data/proof.json
+RUN snarkjs groth16 fullprove -v \
+    ./test/data/proof.json \
+    ./test/data/plonky2_js/plonky2.wasm \
+    ./test/data/g16.zkey \
+    ./test/data/g16_proof.json \
+    ./test/data/g16_public.json
+
+RUN echo "Export verification key"
+RUN snarkjs zkey export verificationkey -v \
+    ./test/data/g16.zkey \
+    ./test/data/verification_key.json
+
+RUN echo "Copy final files"
+RUN mkdir /tmp/aggregation
+RUN cp ./test/data/g16_public.json /tmp/aggregation/final_public.json 
+RUN cp ./test/data/g16_proof.json /tmp/aggregation/final_proof.json
+
+RUN echo "Generate solidity contract"
+RUN snarkjs zkey export solidityverifier -v \
+    ./test/data/g16.zkey \
+    ./hardhat/contracts/final_verifier.sol

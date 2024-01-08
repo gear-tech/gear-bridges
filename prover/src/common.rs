@@ -4,6 +4,7 @@ use crate::{
     consts::{
         BLAKE2_DIGEST_SIZE_IN_BITS, ED25519_PUBLIC_KEY_SIZE_IN_BITS,
         ED25519_SIGNATURE_SIZE_IN_BITS, SHA256_DIGEST_SIZE_IN_BITS,
+        SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
     },
     prelude::*,
 };
@@ -16,7 +17,6 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget},
-        config::PoseidonGoldilocksConfig,
         proof::{Proof, ProofWithPublicInputs},
     },
 };
@@ -27,16 +27,13 @@ pub mod targets {
     use std::fmt::Debug;
     use std::ops::Deref;
 
+    use plonky2_field::goldilocks_field::GoldilocksField;
+    use plonky2_field::types::Field;
+
     use super::*;
 
     pub trait TargetSet: Clone {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
-    }
-
-    pub trait TargetSetOperations {
-        fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>);
-        fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>);
-        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>);
     }
 
     pub type CompositeTarget<T, const N: usize> = [T; N];
@@ -64,22 +61,53 @@ pub mod targets {
             .unwrap()
     }
 
-    impl<T, const N: usize> TargetSetOperations for T
+    pub trait TargetSetOperations {
+        fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>);
+        fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>);
+    }
+
+    pub trait TargetSetWitnessOperations {
+        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>);
+    }
+
+    trait IntoTarget {
+        fn into_target(&self) -> Target;
+    }
+
+    impl IntoTarget for Target {
+        fn into_target(&self) -> Target {
+            self.clone()
+        }
+    }
+
+    impl IntoTarget for BoolTarget {
+        fn into_target(&self) -> Target {
+            self.target
+        }
+    }
+
+    impl<T, S, const N: usize> TargetSetOperations for T
     where
-        T: Deref<Target = CompositeTarget<BoolTarget, N>>,
+        T: Deref<Target = CompositeTarget<S, N>>,
+        S: IntoTarget,
     {
         fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
             for (target_1, target_2) in self.iter().zip(other.iter()) {
-                builder.connect(target_1.target, target_2.target);
+                builder.connect(target_1.into_target(), target_2.into_target());
             }
         }
 
         fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
             for target in self.iter() {
-                builder.register_public_input(target.target);
+                builder.register_public_input(target.into_target());
             }
         }
+    }
 
+    impl<T, const N: usize> TargetSetWitnessOperations for T
+    where
+        T: Deref<Target = CompositeTarget<BoolTarget, N>>,
+    {
         fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
             let data = array_to_bits(data);
             for (target, bit) in self.iter().zip(data.into_iter()) {
@@ -97,52 +125,84 @@ pub mod targets {
         }
     }
 
-    #[derive(Clone, Debug)]
-    pub struct Sha256Target(CompositeTarget<BoolTarget, SHA256_DIGEST_SIZE_IN_BITS>);
+    macro_rules! impl_composite_target_wrapper {
+        ($name:ident, $target_ty:ty, $len:ident) => {
+            #[derive(Clone, Debug)]
+            pub struct $name(CompositeTarget<$target_ty, $len>);
 
-    #[derive(Clone, Debug)]
-    pub struct Blake2Target(CompositeTarget<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>);
+            impl Deref for $name {
+                type Target = CompositeTarget<$target_ty, $len>;
 
-    #[derive(Clone, Debug)]
-    pub struct Ed25519PublicKeyTarget(CompositeTarget<BoolTarget, ED25519_PUBLIC_KEY_SIZE_IN_BITS>);
+                fn deref(&self) -> &Self::Target {
+                    &self.0
+                }
+            }
 
-    #[derive(Clone, Debug)]
-    pub struct Ed25519SignatreTarget(CompositeTarget<BoolTarget, ED25519_SIGNATURE_SIZE_IN_BITS>);
+            impl TargetSet for $name {
+                fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+                    Self(TargetSet::parse(raw))
+                }
+            }
+
+            impl From<[$target_ty; $len]> for $name {
+                fn from(value: [$target_ty; $len]) -> Self {
+                    Self(value)
+                }
+            }
+        };
+    }
+
+    impl_composite_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
+    impl_composite_target_wrapper!(
+        Sha256TargetGoldilocks,
+        Target,
+        SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
+    );
+    impl_composite_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
+    impl_composite_target_wrapper!(
+        Ed25519PublicKeyTarget,
+        BoolTarget,
+        ED25519_PUBLIC_KEY_SIZE_IN_BITS
+    );
+    impl_composite_target_wrapper!(
+        Ed25519SignatreTarget,
+        BoolTarget,
+        ED25519_SIGNATURE_SIZE_IN_BITS
+    );
+
+    impl Sha256TargetGoldilocks {
+        /// Packs underlying `BoolTarget`s to `Target`s by groups of 52.
+        pub fn from_sha256_target(
+            sha256_target: Sha256Target,
+            builder: &mut CircuitBuilder<F, D>,
+        ) -> Self {
+            const BITS_FOR_SINGLE_TARGET: usize = 52;
+
+            let bit_exp_targets: Vec<_> = (0..BITS_FOR_SINGLE_TARGET)
+                .map(|bit_no| builder.constant(GoldilocksField::from_canonical_u32(1 << bit_no)))
+                .collect();
+
+            let targets = sha256_target
+                .0
+                .chunks(BITS_FOR_SINGLE_TARGET)
+                .map(|bit_targets| {
+                    let mut result = builder.zero();
+                    for (bit, exp) in bit_targets.iter().zip(bit_exp_targets.iter()) {
+                        result = builder.mul_add(bit.target, *exp, result);
+                    }
+                    result
+                })
+                .collect::<Vec<_>>();
+
+            let targets: [_; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
+                targets.try_into().unwrap();
+
+            targets.into()
+        }
+    }
 
     #[derive(Clone, Debug)]
     pub struct BitArrayTarget<const N: usize>(CompositeTarget<BoolTarget, N>);
-
-    impl Deref for Sha256Target {
-        type Target = CompositeTarget<BoolTarget, SHA256_DIGEST_SIZE_IN_BITS>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    impl Deref for Blake2Target {
-        type Target = CompositeTarget<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    impl Deref for Ed25519PublicKeyTarget {
-        type Target = CompositeTarget<BoolTarget, ED25519_PUBLIC_KEY_SIZE_IN_BITS>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    impl Deref for Ed25519SignatreTarget {
-        type Target = CompositeTarget<BoolTarget, ED25519_SIGNATURE_SIZE_IN_BITS>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
 
     impl<const N: usize> Deref for BitArrayTarget<N> {
         type Target = CompositeTarget<BoolTarget, N>;
@@ -160,39 +220,11 @@ pub mod targets {
         fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
             builder.register_public_input(self.0)
         }
-
-        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
-            unimplemented!("Set SingleTarget manually by calling .to_target()");
-        }
     }
 
     impl TargetSet for SingleTarget {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
             Self(raw.next().unwrap())
-        }
-    }
-
-    impl TargetSet for Sha256Target {
-        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-            Self(TargetSet::parse(raw))
-        }
-    }
-
-    impl TargetSet for Blake2Target {
-        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-            Self(TargetSet::parse(raw))
-        }
-    }
-
-    impl TargetSet for Ed25519PublicKeyTarget {
-        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-            Self(TargetSet::parse(raw))
-        }
-    }
-
-    impl TargetSet for Ed25519SignatreTarget {
-        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-            Self(TargetSet::parse(raw))
         }
     }
 
@@ -204,30 +236,6 @@ pub mod targets {
 
     impl From<Target> for SingleTarget {
         fn from(value: Target) -> Self {
-            Self(value)
-        }
-    }
-
-    impl From<[BoolTarget; SHA256_DIGEST_SIZE_IN_BITS]> for Sha256Target {
-        fn from(value: [BoolTarget; SHA256_DIGEST_SIZE_IN_BITS]) -> Self {
-            Self(value)
-        }
-    }
-
-    impl From<[BoolTarget; BLAKE2_DIGEST_SIZE_IN_BITS]> for Blake2Target {
-        fn from(value: [BoolTarget; BLAKE2_DIGEST_SIZE_IN_BITS]) -> Self {
-            Self(value)
-        }
-    }
-
-    impl From<[BoolTarget; ED25519_PUBLIC_KEY_SIZE_IN_BITS]> for Ed25519PublicKeyTarget {
-        fn from(value: [BoolTarget; ED25519_PUBLIC_KEY_SIZE_IN_BITS]) -> Self {
-            Self(value)
-        }
-    }
-
-    impl From<[BoolTarget; ED25519_SIGNATURE_SIZE_IN_BITS]> for Ed25519SignatreTarget {
-        fn from(value: [BoolTarget; ED25519_SIGNATURE_SIZE_IN_BITS]) -> Self {
             Self(value)
         }
     }

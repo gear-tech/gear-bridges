@@ -3,7 +3,10 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
-        targets::{BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target, TargetSetOperations},
+        targets::{
+            BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target, Sha256TargetGoldilocks,
+            TargetSetOperations,
+        },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
     consts::{ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
@@ -21,15 +24,15 @@ const AUTHORITY_WEIGHT_SIZE_IN_BITS: usize = AUTHORITY_WEIGHT_SIZE * 8;
 
 #[derive(Clone)]
 pub struct NextValidatorSetTarget {
-    validator_set_hash: Sha256Target,
-    next_validator_set_hash: Sha256Target,
+    validator_set_hash: Sha256TargetGoldilocks,
+    next_validator_set_hash: Sha256TargetGoldilocks,
 }
 
 impl TargetSet for NextValidatorSetTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
-            validator_set_hash: Sha256Target::parse(raw),
-            next_validator_set_hash: Sha256Target::parse(raw),
+            validator_set_hash: Sha256TargetGoldilocks::parse(raw),
+            next_validator_set_hash: Sha256TargetGoldilocks::parse(raw),
         }
     }
 }
@@ -82,13 +85,17 @@ impl NextValidatorSet {
             let next_validator_set_public_inputs: NextValidatorSetNonHashedTarget =
                 targets.second_proof_public_inputs;
 
-            next_validator_set_public_inputs
-                .current_validator_set_hash
-                .register_as_public_inputs(builder);
+            Sha256TargetGoldilocks::from_sha256_target(
+                next_validator_set_public_inputs.current_validator_set_hash,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
-            validator_set_hash_public_inputs
-                .hash
-                .register_as_public_inputs(builder);
+            Sha256TargetGoldilocks::from_sha256_target(
+                validator_set_hash_public_inputs.hash,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
             for (validator_1, validator_2) in validator_set_hash_public_inputs
                 .validator_set

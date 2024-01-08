@@ -20,7 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target, SingleTarget,
-            TargetSetOperations,
+            TargetSetOperations, TargetSetWitnessOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },

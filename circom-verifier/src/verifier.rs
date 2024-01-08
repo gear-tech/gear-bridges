@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use anyhow::Result;
 use log::Level;
 use plonky2::field::extension::{Extendable, FieldExtension};
@@ -21,14 +19,6 @@ use serde::Serialize;
 
 const TEMPLATE_CONSTANTS: &str = include_str!("../circom/circuits/template_constants.circom");
 const TEMPLATE_GATES: &str = include_str!("../circom/circuits/template_gates.circom");
-
-pub fn encode_hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        write!(&mut s, "{:02x}", b).unwrap();
-    }
-    s
-}
 
 pub fn recursive_proof<
     F: RichField + Extendable<D>,
@@ -71,7 +61,7 @@ where
     for i in 0..builder.config.fri_config.num_cap_elements() {
         builder.register_public_inputs(&inner_data.constants_sigmas_cap.0[i].elements);
     }
-    builder.register_public_inputs(&pt.public_inputs[..16]);
+    builder.register_public_inputs(&pt.public_inputs[..]);
 
     builder.verify_proof::<InnerC>(&pt, &inner_data, &inner_cd);
 

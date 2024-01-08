@@ -335,6 +335,14 @@ where
             circuit_digest: builder.add_virtual_hash(),
         };
 
+        let first_hash_target =
+            builder.constant_hash(first.circuit_data.verifier_only.circuit_digest);
+        builder.connect_hashes(first_hash_target, verifier_circuit_target_1.circuit_digest);
+
+        let second_hash_target =
+            builder.constant_hash(second.circuit_data.verifier_only.circuit_digest);
+        builder.connect_hashes(second_hash_target, verifier_circuit_target_2.circuit_digest);
+
         let mut pw = PartialWitness::new();
         pw.set_proof_with_pis_target(
             &proof_with_pis_target_1,

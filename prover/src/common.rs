@@ -314,11 +314,12 @@ where
     TS1: TargetSet,
     TS2: TargetSet,
 {
-    pub fn new(
+    pub fn new_with_config(
         first: ProofWithCircuitData<TS1>,
         second: ProofWithCircuitData<TS2>,
+        config: CircuitConfig,
     ) -> ProofCompositionBuilder<TS1, TS2> {
-        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
+        let mut builder = CircuitBuilder::<F, D>::new(config);
         let proof_with_pis_target_1 =
             builder.add_virtual_proof_with_pis::<C>(&first.circuit_data.common);
         let proof_with_pis_target_2 =
@@ -387,6 +388,13 @@ where
                 &mut proof_with_pis_target_2.public_inputs.into_iter(),
             ),
         }
+    }
+
+    pub fn new(
+        first: ProofWithCircuitData<TS1>,
+        second: ProofWithCircuitData<TS2>,
+    ) -> ProofCompositionBuilder<TS1, TS2> {
+        Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
     }
 
     pub fn operation_with_targets<O>(mut self, op: O) -> ProofCompositionBuilder<TS1, TS2>

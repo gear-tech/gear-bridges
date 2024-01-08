@@ -1,4 +1,7 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    fri::FriConfig,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+};
 
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
@@ -49,7 +52,10 @@ where
 
         log::info!("Composing inclusion and finality proofs...");
 
-        let composition_builder = ProofCompositionBuilder::new(inclusion_proof, finality_proof);
+        let mut config = CircuitConfig::standard_recursion_config();
+        config.fri_config.cap_height = 0;
+        let composition_builder =
+            ProofCompositionBuilder::new_with_config(inclusion_proof, finality_proof, config);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
                           targets: ProofCompositionTargets<_, _>| {

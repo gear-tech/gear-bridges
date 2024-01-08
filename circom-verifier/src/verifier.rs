@@ -68,7 +68,7 @@ where
     pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
 
     builder.register_public_inputs(inner_data.circuit_digest.elements.as_slice());
-    for i in 0..builder.config.fri_config.num_cap_elements() {
+    for i in 0..inner_cd.config.fri_config.cap_height {
         builder.register_public_inputs(&inner_data.constants_sigmas_cap.0[i].elements);
     }
     builder.register_public_inputs(&pt.public_inputs[..16]);

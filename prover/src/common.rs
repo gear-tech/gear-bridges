@@ -27,8 +27,9 @@ pub mod targets {
     use std::fmt::Debug;
     use std::ops::Deref;
 
+    use num::traits::ToBytes;
     use plonky2_field::goldilocks_field::GoldilocksField;
-    use plonky2_field::types::Field;
+    use plonky2_field::types::{Field, Field64};
 
     use super::*;
 
@@ -123,6 +124,64 @@ pub mod targets {
         pub fn to_target(&self) -> Target {
             self.0
         }
+
+        pub fn from_u64_bits_le_lossy(
+            bits: CompositeTarget<BoolTarget, 64>,
+            builder: &mut CircuitBuilder<F, D>,
+        ) -> SingleTarget {
+            let bit_exp_targets: Vec<_> = (0..64)
+                .rev()
+                .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
+                .collect();
+
+            let mut result = builder.zero();
+            for (bit, exp) in bits.chunks(8).rev().flatten().zip(bit_exp_targets.iter()) {
+                result = builder.mul_add(bit.target, *exp, result);
+            }
+            SingleTarget(result)
+        }
+    }
+
+    #[test]
+    fn test_single_target_from_u64_bits_le_lossy() {
+        fn test_case(num: u64) {
+            let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_ecc_config());
+
+            let bits = array_to_bits(&num.to_le_bytes());
+            let bit_targets: [BoolTarget; 64] = (0..bits.len())
+                .map(|_| builder.add_virtual_bool_target_safe())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+
+            let resulting_target = SingleTarget::from_u64_bits_le_lossy(bit_targets, &mut builder);
+            builder.register_public_input(resulting_target.0);
+
+            let mut pw = PartialWitness::new();
+
+            for (value, target) in bits.iter().zip(bit_targets.iter()) {
+                pw.set_bool_target(*target, *value);
+            }
+
+            let circuit = builder.build::<C>();
+            let proof = circuit.prove(pw).unwrap();
+
+            assert_eq!(proof.public_inputs.len(), 1);
+
+            let result = proof.public_inputs[0];
+
+            println!("{}", num);
+
+            assert_eq!(result, GoldilocksField::from_noncanonical_u64(num));
+            assert!(circuit.verify(proof).is_ok());
+        }
+
+        test_case(0);
+        test_case(100_000);
+        test_case(u32::MAX as u64);
+        test_case(1 << 48);
+        test_case(u64::MAX - (u32::MAX as u64) * 8);
+        test_case(u64::MAX);
     }
 
     macro_rules! impl_composite_target_wrapper {

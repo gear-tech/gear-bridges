@@ -5,7 +5,7 @@ use crate::{
     common::{
         targets::{
             BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target, Sha256TargetGoldilocks,
-            TargetSetOperations,
+            SingleTarget, TargetSetOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -26,6 +26,7 @@ const AUTHORITY_WEIGHT_SIZE_IN_BITS: usize = AUTHORITY_WEIGHT_SIZE * 8;
 pub struct NextValidatorSetTarget {
     validator_set_hash: Sha256TargetGoldilocks,
     next_validator_set_hash: Sha256TargetGoldilocks,
+    authority_set_id: SingleTarget,
 }
 
 impl TargetSet for NextValidatorSetTarget {
@@ -33,6 +34,7 @@ impl TargetSet for NextValidatorSetTarget {
         Self {
             validator_set_hash: Sha256TargetGoldilocks::parse(raw),
             next_validator_set_hash: Sha256TargetGoldilocks::parse(raw),
+            authority_set_id: SingleTarget::parse(raw),
         }
     }
 }
@@ -97,6 +99,10 @@ impl NextValidatorSet {
             )
             .register_as_public_inputs(builder);
 
+            next_validator_set_public_inputs
+                .authority_set_id
+                .register_as_public_inputs(builder);
+
             for (validator_1, validator_2) in validator_set_hash_public_inputs
                 .validator_set
                 .iter()
@@ -115,6 +121,7 @@ impl NextValidatorSet {
 #[derive(Clone)]
 struct NextValidatorSetNonHashedTarget {
     current_validator_set_hash: Sha256Target,
+    authority_set_id: SingleTarget,
     next_validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
 }
 
@@ -122,6 +129,7 @@ impl TargetSet for NextValidatorSetNonHashedTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
             current_validator_set_hash: Sha256Target::parse(raw),
+            authority_set_id: SingleTarget::parse(raw),
             next_validator_set: (0..VALIDATOR_COUNT)
                 .map(|_| Ed25519PublicKeyTarget::parse(raw))
                 .collect::<Vec<_>>()
@@ -191,6 +199,12 @@ impl NextValidatorSetNonHashed {
             block_finality_public_inputs
                 .validator_set_hash
                 .register_as_public_inputs(builder);
+
+            SingleTarget::from_u64_bits_le_lossy(
+                *block_finality_public_inputs.message.authority_set_id,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
             let validator_set_targets = ValidatorSetInStorageTarget::parse(
                 &mut merkle_proof_public_inputs

@@ -60,7 +60,8 @@ impl TargetSet for BlockFinalityTarget {
 pub struct GrandpaVoteTarget {
     _aux_data: BitArrayTarget<8>,
     pub block_hash: Blake2Target,
-    _aux_data_2: BitArrayTarget<160>,
+    _aux_data_2: BitArrayTarget<96>,
+    pub authority_set_id: BitArrayTarget<64>,
 }
 
 impl TargetSet for GrandpaVoteTarget {
@@ -69,6 +70,7 @@ impl TargetSet for GrandpaVoteTarget {
             _aux_data: BitArrayTarget::parse(raw),
             block_hash: Blake2Target::parse(raw),
             _aux_data_2: BitArrayTarget::parse(raw),
+            authority_set_id: BitArrayTarget::parse(raw),
         }
     }
 }

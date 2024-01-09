@@ -3,7 +3,9 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
-        targets::{BitArrayTarget, Sha256Target, TargetSetOperations},
+        targets::{
+            BitArrayTarget, Sha256Target, Sha256TargetGoldilocks, SingleTarget, TargetSetOperations,
+        },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
     merkle_proof::{MerkleProof, MerkleProofTarget},
@@ -13,7 +15,8 @@ use crate::{
 
 #[derive(Clone)]
 pub struct MessageSentTarget<const MESSAGE_LENGTH_IN_BITS: usize> {
-    validator_set_hash: Sha256Target,
+    validator_set_hash: Sha256TargetGoldilocks,
+    authority_set_id: SingleTarget,
     message_contents: BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
 }
 
@@ -23,7 +26,8 @@ where
 {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
-            validator_set_hash: Sha256Target::parse(raw),
+            validator_set_hash: Sha256TargetGoldilocks::parse(raw),
+            authority_set_id: SingleTarget::parse(raw),
             message_contents: BitArrayTarget::parse(raw),
         }
     }
@@ -58,9 +62,17 @@ where
             let finality_proof_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
 
-            finality_proof_public_inputs
-                .validator_set_hash
-                .register_as_public_inputs(builder);
+            Sha256TargetGoldilocks::from_sha256_target(
+                finality_proof_public_inputs.validator_set_hash,
+                builder,
+            )
+            .register_as_public_inputs(builder);
+
+            SingleTarget::from_u64_bits_le_lossy(
+                *finality_proof_public_inputs.message.authority_set_id,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
             inclusion_proof_public_inputs
                 .leaf_data

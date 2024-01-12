@@ -107,6 +107,8 @@ impl BlockFinality {
             .take(PROCESSED_VALIDATOR_COUNT)
             .collect();
 
+        assert_eq!(processed_pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
+
         let validator_set_hash_proof = ValidatorSetHash {
             validator_set: self.validator_set.clone(),
         }

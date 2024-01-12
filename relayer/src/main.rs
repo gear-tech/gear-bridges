@@ -70,7 +70,7 @@ async fn main() {
             let circuit = NextValidatorSet {
                 current_epoch_block_finality: api.fetch_finality_proof(block).await,
                 next_validator_set_inclusion_proof: api
-                    .fetch_next_authorities_merkle_proof(block)
+                    .fetch_next_session_keys_merkle_proof(block)
                     .await,
             };
 

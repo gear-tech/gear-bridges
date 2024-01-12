@@ -35,6 +35,9 @@ pub(crate) mod consts {
     /// 5 Goldilocks field elements are required.
     pub const SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 5;
 
+    // For now we send a single Keccak256 hash.
+    pub const MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 5;
+
     pub const BLAKE2_DIGEST_SIZE: usize = 32;
     pub const BLAKE2_DIGEST_SIZE_IN_BITS: usize = BLAKE2_DIGEST_SIZE * 8;
 

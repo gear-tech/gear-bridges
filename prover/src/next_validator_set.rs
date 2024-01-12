@@ -9,7 +9,7 @@ use crate::{
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
-    consts::{ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
+    consts::VALIDATOR_COUNT,
     merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},

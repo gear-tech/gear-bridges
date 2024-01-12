@@ -1,10 +1,11 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{iop::target::BoolTarget, plonk::circuit_builder::CircuitBuilder};
 
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
         targets::{
-            BitArrayTarget, Sha256Target, Sha256TargetGoldilocks, SingleTarget, TargetSetOperations,
+            BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks, SingleTarget,
+            TargetSetOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -14,21 +15,18 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct MessageSentTarget<const MESSAGE_LENGTH_IN_BITS: usize> {
+pub struct MessageSentTarget {
     validator_set_hash: Sha256TargetGoldilocks,
     authority_set_id: SingleTarget,
-    message_contents: BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
+    message_contents: MessageTargetGoldilocks,
 }
 
-impl<const MESSAGE_LENGTH_IN_BITS: usize> TargetSet for MessageSentTarget<MESSAGE_LENGTH_IN_BITS>
-where
-    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
-{
+impl TargetSet for MessageSentTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
             validator_set_hash: Sha256TargetGoldilocks::parse(raw),
             authority_set_id: SingleTarget::parse(raw),
-            message_contents: BitArrayTarget::parse(raw),
+            message_contents: MessageTargetGoldilocks::parse(raw),
         }
     }
 }
@@ -45,7 +43,7 @@ impl<const MESSAGE_LENGTH_IN_BITS: usize> MessageSent<MESSAGE_LENGTH_IN_BITS>
 where
     [(); MESSAGE_LENGTH_IN_BITS / 8]:,
 {
-    pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget<MESSAGE_LENGTH_IN_BITS>> {
+    pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget> {
         log::info!("Proving message presense in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
@@ -74,8 +72,14 @@ where
             )
             .register_as_public_inputs(builder);
 
-            inclusion_proof_public_inputs
-                .leaf_data
+            // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
+            // and pad it with zeroes.
+            let message_targets_array: [BoolTarget; 260] = inclusion_proof_public_inputs.leaf_data
+                [..260]
+                .try_into()
+                .unwrap();
+            let message_targets: BitArrayTarget<260> = message_targets_array.into();
+            MessageTargetGoldilocks::from_bit_array(message_targets, builder)
                 .register_as_public_inputs(builder);
 
             inclusion_proof_public_inputs

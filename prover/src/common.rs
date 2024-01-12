@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use crate::{
     consts::{
         BLAKE2_DIGEST_SIZE_IN_BITS, ED25519_PUBLIC_KEY_SIZE_IN_BITS,
-        ED25519_SIGNATURE_SIZE_IN_BITS, SHA256_DIGEST_SIZE_IN_BITS,
-        SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
+        ED25519_SIGNATURE_SIZE_IN_BITS, MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
+        SHA256_DIGEST_SIZE_IN_BITS, SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
     },
     prelude::*,
 };
@@ -26,10 +26,10 @@ pub use targets::TargetSet;
 pub mod targets {
     use std::fmt::Debug;
     use std::ops::Deref;
+    use std::usize;
 
-    use num::traits::ToBytes;
     use plonky2_field::goldilocks_field::GoldilocksField;
-    use plonky2_field::types::{Field, Field64};
+    use plonky2_field::types::Field64;
 
     use super::*;
 
@@ -117,6 +117,36 @@ pub mod targets {
         }
     }
 
+    trait BoolTargetsArrayToSingleTargets<const PACK_BY: usize> {
+        fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<SingleTarget>;
+    }
+
+    impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_BY>
+        for CompositeTarget<BoolTarget, N>
+    {
+        fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<SingleTarget> {
+            assert_eq!(N % PACK_BY, 0);
+            assert!(PACK_BY <= 64);
+
+            let bit_exp_targets = (0..PACK_BY)
+                .rev()
+                .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+
+            self.chunks(PACK_BY)
+                .map(|bits| {
+                    SingleTarget::from_bool_targets_le_precomputed_exp::<PACK_BY>(
+                        bits.try_into().unwrap(),
+                        &bit_exp_targets,
+                        builder,
+                    )
+                })
+                .collect()
+        }
+    }
+
     #[derive(Clone, Debug)]
     pub struct SingleTarget(Target);
 
@@ -125,20 +155,48 @@ pub mod targets {
             self.0
         }
 
-        pub fn from_u64_bits_le_lossy(
-            bits: CompositeTarget<BoolTarget, 64>,
+        // TODO: Specify exact behaviour when `little-endian` is not appliable
+        // like in case with B = 52
+        fn from_bool_targets_le_precomputed_exp<const B: usize>(
+            bits: CompositeTarget<BoolTarget, B>,
+            bit_exp_targets: &[Target; B],
             builder: &mut CircuitBuilder<F, D>,
         ) -> SingleTarget {
-            let bit_exp_targets: Vec<_> = (0..64)
-                .rev()
-                .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
-                .collect();
+            assert!(B <= 64);
 
             let mut result = builder.zero();
             for (bit, exp) in bits.chunks(8).rev().flatten().zip(bit_exp_targets.iter()) {
                 result = builder.mul_add(bit.target, *exp, result);
             }
             SingleTarget(result)
+        }
+
+        fn from_bool_targets_le<const B: usize>(
+            bits: CompositeTarget<BoolTarget, B>,
+            builder: &mut CircuitBuilder<F, D>,
+        ) -> SingleTarget {
+            let bit_exp_targets = (0..B)
+                .rev()
+                .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+
+            Self::from_bool_targets_le_precomputed_exp(bits, &bit_exp_targets, builder)
+        }
+
+        pub fn from_u52_bits_le(
+            bits: CompositeTarget<BoolTarget, 52>,
+            builder: &mut CircuitBuilder<F, D>,
+        ) -> SingleTarget {
+            Self::from_bool_targets_le(bits, builder)
+        }
+
+        pub fn from_u64_bits_le_lossy(
+            bits: CompositeTarget<BoolTarget, 64>,
+            builder: &mut CircuitBuilder<F, D>,
+        ) -> SingleTarget {
+            Self::from_bool_targets_le(bits, builder)
         }
     }
 
@@ -217,6 +275,11 @@ pub mod targets {
         Target,
         SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
     );
+    impl_composite_target_wrapper!(
+        MessageTargetGoldilocks,
+        Target,
+        MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
+    );
     impl_composite_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
     impl_composite_target_wrapper!(
         Ed25519PublicKeyTarget,
@@ -236,25 +299,52 @@ pub mod targets {
             builder: &mut CircuitBuilder<F, D>,
         ) -> Self {
             const BITS_FOR_SINGLE_TARGET: usize = 52;
+            const PADDED_SIZE: usize =
+                SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * BITS_FOR_SINGLE_TARGET;
+            const PADDING: usize = PADDED_SIZE - SHA256_DIGEST_SIZE_IN_BITS;
 
-            let bit_exp_targets: Vec<_> = (0..BITS_FOR_SINGLE_TARGET)
-                .map(|bit_no| builder.constant(GoldilocksField::from_canonical_u32(1 << bit_no)))
-                .collect();
-
-            let targets = sha256_target
+            let padding_targets = (0..PADDING).map(|_| builder._false());
+            let bit_targets: [_; PADDED_SIZE] = sha256_target
                 .0
-                .chunks(BITS_FOR_SINGLE_TARGET)
-                .map(|bit_targets| {
-                    let mut result = builder.zero();
-                    for (bit, exp) in bit_targets.iter().zip(bit_exp_targets.iter()) {
-                        result = builder.mul_add(bit.target, *exp, result);
-                    }
-                    result
-                })
-                .collect::<Vec<_>>();
+                .into_iter()
+                .chain(padding_targets)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
 
             let targets: [_; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
-                targets.try_into().unwrap();
+                BoolTargetsArrayToSingleTargets::<BITS_FOR_SINGLE_TARGET>::compress_to_goldilocks(
+                    &bit_targets,
+                    builder,
+                )
+                .into_iter()
+                .map(|t| t.0)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+
+            targets.into()
+        }
+    }
+
+    const PACK_MESSAGE_BY: usize = 52;
+    const MESSAGE_INPUT_IN_BITS: usize =
+        MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * PACK_MESSAGE_BY;
+
+    impl MessageTargetGoldilocks {
+        pub fn from_bit_array(
+            bits: BitArrayTarget<MESSAGE_INPUT_IN_BITS>,
+            builder: &mut CircuitBuilder<F, D>,
+        ) -> Self {
+            let targets: [_; MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
+                BoolTargetsArrayToSingleTargets::<PACK_MESSAGE_BY>::compress_to_goldilocks(
+                    &bits.0, builder,
+                )
+                .into_iter()
+                .map(|t| t.0)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
 
             targets.into()
         }
@@ -262,6 +352,12 @@ pub mod targets {
 
     #[derive(Clone, Debug)]
     pub struct BitArrayTarget<const N: usize>(CompositeTarget<BoolTarget, N>);
+
+    impl<const N: usize> From<CompositeTarget<BoolTarget, N>> for BitArrayTarget<N> {
+        fn from(value: CompositeTarget<BoolTarget, N>) -> Self {
+            Self(value)
+        }
+    }
 
     impl<const N: usize> Deref for BitArrayTarget<N> {
         type Target = CompositeTarget<BoolTarget, N>;

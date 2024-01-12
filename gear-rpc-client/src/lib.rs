@@ -50,6 +50,9 @@ impl GearApi {
         self.api.rpc().chain_get_finalized_head().await.unwrap()
     }
 
+    // TODO: Process case when `grandpa_proveFinality` yields proof for the other block than specified.
+    // Basically this can be in the case when there were finalized blocks between `grandpa_proveFinality`
+    // and `latest_finalized_block` calls.
     pub async fn fetch_finality_proof(&self, block: H256) -> prover::block_finality::BlockFinality {
         let block_hash = block;
         let block = (*self.api).blocks().at(block).await.unwrap();

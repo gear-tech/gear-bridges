@@ -1,12 +1,15 @@
 use plonky2::{
-    fri::FriConfig,
+    iop::target::BoolTarget,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
-        targets::{BitArrayTarget, Sha256Target, TargetSetOperations},
+        targets::{
+            BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks, SingleTarget,
+            TargetSetOperations,
+        },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
     merkle_proof::{MerkleProof, MerkleProofTarget},
@@ -15,19 +18,18 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct MessageSentTarget<const MESSAGE_LENGTH_IN_BITS: usize> {
-    validator_set_hash: Sha256Target,
-    message_contents: BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
+pub struct MessageSentTarget {
+    validator_set_hash: Sha256TargetGoldilocks,
+    authority_set_id: SingleTarget,
+    message_contents: MessageTargetGoldilocks,
 }
 
-impl<const MESSAGE_LENGTH_IN_BITS: usize> TargetSet for MessageSentTarget<MESSAGE_LENGTH_IN_BITS>
-where
-    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
-{
+impl TargetSet for MessageSentTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
-            validator_set_hash: Sha256Target::parse(raw),
-            message_contents: BitArrayTarget::parse(raw),
+            validator_set_hash: Sha256TargetGoldilocks::parse(raw),
+            authority_set_id: SingleTarget::parse(raw),
+            message_contents: MessageTargetGoldilocks::parse(raw),
         }
     }
 }
@@ -44,7 +46,7 @@ impl<const MESSAGE_LENGTH_IN_BITS: usize> MessageSent<MESSAGE_LENGTH_IN_BITS>
 where
     [(); MESSAGE_LENGTH_IN_BITS / 8]:,
 {
-    pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget<MESSAGE_LENGTH_IN_BITS>> {
+    pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget> {
         log::info!("Proving message presense in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
@@ -64,12 +66,26 @@ where
             let finality_proof_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
 
-            finality_proof_public_inputs
-                .validator_set_hash
-                .register_as_public_inputs(builder);
+            Sha256TargetGoldilocks::from_sha256_target(
+                finality_proof_public_inputs.validator_set_hash,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
-            inclusion_proof_public_inputs
-                .leaf_data
+            SingleTarget::from_u64_bits_le_lossy(
+                *finality_proof_public_inputs.message.authority_set_id,
+                builder,
+            )
+            .register_as_public_inputs(builder);
+
+            // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
+            // and pad it with zeroes.
+            let message_targets_array: [BoolTarget; 260] = inclusion_proof_public_inputs.leaf_data
+                [..260]
+                .try_into()
+                .unwrap();
+            let message_targets: BitArrayTarget<260> = message_targets_array.into();
+            MessageTargetGoldilocks::from_bit_array(message_targets, builder)
                 .register_as_public_inputs(builder);
 
             inclusion_proof_public_inputs

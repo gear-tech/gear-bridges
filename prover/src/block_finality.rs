@@ -20,7 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target, SingleTarget,
-            TargetSetOperations,
+            TargetSetOperations, TargetSetWitnessOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -60,7 +60,8 @@ impl TargetSet for BlockFinalityTarget {
 pub struct GrandpaVoteTarget {
     _aux_data: BitArrayTarget<8>,
     pub block_hash: Blake2Target,
-    _aux_data_2: BitArrayTarget<160>,
+    _aux_data_2: BitArrayTarget<96>,
+    pub authority_set_id: BitArrayTarget<64>,
 }
 
 impl TargetSet for GrandpaVoteTarget {
@@ -69,6 +70,7 @@ impl TargetSet for GrandpaVoteTarget {
             _aux_data: BitArrayTarget::parse(raw),
             block_hash: Blake2Target::parse(raw),
             _aux_data_2: BitArrayTarget::parse(raw),
+            authority_set_id: BitArrayTarget::parse(raw),
         }
     }
 }
@@ -95,25 +97,25 @@ impl BlockFinality {
             .iter()
             .filter_map(|pc| {
                 let validator_idx = self.validator_set.iter().position(|v| v == &pc.public_key);
-                validator_idx.and_then(|validator_idx| {
-                    Some(ProcessedPreCommit {
-                        validator_idx,
-                        signature: pc.signature,
-                    })
+                validator_idx.map(|validator_idx| ProcessedPreCommit {
+                    validator_idx,
+                    signature: pc.signature,
                 })
             })
             .take(PROCESSED_VALIDATOR_COUNT)
             .collect();
 
+        assert_eq!(processed_pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
+
         let validator_set_hash_proof = ValidatorSetHash {
-            validator_set: self.validator_set.clone(),
+            validator_set: self.validator_set,
         }
         .prove();
 
         let validator_signs_proof = ValidatorSignsChain {
-            validator_set: self.validator_set.clone(),
+            validator_set: self.validator_set,
             pre_commits: processed_pre_commits,
-            message: self.message.clone(),
+            message: self.message,
         }
         .prove();
 
@@ -204,10 +206,10 @@ impl ValidatorSignsChain {
             |sender, (id, pre_commit)| {
                 thread_pool.scope(|_| {
                     let proof = IndexedValidatorSign {
-                        validator_set: self.validator_set.clone(),
+                        validator_set: self.validator_set,
                         index: pre_commit.validator_idx,
                         signature: pre_commit.signature,
-                        message: self.message.clone(),
+                        message: self.message,
                     }
                     .prove();
 
@@ -219,7 +221,6 @@ impl ValidatorSignsChain {
         receiver
             .iter()
             .sorted_by(|a, b| a.0.cmp(&b.0))
-            .into_iter()
             .map(|(_, proof)| proof)
             .reduce(|acc, x| ComposedValidatorSigns {}.prove(acc, x))
             .unwrap()
@@ -298,7 +299,7 @@ impl IndexedValidatorSign {
         log::info!("    Proving indexed validator sign...");
 
         let selector_proof = ValidatorSelector {
-            validator_set: self.validator_set.clone(),
+            validator_set: self.validator_set,
             index: self.index,
         }
         .prove();
@@ -306,7 +307,7 @@ impl IndexedValidatorSign {
         let sign_proof = SingleValidatorSign {
             public_key: self.validator_set[self.index],
             signature: self.signature,
-            message: self.message.clone(),
+            message: self.message,
         }
         .prove();
 

@@ -1,19 +1,22 @@
 #![feature(generic_const_exprs)]
 
-use gsdk::metadata::storage::{BabeStorage, GrandpaStorage};
+use gsdk::metadata::{
+    storage::{BabeStorage, GrandpaStorage, SessionStorage},
+    vara_runtime::SessionKeys,
+};
 use parity_scale_codec::{Decode, Encode};
 use prover::merkle_proof::{MerkleProof, TrieNodeData};
 use sc_consensus_grandpa::FinalityProof;
 use sp_core::crypto::Wraps;
-use sp_runtime::traits::AppVerify;
+use sp_runtime::AccountId32;
 use subxt::{rpc_params, utils::H256};
 use trie_db::{node::NodeHandle, ChildReference};
 
-const VALIDATOR_SET_DATA_LENGTH_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
+const SESSION_KEYS_DATA_LENGTH_IN_BITS: usize = 8 + VALIDATOR_COUNT * (5 * 32) * 8;
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const VALIDATOR_COUNT: usize = 55;
-const PROCESSED_VALIDATOR_COUNT: usize = 37;
-const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = VALIDATOR_SET_DATA_LENGTH_IN_BITS;
+const VALIDATOR_COUNT: usize = 4;
+const PROCESSED_VALIDATOR_COUNT: usize = 3;
+const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -24,7 +27,7 @@ pub struct GearApi {
 impl GearApi {
     pub async fn new() -> GearApi {
         GearApi {
-            api: gsdk::Api::new(Some("wss://archive-rpc.vara-network.io:443"))
+            api: gsdk::Api::new(Some("wss://testnet-archive.vara-network.io:443"))
                 .await
                 .unwrap(),
         }
@@ -47,6 +50,9 @@ impl GearApi {
         self.api.rpc().chain_get_finalized_head().await.unwrap()
     }
 
+    // TODO: Process case when `grandpa_proveFinality` yields proof for the other block than specified.
+    // Basically this can be in the case when there were finalized blocks between `grandpa_proveFinality`
+    // and `latest_finalized_block` calls.
     pub async fn fetch_finality_proof(&self, block: H256) -> prover::block_finality::BlockFinality {
         let block_hash = block;
         let block = (*self.api).blocks().at(block).await.unwrap();
@@ -94,15 +100,23 @@ impl GearApi {
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(pre_commit.precommit),
         );
 
-        // TODO: Replace with actual validator set.
-        let validator_set = justification
-            .commit
-            .precommits
-            .iter()
-            .filter(|pc| pc.signature.verify(&signed_data[..], &pc.id))
-            .take(PROCESSED_VALIDATOR_COUNT)
-            .map(|pc| pc.id.as_inner_ref().as_array_ref().to_owned())
-            .chain(vec![[0; 32]; VALIDATOR_COUNT - PROCESSED_VALIDATOR_COUNT])
+        // TODO: refactor
+        // This trick works for now because validator set actually don't change
+        // So we can treat QueuedKeys as ones used in the current session.
+        let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
+        let session_keys_data = block
+            .storage()
+            .fetch(&session_keys_address)
+            .await
+            .unwrap()
+            .unwrap()
+            .encoded()
+            .to_vec();
+        let session_keys =
+            Vec::<(AccountId32, SessionKeys)>::decode(&mut &session_keys_data[..]).unwrap();
+        let validator_set = session_keys
+            .into_iter()
+            .map(|sc| sc.1.grandpa.0 .0)
             .collect::<Vec<_>>();
 
         assert_eq!(VALIDATOR_COUNT, validator_set.len());
@@ -127,24 +141,6 @@ impl GearApi {
         }
     }
 
-    pub async fn fetch_babe_authorities(&self, block: H256) -> Vec<[u8; 32]> {
-        let block = (*self.api).blocks().at(block).await.unwrap();
-        let storage = block.storage();
-
-        let address = gsdk::Api::storage_root(BabeStorage::Authorities);
-        let authorities = storage.fetch(&address).await.unwrap();
-        let authorities = Vec::<(
-            pallet_babe::AuthorityId,
-            sp_consensus_babe::BabeAuthorityWeight,
-        )>::decode(&mut authorities.unwrap().encoded())
-        .unwrap();
-
-        authorities
-            .into_iter()
-            .map(|(pk, _)| pk.encode().try_into().unwrap())
-            .collect()
-    }
-
     /// NOTE: mock for now, returns some data with constant position in merkle trie.
     pub async fn fetch_sent_message_merkle_proof(
         &self,
@@ -155,11 +151,11 @@ impl GearApi {
             .await
     }
 
-    pub async fn fetch_next_authorities_merkle_proof(
+    pub async fn fetch_next_session_keys_merkle_proof(
         &self,
         block: H256,
-    ) -> MerkleProof<VALIDATOR_SET_DATA_LENGTH_IN_BITS> {
-        let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
+    ) -> MerkleProof<SESSION_KEYS_DATA_LENGTH_IN_BITS> {
+        let address = gsdk::Api::storage_root(SessionStorage::QueuedKeys).to_root_bytes();
         self.fetch_merkle_proof_including_block_header(block, &address)
             .await
     }
@@ -197,7 +193,7 @@ impl GearApi {
         assert_eq!(merkle_proof.leaf_data.len() * 8, LEAF_DATA_LEN_IN_BITS);
 
         MerkleProof {
-            leaf_data: merkle_proof.leaf_data.try_into().unwrap(),
+            leaf_data: merkle_proof.leaf_data,
             root_hash: block.hash().as_bytes().try_into().unwrap(),
             nodes: merkle_proof_nodes,
         }

@@ -3,57 +3,61 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
-        targets::{BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target, TargetSetOperations},
+        targets::{
+            BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target, Sha256TargetGoldilocks,
+            SingleTarget, TargetSetOperations,
+        },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
-    consts::{ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
+    consts::VALIDATOR_COUNT,
     merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
     ProofWithCircuitData,
 };
 
-const VALIDATOR_SET_SIZE_IN_STORAGE_IN_BITS: usize =
-    8 + VALIDATOR_COUNT * (ED25519_PUBLIC_KEY_SIZE_IN_BITS + AUTHORITY_WEIGHT_SIZE_IN_BITS);
-
-const AUTHORITY_WEIGHT_SIZE: usize = 8;
-const AUTHORITY_WEIGHT_SIZE_IN_BITS: usize = AUTHORITY_WEIGHT_SIZE * 8;
+// record for each validator: (AccountId, SessionKeys)
+// SessionKeys = (Babe, Grandpa, ImOnline, AuthorityDiscovery)
+const SESSION_KEYS_SIZE: usize = 5 * 32;
+const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE: usize = 1 + VALIDATOR_COUNT * SESSION_KEYS_SIZE;
+const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS: usize =
+    SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE * 8;
 
 #[derive(Clone)]
 pub struct NextValidatorSetTarget {
-    validator_set_hash: Sha256Target,
-    next_validator_set_hash: Sha256Target,
+    validator_set_hash: Sha256TargetGoldilocks,
+    next_validator_set_hash: Sha256TargetGoldilocks,
+    authority_set_id: SingleTarget,
 }
 
 impl TargetSet for NextValidatorSetTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
-            validator_set_hash: Sha256Target::parse(raw),
-            next_validator_set_hash: Sha256Target::parse(raw),
+            validator_set_hash: Sha256TargetGoldilocks::parse(raw),
+            next_validator_set_hash: Sha256TargetGoldilocks::parse(raw),
+            authority_set_id: SingleTarget::parse(raw),
         }
     }
 }
 
 pub struct NextValidatorSet {
     pub current_epoch_block_finality: BlockFinality,
-    pub next_validator_set_inclusion_proof: MerkleProof<VALIDATOR_SET_SIZE_IN_STORAGE_IN_BITS>,
+    pub next_validator_set_inclusion_proof:
+        MerkleProof<SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS>,
 }
 
 impl NextValidatorSet {
     pub fn prove(&self) -> ProofWithCircuitData<NextValidatorSetTarget> {
         log::info!("Proving validator set hash change...");
 
-        let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data.clone();
-        let next_validator_set_len = (next_validator_set_data.len() - 1)
-            / (consts::ED25519_PUBLIC_KEY_SIZE + AUTHORITY_WEIGHT_SIZE);
+        let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data;
         let mut next_validator_set = vec![];
-        for validator_idx in 0..next_validator_set_len {
+        for validator_idx in 0..VALIDATOR_COUNT {
             next_validator_set.push(
-                next_validator_set_data[1 + validator_idx
-                    * (consts::ED25519_PUBLIC_KEY_SIZE + AUTHORITY_WEIGHT_SIZE)
-                    ..1 + validator_idx
-                        * (consts::ED25519_PUBLIC_KEY_SIZE + AUTHORITY_WEIGHT_SIZE)
-                        + consts::ED25519_PUBLIC_KEY_SIZE]
+                next_validator_set_data[1
+                    + validator_idx * SESSION_KEYS_SIZE
+                    + consts::ED25519_PUBLIC_KEY_SIZE * 2
+                    ..1 + validator_idx * SESSION_KEYS_SIZE + consts::ED25519_PUBLIC_KEY_SIZE * 3]
                     .try_into()
                     .unwrap(),
             );
@@ -82,12 +86,20 @@ impl NextValidatorSet {
             let next_validator_set_public_inputs: NextValidatorSetNonHashedTarget =
                 targets.second_proof_public_inputs;
 
-            next_validator_set_public_inputs
-                .current_validator_set_hash
-                .register_as_public_inputs(builder);
+            Sha256TargetGoldilocks::from_sha256_target(
+                next_validator_set_public_inputs.current_validator_set_hash,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
-            validator_set_hash_public_inputs
-                .hash
+            Sha256TargetGoldilocks::from_sha256_target(
+                validator_set_hash_public_inputs.hash,
+                builder,
+            )
+            .register_as_public_inputs(builder);
+
+            next_validator_set_public_inputs
+                .authority_set_id
                 .register_as_public_inputs(builder);
 
             for (validator_1, validator_2) in validator_set_hash_public_inputs
@@ -108,6 +120,7 @@ impl NextValidatorSet {
 #[derive(Clone)]
 struct NextValidatorSetNonHashedTarget {
     current_validator_set_hash: Sha256Target,
+    authority_set_id: SingleTarget,
     next_validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
 }
 
@@ -115,6 +128,7 @@ impl TargetSet for NextValidatorSetNonHashedTarget {
     fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
         Self {
             current_validator_set_hash: Sha256Target::parse(raw),
+            authority_set_id: SingleTarget::parse(raw),
             next_validator_set: (0..VALIDATOR_COUNT)
                 .map(|_| Ed25519PublicKeyTarget::parse(raw))
                 .collect::<Vec<_>>()
@@ -124,20 +138,31 @@ impl TargetSet for NextValidatorSetNonHashedTarget {
     }
 }
 
-// Assume the layout of leaf data:
-// - vector length          (1 byte)
-// - public key #1          (32 bytes)
-// - authority weight #1    (8 bytes)
-// - public key #2          (32 bytes)
-// ...
-// - authority weight #N    (8 bytes)
+#[derive(Clone, Debug)]
+struct ValidatorSessionKeysInStorageTarget {
+    _session_key: Ed25519PublicKeyTarget,
+    _babe_key: Ed25519PublicKeyTarget,
+    pub grandpa_key: Ed25519PublicKeyTarget,
+    _imonline_key: Ed25519PublicKeyTarget,
+    _authoryty_discovery_key: Ed25519PublicKeyTarget,
+}
+
+impl TargetSet for ValidatorSessionKeysInStorageTarget {
+    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+        Self {
+            _session_key: TargetSet::parse(raw),
+            _babe_key: TargetSet::parse(raw),
+            grandpa_key: TargetSet::parse(raw),
+            _imonline_key: TargetSet::parse(raw),
+            _authoryty_discovery_key: TargetSet::parse(raw),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ValidatorSetInStorageTarget {
     _length: BitArrayTarget<8>,
-    validators: [(
-        Ed25519PublicKeyTarget,
-        BitArrayTarget<AUTHORITY_WEIGHT_SIZE_IN_BITS>,
-    ); VALIDATOR_COUNT],
+    validators: [ValidatorSessionKeysInStorageTarget; VALIDATOR_COUNT],
 }
 
 impl TargetSet for ValidatorSetInStorageTarget {
@@ -145,12 +170,7 @@ impl TargetSet for ValidatorSetInStorageTarget {
         Self {
             _length: BitArrayTarget::parse(raw),
             validators: (0..VALIDATOR_COUNT)
-                .map(|_| {
-                    (
-                        Ed25519PublicKeyTarget::parse(raw),
-                        BitArrayTarget::parse(raw),
-                    )
-                })
+                .map(|_| ValidatorSessionKeysInStorageTarget::parse(raw))
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap(),
@@ -160,7 +180,8 @@ impl TargetSet for ValidatorSetInStorageTarget {
 
 struct NextValidatorSetNonHashed {
     current_epoch_block_finality: BlockFinality,
-    next_validator_set_inclusion_proof: MerkleProof<VALIDATOR_SET_SIZE_IN_STORAGE_IN_BITS>,
+    next_validator_set_inclusion_proof:
+        MerkleProof<SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS>,
 }
 
 impl NextValidatorSetNonHashed {
@@ -176,7 +197,7 @@ impl NextValidatorSetNonHashed {
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
                           targets: ProofCompositionTargets<_, _>| {
             let merkle_proof_public_inputs: MerkleProofTarget<
-                VALIDATOR_SET_SIZE_IN_STORAGE_IN_BITS,
+                SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS,
             > = targets.first_proof_public_inputs;
             let block_finality_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
@@ -184,6 +205,12 @@ impl NextValidatorSetNonHashed {
             block_finality_public_inputs
                 .validator_set_hash
                 .register_as_public_inputs(builder);
+
+            SingleTarget::from_u64_bits_le_lossy(
+                *block_finality_public_inputs.message.authority_set_id,
+                builder,
+            )
+            .register_as_public_inputs(builder);
 
             let validator_set_targets = ValidatorSetInStorageTarget::parse(
                 &mut merkle_proof_public_inputs
@@ -194,7 +221,7 @@ impl NextValidatorSetNonHashed {
             );
 
             for validator_pk in &validator_set_targets.validators {
-                validator_pk.0.register_as_public_inputs(builder);
+                validator_pk.grandpa_key.register_as_public_inputs(builder);
             }
 
             block_finality_public_inputs

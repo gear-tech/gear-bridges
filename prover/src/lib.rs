@@ -31,6 +31,12 @@ mod prelude {
 pub(crate) mod consts {
     pub const SHA256_DIGEST_SIZE: usize = 32;
     pub const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
+    /// If we pack `BoolTargets` into `Targets` by groups of 52 then
+    /// 5 Goldilocks field elements are required.
+    pub const SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 5;
+
+    // For now we send a single Keccak256 hash.
+    pub const MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 5;
 
     pub const BLAKE2_DIGEST_SIZE: usize = 32;
     pub const BLAKE2_DIGEST_SIZE_IN_BITS: usize = BLAKE2_DIGEST_SIZE * 8;
@@ -44,6 +50,6 @@ pub(crate) mod consts {
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
     pub const GRANDPA_VOTE_LENGTH_IN_BITS: usize = GRANDPA_VOTE_LENGTH * 8;
 
-    pub const VALIDATOR_COUNT: usize = 55;
+    pub const VALIDATOR_COUNT: usize = 4;
     pub const PROCESSED_VALIDATOR_COUNT: usize = 3;
 }

@@ -10,7 +10,7 @@ use plonky2::{
 };
 use std::{
     fs::{create_dir_all, write},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 mod config;

@@ -26,7 +26,6 @@ pub use targets::TargetSet;
 pub mod targets {
     use std::fmt::Debug;
     use std::ops::Deref;
-    use std::usize;
 
     use plonky2_field::goldilocks_field::GoldilocksField;
     use plonky2_field::types::Field64;
@@ -77,7 +76,7 @@ pub mod targets {
 
     impl IntoTarget for Target {
         fn into_target(&self) -> Target {
-            self.clone()
+            *self
         }
     }
 

@@ -193,7 +193,7 @@ impl GearApi {
         assert_eq!(merkle_proof.leaf_data.len() * 8, LEAF_DATA_LEN_IN_BITS);
 
         MerkleProof {
-            leaf_data: merkle_proof.leaf_data.try_into().unwrap(),
+            leaf_data: merkle_proof.leaf_data,
             root_hash: block.hash().as_bytes().try_into().unwrap(),
             nodes: merkle_proof_nodes,
         }

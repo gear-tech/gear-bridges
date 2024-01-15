@@ -50,7 +50,7 @@ impl NextValidatorSet {
     pub fn prove(&self) -> ProofWithCircuitData<NextValidatorSetTarget> {
         log::info!("Proving validator set hash change...");
 
-        let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data.clone();
+        let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data;
         let mut next_validator_set = vec![];
         for validator_idx in 0..VALIDATOR_COUNT {
             next_validator_set.push(

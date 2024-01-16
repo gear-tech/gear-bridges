@@ -1,4 +1,4 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig};
 
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
@@ -74,9 +74,12 @@ impl NextValidatorSet {
         }
         .prove();
 
-        let composition_builder = ProofCompositionBuilder::new(
+        let mut config = CircuitConfig::standard_recursion_config();
+        config.fri_config.cap_height = 0;
+        let composition_builder = ProofCompositionBuilder::new_with_config(
             validator_set_hash_proof,
             non_hashed_next_validator_set_proof,
+            config,
         );
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,

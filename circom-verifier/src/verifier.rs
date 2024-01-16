@@ -58,7 +58,7 @@ where
     pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
 
     builder.register_public_inputs(inner_data.circuit_digest.elements.as_slice());
-    for i in 0..inner_cd.config.fri_config.cap_height {
+    for i in 0..inner_cd.config.fri_config.num_cap_elements() {
         builder.register_public_inputs(&inner_data.constants_sigmas_cap.0[i].elements);
     }
     builder.register_public_inputs(&pt.public_inputs[..]);
@@ -912,10 +912,7 @@ pub fn generate_circom_verifier_inner<
         "$NUM_FRI_FINAL_POLY_EXT_V",
         &conf.num_fri_final_poly_ext_v.to_string(),
     );
-    constants = constants.replace(
-        "$NUM_CHALLENGES",
-        &common.config.num_challenges.to_string(),
-    );
+    constants = constants.replace("$NUM_CHALLENGES", &common.config.num_challenges.to_string());
 
     let circuit_digest = verifier_only.circuit_digest.to_vec();
     let mut circuit_digest_str = "".to_owned();
@@ -966,10 +963,7 @@ pub fn generate_circom_verifier_inner<
         &F::primitive_root_of_unity(log_n).to_string(),
     );
     // TODO: add test with config zero_knoledge = true
-    constants = constants.replace(
-        "$ZERO_KNOWLEDGE",
-        &common.config.zero_knowledge.to_string(),
-    );
+    constants = constants.replace("$ZERO_KNOWLEDGE", &common.config.zero_knowledge.to_string());
     let g = F::primitive_root_of_unity(1);
     constants = constants.replace("$G_ARITY_BITS_1", &g.to_string());
     let g = F::primitive_root_of_unity(2);

@@ -7,8 +7,8 @@ use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
         targets::{
-            BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks, SingleTarget,
-            TargetSetOperations,
+            impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
+            SingleTarget, TargetSetOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -17,20 +17,11 @@ use crate::{
     ProofWithCircuitData,
 };
 
-#[derive(Clone)]
-pub struct MessageSentTarget {
-    validator_set_hash: Sha256TargetGoldilocks,
-    authority_set_id: SingleTarget,
-    message_contents: MessageTargetGoldilocks,
-}
-
-impl TargetSet for MessageSentTarget {
-    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
-        Self {
-            validator_set_hash: Sha256TargetGoldilocks::parse(raw),
-            authority_set_id: SingleTarget::parse(raw),
-            message_contents: MessageTargetGoldilocks::parse(raw),
-        }
+impl_target_set! {
+    pub struct MessageSentTarget {
+        validator_set_hash: Sha256TargetGoldilocks,
+        authority_set_id: SingleTarget,
+        message_contents: MessageTargetGoldilocks,
     }
 }
 
@@ -66,17 +57,9 @@ where
             let finality_proof_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
 
-            Sha256TargetGoldilocks::from_sha256_target(
-                finality_proof_public_inputs.validator_set_hash,
-                builder,
-            )
-            .register_as_public_inputs(builder);
-
-            SingleTarget::from_u64_bits_le_lossy(
-                *finality_proof_public_inputs.message.authority_set_id,
-                builder,
-            )
-            .register_as_public_inputs(builder);
+            inclusion_proof_public_inputs
+                .root_hash
+                .connect(&finality_proof_public_inputs.message.block_hash, builder);
 
             // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
             // and pad it with zeroes.
@@ -85,16 +68,20 @@ where
                 .try_into()
                 .unwrap();
             let message_targets: BitArrayTarget<260> = message_targets_array.into();
-            MessageTargetGoldilocks::from_bit_array(message_targets, builder)
-                .register_as_public_inputs(builder);
 
-            inclusion_proof_public_inputs
-                .root_hash
-                .connect(&finality_proof_public_inputs.message.block_hash, builder);
+            MessageSentTarget {
+                validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                    finality_proof_public_inputs.validator_set_hash,
+                    builder,
+                ),
+                authority_set_id: SingleTarget::from_u64_bits_le_lossy(
+                    *finality_proof_public_inputs.message.authority_set_id,
+                    builder,
+                ),
+                message_contents: MessageTargetGoldilocks::from_bit_array(message_targets, builder),
+            }
         };
 
-        composition_builder
-            .operation_with_targets(targets_op)
-            .build()
+        composition_builder.build(targets_op)
     }
 }

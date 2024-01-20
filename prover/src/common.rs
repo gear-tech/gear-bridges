@@ -23,6 +23,7 @@ use plonky2::{
 
 pub use targets::TargetSet;
 
+#[macro_use]
 pub mod targets {
     use std::fmt::Debug;
     use std::ops::Deref;
@@ -32,8 +33,38 @@ pub mod targets {
 
     use super::*;
 
+    pub(crate) use crate::impl_target_set;
+    #[macro_export]
+    macro_rules! impl_target_set {
+        (
+            $vis:vis struct $struct_name:ident {
+                $($field_vis:vis $field_name:ident: $field_type:ty),*
+                $(,)?
+            }
+        ) => {
+            #[derive(Clone, Debug)]
+            $vis struct $struct_name {
+                $($field_vis $field_name: $field_type),*
+            }
+
+            impl $crate::common::targets::TargetSet for $struct_name {
+                fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+                    Self {
+                        $($field_name: TargetSet::parse(raw)),*
+                    }
+                }
+
+                fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+                    ::std::iter::empty()
+                    $(.chain(self.$field_name.into_targets_iter()))*
+                }
+            }
+        }
+    }
+
     pub trait TargetSet: Clone {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
+        fn into_targets_iter(self) -> impl Iterator<Item = Target>;
     }
 
     pub type CompositeTarget<T, const N: usize> = [T; N];
@@ -42,11 +73,19 @@ pub mod targets {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
             parse_composite_target(raw, BoolTarget::new_unsafe)
         }
+
+        fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            self.into_iter().map(|t| t.target)
+        }
     }
 
     impl<const N: usize> TargetSet for CompositeTarget<Target, N> {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
             parse_composite_target(raw, |t| t)
+        }
+
+        fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            self.into_iter()
         }
     }
 
@@ -258,6 +297,10 @@ pub mod targets {
                 fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
                     Self(TargetSet::parse(raw))
                 }
+
+                fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+                    self.0.into_targets_iter()
+                }
             }
 
             impl From<[$target_ty; $len]> for $name {
@@ -380,11 +423,19 @@ pub mod targets {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
             Self(raw.next().unwrap())
         }
+
+        fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            std::iter::once(self.0)
+        }
     }
 
     impl<const N: usize> TargetSet for BitArrayTarget<N> {
         fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
             Self(TargetSet::parse(raw))
+        }
+
+        fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            self.0.into_iter().map(|t| t.target)
         }
     }
 
@@ -459,6 +510,11 @@ where
     pub second_proof_public_inputs: TS2,
 }
 
+// init(provide 2 proofs)
+// connect(like target_ops)
+// set_pw(like target_ops)
+// expose_pi(like target_ops)
+
 pub struct ProofCompositionBuilder<TS1, TS2>
 where
     TS1: TargetSet,
@@ -476,6 +532,13 @@ where
     TS1: TargetSet,
     TS2: TargetSet,
 {
+    pub fn new(
+        first: ProofWithCircuitData<TS1>,
+        second: ProofWithCircuitData<TS2>,
+    ) -> ProofCompositionBuilder<TS1, TS2> {
+        Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
+    }
+
     pub fn new_with_config(
         first: ProofWithCircuitData<TS1>,
         second: ProofWithCircuitData<TS2>,
@@ -560,18 +623,12 @@ where
         }
     }
 
-    pub fn new(
-        first: ProofWithCircuitData<TS1>,
-        second: ProofWithCircuitData<TS2>,
-    ) -> ProofCompositionBuilder<TS1, TS2> {
-        Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
-    }
-
-    pub fn operation_with_targets<O>(mut self, op: O) -> ProofCompositionBuilder<TS1, TS2>
+    pub fn build<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
     where
-        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets<TS1, TS2>),
+        TS: TargetSet,
+        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets<TS1, TS2>) -> TS,
     {
-        op(
+        let target_set = op(
             &mut self.circuit_builder,
             ProofCompositionTargets {
                 first_proof_public_inputs: self.first_public_inputs.clone(),
@@ -579,13 +636,10 @@ where
             },
         );
 
-        self
-    }
+        for target in target_set.into_targets_iter() {
+            self.circuit_builder.register_public_input(target);
+        }
 
-    pub fn build<TS>(self) -> ProofWithCircuitData<TS>
-    where
-        TS: TargetSet,
-    {
         ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
     }
 }

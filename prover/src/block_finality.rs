@@ -19,8 +19,8 @@ use crate::{
     common::{
         array_to_bits,
         targets::{
-            BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target, SingleTarget,
-            TargetSetOperations, TargetSetWitnessOperations,
+            impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
+            SingleTarget, TargetSetOperations, TargetSetWitnessOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -35,18 +35,10 @@ use crate::{
 
 const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
-#[derive(Clone)]
-pub struct BlockFinalityTarget {
-    pub validator_set_hash: Sha256Target,
-    pub message: GrandpaVoteTarget,
-}
-
-impl TargetSet for BlockFinalityTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self {
-            validator_set_hash: Sha256Target::parse(raw),
-            message: GrandpaVoteTarget::parse(raw),
-        }
+impl_target_set! {
+    pub struct BlockFinalityTarget {
+        pub validator_set_hash: Sha256Target,
+        pub message: GrandpaVoteTarget,
     }
 }
 
@@ -56,22 +48,12 @@ impl TargetSet for BlockFinalityTarget {
 // - block number           (4 bytes)
 // - round number           (8 bytes)
 // - authority set id       (8 bytes)
-#[derive(Clone)]
-pub struct GrandpaVoteTarget {
-    _aux_data: BitArrayTarget<8>,
-    pub block_hash: Blake2Target,
-    _aux_data_2: BitArrayTarget<96>,
-    pub authority_set_id: BitArrayTarget<64>,
-}
-
-impl TargetSet for GrandpaVoteTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self {
-            _aux_data: BitArrayTarget::parse(raw),
-            block_hash: Blake2Target::parse(raw),
-            _aux_data_2: BitArrayTarget::parse(raw),
-            authority_set_id: BitArrayTarget::parse(raw),
-        }
+impl_target_set! {
+    pub struct GrandpaVoteTarget {
+        _aux_data: BitArrayTarget<8>,
+        pub block_hash: Blake2Target,
+        _aux_data_2: BitArrayTarget<96>,
+        pub authority_set_id: BitArrayTarget<64>,
     }
 }
 
@@ -131,14 +113,6 @@ impl BlockFinality {
             let validator_signs_public_inputs: ValidatorSignsChainTarget =
                 targets.second_proof_public_inputs;
 
-            validator_set_hash_public_inputs
-                .hash
-                .register_as_public_inputs(builder);
-
-            validator_signs_public_inputs
-                .message
-                .register_as_public_inputs(builder);
-
             for (validator_1, validator_2) in validator_set_hash_public_inputs
                 .validator_set
                 .iter()
@@ -146,11 +120,20 @@ impl BlockFinality {
             {
                 validator_1.connect(validator_2, builder);
             }
+
+            BlockFinalityTarget {
+                validator_set_hash: validator_set_hash_public_inputs.hash,
+                // REFACTOR
+                message: TargetSet::parse(
+                    &mut validator_signs_public_inputs
+                        .message
+                        .into_iter()
+                        .map(|t| t.target),
+                ),
+            }
         };
 
-        composition_builder
-            .operation_with_targets(targets_op)
-            .build()
+        composition_builder.build(targets_op)
     }
 }
 
@@ -167,6 +150,7 @@ struct ValidatorSignsChainTarget {
     message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
 }
 
+// REFACTOR: wrap validator set into TargetSet
 impl TargetSet for ValidatorSignsChainTarget {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
         Self {
@@ -178,6 +162,17 @@ impl TargetSet for ValidatorSignsChainTarget {
                 .unwrap(),
             message: BitArrayTarget::parse(raw),
         }
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.validator_idx.to_target())
+            .chain(
+                self.validator_set
+                    .into_iter()
+                    .map(|v| v.into_targets_iter())
+                    .flatten(),
+            )
+            .chain(self.message.into_targets_iter())
     }
 }
 
@@ -247,17 +242,6 @@ impl ComposedValidatorSigns {
             let indexed_sign_proof_public_inputs: ValidatorSignsChainTarget =
                 targets.second_proof_public_inputs;
 
-            indexed_sign_proof_public_inputs
-                .validator_idx
-                .register_as_public_inputs(builder);
-
-            for validator in &indexed_sign_proof_public_inputs.validator_set {
-                validator.register_as_public_inputs(builder);
-            }
-            indexed_sign_proof_public_inputs
-                .message
-                .register_as_public_inputs(builder);
-
             previous_composed_proof_public_inputs
                 .message
                 .connect(&indexed_sign_proof_public_inputs.message, builder);
@@ -279,11 +263,15 @@ impl ComposedValidatorSigns {
             let one = builder.one();
             let to_compare_with_0 = builder.sub(new_index_sub_latest, one); // assert >= 0.
             builder.range_check(to_compare_with_0, 32);
+
+            ValidatorSignsChainTarget {
+                validator_idx: indexed_sign_proof_public_inputs.validator_idx,
+                validator_set: indexed_sign_proof_public_inputs.validator_set,
+                message: indexed_sign_proof_public_inputs.message,
+            }
         };
 
-        composition_builder
-            .operation_with_targets(targets_op)
-            .build()
+        composition_builder.build(targets_op)
     }
 }
 
@@ -321,39 +309,24 @@ impl IndexedValidatorSign {
                 targets.second_proof_public_inputs;
 
             selector_proof_public_inputs
-                .index
-                .register_as_public_inputs(builder);
-            for validator in &selector_proof_public_inputs.validator_set {
-                validator.register_as_public_inputs(builder);
-            }
-
-            sign_proof_public_inputs
-                .message
-                .register_as_public_inputs(builder);
-
-            selector_proof_public_inputs
                 .validator
                 .connect(&sign_proof_public_inputs.public_key, builder);
+
+            ValidatorSignsChainTarget {
+                validator_idx: selector_proof_public_inputs.index,
+                validator_set: selector_proof_public_inputs.validator_set,
+                message: sign_proof_public_inputs.message,
+            }
         };
 
-        composition_builder
-            .operation_with_targets(targets_op)
-            .build()
+        composition_builder.build(targets_op)
     }
 }
 
-#[derive(Clone)]
-struct SingleValidatorSignTarget {
-    message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
-    public_key: Ed25519PublicKeyTarget,
-}
-
-impl TargetSet for SingleValidatorSignTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self {
-            message: BitArrayTarget::parse(raw),
-            public_key: Ed25519PublicKeyTarget::parse(raw),
-        }
+impl_target_set! {
+    struct SingleValidatorSignTarget {
+        message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
+        public_key: Ed25519PublicKeyTarget,
     }
 }
 
@@ -411,6 +384,7 @@ struct ValidatorSelectorTarget {
     validator: Ed25519PublicKeyTarget,
 }
 
+// REFACTOR
 impl TargetSet for ValidatorSelectorTarget {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
         Self {
@@ -422,6 +396,17 @@ impl TargetSet for ValidatorSelectorTarget {
                 .unwrap(),
             validator: Ed25519PublicKeyTarget::parse(raw),
         }
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.index.to_target())
+            .chain(
+                self.validator_set
+                    .into_iter()
+                    .map(|v| v.into_targets_iter())
+                    .flatten(),
+            )
+            .chain(self.validator.into_targets_iter())
     }
 }
 

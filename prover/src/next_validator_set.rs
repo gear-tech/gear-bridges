@@ -4,8 +4,8 @@ use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
         targets::{
-            BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target, Sha256TargetGoldilocks,
-            SingleTarget, TargetSetOperations,
+            impl_target_set, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
+            Sha256TargetGoldilocks, SingleTarget, TargetSetOperations,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -23,20 +23,11 @@ const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE: usize = 1 + VALIDATOR_COUNT *
 const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS: usize =
     SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE * 8;
 
-#[derive(Clone)]
-pub struct NextValidatorSetTarget {
-    validator_set_hash: Sha256TargetGoldilocks,
-    next_validator_set_hash: Sha256TargetGoldilocks,
-    authority_set_id: SingleTarget,
-}
-
-impl TargetSet for NextValidatorSetTarget {
-    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
-        Self {
-            validator_set_hash: Sha256TargetGoldilocks::parse(raw),
-            next_validator_set_hash: Sha256TargetGoldilocks::parse(raw),
-            authority_set_id: SingleTarget::parse(raw),
-        }
+impl_target_set! {
+    pub struct NextValidatorSetTarget {
+        validator_set_hash: Sha256TargetGoldilocks,
+        next_validator_set_hash: Sha256TargetGoldilocks,
+        authority_set_id: SingleTarget,
     }
 }
 
@@ -52,6 +43,7 @@ impl NextValidatorSet {
 
         let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data;
         let mut next_validator_set = vec![];
+        // REFACTOR
         for validator_idx in 0..VALIDATOR_COUNT {
             next_validator_set.push(
                 next_validator_set_data[1
@@ -89,22 +81,6 @@ impl NextValidatorSet {
             let next_validator_set_public_inputs: NextValidatorSetNonHashedTarget =
                 targets.second_proof_public_inputs;
 
-            Sha256TargetGoldilocks::from_sha256_target(
-                next_validator_set_public_inputs.current_validator_set_hash,
-                builder,
-            )
-            .register_as_public_inputs(builder);
-
-            Sha256TargetGoldilocks::from_sha256_target(
-                validator_set_hash_public_inputs.hash,
-                builder,
-            )
-            .register_as_public_inputs(builder);
-
-            next_validator_set_public_inputs
-                .authority_set_id
-                .register_as_public_inputs(builder);
-
             for (validator_1, validator_2) in validator_set_hash_public_inputs
                 .validator_set
                 .iter()
@@ -112,14 +88,25 @@ impl NextValidatorSet {
             {
                 validator_1.connect(validator_2, builder);
             }
+
+            NextValidatorSetTarget {
+                validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                    next_validator_set_public_inputs.current_validator_set_hash,
+                    builder,
+                ),
+                next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                    validator_set_hash_public_inputs.hash,
+                    builder,
+                ),
+                authority_set_id: next_validator_set_public_inputs.authority_set_id,
+            }
         };
 
-        composition_builder
-            .operation_with_targets(targets_op)
-            .build()
+        composition_builder.build(targets_op)
     }
 }
 
+// REFACTOR
 #[derive(Clone)]
 struct NextValidatorSetNonHashedTarget {
     current_validator_set_hash: Sha256Target,
@@ -139,29 +126,31 @@ impl TargetSet for NextValidatorSetNonHashedTarget {
                 .unwrap(),
         }
     }
-}
 
-#[derive(Clone, Debug)]
-struct ValidatorSessionKeysInStorageTarget {
-    _session_key: Ed25519PublicKeyTarget,
-    _babe_key: Ed25519PublicKeyTarget,
-    pub grandpa_key: Ed25519PublicKeyTarget,
-    _imonline_key: Ed25519PublicKeyTarget,
-    _authoryty_discovery_key: Ed25519PublicKeyTarget,
-}
-
-impl TargetSet for ValidatorSessionKeysInStorageTarget {
-    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
-        Self {
-            _session_key: TargetSet::parse(raw),
-            _babe_key: TargetSet::parse(raw),
-            grandpa_key: TargetSet::parse(raw),
-            _imonline_key: TargetSet::parse(raw),
-            _authoryty_discovery_key: TargetSet::parse(raw),
-        }
+    fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+        self.current_validator_set_hash
+            .into_targets_iter()
+            .chain(self.authority_set_id.into_targets_iter())
+            .chain(
+                self.next_validator_set
+                    .into_iter()
+                    .map(|v| v.into_targets_iter())
+                    .flatten(),
+            )
     }
 }
 
+impl_target_set! {
+    struct ValidatorSessionKeysInStorageTarget {
+        _session_key: Ed25519PublicKeyTarget,
+        _babe_key: Ed25519PublicKeyTarget,
+        pub grandpa_key: Ed25519PublicKeyTarget,
+        _imonline_key: Ed25519PublicKeyTarget,
+        _authoryty_discovery_key: Ed25519PublicKeyTarget,
+    }
+}
+
+// REFACTOR
 #[derive(Clone)]
 struct ValidatorSetInStorageTarget {
     _length: BitArrayTarget<8>,
@@ -178,6 +167,14 @@ impl TargetSet for ValidatorSetInStorageTarget {
                 .try_into()
                 .unwrap(),
         }
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+        self._length.into_targets_iter().chain(
+            self.validators
+                .into_iter()
+                .flat_map(|v| v.into_targets_iter()),
+        )
     }
 }
 
@@ -205,36 +202,36 @@ impl NextValidatorSetNonHashed {
             let block_finality_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
 
-            block_finality_public_inputs
-                .validator_set_hash
-                .register_as_public_inputs(builder);
-
-            SingleTarget::from_u64_bits_le_lossy(
-                *block_finality_public_inputs.message.authority_set_id,
-                builder,
-            )
-            .register_as_public_inputs(builder);
-
-            let validator_set_targets = ValidatorSetInStorageTarget::parse(
+            // REFACTOR: implement for target itself.
+            let validator_keys_targets = ValidatorSetInStorageTarget::parse(
                 &mut merkle_proof_public_inputs
                     .leaf_data
                     .clone()
                     .into_iter()
                     .map(|t| t.target),
-            );
-
-            for validator_pk in &validator_set_targets.validators {
-                validator_pk.grandpa_key.register_as_public_inputs(builder);
-            }
+            )
+            .validators
+            .into_iter()
+            .map(|v| v.grandpa_key)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
 
             block_finality_public_inputs
                 .message
                 .block_hash
                 .connect(&merkle_proof_public_inputs.root_hash, builder);
+
+            NextValidatorSetNonHashedTarget {
+                current_validator_set_hash: block_finality_public_inputs.validator_set_hash,
+                authority_set_id: SingleTarget::from_u64_bits_le_lossy(
+                    *block_finality_public_inputs.message.authority_set_id,
+                    builder,
+                ),
+                next_validator_set: validator_keys_targets,
+            }
         };
 
-        composition_builder
-            .operation_with_targets(targets_op)
-            .build()
+        composition_builder.build(targets_op)
     }
 }

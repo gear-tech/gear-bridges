@@ -19,18 +19,27 @@ use crate::{
     ProofWithCircuitData,
 };
 
+// REFACTOR: Replace generic over length with generic over used type.
 #[derive(Clone)]
 pub struct MerkleProofTarget<const LEAF_DATA_LENGTH: usize> {
     pub leaf_data: BitArrayTarget<LEAF_DATA_LENGTH>,
     pub root_hash: Blake2Target,
 }
 
+// REFACTOR: Add generics to macro?
 impl<const LEAF_DATA_LENGTH: usize> TargetSet for MerkleProofTarget<LEAF_DATA_LENGTH> {
     fn parse(targets: &mut impl Iterator<Item = Target>) -> Self {
         Self {
             leaf_data: BitArrayTarget::<LEAF_DATA_LENGTH>::parse(targets),
             root_hash: Blake2Target::parse(targets),
         }
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        self.leaf_data
+            .into_iter()
+            .chain(self.root_hash.into_iter())
+            .map(|t| t.target)
     }
 }
 

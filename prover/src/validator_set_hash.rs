@@ -19,6 +19,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
+// REFACTOR
 #[derive(Clone)]
 pub struct ValidatorSetHashTarget {
     pub hash: Sha256Target,
@@ -35,6 +36,14 @@ impl TargetSet for ValidatorSetHashTarget {
                 .try_into()
                 .unwrap(),
         }
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        self.hash.into_targets_iter().chain(
+            self.validator_set
+                .into_iter()
+                .flat_map(|v| v.into_targets_iter()),
+        )
     }
 }
 

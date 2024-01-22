@@ -1,8 +1,5 @@
 use plonky2::{
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::witness::{PartialWitness, WitnessWrite},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_sha256::circuit::make_circuits as sha256_circuit;
@@ -11,39 +8,19 @@ use sha2::{Digest, Sha256};
 use crate::{
     common::{
         array_to_bits,
-        targets::{Ed25519PublicKeyTarget, Sha256Target},
+        targets::{Sha256Target, ValidatorSetTargetSet},
         TargetSet,
     },
     consts::VALIDATOR_COUNT,
+    impl_target_set,
     prelude::*,
     ProofWithCircuitData,
 };
 
-// REFACTOR
-#[derive(Clone)]
-pub struct ValidatorSetHashTarget {
-    pub hash: Sha256Target,
-    pub validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
-}
-
-impl TargetSet for ValidatorSetHashTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self {
-            hash: Sha256Target::parse(raw),
-            validator_set: (0..VALIDATOR_COUNT)
-                .map(|_| Ed25519PublicKeyTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        }
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        self.hash.into_targets_iter().chain(
-            self.validator_set
-                .into_iter()
-                .flat_map(|v| v.into_targets_iter()),
-        )
+impl_target_set! {
+    pub struct ValidatorSetHashTarget {
+        pub hash: Sha256Target,
+        pub validator_set: ValidatorSetTargetSet,
     }
 }
 

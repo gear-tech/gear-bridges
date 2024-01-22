@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -20,7 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
-            SingleTarget, TargetSetOperations, TargetSetWitnessOperations,
+            SingleTarget, TargetSetOperations, TargetSetWitnessOperations, ValidatorSetTargetSet,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -113,13 +113,9 @@ impl BlockFinality {
             let validator_signs_public_inputs: ValidatorSignsChainTarget =
                 targets.second_proof_public_inputs;
 
-            for (validator_1, validator_2) in validator_set_hash_public_inputs
+            validator_set_hash_public_inputs
                 .validator_set
-                .iter()
-                .zip(validator_signs_public_inputs.validator_set.iter())
-            {
-                validator_1.connect(validator_2, builder);
-            }
+                .connect(&validator_signs_public_inputs.validator_set, builder);
 
             BlockFinalityTarget {
                 validator_set_hash: validator_set_hash_public_inputs.hash,
@@ -143,36 +139,11 @@ struct ProcessedPreCommit {
     signature: [u8; consts::ED25519_SIGNATURE_SIZE],
 }
 
-#[derive(Clone)]
-struct ValidatorSignsChainTarget {
-    validator_idx: SingleTarget,
-    validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
-    message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
-}
-
-// REFACTOR: wrap validator set into TargetSet
-impl TargetSet for ValidatorSignsChainTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self {
-            validator_idx: SingleTarget::parse(raw),
-            validator_set: (0..VALIDATOR_COUNT)
-                .map(|_| Ed25519PublicKeyTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-            message: BitArrayTarget::parse(raw),
-        }
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        std::iter::once(self.validator_idx.to_target())
-            .chain(
-                self.validator_set
-                    .into_iter()
-                    .map(|v| v.into_targets_iter())
-                    .flatten(),
-            )
-            .chain(self.message.into_targets_iter())
+impl_target_set! {
+    struct ValidatorSignsChainTarget {
+        validator_idx: SingleTarget,
+        validator_set: ValidatorSetTargetSet,
+        message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
     }
 }
 
@@ -246,13 +217,9 @@ impl ComposedValidatorSigns {
                 .message
                 .connect(&indexed_sign_proof_public_inputs.message, builder);
 
-            for (validator_1, validator_2) in previous_composed_proof_public_inputs
+            previous_composed_proof_public_inputs
                 .validator_set
-                .iter()
-                .zip(indexed_sign_proof_public_inputs.validator_set.iter())
-            {
-                validator_1.connect(validator_2, builder);
-            }
+                .connect(&indexed_sign_proof_public_inputs.validator_set, builder);
 
             let new_index_sub_latest = builder.sub(
                 indexed_sign_proof_public_inputs.validator_idx.to_target(),
@@ -377,36 +344,11 @@ impl SingleValidatorSign {
     }
 }
 
-#[derive(Clone)]
-struct ValidatorSelectorTarget {
-    index: SingleTarget,
-    validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
-    validator: Ed25519PublicKeyTarget,
-}
-
-// REFACTOR
-impl TargetSet for ValidatorSelectorTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self {
-            index: SingleTarget::parse(raw),
-            validator_set: (0..VALIDATOR_COUNT)
-                .map(|_| Ed25519PublicKeyTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-            validator: Ed25519PublicKeyTarget::parse(raw),
-        }
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        std::iter::once(self.index.to_target())
-            .chain(
-                self.validator_set
-                    .into_iter()
-                    .map(|v| v.into_targets_iter())
-                    .flatten(),
-            )
-            .chain(self.validator.into_targets_iter())
+impl_target_set! {
+    struct ValidatorSelectorTarget {
+        index: SingleTarget,
+        validator_set: ValidatorSetTargetSet,
+        validator: Ed25519PublicKeyTarget,
     }
 }
 
@@ -426,9 +368,9 @@ impl ValidatorSelector {
 
         builder.register_public_input(targets.index.to_target());
 
-        for validator in &targets.validator_set {
-            validator.register_as_public_inputs(&mut builder);
-        }
+        targets
+            .validator_set
+            .register_as_public_inputs(&mut builder);
 
         targets.validator.register_as_public_inputs(&mut builder);
 
@@ -439,11 +381,15 @@ impl ValidatorSelector {
             F::from_canonical_u32(self.index as u32),
         );
 
-        for (validator_target, validator_data) in
-            targets.validator_set.iter().zip(self.validator_set.iter())
-        {
-            validator_target.set_partial_witness(validator_data, &mut pw);
-        }
+        targets.validator_set.set_partial_witness(
+            &self
+                .validator_set
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+            &mut pw,
+        );
 
         targets
             .validator
@@ -500,12 +446,12 @@ fn validator_selector_circuit(
         validator_targets.try_into().unwrap();
 
     ValidatorSelectorTarget {
-        validator_set: validator_set_targets
-            .into_iter()
-            .map(|v| v.into())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap(),
+        validator_set: ValidatorSetTargetSet::parse(
+            &mut validator_set_targets
+                .into_iter()
+                .flatten()
+                .map(|t| t.target),
+        ),
         index: index_target.into(),
         validator: validator_targets.into(),
     }

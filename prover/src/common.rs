@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{
     consts::{
-        BLAKE2_DIGEST_SIZE_IN_BITS, ED25519_PUBLIC_KEY_SIZE_IN_BITS,
+        BLAKE2_DIGEST_SIZE_IN_BITS, ED25519_PUBLIC_KEY_SIZE, ED25519_PUBLIC_KEY_SIZE_IN_BITS,
         ED25519_SIGNATURE_SIZE_IN_BITS, MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
         SHA256_DIGEST_SIZE_IN_BITS, SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
     },
@@ -30,6 +30,8 @@ pub mod targets {
 
     use plonky2_field::goldilocks_field::GoldilocksField;
     use plonky2_field::types::Field64;
+
+    use self::consts::VALIDATOR_COUNT;
 
     use super::*;
 
@@ -444,6 +446,49 @@ pub mod targets {
             Self(value)
         }
     }
+
+    #[derive(Clone, Debug)]
+    pub struct ValidatorSetTargetSet([Ed25519PublicKeyTarget; VALIDATOR_COUNT]);
+
+    impl TargetSet for ValidatorSetTargetSet {
+        fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+            Self(
+                (0..VALIDATOR_COUNT)
+                    .map(|_| Ed25519PublicKeyTarget::parse(raw))
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            )
+        }
+
+        fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            self.0.into_iter().flat_map(|v| v.into_targets_iter())
+        }
+    }
+
+    impl TargetSetOperations for ValidatorSetTargetSet {
+        fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
+            self.0
+                .iter()
+                .zip(other.0.iter())
+                .for_each(|(v_0, v_1)| v_0.connect(v_1, builder));
+        }
+
+        fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
+            for validator in &self.0 {
+                validator.register_as_public_inputs(builder);
+            }
+        }
+    }
+
+    impl TargetSetWitnessOperations for ValidatorSetTargetSet {
+        fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
+            self.0
+                .iter()
+                .zip(data.chunks(ED25519_PUBLIC_KEY_SIZE))
+                .for_each(|(validator, data)| validator.set_partial_witness(data, witness));
+        }
+    }
 }
 
 pub struct ProofWithCircuitData<TS>
@@ -509,11 +554,6 @@ where
     pub first_proof_public_inputs: TS1,
     pub second_proof_public_inputs: TS2,
 }
-
-// init(provide 2 proofs)
-// connect(like target_ops)
-// set_pw(like target_ops)
-// expose_pi(like target_ops)
 
 pub struct ProofCompositionBuilder<TS1, TS2>
 where

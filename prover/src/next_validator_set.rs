@@ -5,7 +5,7 @@ use crate::{
     common::{
         targets::{
             impl_target_set, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
-            Sha256TargetGoldilocks, SingleTarget, TargetSetOperations,
+            Sha256TargetGoldilocks, SingleTarget, TargetSetOperations, ValidatorSetTargetSet,
         },
         ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
     },
@@ -81,13 +81,10 @@ impl NextValidatorSet {
             let next_validator_set_public_inputs: NextValidatorSetNonHashedTarget =
                 targets.second_proof_public_inputs;
 
-            for (validator_1, validator_2) in validator_set_hash_public_inputs
-                .validator_set
-                .iter()
-                .zip(next_validator_set_public_inputs.next_validator_set.iter())
-            {
-                validator_1.connect(validator_2, builder);
-            }
+            validator_set_hash_public_inputs.validator_set.connect(
+                &next_validator_set_public_inputs.next_validator_set,
+                builder,
+            );
 
             NextValidatorSetTarget {
                 validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
@@ -106,37 +103,11 @@ impl NextValidatorSet {
     }
 }
 
-// REFACTOR
-#[derive(Clone)]
-struct NextValidatorSetNonHashedTarget {
-    current_validator_set_hash: Sha256Target,
-    authority_set_id: SingleTarget,
-    next_validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
-}
-
-impl TargetSet for NextValidatorSetNonHashedTarget {
-    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
-        Self {
-            current_validator_set_hash: Sha256Target::parse(raw),
-            authority_set_id: SingleTarget::parse(raw),
-            next_validator_set: (0..VALIDATOR_COUNT)
-                .map(|_| Ed25519PublicKeyTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        }
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
-        self.current_validator_set_hash
-            .into_targets_iter()
-            .chain(self.authority_set_id.into_targets_iter())
-            .chain(
-                self.next_validator_set
-                    .into_iter()
-                    .map(|v| v.into_targets_iter())
-                    .flatten(),
-            )
+impl_target_set! {
+    struct NextValidatorSetNonHashedTarget {
+        current_validator_set_hash: Sha256Target,
+        authority_set_id: SingleTarget,
+        next_validator_set: ValidatorSetTargetSet,
     }
 }
 
@@ -212,10 +183,8 @@ impl NextValidatorSetNonHashed {
             )
             .validators
             .into_iter()
-            .map(|v| v.grandpa_key)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+            .flat_map(|v| v.grandpa_key.into_targets_iter())
+            .collect::<Vec<_>>();
 
             block_finality_public_inputs
                 .message
@@ -228,7 +197,9 @@ impl NextValidatorSetNonHashed {
                     *block_finality_public_inputs.message.authority_set_id,
                     builder,
                 ),
-                next_validator_set: validator_keys_targets,
+                next_validator_set: ValidatorSetTargetSet::parse(
+                    &mut validator_keys_targets.into_iter(),
+                ),
             }
         };
 

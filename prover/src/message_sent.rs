@@ -1,7 +1,4 @@
-use plonky2::{
-    iop::target::BoolTarget,
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
-};
+use plonky2::plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig};
 
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},

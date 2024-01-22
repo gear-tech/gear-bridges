@@ -24,10 +24,7 @@ use crate::{
         },
         ProofCompositionBuilder, ProofCompositionTargets,
     },
-    consts::{
-        GRANDPA_VOTE_LENGTH, GRANDPA_VOTE_LENGTH_IN_BITS, PROCESSED_VALIDATOR_COUNT,
-        VALIDATOR_COUNT,
-    },
+    consts::{GRANDPA_VOTE_LENGTH, PROCESSED_VALIDATOR_COUNT, VALIDATOR_COUNT},
     prelude::*,
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
     ProofWithCircuitData,

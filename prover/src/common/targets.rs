@@ -12,7 +12,7 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+    plonk::circuit_builder::CircuitBuilder,
 };
 
 pub trait TargetSet: Clone + Debug {
@@ -116,7 +116,7 @@ where
 {
     fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
         let data = array_to_bits(data);
-        for (target, bit) in (*self).clone().into_targets_iter().zip(data.into_iter()) {
+        for (target, bit) in self.into_targets_iter().zip(data.into_iter()) {
             witness.set_bool_target(BoolTarget::new_unsafe(target), bit);
         }
     }
@@ -346,6 +346,8 @@ impl MessageTargetGoldilocks {
 
 #[test]
 fn test_single_target_from_u64_bits_le_lossy() {
+    use plonky2::plonk::circuit_data::CircuitConfig;
+
     fn test_case(num: u64) {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_ecc_config());
 

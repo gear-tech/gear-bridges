@@ -7,7 +7,7 @@ use crate::{
             impl_target_set, ArrayTarget, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
             Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
         },
-        ProofCompositionBuilder, ProofCompositionTargets,
+        ProofComposition,
     },
     consts::VALIDATOR_COUNT,
     merkle_proof::{MerkleProof, MerkleProofTarget},
@@ -68,38 +68,34 @@ impl NextValidatorSet {
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.fri_config.cap_height = 0;
-        let composition_builder = ProofCompositionBuilder::new_with_config(
+        let composition_builder = ProofComposition::new_with_config(
             validator_set_hash_proof,
             non_hashed_next_validator_set_proof,
             config,
         );
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          targets: ProofCompositionTargets<_, _>| {
-            let validator_set_hash_public_inputs: ValidatorSetHashTarget =
-                targets.first_proof_public_inputs;
-            let next_validator_set_public_inputs: NextValidatorSetNonHashedTarget =
-                targets.second_proof_public_inputs;
+        let targets_op =
+            |builder: &mut CircuitBuilder<F, D>,
+             validator_set_hash: ValidatorSetHashTarget,
+             next_validator_set: NextValidatorSetNonHashedTarget| {
+                validator_set_hash
+                    .validator_set
+                    .connect(&next_validator_set.next_validator_set, builder);
 
-            validator_set_hash_public_inputs.validator_set.connect(
-                &next_validator_set_public_inputs.next_validator_set,
-                builder,
-            );
+                NextValidatorSetTarget {
+                    validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                        next_validator_set.current_validator_set_hash,
+                        builder,
+                    ),
+                    next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                        validator_set_hash.hash,
+                        builder,
+                    ),
+                    authority_set_id: next_validator_set.authority_set_id,
+                }
+            };
 
-            NextValidatorSetTarget {
-                validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                    next_validator_set_public_inputs.current_validator_set_hash,
-                    builder,
-                ),
-                next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                    validator_set_hash_public_inputs.hash,
-                    builder,
-                ),
-                authority_set_id: next_validator_set_public_inputs.authority_set_id,
-            }
-        };
-
-        composition_builder.build(targets_op)
+        composition_builder.compose(targets_op)
     }
 }
 
@@ -112,7 +108,7 @@ impl_target_set! {
 }
 
 impl_target_set! {
-    struct ValidatorSessionKeysInStorageTarget {
+    struct SessionKeysTarget {
         _session_key: Ed25519PublicKeyTarget,
         _babe_key: Ed25519PublicKeyTarget,
         pub grandpa_key: Ed25519PublicKeyTarget,
@@ -124,7 +120,7 @@ impl_target_set! {
 impl_target_set! {
     struct ValidatorSetInStorageTarget {
         _length: BitArrayTarget<8>,
-        validators: ArrayTarget<ValidatorSessionKeysInStorageTarget, VALIDATOR_COUNT>,
+        validators: ArrayTarget<SessionKeysTarget, VALIDATOR_COUNT>,
     }
 }
 
@@ -153,33 +149,26 @@ impl NextValidatorSetNonHashed {
         let merkle_tree_proof = self.next_validator_set_inclusion_proof.prove();
         let block_finality_proof = self.current_epoch_block_finality.prove();
 
-        let composition_builder =
-            ProofCompositionBuilder::new(merkle_tree_proof, block_finality_proof);
+        let composition_builder = ProofComposition::new(merkle_tree_proof, block_finality_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          targets: ProofCompositionTargets<_, _>| {
-            let merkle_proof_public_inputs: MerkleProofTarget<ValidatorSetInStorageTarget> =
-                targets.first_proof_public_inputs;
-            let block_finality_public_inputs: BlockFinalityTarget =
-                targets.second_proof_public_inputs;
-
-            block_finality_public_inputs
+                          merkle_proof: MerkleProofTarget<ValidatorSetInStorageTarget>,
+                          block_finality: BlockFinalityTarget| {
+            block_finality
                 .message
                 .block_hash
-                .connect(&merkle_proof_public_inputs.root_hash, builder);
+                .connect(&merkle_proof.root_hash, builder);
 
             NextValidatorSetNonHashedTarget {
-                current_validator_set_hash: block_finality_public_inputs.validator_set_hash,
+                current_validator_set_hash: block_finality.validator_set_hash,
                 authority_set_id: SingleTarget::from_u64_bits_le_lossy(
-                    block_finality_public_inputs.message.authority_set_id,
+                    block_finality.message.authority_set_id,
                     builder,
                 ),
-                next_validator_set: merkle_proof_public_inputs
-                    .leaf_data
-                    .into_grandpa_authority_keys(),
+                next_validator_set: merkle_proof.leaf_data.into_grandpa_authority_keys(),
             }
         };
 
-        composition_builder.build(targets_op)
+        composition_builder.compose(targets_op)
     }
 }

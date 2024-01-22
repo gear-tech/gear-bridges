@@ -22,7 +22,7 @@ use crate::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
             SingleTarget, TargetSet, TargetSetWitnessOperations, ValidatorSetTarget,
         },
-        ProofCompositionBuilder, ProofCompositionTargets,
+        ProofComposition,
     },
     consts::{GRANDPA_VOTE_LENGTH, PROCESSED_VALIDATOR_COUNT, VALIDATOR_COUNT},
     prelude::*,
@@ -101,26 +101,22 @@ impl BlockFinality {
         log::info!("Composing block finality and validator set hash proofs...");
 
         let composition_builder =
-            ProofCompositionBuilder::new(validator_set_hash_proof, validator_signs_proof);
+            ProofComposition::new(validator_set_hash_proof, validator_signs_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          targets: ProofCompositionTargets<_, _>| {
-            let validator_set_hash_public_inputs: ValidatorSetHashTarget =
-                targets.first_proof_public_inputs;
-            let validator_signs_public_inputs: ValidatorSignsChainTarget =
-                targets.second_proof_public_inputs;
-
-            validator_set_hash_public_inputs
+                          validator_set_hash: ValidatorSetHashTarget,
+                          validator_signs: ValidatorSignsChainTarget| {
+            validator_set_hash
                 .validator_set
-                .connect(&validator_signs_public_inputs.validator_set, builder);
+                .connect(&validator_signs.validator_set, builder);
 
             BlockFinalityTarget {
-                validator_set_hash: validator_set_hash_public_inputs.hash,
-                message: validator_signs_public_inputs.message,
+                validator_set_hash: validator_set_hash.hash,
+                message: validator_signs.message,
             }
         };
 
-        composition_builder.build(targets_op)
+        composition_builder.compose(targets_op)
     }
 }
 
@@ -195,41 +191,35 @@ impl ComposedValidatorSigns {
         log::info!("    Proving validator signs composition...");
 
         let composition_builder =
-            ProofCompositionBuilder::new(previous_composed_proof, indexed_sign_proof);
+            ProofComposition::new(previous_composed_proof, indexed_sign_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          targets: ProofCompositionTargets<_, _>| {
-            let previous_composed_proof_public_inputs: ValidatorSignsChainTarget =
-                targets.first_proof_public_inputs;
-            let indexed_sign_proof_public_inputs: ValidatorSignsChainTarget =
-                targets.second_proof_public_inputs;
-
-            previous_composed_proof_public_inputs
+                          previous_composed_proof: ValidatorSignsChainTarget,
+                          indexed_sign_proof: ValidatorSignsChainTarget| {
+            previous_composed_proof
                 .message
-                .connect(&indexed_sign_proof_public_inputs.message, builder);
+                .connect(&indexed_sign_proof.message, builder);
 
-            previous_composed_proof_public_inputs
+            previous_composed_proof
                 .validator_set
-                .connect(&indexed_sign_proof_public_inputs.validator_set, builder);
+                .connect(&indexed_sign_proof.validator_set, builder);
 
             let new_index_sub_latest = builder.sub(
-                indexed_sign_proof_public_inputs.validator_idx.to_target(),
-                previous_composed_proof_public_inputs
-                    .validator_idx
-                    .to_target(),
+                indexed_sign_proof.validator_idx.to_target(),
+                previous_composed_proof.validator_idx.to_target(),
             );
             let one = builder.one();
             let to_compare_with_0 = builder.sub(new_index_sub_latest, one); // assert >= 0.
             builder.range_check(to_compare_with_0, 32);
 
             ValidatorSignsChainTarget {
-                validator_idx: indexed_sign_proof_public_inputs.validator_idx,
-                validator_set: indexed_sign_proof_public_inputs.validator_set,
-                message: indexed_sign_proof_public_inputs.message,
+                validator_idx: indexed_sign_proof.validator_idx,
+                validator_set: indexed_sign_proof.validator_set,
+                message: indexed_sign_proof.message,
             }
         };
 
-        composition_builder.build(targets_op)
+        composition_builder.compose(targets_op)
     }
 }
 
@@ -257,27 +247,23 @@ impl IndexedValidatorSign {
         }
         .prove();
 
-        let composition_builder = ProofCompositionBuilder::new(selector_proof, sign_proof);
+        let composition_builder = ProofComposition::new(selector_proof, sign_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          targets: ProofCompositionTargets<_, _>| {
-            let selector_proof_public_inputs: ValidatorSelectorTarget =
-                targets.first_proof_public_inputs;
-            let sign_proof_public_inputs: SingleValidatorSignTarget =
-                targets.second_proof_public_inputs;
-
-            selector_proof_public_inputs
+                          selector_proof: ValidatorSelectorTarget,
+                          sign_proof: SingleValidatorSignTarget| {
+            selector_proof
                 .validator
-                .connect(&sign_proof_public_inputs.public_key, builder);
+                .connect(&sign_proof.public_key, builder);
 
             ValidatorSignsChainTarget {
-                validator_idx: selector_proof_public_inputs.index,
-                validator_set: selector_proof_public_inputs.validator_set,
-                message: sign_proof_public_inputs.message,
+                validator_idx: selector_proof.index,
+                validator_set: selector_proof.validator_set,
+                message: sign_proof.message,
             }
         };
 
-        composition_builder.build(targets_op)
+        composition_builder.compose(targets_op)
     }
 }
 

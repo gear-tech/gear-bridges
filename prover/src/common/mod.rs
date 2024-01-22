@@ -71,16 +71,7 @@ where
     }
 }
 
-pub struct ProofCompositionTargets<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    pub first_proof_public_inputs: TS1,
-    pub second_proof_public_inputs: TS2,
-}
-
-pub struct ProofCompositionBuilder<TS1, TS2>
+pub struct ProofComposition<TS1, TS2>
 where
     TS1: TargetSet,
     TS2: TargetSet,
@@ -92,7 +83,7 @@ where
     second_public_inputs: TS2,
 }
 
-impl<TS1, TS2> ProofCompositionBuilder<TS1, TS2>
+impl<TS1, TS2> ProofComposition<TS1, TS2>
 where
     TS1: TargetSet,
     TS2: TargetSet,
@@ -100,7 +91,7 @@ where
     pub fn new(
         first: ProofWithCircuitData<TS1>,
         second: ProofWithCircuitData<TS2>,
-    ) -> ProofCompositionBuilder<TS1, TS2> {
+    ) -> ProofComposition<TS1, TS2> {
         Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
     }
 
@@ -108,7 +99,7 @@ where
         first: ProofWithCircuitData<TS1>,
         second: ProofWithCircuitData<TS2>,
         config: CircuitConfig,
-    ) -> ProofCompositionBuilder<TS1, TS2> {
+    ) -> ProofComposition<TS1, TS2> {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let proof_with_pis_target_1 =
             builder.add_virtual_proof_with_pis::<C>(&first.circuit_data.common);
@@ -177,28 +168,31 @@ where
             &second.circuit_data.common,
         );
 
-        ProofCompositionBuilder {
+        let mut first_public_inputs_iter = proof_with_pis_target_1.public_inputs.into_iter();
+        let first_public_inputs = TS1::parse(&mut first_public_inputs_iter);
+        assert_eq!(first_public_inputs_iter.next(), None);
+
+        let mut second_public_inputs_iter = proof_with_pis_target_2.public_inputs.into_iter();
+        let second_public_inputs = TS2::parse(&mut second_public_inputs_iter);
+        assert_eq!(second_public_inputs_iter.next(), None);
+
+        ProofComposition {
             circuit_builder: builder,
             witness: pw,
-
-            first_public_inputs: TS1::parse(&mut proof_with_pis_target_1.public_inputs.into_iter()),
-            second_public_inputs: TS2::parse(
-                &mut proof_with_pis_target_2.public_inputs.into_iter(),
-            ),
+            first_public_inputs,
+            second_public_inputs,
         }
     }
 
-    pub fn build<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
+    pub fn compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
     where
         TS: TargetSet,
-        O: Fn(&mut CircuitBuilder<F, D>, ProofCompositionTargets<TS1, TS2>) -> TS,
+        O: Fn(&mut CircuitBuilder<F, D>, TS1, TS2) -> TS,
     {
         let target_set = op(
             &mut self.circuit_builder,
-            ProofCompositionTargets {
-                first_proof_public_inputs: self.first_public_inputs.clone(),
-                second_proof_public_inputs: self.second_public_inputs.clone(),
-            },
+            self.first_public_inputs.clone(),
+            self.second_public_inputs.clone(),
         );
 
         target_set.register_as_public_inputs(&mut self.circuit_builder);

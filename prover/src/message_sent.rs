@@ -7,7 +7,7 @@ use crate::{
             impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
             SingleTarget, TargetSet,
         },
-        ProofCompositionBuilder, ProofCompositionTargets,
+        ProofComposition,
     },
     merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,
@@ -45,39 +45,35 @@ where
         let mut config = CircuitConfig::standard_recursion_config();
         config.fri_config.cap_height = 0;
         let composition_builder =
-            ProofCompositionBuilder::new_with_config(inclusion_proof, finality_proof, config);
+            ProofComposition::new_with_config(inclusion_proof, finality_proof, config);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          targets: ProofCompositionTargets<_, _>| {
-            let inclusion_proof_public_inputs: MerkleProofTarget<
-                BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
-            > = targets.first_proof_public_inputs;
-            let finality_proof_public_inputs: BlockFinalityTarget =
-                targets.second_proof_public_inputs;
-
-            inclusion_proof_public_inputs
+                          inclusion_proof: MerkleProofTarget<
+            BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
+        >,
+                          finality_proof: BlockFinalityTarget| {
+            inclusion_proof
                 .root_hash
-                .connect(&finality_proof_public_inputs.message.block_hash, builder);
+                .connect(&finality_proof.message.block_hash, builder);
 
             // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
             // and pad it with zeroes.
-            let message_targets = BitArrayTarget::<260>::parse(
-                &mut inclusion_proof_public_inputs.leaf_data.into_targets_iter(),
-            );
+            let message_targets =
+                BitArrayTarget::<260>::parse(&mut inclusion_proof.leaf_data.into_targets_iter());
 
             MessageSentTarget {
                 validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                    finality_proof_public_inputs.validator_set_hash,
+                    finality_proof.validator_set_hash,
                     builder,
                 ),
                 authority_set_id: SingleTarget::from_u64_bits_le_lossy(
-                    finality_proof_public_inputs.message.authority_set_id,
+                    finality_proof.message.authority_set_id,
                     builder,
                 ),
                 message_contents: MessageTargetGoldilocks::from_bit_array(message_targets, builder),
             }
         };
 
-        composition_builder.build(targets_op)
+        composition_builder.compose(targets_op)
     }
 }

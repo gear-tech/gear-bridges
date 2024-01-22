@@ -6,7 +6,7 @@ use std::{path::PathBuf, time::Instant};
 use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
-    common::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
+    common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
     ProofWithCircuitData,
 };
 

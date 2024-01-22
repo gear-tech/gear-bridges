@@ -5,9 +5,10 @@ use crate::{
     common::{
         targets::{
             impl_target_set, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
-            Sha256TargetGoldilocks, SingleTarget, TargetSetOperations, ValidatorSetTargetSet,
+            Sha256TargetGoldilocks, SingleTarget, TargetSet, TargetSetOperations,
+            ValidatorSetTargetSet,
         },
-        ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
+        ProofCompositionBuilder, ProofCompositionTargets,
     },
     consts::VALIDATOR_COUNT,
     merkle_proof::{MerkleProof, MerkleProofTarget},

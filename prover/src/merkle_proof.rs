@@ -12,8 +12,7 @@ use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 use crate::{
     common::{
         array_to_bits,
-        targets::{BitArrayTarget, Blake2Target},
-        TargetSet,
+        targets::{BitArrayTarget, Blake2Target, TargetSet},
     },
     prelude::*,
     ProofWithCircuitData,

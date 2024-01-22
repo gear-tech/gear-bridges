@@ -20,9 +20,10 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
-            SingleTarget, TargetSetOperations, TargetSetWitnessOperations, ValidatorSetTargetSet,
+            SingleTarget, TargetSet, TargetSetOperations, TargetSetWitnessOperations,
+            ValidatorSetTargetSet,
         },
-        ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
+        ProofCompositionBuilder, ProofCompositionTargets,
     },
     consts::{
         GRANDPA_VOTE_LENGTH, GRANDPA_VOTE_LENGTH_IN_BITS, PROCESSED_VALIDATOR_COUNT,

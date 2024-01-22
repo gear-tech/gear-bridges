@@ -8,9 +8,9 @@ use crate::{
     common::{
         targets::{
             impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
-            SingleTarget, TargetSetOperations,
+            SingleTarget, TargetSet, TargetSetOperations,
         },
-        ProofCompositionBuilder, ProofCompositionTargets, TargetSet,
+        ProofCompositionBuilder, ProofCompositionTargets,
     },
     merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,

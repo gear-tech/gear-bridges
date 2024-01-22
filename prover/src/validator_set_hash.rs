@@ -8,8 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     common::{
         array_to_bits,
-        targets::{Sha256Target, ValidatorSetTargetSet},
-        TargetSet,
+        targets::{Sha256Target, TargetSet, ValidatorSetTargetSet},
     },
     consts::VALIDATOR_COUNT,
     impl_target_set,

@@ -82,22 +82,6 @@ macro_rules! impl_target_set {
     }
 }
 
-trait IntoTarget: Clone + Copy {
-    fn into_target(self) -> Target;
-}
-
-impl IntoTarget for Target {
-    fn into_target(self) -> Target {
-        self
-    }
-}
-
-impl IntoTarget for BoolTarget {
-    fn into_target(self) -> Target {
-        self.target
-    }
-}
-
 #[derive(Clone, Debug, Copy)]
 pub struct ArrayTarget<T: TargetSet, const N: usize>([T; N]);
 
@@ -173,11 +157,89 @@ impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_
 #[derive(Clone, Debug)]
 pub struct SingleTarget(Target);
 
+impl TargetSet for SingleTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self(raw.next().unwrap())
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.0)
+    }
+}
+
+impl From<Target> for SingleTarget {
+    fn from(value: Target) -> Self {
+        Self(value)
+    }
+}
+
 impl SingleTarget {
     pub fn to_target(&self) -> Target {
         self.0
     }
+}
 
+macro_rules! impl_array_target_wrapper {
+    ($name:ident, $target_ty:ty, $len:ident) => {
+        #[derive(Clone, Debug)]
+        pub struct $name(ArrayTarget<$target_ty, $len>);
+
+        impl Deref for $name {
+            type Target = ArrayTarget<$target_ty, $len>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl TargetSet for $name {
+            fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+                Self(TargetSet::parse(raw))
+            }
+
+            fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+                self.0.into_targets_iter()
+            }
+        }
+    };
+}
+
+impl_array_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
+impl_array_target_wrapper!(
+    Sha256TargetGoldilocks,
+    Target,
+    SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
+);
+impl_array_target_wrapper!(
+    MessageTargetGoldilocks,
+    Target,
+    MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
+);
+impl_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
+impl_array_target_wrapper!(
+    Ed25519PublicKeyTarget,
+    BoolTarget,
+    ED25519_PUBLIC_KEY_SIZE_IN_BITS
+);
+impl_array_target_wrapper!(
+    Ed25519SignatreTarget,
+    BoolTarget,
+    ED25519_SIGNATURE_SIZE_IN_BITS
+);
+
+impl_array_target_wrapper!(ValidatorSetTarget, Ed25519PublicKeyTarget, VALIDATOR_COUNT);
+
+impl TargetSetWitnessOperations for ValidatorSetTarget {
+    fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
+        self.0
+             .0
+            .iter()
+            .zip(data.chunks(ED25519_PUBLIC_KEY_SIZE))
+            .for_each(|(validator, data)| validator.set_partial_witness(data, witness));
+    }
+}
+
+impl SingleTarget {
     // TODO: Specify exact behaviour when `little-endian` is not appliable
     // like in case with B = 52
     fn from_bool_targets_le_precomputed_exp<const B: usize>(
@@ -222,54 +284,6 @@ impl SingleTarget {
         Self::from_bool_targets_le(bits, builder)
     }
 }
-
-macro_rules! impl_composite_target_wrapper {
-    ($name:ident, $target_ty:ty, $len:ident) => {
-        #[derive(Clone, Debug)]
-        pub struct $name(ArrayTarget<$target_ty, $len>);
-
-        impl Deref for $name {
-            type Target = ArrayTarget<$target_ty, $len>;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl TargetSet for $name {
-            fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-                Self(TargetSet::parse(raw))
-            }
-
-            fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-                self.0.into_targets_iter()
-            }
-        }
-    };
-}
-
-impl_composite_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
-impl_composite_target_wrapper!(
-    Sha256TargetGoldilocks,
-    Target,
-    SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
-);
-impl_composite_target_wrapper!(
-    MessageTargetGoldilocks,
-    Target,
-    MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
-);
-impl_composite_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
-impl_composite_target_wrapper!(
-    Ed25519PublicKeyTarget,
-    BoolTarget,
-    ED25519_PUBLIC_KEY_SIZE_IN_BITS
-);
-impl_composite_target_wrapper!(
-    Ed25519SignatreTarget,
-    BoolTarget,
-    ED25519_SIGNATURE_SIZE_IN_BITS
-);
 
 impl Sha256TargetGoldilocks {
     /// Packs underlying `BoolTarget`s to `Target`s by groups of 52.
@@ -326,50 +340,6 @@ impl MessageTargetGoldilocks {
             .unwrap();
 
         Self(ArrayTarget(targets))
-    }
-}
-
-impl TargetSet for SingleTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(raw.next().unwrap())
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        std::iter::once(self.0)
-    }
-}
-
-impl From<Target> for SingleTarget {
-    fn from(value: Target) -> Self {
-        Self(value)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ValidatorSetTargetSet([Ed25519PublicKeyTarget; VALIDATOR_COUNT]);
-
-impl TargetSet for ValidatorSetTargetSet {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(
-            (0..VALIDATOR_COUNT)
-                .map(|_| Ed25519PublicKeyTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        )
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        self.0.into_iter().flat_map(|v| v.into_targets_iter())
-    }
-}
-
-impl TargetSetWitnessOperations for ValidatorSetTargetSet {
-    fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
-        self.0
-            .iter()
-            .zip(data.chunks(ED25519_PUBLIC_KEY_SIZE))
-            .for_each(|(validator, data)| validator.set_partial_witness(data, witness));
     }
 }
 

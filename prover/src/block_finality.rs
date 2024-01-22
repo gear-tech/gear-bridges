@@ -20,7 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
-            SingleTarget, TargetSet, TargetSetWitnessOperations, ValidatorSetTargetSet,
+            SingleTarget, TargetSet, TargetSetWitnessOperations, ValidatorSetTarget,
         },
         ProofCompositionBuilder, ProofCompositionTargets,
     },
@@ -136,7 +136,7 @@ struct ProcessedPreCommit {
 impl_target_set! {
     struct ValidatorSignsChainTarget {
         validator_idx: SingleTarget,
-        validator_set: ValidatorSetTargetSet,
+        validator_set: ValidatorSetTarget,
         message: GrandpaVoteTarget,
     }
 }
@@ -341,7 +341,7 @@ impl SingleValidatorSign {
 impl_target_set! {
     struct ValidatorSelectorTarget {
         index: SingleTarget,
-        validator_set: ValidatorSetTargetSet,
+        validator_set: ValidatorSetTarget,
         validator: Ed25519PublicKeyTarget,
     }
 }
@@ -360,7 +360,7 @@ impl ValidatorSelector {
         let targets: ValidatorSelectorTarget =
             validator_selector_circuit(&mut builder, self.validator_set.len());
 
-        builder.register_public_input(targets.index.to_target());
+        targets.index.register_as_public_inputs(&mut builder);
 
         targets
             .validator_set
@@ -438,7 +438,7 @@ fn validator_selector_circuit(
     }
 
     ValidatorSelectorTarget {
-        validator_set: ValidatorSetTargetSet::parse(
+        validator_set: ValidatorSetTarget::parse(
             &mut validator_set_targets
                 .into_iter()
                 .flatten()

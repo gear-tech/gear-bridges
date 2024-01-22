@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     common::{
         array_to_bits,
-        targets::{Sha256Target, TargetSet, ValidatorSetTargetSet},
+        targets::{Sha256Target, TargetSet, ValidatorSetTarget},
     },
     consts::VALIDATOR_COUNT,
     impl_target_set,
@@ -19,7 +19,7 @@ use crate::{
 impl_target_set! {
     pub struct ValidatorSetHashTarget {
         pub hash: Sha256Target,
-        pub validator_set: ValidatorSetTargetSet,
+        pub validator_set: ValidatorSetTarget,
     }
 }
 

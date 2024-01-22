@@ -5,7 +5,7 @@ use crate::{
     common::{
         targets::{
             impl_target_set, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
-            Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTargetSet,
+            Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
         },
         ProofCompositionBuilder, ProofCompositionTargets,
     },
@@ -107,7 +107,7 @@ impl_target_set! {
     struct NextValidatorSetNonHashedTarget {
         current_validator_set_hash: Sha256Target,
         authority_set_id: SingleTarget,
-        next_validator_set: ValidatorSetTargetSet,
+        next_validator_set: ValidatorSetTarget,
     }
 }
 
@@ -196,7 +196,7 @@ impl NextValidatorSetNonHashed {
                     block_finality_public_inputs.message.authority_set_id,
                     builder,
                 ),
-                next_validator_set: ValidatorSetTargetSet::parse(
+                next_validator_set: ValidatorSetTarget::parse(
                     &mut validator_keys_targets.into_iter(),
                 ),
             }

@@ -10,7 +10,7 @@ use crate::{
         array_to_bits,
         targets::{Sha256Target, TargetSet, ValidatorSetTarget},
     },
-    consts::VALIDATOR_COUNT,
+    consts::{ED25519_PUBLIC_KEY_SIZE, ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
     impl_target_set,
     prelude::*,
     ProofWithCircuitData,
@@ -24,7 +24,7 @@ impl_target_set! {
 }
 
 pub struct ValidatorSetHash {
-    pub validator_set: [[u8; consts::ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
+    pub validator_set: [[u8; ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
 }
 
 impl ValidatorSetHash {
@@ -33,16 +33,15 @@ impl ValidatorSetHash {
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
 
-        let targets = sha256_circuit(
-            &mut builder,
-            (self.validator_set.len() * consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS) as u64,
-        );
+        let message_len_in_bits = VALIDATOR_COUNT * ED25519_PUBLIC_KEY_SIZE_IN_BITS;
+        let targets = sha256_circuit(&mut builder, message_len_in_bits as u64);
 
         for target in &targets.digest {
             builder.register_public_input(target.target);
         }
 
-        for target in &targets.message {
+        // The message gets padded so we register only first `message_len_in_bits` bits.
+        for target in &targets.message[..message_len_in_bits] {
             builder.register_public_input(target.target);
         }
 

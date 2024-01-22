@@ -170,11 +170,11 @@ where
 
         let mut first_public_inputs_iter = proof_with_pis_target_1.public_inputs.into_iter();
         let first_public_inputs = TS1::parse(&mut first_public_inputs_iter);
-        assert_eq!(first_public_inputs_iter.next(), None);
+        assert_eq!(first_public_inputs_iter.collect::<Vec<_>>().len(), 0);
 
         let mut second_public_inputs_iter = proof_with_pis_target_2.public_inputs.into_iter();
         let second_public_inputs = TS2::parse(&mut second_public_inputs_iter);
-        assert_eq!(second_public_inputs_iter.next(), None);
+        assert_eq!(second_public_inputs_iter.collect::<Vec<_>>().len(), 0);
 
         ProofComposition {
             circuit_builder: builder,

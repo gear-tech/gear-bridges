@@ -286,15 +286,10 @@ impl SingleValidatorSign {
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
 
+        // This fn registers public inputs as:
+        //  - message contents as `BoolTarget`s
+        //  - public key as `BoolTarget`s
         let targets = ed25519_circuit(&mut builder, self.message.len());
-
-        for target in &targets.msg {
-            builder.register_public_input(target.target);
-        }
-
-        for target in &targets.pk {
-            builder.register_public_input(target.target);
-        }
 
         let mut pw = PartialWitness::new();
 

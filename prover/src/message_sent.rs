@@ -8,7 +8,7 @@ use crate::{
     common::{
         targets::{
             impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
-            SingleTarget, TargetSet, TargetSetOperations,
+            SingleTarget, TargetSet,
         },
         ProofCompositionBuilder, ProofCompositionTargets,
     },

@@ -18,6 +18,19 @@ use plonky2::{
 pub trait TargetSet: Clone {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
     fn into_targets_iter(self) -> impl Iterator<Item = Target>;
+
+    fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
+        self.clone()
+            .into_targets_iter()
+            .zip(other.clone().into_targets_iter())
+            .for_each(|(t_0, t_1)| builder.connect(t_0, t_1));
+    }
+
+    fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
+        self.clone()
+            .into_targets_iter()
+            .for_each(|t| builder.register_public_input(t));
+    }
 }
 
 pub(crate) use crate::impl_target_set;
@@ -98,31 +111,8 @@ fn parse_composite_target<T: Debug, const N: usize>(
         .unwrap()
 }
 
-pub trait TargetSetOperations {
-    fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>);
-    fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>);
-}
-
 pub trait TargetSetWitnessOperations {
     fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>);
-}
-
-impl<T, S, const N: usize> TargetSetOperations for T
-where
-    T: Deref<Target = CompositeTarget<S, N>>,
-    S: IntoTarget,
-{
-    fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
-        for (&target_1, &target_2) in self.iter().zip(other.iter()) {
-            builder.connect(target_1.into_target(), target_2.into_target());
-        }
-    }
-
-    fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
-        for target in self.iter() {
-            builder.register_public_input(target.into_target());
-        }
-    }
 }
 
 impl<T, const N: usize> TargetSetWitnessOperations for T
@@ -348,16 +338,6 @@ impl<const N: usize> Deref for BitArrayTarget<N> {
     }
 }
 
-impl TargetSetOperations for SingleTarget {
-    fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
-        builder.connect(self.0, other.0)
-    }
-
-    fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
-        builder.register_public_input(self.0)
-    }
-}
-
 impl TargetSet for SingleTarget {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
         Self(raw.next().unwrap())
@@ -400,21 +380,6 @@ impl TargetSet for ValidatorSetTargetSet {
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
         self.0.into_iter().flat_map(|v| v.into_targets_iter())
-    }
-}
-
-impl TargetSetOperations for ValidatorSetTargetSet {
-    fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
-        self.0
-            .iter()
-            .zip(other.0.iter())
-            .for_each(|(v_0, v_1)| v_0.connect(v_1, builder));
-    }
-
-    fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
-        for validator in &self.0 {
-            validator.register_as_public_inputs(builder);
-        }
     }
 }
 

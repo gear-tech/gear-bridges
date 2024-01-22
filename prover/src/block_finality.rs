@@ -20,8 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
-            SingleTarget, TargetSet, TargetSetOperations, TargetSetWitnessOperations,
-            ValidatorSetTargetSet,
+            SingleTarget, TargetSet, TargetSetWitnessOperations, ValidatorSetTargetSet,
         },
         ProofCompositionBuilder, ProofCompositionTargets,
     },
@@ -120,13 +119,7 @@ impl BlockFinality {
 
             BlockFinalityTarget {
                 validator_set_hash: validator_set_hash_public_inputs.hash,
-                // REFACTOR
-                message: TargetSet::parse(
-                    &mut validator_signs_public_inputs
-                        .message
-                        .into_iter()
-                        .map(|t| t.target),
-                ),
+                message: validator_signs_public_inputs.message,
             }
         };
 
@@ -144,7 +137,7 @@ impl_target_set! {
     struct ValidatorSignsChainTarget {
         validator_idx: SingleTarget,
         validator_set: ValidatorSetTargetSet,
-        message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
+        message: GrandpaVoteTarget,
     }
 }
 
@@ -293,7 +286,7 @@ impl IndexedValidatorSign {
 
 impl_target_set! {
     struct SingleValidatorSignTarget {
-        message: BitArrayTarget<GRANDPA_VOTE_LENGTH_IN_BITS>,
+        message: GrandpaVoteTarget,
         public_key: Ed25519PublicKeyTarget,
     }
 }

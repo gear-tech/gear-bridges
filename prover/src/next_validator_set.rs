@@ -4,7 +4,7 @@ use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
         targets::{
-            impl_target_set, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
+            impl_target_set, ArrayTarget, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
             Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
         },
         ProofCompositionBuilder, ProofCompositionTargets,
@@ -121,30 +121,21 @@ impl_target_set! {
     }
 }
 
-// REFACTOR
-#[derive(Clone, Debug)]
-struct ValidatorSetInStorageTarget {
-    _length: BitArrayTarget<8>,
-    validators: [ValidatorSessionKeysInStorageTarget; VALIDATOR_COUNT],
+impl_target_set! {
+    struct ValidatorSetInStorageTarget {
+        _length: BitArrayTarget<8>,
+        validators: ArrayTarget<ValidatorSessionKeysInStorageTarget, VALIDATOR_COUNT>,
+    }
 }
 
-impl TargetSet for ValidatorSetInStorageTarget {
-    fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
-        Self {
-            _length: BitArrayTarget::parse(raw),
-            validators: (0..VALIDATOR_COUNT)
-                .map(|_| ValidatorSessionKeysInStorageTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        }
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
-        self._length.into_targets_iter().chain(
-            self.validators
+impl ValidatorSetInStorageTarget {
+    fn into_grandpa_authority_keys(self) -> ValidatorSetTarget {
+        ValidatorSetTarget::parse(
+            &mut self
+                .validators
+                .0
                 .into_iter()
-                .flat_map(|v| v.into_targets_iter()),
+                .flat_map(|v| v.grandpa_key.into_targets_iter()),
         )
     }
 }
@@ -167,23 +158,10 @@ impl NextValidatorSetNonHashed {
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
                           targets: ProofCompositionTargets<_, _>| {
-            let merkle_proof_public_inputs: MerkleProofTarget<
-                SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS,
-            > = targets.first_proof_public_inputs;
+            let merkle_proof_public_inputs: MerkleProofTarget<ValidatorSetInStorageTarget> =
+                targets.first_proof_public_inputs;
             let block_finality_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
-
-            // REFACTOR: implement for target itself.
-            let validator_keys_targets = ValidatorSetInStorageTarget::parse(
-                &mut merkle_proof_public_inputs
-                    .leaf_data
-                    .clone()
-                    .into_targets_iter(),
-            )
-            .validators
-            .into_iter()
-            .flat_map(|v| v.grandpa_key.into_targets_iter())
-            .collect::<Vec<_>>();
 
             block_finality_public_inputs
                 .message
@@ -196,9 +174,9 @@ impl NextValidatorSetNonHashed {
                     block_finality_public_inputs.message.authority_set_id,
                     builder,
                 ),
-                next_validator_set: ValidatorSetTarget::parse(
-                    &mut validator_keys_targets.into_iter(),
-                ),
+                next_validator_set: merkle_proof_public_inputs
+                    .leaf_data
+                    .into_grandpa_authority_keys(),
             }
         };
 

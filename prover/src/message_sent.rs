@@ -52,8 +52,9 @@ where
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
                           targets: ProofCompositionTargets<_, _>| {
-            let inclusion_proof_public_inputs: MerkleProofTarget<MESSAGE_LENGTH_IN_BITS> =
-                targets.first_proof_public_inputs;
+            let inclusion_proof_public_inputs: MerkleProofTarget<
+                BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
+            > = targets.first_proof_public_inputs;
             let finality_proof_public_inputs: BlockFinalityTarget =
                 targets.second_proof_public_inputs;
 

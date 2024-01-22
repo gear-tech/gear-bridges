@@ -82,8 +82,9 @@ macro_rules! impl_target_set {
     }
 }
 
+// REFACTOR: remove pub on inner type.
 #[derive(Clone, Debug, Copy)]
-pub struct ArrayTarget<T: TargetSet, const N: usize>([T; N]);
+pub struct ArrayTarget<T: TargetSet, const N: usize>(pub [T; N]);
 
 pub type BitArrayTarget<const N: usize> = ArrayTarget<BoolTarget, N>;
 

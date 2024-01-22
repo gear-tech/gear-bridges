@@ -18,18 +18,17 @@ use crate::{
     ProofWithCircuitData,
 };
 
-// REFACTOR: Replace generic over length with generic over used type.
 #[derive(Clone, Debug)]
-pub struct MerkleProofTarget<const LEAF_DATA_LENGTH: usize> {
-    pub leaf_data: BitArrayTarget<LEAF_DATA_LENGTH>,
+pub struct MerkleProofTarget<LeafData: TargetSet> {
+    pub leaf_data: LeafData,
     pub root_hash: Blake2Target,
 }
 
 // REFACTOR: Add generics to macro?
-impl<const LEAF_DATA_LENGTH: usize> TargetSet for MerkleProofTarget<LEAF_DATA_LENGTH> {
+impl<LeafData: TargetSet> TargetSet for MerkleProofTarget<LeafData> {
     fn parse(targets: &mut impl Iterator<Item = Target>) -> Self {
         Self {
-            leaf_data: BitArrayTarget::<LEAF_DATA_LENGTH>::parse(targets),
+            leaf_data: TargetSet::parse(targets),
             root_hash: Blake2Target::parse(targets),
         }
     }
@@ -62,7 +61,7 @@ impl<const LEAF_DATA_LENGTH_IN_BITS: usize> MerkleProof<LEAF_DATA_LENGTH_IN_BITS
 where
     [(); LEAF_DATA_LENGTH_IN_BITS / 8]:,
 {
-    pub fn prove(&self) -> ProofWithCircuitData<MerkleProofTarget<LEAF_DATA_LENGTH_IN_BITS>> {
+    pub fn prove<LeafData: TargetSet>(&self) -> ProofWithCircuitData<MerkleProofTarget<LeafData>> {
         log::info!("Proving merkle inclusion...");
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());

@@ -201,9 +201,7 @@ where
             },
         );
 
-        for target in target_set.into_targets_iter() {
-            self.circuit_builder.register_public_input(target);
-        }
+        target_set.register_as_public_inputs(&mut self.circuit_builder);
 
         ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
     }

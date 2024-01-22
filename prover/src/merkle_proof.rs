@@ -19,7 +19,7 @@ use crate::{
 };
 
 // REFACTOR: Replace generic over length with generic over used type.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MerkleProofTarget<const LEAF_DATA_LENGTH: usize> {
     pub leaf_data: BitArrayTarget<LEAF_DATA_LENGTH>,
     pub root_hash: Blake2Target,
@@ -36,9 +36,8 @@ impl<const LEAF_DATA_LENGTH: usize> TargetSet for MerkleProofTarget<LEAF_DATA_LE
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
         self.leaf_data
-            .into_iter()
-            .chain(self.root_hash.into_iter())
-            .map(|t| t.target)
+            .into_targets_iter()
+            .chain(self.root_hash.into_targets_iter())
     }
 }
 

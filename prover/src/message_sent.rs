@@ -63,11 +63,9 @@ where
 
             // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
             // and pad it with zeroes.
-            let message_targets_array: [BoolTarget; 260] = inclusion_proof_public_inputs.leaf_data
-                [..260]
-                .try_into()
-                .unwrap();
-            let message_targets: BitArrayTarget<260> = message_targets_array.into();
+            let message_targets = BitArrayTarget::<260>::parse(
+                &mut inclusion_proof_public_inputs.leaf_data.into_targets_iter(),
+            );
 
             MessageSentTarget {
                 validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
@@ -75,7 +73,7 @@ where
                     builder,
                 ),
                 authority_set_id: SingleTarget::from_u64_bits_le_lossy(
-                    *finality_proof_public_inputs.message.authority_set_id,
+                    finality_proof_public_inputs.message.authority_set_id,
                     builder,
                 ),
                 message_contents: MessageTargetGoldilocks::from_bit_array(message_targets, builder),

@@ -122,7 +122,7 @@ impl_target_set! {
 }
 
 // REFACTOR
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ValidatorSetInStorageTarget {
     _length: BitArrayTarget<8>,
     validators: [ValidatorSessionKeysInStorageTarget; VALIDATOR_COUNT],
@@ -178,8 +178,7 @@ impl NextValidatorSetNonHashed {
                 &mut merkle_proof_public_inputs
                     .leaf_data
                     .clone()
-                    .into_iter()
-                    .map(|t| t.target),
+                    .into_targets_iter(),
             )
             .validators
             .into_iter()
@@ -194,7 +193,7 @@ impl NextValidatorSetNonHashed {
             NextValidatorSetNonHashedTarget {
                 current_validator_set_hash: block_finality_public_inputs.validator_set_hash,
                 authority_set_id: SingleTarget::from_u64_bits_le_lossy(
-                    *block_finality_public_inputs.message.authority_set_id,
+                    block_finality_public_inputs.message.authority_set_id,
                     builder,
                 ),
                 next_validator_set: ValidatorSetTargetSet::parse(

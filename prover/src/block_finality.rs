@@ -434,10 +434,8 @@ fn validator_selector_circuit(
             })
             .unwrap();
 
-        validator_targets.push(target);
+        validator_targets.push(target.target);
     }
-    let validator_targets: [_; consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS] =
-        validator_targets.try_into().unwrap();
 
     ValidatorSelectorTarget {
         validator_set: ValidatorSetTargetSet::parse(
@@ -447,6 +445,6 @@ fn validator_selector_circuit(
                 .map(|t| t.target),
         ),
         index: index_target.into(),
-        validator: validator_targets.into(),
+        validator: Ed25519PublicKeyTarget::parse(&mut validator_targets.into_iter()),
     }
 }

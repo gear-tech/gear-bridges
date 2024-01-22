@@ -15,7 +15,7 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-pub trait TargetSet: Clone {
+pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
     fn into_targets_iter(self) -> impl Iterator<Item = Target>;
 
@@ -30,6 +30,26 @@ pub trait TargetSet: Clone {
         self.clone()
             .into_targets_iter()
             .for_each(|t| builder.register_public_input(t));
+    }
+}
+
+impl TargetSet for Target {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        raw.next().unwrap()
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self)
+    }
+}
+
+impl TargetSet for BoolTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self::new_unsafe(raw.next().unwrap())
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.target)
     }
 }
 
@@ -78,37 +98,27 @@ impl IntoTarget for BoolTarget {
     }
 }
 
-pub type CompositeTarget<T, const N: usize> = [T; N];
+#[derive(Clone, Debug, Copy)]
+pub struct ArrayTarget<T: TargetSet, const N: usize>([T; N]);
 
-impl<const N: usize> TargetSet for CompositeTarget<BoolTarget, N> {
+pub type BitArrayTarget<const N: usize> = ArrayTarget<BoolTarget, N>;
+
+impl<T: TargetSet, const N: usize> TargetSet for ArrayTarget<T, N> {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        parse_composite_target(raw, BoolTarget::new_unsafe)
+        Self(
+            (0..N)
+                .map(|_| TargetSet::parse(raw))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
     }
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        self.into_iter().map(|t| t.target)
+        self.0
+            .into_iter()
+            .flat_map(|element| element.into_targets_iter())
     }
-}
-
-impl<const N: usize> TargetSet for CompositeTarget<Target, N> {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        parse_composite_target(raw, |t| t)
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        self.into_iter()
-    }
-}
-
-fn parse_composite_target<T: Debug, const N: usize>(
-    raw: &mut impl Iterator<Item = Target>,
-    mapping: impl Fn(Target) -> T,
-) -> CompositeTarget<T, N> {
-    raw.take(N)
-        .map(mapping)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
 }
 
 pub trait TargetSetWitnessOperations {
@@ -117,12 +127,12 @@ pub trait TargetSetWitnessOperations {
 
 impl<T, const N: usize> TargetSetWitnessOperations for T
 where
-    T: Deref<Target = CompositeTarget<BoolTarget, N>>,
+    T: Deref<Target = ArrayTarget<BoolTarget, N>>,
 {
     fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
         let data = array_to_bits(data);
-        for (target, bit) in self.iter().zip(data.into_iter()) {
-            witness.set_bool_target(*target, bit);
+        for (target, bit) in (*self).clone().into_targets_iter().zip(data.into_iter()) {
+            witness.set_bool_target(BoolTarget::new_unsafe(target), bit);
         }
     }
 }
@@ -132,7 +142,7 @@ trait BoolTargetsArrayToSingleTargets<const PACK_BY: usize> {
 }
 
 impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_BY>
-    for CompositeTarget<BoolTarget, N>
+    for ArrayTarget<BoolTarget, N>
 {
     fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<SingleTarget> {
         assert_eq!(N % PACK_BY, 0);
@@ -145,10 +155,13 @@ impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_
             .try_into()
             .unwrap();
 
-        self.chunks(PACK_BY)
+        self.0
+            .chunks(PACK_BY)
             .map(|bits| {
+                let bits: [BoolTarget; PACK_BY] = bits.try_into().unwrap();
+
                 SingleTarget::from_bool_targets_le_precomputed_exp::<PACK_BY>(
-                    bits.try_into().unwrap(),
+                    ArrayTarget(bits),
                     &bit_exp_targets,
                     builder,
                 )
@@ -168,21 +181,21 @@ impl SingleTarget {
     // TODO: Specify exact behaviour when `little-endian` is not appliable
     // like in case with B = 52
     fn from_bool_targets_le_precomputed_exp<const B: usize>(
-        bits: CompositeTarget<BoolTarget, B>,
+        bits: ArrayTarget<BoolTarget, B>,
         bit_exp_targets: &[Target; B],
         builder: &mut CircuitBuilder<F, D>,
     ) -> SingleTarget {
         assert!(B <= 64);
 
         let mut result = builder.zero();
-        for (bit, exp) in bits.chunks(8).rev().flatten().zip(bit_exp_targets.iter()) {
+        for (bit, exp) in bits.0.chunks(8).rev().flatten().zip(bit_exp_targets.iter()) {
             result = builder.mul_add(bit.target, *exp, result);
         }
         SingleTarget(result)
     }
 
     fn from_bool_targets_le<const B: usize>(
-        bits: CompositeTarget<BoolTarget, B>,
+        bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> SingleTarget {
         let bit_exp_targets = (0..B)
@@ -196,14 +209,14 @@ impl SingleTarget {
     }
 
     pub fn from_u52_bits_le(
-        bits: CompositeTarget<BoolTarget, 52>,
+        bits: ArrayTarget<BoolTarget, 52>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> SingleTarget {
         Self::from_bool_targets_le(bits, builder)
     }
 
     pub fn from_u64_bits_le_lossy(
-        bits: CompositeTarget<BoolTarget, 64>,
+        bits: ArrayTarget<BoolTarget, 64>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> SingleTarget {
         Self::from_bool_targets_le(bits, builder)
@@ -213,10 +226,10 @@ impl SingleTarget {
 macro_rules! impl_composite_target_wrapper {
     ($name:ident, $target_ty:ty, $len:ident) => {
         #[derive(Clone, Debug)]
-        pub struct $name(CompositeTarget<$target_ty, $len>);
+        pub struct $name(ArrayTarget<$target_ty, $len>);
 
         impl Deref for $name {
-            type Target = CompositeTarget<$target_ty, $len>;
+            type Target = ArrayTarget<$target_ty, $len>;
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -230,12 +243,6 @@ macro_rules! impl_composite_target_wrapper {
 
             fn into_targets_iter(self) -> impl Iterator<Item = Target> {
                 self.0.into_targets_iter()
-            }
-        }
-
-        impl From<[$target_ty; $len]> for $name {
-            fn from(value: [$target_ty; $len]) -> Self {
-                Self(value)
             }
         }
     };
@@ -278,6 +285,7 @@ impl Sha256TargetGoldilocks {
         let padding_targets = (0..PADDING).map(|_| builder._false());
         let bit_targets: [_; PADDED_SIZE] = sha256_target
             .0
+             .0
             .into_iter()
             .chain(padding_targets)
             .collect::<Vec<_>>()
@@ -286,7 +294,7 @@ impl Sha256TargetGoldilocks {
 
         let targets: [_; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
             BoolTargetsArrayToSingleTargets::<BITS_FOR_SINGLE_TARGET>::compress_to_goldilocks(
-                &bit_targets,
+                &ArrayTarget(bit_targets),
                 builder,
             )
             .into_iter()
@@ -295,7 +303,7 @@ impl Sha256TargetGoldilocks {
             .try_into()
             .unwrap();
 
-        targets.into()
+        Self(ArrayTarget(targets))
     }
 }
 
@@ -309,7 +317,7 @@ impl MessageTargetGoldilocks {
     ) -> Self {
         let targets: [_; MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
             BoolTargetsArrayToSingleTargets::<PACK_MESSAGE_BY>::compress_to_goldilocks(
-                &bits.0, builder,
+                &bits, builder,
             )
             .into_iter()
             .map(|t| t.0)
@@ -317,24 +325,7 @@ impl MessageTargetGoldilocks {
             .try_into()
             .unwrap();
 
-        targets.into()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct BitArrayTarget<const N: usize>(CompositeTarget<BoolTarget, N>);
-
-impl<const N: usize> From<CompositeTarget<BoolTarget, N>> for BitArrayTarget<N> {
-    fn from(value: CompositeTarget<BoolTarget, N>) -> Self {
-        Self(value)
-    }
-}
-
-impl<const N: usize> Deref for BitArrayTarget<N> {
-    type Target = CompositeTarget<BoolTarget, N>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        Self(ArrayTarget(targets))
     }
 }
 
@@ -345,16 +336,6 @@ impl TargetSet for SingleTarget {
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
         std::iter::once(self.0)
-    }
-}
-
-impl<const N: usize> TargetSet for BitArrayTarget<N> {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(TargetSet::parse(raw))
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        self.0.into_iter().map(|t| t.target)
     }
 }
 
@@ -404,7 +385,8 @@ fn test_single_target_from_u64_bits_le_lossy() {
             .try_into()
             .unwrap();
 
-        let resulting_target = SingleTarget::from_u64_bits_le_lossy(bit_targets, &mut builder);
+        let resulting_target =
+            SingleTarget::from_u64_bits_le_lossy(ArrayTarget(bit_targets), &mut builder);
         builder.register_public_input(resulting_target.0);
 
         let mut pw = PartialWitness::new();

@@ -1,16 +1,26 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use gsdk::metadata::{
-    storage::{BabeStorage, GrandpaStorage, SessionStorage},
-    vara_runtime::SessionKeys,
+use gsdk::{
+    metadata::{
+        storage::{BabeStorage, GrandpaStorage, SessionStorage},
+        vara_runtime::SessionKeys,
+    },
+    GearConfig,
 };
 use parity_scale_codec::{Decode, Encode};
 use prover::merkle_proof::{MerkleProof, TrieNodeData};
 use sc_consensus_grandpa::FinalityProof;
 use sp_core::crypto::Wraps;
 use sp_runtime::AccountId32;
-use subxt::{rpc_params, utils::H256};
+use subxt::{
+    blocks::Block as BlockImpl,
+    dynamic::DecodedValueThunk,
+    rpc_params,
+    storage::{address::Yes, StorageAddress},
+    utils::H256,
+    OnlineClient,
+};
 use trie_db::{node::NodeHandle, ChildReference};
 
 const SESSION_KEYS_DATA_LENGTH_IN_BITS: usize = 8 + VALIDATOR_COUNT * (5 * 32) * 8;
@@ -26,11 +36,9 @@ pub struct GearApi {
 }
 
 impl GearApi {
-    pub async fn new() -> GearApi {
+    pub async fn new(endpoint: &str) -> GearApi {
         GearApi {
-            api: gsdk::Api::new(Some("wss://testnet-archive.vara-network.io:443"))
-                .await
-                .unwrap(),
+            api: gsdk::Api::new(Some(endpoint)).await.unwrap(),
         }
     }
 
@@ -74,15 +82,7 @@ impl GearApi {
         .unwrap();
 
         let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
-        let set_id = block
-            .storage()
-            .fetch(&set_id_address)
-            .await
-            .unwrap()
-            .unwrap()
-            .encoded()
-            .to_vec();
-        let set_id = u64::decode(&mut &*set_id).unwrap();
+        let set_id: u64 = Self::fetch_from_storage(&block, &set_id_address).await;
 
         let pre_commit = justification.commit.precommits[0].clone();
         assert_eq!(pre_commit.precommit.target_hash, block_hash);
@@ -105,16 +105,9 @@ impl GearApi {
         // This trick works for now because validator set actually don't change
         // So we can treat QueuedKeys as ones used in the current session.
         let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
-        let session_keys_data = block
-            .storage()
-            .fetch(&session_keys_address)
-            .await
-            .unwrap()
-            .unwrap()
-            .encoded()
-            .to_vec();
-        let session_keys =
-            Vec::<(AccountId32, SessionKeys)>::decode(&mut &session_keys_data[..]).unwrap();
+        let session_keys: Vec<(AccountId32, SessionKeys)> =
+            Self::fetch_from_storage(&block, &session_keys_address).await;
+
         let validator_set = session_keys
             .into_iter()
             .map(|sc| sc.1.grandpa.0 .0)
@@ -337,5 +330,24 @@ impl GearApi {
             leaf_data: storage_data.try_into().unwrap(),
             root_hash: state_root.0,
         }
+    }
+
+    async fn fetch_from_storage<T, A>(
+        block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
+        address: &A,
+    ) -> T
+    where
+        A: StorageAddress<IsFetchable = Yes, Target = DecodedValueThunk>,
+        T: Decode,
+    {
+        let data = block
+            .storage()
+            .fetch(address)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_encoded();
+
+        T::decode(&mut &data[..]).unwrap()
     }
 }

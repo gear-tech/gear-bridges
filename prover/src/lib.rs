@@ -48,7 +48,6 @@ pub(crate) mod consts {
     pub const ED25519_SIGNATURE_SIZE_IN_BITS: usize = ED25519_SIGNATURE_SIZE * 8;
 
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
-    pub const GRANDPA_VOTE_LENGTH_IN_BITS: usize = GRANDPA_VOTE_LENGTH * 8;
 
     pub const VALIDATOR_COUNT: usize = 4;
     pub const PROCESSED_VALIDATOR_COUNT: usize = 3;

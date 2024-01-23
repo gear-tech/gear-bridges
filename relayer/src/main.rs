@@ -6,7 +6,7 @@ use std::{path::PathBuf, time::Instant};
 use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
-    common::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
+    common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
     ProofWithCircuitData,
 };
 
@@ -16,6 +16,12 @@ use prover::{
 struct Cli {
     #[command(subcommand)]
     command: CliCommands,
+    /// Address of the VARA RPC endpoint
+    #[arg(
+        long = "vara-endpoint",
+        default_value = "wss://testnet-archive.vara-network.io:443"
+    )]
+    vara_endpoint: String,
     /// Path to the generated circom file containing constants
     #[arg(
         long = "circom-const-path",
@@ -62,7 +68,7 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let api = GearApi::new().await;
+    let api = GearApi::new(&cli.vara_endpoint).await;
     let block = api.latest_finalized_block().await;
 
     match &cli.command {

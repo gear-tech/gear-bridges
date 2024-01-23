@@ -10,7 +10,8 @@ use gsdk::{
 };
 use parity_scale_codec::{Decode, Encode};
 use prover::merkle_proof::{MerkleProof, TrieNodeData};
-use sc_consensus_grandpa::FinalityProof;
+use sc_consensus_grandpa::{FinalityProof, Precommit};
+use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::crypto::Wraps;
 use sp_runtime::AccountId32;
 use subxt::{
@@ -28,6 +29,8 @@ const VOTE_LENGTH_IN_BITS: usize = 424;
 const VALIDATOR_COUNT: usize = 4;
 const PROCESSED_VALIDATOR_COUNT: usize = 3;
 const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
+
+const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -59,65 +62,57 @@ impl GearApi {
         self.api.rpc().chain_get_finalized_head().await.unwrap()
     }
 
-    // TODO: Process case when `grandpa_proveFinality` yields proof for the other block than specified.
-    // Basically this can be in the case when there were finalized blocks between `grandpa_proveFinality`
-    // and `latest_finalized_block` calls.
-    pub async fn fetch_finality_proof(&self, block: H256) -> prover::block_finality::BlockFinality {
-        let block_hash = block;
+    pub async fn validator_set_id(&self, block: H256) -> u64 {
         let block = (*self.api).blocks().at(block).await.unwrap();
+        let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
+        Self::fetch_from_storage(&block, &set_id_address).await
+    }
 
+    /// Returns finality proof for block not earlier `after_block`
+    /// and not later the end of session this block belongs to.
+    pub async fn fetch_finality_proof(
+        &self,
+        after_block: H256,
+    ) -> prover::block_finality::BlockFinality {
+        let required_validator_set_id = self.validator_set_id(after_block).await;
+
+        let after_block_number = self.block_hash_to_number(after_block).await;
         let finality: Option<String> = self
             .api
             .rpc()
-            .request("grandpa_proveFinality", rpc_params![block.number()])
+            .request("grandpa_proveFinality", rpc_params![after_block_number])
             .await
             .unwrap();
         let finality = hex::decode(&finality.unwrap_or_default()["0x".len()..]).unwrap();
         let finality = FinalityProof::<GearHeader>::decode(&mut &finality[..]).unwrap();
 
+        let fetched_validator_set_id = self.validator_set_id(finality.block).await;
+        let fetched_block_number = self.block_hash_to_number(finality.block).await;
+        assert_eq!(required_validator_set_id, fetched_validator_set_id);
+        assert!(fetched_block_number >= after_block_number);
+
         let justification = finality.justification;
-        let justification = sp_consensus_grandpa::GrandpaJustification::<GearHeader>::decode(
-            &mut &justification[..],
-        )
-        .unwrap();
-
-        let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
-        let set_id: u64 = Self::fetch_from_storage(&block, &set_id_address).await;
-
-        let pre_commit = justification.commit.precommits[0].clone();
-        assert_eq!(pre_commit.precommit.target_hash, block_hash);
+        let justification =
+            GrandpaJustification::<GearHeader>::decode(&mut &justification[..]).unwrap();
 
         for pc in &justification.commit.precommits {
-            assert_eq!(pc.precommit.target_hash, pre_commit.precommit.target_hash);
-            assert_eq!(
-                pc.precommit.target_number,
-                pre_commit.precommit.target_number
-            );
+            assert_eq!(pc.precommit.target_hash, finality.block);
+            assert_eq!(pc.precommit.target_number, fetched_block_number);
         }
 
         let signed_data = sp_consensus_grandpa::localized_payload(
             justification.round,
-            set_id,
-            &sp_consensus_grandpa::Message::<GearHeader>::Precommit(pre_commit.precommit),
+            required_validator_set_id,
+            &sp_consensus_grandpa::Message::<GearHeader>::Precommit(Precommit::<GearHeader>::new(
+                finality.block,
+                fetched_block_number,
+            )),
         );
-
-        // TODO: refactor
-        // This trick works for now because validator set actually don't change
-        // So we can treat QueuedKeys as ones used in the current session.
-        let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
-        let session_keys: Vec<(AccountId32, SessionKeys)> =
-            Self::fetch_from_storage(&block, &session_keys_address).await;
-
-        let validator_set = session_keys
-            .into_iter()
-            .map(|sc| sc.1.grandpa.0 .0)
-            .collect::<Vec<_>>();
-
-        assert_eq!(VALIDATOR_COUNT, validator_set.len());
-
-        let validator_set = validator_set.try_into().unwrap();
-
         assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
+
+        let validator_set = self.fetch_validator_set(required_validator_set_id).await;
+        assert_eq!(VALIDATOR_COUNT, validator_set.len());
+        let validator_set = validator_set.try_into().unwrap();
 
         prover::block_finality::BlockFinality {
             validator_set,
@@ -133,6 +128,89 @@ impl GearApi {
                 })
                 .collect(),
         }
+    }
+
+    async fn fetch_validator_set(&self, validator_set_id: u64) -> Vec<[u8; 32]> {
+        let latest_block = self.latest_finalized_block().await;
+        let latest_vs_id = self.validator_set_id(latest_block).await;
+
+        if latest_vs_id == validator_set_id {
+            return self.fetch_validator_set_in_block(latest_block).await;
+        }
+
+        #[derive(Clone, Copy)]
+        enum State {
+            SearchBack { latest_bn: u32, step: u32 },
+            BinarySearch { lower_bn: u32, higher_bn: u32 },
+        }
+
+        let mut state = State::SearchBack {
+            latest_bn: self.block_hash_to_number(latest_block).await,
+            step: EXPECTED_SESSION_DURATION_IN_BLOCKS,
+        };
+
+        loop {
+            state = match state {
+                State::SearchBack { latest_bn, step } => {
+                    let next_bn = latest_bn.saturating_sub(step);
+                    let next_block = self.block_number_to_hash(next_bn).await;
+                    let next_vs = self.validator_set_id(next_block).await;
+
+                    if next_vs == validator_set_id {
+                        return self.fetch_validator_set_in_block(next_block).await;
+                    }
+
+                    if next_vs > validator_set_id {
+                        State::SearchBack {
+                            latest_bn: next_bn,
+                            step: step * 2,
+                        }
+                    } else {
+                        State::BinarySearch {
+                            lower_bn: next_bn,
+                            higher_bn: latest_bn,
+                        }
+                    }
+                }
+                State::BinarySearch {
+                    lower_bn,
+                    higher_bn,
+                } => {
+                    let mid_bn = (lower_bn + higher_bn) / 2;
+                    let mid_block = self.block_number_to_hash(mid_bn).await;
+                    let mid_vs = self.validator_set_id(mid_block).await;
+
+                    if mid_vs == validator_set_id {
+                        return self.fetch_validator_set_in_block(mid_block).await;
+                    }
+
+                    if mid_vs > validator_set_id {
+                        State::BinarySearch {
+                            lower_bn,
+                            higher_bn: mid_bn,
+                        }
+                    } else {
+                        State::BinarySearch {
+                            lower_bn: mid_bn,
+                            higher_bn,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn fetch_validator_set_in_block(&self, block: H256) -> Vec<[u8; 32]> {
+        let block = (*self.api).blocks().at(block).await.unwrap();
+
+        let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
+        let session_keys: Vec<(AccountId32, SessionKeys)> =
+            Self::fetch_from_storage(&block, &session_keys_address).await;
+
+        session_keys
+            .into_iter()
+            .map(|sc| sc.1.grandpa.0 .0)
+            .collect::<Vec<_>>()
     }
 
     /// NOTE: mock for now, returns some data with constant position in merkle trie.

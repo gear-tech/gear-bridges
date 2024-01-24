@@ -29,36 +29,22 @@ import type {
 
 export interface ValidatorSetChangeVerifierInterface extends utils.Interface {
   functions: {
-    "getValidatorSet()": FunctionFragment;
-    "getVerified()": FunctionFragment;
     "nonceId()": FunctionFragment;
     "publicInputs(uint256)": FunctionFragment;
-    "validatorSet(uint256,uint256)": FunctionFragment;
-    "verified()": FunctionFragment;
+    "validatorSet(uint256)": FunctionFragment;
     "verifyProof(uint256[2],uint256[2][2],uint256[2],uint256[78])": FunctionFragment;
     "verifyValidatorSetChangeProof(uint256[2],uint256[2][2],uint256[2],uint256[5])": FunctionFragment;
   };
 
   getFunction(
     nameOrSignatureOrTopic:
-      | "getValidatorSet"
-      | "getVerified"
       | "nonceId"
       | "publicInputs"
       | "validatorSet"
-      | "verified"
       | "verifyProof"
       | "verifyValidatorSetChangeProof"
   ): FunctionFragment;
 
-  encodeFunctionData(
-    functionFragment: "getValidatorSet",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "getVerified",
-    values?: undefined
-  ): string;
   encodeFunctionData(functionFragment: "nonceId", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "publicInputs",
@@ -66,9 +52,8 @@ export interface ValidatorSetChangeVerifierInterface extends utils.Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "validatorSet",
-    values: [PromiseOrValue<BigNumberish>, PromiseOrValue<BigNumberish>]
+    values: [PromiseOrValue<BigNumberish>]
   ): string;
-  encodeFunctionData(functionFragment: "verified", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "verifyProof",
     values: [
@@ -100,14 +85,6 @@ export interface ValidatorSetChangeVerifierInterface extends utils.Interface {
     ]
   ): string;
 
-  decodeFunctionResult(
-    functionFragment: "getValidatorSet",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "getVerified",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(functionFragment: "nonceId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "publicInputs",
@@ -117,7 +94,6 @@ export interface ValidatorSetChangeVerifierInterface extends utils.Interface {
     functionFragment: "validatorSet",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "verified", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "verifyProof",
     data: BytesLike
@@ -185,12 +161,6 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
   removeListener: OnEvent<this>;
 
   functions: {
-    getValidatorSet(
-      overrides?: CallOverrides
-    ): Promise<[[BigNumber, BigNumber, BigNumber, BigNumber, BigNumber][]]>;
-
-    getVerified(overrides?: CallOverrides): Promise<[boolean]>;
-
     nonceId(overrides?: CallOverrides): Promise<[BigNumber]>;
 
     publicInputs(
@@ -200,11 +170,8 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
 
     validatorSet(
       arg0: PromiseOrValue<BigNumberish>,
-      arg1: PromiseOrValue<BigNumberish>,
       overrides?: CallOverrides
     ): Promise<[BigNumber]>;
-
-    verified(overrides?: CallOverrides): Promise<[boolean]>;
 
     verifyProof(
       _pA: [PromiseOrValue<BigNumberish>, PromiseOrValue<BigNumberish>],
@@ -235,12 +202,6 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
     ): Promise<ContractTransaction>;
   };
 
-  getValidatorSet(
-    overrides?: CallOverrides
-  ): Promise<[BigNumber, BigNumber, BigNumber, BigNumber, BigNumber][]>;
-
-  getVerified(overrides?: CallOverrides): Promise<boolean>;
-
   nonceId(overrides?: CallOverrides): Promise<BigNumber>;
 
   publicInputs(
@@ -250,11 +211,8 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
 
   validatorSet(
     arg0: PromiseOrValue<BigNumberish>,
-    arg1: PromiseOrValue<BigNumberish>,
     overrides?: CallOverrides
   ): Promise<BigNumber>;
-
-  verified(overrides?: CallOverrides): Promise<boolean>;
 
   verifyProof(
     _pA: [PromiseOrValue<BigNumberish>, PromiseOrValue<BigNumberish>],
@@ -285,12 +243,6 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
   ): Promise<ContractTransaction>;
 
   callStatic: {
-    getValidatorSet(
-      overrides?: CallOverrides
-    ): Promise<[BigNumber, BigNumber, BigNumber, BigNumber, BigNumber][]>;
-
-    getVerified(overrides?: CallOverrides): Promise<boolean>;
-
     nonceId(overrides?: CallOverrides): Promise<BigNumber>;
 
     publicInputs(
@@ -300,11 +252,8 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
 
     validatorSet(
       arg0: PromiseOrValue<BigNumberish>,
-      arg1: PromiseOrValue<BigNumberish>,
       overrides?: CallOverrides
     ): Promise<BigNumber>;
-
-    verified(overrides?: CallOverrides): Promise<boolean>;
 
     verifyProof(
       _pA: [PromiseOrValue<BigNumberish>, PromiseOrValue<BigNumberish>],
@@ -348,10 +297,6 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
   };
 
   estimateGas: {
-    getValidatorSet(overrides?: CallOverrides): Promise<BigNumber>;
-
-    getVerified(overrides?: CallOverrides): Promise<BigNumber>;
-
     nonceId(overrides?: CallOverrides): Promise<BigNumber>;
 
     publicInputs(
@@ -361,11 +306,8 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
 
     validatorSet(
       arg0: PromiseOrValue<BigNumberish>,
-      arg1: PromiseOrValue<BigNumberish>,
       overrides?: CallOverrides
     ): Promise<BigNumber>;
-
-    verified(overrides?: CallOverrides): Promise<BigNumber>;
 
     verifyProof(
       _pA: [PromiseOrValue<BigNumberish>, PromiseOrValue<BigNumberish>],
@@ -397,10 +339,6 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
   };
 
   populateTransaction: {
-    getValidatorSet(overrides?: CallOverrides): Promise<PopulatedTransaction>;
-
-    getVerified(overrides?: CallOverrides): Promise<PopulatedTransaction>;
-
     nonceId(overrides?: CallOverrides): Promise<PopulatedTransaction>;
 
     publicInputs(
@@ -410,11 +348,8 @@ export interface ValidatorSetChangeVerifier extends BaseContract {
 
     validatorSet(
       arg0: PromiseOrValue<BigNumberish>,
-      arg1: PromiseOrValue<BigNumberish>,
       overrides?: CallOverrides
     ): Promise<PopulatedTransaction>;
-
-    verified(overrides?: CallOverrides): Promise<PopulatedTransaction>;
 
     verifyProof(
       _pA: [PromiseOrValue<BigNumberish>, PromiseOrValue<BigNumberish>],

@@ -1,33 +1,28 @@
 import { ethers } from "hardhat";
-const publics = require("../../aggregation/final_public.json");
-const proof = require("../../aggregation/final_proof.json");
+const publics_for_validator_change = require("../../aggregation/vs_change/final_public.json");
+const publics_for_message_sent = require("../../aggregation/message_sent/final_public.json");
 
 async function main() {
-  const verifierFactory = await ethers.getContractFactory("ValidatorSetChangeVerifier");
-  const  circuitDigestAndMerkleRoots = publics.slice(0, 68);
-  const validatorSet = publics.slice(68, 73);
-  const verifier = await verifierFactory.deploy(
-    circuitDigestAndMerkleRoots, validatorSet
+  const setChangeVerifierFactory = await ethers.getContractFactory("ValidatorSetChangeVerifier");
+  let circuitDigestAndMerkleRoots = publics_for_validator_change.slice(0, 8);
+  let validatorSet = publics_for_validator_change.slice(8, 13);
+  const setChangeVerifier = await setChangeVerifierFactory.deploy(
+    circuitDigestAndMerkleRoots, validatorSet, 232
   );
-  await verifier.deployed();
+  await setChangeVerifier.deployed();
 
-  console.log("Verifier deployed at ", verifier.address);
+  console.log("SetChangeVerifier deployed at ", setChangeVerifier.address);
 
-  // const nextValidatorSet = publics.slice(73);
-  // console.log(nextValidatorSet);
-  
-  // await verifier.verifyValidatorSetChangeProof(
-  //   [proof.pi_a[0], proof.pi_a[1]],
-  //   [
-  //     [proof.pi_b[0][1], proof.pi_b[0][0]],
-  //     [proof.pi_b[1][1], proof.pi_b[1][0]],
-  //   ],
-  //   [proof.pi_c[0], proof.pi_c[1]],
-  //   nextValidatorSet,
-  // )
-    
-  //   console.log(await verifier.getVerified());
-  //   console.log(await verifier.getValidatorSet());
+  const msgSentVerifierFactory = await ethers.getContractFactory("MessageSentVerifier");
+  circuitDigestAndMerkleRoots = publics_for_message_sent.slice(0, 8);
+  validatorSet = publics_for_message_sent.slice(8, 13);
+  const msgSentVerifier = await msgSentVerifierFactory.deploy(
+    circuitDigestAndMerkleRoots, validatorSet, 230
+  );
+  await setChangeVerifier.deployed();
+
+  console.log("MsgSentVerifier deployed at ", msgSentVerifier.address);
+
 }
 
 // We recommend this pattern to be able to use async/await everywhere

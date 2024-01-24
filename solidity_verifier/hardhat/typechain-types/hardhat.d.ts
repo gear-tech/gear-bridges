@@ -17,6 +17,18 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Groth16Verifier__factory>;
     getContractFactory(
+      name: "MessageSentVerifier",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.MessageSentVerifier__factory>;
+    getContractFactory(
+      name: "Verifier",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.Verifier__factory>;
+    getContractFactory(
+      name: "Groth16Verifier",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.Groth16Verifier__factory>;
+    getContractFactory(
       name: "ValidatorSetChangeVerifier",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ValidatorSetChangeVerifier__factory>;
@@ -25,6 +37,21 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Verifier__factory>;
 
+    getContractAt(
+      name: "Groth16Verifier",
+      address: string,
+      signer?: ethers.Signer
+    ): Promise<Contracts.Groth16Verifier>;
+    getContractAt(
+      name: "MessageSentVerifier",
+      address: string,
+      signer?: ethers.Signer
+    ): Promise<Contracts.MessageSentVerifier>;
+    getContractAt(
+      name: "Verifier",
+      address: string,
+      signer?: ethers.Signer
+    ): Promise<Contracts.Verifier>;
     getContractAt(
       name: "Groth16Verifier",
       address: string,

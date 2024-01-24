@@ -26,8 +26,8 @@ use trie_db::{node::NodeHandle, ChildReference};
 
 const SESSION_KEYS_DATA_LENGTH_IN_BITS: usize = 8 + VALIDATOR_COUNT * (5 * 32) * 8;
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const VALIDATOR_COUNT: usize = 4;
-const PROCESSED_VALIDATOR_COUNT: usize = 3;
+const VALIDATOR_COUNT: usize = 6;
+const PROCESSED_VALIDATOR_COUNT: usize = 5;
 const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
 
 const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
@@ -46,7 +46,15 @@ impl GearApi {
     }
 
     pub async fn block_hash_to_number(&self, block: H256) -> u32 {
-        self.api.gear_block_number(Some(block)).await.unwrap()
+        self.api
+            .rpc()
+            .chain_get_block(Some(block))
+            .await
+            .unwrap()
+            .unwrap()
+            .block
+            .header
+            .number
     }
 
     pub async fn block_number_to_hash(&self, block: u32) -> H256 {
@@ -73,7 +81,7 @@ impl GearApi {
     pub async fn fetch_finality_proof(
         &self,
         after_block: H256,
-    ) -> prover::block_finality::BlockFinality {
+    ) -> (H256, prover::block_finality::BlockFinality) {
         let required_validator_set_id = self.validator_set_id(after_block).await;
 
         let after_block_number = self.block_hash_to_number(after_block).await;
@@ -114,20 +122,23 @@ impl GearApi {
         assert_eq!(VALIDATOR_COUNT, validator_set.len());
         let validator_set = validator_set.try_into().unwrap();
 
-        prover::block_finality::BlockFinality {
-            validator_set,
-            message: signed_data.try_into().unwrap(),
-            pre_commits: justification
-                .commit
-                .precommits
-                .into_iter()
-                .take(PROCESSED_VALIDATOR_COUNT)
-                .map(|pc| prover::block_finality::PreCommit {
-                    public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
-                    signature: pc.signature.as_inner_ref().0.to_owned(),
-                })
-                .collect(),
-        }
+        (
+            finality.block,
+            prover::block_finality::BlockFinality {
+                validator_set,
+                message: signed_data.try_into().unwrap(),
+                pre_commits: justification
+                    .commit
+                    .precommits
+                    .into_iter()
+                    .take(PROCESSED_VALIDATOR_COUNT)
+                    .map(|pc| prover::block_finality::PreCommit {
+                        public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
+                        signature: pc.signature.as_inner_ref().0.to_owned(),
+                    })
+                    .collect(),
+            },
+        )
     }
 
     async fn fetch_validator_set(&self, validator_set_id: u64) -> Vec<[u8; 32]> {

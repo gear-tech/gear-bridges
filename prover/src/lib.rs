@@ -49,6 +49,6 @@ pub(crate) mod consts {
 
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
-    pub const VALIDATOR_COUNT: usize = 4;
-    pub const PROCESSED_VALIDATOR_COUNT: usize = 3;
+    pub const VALIDATOR_COUNT: usize = 6;
+    pub const PROCESSED_VALIDATOR_COUNT: usize = 5;
 }

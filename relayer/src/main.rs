@@ -73,8 +73,9 @@ async fn main() {
 
     match &cli.command {
         CliCommands::ValidatorSetChange(_) => {
+            let (block, current_epoch_block_finality) = api.fetch_finality_proof(block).await;
             let circuit = NextValidatorSet {
-                current_epoch_block_finality: api.fetch_finality_proof(block).await,
+                current_epoch_block_finality,
                 next_validator_set_inclusion_proof: api
                     .fetch_next_session_keys_merkle_proof(block)
                     .await,
@@ -83,8 +84,9 @@ async fn main() {
             process_command(&circuit, NextValidatorSet::prove, &cli);
         }
         CliCommands::MessageSent(_) => {
+            let (block, block_finality) = api.fetch_finality_proof(block).await;
             let circuit = MessageSent {
-                block_finality: api.fetch_finality_proof(block).await,
+                block_finality,
                 inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
             };
 

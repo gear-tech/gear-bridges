@@ -14,7 +14,7 @@ describe("Validator set change verifier test", function () {
     const validatorSet = publics_for_validator_change.slice(8, 13);
            
     const verifier = await verifierFactory.deploy(
-      circuitDigestAndMerkleRoots, validatorSet, 232
+      circuitDigestAndMerkleRoots, validatorSet, 248
     );
     
     await verifier.deployed();
@@ -28,17 +28,17 @@ describe("Validator set change verifier test", function () {
       [proof_for_validator_change.pi_c[0], proof_for_validator_change.pi_c[1]],
     ];
 
-    const nextValidatorSet = publics_for_validator_change.slice(13,18);
+    const nextValidatorSet = publics_for_validator_change.slice(14,19);
 
     await expect(verifier.verifyValidatorSetChangeProof(
       solProof[0],
       solProof[1],
       solProof[2],
       nextValidatorSet,
-      233,
+      249,
     )).to.emit(verifier, "SuccessfulVerification")
       .withArgs(nextValidatorSet);
-    
+      
   });
 });
 
@@ -49,7 +49,7 @@ describe("Message sent verifier test", function () {
     const validatorSet = publics_for_message_sent.slice(8, 13);
            
     const verifier = await verifierFactory.deploy(
-      circuitDigestAndMerkleRoots, validatorSet, 230
+      circuitDigestAndMerkleRoots, validatorSet, 250
     );
     
     await verifier.deployed();
@@ -70,7 +70,7 @@ describe("Message sent verifier test", function () {
       solProof[1],
       solProof[2],
       nextValidatorSet,
-      231,
+      251,
     )).to.emit(verifier, "SuccessfulVerification")
       .withArgs(nextValidatorSet);
     

@@ -3,7 +3,7 @@ import {Groth16Verifier} from "./final_verifier.sol";
 
 contract MessageSentVerifier is Groth16Verifier{
      uint[19] public  publicInputs;
-     uint[5] public validatorSet;
+     uint[5][] public validatorSet;
      uint public nonceId;
 
     event SuccessfulVerification(uint[5]);
@@ -11,7 +11,7 @@ contract MessageSentVerifier is Groth16Verifier{
 
     constructor (uint[8] memory _circuitDigestAndMerkleRoots, uint[5] memory _validatorSet, uint  _nonceId) {
         publicInputs = _circuitDigestAndMerkleRoots;
-        validatorSet = _validatorSet; 
+        validatorSet.push(_validatorSet); 
         nonceId = _nonceId; 
     }
 
@@ -19,7 +19,7 @@ contract MessageSentVerifier is Groth16Verifier{
         nonceId = nonceId + 1;
         require(nonceId == _nonceId, "Wrong validator set ID");
         constructPublicInputs(nextValidatorSet);
-        validatorSet = nextValidatorSet;
+        validatorSet.push(nextValidatorSet);
         bytes memory executePayload = abi.encodeWithSignature("verifyProof(uint256[2],uint256[2][2],uint256[2],uint256[19])", _pA, _pB, _pC, publicInputs);
        (bool success, bytes memory returnData) = address(address(this)).call(executePayload);
         bool successful_verification = abi.decode(returnData, (bool));
@@ -31,8 +31,10 @@ contract MessageSentVerifier is Groth16Verifier{
     }
 
     function constructPublicInputs(uint[5] calldata nextValidatorSet ) internal {
-        for (uint i=0; i < validatorSet.length; i++) {
-            publicInputs[8 + i] = validatorSet[i];
+         uint index = validatorSet.length - 1;
+        uint[5] storage prevValidatorSet = validatorSet[index];
+        for (uint i=0; i < prevValidatorSet.length; i++) {
+            publicInputs[8 + i] = prevValidatorSet[i];
         }
         publicInputs[13] = nonceId;
          for (uint i=0; i < nextValidatorSet.length; i++) {
@@ -47,5 +49,14 @@ contract MessageSentVerifier is Groth16Verifier{
 
     function getNonceId() public view returns (uint) {
         return nonceId;
+    }
+
+     function getAllValidatorSets() public view returns (uint[5][] memory) {
+        return validatorSet;
+    }
+
+    function getLastValidatorSet() public view returns (uint[5] memory) {
+         uint index = validatorSet.length - 1;
+        return validatorSet[index];
     }
 }

@@ -36,6 +36,7 @@ impl ContractVerifiers {
 
     pub async fn verify_vs_change(
         &self,
+        pk: String,
         path_to_final_proof: &str,
         path_to_final_public: &str,
     ) -> Result<bool, VerifierError> {
@@ -53,7 +54,6 @@ impl ContractVerifiers {
         let nonce_id = publics[13];
 
         let account = {
-            let pk = env::var("PK").expect("PK is not set");
             let key: PrivateKey = pk.parse().expect("invalid PK");
             Account::Offline(key, None)
         };
@@ -79,6 +79,7 @@ impl ContractVerifiers {
 
     pub async fn verify_msg_sent(
         &self,
+        pk: String,
         path_to_final_proof: &str,
         path_to_final_public: &str,
     ) -> Result<bool, VerifierError> {
@@ -86,7 +87,6 @@ impl ContractVerifiers {
         let publics = get_publics(path_to_final_public)?;
 
         let account = {
-            let pk = env::var("PK").expect("PK is not set");
             let key: PrivateKey = pk.parse().expect("invalid PK");
             Account::Offline(key, None)
         };
@@ -269,6 +269,7 @@ mod tests {
             "{:?}",
             verifier
                 .verify_vs_change(
+                    String::from("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"),
                     "../solidity_verifier/aggregation/vs_change/final_proof.json",
                     "../solidity_verifier/aggregation/vs_change/final_public.json"
                 )
@@ -309,6 +310,7 @@ mod tests {
             "{:?}",
             verifier
                 .verify_msg_sent(
+                    String::from("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"),
                     "../solidity_verifier/aggregation/message_sent/final_proof.json",
                     "../solidity_verifier/aggregation/message_sent/final_public.json"
                 )

@@ -1,2 +1,7 @@
 target/
 .vscode
+node_modules
+typechain-types
+artifacts
+cache
+.DS_Store

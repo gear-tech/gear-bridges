@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "eth-client",
     "gear-rpc-client",
     "prover",
     "relayer",

@@ -10,18 +10,43 @@ use prover::{
     ProofWithCircuitData,
 };
 
+const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
+const DEFAULT_ETH_RPC: &str = "http://127.0.0.1:8545";
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
     command: CliCommands,
-    /// Address of the VARA RPC endpoint
-    #[arg(
-        long = "vara-endpoint",
-        default_value = "wss://testnet-archive.vara-network.io:443"
-    )]
-    vara_endpoint: String,
+}
+
+#[derive(Subcommand)]
+enum CliCommands {
+    /// Generate zk-proofs
+    #[command(subcommand)]
+    #[clap(visible_alias("p"))]
+    Prove(ProveCommands),
+    /// Fetch data from RPC
+    #[command(subcommand)]
+    #[clap(visible_alias("q"))]
+    Query(QueryCommands),
+}
+
+#[derive(Subcommand)]
+enum ProveCommands {
+    /// Prove validator set change
+    #[clap(visible_alias("v"))]
+    ValidatorSetChange(ProveArgs),
+    /// Prove that message was sent
+    #[clap(visible_alias("m"))]
+    MessageSent(ProveArgs),
+}
+
+#[derive(Args)]
+struct ProveArgs {
+    #[clap(flatten)]
+    vara_endpoint: VaraEndpointArg,
     /// Path to the generated circom file containing constants
     #[arg(
         long = "circom-const-path",
@@ -49,18 +74,50 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-enum CliCommands {
-    /// Prove validator set change
-    ValidatorSetChange(ProveValidatorSetChangeCommand),
-    /// Prove that message was sent
-    MessageSent(ProveMessageSentCommand),
+enum QueryCommands {
+    /// Query validator set stats
+    #[clap(visible_alias("v"))]
+    ValidatorSet {
+        #[clap(flatten)]
+        vara_endpoint: VaraEndpointArg,
+        #[clap(flatten)]
+        eth_endpoint: EthEndpointArg,
+    },
+    /// Query relayed message stats
+    #[clap(visible_alias("m"))]
+    Messages {
+        #[clap(flatten)]
+        eth_endpoint: EthEndpointArg,
+    },
+    /// Query all possible stats
+    #[clap(visible_alias("a"))]
+    All {
+        #[clap(flatten)]
+        vara_endpoint: VaraEndpointArg,
+        #[clap(flatten)]
+        eth_endpoint: EthEndpointArg,
+    },
 }
 
 #[derive(Args)]
-struct ProveValidatorSetChangeCommand {}
+struct VaraEndpointArg {
+    /// Address of the VARA RPC endpoint
+    #[arg(
+        long = "vara-endpoint",
+        default_value = DEFAULT_VARA_RPC
+    )]
+    vara_endpoint: String,
+}
 
 #[derive(Args)]
-struct ProveMessageSentCommand {}
+struct EthEndpointArg {
+    /// Address of the Ethereum RPC endpoint
+    #[arg(
+        long = "eth-endpoint",
+        default_value = DEFAULT_ETH_RPC
+    )]
+    eth_endpoint: String,
+}
 
 #[tokio::main]
 async fn main() {
@@ -68,34 +125,47 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let api = GearApi::new(&cli.vara_endpoint).await;
-    let block = api.latest_finalized_block().await;
+    match cli.command {
+        CliCommands::Prove(prove_command) => match prove_command {
+            ProveCommands::ValidatorSetChange(args) => {
+                let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                let block = api.latest_finalized_block().await;
 
-    match &cli.command {
-        CliCommands::ValidatorSetChange(_) => {
-            let (block, current_epoch_block_finality) = api.fetch_finality_proof(block).await;
-            let circuit = NextValidatorSet {
-                current_epoch_block_finality,
-                next_validator_set_inclusion_proof: api
-                    .fetch_next_session_keys_merkle_proof(block)
-                    .await,
-            };
+                let (block, current_epoch_block_finality) = api.fetch_finality_proof(block).await;
+                let circuit = NextValidatorSet {
+                    current_epoch_block_finality,
+                    next_validator_set_inclusion_proof: api
+                        .fetch_next_session_keys_merkle_proof(block)
+                        .await,
+                };
 
-            process_command(&circuit, NextValidatorSet::prove, &cli);
-        }
-        CliCommands::MessageSent(_) => {
-            let (block, block_finality) = api.fetch_finality_proof(block).await;
-            let circuit = MessageSent {
-                block_finality,
-                inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
-            };
+                process_prove(&circuit, NextValidatorSet::prove, &args);
+            }
+            ProveCommands::MessageSent(args) => {
+                let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                let block = api.latest_finalized_block().await;
 
-            process_command(&circuit, MessageSent::prove, &cli);
-        }
+                let (block, block_finality) = api.fetch_finality_proof(block).await;
+                let circuit = MessageSent {
+                    block_finality,
+                    inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
+                };
+
+                process_prove(&circuit, MessageSent::prove, &args);
+            }
+        },
+        CliCommands::Query(query_command) => match query_command {
+            QueryCommands::Vara { vara_endpoint } => {
+                todo!()
+            }
+            QueryCommands::Ethereum { eth_endpoint } => {
+                todo!()
+            }
+        },
     };
 }
 
-fn process_command<C, P, TS>(circuit: &C, prove: P, cli: &Cli)
+fn process_prove<C, P, TS>(circuit: &C, prove: P, args: &ProveArgs)
 where
     TS: TargetSet,
     P: Fn(&C) -> ProofWithCircuitData<TS>,
@@ -107,9 +177,9 @@ where
     let _ = proof.verify();
 
     proof.generate_circom_verifier(CircomVerifierFilePaths {
-        constants: cli.circom_constants_path.clone(),
-        gates: cli.circom_gates_path.clone(),
-        proof: cli.proof_path.clone(),
-        config: cli.config_path.clone(),
+        constants: args.circom_constants_path.clone(),
+        gates: args.circom_gates_path.clone(),
+        proof: args.proof_path.clone(),
+        config: args.config_path.clone(),
     });
 }

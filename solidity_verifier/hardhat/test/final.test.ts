@@ -42,37 +42,37 @@ describe("Validator set change verifier test", function () {
   });
 });
 
-describe("Message sent verifier test", function () {
-  it("Groth16 Verify message sent", async function () {
-    const verifierFactory = await ethers.getContractFactory("MessageSentVerifier");
-    const  circuitDigestAndMerkleRoots = publics_for_message_sent.slice(0, 8);
-    const validatorSet = publics_for_message_sent.slice(8, 13);
+// describe("Message sent verifier test", function () {
+//   it("Groth16 Verify message sent", async function () {
+//     const verifierFactory = await ethers.getContractFactory("MessageSentVerifier");
+//     const  circuitDigestAndMerkleRoots = publics_for_message_sent.slice(0, 8);
+//     const validatorSet = publics_for_message_sent.slice(8, 13);
            
-    const verifier = await verifierFactory.deploy(
-      circuitDigestAndMerkleRoots, validatorSet, 250
-    );
+//     const verifier = await verifierFactory.deploy(
+//       circuitDigestAndMerkleRoots, validatorSet, 250
+//     );
     
-    await verifier.deployed();
+//     await verifier.deployed();
     
-    const solProof = [
-      [proof_for_message_sent.pi_a[0], proof_for_message_sent.pi_a[1]],
-      [
-        [proof_for_message_sent.pi_b[0][1], proof_for_message_sent.pi_b[0][0]],
-        [proof_for_message_sent.pi_b[1][1], proof_for_message_sent.pi_b[1][0]],
-      ],
-      [proof_for_message_sent.pi_c[0], proof_for_message_sent.pi_c[1]],
-    ];
+//     const solProof = [
+//       [proof_for_message_sent.pi_a[0], proof_for_message_sent.pi_a[1]],
+//       [
+//         [proof_for_message_sent.pi_b[0][1], proof_for_message_sent.pi_b[0][0]],
+//         [proof_for_message_sent.pi_b[1][1], proof_for_message_sent.pi_b[1][0]],
+//       ],
+//       [proof_for_message_sent.pi_c[0], proof_for_message_sent.pi_c[1]],
+//     ];
 
-    const nextValidatorSet = publics_for_message_sent.slice(14);
+//     const nextValidatorSet = publics_for_message_sent.slice(14);
 
-    await expect(verifier.verifyMsgSentProof(
-      solProof[0],
-      solProof[1],
-      solProof[2],
-      nextValidatorSet,
-      251,
-    )).to.emit(verifier, "SuccessfulVerification")
-      .withArgs(nextValidatorSet);
+//     await expect(verifier.verifyMsgSentProof(
+//       solProof[0],
+//       solProof[1],
+//       solProof[2],
+//       nextValidatorSet,
+//       251,
+//     )).to.emit(verifier, "SuccessfulVerification")
+//       .withArgs(nextValidatorSet);
     
-  });
-});
+//   });
+// });

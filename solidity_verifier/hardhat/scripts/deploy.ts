@@ -15,9 +15,8 @@ async function main() {
 
   const msgSentVerifierFactory = await ethers.getContractFactory("MessageSentVerifier");
   circuitDigestAndMerkleRoots = publics_for_message_sent.slice(0, 8);
-  validatorSet = publics_for_message_sent.slice(8, 13);
   const msgSentVerifier = await msgSentVerifierFactory.deploy(
-    circuitDigestAndMerkleRoots, validatorSet, 250
+    circuitDigestAndMerkleRoots, setChangeVerifier.address
   );
   await setChangeVerifier.deployed();
 

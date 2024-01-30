@@ -4,21 +4,21 @@ import {Groth16Verifier} from "./final_verifier.sol";
 contract ValidatorSetChangeVerifier is Groth16Verifier{
      uint[8] public  circuitDigestAndMerkleRoots;
      uint[5][] public validatorSet;
-     uint public nonceId;
+     uint public validatorSetId;
 
     event SuccessfulVerification(uint[5]);
     event VerificationFailed(uint[5]);
 
-    constructor (uint[8] memory _circuitDigestAndMerkleRoots, uint[5] memory _validatorSet, uint  _nonceId) {
+    constructor (uint[8] memory _circuitDigestAndMerkleRoots, uint[5] memory _validatorSet, uint  _validatorSetId) {
         circuitDigestAndMerkleRoots = _circuitDigestAndMerkleRoots;
         validatorSet.push(_validatorSet); 
-        nonceId = _nonceId; 
+        validatorSetId = _validatorSetId; 
     }
 
-    function  verifyValidatorSetChangeProof(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[5] calldata nextValidatorSet, uint _nonceId) public {
-        nonceId = nonceId + 1;
-        require(nonceId == _nonceId, "Wrong validator set ID");
-        uint[19] memory publicInputs = getPublicInputs(nextValidatorSet, _nonceId);
+    function  verifyValidatorSetChangeProof(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[5] calldata nextValidatorSet, uint _validatorSetId) public {
+        validatorSetId = validatorSetId + 1;
+        require(validatorSetId == _validatorSetId, "Wrong validator set ID");
+        uint[19] memory publicInputs = getPublicInputs(nextValidatorSet, _validatorSetId);
         validatorSet.push(nextValidatorSet);
         bytes memory executePayload = abi.encodeWithSignature("verifyProof(uint256[2],uint256[2][2],uint256[2],uint256[19])", _pA, _pB, _pC, publicInputs);
        (bool success, bytes memory returnData) = address(address(this)).call(executePayload);
@@ -46,8 +46,8 @@ contract ValidatorSetChangeVerifier is Groth16Verifier{
         return publicInputs;
     } 
 
-    function getNonceId() public view returns (uint) {
-        return nonceId;
+    function getValidatorSetId() public view returns (uint) {
+        return validatorSetId;
     }
 
     function getAllValidatorSets() public view returns (uint[5][] memory) {

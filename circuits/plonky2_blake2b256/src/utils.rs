@@ -49,7 +49,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
 
     fn xor_words(&mut self, a: WordTargets, b: WordTargets) -> WordTargets {
         a.into_iter()
-            .zip(b)
+            .zip(b.into_iter())
             .map(|(a, b)| self.xor(a, b))
             .collect::<Vec<_>>()
             .try_into()
@@ -113,7 +113,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
 
 fn collect_word(l: [BoolTarget; WORD_BITS / 2], h: [BoolTarget; WORD_BITS / 2]) -> WordTargets {
     l.into_iter()
-        .chain(h)
+        .chain(h.into_iter())
         .collect::<Vec<_>>()
         .chunks(8)
         .flat_map(|bits| bits.iter().rev())

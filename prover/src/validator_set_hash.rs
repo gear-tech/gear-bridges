@@ -1,5 +1,8 @@
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_sha256::circuit::make_circuits as sha256_circuit;
@@ -8,23 +11,35 @@ use sha2::{Digest, Sha256};
 use crate::{
     common::{
         array_to_bits,
-        targets::{Sha256Target, TargetSet, ValidatorSetTarget},
+        targets::{Ed25519PublicKeyTarget, Sha256Target},
+        TargetSet,
     },
-    consts::{ED25519_PUBLIC_KEY_SIZE, ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
-    impl_target_set,
+    consts::VALIDATOR_COUNT,
     prelude::*,
     ProofWithCircuitData,
 };
 
-impl_target_set! {
-    pub struct ValidatorSetHashTarget {
-        pub hash: Sha256Target,
-        pub validator_set: ValidatorSetTarget,
+#[derive(Clone)]
+pub struct ValidatorSetHashTarget {
+    pub hash: Sha256Target,
+    pub validator_set: [Ed25519PublicKeyTarget; VALIDATOR_COUNT],
+}
+
+impl TargetSet for ValidatorSetHashTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self {
+            hash: Sha256Target::parse(raw),
+            validator_set: (0..VALIDATOR_COUNT)
+                .map(|_| Ed25519PublicKeyTarget::parse(raw))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
     }
 }
 
 pub struct ValidatorSetHash {
-    pub validator_set: [[u8; ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
+    pub validator_set: [[u8; consts::ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
 }
 
 impl ValidatorSetHash {
@@ -33,15 +48,16 @@ impl ValidatorSetHash {
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
 
-        let message_len_in_bits = VALIDATOR_COUNT * ED25519_PUBLIC_KEY_SIZE_IN_BITS;
-        let targets = sha256_circuit(&mut builder, message_len_in_bits as u64);
+        let targets = sha256_circuit(
+            &mut builder,
+            (self.validator_set.len() * consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS) as u64,
+        );
 
         for target in &targets.digest {
             builder.register_public_input(target.target);
         }
 
-        // The message gets padded so we register only first `message_len_in_bits` bits.
-        for target in &targets.message[..message_len_in_bits] {
+        for target in &targets.message {
             builder.register_public_input(target.target);
         }
 

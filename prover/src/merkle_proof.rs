@@ -12,31 +12,25 @@ use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 use crate::{
     common::{
         array_to_bits,
-        targets::{Blake2Target, TargetSet},
+        targets::{BitArrayTarget, Blake2Target},
+        TargetSet,
     },
     prelude::*,
     ProofWithCircuitData,
 };
 
-#[derive(Clone, Debug)]
-pub struct MerkleProofTarget<LeafData: TargetSet> {
-    pub leaf_data: LeafData,
+#[derive(Clone)]
+pub struct MerkleProofTarget<const LEAF_DATA_LENGTH: usize> {
+    pub leaf_data: BitArrayTarget<LEAF_DATA_LENGTH>,
     pub root_hash: Blake2Target,
 }
 
-// REFACTOR: Add generics to macro?
-impl<LeafData: TargetSet> TargetSet for MerkleProofTarget<LeafData> {
+impl<const LEAF_DATA_LENGTH: usize> TargetSet for MerkleProofTarget<LEAF_DATA_LENGTH> {
     fn parse(targets: &mut impl Iterator<Item = Target>) -> Self {
         Self {
-            leaf_data: TargetSet::parse(targets),
+            leaf_data: BitArrayTarget::<LEAF_DATA_LENGTH>::parse(targets),
             root_hash: Blake2Target::parse(targets),
         }
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        self.leaf_data
-            .into_targets_iter()
-            .chain(self.root_hash.into_targets_iter())
     }
 }
 
@@ -61,7 +55,7 @@ impl<const LEAF_DATA_LENGTH_IN_BITS: usize> MerkleProof<LEAF_DATA_LENGTH_IN_BITS
 where
     [(); LEAF_DATA_LENGTH_IN_BITS / 8]:,
 {
-    pub fn prove<LeafData: TargetSet>(&self) -> ProofWithCircuitData<MerkleProofTarget<LeafData>> {
+    pub fn prove(&self) -> ProofWithCircuitData<MerkleProofTarget<LEAF_DATA_LENGTH_IN_BITS>> {
         log::info!("Proving merkle inclusion...");
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());

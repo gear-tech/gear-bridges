@@ -1,5 +1,4 @@
 #![feature(generic_const_exprs)]
-#![allow(incomplete_features)]
 
 use plonky2::{
     field::goldilocks_field::GoldilocksField,

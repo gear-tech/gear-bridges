@@ -6,7 +6,7 @@ use std::{path::PathBuf, time::Instant};
 use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
-    common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
+    common::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
     ProofWithCircuitData,
 };
 
@@ -16,12 +16,6 @@ use prover::{
 struct Cli {
     #[command(subcommand)]
     command: CliCommands,
-    /// Address of the VARA RPC endpoint
-    #[arg(
-        long = "vara-endpoint",
-        default_value = "wss://testnet-archive.vara-network.io:443"
-    )]
-    vara_endpoint: String,
     /// Path to the generated circom file containing constants
     #[arg(
         long = "circom-const-path",
@@ -68,14 +62,13 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let api = GearApi::new(&cli.vara_endpoint).await;
+    let api = GearApi::new().await;
     let block = api.latest_finalized_block().await;
 
     match &cli.command {
         CliCommands::ValidatorSetChange(_) => {
-            let (block, current_epoch_block_finality) = api.fetch_finality_proof(block).await;
             let circuit = NextValidatorSet {
-                current_epoch_block_finality,
+                current_epoch_block_finality: api.fetch_finality_proof(block).await,
                 next_validator_set_inclusion_proof: api
                     .fetch_next_session_keys_merkle_proof(block)
                     .await,
@@ -84,9 +77,8 @@ async fn main() {
             process_command(&circuit, NextValidatorSet::prove, &cli);
         }
         CliCommands::MessageSent(_) => {
-            let (block, block_finality) = api.fetch_finality_proof(block).await;
             let circuit = MessageSent {
-                block_finality,
+                block_finality: api.fetch_finality_proof(block).await,
                 inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
             };
 

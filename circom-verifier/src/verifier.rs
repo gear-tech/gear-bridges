@@ -58,7 +58,7 @@ where
     pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
 
     builder.register_public_inputs(inner_data.circuit_digest.elements.as_slice());
-    for i in 0..inner_cd.config.fri_config.num_cap_elements() {
+    for i in 0..builder.config.fri_config.num_cap_elements() {
         builder.register_public_inputs(&inner_data.constants_sigmas_cap.0[i].elements);
     }
     builder.register_public_inputs(&pt.public_inputs[..]);
@@ -89,6 +89,141 @@ where
 
     println!("######################### recursive verify #########################");
     data.verify(proof.clone())?;
+
+    Ok((proof, data.verifier_only, data.common))
+}
+
+type ProofTuple<F, C, const D: usize> = (
+    ProofWithPublicInputs<F, C, D>,
+    VerifierOnlyCircuitData<C, D>,
+    CommonCircuitData<F, D>,
+);
+
+fn aggregation_proof<
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    InnerC: GenericConfig<D, F = F>,
+    const D: usize,
+>(
+    inner1: &ProofTuple<F, InnerC, D>,
+    inner2: Option<ProofTuple<F, InnerC, D>>,
+    config: &CircuitConfig,
+    min_degree_bits: Option<usize>,
+) -> Result<ProofTuple<F, C, D>>
+where
+    InnerC::Hasher: AlgebraicHasher<F>,
+    [(); C::Hasher::HASH_SIZE]:,
+{
+    let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+    let mut pw = PartialWitness::new();
+
+    {
+        let (inner_proof, inner_vd, inner_cd) = inner1;
+        let pt = builder.add_virtual_proof_with_pis::<InnerC>(inner_cd);
+        pw.set_proof_with_pis_target(&pt, inner_proof);
+        builder.register_public_inputs(&*pt.public_inputs);
+
+        let inner_data = VerifierCircuitTarget {
+            constants_sigmas_cap: builder.add_virtual_cap(inner_cd.config.fri_config.cap_height),
+            circuit_digest: builder.add_virtual_hash(),
+        };
+        pw.set_cap_target(
+            &inner_data.constants_sigmas_cap,
+            &inner_vd.constants_sigmas_cap,
+        );
+        pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
+
+        builder.verify_proof::<InnerC>(&pt, &inner_data, inner_cd);
+    }
+
+    if inner2.is_some() {
+        let (inner_proof, inner_vd, inner_cd) = inner2.unwrap();
+        let pt = builder.add_virtual_proof_with_pis::<InnerC>(&inner_cd);
+        pw.set_proof_with_pis_target(&pt, &inner_proof);
+        builder.register_public_inputs(&*pt.public_inputs);
+
+        let inner_data = VerifierCircuitTarget {
+            constants_sigmas_cap: builder.add_virtual_cap(inner_cd.config.fri_config.cap_height),
+            circuit_digest: builder.add_virtual_hash(),
+        };
+        pw.set_hash_target(inner_data.circuit_digest, inner_vd.circuit_digest);
+        pw.set_cap_target(
+            &inner_data.constants_sigmas_cap,
+            &inner_vd.constants_sigmas_cap,
+        );
+
+        builder.verify_proof::<InnerC>(&pt, &inner_data, &inner_cd);
+    }
+    builder.print_gate_counts(0);
+
+    if let Some(min_degree_bits) = min_degree_bits {
+        // We don't want to pad all the way up to 2^min_degree_bits, as the builder will
+        // add a few special gates afterward. So just pad to 2^(min_degree_bits
+        // - 1) + 1. Then the builder will pad to the next power of two,
+        // 2^min_degree_bits.
+        let min_gates = (1 << (min_degree_bits - 1)) + 1;
+        for _ in builder.num_gates()..min_gates {
+            builder.add_gate(NoopGate, vec![]);
+        }
+    }
+
+    let data = builder.build::<C>();
+
+    let mut timing = TimingTree::new("prove", Level::Info);
+    let proof = prove(&data.prover_only, &data.common, pw, &mut timing)?;
+    timing.print();
+
+    data.verify(proof.clone())?;
+
+    // test_serialization(&proof, &data.verifier_only, &data.common)?;
+    Ok((proof, data.verifier_only, data.common))
+}
+
+fn fib_proof<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
+    input: u32,
+) -> Result<ProofTuple<F, C, D>> {
+    // const D: usize = 2;
+    // type C = PoseidonGoldilocksConfig;
+    // type F = <C as GenericConfig<D>>::F;
+
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+
+    // The arithmetic circuit.
+    let initial_a = builder.add_virtual_target();
+    let initial_b = builder.add_virtual_target();
+    let mut prev_target = initial_a;
+    let mut cur_target = initial_b;
+    for _ in 0..99 {
+        let temp = builder.add(prev_target, cur_target);
+        prev_target = cur_target;
+        cur_target = temp;
+    }
+
+    // Public inputs are the two initial values (provided below) and the result (which is generated).
+    builder.register_public_input(initial_a);
+    builder.register_public_input(initial_b);
+    builder.register_public_input(cur_target);
+
+    // Provide initial values.
+    let mut pw = PartialWitness::new();
+    if input == 1 {
+        pw.set_target(initial_a, F::ZERO);
+        pw.set_target(initial_b, F::ONE);
+    } else {
+        pw.set_target(initial_a, F::ONE);
+        pw.set_target(initial_b, F::TWO);
+    }
+
+    let data = builder.build::<C>();
+    let proof = data.prove(pw)?;
+
+    println!(
+        "100th Fibonacci number mod |F| (starting with {}, {}) is: {}",
+        proof.public_inputs[0], proof.public_inputs[1], proof.public_inputs[2]
+    );
+
+    data.verify(proof.clone()).unwrap();
 
     Ok((proof, data.verifier_only, data.common))
 }
@@ -661,7 +796,7 @@ pub fn generate_circom_verifier_inner<
             + &*k_is[i].to_canonical_u64().to_string()
             + ";\n");
     }
-    constants = constants.replace("  $SET_K_IS;\n", &k_is_str);
+    constants = constants.replace("  $SET_K_IS;\n", &*k_is_str);
 
     let reduction_arity_bits = &common.fri_params.reduction_arity_bits;
     let mut reduction_arity_bits_str = "".to_owned();
@@ -672,112 +807,115 @@ pub fn generate_circom_verifier_inner<
             + &*reduction_arity_bits[i].to_string()
             + ";\n");
     }
-    constants = constants.replace("  $SET_REDUCTION_ARITY_BITS;\n", &reduction_arity_bits_str);
+    constants = constants.replace("  $SET_REDUCTION_ARITY_BITS;\n", &*reduction_arity_bits_str);
     constants = constants.replace(
         "$NUM_REDUCTION_ARITY_BITS",
-        &reduction_arity_bits.len().to_string(),
+        &*reduction_arity_bits.len().to_string(),
     );
 
-    constants = constants.replace("$NUM_PUBLIC_INPUTS", &conf.num_public_inputs.to_string());
-    constants = constants.replace("$NUM_WIRES_CAP", &conf.num_wires_cap.to_string());
+    constants = constants.replace("$NUM_PUBLIC_INPUTS", &*conf.num_public_inputs.to_string());
+    constants = constants.replace("$NUM_WIRES_CAP", &*conf.num_wires_cap.to_string());
     constants = constants.replace(
         "$NUM_PLONK_ZS_PARTIAL_PRODUCTS_CAP",
-        &conf.num_plonk_zs_partial_products_cap.to_string(),
+        &*conf.num_plonk_zs_partial_products_cap.to_string(),
     );
     constants = constants.replace(
         "$NUM_QUOTIENT_POLYS_CAP",
-        &conf.num_quotient_polys_cap.to_string(),
+        &*conf.num_quotient_polys_cap.to_string(),
     );
     constants = constants.replace(
         "$NUM_OPENINGS_CONSTANTS",
-        &conf.num_openings_constants.to_string(),
+        &*conf.num_openings_constants.to_string(),
     );
     constants = constants.replace(
         "$NUM_OPENINGS_PLONK_SIGMAS",
-        &conf.num_openings_plonk_sigmas.to_string(),
+        &*conf.num_openings_plonk_sigmas.to_string(),
     );
-    constants = constants.replace("$NUM_OPENINGS_WIRES", &conf.num_openings_wires.to_string());
+    constants = constants.replace("$NUM_OPENINGS_WIRES", &*conf.num_openings_wires.to_string());
     constants = constants.replace(
         "$NUM_OPENINGS_PLONK_ZS0",
-        &conf.num_openings_plonk_zs.to_string(),
+        &*conf.num_openings_plonk_zs.to_string(),
     );
     constants = constants.replace(
         "$NUM_OPENINGS_PLONK_ZS_NEXT",
-        &conf.num_openings_plonk_zs_next.to_string(),
+        &*conf.num_openings_plonk_zs_next.to_string(),
     );
     constants = constants.replace(
         "$NUM_OPENINGS_PARTIAL_PRODUCTS",
-        &conf.num_openings_partial_products.to_string(),
+        &*conf.num_openings_partial_products.to_string(),
     );
     constants = constants.replace(
         "$NUM_OPENINGS_QUOTIENT_POLYS",
-        &conf.num_openings_quotient_polys.to_string(),
+        &*conf.num_openings_quotient_polys.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_COMMIT_ROUND",
-        &conf.num_fri_commit_round.to_string(),
+        &*conf.num_fri_commit_round.to_string(),
     );
     constants = constants.replace(
         "$FRI_COMMIT_MERKLE_CAP_HEIGHT",
-        &conf.fri_commit_merkle_cap_height.to_string(),
+        &*conf.fri_commit_merkle_cap_height.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_ROUND",
-        &conf.num_fri_query_round.to_string(),
+        &*conf.num_fri_query_round.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_CONSTANTS_SIGMAS_V",
-        &conf.num_fri_query_init_constants_sigmas_v.to_string(),
+        &*conf.num_fri_query_init_constants_sigmas_v.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_CONSTANTS_SIGMAS_P",
-        &conf.num_fri_query_init_constants_sigmas_p.to_string(),
+        &*conf.num_fri_query_init_constants_sigmas_p.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_WIRES_V",
-        &conf.num_fri_query_init_wires_v.to_string(),
+        &*conf.num_fri_query_init_wires_v.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_WIRES_P",
-        &conf.num_fri_query_init_wires_p.to_string(),
+        &*conf.num_fri_query_init_wires_p.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_ZS_PARTIAL_V",
-        &conf.num_fri_query_init_zs_partial_v.to_string(),
+        &*conf.num_fri_query_init_zs_partial_v.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_ZS_PARTIAL_P",
-        &conf.num_fri_query_init_zs_partial_p.to_string(),
+        &*conf.num_fri_query_init_zs_partial_p.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_QUOTIENT_V",
-        &conf.num_fri_query_init_quotient_v.to_string(),
+        &*conf.num_fri_query_init_quotient_v.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_INIT_QUOTIENT_P",
-        &conf.num_fri_query_init_quotient_p.to_string(),
+        &*conf.num_fri_query_init_quotient_p.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_STEP0_V",
-        &conf.num_fri_query_step0_v.to_string(),
+        &*conf.num_fri_query_step0_v.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_STEP0_P",
-        &conf.num_fri_query_step0_p.to_string(),
+        &*conf.num_fri_query_step0_p.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_STEP1_V",
-        &conf.num_fri_query_step1_v.to_string(),
+        &*conf.num_fri_query_step1_v.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_QUERY_STEP1_P",
-        &conf.num_fri_query_step1_p.to_string(),
+        &*conf.num_fri_query_step1_p.to_string(),
     );
     constants = constants.replace(
         "$NUM_FRI_FINAL_POLY_EXT_V",
-        &conf.num_fri_final_poly_ext_v.to_string(),
+        &*conf.num_fri_final_poly_ext_v.to_string(),
     );
-    constants = constants.replace("$NUM_CHALLENGES", &common.config.num_challenges.to_string());
+    constants = constants.replace(
+        "$NUM_CHALLENGES",
+        &*common.config.num_challenges.to_string(),
+    );
 
     let circuit_digest = verifier_only.circuit_digest.to_vec();
     let mut circuit_digest_str = "".to_owned();
@@ -788,24 +926,24 @@ pub fn generate_circom_verifier_inner<
             + &*circuit_digest[i].to_canonical_u64().to_string()
             + ";\n");
     }
-    constants = constants.replace("  $SET_CIRCUIT_DIGEST;\n", &circuit_digest_str);
+    constants = constants.replace("  $SET_CIRCUIT_DIGEST;\n", &*circuit_digest_str);
 
     constants = constants.replace(
         "$FRI_RATE_BITS",
-        &common.config.fri_config.rate_bits.to_string(),
+        &*common.config.fri_config.rate_bits.to_string(),
     );
-    constants = constants.replace("$DEGREE_BITS", &common.degree_bits().to_string());
+    constants = constants.replace("$DEGREE_BITS", &*common.degree_bits().to_string());
     constants = constants.replace(
         "$NUM_GATE_CONSTRAINTS",
-        &common.num_gate_constraints.to_string(),
+        &*common.num_gate_constraints.to_string(),
     );
     constants = constants.replace(
         "$QUOTIENT_DEGREE_FACTOR",
-        &common.quotient_degree_factor.to_string(),
+        &*common.quotient_degree_factor.to_string(),
     );
     constants = constants.replace(
         "$MIN_FRI_POW_RESPONSE",
-        &(common.config.fri_config.proof_of_work_bits + (64 - F::order().bits()) as u32)
+        &*(common.config.fri_config.proof_of_work_bits + (64 - F::order().bits()) as u32)
             .to_string(),
     );
     let g = F::Extension::primitive_root_of_unity(common.degree_bits());
@@ -818,17 +956,20 @@ pub fn generate_circom_verifier_inner<
         &g.to_basefield_array()[1].to_string(),
     );
     let log_n = log2_strict(common.fri_params.lde_size());
-    constants = constants.replace("$LOG_SIZE_OF_LDE_DOMAIN", &log_n.to_string());
+    constants = constants.replace("$LOG_SIZE_OF_LDE_DOMAIN", &*log_n.to_string());
     constants = constants.replace(
         "$MULTIPLICATIVE_GROUP_GENERATOR",
-        &F::MULTIPLICATIVE_GROUP_GENERATOR.to_string(),
+        &*F::MULTIPLICATIVE_GROUP_GENERATOR.to_string(),
     );
     constants = constants.replace(
         "$PRIMITIVE_ROOT_OF_UNITY_LDE",
-        &F::primitive_root_of_unity(log_n).to_string(),
+        &*F::primitive_root_of_unity(log_n).to_string(),
     );
     // TODO: add test with config zero_knoledge = true
-    constants = constants.replace("$ZERO_KNOWLEDGE", &common.config.zero_knowledge.to_string());
+    constants = constants.replace(
+        "$ZERO_KNOWLEDGE",
+        &*common.config.zero_knowledge.to_string(),
+    );
     let g = F::primitive_root_of_unity(1);
     constants = constants.replace("$G_ARITY_BITS_1", &g.to_string());
     let g = F::primitive_root_of_unity(2);
@@ -853,7 +994,7 @@ pub fn generate_circom_verifier_inner<
         let group_range = common.selectors_info.groups[selector_index].clone();
         let mut c = 0;
 
-        evaluate_gate_constraints_str += "\n";
+        evaluate_gate_constraints_str = evaluate_gate_constraints_str + "\n";
         let mut filter_str = "filter <== ".to_owned();
         let filter_chain = group_range
             .filter(|&i| i != row)
@@ -865,13 +1006,13 @@ pub fn generate_circom_verifier_inner<
                 + "constants["
                 + &*selector_index.to_string()
                 + "]), ");
-            c += 1;
+            c = c + 1;
         }
         filter_str += &*("GlExt(1, 0)()".to_owned());
         for _ in 0..c {
-            filter_str += ")";
+            filter_str = filter_str + ")";
         }
-        filter_str += ";";
+        filter_str = filter_str + ";";
 
         let mut eval_str = "  // ".to_owned() + &*gate.0.id() + "\n";
         let gate_name = gate.0.id();
@@ -891,7 +1032,7 @@ pub fn generate_circom_verifier_inner<
         {
             //TODO: use num_coeff as a param (same TODO for other gates)
             let mut code_str = gate.0.export_circom_verification_code();
-            code_str = code_str.replace("$SET_FILTER;", &filter_str);
+            code_str = code_str.replace("$SET_FILTER;", &*filter_str);
             let v: Vec<&str> = code_str.split(' ').collect();
             let template_name = &v[1][0..v[1].len() - 2];
             let component_name = "c_".to_owned() + template_name;
@@ -902,7 +1043,7 @@ pub fn generate_circom_verifier_inner<
             eval_str += &*("  ".to_owned()
                 + &*component_name
                 + ".public_input_hash <== public_input_hash;\n");
-            if last_component_name.is_empty() {
+            if last_component_name == "" {
                 eval_str +=
                     &*("  ".to_owned() + &*component_name + ".constraints <== constraints;\n");
             } else {
@@ -928,18 +1069,18 @@ pub fn generate_circom_verifier_inner<
 
     gates_lib = gates_lib.replace(
         "$NUM_GATE_CONSTRAINTS",
-        &common.num_gate_constraints.to_string(),
+        &*common.num_gate_constraints.to_string(),
     );
     gates_lib = gates_lib.replace("$NUM_SELECTORS", &num_selectors.to_string());
     gates_lib = gates_lib.replace(
         "$NUM_OPENINGS_CONSTANTS",
-        &conf.num_openings_constants.to_string(),
+        &*conf.num_openings_constants.to_string(),
     );
-    gates_lib = gates_lib.replace("$NUM_OPENINGS_WIRES", &conf.num_openings_wires.to_string());
-    gates_lib = gates_lib.replace("$F_EXT_W", &F::W.to_basefield_array()[0].to_string());
+    gates_lib = gates_lib.replace("$NUM_OPENINGS_WIRES", &*conf.num_openings_wires.to_string());
+    gates_lib = gates_lib.replace("$F_EXT_W", &*F::W.to_basefield_array()[0].to_string());
 
     let sigma_cap_count = 1 << common.config.fri_config.cap_height;
-    constants = constants.replace("$SIGMA_CAP_COUNT", &sigma_cap_count.to_string());
+    constants = constants.replace("$SIGMA_CAP_COUNT", &*sigma_cap_count.to_string());
 
     let mut sigma_cap_str = "".to_owned();
     for i in 0..sigma_cap_count {
@@ -967,7 +1108,7 @@ pub fn generate_circom_verifier_inner<
             + &*hash[3].to_canonical_u64().to_string()
             + ";\n");
     }
-    constants = constants.replace("  $SET_SIGMA_CAP;\n", &sigma_cap_str);
+    constants = constants.replace("  $SET_SIGMA_CAP;\n", &*sigma_cap_str);
 
     Ok((constants, gates_lib))
 }

@@ -30,24 +30,67 @@ impl<F: RichField> PlonkyPermutation<F> for PoseidonBN128Permutation {
                 input[11].to_canonical_u64(),
             );
 
-            fn u64_to_f<F: RichField>(x: u64) -> F {
-                let x = if x >= F::ORDER { x - F::ORDER } else { x };
-                F::from_canonical_u64(x)
-            }
-
             [
-                u64_to_f(h.r0),
-                u64_to_f(h.r1),
-                u64_to_f(h.r2),
-                u64_to_f(h.r3),
-                u64_to_f(h.r4),
-                u64_to_f(h.r5),
-                u64_to_f(h.r6),
-                u64_to_f(h.r7),
-                u64_to_f(h.r8),
-                u64_to_f(h.r9),
-                u64_to_f(h.r10),
-                u64_to_f(h.r11),
+                F::from_canonical_u64(if h.r0 >= F::ORDER {
+                    h.r0 - F::ORDER
+                } else {
+                    h.r0
+                }),
+                F::from_canonical_u64(if h.r1 >= F::ORDER {
+                    h.r1 - F::ORDER
+                } else {
+                    h.r1
+                }),
+                F::from_canonical_u64(if h.r2 >= F::ORDER {
+                    h.r2 - F::ORDER
+                } else {
+                    h.r2
+                }),
+                F::from_canonical_u64(if h.r3 >= F::ORDER {
+                    h.r3 - F::ORDER
+                } else {
+                    h.r3
+                }),
+                F::from_canonical_u64(if h.r4 >= F::ORDER {
+                    h.r4 - F::ORDER
+                } else {
+                    h.r4
+                }),
+                F::from_canonical_u64(if h.r5 >= F::ORDER {
+                    h.r5 - F::ORDER
+                } else {
+                    h.r5
+                }),
+                F::from_canonical_u64(if h.r6 >= F::ORDER {
+                    h.r6 - F::ORDER
+                } else {
+                    h.r6
+                }),
+                F::from_canonical_u64(if h.r7 >= F::ORDER {
+                    h.r7 - F::ORDER
+                } else {
+                    h.r7
+                }),
+                F::from_canonical_u64(if h.r8 >= F::ORDER {
+                    h.r8 - F::ORDER
+                } else {
+                    h.r8
+                }),
+                F::from_canonical_u64(if h.r9 >= F::ORDER {
+                    h.r9 - F::ORDER
+                } else {
+                    h.r9
+                }),
+                F::from_canonical_u64(if h.r10 >= F::ORDER {
+                    h.r10 - F::ORDER
+                } else {
+                    h.r10
+                }),
+                F::from_canonical_u64(if h.r11 >= F::ORDER {
+                    h.r11 - F::ORDER
+                } else {
+                    h.r11
+                }),
             ]
         }
     }

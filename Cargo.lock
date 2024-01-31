@@ -6192,6 +6192,7 @@ version = "0.1.0"
 dependencies = [
  "circom_verifier",
  "clap",
+ "eth-client",
  "gear-rpc-client",
  "log",
  "pretty_env_logger",

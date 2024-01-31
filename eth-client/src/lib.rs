@@ -1,4 +1,4 @@
-mod error;
+pub mod error;
 use error::VerifierError;
 use ethcontract::prelude::*;
 use primitive_types::U256;
@@ -44,14 +44,14 @@ impl ContractVerifiers {
         let publics = get_publics(path_to_final_public)?;
 
         let validator_set = [
+            publics[13],
             publics[14],
             publics[15],
             publics[16],
             publics[17],
-            publics[18],
         ];
 
-        let validator_set_id = publics[13];
+        let validator_set_id = publics[18];
 
         let account = {
             let key: PrivateKey = pk.parse().expect("invalid PK");
@@ -123,53 +123,46 @@ impl ContractVerifiers {
     pub async fn get_all_validator_sets_from_vs_vrf(
         &self,
     ) -> Result<Vec<[U256; 5]>, VerifierError> {
-
-        Ok(self.vs_change_vrf
+        Ok(self
+            .vs_change_vrf
             .get_all_validator_sets()
             .call()
             .await
             .map_err(|_| VerifierError::ErrorDuringContractExecution)?)
     }
 
-    pub async fn get_last_validator_set_from_vs_vrf(
-        &self,
-    ) -> Result<[U256; 5], VerifierError> {
-
-        Ok(self.vs_change_vrf
+    pub async fn get_last_validator_set_from_vs_vrf(&self) -> Result<[U256; 5], VerifierError> {
+        Ok(self
+            .vs_change_vrf
             .get_last_validator_set()
             .call()
             .await
             .map_err(|_| VerifierError::ErrorDuringContractExecution)?)
     }
 
-    pub async fn get_nonce_id_from_vs_vrf(
-        &self,
-    ) -> Result<U256, VerifierError> {
-
-        Ok(self.vs_change_vrf
+    pub async fn get_nonce_id_from_vs_vrf(&self) -> Result<U256, VerifierError> {
+        Ok(self
+            .vs_change_vrf
             .get_validator_set_id()
             .call()
             .await
             .map_err(|_| VerifierError::ErrorDuringContractExecution)?)
     }
 
-
     pub async fn get_all_msg_hashes_from_msg_sent_vrf(
         &self,
     ) -> Result<Vec<[U256; 5]>, VerifierError> {
-
-        Ok(self.msg_sent_vrf
+        Ok(self
+            .msg_sent_vrf
             .get_all_msg_hashes()
             .call()
             .await
             .map_err(|_| VerifierError::ErrorDuringContractExecution)?)
     }
 
-    pub async fn get_last_msg_hashes_from_msg_sent_vrf(
-        &self,
-    ) -> Result<[U256; 5], VerifierError> {
-
-        Ok(self.msg_sent_vrf
+    pub async fn get_last_msg_hashes_from_msg_sent_vrf(&self) -> Result<[U256; 5], VerifierError> {
+        Ok(self
+            .msg_sent_vrf
             .get_last_msg_hashes()
             .call()
             .await
@@ -258,33 +251,22 @@ mod tests {
             "{:?}",
             verifier
                 .verify_vs_change(
-                    String::from("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"),
+                    String::from(
+                        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                    ),
                     "../solidity_verifier/aggregation/vs_change/final_proof.json",
                     "../solidity_verifier/aggregation/vs_change/final_public.json"
                 )
                 .await
         );
 
-        println!(
-            "{:?}",
-            verifier
-                .get_all_validator_sets_from_vs_vrf()
-                .await
-        );
+        println!("{:?}", verifier.get_all_validator_sets_from_vs_vrf().await);
 
-        println!(
-            "{:?}",
-            verifier
-                .get_last_validator_set_from_vs_vrf()
-                .await
-        );
+        println!("{:?}", verifier.get_last_validator_set_from_vs_vrf().await);
 
-        println!(
-            "{:?}",
-            verifier
-                .get_nonce_id_from_vs_vrf()
-                .await
-        );
+        println!("{:?}", verifier.get_nonce_id_from_vs_vrf().await);
+
+        panic!();
     }
 
     // uncomment when there will be public inputs for msg sent verifier

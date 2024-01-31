@@ -16,8 +16,8 @@ contract ValidatorSetChangeVerifier is Groth16Verifier{
     }
 
     function  verifyValidatorSetChangeProof(uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[5] calldata nextValidatorSet, uint _validatorSetId) public {
-        validatorSetId = validatorSetId + 1;
         require(validatorSetId == _validatorSetId, "Wrong validator set ID");
+        validatorSetId = validatorSetId + 1;
         uint[19] memory publicInputs = getPublicInputs(nextValidatorSet, _validatorSetId);
         validatorSet.push(nextValidatorSet);
         bytes memory executePayload = abi.encodeWithSignature("verifyProof(uint256[2],uint256[2][2],uint256[2],uint256[19])", _pA, _pB, _pC, publicInputs);
@@ -40,9 +40,9 @@ contract ValidatorSetChangeVerifier is Groth16Verifier{
             publicInputs[8 + i] = prevValidatorSet[i];
         }
          for (uint i=0; i < nextValidatorSet.length; i++) {
-            publicInputs[14 + i]  = nextValidatorSet[i];
+            publicInputs[13 + i]  = nextValidatorSet[i];
         }
-        publicInputs[13] = _nonceId;
+        publicInputs[18] = _nonceId;
         return publicInputs;
     } 
 

@@ -1,6 +1,7 @@
 extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
+use eth_client::{error::VerifierError, ContractVerifiers};
 use std::{path::PathBuf, time::Instant};
 
 use circom_verifier::CircomVerifierFilePaths;
@@ -24,20 +25,28 @@ struct Cli {
 #[derive(Subcommand)]
 enum CliCommands {
     /// Generate zk-proofs
-    #[command(subcommand)]
     #[clap(visible_alias("p"))]
-    Prove(ProveCommands),
-    /// Fetch data from RPC
     #[command(subcommand)]
+    Prove(ProveCommands),
+    /// Fetch stats from RPC
     #[clap(visible_alias("q"))]
-    Query(QueryCommands),
+    Query(QueryArgs),
+    /// Send zk-proof to Ethereum
+    #[clap(visible_alias("s"))]
+    #[command(subcommand)]
+    SendProof(SendProofCommands),
 }
 
 #[derive(Subcommand)]
 enum ProveCommands {
     /// Prove validator set change
     #[clap(visible_alias("v"))]
-    ValidatorSetChange(ProveArgs),
+    ValidatorSetChange {
+        #[clap(flatten)]
+        args: ProveArgs,
+        #[arg(long = "validator-set-id", short = 'v')]
+        validator_set_id: u64,
+    },
     /// Prove that message was sent
     #[clap(visible_alias("m"))]
     MessageSent(ProveArgs),
@@ -73,30 +82,14 @@ struct ProveArgs {
     config_path: PathBuf,
 }
 
-#[derive(Subcommand)]
-enum QueryCommands {
-    /// Query validator set stats
-    #[clap(visible_alias("v"))]
-    ValidatorSet {
-        #[clap(flatten)]
-        vara_endpoint: VaraEndpointArg,
-        #[clap(flatten)]
-        eth_endpoint: EthEndpointArg,
-    },
-    /// Query relayed message stats
-    #[clap(visible_alias("m"))]
-    Messages {
-        #[clap(flatten)]
-        eth_endpoint: EthEndpointArg,
-    },
-    /// Query all possible stats
-    #[clap(visible_alias("a"))]
-    All {
-        #[clap(flatten)]
-        vara_endpoint: VaraEndpointArg,
-        #[clap(flatten)]
-        eth_endpoint: EthEndpointArg,
-    },
+#[derive(Args)]
+struct QueryArgs {
+    #[clap(flatten)]
+    vara_endpoint: VaraEndpointArg,
+    #[clap(flatten)]
+    eth_endpoint: EthEndpointArg,
+    #[clap(flatten)]
+    contract_addresses: ContractAddressesArgs,
 }
 
 #[derive(Args)]
@@ -119,6 +112,36 @@ struct EthEndpointArg {
     eth_endpoint: String,
 }
 
+#[derive(Subcommand)]
+enum SendProofCommands {
+    #[clap(visible_alias("v"))]
+    ValidatorSetChange(SendProofArgs),
+    #[clap(visible_alias("m"))]
+    MessageSent(SendProofArgs),
+}
+
+#[derive(Args)]
+struct SendProofArgs {
+    #[arg(long = "proof-path", default_value = "./final_proof.json")]
+    proof_path: PathBuf,
+    #[arg(long = "pi-path", default_value = "./final_public.json")]
+    public_inputs_path: PathBuf,
+    #[arg(long, env = "ETHEREUM_PRIVATE_KEY")]
+    ethereum_private_key: String,
+    #[clap(flatten)]
+    eth_endpoint: EthEndpointArg,
+    #[clap(flatten)]
+    contract_addresses: ContractAddressesArgs,
+}
+
+#[derive(Args)]
+struct ContractAddressesArgs {
+    #[arg(long, env = "MS_CONTRACT")]
+    message_sent_contract: String,
+    #[arg(long, env = "VS_CONTRACT")]
+    validator_set_change_contract: String,
+}
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
@@ -127,11 +150,13 @@ async fn main() {
 
     match cli.command {
         CliCommands::Prove(prove_command) => match prove_command {
-            ProveCommands::ValidatorSetChange(args) => {
+            ProveCommands::ValidatorSetChange {
+                args,
+                validator_set_id,
+            } => {
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
-                let block = api.latest_finalized_block().await;
-
-                let (block, current_epoch_block_finality) = api.fetch_finality_proof(block).await;
+                let (block, current_epoch_block_finality) =
+                    api.fetch_finality_proof_for_session(validator_set_id).await;
                 let circuit = NextValidatorSet {
                     current_epoch_block_finality,
                     next_validator_set_inclusion_proof: api
@@ -154,12 +179,81 @@ async fn main() {
                 process_prove(&circuit, MessageSent::prove, &args);
             }
         },
-        CliCommands::Query(query_command) => match query_command {
-            QueryCommands::Vara { vara_endpoint } => {
-                todo!()
+        CliCommands::Query(args) => {
+            let eth_client = ContractVerifiers::new(
+                &args.eth_endpoint.eth_endpoint,
+                &args.contract_addresses.validator_set_change_contract,
+                &args.contract_addresses.message_sent_contract,
+            )
+            .unwrap();
+
+            let vara_client = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+
+            let messages = eth_client
+                .get_all_msg_hashes_from_msg_sent_vrf()
+                .await
+                .unwrap();
+            println!("-----Messages-----");
+            for msg in messages {
+                println!("{:?}", msg);
             }
-            QueryCommands::Ethereum { eth_endpoint } => {
-                todo!()
+
+            let validator_sets = eth_client
+                .get_all_validator_sets_from_vs_vrf()
+                .await
+                .unwrap();
+            println!("-----Validator sets-----");
+            for vs in validator_sets {
+                println!("{:?}", vs);
+            }
+
+            let last_vs_id = eth_client.get_nonce_id_from_vs_vrf().await.unwrap();
+            println!("-----Last relayed validator set ID-----");
+            println!("{}", last_vs_id);
+
+            let latest_block = vara_client.latest_finalized_block().await;
+            let last_vs_id = vara_client.validator_set_id(latest_block).await;
+            println!("-----Last validator set ID on VARA-----");
+            println!("{}", last_vs_id);
+        }
+        CliCommands::SendProof(command) => match command {
+            SendProofCommands::ValidatorSetChange(args) => {
+                let eth_client = ContractVerifiers::new(
+                    &args.eth_endpoint.eth_endpoint,
+                    &args.contract_addresses.validator_set_change_contract,
+                    &args.contract_addresses.message_sent_contract,
+                )
+                .unwrap();
+
+                let verified = eth_client
+                    .verify_vs_change(
+                        args.ethereum_private_key,
+                        args.proof_path.to_str().unwrap(),
+                        args.public_inputs_path.to_str().unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                println!("Verified with result: {}", verified);
+            }
+            SendProofCommands::MessageSent(args) => {
+                let eth_client = ContractVerifiers::new(
+                    &args.eth_endpoint.eth_endpoint,
+                    &args.contract_addresses.validator_set_change_contract,
+                    &args.contract_addresses.message_sent_contract,
+                )
+                .unwrap();
+
+                let verified = eth_client
+                    .verify_msg_sent(
+                        args.ethereum_private_key,
+                        args.proof_path.to_str().unwrap(),
+                        args.public_inputs_path.to_str().unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                println!("Verified with result: {}", verified);
             }
         },
     };

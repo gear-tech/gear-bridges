@@ -7,7 +7,7 @@ async function main() {
   let circuitDigestAndMerkleRoots = publics_for_validator_change.slice(0, 8);
   let validatorSet = publics_for_validator_change.slice(8, 13);
   const setChangeVerifier = await setChangeVerifierFactory.deploy(
-    circuitDigestAndMerkleRoots, validatorSet, 248
+    circuitDigestAndMerkleRoots, validatorSet, 250
   );
   await setChangeVerifier.deployed();
 

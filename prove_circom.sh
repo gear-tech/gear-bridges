@@ -1,5 +1,4 @@
 cd ./circom-verifier
-docker context ls
 docker build -t temp -f ./Dockerfile.generate-circom-verifier .
 cd ../
 docker create --name temp_container temp

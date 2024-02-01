@@ -160,7 +160,7 @@ impl GearApi {
         self.fetch_validator_set_in_block(block).await
     }
 
-    async fn search_for_validator_set_block(&self, validator_set_id: u64) -> H256 {
+    pub async fn search_for_validator_set_block(&self, validator_set_id: u64) -> H256 {
         let latest_block = self.latest_finalized_block().await;
         let latest_vs_id = self.validator_set_id(latest_block).await;
 

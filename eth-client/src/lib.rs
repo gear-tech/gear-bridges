@@ -182,7 +182,6 @@ fn get_coefficients(
         pi_b: Vec<Vec<String>>,
         pi_c: Vec<String>,
         protocol: String,
-        curve: String,
     }
     let final_proof: FinalProof =
         serde_json::from_str(&final_proof).map_err(|_| VerifierError::WrongJsonFormation)?;

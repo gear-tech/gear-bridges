@@ -49,7 +49,12 @@ enum ProveCommands {
     },
     /// Prove that message was sent
     #[clap(visible_alias("m"))]
-    MessageSent(ProveArgs),
+    MessageSent {
+        #[clap(flatten)]
+        args: ProveArgs,
+        #[arg(long = "validator-set-id", short = 'v')]
+        validator_set_id: Option<u64>,
+    },
 }
 
 #[derive(Args)]
@@ -166,9 +171,17 @@ async fn main() {
 
                 process_prove(&circuit, NextValidatorSet::prove, &args);
             }
-            ProveCommands::MessageSent(args) => {
+            ProveCommands::MessageSent {
+                args,
+                validator_set_id,
+            } => {
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
-                let block = api.latest_finalized_block().await;
+
+                let block = if let Some(validator_set_id) = validator_set_id {
+                    api.search_for_validator_set_block(validator_set_id).await
+                } else {
+                    api.latest_finalized_block().await
+                };
 
                 let (block, block_finality) = api.fetch_finality_proof(block).await;
                 let circuit = MessageSent {

@@ -13,7 +13,7 @@ use prover::merkle_proof::{MerkleProof, TrieNodeData};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
 use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::crypto::Wraps;
-use sp_runtime::AccountId32;
+use sp_runtime::{traits::AppVerify, AccountId32};
 use subxt::{
     blocks::Block as BlockImpl,
     dynamic::DecodedValueThunk,
@@ -76,6 +76,14 @@ impl GearApi {
         Self::fetch_from_storage(&block, &set_id_address).await
     }
 
+    pub async fn fetch_finality_proof_for_session(
+        &self,
+        validator_set_id: u64,
+    ) -> (H256, prover::block_finality::BlockFinality) {
+        let block = self.search_for_validator_set_block(validator_set_id).await;
+        self.fetch_finality_proof(block).await
+    }
+
     /// Returns finality proof for block not earlier `after_block`
     /// and not later the end of session this block belongs to.
     pub async fn fetch_finality_proof(
@@ -94,9 +102,7 @@ impl GearApi {
         let finality = hex::decode(&finality.unwrap_or_default()["0x".len()..]).unwrap();
         let finality = FinalityProof::<GearHeader>::decode(&mut &finality[..]).unwrap();
 
-        let fetched_validator_set_id = self.validator_set_id(finality.block).await;
         let fetched_block_number = self.block_hash_to_number(finality.block).await;
-        assert_eq!(required_validator_set_id, fetched_validator_set_id);
         assert!(fetched_block_number >= after_block_number);
 
         let justification = finality.justification;
@@ -118,35 +124,48 @@ impl GearApi {
         );
         assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
 
+        for pc in &justification.commit.precommits {
+            pc.signature.verify(&signed_data[..], &pc.id);
+        }
+
         let validator_set = self.fetch_validator_set(required_validator_set_id).await;
         assert_eq!(VALIDATOR_COUNT, validator_set.len());
         let validator_set = validator_set.try_into().unwrap();
+
+        let pre_commits: Vec<_> = justification
+            .commit
+            .precommits
+            .into_iter()
+            .take(PROCESSED_VALIDATOR_COUNT)
+            .map(|pc| prover::block_finality::PreCommit {
+                public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
+                signature: pc.signature.as_inner_ref().0.to_owned(),
+            })
+            .collect();
+
+        assert_eq!(pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
 
         (
             finality.block,
             prover::block_finality::BlockFinality {
                 validator_set,
                 message: signed_data.try_into().unwrap(),
-                pre_commits: justification
-                    .commit
-                    .precommits
-                    .into_iter()
-                    .take(PROCESSED_VALIDATOR_COUNT)
-                    .map(|pc| prover::block_finality::PreCommit {
-                        public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
-                        signature: pc.signature.as_inner_ref().0.to_owned(),
-                    })
-                    .collect(),
+                pre_commits,
             },
         )
     }
 
     async fn fetch_validator_set(&self, validator_set_id: u64) -> Vec<[u8; 32]> {
+        let block = self.search_for_validator_set_block(validator_set_id).await;
+        self.fetch_validator_set_in_block(block).await
+    }
+
+    pub async fn search_for_validator_set_block(&self, validator_set_id: u64) -> H256 {
         let latest_block = self.latest_finalized_block().await;
         let latest_vs_id = self.validator_set_id(latest_block).await;
 
         if latest_vs_id == validator_set_id {
-            return self.fetch_validator_set_in_block(latest_block).await;
+            return latest_block;
         }
 
         #[derive(Clone, Copy)]
@@ -168,7 +187,7 @@ impl GearApi {
                     let next_vs = self.validator_set_id(next_block).await;
 
                     if next_vs == validator_set_id {
-                        return self.fetch_validator_set_in_block(next_block).await;
+                        return next_block;
                     }
 
                     if next_vs > validator_set_id {
@@ -192,7 +211,7 @@ impl GearApi {
                     let mid_vs = self.validator_set_id(mid_block).await;
 
                     if mid_vs == validator_set_id {
-                        return self.fetch_validator_set_in_block(mid_block).await;
+                        return mid_block;
                     }
 
                     if mid_vs > validator_set_id {

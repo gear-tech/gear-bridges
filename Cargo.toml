@@ -1,12 +1,15 @@
 [workspace]
 
 members = [
+    "eth-client",
     "gear-rpc-client",
     "prover",
     "relayer",
     "circuits/plonky2_blake2b256",
     "circom-verifier",
 ]
+
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
@@ -17,6 +20,7 @@ gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
 circom_verifier = { path = "./circom-verifier" }
+eth-client = { path = "./eth-client" }
 
 anyhow = "1.0.40"
 env_logger = "0.9.0"

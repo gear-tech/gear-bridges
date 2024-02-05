@@ -37,26 +37,46 @@ ENV NODE_OPTIONS="--max-old-space-size=65536"
 RUN echo "Circuit-specific setup"
 RUN snarkjs groth16 setup ./test/data/plonky2.r1cs ../trusted_setup/final.ptau ./test/data/g16.zkey -v
 
-RUN echo "Prove"
+#TODO: move steps for setting up rapidsnark to the top of the file.
+RUN apt-get install -y cmake libgmp-dev libsodium-dev nasm m4
+WORKDIR /
+RUN git clone https://github.com/iden3/rapidsnark.git
+WORKDIR /rapidsnark
+RUN git reset --hard v0.0.2
+RUN git submodule init
+RUN git submodule update
+RUN ./build_gmp.sh host
+RUN mkdir build_prover
+WORKDIR /rapidsnark/build_prover
+RUN cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../package
+RUN make -j4 && make install
+WORKDIR /verifier/circom
+
+RUN echo "Calculate witness"
 COPY ./plonky2_proof.json /verifier/circom/test/data/proof.json
-RUN snarkjs groth16 fullprove -v \
-    ./test/data/proof.json \
+RUN snarkjs wtns calculate -v \
     ./test/data/plonky2_js/plonky2.wasm \
+    ./test/data/proof.json \
+    ./test/data/witness.wtns
+
+RUN echo "Prove"
+RUN /rapidsnark/package/bin/prover \
     ./test/data/g16.zkey \
+    ./test/data/witness.wtns \
     ./test/data/g16_proof.json \
     ./test/data/g16_public.json
 
-RUN echo "Export verification key"
-RUN snarkjs zkey export verificationkey -v \
-    ./test/data/g16.zkey \
-    ./test/data/verification_key.json
+# RUN echo "Export verification key"
+# RUN snarkjs zkey export verificationkey -v \
+#     ./test/data/g16.zkey \
+#     ./test/data/verification_key.json
 
 RUN echo "Copy final files"
 RUN mkdir /tmp/aggregation
 RUN cp ./test/data/g16_public.json /tmp/aggregation/final_public.json 
 RUN cp ./test/data/g16_proof.json /tmp/aggregation/final_proof.json
 
-RUN echo "Generate solidity contract"
-RUN snarkjs zkey export solidityverifier -v \
-    ./test/data/g16.zkey \
-    ./hardhat/contracts/final_verifier.sol
+# RUN echo "Generate solidity contract"
+# RUN snarkjs zkey export solidityverifier -v \
+#     ./test/data/g16.zkey \
+#     ./hardhat/contracts/final_verifier.sol

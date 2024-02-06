@@ -15,6 +15,7 @@ use std::{
 };
 
 mod config;
+mod gate_verification_codes;
 mod verifier;
 
 use config::PoseidonBN128GoldilocksConfig as CBn128;

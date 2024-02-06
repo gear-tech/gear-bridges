@@ -1,7 +1,9 @@
+use crate::gate_verification_codes::export_gate_verification_code;
 use anyhow::Result;
 use log::Level;
 use plonky2::field::extension::{Extendable, FieldExtension};
 use plonky2::field::types::Field;
+use plonky2::gates::gate::Gate;
 use plonky2::gates::noop::NoopGate;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
@@ -44,7 +46,7 @@ where
 {
     let mut builder = CircuitBuilder::<F, D>::new(config.clone());
     let mut pw = PartialWitness::new();
-    let pt = builder.add_virtual_proof_with_pis::<InnerC>(&inner_cd);
+    let pt = builder.add_virtual_proof_with_pis(&inner_cd);
     pw.set_proof_with_pis_target(&pt, &inner_proof);
 
     let inner_data = VerifierCircuitTarget {
@@ -849,7 +851,7 @@ pub fn generate_circom_verifier_inner<
         if gate.0.id().eq("NoopGate") {
             continue;
         }
-        let selector_index = common.selectors_info.selector_indices[row];
+        let selector_index: usize = common.selectors_info.selector_indices[row];
         let group_range = common.selectors_info.groups[selector_index].clone();
         let mut c = 0;
 
@@ -890,7 +892,7 @@ pub fn generate_circom_verifier_inner<
             || gate_name[0..26].eq("LowDegreeInterpolationGate")
         {
             //TODO: use num_coeff as a param (same TODO for other gates)
-            let mut code_str = gate.0.export_circom_verification_code();
+            let mut code_str = export_gate_verification_code(gate.0.as_ref());
             code_str = code_str.replace("$SET_FILTER;", &filter_str);
             let v: Vec<&str> = code_str.split(' ').collect();
             let template_name = &v[1][0..v[1].len() - 2];

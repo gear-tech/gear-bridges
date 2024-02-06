@@ -5,7 +5,7 @@ members = [
     "gear-rpc-client",
     "prover",
     "relayer",
-    "circuits/plonky2_blake2b256",
+    "circuits/*",
     "circom-verifier",
 ]
 
@@ -19,6 +19,11 @@ edition = "2021"
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
+plonky2_sha256 = { path = "./circuits/plonky2_sha256" }
+plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
+plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
+plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
+plonky2_u32 = { path = "./circuits/plonky2_u32" }
 circom_verifier = { path = "./circom-verifier" }
 eth-client = { path = "./eth-client" }
 
@@ -29,14 +34,13 @@ jemallocator = "0.5.0"
 keccak-hash = "0.8.0"
 log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
-plonky2 = { git = "https://github.com/polymerdao/plonky2", rev = "4cb0b48df1d227d5461a4c28ed025aaea64e2e62" }
-plonky2_field = { git = "https://github.com/polymerdao/plonky2", rev = "4cb0b48df1d227d5461a4c28ed025aaea64e2e62" }
-plonky2_util = { git = "https://github.com/polymerdao/plonky2", rev = "4cb0b48df1d227d5461a4c28ed025aaea64e2e62" }
-plonky2_ecdsa = { git = "https://github.com/polymerdao/plonky2", rev = "4cb0b48df1d227d5461a4c28ed025aaea64e2e62" }
-plonky2_u32 = { git = "https://github.com/polymerdao/plonky2", rev = "4cb0b48df1d227d5461a4c28ed025aaea64e2e62" }
-plonky2_ed25519 = { git = "https://github.com/polymerdao/plonky2-ed25519", rev = "16b34149a838ce424133afd340c368088524d77b" }
-plonky2_sha256 = { git = "https://github.com/polymerdao/plonky2-sha256", rev = "06d128e78ed8d29b21d58294b069e852c1866f8d" }
-plonky2_sha512 = { git = "https://github.com/polymerdao/plonky2-sha512", rev = "6504a307448fdcc8c2daf000150a1f5691a4f8ef" }
+
+plonky2 = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
+plonky2_field = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
+plonky2_util = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
+plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
+curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
+
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 serde = { version = "1.0", features = ["alloc", "derive"] }
@@ -46,9 +50,6 @@ static_assertions = "1.1.0"
 unroll = "0.1.5"
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 blake2 = "0.10.6"
-
-[patch.'https://github.com/polymerdao/curve25519-dalek']
-curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
 
 [patch.crates-io]
 parity-wasm = { version = "0.45.0", git = "https://github.com/gear-tech/parity-wasm", branch = "v0.45.0-sign-ext" }

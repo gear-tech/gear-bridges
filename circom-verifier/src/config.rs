@@ -2,32 +2,49 @@ use plonky2::field::extension::quadratic::QuadraticExtension;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 
-use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
-use plonky2::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation, SPONGE_WIDTH};
-use plonky2::hash::poseidon::PoseidonHash;
+use plonky2::field::types::PrimeField64;
+use plonky2::hash::hash_types::{HashOut, RichField};
+use plonky2::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation};
+use plonky2::hash::poseidon::{PoseidonHash, PoseidonPermutation};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::config::{AlgebraicHasher, GenericConfig, Hasher};
 use poseidon_permutation::bindings::permute;
+use std::fmt::Debug;
 
-pub struct PoseidonBN128Permutation;
-impl<F: RichField> PlonkyPermutation<F> for PoseidonBN128Permutation {
-    fn permute(input: [F; SPONGE_WIDTH]) -> [F; SPONGE_WIDTH] {
-        assert_eq!(SPONGE_WIDTH, 12);
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+pub struct PoseidonBN128Permutation<T: Eq> {
+    // TODO: remove const
+    state: [T; 12],
+}
+
+impl<T: Eq> AsRef<[T]> for PoseidonBN128Permutation<T> {
+    fn as_ref(&self) -> &[T] {
+        todo!()
+    }
+}
+
+impl PlonkyPermutation<GoldilocksField> for PoseidonBN128Permutation<GoldilocksField> {
+    // TODO: remove consts
+    const RATE: usize = 8;
+    const WIDTH: usize = 12;
+
+    fn permute(&mut self) {
+        assert_eq!(Self::WIDTH, 12);
         unsafe {
             let h = permute(
-                input[0].to_canonical_u64(),
-                input[1].to_canonical_u64(),
-                input[2].to_canonical_u64(),
-                input[3].to_canonical_u64(),
-                input[4].to_canonical_u64(),
-                input[5].to_canonical_u64(),
-                input[6].to_canonical_u64(),
-                input[7].to_canonical_u64(),
-                input[8].to_canonical_u64(),
-                input[9].to_canonical_u64(),
-                input[10].to_canonical_u64(),
-                input[11].to_canonical_u64(),
+                self.state[0].to_canonical_u64(),
+                self.state[1].to_canonical_u64(),
+                self.state[2].to_canonical_u64(),
+                self.state[3].to_canonical_u64(),
+                self.state[4].to_canonical_u64(),
+                self.state[5].to_canonical_u64(),
+                self.state[6].to_canonical_u64(),
+                self.state[7].to_canonical_u64(),
+                self.state[8].to_canonical_u64(),
+                self.state[9].to_canonical_u64(),
+                self.state[10].to_canonical_u64(),
+                self.state[11].to_canonical_u64(),
             );
 
             fn u64_to_f<F: RichField>(x: u64) -> F {
@@ -35,7 +52,7 @@ impl<F: RichField> PlonkyPermutation<F> for PoseidonBN128Permutation {
                 F::from_canonical_u64(x)
             }
 
-            [
+            self.state = [
                 u64_to_f(h.r0),
                 u64_to_f(h.r1),
                 u64_to_f(h.r2),
@@ -48,51 +65,73 @@ impl<F: RichField> PlonkyPermutation<F> for PoseidonBN128Permutation {
                 u64_to_f(h.r9),
                 u64_to_f(h.r10),
                 u64_to_f(h.r11),
-            ]
+            ];
         }
+    }
+
+    fn new<I: IntoIterator<Item = GoldilocksField>>(iter: I) -> Self {
+        Self {
+            state: iter
+                .into_iter()
+                .take(12)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
+    }
+
+    fn set_elt(&mut self, elt: GoldilocksField, idx: usize) {
+        todo!()
+    }
+
+    fn set_from_iter<I: IntoIterator<Item = GoldilocksField>>(
+        &mut self,
+        elts: I,
+        start_idx: usize,
+    ) {
+        todo!()
+    }
+
+    fn set_from_slice(&mut self, elts: &[GoldilocksField], start_idx: usize) {
+        let begin = start_idx;
+        let end = start_idx + elts.len();
+        self.state[begin..end].copy_from_slice(elts);
+    }
+
+    fn squeeze(&self) -> &[GoldilocksField] {
+        &self.state[..Self::RATE]
     }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PoseidonBN128Hash;
-impl<F: RichField> Hasher<F> for PoseidonBN128Hash {
+impl Hasher<GoldilocksField> for PoseidonBN128Hash {
     const HASH_SIZE: usize = 4 * 8;
-    type Hash = HashOut<F>;
-    type Permutation = PoseidonBN128Permutation;
+    type Hash = HashOut<GoldilocksField>;
+    type Permutation = PoseidonBN128Permutation<GoldilocksField>;
 
-    fn hash_no_pad(input: &[F]) -> Self::Hash {
-        hash_n_to_hash_no_pad::<F, Self::Permutation>(input)
-    }
-
-    fn hash_public_inputs(input: &[F]) -> Self::Hash {
-        PoseidonHash::hash_no_pad(input)
+    fn hash_no_pad(input: &[GoldilocksField]) -> Self::Hash {
+        hash_n_to_hash_no_pad::<GoldilocksField, Self::Permutation>(input)
     }
 
     fn two_to_one(left: Self::Hash, right: Self::Hash) -> Self::Hash {
-        compress::<F, Self::Permutation>(left, right)
+        compress::<GoldilocksField, Self::Permutation>(left, right)
     }
 }
 
 // TODO: this is a work around. Still use Goldilocks based Poseidon for algebraic PoseidonBN128Hash.
-impl<F: RichField> AlgebraicHasher<F> for PoseidonBN128Hash {
+impl AlgebraicHasher<GoldilocksField> for PoseidonBN128Hash {
+    type AlgebraicPermutation = PoseidonPermutation<Target>;
+
     fn permute_swapped<const D: usize>(
-        inputs: [Target; SPONGE_WIDTH],
+        inputs: PoseidonPermutation<Target>,
         swap: BoolTarget,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> [Target; SPONGE_WIDTH]
+        builder: &mut CircuitBuilder<GoldilocksField, D>,
+    ) -> PoseidonPermutation<Target>
     where
-        F: RichField + Extendable<D>,
+        GoldilocksField: Extendable<D>,
     {
         PoseidonHash::permute_swapped(inputs, swap, builder)
-    }
-    fn public_inputs_hash<const D: usize>(
-        inputs: Vec<Target>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> HashOutTarget
-    where
-        F: RichField + Extendable<D>,
-    {
-        PoseidonHash::public_inputs_hash(inputs, builder)
     }
 }
 
@@ -111,6 +150,7 @@ impl GenericConfig<2> for PoseidonBN128GoldilocksConfig {
 mod tests {
     use anyhow::Result;
     use plonky2::field::types::Field;
+    use plonky2::hash::poseidon::{Poseidon, PoseidonHash, PoseidonPermutation};
     use plonky2::plonk::config::{GenericConfig, Hasher, PoseidonGoldilocksConfig};
 
     use super::super::config::PoseidonBN128Hash;

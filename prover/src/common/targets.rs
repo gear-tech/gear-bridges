@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
-use plonky2_field::goldilocks_field::GoldilocksField;
-use plonky2_field::types::Field64;
-
 use self::consts::VALIDATOR_COUNT;
 
 use crate::{common::array_to_bits, consts::*, prelude::*};
@@ -14,6 +11,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_field::{goldilocks_field::GoldilocksField, types::Field};
 
 pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;

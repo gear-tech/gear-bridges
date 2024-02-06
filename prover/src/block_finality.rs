@@ -7,7 +7,7 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-use plonky2_ed25519::gadgets::eddsa::make_verify_circuits as ed25519_circuit;
+use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
 use plonky2_field::types::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},

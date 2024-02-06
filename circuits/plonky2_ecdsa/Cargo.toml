@@ -1,0 +1,21 @@
+[package]
+name = "plonky2_ecdsa"
+description = "ECDSA gadget for Plonky2"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+
+[features]
+parallel = ["plonky2_maybe_rayon/parallel", "plonky2/parallel"]
+
+[dependencies]
+anyhow.workspace = true
+itertools.workspace = true
+plonky2_maybe_rayon.workspace = true
+num.workspace = true
+plonky2.workspace = true
+plonky2_u32.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+rand.workspace = true

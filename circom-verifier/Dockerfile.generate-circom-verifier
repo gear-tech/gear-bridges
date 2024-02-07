@@ -6,7 +6,12 @@ RUN apt-get update
 RUN apt-get install -y \
     curl \
     build-essential \
-    git
+    git \
+    cmake \
+    libgmp-dev \
+    libsodium-dev \
+    nasm \
+    m4
 
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -20,6 +25,18 @@ RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
 RUN apt-get install -y nodejs
 
 RUN npm install -g snarkjs@0.7.2
+
+WORKDIR /
+RUN git clone https://github.com/iden3/rapidsnark.git
+WORKDIR /rapidsnark
+RUN git reset --hard v0.0.2
+RUN git submodule init
+RUN git submodule update
+RUN ./build_gmp.sh host
+RUN mkdir build_prover
+WORKDIR /rapidsnark/build_prover
+RUN cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../package
+RUN make -j4 && make install
 
 RUN echo "Download initial trusted setup"
 RUN mkdir -p /verifier/trusted_setup
@@ -36,21 +53,6 @@ ENV NODE_OPTIONS="--max-old-space-size=65536"
 
 RUN echo "Circuit-specific setup"
 RUN snarkjs groth16 setup ./test/data/plonky2.r1cs ../trusted_setup/final.ptau ./test/data/g16.zkey -v
-
-#TODO: move steps for setting up rapidsnark to the top of the file.
-RUN apt-get install -y cmake libgmp-dev libsodium-dev nasm m4
-WORKDIR /
-RUN git clone https://github.com/iden3/rapidsnark.git
-WORKDIR /rapidsnark
-RUN git reset --hard v0.0.2
-RUN git submodule init
-RUN git submodule update
-RUN ./build_gmp.sh host
-RUN mkdir build_prover
-WORKDIR /rapidsnark/build_prover
-RUN cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../package
-RUN make -j4 && make install
-WORKDIR /verifier/circom
 
 RUN echo "Calculate witness"
 COPY ./plonky2_proof.json /verifier/circom/test/data/proof.json

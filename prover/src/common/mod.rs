@@ -3,10 +3,12 @@ use std::marker::PhantomData;
 use crate::prelude::*;
 use circom_verifier::CircomVerifierFilePaths;
 use plonky2::{
+    hash::hash_types::HashOutTarget,
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget},
+        config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
 };
@@ -15,6 +17,8 @@ use plonky2::{
 pub mod targets;
 
 use targets::TargetSet;
+
+type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
 pub struct ProofWithCircuitData<TS>
 where
@@ -49,6 +53,10 @@ where
         }
     }
 
+    fn circuit_digest(&self) -> CircuitDigest {
+        self.circuit_data.verifier_only.circuit_digest
+    }
+
     pub fn verify(&self) -> bool {
         self.circuit_data
             .verify(ProofWithPublicInputs {
@@ -81,6 +89,12 @@ where
 
     first_public_inputs: TS1,
     second_public_inputs: TS2,
+
+    first_circuit_digest: CircuitDigest,
+    second_circuit_digest: CircuitDigest,
+
+    first_circuit_digest_target: HashOutTarget,
+    second_circuit_digest_target: HashOutTarget,
 }
 
 impl<TS1, TS2> ProofComposition<TS1, TS2>
@@ -106,6 +120,9 @@ where
         let proof_with_pis_target_2 =
             builder.add_virtual_proof_with_pis::<C>(&second.circuit_data.common);
 
+        let first_circuit_digest = first.circuit_digest();
+        let second_circuit_digest = second.circuit_digest();
+
         let verifier_circuit_target_1 = VerifierCircuitTarget {
             constants_sigmas_cap: builder
                 .add_virtual_cap(first.circuit_data.common.config.fri_config.cap_height),
@@ -116,14 +133,6 @@ where
                 .add_virtual_cap(second.circuit_data.common.config.fri_config.cap_height),
             circuit_digest: builder.add_virtual_hash(),
         };
-
-        let first_hash_target =
-            builder.constant_hash(first.circuit_data.verifier_only.circuit_digest);
-        builder.connect_hashes(first_hash_target, verifier_circuit_target_1.circuit_digest);
-
-        let second_hash_target =
-            builder.constant_hash(second.circuit_data.verifier_only.circuit_digest);
-        builder.connect_hashes(second_hash_target, verifier_circuit_target_2.circuit_digest);
 
         let mut pw = PartialWitness::new();
         pw.set_proof_with_pis_target(
@@ -179,9 +188,39 @@ where
         ProofComposition {
             circuit_builder: builder,
             witness: pw,
+
             first_public_inputs,
             second_public_inputs,
+
+            first_circuit_digest,
+            second_circuit_digest,
+
+            first_circuit_digest_target: verifier_circuit_target_1.circuit_digest,
+            second_circuit_digest_target: verifier_circuit_target_2.circuit_digest,
         }
+    }
+
+    pub fn assert_both_circuit_digests(self) -> Self {
+        self.assert_first_circuit_digest()
+            .assert_second_circuit_digest()
+    }
+
+    pub fn assert_first_circuit_digest(mut self) -> Self {
+        let value_target = self
+            .circuit_builder
+            .constant_hash(self.first_circuit_digest);
+        self.circuit_builder
+            .connect_hashes(value_target, self.first_circuit_digest_target);
+        self
+    }
+
+    pub fn assert_second_circuit_digest(mut self) -> Self {
+        let value_target = self
+            .circuit_builder
+            .constant_hash(self.second_circuit_digest);
+        self.circuit_builder
+            .connect_hashes(value_target, self.second_circuit_digest_target);
+        self
     }
 
     pub fn compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>

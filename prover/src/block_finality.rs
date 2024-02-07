@@ -289,7 +289,7 @@ impl SingleValidatorSign {
         // This fn registers public inputs as:
         //  - message contents as `BoolTarget`s
         //  - public key as `BoolTarget`s
-        let targets = ed25519_circuit(&mut builder, self.message.len());
+        let targets = ed25519_circuit(&mut builder, self.message.len() * 8);
 
         let mut pw = PartialWitness::new();
 

@@ -3,7 +3,7 @@ use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 
 use plonky2::field::types::PrimeField64;
-use plonky2::hash::hash_types::{HashOut, RichField};
+use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
 use plonky2::hash::hashing::{compress, hash_n_to_hash_no_pad, PlonkyPermutation};
 use plonky2::hash::poseidon::{PoseidonHash, PoseidonPermutation};
 use plonky2::iop::target::{BoolTarget, Target};
@@ -20,7 +20,7 @@ pub struct PoseidonBN128Permutation<T: Eq> {
 
 impl<T: Eq> AsRef<[T]> for PoseidonBN128Permutation<T> {
     fn as_ref(&self) -> &[T] {
-        todo!()
+        &self.state
     }
 }
 
@@ -81,7 +81,7 @@ impl PlonkyPermutation<GoldilocksField> for PoseidonBN128Permutation<GoldilocksF
     }
 
     fn set_elt(&mut self, elt: GoldilocksField, idx: usize) {
-        todo!()
+        self.state[idx] = elt;
     }
 
     fn set_from_iter<I: IntoIterator<Item = GoldilocksField>>(
@@ -89,7 +89,9 @@ impl PlonkyPermutation<GoldilocksField> for PoseidonBN128Permutation<GoldilocksF
         elts: I,
         start_idx: usize,
     ) {
-        todo!()
+        for (s, e) in self.state[start_idx..].iter_mut().zip(elts) {
+            *s = e;
+        }
     }
 
     fn set_from_slice(&mut self, elts: &[GoldilocksField], start_idx: usize) {
@@ -114,6 +116,10 @@ impl Hasher<GoldilocksField> for PoseidonBN128Hash {
         hash_n_to_hash_no_pad::<GoldilocksField, Self::Permutation>(input)
     }
 
+    fn hash_public_inputs(input: &[GoldilocksField]) -> Self::Hash {
+        PoseidonHash::hash_no_pad(input)
+    }
+
     fn two_to_one(left: Self::Hash, right: Self::Hash) -> Self::Hash {
         compress::<GoldilocksField, Self::Permutation>(left, right)
     }
@@ -132,6 +138,16 @@ impl AlgebraicHasher<GoldilocksField> for PoseidonBN128Hash {
         GoldilocksField: Extendable<D>,
     {
         PoseidonHash::permute_swapped(inputs, swap, builder)
+    }
+
+    fn public_inputs_hash<const D: usize>(
+        inputs: Vec<Target>,
+        builder: &mut CircuitBuilder<GoldilocksField, D>,
+    ) -> HashOutTarget
+    where
+        GoldilocksField: RichField + Extendable<D>,
+    {
+        PoseidonHash::public_inputs_hash(inputs, builder)
     }
 }
 

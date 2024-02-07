@@ -590,6 +590,7 @@ pub fn generate_proof_base64<
 
     proof_size += conf.field_size;
 
+    proof_size += 8; // Length of the public inputs vec.
     proof_size += conf.num_public_inputs * conf.field_size;
 
     let mut public_inputs = vec!["0".to_string(); conf.num_public_inputs];

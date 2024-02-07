@@ -1,10 +1,10 @@
-use std::any::Any;
-
 use plonky2::{
     gates::{
         arithmetic_base::ArithmeticGate, arithmetic_extension::ArithmeticExtensionGate,
         base_sum::BaseSumGate, constant::ConstantGate, exponentiation::ExponentiationGate,
-        gate::AnyGate, multiplication_extension::MulExtensionGate, poseidon::PoseidonGate,
+        gate::AnyGate, interpolation::InterpolationGate,
+        low_degree_interpolation::LowDegreeInterpolationGate,
+        multiplication_extension::MulExtensionGate, poseidon::PoseidonGate,
         poseidon_mds::PoseidonMdsGate, public_input::PublicInputGate,
         random_access::RandomAccessGate, reducing::ReducingGate,
         reducing_extension::ReducingExtensionGate,
@@ -14,7 +14,10 @@ use plonky2::{
         poseidon::{self, Poseidon},
     },
 };
-use plonky2_field::extension::Extendable;
+use plonky2_field::{
+    extension::{Extendable, FieldExtension},
+    types::Field,
+};
 
 trait GateVerificationCode {
     fn export_verification_code(&self) -> String;
@@ -56,8 +59,9 @@ where
     process_gate!(RandomAccessGate<F, D>);
     process_gate!(ReducingGate<D>);
     process_gate!(ReducingExtensionGate<D>);
+    process_gate!(LowDegreeInterpolationGate<F, D>);
 
-    unimpemented!()
+    unimplemented!()
 }
 
 impl GateVerificationCode for ArithmeticGate {
@@ -746,6 +750,118 @@ impl<const D: usize> GateVerificationCode for ReducingExtensionGate<D> {
 
         template_str = template_str.replace("$NUM_COEFFS", &*self.num_coeffs.to_string());
         template_str = template_str.replace("$D", &*D.to_string());
+
+        template_str
+    }
+}
+
+impl<F, const D: usize> GateVerificationCode for LowDegreeInterpolationGate<F, D>
+where
+    F: RichField + Extendable<D>,
+{
+    fn export_verification_code(&self) -> String {
+        let mut template_str = format!(
+            "template LowDegreeInterpolation$SUBGROUP_BITS() {{
+                signal input constants[NUM_OPENINGS_CONSTANTS()][2];
+                signal input wires[NUM_OPENINGS_WIRES()][2];
+                signal input public_input_hash[4];
+                signal input constraints[NUM_GATE_CONSTRAINTS()][2];
+                signal output out[NUM_GATE_CONSTRAINTS()][2];
+                signal filter[2];
+                $SET_FILTER;
+                var index = 0;
+                signal altered_coeffs[$NUM_POINTS][$D][2];
+                signal powers_shift[$NUM_POINTS][2];
+                powers_shift[0][0] <== 1;
+                powers_shift[0][1] <== 0;
+                powers_shift[1] <== wires[0];
+                for (var i = 2; i < $NUM_POINTS; i++) {{
+                    powers_shift[i] <== wires[1 + 2 * $NUM_POINTS * $D + $D + $D + i - 2];
+                }}
+                for (var i = 2; i < $NUM_POINTS; i++) {{
+                    out[index] <== ConstraintPush()(constraints[index], filter, GlExtSub()(GlExtMul()(powers_shift[i - 1], powers_shift[1]), powers_shift[i]));
+                    index++;
+                }}
+                for (var i = 0; i < $NUM_POINTS; i++) {{
+                    for (var j = 0; j < $D; j++) {{
+                    altered_coeffs[i][j] <== GlExtMul()(wires[ldi_wires_coeff_start(i) + j], powers_shift[i]);
+                    }}
+                }}
+                signal value[$SUBGROUP_SIZE][$D][2];
+                signal acc[$SUBGROUP_SIZE][$NUM_POINTS][$D][2];
+                for (var i = 0; i < $SUBGROUP_SIZE; i++) {{
+                    for (var j = 0; j < $D; j++) {{
+                    value[i][j] <== wires[1 + i * $D + j];
+                    }}
+                    for (var j = $NUM_POINTS; j > 0; j--) {{
+                    for (var k = 0; k < $D; k++) {{
+                        if (j == $NUM_POINTS) acc[i][j - 1][k] <== altered_coeffs[j - 1][k];
+                        else acc[i][j - 1][k] <== GlExtAdd()(GlExtMul()(acc[i][j][k], GlExt(two_adic_subgroup(i), 0)()), altered_coeffs[j - 1][k]);
+                    }}
+                    }}
+                    for (var j = 0; j < $D; j++) {{
+                    out[index] <== ConstraintPush()(constraints[index], filter, GlExtSub()(value[i][j], acc[i][0][j]));
+                    index++;
+                    }}
+                }}
+                signal m[$NUM_POINTS - 2][2][2];
+                for (var i = 1; i < $NUM_POINTS - 1; i++) {{
+                    m[i - 1] <== WiresAlgebraMul(ldi_powers_evaluation_start(i), ldi_powers_evaluation_start(1))(wires);
+                    for (var j = 0; j < $D; j++) {{
+                    out[index] <== ConstraintPush()(constraints[index], filter, GlExtSub()(m[i - 1][j], wires[ldi_powers_evaluation_start(i + 1) + j]));
+                    index++;
+                    }}
+                }}
+                signal acc2[$D][$NUM_POINTS][2];
+                for (var i = 0; i < $D; i++) {{
+                    acc2[i][0] <== wires[ldi_wires_coeff_start(0) + i];
+                }}
+                signal m2[$NUM_POINTS - 1][2][2];
+                for (var i = 1; i < $NUM_POINTS; i++) {{
+                    m2[i - 1] <== WiresAlgebraMul(ldi_powers_evaluation_start(i), ldi_wires_coeff_start(i))(wires);
+                    for (var j = 0; j < $D; j++) {{
+                    acc2[j][i] <== GlExtAdd()(acc2[j][i - 1], m2[i - 1][j]);
+                    }}
+                }}
+                for (var i = 0; i < $D; i++) {{
+                    out[index] <== ConstraintPush()(constraints[index], filter, GlExtSub()(wires[1 + $NUM_POINTS * $D + $D + i], acc2[i][$NUM_POINTS - 1]));
+                    index++;
+                }}
+                for (var i = index; i < NUM_GATE_CONSTRAINTS(); i++) {{
+                    out[i] <== constraints[i];
+                }}
+                }}
+                function ldi_powers_evaluation_start(i) {{
+                if (i == 1) return 1 + $NUM_POINTS * $D;
+                else return 1 + $D + $D + 2 * $NUM_POINTS * $D + $NUM_POINTS - 2 + (i - 2) * $D;
+                }}
+                function ldi_wires_coeff_start(i) {{
+                return 1 + ($NUM_POINTS + i + 2) * $D;
+                }}
+                function two_adic_subgroup(i) {{
+                var subgroup[$SUBGROUP_SIZE];
+                $SET_SUBGROUP;
+                return subgroup[i];
+                }}"
+        )
+            .to_string();
+
+        template_str = template_str.replace("$NUM_POINTS", &*self.num_points().to_string());
+        assert_eq!(D, 2);
+        template_str = template_str.replace("$D", &*D.to_string());
+        template_str = template_str.replace("$SUBGROUP_BITS", &*self.subgroup_bits.to_string());
+
+        let subgroup = F::Extension::two_adic_subgroup(self.subgroup_bits);
+        template_str = template_str.replace("$SUBGROUP_SIZE", &*subgroup.len().to_string());
+        let mut subgroup_str = "".to_owned();
+        for i in 0..subgroup.len() {
+            subgroup_str += &*("  subgroup[".to_owned()
+                + &*i.to_string()
+                + "] = "
+                + &*subgroup[i].to_basefield_array()[0].to_string()
+                + ";\n");
+        }
+        template_str = template_str.replace("  $SET_SUBGROUP;\n", &*subgroup_str);
 
         template_str
     }

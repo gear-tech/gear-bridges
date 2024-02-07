@@ -25,9 +25,9 @@ const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS: usize =
 
 impl_target_set! {
     pub struct NextValidatorSetTarget {
-        validator_set_hash: Sha256TargetGoldilocks,
-        next_validator_set_hash: Sha256TargetGoldilocks,
-        authority_set_id: SingleTarget,
+        pub validator_set_hash: Sha256TargetGoldilocks,
+        pub next_validator_set_hash: Sha256TargetGoldilocks,
+        pub current_authority_set_id: SingleTarget,
     }
 }
 
@@ -91,7 +91,7 @@ impl NextValidatorSet {
                         validator_set_hash.hash,
                         builder,
                     ),
-                    authority_set_id: next_validator_set.authority_set_id,
+                    current_authority_set_id: next_validator_set.authority_set_id,
                 }
             };
 

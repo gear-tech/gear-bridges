@@ -7,7 +7,7 @@ use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget},
+        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierCircuitTarget},
         config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
@@ -16,6 +16,7 @@ use plonky2::{
 #[macro_use]
 pub mod targets;
 
+use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;
 
 type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
@@ -25,7 +26,7 @@ where
     TS: TargetSet,
 {
     proof: Proof<F, C, D>,
-    circuit_data: CircuitData<F, C, D>,
+    circuit_data: VerifierCircuitData<F, C, D>,
 
     public_inputs: Vec<F>,
     public_inputs_parser: PhantomData<TS>,
@@ -47,14 +48,19 @@ where
 
         ProofWithCircuitData {
             proof,
-            circuit_data,
+            circuit_data: circuit_data.verifier_data(),
             public_inputs,
             public_inputs_parser: PhantomData,
         }
     }
 
-    fn circuit_digest(&self) -> CircuitDigest {
+    pub fn circuit_digest(&self) -> CircuitDigest {
         self.circuit_data.verifier_only.circuit_digest
+    }
+
+    // TODO: REMOVE
+    pub fn pis(&self) -> Vec<GoldilocksField> {
+        self.public_inputs.clone()
     }
 
     pub fn verify(&self) -> bool {
@@ -64,6 +70,17 @@ where
                 public_inputs: self.public_inputs.clone(),
             })
             .is_ok()
+    }
+
+    pub fn serialize(&self) {
+        let proof = ProofWithPublicInputs {
+            proof: self.proof.clone(),
+            public_inputs: self.public_inputs.clone(),
+        };
+        let proof = proof.to_bytes();
+
+        //let common_circuit_data = self.circuit_data.common.clone();
+        //let verifier_circuit_data = self.circuit_data.verifier_only.clone();
     }
 
     pub fn generate_circom_verifier(self, paths: CircomVerifierFilePaths) {
@@ -95,6 +112,18 @@ where
 
     first_circuit_digest_target: HashOutTarget,
     second_circuit_digest_target: HashOutTarget,
+}
+
+pub struct ExtendedComposeArgs<TS1, TS2>
+where
+    TS1: TargetSet,
+    TS2: TargetSet,
+{
+    pub first_target_set: TS1,
+    pub second_target_set: TS2,
+
+    pub first_circuit_digest: HashOutTarget,
+    pub second_circuit_digest: HashOutTarget,
 }
 
 impl<TS1, TS2> ProofComposition<TS1, TS2>
@@ -232,6 +261,27 @@ where
             &mut self.circuit_builder,
             self.first_public_inputs.clone(),
             self.second_public_inputs.clone(),
+        );
+
+        target_set.register_as_public_inputs(&mut self.circuit_builder);
+
+        ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
+    }
+
+    pub fn extended_compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
+    where
+        TS: TargetSet,
+        O: Fn(&mut CircuitBuilder<F, D>, ExtendedComposeArgs<TS1, TS2>) -> TS,
+    {
+        let target_set = op(
+            &mut self.circuit_builder,
+            ExtendedComposeArgs {
+                first_target_set: self.first_public_inputs.clone(),
+                second_target_set: self.second_public_inputs.clone(),
+
+                first_circuit_digest: self.first_circuit_digest_target,
+                second_circuit_digest: self.second_circuit_digest_target,
+            },
         );
 
         target_set.register_as_public_inputs(&mut self.circuit_builder);

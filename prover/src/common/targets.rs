@@ -8,6 +8,7 @@ use self::consts::VALIDATOR_COUNT;
 
 use crate::{common::array_to_bits, consts::*, prelude::*};
 use plonky2::{
+    hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -50,6 +51,18 @@ impl TargetSet for BoolTarget {
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
         std::iter::once(self.target)
+    }
+}
+
+impl TargetSet for HashOutTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        let target = HashOutTarget::from_vec(raw.take(CIRCUIT_DIGEST_SIZE).collect());
+        assert_eq!(target.elements.len(), CIRCUIT_DIGEST_SIZE);
+        target
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        self.elements.into_iter()
     }
 }
 

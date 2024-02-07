@@ -10,6 +10,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 pub mod block_finality;
 pub mod common;
+pub mod latest_validator_set;
 pub mod merkle_proof;
 pub mod message_sent;
 pub mod next_validator_set;
@@ -29,6 +30,8 @@ mod prelude {
 }
 
 pub(crate) mod consts {
+    pub const CIRCUIT_DIGEST_SIZE: usize = 4;
+
     pub const SHA256_DIGEST_SIZE: usize = 32;
     pub const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
     /// If we pack `BoolTargets` into `Targets` by groups of 52 then

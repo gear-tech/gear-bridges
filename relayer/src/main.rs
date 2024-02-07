@@ -7,7 +7,10 @@ use std::{path::PathBuf, time::Instant};
 use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
-    common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
+    common::targets::TargetSet,
+    latest_validator_set::{LatestValidatorSet, ValidatorSetGenesis},
+    message_sent::MessageSent,
+    next_validator_set::NextValidatorSet,
     ProofWithCircuitData,
 };
 
@@ -160,16 +163,80 @@ async fn main() {
                 validator_set_id,
             } => {
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
-                let (block, current_epoch_block_finality) =
-                    api.fetch_finality_proof_for_session(validator_set_id).await;
-                let circuit = NextValidatorSet {
-                    current_epoch_block_finality,
-                    next_validator_set_inclusion_proof: api
-                        .fetch_next_session_keys_merkle_proof(block)
-                        .await,
-                };
 
-                process_prove(&circuit, NextValidatorSet::prove, &args);
+                let genesis_data = ValidatorSetGenesis {
+                    validator_set_hash: [
+                        2787997088524558,
+                        914341688072726,
+                        3440393019007615,
+                        3418656939423883,
+                        276187037400784,
+                    ],
+                    authority_set_id: validator_set_id,
+                };
+                let mut proof = genesis_data.prove();
+                for i in 0..4 {
+                    let (block, current_epoch_block_finality) = api
+                        .fetch_finality_proof_for_session(validator_set_id + i)
+                        .await;
+
+                    let nvs = NextValidatorSet {
+                        current_epoch_block_finality,
+                        next_validator_set_inclusion_proof: api
+                            .fetch_next_session_keys_merkle_proof(block)
+                            .await,
+                    };
+
+                    let recursion = LatestValidatorSet {
+                        current_proof: proof,
+                        genesis_data: genesis_data.clone(),
+                        change_proof: nvs,
+                    };
+
+                    proof = recursion.prove();
+
+                    let cd = proof.circuit_digest();
+                    println!(
+                        "PHASE {} \nCD: {:?} \nPI: {:?}",
+                        i,
+                        cd.elements,
+                        proof.pis()
+                    );
+                }
+
+                // Single recursion
+                // CD: [
+                // 18315009976923485204,
+                // 14164793601880394087,
+                // 10948834238386344171,
+                // 3440343259230109350
+                // ]
+                // PI: [
+                // 17888550690340597725,
+                // 2265934899556215602,
+                // 14381180512499930894,
+                // 12546334548827159079,
+                // 2787997088524558,
+                // 914341688072726,
+                // 3440393019007615,
+                // 3418656939423883,
+                // 276187037400784,
+                // 251
+                // ]
+
+                // ---------- OLD -----------------
+
+                // let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                // let (block, current_epoch_block_finality) =
+                //     api.fetch_finality_proof_for_session(validator_set_id).await;
+                // let circuit = NextValidatorSet {
+                //     current_epoch_block_finality,
+                //     next_validator_set_inclusion_proof: api
+                //         .fetch_next_session_keys_merkle_proof(block)
+                //         .await,
+                // };
+
+                // process_prove(&circuit, NextValidatorSet::prove, &args);
             }
             ProveCommands::MessageSent {
                 args,

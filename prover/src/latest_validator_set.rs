@@ -1,32 +1,25 @@
-use itertools::Itertools;
 use plonky2::{
     field::types::Field,
-    hash::hash_types::{HashOut, HashOutTarget},
-    iop::{target::BoolTarget, witness::PartialWitness},
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+    gates::noop::NoopGate,
+    hash::hash_types::MerkleCapTarget,
+    iop::{
+        target::BoolTarget,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+    recursion::dummy_circuit::cyclic_base_proof,
 };
 
 use crate::{
-    common::{
-        targets::{impl_target_set, Sha256TargetGoldilocks, SingleTarget, TargetSet},
-        ExtendedComposeArgs, ProofComposition,
-    },
+    common::targets::{impl_target_set, ArrayTarget, SingleTarget, TargetSet},
     next_validator_set::{NextValidatorSet, NextValidatorSetTarget},
-    prelude::{
-        consts::{CIRCUIT_DIGEST_SIZE, SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS},
-        *,
-    },
+    prelude::{consts::SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS, *},
     ProofWithCircuitData,
 };
-
-// TODO: Assert that contsants merkle caps are equal too.
-impl_target_set! {
-    pub struct RecursiveValidatorSetChangeTarget {
-        prev_circuit_digest: HashOutTarget,
-        validator_set_hash: Sha256TargetGoldilocks,
-        authority_set_id: SingleTarget,
-    }
-}
 
 #[derive(Clone)]
 pub struct ValidatorSetGenesis {
@@ -34,135 +27,231 @@ pub struct ValidatorSetGenesis {
     pub authority_set_id: u64,
 }
 
-impl ValidatorSetGenesis {
-    pub fn prove(&self) -> ProofWithCircuitData<RecursiveValidatorSetChangeTarget> {
-        let mut builder = CircuitBuilder::new(CircuitConfig::standard_ecc_config());
+// circuit digest + merkle caps
+const VERIFIER_DATA_LEN: usize = 4 + 4 * 16;
 
-        let placeholder_prev_circuit_digest = [F::ZERO; CIRCUIT_DIGEST_SIZE];
-        let targets = builder.constants(&placeholder_prev_circuit_digest);
-        builder.register_public_inputs(&targets);
-
-        let targets = builder.constants(
-            &self
-                .validator_set_hash
-                .into_iter()
-                .map(|e| F::from_canonical_u64(e))
-                .collect::<Vec<_>>(),
-        );
-        builder.register_public_inputs(&targets);
-
-        let target = builder.constant(F::from_canonical_u64(self.authority_set_id));
-        builder.register_public_input(target);
-
-        let witness = PartialWitness::new();
-
-        ProofWithCircuitData::from_builder(builder, witness)
+impl_target_set! {
+    pub struct LatestValidatorSetTarget {
+        genesis_set_id: SingleTarget,
+        current_set_id: SingleTarget,
+        chain_length: SingleTarget,
+        verifier_data: ArrayTarget<SingleTarget, VERIFIER_DATA_LEN>,
     }
 }
 
 pub struct LatestValidatorSet {
     pub genesis_data: ValidatorSetGenesis,
-    pub current_proof: ProofWithCircuitData<RecursiveValidatorSetChangeTarget>,
     pub change_proof: NextValidatorSet,
 }
 
-impl LatestValidatorSet {
-    pub fn prove(self) -> ProofWithCircuitData<RecursiveValidatorSetChangeTarget> {
-        log::info!("Appending validator set change proof to composition...");
+pub struct CircuitDataWithTargets {
+    cyclic_circuit_data: CircuitData<F, C, D>,
 
-        let next_validator_set_proof = self.change_proof.prove();
-        // TODO: Cache it somehow?
-        let genesis_proof_circuit_digest = self.genesis_data.prove().circuit_digest();
+    common_data: CommonCircuitData<F, D>,
 
-        let mut config = CircuitConfig::standard_recursion_config();
-        config.fri_config.cap_height = 0;
-        let composition_builder =
-            ProofComposition::new_with_config(next_validator_set_proof, self.current_proof, config);
+    condition: BoolTarget,
+    inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    verifier_data_target: VerifierCircuitTarget,
 
-        let targets_op =
-            |builder: &mut CircuitBuilder<F, D>,
-             ExtendedComposeArgs::<NextValidatorSetTarget, RecursiveValidatorSetChangeTarget> {
-                 first_target_set: next_validator_set,
-                 second_target_set: current_proof,
-                 first_circuit_digest: _,
-                 second_circuit_digest: current_proof_circuit_digest,
-             }| {
-                next_validator_set
-                    .validator_set_hash
-                    .connect(&current_proof.validator_set_hash, builder);
+    witness: PartialWitness<F>,
+}
 
-                current_proof
-                    .authority_set_id
-                    .connect(&next_validator_set.current_authority_set_id, builder);
+impl CircuitDataWithTargets {
+    pub fn prove_initial(
+        mut self,
+        genesis_set_id: u64,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        let initial_hash_pis = vec![F::from_canonical_u64(genesis_set_id)]
+            .into_iter()
+            .enumerate()
+            .collect();
 
-                let current_proof_is_recursed = hashes_equal(
-                    builder,
-                    current_proof_circuit_digest,
-                    current_proof.prev_circuit_digest,
-                );
+        self.witness.set_bool_target(self.condition, false);
+        self.witness.set_proof_with_pis_target::<C, D>(
+            &self.inner_cyclic_proof_with_pis,
+            &cyclic_base_proof(
+                &self.common_data,
+                &self.cyclic_circuit_data.verifier_only,
+                initial_hash_pis,
+            ),
+        );
+        self.witness.set_verifier_data_target(
+            &self.verifier_data_target,
+            &self.cyclic_circuit_data.verifier_only,
+        );
 
-                let zeroed_circuit_digest = builder.constant_hash(HashOut::<F>::ZERO);
-                let prev_circuit_digest_zeroed = hashes_equal(
-                    builder,
-                    zeroed_circuit_digest,
-                    current_proof.prev_circuit_digest,
-                );
+        ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness)
+    }
 
-                let genesis_circuit_digest = builder.constant_hash(genesis_proof_circuit_digest);
-                let current_circuit_digest_is_genesis = hashes_equal(
-                    builder,
-                    genesis_circuit_digest,
-                    current_proof_circuit_digest,
-                );
+    pub fn prove_recursive(
+        mut self,
+        composed_proof: ProofWithPublicInputs<F, C, D>,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        self.witness.set_bool_target(self.condition, true);
+        self.witness
+            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
+        self.witness.set_verifier_data_target(
+            &self.verifier_data_target,
+            &self.cyclic_circuit_data.verifier_only,
+        );
 
-                let current_proof_is_genesis = builder.and(
-                    prev_circuit_digest_zeroed,
-                    current_circuit_digest_is_genesis,
-                );
-
-                let recursion_correct =
-                    or(builder, current_proof_is_recursed, current_proof_is_genesis);
-
-                //builder.assert_one(recursion_correct.target);
-
-                let one = builder.one();
-                let next_authority_set_id =
-                    builder.add(current_proof.authority_set_id.to_target(), one);
-                let next_authority_set_id =
-                    SingleTarget::parse(&mut std::iter::once(next_authority_set_id));
-
-                RecursiveValidatorSetChangeTarget {
-                    prev_circuit_digest: current_proof_circuit_digest,
-                    validator_set_hash: next_validator_set.validator_set_hash,
-                    authority_set_id: next_authority_set_id,
-                }
-            };
-
-        composition_builder
-            //.assert_first_circuit_digest()
-            .extended_compose(targets_op)
+        ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness)
     }
 }
 
-fn or(builder: &mut CircuitBuilder<F, D>, lhs: BoolTarget, rhs: BoolTarget) -> BoolTarget {
-    let not_lhs = builder.not(lhs);
-    let not_rhs = builder.not(rhs);
-    let inv_res = builder.and(not_lhs, not_rhs);
-    builder.not(inv_res)
+// TODO: verify that verifier data is correct in the proof that will be built on top of it.
+impl LatestValidatorSet {
+    pub fn build_circuit(&self) -> CircuitDataWithTargets {
+        let next_validator_set_proof = self.change_proof.prove();
+
+        println!(
+            "NVS VD: {:?} {:?}",
+            next_validator_set_proof
+                .circuit_data()
+                .verifier_only
+                .circuit_digest
+                .elements,
+            next_validator_set_proof
+                .circuit_data()
+                .verifier_only
+                .constants_sigmas_cap
+                .0
+                .iter()
+                .map(|h| h.elements)
+                .flatten()
+                .collect::<Vec<_>>()
+        );
+
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let one = builder.one();
+
+        let genesis_authority_set_id = builder.add_virtual_target();
+        builder.register_public_input(genesis_authority_set_id);
+
+        // Verify authority set change
+        let next_validator_set_proof_target = builder
+            .add_virtual_proof_with_pis::<C>(&next_validator_set_proof.circuit_data().common);
+
+        let desired_authority_set_change_proof_circuit_digest =
+            builder.constant_hash(next_validator_set_proof.circuit_digest());
+        let desired_next_validator_set_merkle_cap = MerkleCapTarget(
+            next_validator_set_proof
+                .circuit_data()
+                .verifier_only
+                .constants_sigmas_cap
+                .0
+                .iter()
+                .map(|value| builder.constant_hash(*value))
+                .collect::<Vec<_>>(),
+        );
+
+        let next_validator_set_verifier_target = VerifierCircuitTarget {
+            constants_sigmas_cap: desired_next_validator_set_merkle_cap,
+            circuit_digest: desired_authority_set_change_proof_circuit_digest,
+        };
+
+        let mut witness = PartialWitness::new();
+
+        witness.set_proof_with_pis_target(
+            &next_validator_set_proof_target,
+            &next_validator_set_proof.proof(),
+        );
+
+        builder.verify_proof::<C>(
+            &next_validator_set_proof_target,
+            &next_validator_set_verifier_target,
+            &next_validator_set_proof.circuit_data().common,
+        );
+
+        let mut next_authority_set_public_inputs_iter =
+            next_validator_set_proof_target.public_inputs.into_iter();
+        let next_authority_set_public_inputs =
+            NextValidatorSetTarget::parse(&mut next_authority_set_public_inputs_iter);
+        assert_eq!(next_authority_set_public_inputs_iter.next(), None);
+
+        let current_set_id = next_authority_set_public_inputs
+            .current_authority_set_id
+            .to_target();
+        let next_set_id = builder.add(current_set_id, one);
+
+        // -------------------------------
+        builder.register_public_input(next_set_id);
+        // TODO: can be removed?
+        let counter = builder.add_virtual_public_input();
+
+        let mut common_data = common_data_for_recursion();
+        let verifier_data_target = builder.add_verifier_data_public_inputs();
+        common_data.num_public_inputs = builder.num_public_inputs();
+
+        let condition = builder.add_virtual_bool_target_safe();
+
+        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis::<C>(&common_data);
+        let inner_cyclic_pis = &inner_cyclic_proof_with_pis.public_inputs;
+        let inner_cyclic_genesis_set_id = inner_cyclic_pis[0];
+        let inner_cyclic_current_set_id = inner_cyclic_pis[1];
+        let inner_cyclic_counter = inner_cyclic_pis[2];
+
+        builder.connect(genesis_authority_set_id, inner_cyclic_genesis_set_id);
+
+        let actual_current_authority_set_id = builder.select(
+            condition,
+            inner_cyclic_current_set_id,
+            genesis_authority_set_id,
+        );
+        builder.connect(actual_current_authority_set_id, current_set_id);
+
+        let new_counter = builder.mul_add(condition.target, inner_cyclic_counter, one);
+        builder.connect(counter, new_counter);
+
+        builder
+            .conditionally_verify_cyclic_proof_or_dummy::<C>(
+                condition,
+                &inner_cyclic_proof_with_pis,
+                &common_data,
+            )
+            .unwrap();
+
+        let cyclic_circuit_data = builder.build::<C>();
+
+        CircuitDataWithTargets {
+            cyclic_circuit_data,
+
+            common_data,
+
+            condition,
+            inner_cyclic_proof_with_pis,
+            verifier_data_target,
+
+            witness,
+        }
+    }
 }
 
-fn hashes_equal(
-    builder: &mut CircuitBuilder<F, D>,
-    lhs: HashOutTarget,
-    rhs: HashOutTarget,
-) -> BoolTarget {
-    lhs.elements
-        .into_iter()
-        .zip_eq(rhs.elements.into_iter())
-        .map(|(el1, el2)| builder.is_equal(el1, el2))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .fold(builder._true(), |acc, elements_eq| {
-            builder.and(acc, elements_eq)
-        })
+fn common_data_for_recursion() -> CommonCircuitData<F, D> {
+    let config = CircuitConfig::standard_recursion_config();
+    let builder = CircuitBuilder::<F, D>::new(config);
+    let data = builder.build::<C>();
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let proof = builder.add_virtual_proof_with_pis::<C>(&data.common);
+    let verifier_data = VerifierCircuitTarget {
+        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
+        circuit_digest: builder.add_virtual_hash(),
+    };
+
+    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+    let data = builder.build::<C>();
+
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let proof = builder.add_virtual_proof_with_pis::<C>(&data.common);
+    let verifier_data = VerifierCircuitTarget {
+        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
+        circuit_digest: builder.add_virtual_hash(),
+    };
+    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+    while builder.num_gates() < 1 << 13 {
+        builder.add_gate(NoopGate, vec![]);
+    }
+    builder.build::<C>().common
 }

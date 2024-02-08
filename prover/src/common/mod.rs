@@ -54,13 +54,44 @@ where
         }
     }
 
+    pub fn from_circuit_data(
+        circuit_data: CircuitData<F, C, D>,
+        witness: PartialWitness<F>,
+    ) -> ProofWithCircuitData<TS> {
+        let ProofWithPublicInputs {
+            proof,
+            public_inputs,
+        } = circuit_data.prove(witness).unwrap();
+
+        ProofWithCircuitData {
+            proof,
+            circuit_data: circuit_data.verifier_data(),
+            public_inputs,
+            public_inputs_parser: PhantomData,
+        }
+    }
+
+    // TODO: REMOVE
     pub fn circuit_digest(&self) -> CircuitDigest {
         self.circuit_data.verifier_only.circuit_digest
     }
 
     // TODO: REMOVE
+    pub fn circuit_data(&self) -> &VerifierCircuitData<F, C, D> {
+        &self.circuit_data
+    }
+
+    // TODO: REMOVE
     pub fn pis(&self) -> Vec<GoldilocksField> {
         self.public_inputs.clone()
+    }
+
+    // TODO: REMOVE
+    pub fn proof(&self) -> ProofWithPublicInputs<F, C, D> {
+        ProofWithPublicInputs {
+            proof: self.proof.clone(),
+            public_inputs: self.public_inputs.clone(),
+        }
     }
 
     pub fn verify(&self) -> bool {
@@ -229,6 +260,7 @@ where
         }
     }
 
+    // TODO: assert merkle caps too.
     pub fn assert_both_circuit_digests(self) -> Self {
         self.assert_first_circuit_digest()
             .assert_second_circuit_digest()

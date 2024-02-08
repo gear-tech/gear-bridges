@@ -174,7 +174,7 @@ async fn main() {
                     ],
                     authority_set_id: validator_set_id,
                 };
-                let mut proof = genesis_data.prove();
+                let mut proof = None;
                 for i in 0..4 {
                     let (block, current_epoch_block_finality) = api
                         .fetch_finality_proof_for_session(validator_set_id + i)
@@ -188,42 +188,24 @@ async fn main() {
                     };
 
                     let recursion = LatestValidatorSet {
-                        current_proof: proof,
                         genesis_data: genesis_data.clone(),
                         change_proof: nvs,
                     };
 
-                    proof = recursion.prove();
+                    let circuit = recursion.build_circuit();
 
-                    let cd = proof.circuit_digest();
-                    println!(
-                        "PHASE {} \nCD: {:?} \nPI: {:?}",
-                        i,
-                        cd.elements,
-                        proof.pis()
-                    );
+                    let pwcd: ProofWithCircuitData<
+                        prover::latest_validator_set::LatestValidatorSetTarget,
+                    > = match proof {
+                        Some(proof) => circuit.prove_recursive(proof),
+                        None => circuit.prove_initial(genesis_data.authority_set_id),
+                    };
+
+                    proof = Some(pwcd.proof());
+
+                    let cd = pwcd.circuit_digest();
+                    println!("PHASE {} \nCD: {:?} \nPI: {:?}", i, cd.elements, pwcd.pis());
                 }
-
-                // Single recursion
-                // CD: [
-                // 18315009976923485204,
-                // 14164793601880394087,
-                // 10948834238386344171,
-                // 3440343259230109350
-                // ]
-                // PI: [
-                // 17888550690340597725,
-                // 2265934899556215602,
-                // 14381180512499930894,
-                // 12546334548827159079,
-                // 2787997088524558,
-                // 914341688072726,
-                // 3440393019007615,
-                // 3418656939423883,
-                // 276187037400784,
-                // 251
-                // ]
-
                 // ---------- OLD -----------------
 
                 // let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;

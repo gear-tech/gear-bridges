@@ -5,12 +5,12 @@ implementation of zk-based bridge to ethereum for gear-based blockchains
 ## Circuits
 
 #### block finality
-the basic building block for two types of proofs used in protocol
+proves that some block was correctly finalized on the gear chain
 
 ![block finality circuit](https://github.com/mertwole/gear-bridges/blob/main/images/block_finality_circuit.png)
 
 #### validator set change
-used to keep actual validator set on ethereum
+used to compose `recent validator set` proof 
 
 ![validator set change circuit](https://github.com/mertwole/gear-bridges/blob/main/images/next_validator_set_circuit.png)
 

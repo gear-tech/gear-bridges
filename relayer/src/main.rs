@@ -7,11 +7,8 @@ use std::{path::PathBuf, time::Instant};
 use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
-    common::targets::TargetSet,
-    latest_validator_set::{LatestValidatorSet, ValidatorSetGenesis},
-    message_sent::MessageSent,
-    next_validator_set::NextValidatorSet,
-    ProofWithCircuitData,
+    common::targets::TargetSet, latest_validator_set::LatestValidatorSet,
+    message_sent::MessageSent, next_validator_set::NextValidatorSet, ProofWithCircuitData,
 };
 
 const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
@@ -164,16 +161,6 @@ async fn main() {
             } => {
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
 
-                let genesis_data = ValidatorSetGenesis {
-                    validator_set_hash: [
-                        2787997088524558,
-                        914341688072726,
-                        3440393019007615,
-                        3418656939423883,
-                        276187037400784,
-                    ],
-                    authority_set_id: validator_set_id,
-                };
                 let mut proof = None;
                 for i in 0..4 {
                     let (block, current_epoch_block_finality) = api
@@ -187,10 +174,7 @@ async fn main() {
                             .await,
                     };
 
-                    let recursion = LatestValidatorSet {
-                        genesis_data: genesis_data.clone(),
-                        change_proof: nvs,
-                    };
+                    let recursion = LatestValidatorSet { change_proof: nvs };
 
                     let circuit = recursion.build_circuit();
 
@@ -198,7 +182,16 @@ async fn main() {
                         prover::latest_validator_set::LatestValidatorSetTarget,
                     > = match proof {
                         Some(proof) => circuit.prove_recursive(proof),
-                        None => circuit.prove_initial(genesis_data.authority_set_id),
+                        None => circuit.prove_initial(
+                            validator_set_id,
+                            [
+                                2787997088524558,
+                                914341688072726,
+                                3440393019007615,
+                                3418656939423883,
+                                276187037400784,
+                            ],
+                        ),
                     };
 
                     proof = Some(pwcd.proof());

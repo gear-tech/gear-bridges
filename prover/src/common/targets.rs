@@ -20,6 +20,12 @@ pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
     fn into_targets_iter(self) -> impl Iterator<Item = Target>;
 
+    fn parse_exact(raw: &mut impl Iterator<Item = Target>) -> Self {
+        let out = Self::parse(raw);
+        assert_eq!(raw.next(), None);
+        out
+    }
+
     fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
         self.clone()
             .into_targets_iter()
@@ -92,6 +98,34 @@ macro_rules! impl_target_set {
                 $(.chain(self.$field_name.into_targets_iter()))*
             }
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VerifierDataTarget<const NUM_CAP_ELEMENTS: usize> {
+    pub circuit_digest: HashOutTarget,
+    pub merkle_caps: [HashOutTarget; NUM_CAP_ELEMENTS],
+}
+
+impl<const NUM_CAP_ELEMENTS: usize> TargetSet for VerifierDataTarget<NUM_CAP_ELEMENTS> {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self {
+            circuit_digest: HashOutTarget::parse(raw),
+            merkle_caps: (0..NUM_CAP_ELEMENTS)
+                .map(|_| HashOutTarget::parse(raw))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        self.circuit_digest.into_targets_iter().chain(
+            self.merkle_caps
+                .into_iter()
+                .map(|hash| hash.into_targets_iter())
+                .flatten(),
+        )
     }
 }
 

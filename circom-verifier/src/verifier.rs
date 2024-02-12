@@ -27,8 +27,8 @@ pub fn recursive_proof<
     const D: usize,
 >(
     inner_proof: ProofWithPublicInputs<F, InnerC, D>,
-    inner_vd: VerifierOnlyCircuitData<InnerC, D>,
-    inner_cd: CommonCircuitData<F, D>,
+    inner_vd: &VerifierOnlyCircuitData<InnerC, D>,
+    inner_cd: &CommonCircuitData<F, D>,
     config: &CircuitConfig,
     min_degree_bits: Option<usize>,
     print_gate_counts: bool,

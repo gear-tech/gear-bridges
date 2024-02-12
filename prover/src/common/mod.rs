@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use crate::prelude::*;
 use circom_verifier::CircomVerifierFilePaths;
@@ -21,12 +21,13 @@ use targets::TargetSet;
 
 type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
+#[derive(Clone)]
 pub struct ProofWithCircuitData<TS>
 where
     TS: TargetSet,
 {
     proof: Proof<F, C, D>,
-    circuit_data: VerifierCircuitData<F, C, D>,
+    circuit_data: Arc<VerifierCircuitData<F, C, D>>,
 
     public_inputs: Vec<F>,
     public_inputs_parser: PhantomData<TS>,
@@ -48,7 +49,7 @@ where
 
         ProofWithCircuitData {
             proof,
-            circuit_data: circuit_data.verifier_data(),
+            circuit_data: Arc::from(circuit_data.verifier_data()),
             public_inputs,
             public_inputs_parser: PhantomData,
         }
@@ -65,7 +66,7 @@ where
 
         ProofWithCircuitData {
             proof,
-            circuit_data: circuit_data.verifier_data(),
+            circuit_data: Arc::from(circuit_data.verifier_data()),
             public_inputs,
             public_inputs_parser: PhantomData,
         }
@@ -108,7 +109,7 @@ where
             proof: self.proof.clone(),
             public_inputs: self.public_inputs.clone(),
         };
-        let proof = proof.to_bytes();
+        let _proof = proof.to_bytes();
 
         //let common_circuit_data = self.circuit_data.common.clone();
         //let verifier_circuit_data = self.circuit_data.verifier_only.clone();
@@ -117,8 +118,8 @@ where
     pub fn generate_circom_verifier(self, paths: CircomVerifierFilePaths) {
         circom_verifier::write_circom_verifier_files(
             paths,
-            self.circuit_data.common,
-            self.circuit_data.verifier_only,
+            &self.circuit_data.common,
+            &self.circuit_data.verifier_only,
             ProofWithPublicInputs {
                 proof: self.proof,
                 public_inputs: self.public_inputs,
@@ -237,13 +238,11 @@ where
             &second.circuit_data.common,
         );
 
-        let mut first_public_inputs_iter = proof_with_pis_target_1.public_inputs.into_iter();
-        let first_public_inputs = TS1::parse(&mut first_public_inputs_iter);
-        assert_eq!(first_public_inputs_iter.collect::<Vec<_>>().len(), 0);
+        let first_public_inputs =
+            TS1::parse_exact(&mut proof_with_pis_target_1.public_inputs.into_iter());
 
-        let mut second_public_inputs_iter = proof_with_pis_target_2.public_inputs.into_iter();
-        let second_public_inputs = TS2::parse(&mut second_public_inputs_iter);
-        assert_eq!(second_public_inputs_iter.collect::<Vec<_>>().len(), 0);
+        let second_public_inputs =
+            TS2::parse_exact(&mut proof_with_pis_target_2.public_inputs.into_iter());
 
         ProofComposition {
             circuit_builder: builder,

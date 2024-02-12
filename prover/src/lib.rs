@@ -10,6 +10,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 pub mod block_finality;
 pub mod common;
+pub mod final_proof;
 pub mod latest_validator_set;
 pub mod merkle_proof;
 pub mod message_sent;
@@ -54,4 +55,13 @@ pub(crate) mod consts {
 
     pub const VALIDATOR_COUNT: usize = 6;
     pub const PROCESSED_VALIDATOR_COUNT: usize = 2;
+
+    pub const GENESIS_AUTHORITY_SET_ID: u64 = 270;
+    pub const GENESIS_VALIDATOR_SET_HASH: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
+        2787997088524558,
+        914341688072726,
+        3440393019007615,
+        3418656939423883,
+        276187037400784,
+    ];
 }

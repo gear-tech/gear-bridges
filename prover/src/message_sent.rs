@@ -16,12 +16,13 @@ use crate::{
 
 impl_target_set! {
     pub struct MessageSentTarget {
-        validator_set_hash: Sha256TargetGoldilocks,
-        authority_set_id: SingleTarget,
-        message_contents: MessageTargetGoldilocks,
+        pub validator_set_hash: Sha256TargetGoldilocks,
+        pub authority_set_id: SingleTarget,
+        pub message_contents: MessageTargetGoldilocks,
     }
 }
 
+// TODO: Remove generic as we have constant-length message(keccak-256 hash).
 pub struct MessageSent<const MESSAGE_LENGTH_IN_BITS: usize>
 where
     [(); MESSAGE_LENGTH_IN_BITS / 8]:,

@@ -17,23 +17,24 @@ use plonky2::{
 
 use crate::{
     common::targets::{
-        impl_target_set, ArrayTarget, Sha256TargetGoldilocks, SingleTarget, TargetSet,
+        impl_target_set, Sha256TargetGoldilocks, SingleTarget, TargetSet, VerifierDataTarget,
     },
     next_validator_set::{NextValidatorSet, NextValidatorSetTarget},
-    prelude::{consts::SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS, *},
+    prelude::*,
     ProofWithCircuitData,
 };
 
-// circuit digest + merkle caps
-const VERIFIER_DATA_LEN: usize = 4 + 4 * 16;
+use self::consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH};
+
+const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_target_set! {
     pub struct LatestValidatorSetTarget {
-        genesis_set_id: SingleTarget,
-        genesis_hash: Sha256TargetGoldilocks,
-        current_set_id: SingleTarget,
-        current_hash: Sha256TargetGoldilocks,
-        verifier_data: ArrayTarget<SingleTarget, VERIFIER_DATA_LEN>,
+        pub genesis_set_id: SingleTarget,
+        pub genesis_hash: Sha256TargetGoldilocks,
+        pub current_set_id: SingleTarget,
+        pub current_hash: Sha256TargetGoldilocks,
+        pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
     }
 }
 
@@ -41,7 +42,7 @@ pub struct LatestValidatorSet {
     pub change_proof: NextValidatorSet,
 }
 
-pub struct CircuitDataWithTargets {
+struct Circuit {
     cyclic_circuit_data: CircuitData<F, C, D>,
 
     common_data: CommonCircuitData<F, D>,
@@ -53,15 +54,11 @@ pub struct CircuitDataWithTargets {
     witness: PartialWitness<F>,
 }
 
-impl CircuitDataWithTargets {
-    pub fn prove_initial(
-        mut self,
-        genesis_set_id: u64,
-        genesis_hash: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
-    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        let genesis_data_pis = vec![genesis_set_id]
+impl Circuit {
+    pub fn prove_genesis(mut self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        let genesis_data_pis = vec![GENESIS_AUTHORITY_SET_ID]
             .into_iter()
-            .chain(genesis_hash.into_iter())
+            .chain(GENESIS_VALIDATOR_SET_HASH.into_iter())
             .map(F::from_noncanonical_u64)
             .enumerate()
             .collect();
@@ -99,9 +96,21 @@ impl CircuitDataWithTargets {
     }
 }
 
-// TODO: verify that verifier data is correct in the proof that will be built on top of it.
 impl LatestValidatorSet {
-    pub fn build_circuit(&self) -> CircuitDataWithTargets {
+    pub fn prove_genesis(&self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        let circuit = self.build_circuit();
+        circuit.prove_genesis()
+    }
+
+    pub fn prove_recursive(
+        &self,
+        composed_proof: ProofWithPublicInputs<F, C, D>,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        let circuit = self.build_circuit();
+        circuit.prove_recursive(composed_proof)
+    }
+
+    fn build_circuit(&self) -> Circuit {
         let next_validator_set_proof = self.change_proof.prove();
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
@@ -113,7 +122,7 @@ impl LatestValidatorSet {
         );
         genesis_authority_set_hash.register_as_public_inputs(&mut builder);
 
-        // Verify authority set change
+        // Verify validator set change
         let next_validator_set_proof_target = builder
             .add_virtual_proof_with_pis::<C>(&next_validator_set_proof.circuit_data().common);
 
@@ -148,11 +157,9 @@ impl LatestValidatorSet {
             &next_validator_set_proof.circuit_data().common,
         );
 
-        let mut next_authority_set_public_inputs_iter =
-            next_validator_set_proof_target.public_inputs.into_iter();
-        let next_authority_set_public_inputs =
-            NextValidatorSetTarget::parse(&mut next_authority_set_public_inputs_iter);
-        assert_eq!(next_authority_set_public_inputs_iter.next(), None);
+        let next_authority_set_public_inputs = NextValidatorSetTarget::parse_exact(
+            &mut next_validator_set_proof_target.public_inputs.into_iter(),
+        );
 
         let current_set_id = next_authority_set_public_inputs
             .current_authority_set_id
@@ -166,7 +173,7 @@ impl LatestValidatorSet {
             .next_validator_set_hash
             .register_as_public_inputs(&mut builder);
 
-        // IVC
+        // Recursion
         let verifier_data_target = builder.add_verifier_data_public_inputs();
         let common_data = common_data_for_recursion(builder.num_public_inputs());
 
@@ -174,9 +181,9 @@ impl LatestValidatorSet {
 
         let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis::<C>(&common_data);
 
-        let mut inner_cyclic_pis = inner_cyclic_proof_with_pis.public_inputs.iter().cloned();
-        let inner_cyclic_targets = LatestValidatorSetTarget::parse(&mut inner_cyclic_pis);
-        assert_eq!(inner_cyclic_pis.next(), None);
+        let inner_cyclic_targets = LatestValidatorSetTarget::parse_exact(
+            &mut inner_cyclic_proof_with_pis.public_inputs.iter().cloned(),
+        );
 
         builder.connect(
             genesis_authority_set_id,
@@ -192,15 +199,14 @@ impl LatestValidatorSet {
         );
         builder.connect(actual_current_authority_set_id, current_set_id);
 
-        let mut actual_cirrent_authority_set_hash_iter = inner_cyclic_targets
-            .current_hash
-            .into_targets_iter()
-            .zip_eq(genesis_authority_set_hash.into_targets_iter())
-            .map(|(inner, outer)| builder.select(condition, inner, outer));
-        let actual_cirrent_authority_set_hash =
-            Sha256TargetGoldilocks::parse(&mut actual_cirrent_authority_set_hash_iter);
-        assert_eq!(actual_cirrent_authority_set_hash_iter.next(), None);
-        actual_cirrent_authority_set_hash.connect(&current_set_hash, &mut builder);
+        let actual_current_authority_set_hash = Sha256TargetGoldilocks::parse_exact(
+            &mut inner_cyclic_targets
+                .current_hash
+                .into_targets_iter()
+                .zip_eq(genesis_authority_set_hash.into_targets_iter())
+                .map(|(inner, outer)| builder.select(condition, inner, outer)),
+        );
+        actual_current_authority_set_hash.connect(&current_set_hash, &mut builder);
 
         builder
             .conditionally_verify_cyclic_proof_or_dummy::<C>(
@@ -212,7 +218,7 @@ impl LatestValidatorSet {
 
         let cyclic_circuit_data = builder.build::<C>();
 
-        CircuitDataWithTargets {
+        Circuit {
             cyclic_circuit_data,
 
             common_data,

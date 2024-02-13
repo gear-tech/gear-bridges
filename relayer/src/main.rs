@@ -7,8 +7,8 @@ use std::{path::PathBuf, time::Instant};
 use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
-    common::targets::TargetSet, final_proof::FinalProof, latest_validator_set::LatestValidatorSet,
-    message_sent::MessageSent, next_validator_set::NextValidatorSet, ProofWithCircuitData,
+    common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
+    ProofWithCircuitData,
 };
 
 const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
@@ -160,77 +160,16 @@ async fn main() {
                 validator_set_id,
             } => {
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                let (block, current_epoch_block_finality) =
+                    api.fetch_finality_proof_for_session(validator_set_id).await;
+                let circuit = NextValidatorSet {
+                    current_epoch_block_finality,
+                    next_validator_set_inclusion_proof: api
+                        .fetch_next_session_keys_merkle_proof(block)
+                        .await,
+                };
 
-                let mut proof = None;
-                for i in 0..4 {
-                    let (block, current_epoch_block_finality) = api
-                        .fetch_finality_proof_for_session(validator_set_id + i)
-                        .await;
-
-                    let nvs = NextValidatorSet {
-                        current_epoch_block_finality,
-                        next_validator_set_inclusion_proof: api
-                            .fetch_next_session_keys_merkle_proof(block)
-                            .await,
-                    };
-
-                    let recursion = LatestValidatorSet { change_proof: nvs };
-
-                    let pwcd: ProofWithCircuitData<
-                        prover::latest_validator_set::LatestValidatorSetTarget,
-                    > = match proof {
-                        Some(proof) => recursion.prove_recursive(proof),
-                        None => recursion.prove_genesis(),
-                    };
-
-                    let message_block = api
-                        .search_for_validator_set_block(validator_set_id + i + 1)
-                        .await;
-                    let (message_block, block_finality) =
-                        api.fetch_finality_proof(message_block).await;
-                    let message_sent = MessageSent {
-                        block_finality,
-                        inclusion_proof: api.fetch_sent_message_merkle_proof(message_block).await,
-                    };
-
-                    let final_proof = FinalProof {
-                        current_validator_set: pwcd.clone(),
-                        message_sent,
-                    }
-                    .prove();
-                    println!(
-                        "FP STATS: {:?} {:?} {:?}",
-                        final_proof.circuit_digest(),
-                        final_proof
-                            .circuit_data()
-                            .verifier_only
-                            .constants_sigmas_cap
-                            .0
-                            .iter()
-                            .map(|h| h.elements)
-                            .flatten()
-                            .collect::<Vec<_>>(),
-                        final_proof.proof().public_inputs
-                    );
-
-                    proof = Some(pwcd.proof());
-
-                    let cd = pwcd.circuit_digest();
-                    println!("PHASE {} \nCD: {:?} \nPI: {:?}", i, cd.elements, pwcd.pis());
-                }
-                // ---------- OLD -----------------
-
-                // let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
-                // let (block, current_epoch_block_finality) =
-                //     api.fetch_finality_proof_for_session(validator_set_id).await;
-                // let circuit = NextValidatorSet {
-                //     current_epoch_block_finality,
-                //     next_validator_set_inclusion_proof: api
-                //         .fetch_next_session_keys_merkle_proof(block)
-                //         .await,
-                // };
-
-                // process_prove(&circuit, NextValidatorSet::prove, &args);
+                process_prove(&circuit, NextValidatorSet::prove, &args);
             }
             ProveCommands::MessageSent {
                 args,

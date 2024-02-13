@@ -36,8 +36,8 @@ pub struct CircomVerifierFilePaths {
 
 pub fn write_circom_verifier_files(
     paths: CircomVerifierFilePaths,
-    common_circuit_data: CommonCircuitData<F, D>,
-    verifier_only_circuit_data: VerifierOnlyCircuitData<C, D>,
+    common_circuit_data: &CommonCircuitData<F, D>,
+    verifier_only_circuit_data: &VerifierOnlyCircuitData<C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
 ) {
     let standard_config = CircuitConfig::standard_recursion_config();

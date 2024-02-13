@@ -1,7 +1,7 @@
 extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
-use eth_client::{error::VerifierError, ContractVerifiers};
+use eth_client::ContractVerifiers;
 use std::{path::PathBuf, time::Instant};
 
 use circom_verifier::CircomVerifierFilePaths;

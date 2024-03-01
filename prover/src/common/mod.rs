@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use crate::prelude::*;
-use circom_verifier::CircomVerifierFilePaths;
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -56,18 +55,6 @@ where
                 public_inputs: self.public_inputs.clone(),
             })
             .is_ok()
-    }
-
-    pub fn generate_circom_verifier(self, paths: CircomVerifierFilePaths) {
-        circom_verifier::write_circom_verifier_files(
-            paths,
-            self.circuit_data.common,
-            self.circuit_data.verifier_only,
-            ProofWithPublicInputs {
-                proof: self.proof,
-                public_inputs: self.public_inputs,
-            },
-        )
     }
 }
 

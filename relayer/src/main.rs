@@ -1,10 +1,9 @@
 extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
-use eth_client::{error::VerifierError, ContractVerifiers};
+use eth_client::ContractVerifiers;
 use std::{path::PathBuf, time::Instant};
 
-use circom_verifier::CircomVerifierFilePaths;
 use gear_rpc_client::GearApi;
 use prover::{
     common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
@@ -282,11 +281,4 @@ where
     log::info!("Proven in {}ms", now.elapsed().as_millis());
 
     let _ = proof.verify();
-
-    proof.generate_circom_verifier(CircomVerifierFilePaths {
-        constants: args.circom_constants_path.clone(),
-        gates: args.circom_gates_path.clone(),
-        proof: args.proof_path.clone(),
-        config: args.config_path.clone(),
-    });
 }

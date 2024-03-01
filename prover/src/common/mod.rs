@@ -160,9 +160,6 @@ where
         let first_circuit_digest = first.circuit_digest();
         let second_circuit_digest = second.circuit_digest();
 
-        let first_circuit_digest = first.circuit_digest();
-        let second_circuit_digest = second.circuit_digest();
-
         let verifier_circuit_target_1 = VerifierCircuitTarget {
             constants_sigmas_cap: builder
                 .add_virtual_cap(first.circuit_data.common.config.fri_config.cap_height),

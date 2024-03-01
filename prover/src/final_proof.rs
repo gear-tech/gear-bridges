@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use plonky2::plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig};
-use plonky2_field::types::Field64;
+use plonky2_field::types::Field;
 
 use crate::{
     common::{

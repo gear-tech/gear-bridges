@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use crate::prelude::*;
 use plonky2::{
@@ -14,6 +14,7 @@ use plonky2::{
 
 #[macro_use]
 pub mod targets;
+pub mod poseidon_bn128;
 
 use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;

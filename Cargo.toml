@@ -27,10 +27,10 @@ keccak-hash = "0.8.0"
 log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
 
-plonky2 = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
-plonky2_field = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
-plonky2_util = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
-plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2", branch = "circom-verifier" }
+plonky2 = { git = "https://github.com/mertwole/plonky2" }
+plonky2_field = { git = "https://github.com/mertwole/plonky2" }
+plonky2_util = { git = "https://github.com/mertwole/plonky2" }
+plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2" }
 curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
 
 rand_chacha = "0.3.1"
@@ -42,6 +42,8 @@ static_assertions = "1.1.0"
 unroll = "0.1.5"
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 blake2 = "0.10.6"
+ff = { version = "0.13.0", features = ["derive"] }
+lazy_static = "1.4.0"
 
 [patch.crates-io]
 parity-wasm = { version = "0.45.0", git = "https://github.com/gear-tech/parity-wasm", branch = "v0.45.0-sign-ext" }

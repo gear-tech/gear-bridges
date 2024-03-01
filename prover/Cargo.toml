@@ -27,3 +27,5 @@ serde_json.workspace = true
 sha2.workspace = true
 static_assertions.workspace = true
 unroll.workspace = true
+ff.workspace = true
+lazy_static.workspace = true

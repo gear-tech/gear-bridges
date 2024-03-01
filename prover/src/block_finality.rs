@@ -116,7 +116,9 @@ impl BlockFinality {
             }
         };
 
-        composition_builder.compose(targets_op)
+        composition_builder
+            .assert_both_circuit_digests()
+            .compose(targets_op)
     }
 }
 
@@ -219,7 +221,9 @@ impl ComposedValidatorSigns {
             }
         };
 
-        composition_builder.compose(targets_op)
+        composition_builder
+            .assert_both_circuit_digests()
+            .compose(targets_op)
     }
 }
 
@@ -263,7 +267,9 @@ impl IndexedValidatorSign {
             }
         };
 
-        composition_builder.compose(targets_op)
+        composition_builder
+            .assert_both_circuit_digests()
+            .compose(targets_op)
     }
 }
 

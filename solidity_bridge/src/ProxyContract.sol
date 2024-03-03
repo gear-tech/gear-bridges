@@ -29,7 +29,7 @@ contract ProxyContract is ERC1967Proxy {
 
 
 
-    fallback() external payable  {
+    fallback() override external payable  {
         super._fallback();
     }
 

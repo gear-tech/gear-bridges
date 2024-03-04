@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 gear-rpc-client.workspace = true
 prover.workspace = true
-circom_verifier.workspace = true
 eth-client.workspace = true
 
 log.workspace = true

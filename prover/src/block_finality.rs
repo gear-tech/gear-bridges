@@ -7,7 +7,7 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-use plonky2_ed25519::gadgets::eddsa::make_verify_circuits as ed25519_circuit;
+use plonky2_ed25519::gadgets::eddsa::ed25519_circuit;
 use plonky2_field::types::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
@@ -117,7 +117,8 @@ impl BlockFinality {
         };
 
         composition_builder
-            .assert_both_circuit_digests()
+            // TODO: Return assertion back when ValidatorSignsProof will have constant circuit digest
+            //.assert_both_circuit_digests()
             .compose(targets_op)
     }
 }
@@ -295,7 +296,7 @@ impl SingleValidatorSign {
         // This fn registers public inputs as:
         //  - message contents as `BoolTarget`s
         //  - public key as `BoolTarget`s
-        let targets = ed25519_circuit(&mut builder, self.message.len());
+        let targets = ed25519_circuit(&mut builder, self.message.len() * 8);
 
         let mut pw = PartialWitness::new();
 

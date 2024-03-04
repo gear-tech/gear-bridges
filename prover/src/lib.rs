@@ -56,7 +56,7 @@ pub(crate) mod consts {
     pub const VALIDATOR_COUNT: usize = 6;
     pub const PROCESSED_VALIDATOR_COUNT: usize = 2;
 
-    pub const GENESIS_AUTHORITY_SET_ID: u64 = 270;
+    pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
     pub const GENESIS_VALIDATOR_SET_HASH: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
         2787997088524558,
         914341688072726,

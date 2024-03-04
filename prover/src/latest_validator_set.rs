@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use plonky2::{
-    field::types::Field64,
+    field::types::Field,
     gates::noop::NoopGate,
     hash::hash_types::MerkleCapTarget,
     iop::{
@@ -123,8 +123,8 @@ impl LatestValidatorSet {
         genesis_authority_set_hash.register_as_public_inputs(&mut builder);
 
         // Verify validator set change
-        let next_validator_set_proof_target = builder
-            .add_virtual_proof_with_pis::<C>(&next_validator_set_proof.circuit_data().common);
+        let next_validator_set_proof_target =
+            builder.add_virtual_proof_with_pis(&next_validator_set_proof.circuit_data().common);
 
         let desired_authority_set_change_proof_circuit_digest =
             builder.constant_hash(next_validator_set_proof.circuit_digest());
@@ -179,7 +179,7 @@ impl LatestValidatorSet {
 
         let condition = builder.add_virtual_bool_target_safe();
 
-        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis::<C>(&common_data);
+        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis(&common_data);
 
         let inner_cyclic_targets = LatestValidatorSetTarget::parse_exact(
             &mut inner_cyclic_proof_with_pis.public_inputs.iter().cloned(),
@@ -238,7 +238,7 @@ fn common_data_for_recursion(public_input_count: usize) -> CommonCircuitData<F, 
     let data = builder.build::<C>();
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
-    let proof = builder.add_virtual_proof_with_pis::<C>(&data.common);
+    let proof = builder.add_virtual_proof_with_pis(&data.common);
     let verifier_data = VerifierCircuitTarget {
         constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
         circuit_digest: builder.add_virtual_hash(),
@@ -249,7 +249,7 @@ fn common_data_for_recursion(public_input_count: usize) -> CommonCircuitData<F, 
 
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
-    let proof = builder.add_virtual_proof_with_pis::<C>(&data.common);
+    let proof = builder.add_virtual_proof_with_pis(&data.common);
     let verifier_data = VerifierCircuitTarget {
         constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
         circuit_digest: builder.add_virtual_hash(),

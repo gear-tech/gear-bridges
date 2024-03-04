@@ -24,7 +24,7 @@ pub struct MerkleProofTarget<LeafData: TargetSet> {
     pub root_hash: Blake2Target,
 }
 
-// REFACTOR: Add generics to macro?
+// TODO REFACTOR: Add generics to macro?
 impl<LeafData: TargetSet> TargetSet for MerkleProofTarget<LeafData> {
     fn parse(targets: &mut impl Iterator<Item = Target>) -> Self {
         Self {

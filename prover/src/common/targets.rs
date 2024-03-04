@@ -1,9 +1,6 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
-use plonky2_field::goldilocks_field::GoldilocksField;
-use plonky2_field::types::Field64;
-
 use self::consts::VALIDATOR_COUNT;
 
 use crate::{common::array_to_bits, consts::*, prelude::*};
@@ -15,6 +12,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_field::{goldilocks_field::GoldilocksField, types::Field};
 
 pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
@@ -129,7 +127,7 @@ impl<const NUM_CAP_ELEMENTS: usize> TargetSet for VerifierDataTarget<NUM_CAP_ELE
     }
 }
 
-// REFACTOR: remove pub on inner type.
+// TODO REFACTOR: remove pub on inner type.
 #[derive(Clone, Debug, Copy)]
 pub struct ArrayTarget<T: TargetSet, const N: usize>(pub [T; N]);
 

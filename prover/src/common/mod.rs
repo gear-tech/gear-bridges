@@ -1,7 +1,6 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use crate::prelude::*;
-use circom_verifier::CircomVerifierFilePaths;
 use plonky2::{
     hash::hash_types::HashOutTarget,
     iop::witness::{PartialWitness, WitnessWrite},
@@ -15,9 +14,12 @@ use plonky2::{
 
 #[macro_use]
 pub mod targets;
+pub mod poseidon_bn128;
 
 use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;
+
+use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
 
 type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
@@ -95,6 +97,22 @@ where
         }
     }
 
+    pub fn export_final(self) -> SerializedDataToVerify {
+        let proof_with_public_inputs = ProofWithPublicInputs {
+            proof: self.proof,
+            public_inputs: self.public_inputs,
+        };
+
+        let (proof_with_public_inputs, circuit_data) =
+            wrap_bn128(&self.circuit_data, proof_with_public_inputs);
+
+        SerializedDataToVerify {
+            proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
+            common_circuit_data: serde_json::to_string(&circuit_data.common).unwrap(),
+            verifier_only_circuit_data: serde_json::to_string(&circuit_data.verifier_only).unwrap(),
+        }
+    }
+
     pub fn verify(&self) -> bool {
         self.circuit_data
             .verify(ProofWithPublicInputs {
@@ -103,29 +121,12 @@ where
             })
             .is_ok()
     }
+}
 
-    pub fn serialize(&self) {
-        let proof = ProofWithPublicInputs {
-            proof: self.proof.clone(),
-            public_inputs: self.public_inputs.clone(),
-        };
-        let _proof = proof.to_bytes();
-
-        //let common_circuit_data = self.circuit_data.common.clone();
-        //let verifier_circuit_data = self.circuit_data.verifier_only.clone();
-    }
-
-    pub fn generate_circom_verifier(self, paths: CircomVerifierFilePaths) {
-        circom_verifier::write_circom_verifier_files(
-            paths,
-            &self.circuit_data.common,
-            &self.circuit_data.verifier_only,
-            ProofWithPublicInputs {
-                proof: self.proof,
-                public_inputs: self.public_inputs,
-            },
-        )
-    }
+pub struct SerializedDataToVerify {
+    pub proof_with_public_inputs: String,
+    pub common_circuit_data: String,
+    pub verifier_only_circuit_data: String,
 }
 
 pub struct ProofComposition<TS1, TS2>
@@ -177,9 +178,9 @@ where
     ) -> ProofComposition<TS1, TS2> {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let proof_with_pis_target_1 =
-            builder.add_virtual_proof_with_pis::<C>(&first.circuit_data.common);
+            builder.add_virtual_proof_with_pis(&first.circuit_data.common);
         let proof_with_pis_target_2 =
-            builder.add_virtual_proof_with_pis::<C>(&second.circuit_data.common);
+            builder.add_virtual_proof_with_pis(&second.circuit_data.common);
 
         let first_circuit_digest = first.circuit_digest();
         let second_circuit_digest = second.circuit_digest();
@@ -319,6 +320,49 @@ where
 
         ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
     }
+}
+
+pub fn wrap_bn128(
+    inner_circuit_data: &VerifierCircuitData<F, C, D>,
+    proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
+) -> (
+    ProofWithPublicInputs<F, PoseidonBN128GoldilocksConfig, D>,
+    CircuitData<F, PoseidonBN128GoldilocksConfig, D>,
+) {
+    let mut builder: CircuitBuilder<F, D> =
+        CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+
+    let proof_with_pis_target = builder.add_virtual_proof_with_pis(&inner_circuit_data.common);
+    let circuit_digest = inner_circuit_data.verifier_only.circuit_digest;
+    let verifier_circuit_target = VerifierCircuitTarget {
+        constants_sigmas_cap: builder
+            .add_virtual_cap(inner_circuit_data.common.config.fri_config.cap_height),
+        circuit_digest: builder.add_virtual_hash(),
+    };
+
+    builder.register_public_inputs(&proof_with_pis_target.public_inputs);
+
+    let mut witness = PartialWitness::new();
+    witness.set_proof_with_pis_target(&proof_with_pis_target, &proof_with_public_inputs);
+    witness.set_cap_target(
+        &verifier_circuit_target.constants_sigmas_cap,
+        &inner_circuit_data.verifier_only.constants_sigmas_cap,
+    );
+    witness.set_hash_target(
+        verifier_circuit_target.circuit_digest,
+        inner_circuit_data.verifier_only.circuit_digest,
+    );
+
+    builder.verify_proof::<C>(
+        &proof_with_pis_target,
+        &verifier_circuit_target,
+        &inner_circuit_data.common,
+    );
+
+    let circuit_data = builder.build::<PoseidonBN128GoldilocksConfig>();
+    let proof = circuit_data.prove(witness).unwrap();
+
+    (proof, circuit_data)
 }
 
 pub fn array_to_bits(data: &[u8]) -> Vec<bool> {

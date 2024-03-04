@@ -6,7 +6,11 @@ use std::{path::PathBuf, time::Instant};
 
 use gear_rpc_client::GearApi;
 use prover::{
-    common::targets::TargetSet, message_sent::MessageSent, next_validator_set::NextValidatorSet,
+    common::targets::TargetSet,
+    final_proof::FinalProof,
+    latest_validator_set::{self, LatestValidatorSet},
+    message_sent::MessageSent,
+    next_validator_set::NextValidatorSet,
     ProofWithCircuitData,
 };
 
@@ -54,36 +58,36 @@ enum ProveCommands {
         #[arg(long = "validator-set-id", short = 'v')]
         validator_set_id: Option<u64>,
     },
+    /// Generate test data
+    #[clap(visible_alias("t"))]
+    TestCase {
+        #[clap(flatten)]
+        args: ProveArgs,
+    },
 }
 
 #[derive(Args)]
 struct ProveArgs {
     #[clap(flatten)]
     vara_endpoint: VaraEndpointArg,
-    /// Path to the generated circom file containing constants
+    /// Where to write proof with public inputs
     #[arg(
         long = "circom-const-path",
-        default_value = "./circom-verifier/circom/circuits/constants.circom"
+        default_value = "../gnark-plonky2-verifier/testdata/own_2/proof_with_public_inputs.json"
     )]
-    circom_constants_path: PathBuf,
-    /// Path to the generated circom file containing gates
+    proof_with_public_inputs_path: PathBuf,
+    /// Where to write common circuit data
     #[arg(
         long = "circom-gates-path",
-        default_value = "./circom-verifier/circom/circuits/gates.circom"
+        default_value = "../gnark-plonky2-verifier/testdata/own_2/common_circuit_data.json"
     )]
-    circom_gates_path: PathBuf,
-    /// Path to the generated proof
+    common_circuit_data_path: PathBuf,
+    /// Where to write verifier only circuit data
     #[arg(
-        long = "proof-path",
-        default_value = "./circom-verifier/plonky2_proof.json"
+        long = "verifier-only-circuit-data",
+        default_value = "../gnark-plonky2-verifier/testdata/own_2/verifier_only_circuit_data.json"
     )]
-    proof_path: PathBuf,
-    /// Path to the generated circuit config
-    #[arg(
-        long = "config-path",
-        default_value = "./circom-verifier/circom/test/data/conf.json"
-    )]
-    config_path: PathBuf,
+    verifier_only_circuit_data_path: PathBuf,
 }
 
 #[derive(Args)]
@@ -168,7 +172,11 @@ async fn main() {
                         .await,
                 };
 
-                process_prove(&circuit, NextValidatorSet::prove, &args);
+                let now = Instant::now();
+                let proof = circuit.prove();
+                log::info!("Proven in {}ms", now.elapsed().as_millis());
+                let verified = proof.verify();
+                log::info!("Verified with result {}", verified);
             }
             ProveCommands::MessageSent {
                 args,
@@ -188,7 +196,76 @@ async fn main() {
                     inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
                 };
 
-                process_prove(&circuit, MessageSent::prove, &args);
+                let now = Instant::now();
+                let proof = circuit.prove();
+                log::info!("Proven in {}ms", now.elapsed().as_millis());
+                let verified = proof.verify();
+                log::info!("Verified with result {}", verified);
+            }
+            ProveCommands::TestCase { args } => {
+                const GENESIS_VS_ID: u64 = 272;
+
+                let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+
+                let (block, current_epoch_block_finality) =
+                    api.fetch_finality_proof_for_session(GENESIS_VS_ID).await;
+                let change_from_genesis = NextValidatorSet {
+                    current_epoch_block_finality,
+                    next_validator_set_inclusion_proof: api
+                        .fetch_next_session_keys_merkle_proof(block)
+                        .await,
+                };
+
+                let latest_vs = LatestValidatorSet {
+                    change_proof: change_from_genesis,
+                }
+                .prove_genesis();
+
+                let (block, current_epoch_block_finality) = api
+                    .fetch_finality_proof_for_session(GENESIS_VS_ID + 1)
+                    .await;
+                let next_change = NextValidatorSet {
+                    current_epoch_block_finality,
+                    next_validator_set_inclusion_proof: api
+                        .fetch_next_session_keys_merkle_proof(block)
+                        .await,
+                };
+
+                let latest_vs = LatestValidatorSet {
+                    change_proof: next_change,
+                }
+                .prove_recursive(latest_vs.proof());
+
+                let block = api.search_for_validator_set_block(GENESIS_VS_ID + 2).await;
+                let (block, block_finality) = api.fetch_finality_proof(block).await;
+                let message_sent = MessageSent {
+                    block_finality,
+                    inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
+                };
+
+                let final_proof = FinalProof {
+                    current_validator_set: latest_vs,
+                    message_sent,
+                }
+                .prove();
+
+                let final_serialized = final_proof.export_final();
+
+                std::fs::write(
+                    args.proof_with_public_inputs_path,
+                    final_serialized.proof_with_public_inputs,
+                )
+                .unwrap();
+                std::fs::write(
+                    args.common_circuit_data_path,
+                    final_serialized.common_circuit_data,
+                )
+                .unwrap();
+                std::fs::write(
+                    args.verifier_only_circuit_data_path,
+                    final_serialized.verifier_only_circuit_data,
+                )
+                .unwrap();
             }
         },
         CliCommands::Query(args) => {
@@ -269,19 +346,4 @@ async fn main() {
             }
         },
     };
-}
-
-fn process_prove<C, P, TS>(circuit: &C, prove: P, args: &ProveArgs)
-where
-    TS: TargetSet,
-    P: Fn(&C) -> ProofWithCircuitData<TS>,
-{
-    let now = Instant::now();
-    let proof = prove(circuit);
-    log::info!("Proven in {}ms", now.elapsed().as_millis());
-
-    let verified = proof.verify();
-    log::info!("Verified with result {}", verified);
-
-    proof.wrap_bn128();
 }

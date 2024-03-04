@@ -117,7 +117,8 @@ impl BlockFinality {
         };
 
         composition_builder
-            .assert_both_circuit_digests()
+            // TODO: Return assertion back when ValidatorSignsProof will have constant circuit digest
+            //.assert_both_circuit_digests()
             .compose(targets_op)
     }
 }

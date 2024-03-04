@@ -1,9 +1,9 @@
-use std::ops::{AddAssign, MulAssign};
-
+use super::{
+    constants::{C_CONSTANTS, M_MATRIX, P_MATRIX, S_CONSTANTS},
+    fr::Fr,
+};
 use ff::Field;
-
-use super::constants::{C_CONSTANTS, M_MATRIX, P_MATRIX, S_CONSTANTS};
-use super::fr::Fr;
+use std::ops::{AddAssign, MulAssign};
 
 pub const RATE: usize = 3;
 pub const WIDTH: usize = 4;

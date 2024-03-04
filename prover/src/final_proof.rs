@@ -4,7 +4,10 @@ use plonky2_field::types::Field;
 
 use crate::{
     common::{
-        targets::{impl_target_set, MessageTargetGoldilocks, Sha256TargetGoldilocks, TargetSet},
+        targets::{
+            impl_target_set, MessageTargetGoldilocks, Sha256TargetGoldilocks, SingleTarget,
+            TargetSet,
+        },
         ProofComposition,
     },
     consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
@@ -16,7 +19,8 @@ use crate::{
 
 impl_target_set! {
     pub struct FinalProofTarget {
-        message_contents: MessageTargetGoldilocks
+        message_contents: MessageTargetGoldilocks,
+        block_number: SingleTarget
     }
 }
 
@@ -91,8 +95,10 @@ where
             desired_genesis_validator_set_hash
                 .connect(&current_validator_set_proof.genesis_hash, builder);
 
+            // TODO: Replace with the actual block number.
             FinalProofTarget {
                 message_contents: message_sent_proof.message_contents,
+                block_number: message_sent_proof.authority_set_id,
             }
         };
 

@@ -127,7 +127,7 @@ impl<const NUM_CAP_ELEMENTS: usize> TargetSet for VerifierDataTarget<NUM_CAP_ELE
     }
 }
 
-// REFACTOR: remove pub on inner type.
+// TODO REFACTOR: remove pub on inner type.
 #[derive(Clone, Debug, Copy)]
 pub struct ArrayTarget<T: TargetSet, const N: usize>(pub [T; N]);
 

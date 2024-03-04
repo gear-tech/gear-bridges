@@ -14,6 +14,7 @@ use plonky2::{
 
 #[macro_use]
 pub mod targets;
+pub mod bn128_wrapper;
 pub mod poseidon_bn128;
 
 use plonky2_field::goldilocks_field::GoldilocksField;
@@ -93,6 +94,14 @@ where
             proof: self.proof.clone(),
             public_inputs: self.public_inputs.clone(),
         }
+    }
+
+    pub fn wrap_bn128(self) {
+        let pwpi = ProofWithPublicInputs {
+            proof: self.proof,
+            public_inputs: self.public_inputs,
+        };
+        bn128_wrapper::wrap(&self.circuit_data, pwpi);
     }
 
     pub fn verify(&self) -> bool {

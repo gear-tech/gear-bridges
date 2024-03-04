@@ -21,7 +21,7 @@ pub struct PoseidonBN128GoldilocksConfig;
 impl GenericConfig<2> for PoseidonBN128GoldilocksConfig {
     type F = GoldilocksField;
     type FE = QuadraticExtension<Self::F>;
-    type Hasher = PoseidonHash;
+    type Hasher = PoseidonBN128Hash;
     type InnerHasher = PoseidonHash;
 }
 

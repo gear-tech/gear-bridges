@@ -280,5 +280,8 @@ where
     let proof = prove(circuit);
     log::info!("Proven in {}ms", now.elapsed().as_millis());
 
-    let _ = proof.verify();
+    let verified = proof.verify();
+    log::info!("Verified with result {}", verified);
+
+    proof.wrap_bn128();
 }

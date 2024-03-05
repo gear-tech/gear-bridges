@@ -5,7 +5,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 
 import {Test, console} from "forge-std/Test.sol";
-import {Proover} from "../src/Proover.sol";
+import {Prover} from "../src/mocks/ProverMock.sol";
 import {Relayer} from "../src/Relayer.sol";
 
 import {Treasury} from "../src/Treasury.sol";
@@ -20,7 +20,7 @@ import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 contract MessageQueueTest is Test {
     Relayer public relayer;
-    Proover public proover;
+    Prover public prover;
     Treasury public treasury;
     MessageQueue public message_queue;
     using Address for address;
@@ -32,20 +32,20 @@ contract MessageQueueTest is Test {
     bytes32 private constant VARA_ID = keccak256(bytes("VARA_ID"));
 
     function setUp() public {
-        Proover _proover = new Proover();
+        Prover _prover = new Prover();
         Relayer _relayer = new Relayer();
         Treasury _treasury = new Treasury();
         MessageQueue _message_queue = new MessageQueue();
         
-        ProxyContract _relayer_proxy = new ProxyContract( address(_relayer), abi.encodeWithSignature("initialize(address)", address(_proover) )); 
+        ProxyContract _relayer_proxy = new ProxyContract( address(_relayer), abi.encodeWithSignature("initialize(address)", address(_prover) )); 
         
-        ProxyContract _message_queue_proxy = new ProxyContract( address(_message_queue), abi.encodeWithSignature("initialize(address,address)", address(_proover), address(_relayer_proxy) )); 
+        ProxyContract _message_queue_proxy = new ProxyContract( address(_message_queue), abi.encodeWithSignature("initialize(address,address)", address(_prover), address(_relayer_proxy) )); 
         ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)  ));
 
         relayer = Relayer(address(_relayer_proxy));
         treasury = Treasury(address(_treasury_proxy));
         message_queue = MessageQueue(address(_message_queue_proxy) );
-        proover = Proover(address(_proover));
+        prover = Prover(address(_prover));
 
         erc20_token = new ERC20Mock("wVARA");
 
@@ -55,7 +55,7 @@ contract MessageQueueTest is Test {
         treasury.deposit(address(erc20_token), amount);
 
 
-        relayer.add_merkle_root(BLOCK_ID, BLOCK_MERKLE_ROOT, bytes(""));
+        relayer.add_merkle_root_with_block(BLOCK_ID, BLOCK_MERKLE_ROOT, bytes(""));
 
 
     }

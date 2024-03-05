@@ -4,7 +4,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
-import {IProover} from "./interfaces/IProover.sol";
+import {IProver} from "./interfaces/IProver.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 
 import {Constants} from "./libraries/Constants.sol";
@@ -14,7 +14,7 @@ import {VaraMessage, ContentMessage, IMessageQueue, Hasher} from "./interfaces/I
 
 contract MessageQueue is IMessageQueue,AccessControl {
     using Address for address;
-    IProover private _proover;
+    IProver private _prover;
     IRelayer private _relayer;
     using Hasher for VaraMessage;
     using Hasher for ContentMessage;
@@ -25,20 +25,20 @@ contract MessageQueue is IMessageQueue,AccessControl {
     }
 
 
-    function initialize(address proover, address relayer) public {
+    function initialize(address prover, address relayer) public {
         if(getRoleAdmin(Constants.ADMIN_ROLE) != DEFAULT_ADMIN_ROLE) revert AlreadyInitialized();
         _setRoleAdmin(Constants.ADMIN_ROLE, Constants.ADMIN_ROLE);
         _grantRole(Constants.ADMIN_ROLE, msg.sender );
-        _proover = IProover(proover);
-        emit ProoverAddressUpdated(proover);
+        _prover = IProver(prover);
+        emit ProoverAddressUpdated(prover);
 
         _relayer = IRelayer(relayer);
         emit RelayerAddressUpdated(relayer);
     }
 
-    function setProover(address proover) public onlyRole(Constants.ADMIN_ROLE) {    
-        _proover = IProover(proover);
-        emit ProoverAddressUpdated(proover);
+    function setProover(address prover) public onlyRole(Constants.ADMIN_ROLE) {    
+        _prover = IProver(prover);
+        emit ProoverAddressUpdated(prover);
     }
 
     function setRelayer(address relayer) public onlyRole(Constants.ADMIN_ROLE) {    
@@ -54,8 +54,12 @@ contract MessageQueue is IMessageQueue,AccessControl {
         bytes32 merkle_root = _relayer.get_merkle_root(message.block_number);
         if(merkle_root == bytes32(0)) revert MerkleRootNotSet(message.block_number);
 
+        uint256[] memory public_inputs = new uint256[](1);
+        public_inputs[0] = uint256(merkle_root) & 0xFFF;
+
         bytes memory message_bytes = abi.encodePacked(merkle_root, msg_hash);
-        if(!_proover.verifyProof( message_bytes, message.proof) ) revert BadProof();
+        
+        if(!_prover.verifyProof( message.proof, public_inputs) ) revert BadProof();
 
         _processed_messages[message.block_number][ msg_hash ] = true;
 

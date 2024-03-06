@@ -23,35 +23,19 @@ contract Relayer is IRelayer, AccessControl {
         _prover = IProver(prover);
     }
 
-    function add_merkle_root_with_block(uint256 block_number, bytes32 merkle_root, bytes calldata proof ) external {
-        uint256[] memory public_inputs = new uint256[](6); 
 
-        uint256 _merkle_root=uint256(merkle_root);
-        for(uint256 i = 0; i < 5; i++ ){
-            public_inputs[i] = (_merkle_root & MASK_52BITS);
-            _merkle_root >>= 52;
-        }
-        public_inputs[5] = block_number + P;
-
-        if(!_prover.verifyProof(proof, public_inputs)) {
-            revert InvalidProof();
-        }
-        _block_numbers[block_number] = merkle_root;
-        _merkle_roots[merkle_root] = block_number;
-    }
-    
-    function add_merkle_root_with_inputs(uint256[] calldata public_inputs, bytes calldata proof ) external {
+    function submit_merkle_root(uint256[] calldata public_inputs, bytes calldata proof ) external {
         if(!_prover.verifyProof(proof, public_inputs)) {
             revert InvalidProof();
         }
 
-        uint256 merkle_root=uint256(public_inputs[4] & MASK_52BITS) % P;
+        uint256 merkle_root=(uint256(public_inputs[4]) % P )  & MASK_52BITS;
         for(uint256 i = 4 ; i > 0; i --) {
             merkle_root <<= 52;
-            merkle_root |= (public_inputs[i-1] & MASK_52BITS) % P;
+            merkle_root |= (public_inputs[i-1] % P) & MASK_52BITS;
         }
 
-        uint256 block_number = public_inputs[5] - P;
+        uint256 block_number = public_inputs[5] % P;
 
         _block_numbers[block_number] = bytes32(merkle_root);
         _merkle_roots[bytes32(merkle_root)] = block_number;

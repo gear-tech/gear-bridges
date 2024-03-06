@@ -56,8 +56,6 @@ contract MessageQueue is IMessageQueue,AccessControl {
         uint256[] memory public_inputs = new uint256[](1);
         public_inputs[0] = uint256(merkle_root) & 0xFFF;
 
-        bytes memory message_bytes = abi.encodePacked(merkle_root, msg_hash);
-
         if(!_prover.verifyProof( message.proof, public_inputs) ) revert BadProof();
 
         _processed_messages[ msg_hash ] = true;

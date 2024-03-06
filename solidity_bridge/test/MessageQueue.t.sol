@@ -12,11 +12,12 @@ import {Treasury} from "../src/Treasury.sol";
 import {ITreasury} from "../src/interfaces/ITreasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
-import {IMessageQueue, ContentMessage, VaraMessage } from "../src/interfaces/IMessageQueue.sol";
+import {IMessageQueue, ContentMessage, VaraMessage, Hasher } from "../src/interfaces/IMessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {Constants} from "../src/libraries/Constants.sol";
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
+
 
 contract MessageQueueTest is Test {
     Relayer public relayer;
@@ -24,6 +25,7 @@ contract MessageQueueTest is Test {
     Treasury public treasury;
     MessageQueue public message_queue;
     using Address for address;
+    using Hasher for ContentMessage;
     
     ERC20Mock public erc20_token;
 
@@ -62,7 +64,7 @@ contract MessageQueueTest is Test {
 
 
     function testWithdraw() public {
-        ContentMessage memory context_message = ContentMessage({ 
+        ContentMessage memory content_message = ContentMessage({ 
             eth_address : address(treasury), 
             vara_address : VARA_ID, 
             nonce : 1, 
@@ -71,11 +73,17 @@ contract MessageQueueTest is Test {
 
         VaraMessage memory vara_message = VaraMessage({
             block_number : BLOCK_ID,
-            content : context_message,
+            content : content_message,
             proof : bytes("")
         });
 
+        bytes32 messageHash = content_message.hash();
+
         message_queue.process_message(vara_message);
+
+        vm.expectRevert(  abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, messageHash) );
+        message_queue.process_message(vara_message);
+
 
     }
 

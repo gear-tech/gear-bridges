@@ -16,10 +16,9 @@ contract MessageQueue is IMessageQueue,AccessControl {
     using Address for address;
     IProver private _prover;
     IRelayer private _relayer;
-    using Hasher for VaraMessage;
     using Hasher for ContentMessage;
 
-    mapping(uint256=>mapping(bytes32=>bool)) private _processed_messages;
+    mapping(bytes32=>bool) private _processed_messages;
 
     constructor() {
     }
@@ -49,7 +48,7 @@ contract MessageQueue is IMessageQueue,AccessControl {
 
     function process_message(VaraMessage calldata message) public {
         bytes32 msg_hash = message.content.hash();
-        if( _processed_messages[message.block_number][msg_hash] ) revert MessageAlreadyProcessed(msg_hash);
+        if( _processed_messages[msg_hash] ) revert MessageAlreadyProcessed(msg_hash);
 
         bytes32 merkle_root = _relayer.get_merkle_root(message.block_number);
         if(merkle_root == bytes32(0)) revert MerkleRootNotSet(message.block_number);
@@ -58,14 +57,19 @@ contract MessageQueue is IMessageQueue,AccessControl {
         public_inputs[0] = uint256(merkle_root) & 0xFFF;
 
         bytes memory message_bytes = abi.encodePacked(merkle_root, msg_hash);
-        
+
         if(!_prover.verifyProof( message.proof, public_inputs) ) revert BadProof();
 
-        _processed_messages[message.block_number][ msg_hash ] = true;
+        _processed_messages[ msg_hash ] = true;
 
         message.content.eth_address.functionCall(message.content.data);
 
         emit MessageProcessed(message.block_number, msg_hash);
+    }
+
+    function is_processed(VaraMessage calldata message) external view returns(bool) {
+        bytes32 msg_hash = message.content.hash();
+        return _processed_messages[msg_hash];
     }
 
 

@@ -40,15 +40,15 @@ contract Relayer is IRelayer, AccessControl {
         _merkle_roots[merkle_root] = block_number;
     }
     
-function add_merkle_root_with_inputs(uint256[] calldata public_inputs, bytes calldata proof ) external {
+    function add_merkle_root_with_inputs(uint256[] calldata public_inputs, bytes calldata proof ) external {
         if(!_prover.verifyProof(proof, public_inputs)) {
             revert InvalidProof();
         }
 
-        uint256 merkle_root=uint256(public_inputs[4] & MASK_52BITS);
+        uint256 merkle_root=uint256(public_inputs[4] & MASK_52BITS) % P;
         for(uint256 i = 4 ; i > 0; i --) {
             merkle_root <<= 52;
-            merkle_root |= (public_inputs[i-1] & MASK_52BITS);
+            merkle_root |= (public_inputs[i-1] & MASK_52BITS) % P;
         }
 
         uint256 block_number = public_inputs[5] - P;

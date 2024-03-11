@@ -99,22 +99,6 @@ where
         }
     }
 
-    pub fn export_final_dummy() -> SerializedDataToVerify {
-        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        builder.add_gate(NoopGate {}, vec![]);
-        let pw = PartialWitness::new();
-        let circuit = builder.build();
-        let proof = circuit.prove(pw).unwrap();
-
-        let (proof_with_public_inputs, circuit_data) = wrap_bn128(&circuit.verifier_data(), proof);
-
-        SerializedDataToVerify {
-            proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
-            common_circuit_data: serde_json::to_string(&circuit_data.common).unwrap(),
-            verifier_only_circuit_data: serde_json::to_string(&circuit_data.verifier_only).unwrap(),
-        }
-    }
-
     pub fn export_final(self) -> SerializedDataToVerify {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,

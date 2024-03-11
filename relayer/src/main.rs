@@ -73,19 +73,19 @@ struct ProveArgs {
     /// Where to write proof with public inputs
     #[arg(
         long = "circom-const-path",
-        default_value = "../gnark-plonky2-verifier/testdata/own_5/proof_with_public_inputs.json"
+        default_value = "../gnark-plonky2-verifier/testdata/own_2/proof_with_public_inputs.json"
     )]
     proof_with_public_inputs_path: PathBuf,
     /// Where to write common circuit data
     #[arg(
         long = "circom-gates-path",
-        default_value = "../gnark-plonky2-verifier/testdata/own_5/common_circuit_data.json"
+        default_value = "../gnark-plonky2-verifier/testdata/own_2/common_circuit_data.json"
     )]
     common_circuit_data_path: PathBuf,
     /// Where to write verifier only circuit data
     #[arg(
         long = "verifier-only-circuit-data",
-        default_value = "../gnark-plonky2-verifier/testdata/own_5/verifier_only_circuit_data.json"
+        default_value = "../gnark-plonky2-verifier/testdata/own_2/verifier_only_circuit_data.json"
     )]
     verifier_only_circuit_data_path: PathBuf,
 }
@@ -203,21 +203,6 @@ async fn main() {
                 log::info!("Verified with result {}", verified);
             }
             ProveCommands::TestCase { args } => {
-                let ser = ProofWithCircuitData::<LatestValidatorSetTarget>::export_final_dummy();
-                std::fs::write(
-                    args.proof_with_public_inputs_path,
-                    ser.proof_with_public_inputs,
-                )
-                .unwrap();
-                std::fs::write(args.common_circuit_data_path, ser.common_circuit_data).unwrap();
-                std::fs::write(
-                    args.verifier_only_circuit_data_path,
-                    ser.verifier_only_circuit_data,
-                )
-                .unwrap();
-
-                panic!("DONE");
-
                 const GENESIS_VS_ID: u64 = 272;
 
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;

@@ -2,6 +2,7 @@ use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use crate::prelude::*;
 use plonky2::{
+    gates::noop::NoopGate,
     hash::hash_types::HashOutTarget,
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -10,6 +11,7 @@ use plonky2::{
         config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
+    recursion::dummy_circuit,
 };
 
 #[macro_use]
@@ -94,6 +96,22 @@ where
         ProofWithPublicInputs {
             proof: self.proof.clone(),
             public_inputs: self.public_inputs.clone(),
+        }
+    }
+
+    pub fn export_final_dummy() -> SerializedDataToVerify {
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        builder.add_gate(NoopGate {}, vec![]);
+        let pw = PartialWitness::new();
+        let circuit = builder.build();
+        let proof = circuit.prove(pw).unwrap();
+
+        let (proof_with_public_inputs, circuit_data) = wrap_bn128(&circuit.verifier_data(), proof);
+
+        SerializedDataToVerify {
+            proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
+            common_circuit_data: serde_json::to_string(&circuit_data.common).unwrap(),
+            verifier_only_circuit_data: serde_json::to_string(&circuit_data.verifier_only).unwrap(),
         }
     }
 
@@ -322,6 +340,7 @@ where
     }
 }
 
+// TODO: Assert wrapped proof circuit digest and constant merkle caps.
 pub fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,

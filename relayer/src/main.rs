@@ -73,19 +73,19 @@ struct ProveArgs {
     /// Where to write proof with public inputs
     #[arg(
         long = "circom-const-path",
-        default_value = "../gnark-plonky2-verifier/testdata/own_2/proof_with_public_inputs.json"
+        default_value = "./gnark-wrapper/data/proof_with_public_inputs.json"
     )]
     proof_with_public_inputs_path: PathBuf,
     /// Where to write common circuit data
     #[arg(
         long = "circom-gates-path",
-        default_value = "../gnark-plonky2-verifier/testdata/own_2/common_circuit_data.json"
+        default_value = "./gnark-wrapper/data/common_circuit_data.json"
     )]
     common_circuit_data_path: PathBuf,
     /// Where to write verifier only circuit data
     #[arg(
         long = "verifier-only-circuit-data",
-        default_value = "../gnark-plonky2-verifier/testdata/own_2/verifier_only_circuit_data.json"
+        default_value = "./gnark-wrapper/data/verifier_only_circuit_data.json"
     )]
     verifier_only_circuit_data_path: PathBuf,
 }

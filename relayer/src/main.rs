@@ -6,12 +6,8 @@ use std::{path::PathBuf, time::Instant};
 
 use gear_rpc_client::GearApi;
 use prover::{
-    common::targets::TargetSet,
-    final_proof::FinalProof,
-    latest_validator_set::{self, LatestValidatorSet, LatestValidatorSetTarget},
-    message_sent::MessageSent,
+    final_proof::FinalProof, latest_validator_set::LatestValidatorSet, message_sent::MessageSent,
     next_validator_set::NextValidatorSet,
-    ProofWithCircuitData,
 };
 
 const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
@@ -236,6 +232,13 @@ async fn main() {
                 }
                 .prove_recursive(latest_vs.proof());
 
+                let final_serialized = latest_vs.export();
+                std::fs::write("./pwpi_2.json", final_serialized.proof_with_public_inputs).unwrap();
+                std::fs::write("ccd_2.json", final_serialized.common_circuit_data).unwrap();
+                std::fs::write("vocd_2.json", final_serialized.verifier_only_circuit_data).unwrap();
+
+                panic!("DONE");
+
                 let (block, current_epoch_block_finality) = api
                     .fetch_finality_proof_for_session(GENESIS_VS_ID + 2)
                     .await;
@@ -264,7 +267,7 @@ async fn main() {
                 }
                 .prove();
 
-                let final_serialized = final_proof.export_final();
+                let final_serialized = final_proof.export_wrapped();
 
                 std::fs::write(
                     args.proof_with_public_inputs_path,
@@ -283,43 +286,7 @@ async fn main() {
                 .unwrap();
             }
         },
-        CliCommands::Query(args) => {
-            let eth_client = ContractVerifiers::new(
-                &args.eth_endpoint.eth_endpoint,
-                &args.contract_addresses.validator_set_change_contract,
-                &args.contract_addresses.message_sent_contract,
-            )
-            .unwrap();
-
-            let vara_client = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
-
-            let messages = eth_client
-                .get_all_msg_hashes_from_msg_sent_vrf()
-                .await
-                .unwrap();
-            println!("-----Messages-----");
-            for msg in messages {
-                println!("{:?}", msg);
-            }
-
-            let validator_sets = eth_client
-                .get_all_validator_sets_from_vs_vrf()
-                .await
-                .unwrap();
-            println!("-----Validator sets-----");
-            for vs in validator_sets {
-                println!("{:?}", vs);
-            }
-
-            let last_vs_id = eth_client.get_nonce_id_from_vs_vrf().await.unwrap();
-            println!("-----Last relayed validator set ID-----");
-            println!("{}", last_vs_id);
-
-            let latest_block = vara_client.latest_finalized_block().await;
-            let last_vs_id = vara_client.validator_set_id(latest_block).await;
-            println!("-----Last validator set ID on VARA-----");
-            println!("{}", last_vs_id);
-        }
+        CliCommands::Query(args) => {}
         CliCommands::SendProof(command) => match command {
             SendProofCommands::ValidatorSetChange(args) => {
                 let eth_client = ContractVerifiers::new(

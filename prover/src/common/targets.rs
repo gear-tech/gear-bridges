@@ -4,15 +4,19 @@ use std::ops::Deref;
 use self::consts::VALIDATOR_COUNT;
 
 use crate::{common::array_to_bits, consts::*, prelude::*};
+use itertools::Itertools;
 use plonky2::{
-    hash::hash_types::HashOutTarget,
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierOnlyCircuitData},
 };
-use plonky2_field::{goldilocks_field::GoldilocksField, types::Field};
+use plonky2_field::{
+    goldilocks_field::GoldilocksField,
+    types::{Field, PrimeField64},
+};
 
 pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
@@ -36,6 +40,12 @@ pub trait TargetSet: Clone + Debug {
             .into_targets_iter()
             .for_each(|t| builder.register_public_input(t));
     }
+}
+
+pub trait ParsableTargetSet: TargetSet {
+    type PublicInputsData;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData;
 }
 
 impl TargetSet for Target {
@@ -70,7 +80,23 @@ impl TargetSet for HashOutTarget {
     }
 }
 
+impl ParsableTargetSet for HashOutTarget {
+    type PublicInputsData = HashOut<F>;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        HashOut {
+            elements: public_inputs
+                .take(NUM_HASH_OUT_ELTS)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
+    }
+}
+
 pub(crate) use crate::impl_target_set;
+
+use super::bits_to_byte;
 #[macro_export]
 macro_rules! impl_target_set {
     (
@@ -213,6 +239,14 @@ impl TargetSet for SingleTarget {
     }
 }
 
+impl ParsableTargetSet for SingleTarget {
+    type PublicInputsData = u64;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs.next().unwrap().to_canonical_u64()
+    }
+}
+
 impl From<Target> for SingleTarget {
     fn from(value: Target) -> Self {
         Self(value)
@@ -272,8 +306,27 @@ impl_array_target_wrapper!(
     BoolTarget,
     ED25519_SIGNATURE_SIZE_IN_BITS
 );
-
 impl_array_target_wrapper!(ValidatorSetTarget, Ed25519PublicKeyTarget, VALIDATOR_COUNT);
+
+impl ParsableTargetSet for Sha256TargetGoldilocks {
+    type PublicInputsData = [u8; 32];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs
+            .take(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|f| array_to_bits(&f.to_canonical_u64().to_le_bytes())[64 - 52..].to_vec())
+            .flatten()
+            .collect::<Vec<_>>()
+            .chunks(8)
+            .map(|bits| bits_to_byte(bits.try_into().unwrap()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
 
 impl TargetSetWitnessOperations for ValidatorSetTarget {
     fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {

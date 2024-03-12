@@ -7,6 +7,7 @@ edition.workspace = true
 gear-rpc-client.workspace = true
 prover.workspace = true
 eth-client.workspace = true
+intermediate-proof-storage.workspace = true
 
 log.workspace = true
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -22,7 +23,7 @@ import (
 )
 
 func main() {
-	compileCircuit := flag.Bool("compile-circuit", true, "create proving key, verifying key, R1CS and solidity verifier")
+	compileCircuit := flag.Bool("compile-circuit", false, "create proving key, verifying key, R1CS and solidity verifier")
 	flag.Parse()
 
 	if *compileCircuit {
@@ -65,7 +66,7 @@ func compile() {
 		os.Exit(1)
 	}
 
-	fR1CS, _ := os.Create("data/circuit")
+	fR1CS, _ := os.Create("data/r1cs")
 	r1cs.WriteTo(fR1CS)
 	fR1CS.Close()
 
@@ -81,6 +82,11 @@ func compile() {
 	_ = vk.ExportSolidity(fSolidity)
 }
 
+type ProofWithPublicInputs struct {
+	Proof        string   `json:"proof"`
+	PublicInputs []uint64 `json:"public_inputs"`
+}
+
 func prove() {
 	r1cs := loadR1CS()
 	pk := loadProvingKey()
@@ -90,26 +96,44 @@ func prove() {
 
 	proof, err := plonk.Prove(r1cs, pk, witness)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		panic(err)
 	}
 
-	// TODO: Write to file
+	saveProof(proof, assignment.PublicInputs)
+
+	vk := loadVerifyingKey()
+	publicWitness, err := witness.Public()
+	if err != nil {
+		panic(err)
+	}
+	err = plonk.Verify(proof, vk, publicWitness)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func saveProof(proof plonk.Proof, glPublicInputs []gl.Variable) {
 	_proof := proof.(*plonk_bn254.Proof)
 	proofBytes := _proof.MarshalSolidity()
 	proofStr := hex.EncodeToString(proofBytes)
-	fmt.Println(proofStr)
-}
 
-func verify() {
-	// TODO: Implement
-	// fmt.Println("Verifying proof", time.Now())
-	_ = loadVerifyingKey()
-	// err := plonk.Verify(proof, vk, publicWitness)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	os.Exit(1)
-	// }
+	publicInputs := make([]uint64, len(glPublicInputs))
+	for i := 0; i < len(publicInputs); i++ {
+		publicInputs[i] = glPublicInputs[i].Limb.(uint64)
+	}
+
+	jsonProof, err := json.MarshalIndent(ProofWithPublicInputs{
+		Proof:        "0x" + proofStr,
+		PublicInputs: publicInputs,
+	}, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+
+	err = os.WriteFile("data/final_proof.json", jsonProof, 0644)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func loadCircuit() Plonky2VerifierCircuit {
@@ -158,7 +182,7 @@ func loadProvingKey() plonk.ProvingKey {
 
 func loadR1CS() constraint.ConstraintSystem {
 	r1cs := plonk.NewCS(ecc.BN254)
-	r1csFile, err := os.Open("data/circuit")
+	r1csFile, err := os.Open("data/r1cs")
 	if err != nil {
 		fmt.Println(err)
 	}

@@ -112,8 +112,7 @@ mod permutation_tests {
     use anyhow::Ok;
     use ff::{Field, PrimeField};
 
-    use super::{permution, WIDTH};
-    use crate::backend::wrapper::utils::Fr;
+    use super::{permution, Fr, WIDTH};
 
     #[test]
     fn test_permuation() -> Result<(), anyhow::Error> {
@@ -198,7 +197,7 @@ mod merkle_tree_tests {
     use plonky2::hash::merkle_tree::MerkleTree;
     use plonky2::plonk::config::GenericConfig;
 
-    use crate::backend::wrapper::plonky2_config::PoseidonBN128GoldilocksConfig;
+    use super::super::super::PoseidonBN128GoldilocksConfig;
 
     fn random_data<F: RichField>(n: usize, k: usize) -> Vec<Vec<F>> {
         (0..n).map(|_| F::rand_vec(k)).collect()

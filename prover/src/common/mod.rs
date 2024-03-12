@@ -2,6 +2,7 @@ use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use crate::prelude::*;
 use plonky2::{
+    gates::noop::NoopGate,
     hash::hash_types::HashOutTarget,
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -10,6 +11,7 @@ use plonky2::{
         config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
+    recursion::dummy_circuit,
 };
 
 #[macro_use]
@@ -322,6 +324,7 @@ where
     }
 }
 
+// TODO: Assert wrapped proof circuit digest and constant merkle caps.
 pub fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,

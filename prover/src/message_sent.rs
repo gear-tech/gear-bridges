@@ -59,8 +59,14 @@ where
 
             // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
             // and pad it with zeroes.
-            let message_targets =
-                BitArrayTarget::<260>::parse(&mut inclusion_proof.leaf_data.into_targets_iter());
+            let padding_targets = (0..4).map(|_| builder.constant_bool(false).target);
+            let message_targets = BitArrayTarget::<260>::parse(
+                &mut inclusion_proof
+                    .leaf_data
+                    .into_targets_iter()
+                    .take(256)
+                    .chain(padding_targets),
+            );
 
             MessageSentTarget {
                 validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(

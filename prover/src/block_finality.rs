@@ -212,7 +212,8 @@ impl ComposedValidatorSigns {
                 previous_composed_proof.validator_idx.to_target(),
             );
             let one = builder.one();
-            let to_compare_with_0 = builder.sub(new_index_sub_latest, one); // assert >= 0.
+            let to_compare_with_0 = builder.sub(new_index_sub_latest, one);
+            // assert that `to_compare_with_0` >= 0.
             builder.range_check(to_compare_with_0, 32);
 
             ValidatorSignsChainTarget {

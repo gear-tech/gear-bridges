@@ -8,7 +8,7 @@ use gear_rpc_client::GearApi;
 use prover::{
     common::targets::TargetSet,
     final_proof::FinalProof,
-    latest_validator_set::{self, LatestValidatorSet},
+    latest_validator_set::{self, LatestValidatorSet, LatestValidatorSetTarget},
     message_sent::MessageSent,
     next_validator_set::NextValidatorSet,
     ProofWithCircuitData,
@@ -73,19 +73,19 @@ struct ProveArgs {
     /// Where to write proof with public inputs
     #[arg(
         long = "circom-const-path",
-        default_value = "../gnark-plonky2-verifier/testdata/own_2/proof_with_public_inputs.json"
+        default_value = "./gnark-wrapper/data/proof_with_public_inputs.json"
     )]
     proof_with_public_inputs_path: PathBuf,
     /// Where to write common circuit data
     #[arg(
         long = "circom-gates-path",
-        default_value = "../gnark-plonky2-verifier/testdata/own_2/common_circuit_data.json"
+        default_value = "./gnark-wrapper/data/common_circuit_data.json"
     )]
     common_circuit_data_path: PathBuf,
     /// Where to write verifier only circuit data
     #[arg(
         long = "verifier-only-circuit-data",
-        default_value = "../gnark-plonky2-verifier/testdata/own_2/verifier_only_circuit_data.json"
+        default_value = "./gnark-wrapper/data/verifier_only_circuit_data.json"
     )]
     verifier_only_circuit_data_path: PathBuf,
 }
@@ -236,7 +236,22 @@ async fn main() {
                 }
                 .prove_recursive(latest_vs.proof());
 
-                let block = api.search_for_validator_set_block(GENESIS_VS_ID + 2).await;
+                let (block, current_epoch_block_finality) = api
+                    .fetch_finality_proof_for_session(GENESIS_VS_ID + 2)
+                    .await;
+                let next_change = NextValidatorSet {
+                    current_epoch_block_finality,
+                    next_validator_set_inclusion_proof: api
+                        .fetch_next_session_keys_merkle_proof(block)
+                        .await,
+                };
+
+                let latest_vs = LatestValidatorSet {
+                    change_proof: next_change,
+                }
+                .prove_recursive(latest_vs.proof());
+
+                let block = api.search_for_validator_set_block(GENESIS_VS_ID + 3).await;
                 let (block, block_finality) = api.fetch_finality_proof(block).await;
                 let message_sent = MessageSent {
                     block_finality,

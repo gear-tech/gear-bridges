@@ -41,6 +41,7 @@ impl_target_set! {
         pub genesis_hash: Sha256TargetGoldilocks,
         pub current_set_id: SingleTarget,
         pub current_hash: Sha256TargetGoldilocks,
+
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
     }
 }

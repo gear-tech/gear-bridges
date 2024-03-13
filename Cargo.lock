@@ -3336,7 +3336,9 @@ dependencies = [
 name = "intermediate-proof-storage"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "plonky2",
+ "prover",
 ]
 
 [[package]]

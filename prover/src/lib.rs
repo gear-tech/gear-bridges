@@ -19,7 +19,7 @@ pub mod validator_set_hash;
 
 pub use common::ProofWithCircuitData;
 
-mod prelude {
+pub mod prelude {
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
 

@@ -19,7 +19,7 @@ pub mod validator_set_hash;
 
 pub use common::ProofWithCircuitData;
 
-mod prelude {
+pub mod prelude {
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
@@ -28,6 +28,8 @@ mod prelude {
     pub const D: usize = 2;
 
     pub(crate) use super::consts;
+
+    pub use super::consts::GENESIS_AUTHORITY_SET_ID;
 }
 
 pub(crate) mod consts {

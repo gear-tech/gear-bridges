@@ -6,3 +6,4 @@ artifacts
 cache
 .DS_Store
 data/
+/proof_storage

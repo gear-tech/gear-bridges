@@ -3333,6 +3333,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "intermediate-proof-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "plonky2",
+ "prover",
+ "serde_json",
+]
+
+[[package]]
 name = "intx"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6143,9 +6153,11 @@ dependencies = [
  "clap",
  "eth-client",
  "gear-rpc-client",
+ "intermediate-proof-storage",
  "log",
  "pretty_env_logger",
  "prover",
+ "serde_json",
  "tokio",
 ]
 

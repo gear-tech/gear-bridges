@@ -1,8 +1,7 @@
-use std::{marker::PhantomData, path::Path, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 
 use crate::prelude::*;
 use plonky2::{
-    gates::noop::NoopGate,
     hash::hash_types::HashOutTarget,
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{
@@ -11,7 +10,6 @@ use plonky2::{
         config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
-    recursion::dummy_circuit,
 };
 
 #[macro_use]
@@ -99,7 +97,26 @@ where
         }
     }
 
-    pub fn export_final(self) -> SerializedDataToVerify {
+    // TODO: REMOVE
+    pub fn verifier_circuit_data(&self) -> VerifierCircuitData<F, C, D> {
+        self.circuit_data.as_ref().clone()
+    }
+
+    pub fn export(self) -> SerializedDataToVerify {
+        let proof_with_public_inputs = ProofWithPublicInputs {
+            proof: self.proof,
+            public_inputs: self.public_inputs,
+        };
+
+        SerializedDataToVerify {
+            proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
+            common_circuit_data: serde_json::to_string(&self.circuit_data.common).unwrap(),
+            verifier_only_circuit_data: serde_json::to_string(&self.circuit_data.verifier_only)
+                .unwrap(),
+        }
+    }
+
+    pub fn export_wrapped(self) -> SerializedDataToVerify {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
             public_inputs: self.public_inputs,
@@ -379,4 +396,12 @@ fn byte_to_bits(byte: u8) -> [bool; 8] {
         .collect::<Vec<_>>()
         .try_into()
         .unwrap()
+}
+
+pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
+    bits.into_iter()
+        .rev()
+        .enumerate()
+        .map(|(no, bit)| (bit as u8) << no)
+        .sum()
 }

@@ -2,14 +2,20 @@ use itertools::Itertools;
 use plonky2::{
     field::types::Field,
     gates::noop::NoopGate,
-    hash::hash_types::MerkleCapTarget,
+    hash::{
+        hash_types::{HashOutTarget, MerkleCapTarget, NUM_HASH_OUT_ELTS},
+        merkle_tree::MerkleCap,
+    },
     iop::{
         target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget},
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
@@ -17,7 +23,8 @@ use plonky2::{
 
 use crate::{
     common::targets::{
-        impl_target_set, Sha256TargetGoldilocks, SingleTarget, TargetSet, VerifierDataTarget,
+        impl_target_set, ParsableTargetSet, Sha256TargetGoldilocks, SingleTarget, TargetSet,
+        VerifierDataTarget,
     },
     next_validator_set::{NextValidatorSet, NextValidatorSetTarget},
     prelude::*,
@@ -34,7 +41,43 @@ impl_target_set! {
         pub genesis_hash: Sha256TargetGoldilocks,
         pub current_set_id: SingleTarget,
         pub current_hash: Sha256TargetGoldilocks,
+
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
+    }
+}
+
+pub struct LatestValidatorSetPublicInputs {
+    pub genesis_set_id: u64,
+    pub genesis_hash: [u8; 32],
+    pub current_set_id: u64,
+    pub current_hash: [u8; 32],
+
+    pub verifier_only_data: VerifierOnlyCircuitData<C, D>,
+}
+
+impl ParsableTargetSet for LatestValidatorSetTarget {
+    type PublicInputsData = LatestValidatorSetPublicInputs;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        let pis = LatestValidatorSetPublicInputs {
+            genesis_set_id: SingleTarget::parse_public_inputs(public_inputs),
+            genesis_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
+            current_set_id: SingleTarget::parse_public_inputs(public_inputs),
+            current_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
+
+            verifier_only_data: VerifierOnlyCircuitData {
+                circuit_digest: HashOutTarget::parse_public_inputs(public_inputs),
+                constants_sigmas_cap: MerkleCap(
+                    (0..VERIFIER_DATA_NUM_CAP_ELEMENTS)
+                        .map(|_| HashOutTarget::parse_public_inputs(public_inputs))
+                        .collect(),
+                ),
+            },
+        };
+
+        assert_eq!(public_inputs.next(), None);
+
+        pis
     }
 }
 

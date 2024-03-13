@@ -1,6 +1,13 @@
 [workspace]
 
-members = ["eth-client", "gear-rpc-client", "prover", "relayer", "circuits/*"]
+members = [
+    "eth-client",
+    "gear-rpc-client",
+    "prover",
+    "relayer",
+    "circuits/*",
+    "intermediate-proof-storage",
+]
 
 resolver = "2"
 
@@ -18,6 +25,7 @@ plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
 plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
 plonky2_u32 = { path = "./circuits/plonky2_u32" }
 eth-client = { path = "./eth-client" }
+intermediate-proof-storage = { path = "./intermediate-proof-storage" }
 
 anyhow = "1.0.40"
 env_logger = "0.9.0"

@@ -10,6 +10,7 @@ eth-client.workspace = true
 intermediate-proof-storage.workspace = true
 
 log.workspace = true
+serde_json.workspace = true
 
 clap = { version = "4.4.13", features = ["derive", "env"] }
 tokio = { version = "1.23.0", features = ["full"] }

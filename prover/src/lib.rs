@@ -28,6 +28,8 @@ pub mod prelude {
     pub const D: usize = 2;
 
     pub(crate) use super::consts;
+
+    pub use super::consts::GENESIS_AUTHORITY_SET_ID;
 }
 
 pub(crate) mod consts {

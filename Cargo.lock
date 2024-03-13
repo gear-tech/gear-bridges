@@ -3339,6 +3339,7 @@ dependencies = [
  "anyhow",
  "plonky2",
  "prover",
+ "serde_json",
 ]
 
 [[package]]
@@ -6156,6 +6157,7 @@ dependencies = [
  "log",
  "pretty_env_logger",
  "prover",
+ "serde_json",
  "tokio",
 ]
 

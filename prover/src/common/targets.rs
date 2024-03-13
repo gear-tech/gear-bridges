@@ -319,6 +319,7 @@ impl ParsableTargetSet for Sha256TargetGoldilocks {
             .rev()
             .map(|f| array_to_bits(&f.to_canonical_u64().to_le_bytes())[64 - 52..].to_vec())
             .flatten()
+            .skip(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * 52 - SHA256_DIGEST_SIZE_IN_BITS)
             .collect::<Vec<_>>()
             .chunks(8)
             .map(|bits| bits_to_byte(bits.try_into().unwrap()))

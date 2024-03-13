@@ -97,6 +97,11 @@ where
         }
     }
 
+    // TODO: REMOVE
+    pub fn verifier_circuit_data(&self) -> VerifierCircuitData<F, C, D> {
+        self.circuit_data.as_ref().clone()
+    }
+
     pub fn export(self) -> SerializedDataToVerify {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,

@@ -3,7 +3,10 @@ use std::{marker::PhantomData, sync::Arc};
 use crate::prelude::*;
 use plonky2::{
     hash::hash_types::HashOutTarget,
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierCircuitTarget},

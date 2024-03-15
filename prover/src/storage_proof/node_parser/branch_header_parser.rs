@@ -27,7 +27,7 @@ pub fn define(
     let first_byte = input.first_node_data_block.constant_read(0);
     let second_byte = input.first_node_data_block.constant_read(1);
 
-    let first_byte_bits = first_byte.into_bits(builder);
+    let first_byte_bits = first_byte.to_bit_targets(builder);
     let node_prefix = (
         first_byte_bits.constant_read(7),
         first_byte_bits.constant_read(6),

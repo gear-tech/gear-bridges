@@ -6,8 +6,8 @@ use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
 use crate::{
     common::targets::{
-        impl_array_target_wrapper, impl_target_set, ByteTarget, HalfByteTarget, SingleTarget,
-        TargetSet,
+        impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
+        SingleTarget, TargetSet,
     },
     prelude::*,
 };
@@ -20,6 +20,7 @@ mod nibble_parser;
 const NODE_DATA_BLOCK_BYTES: usize = 128;
 const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
+const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
 
@@ -44,10 +45,10 @@ impl StorageAddressPaddedTarget {
 }
 
 impl_target_set! {
-    // Invariant: all the data after `current_length` is zeroed.
+    // Invariant: all the data after `length` is zeroed.
     pub struct PartialStorageAddressTarget {
         pub address: StorageAddressPaddedTarget,
-        pub current_length: SingleTarget
+        pub length: SingleTarget
     }
 }
 
@@ -55,7 +56,41 @@ impl PartialStorageAddressTarget {
     pub fn empty(builder: &mut CircuitBuilder<F, D>) -> Self {
         Self {
             address: StorageAddressPaddedTarget::empty(builder),
-            current_length: builder.zero().into(),
+            length: builder.zero().into(),
+        }
+    }
+
+    /// Preserves invariant even if half-bytes after `self.length` contain trash.
+    pub fn from_half_byte_targets_safe(
+        targets: [HalfByteTarget; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES],
+        length: SingleTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Self {
+        let zero = HalfByteTarget::constant(0, builder);
+        let targets = targets
+            .into_iter()
+            .enumerate()
+            .map(|(idx, unchecked_target)| {
+                let idx = builder.constant(F::from_canonical_usize(idx));
+                let valid_half_byte =
+                    list_le_circuit(builder, vec![idx], vec![length.to_target()], 32);
+
+                // Returns `if b { x } else { y }`.
+                let checked_target = builder.select(
+                    valid_half_byte,
+                    unchecked_target.to_target(),
+                    zero.to_target(),
+                );
+
+                HalfByteTarget::from_target_unsafe(checked_target)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        Self {
+            address: StorageAddressPaddedTarget(ArrayTarget(targets)),
+            length,
         }
     }
 
@@ -64,10 +99,7 @@ impl PartialStorageAddressTarget {
         append: PartialStorageAddressTarget,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
-        let final_length = builder.add(
-            self.current_length.to_target(),
-            append.current_length.to_target(),
-        );
+        let final_length = builder.add(self.length.to_target(), append.length.to_target());
         let max_length = builder.constant(F::from_canonical_usize(
             MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
         ));
@@ -79,13 +111,13 @@ impl PartialStorageAddressTarget {
         let zero = builder.zero();
         let mut address_targets = (0..MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES).map(|i| {
             let self_read_idx = builder.constant(F::from_canonical_usize(i));
-            let appended_read_idx = builder.sub(self_read_idx, self.current_length.to_target());
+            let appended_read_idx = builder.sub(self_read_idx, self.length.to_target());
 
-            // `appended_read_idx` is valid iff `self_read_idx` >= `self.current_length`.
+            // `appended_read_idx` is valid iff `self_read_idx` >= `self.length`.
             // Elsewhere we don't care about actual idx and set it to zero, as we don't use it's value.
             let appended_read_idx_valid = list_le_circuit(
                 builder,
-                vec![self.current_length.to_target()],
+                vec![self.length.to_target()],
                 vec![self_read_idx],
                 32,
             );
@@ -98,10 +130,10 @@ impl PartialStorageAddressTarget {
                 .address
                 .random_read(appended_read_idx.into(), builder);
 
-            // Check if `self.current_length` <= `i`
+            // Check if `self.length` <= `i`
             let select_nibble_from_appended = list_le_circuit(
                 builder,
-                vec![self.current_length.to_target()],
+                vec![self.length.to_target()],
                 vec![self_read_idx],
                 32,
             );
@@ -118,7 +150,7 @@ impl PartialStorageAddressTarget {
 
         Self {
             address,
-            current_length: final_length.into(),
+            length: final_length.into(),
         }
     }
 }
@@ -215,8 +247,8 @@ mod tests {
         witness: &mut PartialWitness<F>,
     ) -> PartialStorageAddressTarget {
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
-        let current_length = builder.add_virtual_target();
-        witness.set_target(current_length, F::from_canonical_usize(nibbles.len()));
+        let length = builder.add_virtual_target();
+        witness.set_target(length, F::from_canonical_usize(nibbles.len()));
 
         let mut nibble_targets = nibbles
             .iter()
@@ -230,7 +262,7 @@ mod tests {
             });
 
         PartialStorageAddressTarget {
-            current_length: current_length.into(),
+            length: length.into(),
             address: StorageAddressPaddedTarget::parse_exact(&mut nibble_targets),
         }
     }

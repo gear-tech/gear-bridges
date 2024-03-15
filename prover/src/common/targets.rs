@@ -219,6 +219,24 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
 
         T::parse_exact(&mut result_targets)
     }
+
+    pub fn random_read_array<const R: usize>(
+        &self,
+        at: SingleTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> ArrayTarget<T, R> {
+        ArrayTarget(
+            (0..N)
+                .map(|offset| {
+                    let offset = builder.constant(F::from_canonical_usize(offset));
+                    let read_at = builder.add(at.to_target(), offset);
+                    self.random_read(read_at.into(), builder)
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
+    }
 }
 
 pub trait TargetSetWitnessOperations {
@@ -330,8 +348,24 @@ impl ByteTarget {
         self.0
     }
 
+    /// Splits byte into `(least_significant, most_significant)` half-bytes.
+    pub fn to_half_byte_targets(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> (HalfByteTarget, HalfByteTarget) {
+        let bits = self.to_bit_targets(builder);
+
+        let l_bits = &bits.0[..4];
+        let h_bits = &bits.0[4..];
+
+        (
+            HalfByteTarget::from_target_unsafe(builder.le_sum(l_bits.iter())),
+            HalfByteTarget::from_target_unsafe(builder.le_sum(h_bits.iter())),
+        )
+    }
+
     /// Arranged from less to most significant bit.
-    pub fn into_bits(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
+    pub fn to_bit_targets(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
         ArrayTarget(builder.low_bits(self.0, 8, 8).try_into().unwrap())
     }
 }

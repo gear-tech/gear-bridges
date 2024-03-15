@@ -3,7 +3,11 @@ use std::ops::Deref;
 
 use self::consts::VALIDATOR_COUNT;
 
-use crate::{common::array_to_bits, consts::*, prelude::*};
+use crate::{
+    common::{array_to_bits, bits_to_byte},
+    consts::*,
+    prelude::*,
+};
 use itertools::Itertools;
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
@@ -96,7 +100,6 @@ impl ParsableTargetSet for HashOutTarget {
 
 pub(crate) use crate::impl_target_set;
 
-use super::bits_to_byte;
 #[macro_export]
 macro_rules! impl_target_set {
     (
@@ -259,13 +262,66 @@ impl SingleTarget {
     }
 }
 
-macro_rules! impl_array_target_wrapper {
-    ($name:ident, $target_ty:ty, $len:ident) => {
-        #[derive(Clone, Debug)]
-        pub struct $name(ArrayTarget<$target_ty, $len>);
+#[derive(Clone, Debug)]
+pub struct ByteTarget(Target);
 
-        impl Deref for $name {
-            type Target = ArrayTarget<$target_ty, $len>;
+impl TargetSet for ByteTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self(raw.next().unwrap())
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.0)
+    }
+}
+
+impl ByteTarget {
+    pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+        Self(builder.constant(F::from_canonical_u8(value)))
+    }
+
+    pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+        builder.range_check(target, 8);
+        Self(target)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HalfByteTarget(Target);
+
+impl TargetSet for HalfByteTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self(raw.next().unwrap())
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.0)
+    }
+}
+
+impl HalfByteTarget {
+    pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
+        assert!(value < 16);
+        Self(builder.constant(F::from_canonical_u8(value)))
+    }
+
+    pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
+        builder.range_check(target, 4);
+        Self(target)
+    }
+}
+
+pub(crate) use crate::impl_array_target_wrapper;
+
+#[macro_export]
+macro_rules! impl_array_target_wrapper {
+    // TODO: Add access modifier to params.
+    ($name:ident, $target_ty:ty, $len:ident) => {
+        #[derive(::std::clone::Clone, ::std::fmt::Debug)]
+        pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);
+
+        impl ::std::ops::Deref for $name {
+            type Target = $crate::common::targets::ArrayTarget<$target_ty, $len>;
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -273,11 +329,11 @@ macro_rules! impl_array_target_wrapper {
         }
 
         impl TargetSet for $name {
-            fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-                Self(TargetSet::parse(raw))
+            fn parse(raw: &mut impl ::std::iter::Iterator<Item = Target>) -> Self {
+                Self($crate::common::targets::TargetSet::parse(raw))
             }
 
-            fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = Target> {
                 self.0.into_targets_iter()
             }
         }

@@ -359,6 +359,14 @@ impl HalfByteTarget {
         builder.range_check(target, 4);
         Self(target)
     }
+
+    pub fn from_target_unsafe(target: Target) -> HalfByteTarget {
+        Self(target)
+    }
+
+    pub fn to_target(&self) -> Target {
+        self.0
+    }
 }
 
 pub(crate) use crate::impl_array_target_wrapper;

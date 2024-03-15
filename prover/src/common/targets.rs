@@ -21,6 +21,7 @@ use plonky2_field::{
     goldilocks_field::GoldilocksField,
     types::{Field, PrimeField64},
 };
+use std::iter;
 
 pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
@@ -180,6 +181,46 @@ impl<T: TargetSet, const N: usize> TargetSet for ArrayTarget<T, N> {
     }
 }
 
+impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
+    pub fn constant_read(&self, at: usize) -> T {
+        self.0[at].clone()
+    }
+
+    pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> T {
+        let self_targets = self
+            .0
+            .clone()
+            .into_iter()
+            .map(|ts| ts.into_targets_iter().collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let inner_target_len = self_targets[0].len();
+        assert!(self_targets.iter().all(|t| t.len() == inner_target_len));
+
+        let self_targets_padded_len = (self_targets.len() * inner_target_len).next_power_of_two();
+        let zero_target = builder.zero();
+        let self_targets = self_targets
+            .into_iter()
+            .flatten()
+            .chain(iter::repeat(zero_target))
+            .take(self_targets_padded_len)
+            .collect::<Vec<_>>();
+
+        let access_targets = (0..inner_target_len)
+            .map(|offset| {
+                let offset_const = builder.constant(F::from_canonical_usize(offset));
+                builder.add(at.0, offset_const)
+            })
+            .collect::<Vec<_>>();
+
+        let mut result_targets = access_targets
+            .into_iter()
+            .map(|access_at| builder.random_access(access_at, self_targets.clone()));
+
+        T::parse_exact(&mut result_targets)
+    }
+}
+
 pub trait TargetSetWitnessOperations {
     fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>);
 }
@@ -283,6 +324,15 @@ impl ByteTarget {
     pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
         builder.range_check(target, 8);
         Self(target)
+    }
+
+    pub fn to_target(&self) -> Target {
+        self.0
+    }
+
+    /// Arranged from less to most significant bit.
+    pub fn into_bits(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
+        ArrayTarget(builder.low_bits(self.0, 8, 8).try_into().unwrap())
     }
 }
 
@@ -428,6 +478,14 @@ impl SingleTarget {
 
     pub fn from_u52_bits_le(
         bits: ArrayTarget<BoolTarget, 52>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> SingleTarget {
+        Self::from_bool_targets_le(bits, builder)
+    }
+
+    /// Bits are sorted from less to most significant.
+    pub fn from_u8_bits_le(
+        bits: ArrayTarget<BoolTarget, 8>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> SingleTarget {
         Self::from_bool_targets_le(bits, builder)

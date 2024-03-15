@@ -31,6 +31,7 @@ const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
+
 impl_array_target_wrapper!(
     BranchNodeDataPaddedTarget,
     NodeDataBlockTarget,

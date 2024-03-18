@@ -443,7 +443,28 @@ impl_array_target_wrapper!(
     Target,
     MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
 );
+
 impl_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
+
+impl Blake2Target {
+    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
+        let mut targets = (0..BLAKE2_DIGEST_SIZE_IN_BITS).map(|_| builder.add_virtual_target());
+        Blake2Target::parse_exact(&mut targets)
+    }
+
+    pub fn set_witness(
+        &self,
+        data: &[bool; BLAKE2_DIGEST_SIZE_IN_BITS],
+        witness: &mut PartialWitness<F>,
+    ) {
+        self.0
+             .0
+            .iter()
+            .zip_eq(data.iter())
+            .for_each(|(target, value)| witness.set_bool_target(*target, *value));
+    }
+}
+
 impl_array_target_wrapper!(
     Ed25519PublicKeyTarget,
     BoolTarget,

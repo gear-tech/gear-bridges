@@ -1,6 +1,13 @@
 use std::iter;
 
-use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
+use itertools::Itertools;
+use plonky2::{
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_field::types::Field;
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
@@ -18,7 +25,7 @@ mod child_node_array_parser;
 mod nibble_parser;
 
 const NODE_DATA_BLOCK_BYTES: usize = 128;
-const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 10;
+const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
@@ -41,6 +48,29 @@ impl_array_target_wrapper!(
     NodeDataBlockTarget,
     MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS
 );
+
+impl BranchNodeDataPaddedTarget {
+    pub fn add_virtual(builder: &mut CircuitBuilder<F, D>) -> BranchNodeDataPaddedTarget {
+        let mut targets = (0..NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
+            .map(|_| builder.add_virtual_target());
+        Self::parse_exact(&mut targets)
+    }
+
+    pub fn set_witness(
+        &self,
+        data: &[[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
+        witness: &mut PartialWitness<F>,
+    ) {
+        self.clone()
+            .into_targets_iter()
+            .zip_eq(data.into_iter().flatten())
+            .for_each(|(target, value)| witness.set_target(target, F::from_canonical_u8(*value)));
+    }
+
+    pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+        todo!()
+    }
+}
 
 impl_array_target_wrapper!(
     StorageAddressPaddedTarget,

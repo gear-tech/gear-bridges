@@ -19,13 +19,16 @@ use crate::{
     ProofWithCircuitData,
 };
 
+mod child_node_parser;
+mod scale_compact_integer_parser;
+
 impl_target_set! {
     pub struct ChildNodeArrayParserInputTarget {
         pub node_data: BranchNodeDataPaddedTarget,
         // Within the first data block.
         pub read_offset: SingleTarget,
         pub overall_children_amount: SingleTarget,
-        pub child_index_in_array: SingleTarget,
+        pub claimed_child_index_in_array: SingleTarget,
         pub claimed_child_hash: Blake2Target
     }
 }

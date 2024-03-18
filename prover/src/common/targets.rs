@@ -226,7 +226,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         builder: &mut CircuitBuilder<F, D>,
     ) -> ArrayTarget<T, R> {
         ArrayTarget(
-            (0..N)
+            (0..R)
                 .map(|offset| {
                     let offset = builder.constant(F::from_canonical_usize(offset));
                     let read_at = builder.add(at.to_target(), offset);

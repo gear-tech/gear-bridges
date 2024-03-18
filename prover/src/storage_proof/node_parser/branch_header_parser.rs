@@ -84,14 +84,16 @@ pub fn define(
 
 #[cfg(test)]
 mod tests {
-    use super::{super::NODE_DATA_BLOCK_BYTES, *};
+    use super::{
+        super::{tests_common::pad_byte_vec, NODE_DATA_BLOCK_BYTES},
+        *,
+    };
     use plonky2::{iop::witness::PartialWitness, plonk::circuit_data::CircuitConfig};
-    use std::iter;
 
     #[test]
     fn test_branch_header_parser() {
         test_case(
-            &pad(vec![0b10_01_00_00]),
+            &pad_byte_vec(vec![0b10_01_00_00]),
             Some(ExpectedData {
                 nibble_count: 16,
                 resulting_offset: 1,
@@ -99,7 +101,7 @@ mod tests {
         );
 
         test_case(
-            &pad(vec![0b10_11_11_11, 0b_00_00_00_00]),
+            &pad_byte_vec(vec![0b10_11_11_11, 0b_00_00_00_00]),
             Some(ExpectedData {
                 nibble_count: 63,
                 resulting_offset: 2,
@@ -107,7 +109,7 @@ mod tests {
         );
 
         test_case(
-            &pad(vec![0b10_11_11_11, 0b_10_00_00_00]),
+            &pad_byte_vec(vec![0b10_11_11_11, 0b_10_00_00_00]),
             Some(ExpectedData {
                 nibble_count: 63 + 128,
                 resulting_offset: 2,
@@ -120,7 +122,7 @@ mod tests {
         expected = "Partition containing Wire(Wire { row: 4, column: 3 }) was set twice with different values: 1 != 0"
     )]
     fn test_branch_header_parser_value_overflow_panics() {
-        test_case(&pad(vec![0b10_11_11_11, 0b11_11_11_11]), None);
+        test_case(&pad_byte_vec(vec![0b10_11_11_11, 0b11_11_11_11]), None);
     }
 
     #[test]
@@ -128,7 +130,7 @@ mod tests {
         expected = "Partition containing Wire(Wire { row: 0, column: 8 }) was set twice with different values: 1 != 0"
     )]
     fn test_branch_header_parser_wrong_prefix_panics() {
-        test_case(&pad(vec![0b00_00_00_11]), None);
+        test_case(&pad_byte_vec(vec![0b00_00_00_11]), None);
     }
 
     struct ExpectedData {
@@ -136,24 +138,12 @@ mod tests {
         resulting_offset: u64,
     }
 
-    fn pad(data: Vec<u8>) -> [u8; NODE_DATA_BLOCK_BYTES] {
-        data.into_iter()
-            .chain(iter::repeat(0))
-            .take(NODE_DATA_BLOCK_BYTES)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
-    }
-
     fn test_case(node_data: &[u8; NODE_DATA_BLOCK_BYTES], expected_data: Option<ExpectedData>) {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let pw = PartialWitness::new();
 
-        let mut node_data_targets = node_data
-            .iter()
-            .map(|byte| builder.constant(F::from_canonical_u8(*byte)));
-        let node_data_block = NodeDataBlockTarget::parse_exact(&mut node_data_targets);
+        let node_data_block = NodeDataBlockTarget::constant(&node_data, &mut builder);
 
         let input_target = BranchHeaderParserInputTarget {
             first_node_data_block: node_data_block,

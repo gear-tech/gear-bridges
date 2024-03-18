@@ -18,11 +18,23 @@ mod child_node_array_parser;
 mod nibble_parser;
 
 const NODE_DATA_BLOCK_BYTES: usize = 128;
-const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
+const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 10;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
+
+impl NodeDataBlockTarget {
+    pub fn constant(
+        data: &[u8; NODE_DATA_BLOCK_BYTES],
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Self {
+        let mut data_targets = data
+            .iter()
+            .map(|byte| builder.constant(F::from_canonical_u8(*byte)));
+        Self::parse_exact(&mut data_targets)
+    }
+}
 
 impl_array_target_wrapper!(
     BranchNodeDataPaddedTarget,
@@ -71,9 +83,9 @@ impl PartialStorageAddressTarget {
             .into_iter()
             .enumerate()
             .map(|(idx, unchecked_target)| {
-                let idx = builder.constant(F::from_canonical_usize(idx));
+                let idx_inc = builder.constant(F::from_canonical_usize(idx + 1));
                 let valid_half_byte =
-                    list_le_circuit(builder, vec![idx], vec![length.to_target()], 32);
+                    list_le_circuit(builder, vec![idx_inc], vec![length.to_target()], 32);
 
                 // Returns `if b { x } else { y }`.
                 let checked_target = builder.select(
@@ -156,16 +168,59 @@ impl PartialStorageAddressTarget {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_common {
     use super::*;
+    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+
+    pub fn pad_byte_vec<const L: usize>(data: Vec<u8>) -> [u8; L] {
+        assert!(data.len() <= L);
+        data.into_iter()
+            .chain(iter::repeat(0))
+            .take(L)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn create_address_target(
+        nibbles: &[u8],
+        builder: &mut CircuitBuilder<F, D>,
+        witness: &mut PartialWitness<F>,
+    ) -> PartialStorageAddressTarget {
+        assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
+        let length = builder.add_virtual_target();
+        witness.set_target(length, F::from_canonical_usize(nibbles.len()));
+
+        let mut nibble_targets = nibbles
+            .iter()
+            .cloned()
+            .chain(iter::repeat(0))
+            .take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES)
+            .map(|nibble| {
+                let nibble_target = builder.add_virtual_target();
+                witness.set_target(nibble_target, F::from_canonical_u8(nibble));
+                HalfByteTarget::from_target_safe(nibble_target, builder).to_target()
+            });
+
+        PartialStorageAddressTarget {
+            length: length.into(),
+            address: StorageAddressPaddedTarget::parse_exact(&mut nibble_targets),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::tests_common::pad_byte_vec;
+
+    use super::{tests_common::create_address_target, *};
     use plonky2::{
-        iop::witness::{PartialWitness, WitnessWrite},
+        iop::witness::PartialWitness,
         plonk::{
             circuit_data::{CircuitConfig, CircuitData},
             proof::ProofWithPublicInputs,
         },
     };
-    use std::iter;
 
     #[test]
     fn test_address_append() {
@@ -241,29 +296,55 @@ mod tests {
         (circuit, proof)
     }
 
-    fn create_address_target(
-        nibbles: &[u8],
-        builder: &mut CircuitBuilder<F, D>,
-        witness: &mut PartialWitness<F>,
-    ) -> PartialStorageAddressTarget {
-        assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
-        let length = builder.add_virtual_target();
-        witness.set_target(length, F::from_canonical_usize(nibbles.len()));
+    #[test]
+    fn test_address_from_half_byte_targets_safe() {
+        address_from_half_byte_targets_safe_test_case(&pad_byte_vec(vec![]), 0, &vec![]);
 
-        let mut nibble_targets = nibbles
-            .iter()
-            .cloned()
-            .chain(iter::repeat(0))
-            .take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES)
-            .map(|nibble| {
-                let nibble_target = builder.add_virtual_target();
-                witness.set_target(nibble_target, F::from_canonical_u8(nibble));
-                HalfByteTarget::from_target_safe(nibble_target, builder).to_target()
-            });
+        address_from_half_byte_targets_safe_test_case(
+            &pad_byte_vec(vec![1, 2, 3, 4]),
+            4,
+            &vec![1, 2, 3, 4],
+        );
 
-        PartialStorageAddressTarget {
-            length: length.into(),
-            address: StorageAddressPaddedTarget::parse_exact(&mut nibble_targets),
-        }
+        address_from_half_byte_targets_safe_test_case(
+            &pad_byte_vec(vec![1, 2, 3, 4, 5]),
+            3,
+            &vec![1, 2, 3],
+        );
+    }
+
+    fn address_from_half_byte_targets_safe_test_case(
+        data: &[u8; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES],
+        length: usize,
+        expected_data: &[u8],
+    ) {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut pw = PartialWitness::new();
+
+        let targets = data
+            .into_iter()
+            .map(|byte| HalfByteTarget::constant(*byte, &mut builder))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let length = builder.constant(F::from_canonical_usize(length));
+
+        let address = PartialStorageAddressTarget::from_half_byte_targets_safe(
+            targets,
+            length.into(),
+            &mut builder,
+        );
+
+        let expected_address = create_address_target(expected_data, &mut builder, &mut pw);
+
+        address.register_as_public_inputs(&mut builder);
+
+        address.connect(&expected_address, &mut builder);
+
+        let circuit = builder.build::<C>();
+        let proof = circuit.prove(pw).expect("Failed to prove");
+        circuit.verify(proof).expect("Failed to verify");
     }
 }

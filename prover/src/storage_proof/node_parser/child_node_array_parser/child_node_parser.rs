@@ -1,12 +1,17 @@
-use super::super::{
-    BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+use super::{
+    super::{
+        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
+    scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
 };
 use crate::{
     common::{
         array_to_bits,
-        targets::{impl_target_set, Blake2Target, HalfByteTarget, SingleTarget, TargetSet},
+        targets::{
+            impl_target_set, ArrayTarget, Blake2Target, HalfByteTarget, SingleTarget, TargetSet,
+        },
     },
-    consts::BLAKE2_DIGEST_SIZE_IN_BITS,
+    consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
     prelude::*,
     ProofWithCircuitData,
 };
@@ -42,11 +47,9 @@ struct ChildNodeParser {
 }
 
 impl ChildNodeParser {
-    fn prove_initial(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
-        todo!()
-    }
-
     fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
+        log::info!("Proving child node parser...");
+
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let mut pw = PartialWitness::new();
@@ -63,8 +66,59 @@ impl ChildNodeParser {
         let claimed_child_hash = Blake2Target::add_virtual_unsafe(&mut builder);
         claimed_child_hash.set_witness(&self.claimed_child_hash, &mut pw);
 
-        // TODO
+        // Read only one byte as we don't support compact integers in other modes than single-byte.
+        let encoded_length_size = builder.one();
+        let encoded_length = node_data.random_read(read_offset.into(), &mut builder);
+        let encoded_child_data_length = scale_compact_integer_parser::define(
+            ScaleCompactIntegerParserInputTarget {
+                first_byte: encoded_length,
+            },
+            &mut builder,
+        )
+        .decoded
+        .to_target();
 
-        ProofWithCircuitData::from_builder(builder, pw)
+        let read_data_at = builder.add(read_offset, encoded_length_size);
+        let potential_child_hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> =
+            node_data.random_read_array(read_data_at.into(), &mut builder);
+        let mut potential_child_hash_data_bits = potential_child_hash_data
+            .0
+            .into_iter()
+            .map(|byte| {
+                byte.to_bit_targets(&mut builder)
+                    .0
+                    .into_iter()
+                    .map(|target| target.target)
+                    .rev()
+            })
+            .flatten();
+        let potential_child_hash = Blake2Target::parse_exact(&mut potential_child_hash_data_bits);
+        let child_hash_matches =
+            claimed_child_hash.check_equal(&potential_child_hash, &mut builder);
+        let child_hash_not_matches = builder.not(child_hash_matches);
+
+        let invalid_child_hash = builder.and(child_hash_not_matches, assert_child_hash);
+        builder.assert_zero(invalid_child_hash.target);
+
+        let resulting_read_offset = builder.add_many(vec![
+            read_offset,
+            encoded_length_size,
+            encoded_child_data_length,
+        ]);
+
+        ChildNodeParserTarget {
+            node_data,
+            read_offset: read_offset.into(),
+            resulting_read_offset: resulting_read_offset.into(),
+            assert_child_hash,
+            claimed_child_hash,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        let data = ProofWithCircuitData::from_builder(builder, pw);
+
+        log::info!("Proven child node parser");
+
+        data
     }
 }

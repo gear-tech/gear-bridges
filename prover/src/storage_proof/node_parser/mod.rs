@@ -86,6 +86,22 @@ impl BranchNodeDataPaddedTarget {
             .for_each(|(target, data)| target.set_witness(data, witness));
     }
 
+    pub fn random_read_array<const L: usize>(
+        &self,
+        at: SingleTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> ArrayTarget<ByteTarget, L> {
+        let targets = (0..L)
+            .map(|offset| {
+                let offset = builder.constant(F::from_canonical_usize(offset));
+                let read_at = builder.add(at.to_target(), offset);
+                self.random_read(read_at.into(), builder)
+            })
+            .collect::<Vec<_>>();
+
+        ArrayTarget(targets.try_into().unwrap())
+    }
+
     pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
         let block_size = builder.constant(F::from_canonical_usize(NODE_DATA_BLOCK_BYTES));
         let max_data_size = builder.constant(F::from_canonical_usize(

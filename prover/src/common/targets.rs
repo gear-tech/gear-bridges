@@ -467,6 +467,20 @@ impl Blake2Target {
             .zip_eq(data.iter())
             .for_each(|(target, value)| witness.set_bool_target(*target, *value));
     }
+
+    pub fn check_equal(
+        &self,
+        other: &Blake2Target,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> BoolTarget {
+        let mut equal = builder._true();
+        for (self_bit, other_bit) in self.0 .0.iter().zip_eq(other.0 .0.iter()) {
+            let bits_equal = builder.and(*self_bit, *other_bit);
+            equal = builder.and(equal, bits_equal);
+        }
+
+        equal
+    }
 }
 
 impl_array_target_wrapper!(

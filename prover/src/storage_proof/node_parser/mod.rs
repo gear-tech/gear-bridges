@@ -41,6 +41,21 @@ impl NodeDataBlockTarget {
             .map(|byte| builder.constant(F::from_canonical_u8(*byte)));
         Self::parse_exact(&mut data_targets)
     }
+
+    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
+        let mut targets = (0..NODE_DATA_BLOCK_BYTES).map(|_| builder.add_virtual_target());
+        Self::parse_exact(&mut targets)
+    }
+
+    pub fn set_witness(&self, data: &[u8; NODE_DATA_BLOCK_BYTES], witness: &mut PartialWitness<F>) {
+        self.0
+             .0
+            .iter()
+            .zip_eq(data.iter())
+            .for_each(|(target, value)| {
+                witness.set_target(target.to_target(), F::from_canonical_u8(*value))
+            });
+    }
 }
 
 impl_array_target_wrapper!(
@@ -50,10 +65,13 @@ impl_array_target_wrapper!(
 );
 
 impl BranchNodeDataPaddedTarget {
-    pub fn add_virtual(builder: &mut CircuitBuilder<F, D>) -> BranchNodeDataPaddedTarget {
-        let mut targets = (0..NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
-            .map(|_| builder.add_virtual_target());
-        Self::parse_exact(&mut targets)
+    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> BranchNodeDataPaddedTarget {
+        let targets = (0..MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
+            .map(|_| NodeDataBlockTarget::add_virtual_unsafe(builder))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        Self(ArrayTarget(targets))
     }
 
     pub fn set_witness(
@@ -61,14 +79,57 @@ impl BranchNodeDataPaddedTarget {
         data: &[[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
         witness: &mut PartialWitness<F>,
     ) {
-        self.clone()
-            .into_targets_iter()
-            .zip_eq(data.into_iter().flatten())
-            .for_each(|(target, value)| witness.set_target(target, F::from_canonical_u8(*value)));
+        self.0
+             .0
+            .iter()
+            .zip_eq(data.into_iter())
+            .for_each(|(target, data)| target.set_witness(data, witness));
     }
 
     pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
-        todo!()
+        let block_size = builder.constant(F::from_canonical_usize(NODE_DATA_BLOCK_BYTES));
+        let max_data_size = builder.constant(F::from_canonical_usize(
+            NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS,
+        ));
+
+        let shifted_block_size = builder.add(block_size, max_data_size);
+        let mut current_offset = at.to_target();
+        let mut block_already_selected = builder._false();
+        let mut final_data = builder.zero();
+        for block in &self.0 .0 {
+            // Check that `current_offset` < `block_size`. This check is performed as:
+            // `current_offset` + `max_data_size` + 1 <= `block_size` + `max_data_size`
+            // to avoid negative numbers.
+            let one = builder.one();
+            let shifted_current_offset = builder.add_many(vec![current_offset, max_data_size, one]);
+            let current_offset_eligible = list_le_circuit(
+                builder,
+                vec![shifted_current_offset],
+                vec![shifted_block_size],
+                32,
+            );
+
+            let block_not_yet_selected = builder.not(block_already_selected);
+            let read_from_current_block =
+                builder.and(current_offset_eligible, block_not_yet_selected);
+
+            block_already_selected = builder.or(read_from_current_block, block_already_selected);
+
+            let zero = builder.zero();
+
+            // Returns `if b { x } else { y }`.
+            // If we don't select from current block then we don't care about actual data that's read.
+            let read_from = builder.select(read_from_current_block, current_offset, zero);
+            let read_data = block.random_read(read_from.into(), builder);
+
+            let masked_read_data =
+                builder.mul(read_data.to_target(), read_from_current_block.target);
+            final_data = builder.add(final_data, masked_read_data);
+
+            current_offset = builder.sub(current_offset, block_size);
+        }
+
+        ByteTarget::from_target_unsafe(final_data)
     }
 }
 
@@ -240,7 +301,7 @@ mod tests_common {
 }
 
 #[cfg(test)]
-mod tests {
+mod address_tests {
     use self::tests_common::pad_byte_vec;
 
     use super::{tests_common::create_address_target, *};
@@ -372,6 +433,75 @@ mod tests {
         address.register_as_public_inputs(&mut builder);
 
         address.connect(&expected_address, &mut builder);
+
+        let circuit = builder.build::<C>();
+        let proof = circuit.prove(pw).expect("Failed to prove");
+        circuit.verify(proof).expect("Failed to verify");
+    }
+}
+
+#[cfg(test)]
+mod node_data_padded_tests {
+    use plonky2::plonk::circuit_data::CircuitConfig;
+
+    use self::tests_common::pad_byte_vec;
+
+    use super::*;
+
+    #[test]
+    fn test_node_data_padded_random_read() {
+        test_case(
+            &[
+                pad_byte_vec(vec![]),
+                pad_byte_vec(vec![]),
+                pad_byte_vec(vec![]),
+                pad_byte_vec(vec![]),
+                pad_byte_vec(vec![]),
+            ],
+            0,
+            0,
+        );
+
+        let meaningful_data = &[
+            pad_byte_vec(vec![0xAA; NODE_DATA_BLOCK_BYTES]),
+            pad_byte_vec(vec![0xBB; NODE_DATA_BLOCK_BYTES]),
+            pad_byte_vec(vec![0xCC; NODE_DATA_BLOCK_BYTES]),
+            pad_byte_vec(vec![0xDD; NODE_DATA_BLOCK_BYTES]),
+            pad_byte_vec(vec![0xEE; NODE_DATA_BLOCK_BYTES]),
+        ];
+
+        test_case(meaningful_data, 0, 0xAA);
+        test_case(meaningful_data, NODE_DATA_BLOCK_BYTES - 1, 0xAA);
+        test_case(meaningful_data, NODE_DATA_BLOCK_BYTES, 0xBB);
+        test_case(
+            meaningful_data,
+            NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS - 1,
+            0xEE,
+        );
+    }
+
+    fn test_case(
+        data: &[[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
+        at: usize,
+        expected_data: u8,
+    ) {
+        let mut config = CircuitConfig::standard_recursion_config();
+        config.num_wires = 160;
+        config.num_routed_wires = 130;
+
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut pw = PartialWitness::new();
+
+        let node_data = BranchNodeDataPaddedTarget::add_virtual_unsafe(&mut builder);
+        node_data.set_witness(data, &mut pw);
+
+        let at_target = builder.add_virtual_target();
+        pw.set_target(at_target, F::from_canonical_usize(at));
+
+        let data = node_data.random_read(at_target.into(), &mut builder);
+        let expected = ByteTarget::constant(expected_data, &mut builder);
+
+        data.connect(&expected, &mut builder);
 
         let circuit = builder.build::<C>();
         let proof = circuit.prove(pw).expect("Failed to prove");

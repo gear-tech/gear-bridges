@@ -51,7 +51,7 @@ impl ChildNodeParser {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let mut pw = PartialWitness::new();
 
-        let node_data = BranchNodeDataPaddedTarget::add_virtual(&mut builder);
+        let node_data = BranchNodeDataPaddedTarget::add_virtual_unsafe(&mut builder);
         node_data.set_witness(&self.node_data, &mut pw);
 
         let read_offset = builder.add_virtual_target();

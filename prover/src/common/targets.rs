@@ -344,6 +344,10 @@ impl ByteTarget {
         Self(target)
     }
 
+    pub fn from_target_unsafe(target: Target) -> ByteTarget {
+        Self(target)
+    }
+
     pub fn to_target(&self) -> Target {
         self.0
     }

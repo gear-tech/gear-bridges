@@ -88,4 +88,94 @@ pub fn define(
     }
 }
 
-// TODO: Add tests.
+#[cfg(test)]
+mod tests {
+    use crate::storage_proof::node_parser::tests_common::pad_byte_vec;
+
+    use super::*;
+
+    #[test]
+    fn test_bitmap_parser() {
+        test_case(
+            [0b10_00_00_00, 0b00_00_00_00],
+            0,
+            Some(ExpectedData {
+                overall_children_amount: 1,
+                child_index: 0,
+            }),
+        );
+
+        test_case(
+            [0b00_00_00_00, 0b00_10_00_00],
+            10,
+            Some(ExpectedData {
+                overall_children_amount: 1,
+                child_index: 0,
+            }),
+        );
+
+        test_case(
+            [0b11_00_11_10, 0b11_10_01_10],
+            10,
+            Some(ExpectedData {
+                overall_children_amount: 10,
+                child_index: 7,
+            }),
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Partition containing Wire(Wire { row: 7, column: 59 }) was set twice with different values: 0 != 1"
+    )]
+    fn test_bitmap_parser_wrong_claimed_child_fails() {
+        test_case([0b11_00_11_10, 0b11_10_01_10], 7, None);
+    }
+
+    struct ExpectedData {
+        overall_children_amount: usize,
+        child_index: usize,
+    }
+
+    fn test_case(bitmap: [u8; 2], claimed_nibble: u8, expected_data: Option<ExpectedData>) {
+        let mut config = CircuitConfig::standard_recursion_config();
+        config.num_wires = 160;
+        config.num_routed_wires = 130;
+
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let pw = PartialWitness::new();
+
+        let data_block_target =
+            NodeDataBlockTarget::constant(&pad_byte_vec(bitmap.to_vec()), &mut builder);
+        let read_offset = builder.zero().into();
+        let claimed_child_node_nibble = HalfByteTarget::constant(claimed_nibble, &mut builder);
+
+        let input = BitmapParserInputTarget {
+            first_node_data_block: data_block_target,
+            read_offset,
+            claimed_child_node_nibble,
+        };
+
+        let output = define(input, &mut builder);
+
+        if let Some(ExpectedData {
+            overall_children_amount,
+            child_index,
+        }) = expected_data
+        {
+            let overall_children_amount =
+                builder.constant(F::from_canonical_usize(overall_children_amount));
+            builder.connect(
+                overall_children_amount,
+                output.overall_children_amount.to_target(),
+            );
+
+            let child_index = builder.constant(F::from_canonical_usize(child_index));
+            builder.connect(child_index, output.child_index_in_array.to_target());
+        }
+
+        let circuit = builder.build::<C>();
+        let proof = circuit.prove(pw).expect("Failed to prove");
+        circuit.verify(proof).expect("Failed to verify");
+    }
+}

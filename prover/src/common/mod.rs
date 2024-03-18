@@ -2,6 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::prelude::*;
 use plonky2::{
+    gates::noop::NoopGate,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
@@ -9,7 +10,10 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierCircuitTarget},
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierCircuitTarget,
+        },
         config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
@@ -193,6 +197,7 @@ where
         Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
     }
 
+    // TODO: Rewrite using recursively_verify_constant_proof.
     pub fn new_with_config(
         first: ProofWithCircuitData<TS1>,
         second: ProofWithCircuitData<TS2>,
@@ -386,6 +391,67 @@ pub fn wrap_bn128(
     let proof = circuit_data.prove(witness).unwrap();
 
     (proof, circuit_data)
+}
+
+pub trait ConstantRecursiveVerifier {
+    fn recursively_verify_constant_proof<T: TargetSet>(
+        &mut self,
+        proof: ProofWithCircuitData<T>,
+        witness: &mut PartialWitness<F>,
+    ) -> T;
+}
+
+impl ConstantRecursiveVerifier for CircuitBuilder<F, D> {
+    fn recursively_verify_constant_proof<T: TargetSet>(
+        &mut self,
+        proof: ProofWithCircuitData<T>,
+        witness: &mut PartialWitness<F>,
+    ) -> T {
+        let proof_with_pis_target = self.add_virtual_proof_with_pis(&proof.circuit_data.common);
+        let verifier_data_target = self.constant_verifier_data(&proof.circuit_data.verifier_only);
+
+        witness.set_proof_with_pis_target(&proof_with_pis_target, &proof.proof());
+
+        self.verify_proof::<C>(
+            &proof_with_pis_target,
+            &verifier_data_target,
+            &proof.circuit_data.common,
+        );
+
+        T::parse_exact(&mut proof_with_pis_target.public_inputs.into_iter())
+    }
+}
+
+pub fn common_data_for_recursion(
+    config: CircuitConfig,
+    public_input_count: usize,
+    num_gates: usize,
+) -> CommonCircuitData<F, D> {
+    let builder = CircuitBuilder::<F, D>::new(config.clone());
+    let data = builder.build::<C>();
+    let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+    let proof = builder.add_virtual_proof_with_pis(&data.common);
+    let verifier_data = VerifierCircuitTarget {
+        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
+        circuit_digest: builder.add_virtual_hash(),
+    };
+
+    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+    let data = builder.build::<C>();
+
+    let mut builder = CircuitBuilder::<F, D>::new(config);
+    let proof = builder.add_virtual_proof_with_pis(&data.common);
+    let verifier_data = VerifierCircuitTarget {
+        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
+        circuit_digest: builder.add_virtual_hash(),
+    };
+    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+    while builder.num_gates() < num_gates {
+        builder.add_gate(NoopGate, vec![]);
+    }
+    let mut data = builder.build::<C>().common;
+    data.num_public_inputs = public_input_count;
+    data
 }
 
 // !(!a & !b) & !(a & b)

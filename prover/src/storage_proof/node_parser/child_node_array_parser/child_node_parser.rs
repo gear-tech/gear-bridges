@@ -60,7 +60,7 @@ impl ParsableTargetSet for ChildNodeParserTarget {
     }
 }
 
-struct ChildNodeParser {
+pub struct ChildNodeParser {
     pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
 
     pub read_offset: usize,
@@ -70,7 +70,7 @@ struct ChildNodeParser {
 }
 
 impl ChildNodeParser {
-    fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
+    pub fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
         log::info!("Proving child node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();

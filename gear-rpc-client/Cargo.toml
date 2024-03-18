@@ -21,7 +21,7 @@ sp-consensus-babe = { version = "0.10.0-dev", git = "https://github.com/gear-tec
     "std",
 ] }
 sp-state-machine = { version = "0.13.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
-parity-scale-codec = { version = "3.6.4", default-features = false }
+parity-scale-codec.workspace = true
 trie-db = { version = "0.27.0", default-features = false }
 sp-trie = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
 sp-core = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }

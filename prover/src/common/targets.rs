@@ -51,6 +51,14 @@ pub trait ParsableTargetSet: TargetSet {
     type PublicInputsData;
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData;
+
+    fn parse_public_inputs_exact(
+        public_inputs: &mut impl Iterator<Item = F>,
+    ) -> Self::PublicInputsData {
+        let data = Self::parse_public_inputs(public_inputs);
+        assert_eq!(public_inputs.next(), None);
+        data
+    }
 }
 
 impl TargetSet for Target {
@@ -70,6 +78,16 @@ impl TargetSet for BoolTarget {
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
         std::iter::once(self.target)
+    }
+}
+
+impl ParsableTargetSet for BoolTarget {
+    type PublicInputsData = bool;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        let data = public_inputs.next().unwrap().to_canonical_u64();
+        assert!(data == 0 || data == 1);
+        data == 1
     }
 }
 
@@ -436,6 +454,22 @@ macro_rules! impl_array_target_wrapper {
     };
 }
 
+impl<T, const N: usize> ParsableTargetSet for ArrayTarget<T, N>
+where
+    T: ParsableTargetSet,
+    T::PublicInputsData: Debug,
+{
+    type PublicInputsData = [T::PublicInputsData; N];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        (0..N)
+            .map(|_| T::parse_public_inputs(public_inputs))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
+
 impl_array_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
 impl_array_target_wrapper!(
     Sha256TargetGoldilocks,
@@ -475,7 +509,7 @@ impl Blake2Target {
     ) -> BoolTarget {
         let mut equal = builder._true();
         for (self_bit, other_bit) in self.0 .0.iter().zip_eq(other.0 .0.iter()) {
-            let bits_equal = builder.and(*self_bit, *other_bit);
+            let bits_equal = builder.is_equal(self_bit.target, other_bit.target);
             equal = builder.and(equal, bits_equal);
         }
 

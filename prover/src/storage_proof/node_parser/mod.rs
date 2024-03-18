@@ -8,13 +8,13 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_field::types::Field;
+use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
 use crate::{
     common::targets::{
         impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
-        SingleTarget, TargetSet,
+        ParsableTargetSet, SingleTarget, TargetSet,
     },
     prelude::*,
 };
@@ -30,6 +30,19 @@ const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
+
+impl ParsableTargetSet for NodeDataBlockTarget {
+    type PublicInputsData = [u8; NODE_DATA_BLOCK_BYTES];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs
+            .take(NODE_DATA_BLOCK_BYTES)
+            .map(|pi| pi.to_canonical_u64() as u8)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
 
 impl NodeDataBlockTarget {
     pub fn constant(
@@ -63,6 +76,18 @@ impl_array_target_wrapper!(
     NodeDataBlockTarget,
     MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS
 );
+
+impl ParsableTargetSet for BranchNodeDataPaddedTarget {
+    type PublicInputsData = [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        (0..MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
+            .map(|_| NodeDataBlockTarget::parse_public_inputs(public_inputs))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
 
 impl BranchNodeDataPaddedTarget {
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> BranchNodeDataPaddedTarget {

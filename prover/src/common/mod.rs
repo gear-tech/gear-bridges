@@ -388,6 +388,18 @@ pub fn wrap_bn128(
     (proof, circuit_data)
 }
 
+// !(!a & !b) & !(a & b)
+pub fn xor_targets(a: BoolTarget, b: BoolTarget, builder: &mut CircuitBuilder<F, D>) -> BoolTarget {
+    let not_a = builder.not(a);
+    let not_b = builder.not(b);
+
+    let c = builder.and(not_a, not_b);
+    let c = builder.not(c);
+    let d = builder.and(a, b);
+    let d = builder.not(d);
+    builder.and(c, d)
+}
+
 pub fn array_to_bits(data: &[u8]) -> Vec<bool> {
     data.iter().copied().flat_map(byte_to_bits).collect()
 }

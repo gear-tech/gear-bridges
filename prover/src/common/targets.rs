@@ -288,7 +288,7 @@ impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SingleTarget(Target);
 
 impl TargetSet for SingleTarget {

@@ -20,7 +20,7 @@ use crate::{
         },
     },
     prelude::*,
-    storage_proof::node_parser::storage_address::{
+    storage_proof::storage_address::{
         MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
     },
     ProofWithCircuitData,
@@ -123,12 +123,12 @@ pub fn define(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage_proof::node_parser::{
+    use crate::storage_proof::{
+        node_parser::{NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
         storage_address::{
             tests_common::create_address_target, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
         },
         tests_common::pad_byte_vec,
-        NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES,
     };
     use plonky2::{
         iop::witness::PartialWitness,

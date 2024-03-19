@@ -1,3 +1,4 @@
+use super::storage_address::{PartialStorageAddressTarget, StorageAddressPaddedTarget};
 use crate::{
     common::targets::{
         impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
@@ -16,13 +17,9 @@ use plonky2::{
 use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 use std::iter;
-use storage_address::{PartialStorageAddressTarget, StorageAddressPaddedTarget};
 
-mod bitmap_parser;
-mod branch_header_parser;
-mod child_node_array_parser;
+mod branch_parser;
 mod nibble_parser;
-mod storage_address;
 
 const NODE_DATA_BLOCK_BYTES: usize = 128;
 const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
@@ -173,28 +170,10 @@ impl BranchNodeDataPaddedTarget {
 }
 
 #[cfg(test)]
-mod tests_common {
+mod tests {
     use super::*;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-
-    pub fn pad_byte_vec<const L: usize>(data: Vec<u8>) -> [u8; L] {
-        assert!(data.len() <= L);
-        data.into_iter()
-            .chain(iter::repeat(0))
-            .take(L)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
-    }
-}
-
-#[cfg(test)]
-mod node_data_padded_tests {
+    use crate::storage_proof::tests_common::pad_byte_vec;
     use plonky2::plonk::circuit_data::CircuitConfig;
-
-    use self::tests_common::pad_byte_vec;
-
-    use super::*;
 
     #[test]
     fn test_node_data_padded_random_read() {

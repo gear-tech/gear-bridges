@@ -10,7 +10,6 @@ use plonky2::{
 use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 use plonky2_field::{packed::PackedField, types::Field};
 
-use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
 use crate::{
     common::{
         array_to_bits,
@@ -18,6 +17,9 @@ use crate::{
         xor_targets,
     },
     prelude::*,
+    storage_proof::{
+        node_parser::NodeDataBlockTarget, storage_address::PartialStorageAddressTarget,
+    },
     ProofWithCircuitData,
 };
 
@@ -90,9 +92,8 @@ pub fn define(
 
 #[cfg(test)]
 mod tests {
-    use crate::storage_proof::node_parser::tests_common::pad_byte_vec;
-
     use super::*;
+    use crate::storage_proof::tests_common::pad_byte_vec;
 
     #[test]
     fn test_bitmap_parser() {

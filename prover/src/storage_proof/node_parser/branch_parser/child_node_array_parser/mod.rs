@@ -2,7 +2,7 @@ use self::{
     child_node_parser::{ChildNodeParser, ChildNodeParserTarget},
     consts::BLAKE2_DIGEST_SIZE,
 };
-use super::{
+use crate::storage_proof::node_parser::{
     BranchNodeDataPaddedTarget, NodeDataBlockTarget, PartialStorageAddressTarget,
     MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
 };

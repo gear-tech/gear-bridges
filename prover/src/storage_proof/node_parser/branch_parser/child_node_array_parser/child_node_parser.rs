@@ -1,15 +1,13 @@
-use super::{
-    super::{
-        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
-    },
-    scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
-};
+use super::scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget};
 use crate::{
     common::targets::{
         impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, SingleTarget, TargetSet,
     },
     consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
     prelude::*,
+    storage_proof::node_parser::{
+        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
     ProofWithCircuitData,
 };
 use plonky2::{

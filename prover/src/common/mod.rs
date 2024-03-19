@@ -486,3 +486,13 @@ pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
         .map(|(no, bit)| (bit as u8) << no)
         .sum()
 }
+
+pub fn pad_byte_vec<const L: usize>(data: Vec<u8>) -> [u8; L] {
+    assert!(data.len() <= L);
+    data.into_iter()
+        .chain(std::iter::repeat(0))
+        .take(L)
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}

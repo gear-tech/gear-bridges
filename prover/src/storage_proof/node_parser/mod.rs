@@ -1,8 +1,11 @@
 use super::storage_address::{PartialStorageAddressTarget, StorageAddressPaddedTarget};
 use crate::{
-    common::targets::{
-        impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
-        ParsableTargetSet, SingleTarget, TargetSet,
+    common::{
+        pad_byte_vec,
+        targets::{
+            impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
+            ParsableTargetSet, SingleTarget, TargetSet,
+        },
     },
     prelude::*,
 };
@@ -16,7 +19,6 @@ use plonky2::{
 };
 use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
-use std::iter;
 
 mod branch_parser;
 mod nibble_parser;
@@ -55,6 +57,14 @@ impl NodeDataBlockTarget {
         Self::parse_exact(&mut targets)
     }
 
+    pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Self {
+        let mut targets = (0..NODE_DATA_BLOCK_BYTES).map(|_| {
+            let target = builder.add_virtual_target();
+            ByteTarget::from_target_safe(target, builder).to_target()
+        });
+        Self::parse_exact(&mut targets)
+    }
+
     pub fn set_witness(&self, data: &[u8; NODE_DATA_BLOCK_BYTES], witness: &mut PartialWitness<F>) {
         self.0
              .0
@@ -85,9 +95,20 @@ impl ParsableTargetSet for BranchNodeDataPaddedTarget {
 }
 
 impl BranchNodeDataPaddedTarget {
-    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> BranchNodeDataPaddedTarget {
+    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
+        Self::add_virtual(builder, NodeDataBlockTarget::add_virtual_unsafe)
+    }
+
+    pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Self {
+        Self::add_virtual(builder, NodeDataBlockTarget::add_virtual_safe)
+    }
+
+    fn add_virtual(
+        builder: &mut CircuitBuilder<F, D>,
+        create_block: impl Fn(&mut CircuitBuilder<F, D>) -> NodeDataBlockTarget,
+    ) -> Self {
         let targets = (0..MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
-            .map(|_| NodeDataBlockTarget::add_virtual_unsafe(builder))
+            .map(|_| create_block(builder))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
@@ -169,10 +190,24 @@ impl BranchNodeDataPaddedTarget {
     }
 }
 
+pub fn compose_padded_node_data(
+    node_data: Vec<u8>,
+) -> [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] {
+    assert!(node_data.len() <= NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS);
+
+    let node_data_padded: [u8; NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] =
+        pad_byte_vec(node_data);
+    node_data_padded
+        .chunks(NODE_DATA_BLOCK_BYTES)
+        .map(|chunk| chunk.try_into().unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage_proof::tests_common::pad_byte_vec;
     use plonky2::plonk::circuit_data::CircuitConfig;
 
     #[test]

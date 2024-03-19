@@ -134,13 +134,13 @@ macro_rules! impl_target_set {
         }
 
         impl $crate::common::targets::TargetSet for $struct_name {
-            fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+            fn parse(_raw: &mut impl ::std::iter::Iterator<Item = plonky2::iop::target::Target>) -> Self {
                 Self {
-                    $($field_name: TargetSet::parse(raw)),*
+                    $($field_name: $crate::common::targets::TargetSet::parse(_raw)),*
                 }
             }
 
-            fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+            fn into_targets_iter(self) -> impl Iterator<Item = ::plonky2::iop::target::Target> {
                 ::std::iter::empty()
                 $(.chain(self.$field_name.into_targets_iter()))*
             }
@@ -164,13 +164,13 @@ macro_rules! impl_parsable_target_set {
         }
 
         impl $crate::common::targets::TargetSet for $struct_name {
-            fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+            fn parse(raw: &mut impl ::std::iter::Iterator<Item = plonky2::iop::target::Target>) -> Self {
                 Self {
-                    $($field_name: TargetSet::parse(raw)),*
+                    $($field_name: $crate::common::targets::TargetSet::parse(raw)),*
                 }
             }
 
-            fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = ::plonky2::iop::target::Target> {
                 ::std::iter::empty()
                 $(.chain(self.$field_name.into_targets_iter()))*
             }
@@ -184,7 +184,7 @@ macro_rules! impl_parsable_target_set {
             impl $crate::common::targets::ParsableTargetSet for $struct_name {
                 type PublicInputsData = [<$struct_name PublicInputs>];
 
-                fn parse_public_inputs(_public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+                fn parse_public_inputs(_public_inputs: &mut impl ::std::iter::Iterator<Item = F>) -> Self::PublicInputsData {
                     Self::PublicInputsData {
                         $($field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::parse_public_inputs(_public_inputs)),*
                     }
@@ -439,7 +439,7 @@ impl ByteTarget {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct HalfByteTarget(Target);
 
 impl TargetSet for HalfByteTarget {

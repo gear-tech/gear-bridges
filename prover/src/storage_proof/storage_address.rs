@@ -12,9 +12,12 @@ use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
 use crate::{
-    common::targets::{
-        impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
-        ParsableTargetSet, SingleTarget, TargetSet,
+    common::{
+        pad_byte_vec,
+        targets::{
+            impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
+            ParsableTargetSet, SingleTarget, TargetSet,
+        },
     },
     prelude::*,
 };
@@ -22,6 +25,7 @@ use crate::{
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
+// TODO: Remove it and store just ArrayTarget inside PartialStorageAddressTarget
 impl_array_target_wrapper!(
     StorageAddressPaddedTarget,
     HalfByteTarget,
@@ -49,6 +53,27 @@ impl PartialStorageAddressTarget {
         Self {
             address: StorageAddressPaddedTarget::empty(builder),
             length: builder.zero().into(),
+        }
+    }
+
+    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
+        Self::parse(&mut iter::repeat(()).map(|_| builder.add_virtual_target()))
+    }
+
+    pub fn set_witness(&self, nibbles: &[u8], witness: &mut PartialWitness<F>) {
+        let length = nibbles.len();
+        witness.set_target(self.length.to_target(), F::from_canonical_usize(length));
+
+        assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
+        for (target, value) in self
+            .address
+            .0
+             .0
+            .iter()
+            .zip(nibbles.iter().copied().chain(iter::repeat(0)))
+        {
+            assert!(value < (1 << 4));
+            witness.set_target(target.to_target(), F::from_canonical_u8(value));
         }
     }
 
@@ -83,6 +108,20 @@ impl PartialStorageAddressTarget {
         Self {
             address: StorageAddressPaddedTarget(ArrayTarget(targets)),
             length,
+        }
+    }
+
+    pub fn from_single_nibble_target(
+        nibble: HalfByteTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Self {
+        let zero = HalfByteTarget::constant(0, builder);
+        let mut targets = [zero; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES];
+        targets[0] = nibble;
+
+        Self {
+            address: StorageAddressPaddedTarget(ArrayTarget(targets)),
+            length: builder.one().into(),
         }
     }
 
@@ -149,7 +188,7 @@ impl PartialStorageAddressTarget {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::tests_common::pad_byte_vec, tests_common::create_address_target, *};
+    use super::{tests_common::create_address_target, *};
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{

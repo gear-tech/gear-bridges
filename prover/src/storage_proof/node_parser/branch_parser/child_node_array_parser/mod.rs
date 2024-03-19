@@ -36,10 +36,92 @@ use std::iter;
 mod child_node_parser;
 mod scale_compact_integer_parser;
 
+impl_parsable_target_set! {
+    pub struct ChildNodeArrayParserTarget {
+        pub node_data: BranchNodeDataPaddedTarget,
+        pub initial_read_offset: SingleTarget,
+        pub final_read_offset: SingleTarget,
+        pub overall_children_amount: SingleTarget,
+        pub claimed_child_index_in_array: SingleTarget,
+        pub claimed_child_hash: Blake2Target,
+    }
+}
+
+#[derive(Clone)]
+pub struct InitialData {
+    pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
+    pub read_offset: usize,
+    pub claimed_child_index_in_array: usize,
+    pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
+}
+
+pub struct ChildNodeArrayParser {
+    initial_data: InitialData,
+    children_lengths: Vec<usize>,
+}
+
+impl ChildNodeArrayParser {
+    pub fn prove(self) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+        let inner_proof = self.inner_proof();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::new(config);
+        let mut witness = PartialWitness::new();
+
+        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut witness);
+
+        ChildNodeArrayParserTarget {
+            node_data: inner_proof_pis.node_data,
+            initial_read_offset: inner_proof_pis.initial_read_offset,
+            final_read_offset: inner_proof_pis.read_offset,
+            overall_children_amount: inner_proof_pis.overall_children_amount,
+            claimed_child_index_in_array: inner_proof_pis.claimed_child_index_in_array,
+            claimed_child_hash: inner_proof_pis.claimed_child_hash,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
+    }
+
+    fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTarget> {
+        log::info!("Proving child node parser...");
+        let claimed_child_hash = array_to_bits(&self.initial_data.claimed_child_hash)
+            .try_into()
+            .unwrap();
+
+        let mut read_offset = self.initial_data.read_offset;
+        let mut cyclic_proof: Option<ProofWithCircuitData<CyclicRecursionTarget>> = None;
+        for (child_idx, child_length) in self.children_lengths.into_iter().enumerate() {
+            let assert_child_hash = child_idx == self.initial_data.claimed_child_index_in_array;
+
+            let inner_circuit = ChildNodeParser {
+                node_data: self.initial_data.node_data.clone(),
+                read_offset,
+                assert_child_hash,
+                claimed_child_hash,
+            };
+
+            let circuit = Circuit::build(inner_circuit);
+
+            cyclic_proof = Some(if let Some(cyclic_proof) = cyclic_proof {
+                circuit.prove_recursive(cyclic_proof.proof())
+            } else {
+                circuit.prove_initial(self.initial_data.clone())
+            });
+
+            read_offset += child_length;
+        }
+
+        log::info!("Proven child node parser");
+
+        cyclic_proof.unwrap()
+    }
+}
+
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_target_set! {
-    pub struct ChildNodeArrayParserTarget {
+    struct CyclicRecursionTarget {
         pub node_data: BranchNodeDataPaddedTarget,
         pub initial_read_offset: SingleTarget,
         pub read_offset: SingleTarget,
@@ -51,9 +133,9 @@ impl_target_set! {
     }
 }
 
-impl ChildNodeArrayParserTarget {
-    fn remove_verifier_data(self) -> ChildNodeArrayParserTargetWithoutCircuitData {
-        ChildNodeArrayParserTargetWithoutCircuitData {
+impl CyclicRecursionTarget {
+    fn remove_verifier_data(self) -> CyclicRecursionTargetWithoutCircuitData {
+        CyclicRecursionTargetWithoutCircuitData {
             node_data: self.node_data,
             initial_read_offset: self.initial_read_offset,
             read_offset: self.read_offset,
@@ -64,8 +146,9 @@ impl ChildNodeArrayParserTarget {
     }
 }
 
+// TODO: Remove
 impl_parsable_target_set! {
-    pub struct ChildNodeArrayParserTargetWithoutCircuitData {
+    struct CyclicRecursionTargetWithoutCircuitData {
         pub node_data: BranchNodeDataPaddedTarget,
         pub initial_read_offset: SingleTarget,
         pub read_offset: SingleTarget,
@@ -75,7 +158,7 @@ impl_parsable_target_set! {
     }
 }
 
-pub struct Circuit {
+struct Circuit {
     cyclic_circuit_data: CircuitData<F, C, D>,
 
     common_data: CommonCircuitData<F, D>,
@@ -86,18 +169,11 @@ pub struct Circuit {
     witness: PartialWitness<F>,
 }
 
-pub struct InitialData {
-    pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
-    pub read_offset: usize,
-    pub claimed_child_index_in_array: usize,
-    pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
-}
-
 impl Circuit {
-    pub fn prove_initial(
+    fn prove_initial(
         mut self,
         initial_data: InitialData,
-    ) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+    ) -> ProofWithCircuitData<CyclicRecursionTarget> {
         log::info!("    Proving child node parser recursion layer(initial)...");
 
         let public_inputs = initial_data
@@ -117,7 +193,7 @@ impl Circuit {
             .map(F::from_canonical_usize);
 
         // Length check.
-        ChildNodeArrayParserTargetWithoutCircuitData::parse_public_inputs_exact(
+        CyclicRecursionTargetWithoutCircuitData::parse_public_inputs_exact(
             &mut public_inputs.clone().into_iter(),
         );
 
@@ -141,10 +217,10 @@ impl Circuit {
         result
     }
 
-    pub fn prove_recursive(
+    fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+    ) -> ProofWithCircuitData<CyclicRecursionTarget> {
         log::info!("    Proving child node parser recursion layer...");
         self.witness.set_bool_target(self.condition, true);
         self.witness
@@ -158,7 +234,7 @@ impl Circuit {
         result
     }
 
-    pub fn build(inner_circuit: ChildNodeParser) -> Circuit {
+    fn build(inner_circuit: ChildNodeParser) -> Circuit {
         log::info!("    Proving child node correctness...");
 
         let inner_proof = inner_circuit.prove();
@@ -175,7 +251,7 @@ impl Circuit {
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis =
-            ChildNodeArrayParserTargetWithoutCircuitData::parse(&mut virtual_targets);
+            CyclicRecursionTargetWithoutCircuitData::parse(&mut virtual_targets);
         future_inner_cyclic_proof_pis.register_as_public_inputs(&mut builder);
 
         let verifier_data_target = builder.add_verifier_data_public_inputs();
@@ -188,7 +264,7 @@ impl Circuit {
         let condition = builder.add_virtual_bool_target_safe();
 
         let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis(&common_data);
-        let inner_cyclic_proof_pis = ChildNodeArrayParserTarget::parse_exact(
+        let inner_cyclic_proof_pis = CyclicRecursionTarget::parse_exact(
             &mut inner_cyclic_proof_with_pis
                 .public_inputs
                 .clone()
@@ -243,7 +319,7 @@ impl Circuit {
 
         let resulting_read_offset = inner_proof_pis.resulting_read_offset;
 
-        let final_pis = ChildNodeArrayParserTargetWithoutCircuitData {
+        let final_pis = CyclicRecursionTargetWithoutCircuitData {
             node_data: inner_cyclic_proof_pis.node_data,
             initial_read_offset: inner_cyclic_proof_pis.initial_read_offset,
             read_offset: resulting_read_offset,

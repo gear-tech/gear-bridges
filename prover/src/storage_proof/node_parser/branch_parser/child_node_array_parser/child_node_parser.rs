@@ -154,7 +154,7 @@ impl ChildNodeParser {
 #[cfg(test)]
 mod tests {
     use super::{tests_common::*, *};
-    use crate::common::array_to_bits;
+    use crate::{common::array_to_bits, storage_proof::node_parser::compose_padded_node_data};
 
     #[test]
     fn test_child_node_parser() {
@@ -238,7 +238,7 @@ mod tests {
 #[cfg(test)]
 pub mod tests_common {
     use super::*;
-    use crate::storage_proof::node_parser::tests_common::pad_byte_vec;
+    use crate::storage_proof::node_parser::compose_padded_node_data;
     use parity_scale_codec::{Compact, Encode};
 
     #[derive(Clone, Copy)]
@@ -269,19 +269,6 @@ pub mod tests_common {
             .collect();
 
         compose_padded_node_data(data)
-    }
-
-    pub fn compose_padded_node_data(
-        node_data: Vec<u8>,
-    ) -> [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] {
-        let node_data_padded: [u8; NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] =
-            pad_byte_vec(node_data);
-        node_data_padded
-            .chunks(NODE_DATA_BLOCK_BYTES)
-            .map(|chunk| chunk.try_into().unwrap())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
     }
 
     pub fn encode_not_claimed_node(length: usize) -> impl Iterator<Item = u8> {

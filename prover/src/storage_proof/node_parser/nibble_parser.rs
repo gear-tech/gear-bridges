@@ -124,11 +124,10 @@ pub fn define(
 mod tests {
     use super::*;
     use crate::storage_proof::{
-        node_parser::{NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
+        node_parser::{pad_byte_vec, NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
         storage_address::{
             tests_common::create_address_target, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
         },
-        tests_common::pad_byte_vec,
     };
     use plonky2::{
         iop::witness::PartialWitness,

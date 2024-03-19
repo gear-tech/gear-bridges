@@ -93,7 +93,7 @@ pub fn define(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage_proof::tests_common::pad_byte_vec;
+    use crate::storage_proof::node_parser::pad_byte_vec;
 
     #[test]
     fn test_bitmap_parser() {

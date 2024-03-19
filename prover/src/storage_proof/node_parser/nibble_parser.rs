@@ -10,9 +10,7 @@ use plonky2::{
 use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
 use plonky2_field::types::Field;
 
-use super::{
-    NodeDataBlockTarget, PartialStorageAddressTarget, MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES,
-};
+use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
 use crate::{
     common::{
         array_to_bits,
@@ -22,7 +20,9 @@ use crate::{
         },
     },
     prelude::*,
-    storage_proof::node_parser::MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
+    storage_proof::node_parser::storage_address::{
+        MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
+    },
     ProofWithCircuitData,
 };
 
@@ -124,8 +124,11 @@ pub fn define(
 mod tests {
     use super::*;
     use crate::storage_proof::node_parser::{
-        tests_common::{create_address_target, pad_byte_vec},
-        NodeDataBlockTarget, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES, NODE_DATA_BLOCK_BYTES,
+        storage_address::{
+            tests_common::create_address_target, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
+        },
+        tests_common::pad_byte_vec,
+        NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES,
     };
     use plonky2::{
         iop::witness::PartialWitness,

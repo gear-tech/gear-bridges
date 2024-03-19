@@ -1,15 +1,14 @@
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_field::types::Field;
 
-use super::NodeDataBlockTarget;
 use crate::{
-    common::targets::{impl_target_set, SingleTarget, TargetSet},
+    common::targets::{impl_target_set, ArrayTarget, ByteTarget, SingleTarget, TargetSet},
     prelude::*,
 };
 
 impl_target_set! {
     pub struct BranchHeaderParserInputTarget {
-        pub first_node_data_block: NodeDataBlockTarget,
+        pub first_bytes: ArrayTarget<ByteTarget, 2>,
     }
 }
 
@@ -24,8 +23,8 @@ pub fn define(
     input: BranchHeaderParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> BranchHeaderParserOutputTarget {
-    let first_byte = input.first_node_data_block.constant_read(0);
-    let second_byte = input.first_node_data_block.constant_read(1);
+    let first_byte = input.first_bytes.0[0].clone();
+    let second_byte = input.first_bytes.0[1].clone();
 
     let first_byte_bits = first_byte.to_bit_targets(builder);
     let node_prefix = (
@@ -84,16 +83,13 @@ pub fn define(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::{tests_common::pad_byte_vec, NODE_DATA_BLOCK_BYTES},
-        *,
-    };
+    use super::*;
     use plonky2::{iop::witness::PartialWitness, plonk::circuit_data::CircuitConfig};
 
     #[test]
     fn test_branch_header_parser() {
         test_case(
-            &pad_byte_vec(vec![0b10_01_00_00]),
+            &[0b10_01_00_00, 0],
             Some(ExpectedData {
                 nibble_count: 16,
                 resulting_offset: 1,
@@ -101,7 +97,7 @@ mod tests {
         );
 
         test_case(
-            &pad_byte_vec(vec![0b10_11_11_11, 0b_00_00_00_00]),
+            &[0b10_11_11_11, 0b_00_00_00_00],
             Some(ExpectedData {
                 nibble_count: 63,
                 resulting_offset: 2,
@@ -109,7 +105,7 @@ mod tests {
         );
 
         test_case(
-            &pad_byte_vec(vec![0b10_11_11_11, 0b_10_00_00_00]),
+            &[0b10_11_11_11, 0b_10_00_00_00],
             Some(ExpectedData {
                 nibble_count: 63 + 128,
                 resulting_offset: 2,
@@ -122,7 +118,7 @@ mod tests {
         expected = "Partition containing Wire(Wire { row: 4, column: 3 }) was set twice with different values: 1 != 0"
     )]
     fn test_branch_header_parser_value_overflow_panics() {
-        test_case(&pad_byte_vec(vec![0b10_11_11_11, 0b11_11_11_11]), None);
+        test_case(&[0b10_11_11_11, 0b11_11_11_11], None);
     }
 
     #[test]
@@ -130,7 +126,7 @@ mod tests {
         expected = "Partition containing Wire(Wire { row: 0, column: 8 }) was set twice with different values: 1 != 0"
     )]
     fn test_branch_header_parser_wrong_prefix_panics() {
-        test_case(&pad_byte_vec(vec![0b00_00_00_11]), None);
+        test_case(&[0b00_00_00_11, 0], None);
     }
 
     struct ExpectedData {
@@ -138,15 +134,20 @@ mod tests {
         resulting_offset: u64,
     }
 
-    fn test_case(node_data: &[u8; NODE_DATA_BLOCK_BYTES], expected_data: Option<ExpectedData>) {
+    fn test_case(first_bytes: &[u8; 2], expected_data: Option<ExpectedData>) {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let pw = PartialWitness::new();
 
-        let node_data_block = NodeDataBlockTarget::constant(&node_data, &mut builder);
+        let byte_targets = first_bytes
+            .into_iter()
+            .map(|value| ByteTarget::constant(*value, &mut builder))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
 
         let input_target = BranchHeaderParserInputTarget {
-            first_node_data_block: node_data_block,
+            first_bytes: ArrayTarget(byte_targets),
         };
 
         let output_target = define(input_target, &mut builder);

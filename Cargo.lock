@@ -5822,6 +5822,7 @@ dependencies = [
  "log",
  "num",
  "parity-scale-codec",
+ "paste",
  "plonky2",
  "plonky2_blake2b256",
  "plonky2_ecdsa",

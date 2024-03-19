@@ -1,33 +1,37 @@
-use std::iter;
-
-use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
-        proof::ProofWithPublicInputsTarget,
-    },
+use self::{
+    child_node_parser::{ChildNodeParser, ChildNodeParserTarget},
+    consts::BLAKE2_DIGEST_SIZE,
 };
-use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
-
-use self::child_node_parser::{ChildNodeParser, ChildNodeParserTarget};
-
-use super::{BranchNodeDataPaddedTarget, NodeDataBlockTarget, PartialStorageAddressTarget};
+use super::{
+    BranchNodeDataPaddedTarget, NodeDataBlockTarget, PartialStorageAddressTarget,
+    MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+};
 use crate::{
     common::{
         array_to_bits, common_data_for_recursion,
         targets::{
-            impl_target_set, Blake2Target, HalfByteTarget, SingleTarget, TargetSet,
-            VerifierDataTarget,
+            impl_parsable_target_set, impl_target_set, Blake2Target, HalfByteTarget,
+            ParsableTargetSet, SingleTarget, TargetSet, VerifierDataTarget,
         },
         ConstantRecursiveVerifier,
     },
     prelude::*,
     ProofWithCircuitData,
 };
+use plonky2::{
+    iop::{
+        target::BoolTarget,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+    recursion::dummy_circuit::cyclic_base_proof,
+};
+use plonky2_field::types::Field;
+use std::iter;
 
 mod child_node_parser;
 mod scale_compact_integer_parser;
@@ -60,7 +64,7 @@ impl ChildNodeArrayParserTarget {
     }
 }
 
-impl_target_set! {
+impl_parsable_target_set! {
     pub struct ChildNodeArrayParserTargetWithoutCircuitData {
         pub node_data: BranchNodeDataPaddedTarget,
         pub initial_read_offset: SingleTarget,
@@ -71,7 +75,7 @@ impl_target_set! {
     }
 }
 
-struct Circuit {
+pub struct Circuit {
     cyclic_circuit_data: CircuitData<F, C, D>,
 
     common_data: CommonCircuitData<F, D>,
@@ -82,10 +86,86 @@ struct Circuit {
     witness: PartialWitness<F>,
 }
 
+pub struct InitialData {
+    pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
+    pub read_offset: usize,
+    pub claimed_child_index_in_array: usize,
+    pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
+}
+
 impl Circuit {
-    // TODO: Assert verifier data?
+    pub fn prove_initial(
+        mut self,
+        initial_data: InitialData,
+    ) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+        log::info!("    Proving child node parser recursion layer(initial)...");
+
+        let public_inputs = initial_data
+            .node_data
+            .into_iter()
+            .flatten()
+            .map(|byte| byte as usize)
+            .chain(iter::once(initial_data.read_offset))
+            .chain(iter::once(0))
+            .chain(iter::once(0))
+            .chain(iter::once(initial_data.claimed_child_index_in_array))
+            .chain(
+                array_to_bits(&initial_data.claimed_child_hash)
+                    .into_iter()
+                    .map(|bit| bit as usize),
+            )
+            .map(F::from_canonical_usize);
+
+        // Length check.
+        ChildNodeArrayParserTargetWithoutCircuitData::parse_public_inputs_exact(
+            &mut public_inputs.clone().into_iter(),
+        );
+
+        let public_inputs = public_inputs.enumerate().collect();
+
+        self.witness.set_bool_target(self.condition, false);
+        self.witness.set_proof_with_pis_target::<C, D>(
+            &self.inner_cyclic_proof_with_pis,
+            &cyclic_base_proof(
+                &self.common_data,
+                &self.cyclic_circuit_data.verifier_only,
+                public_inputs,
+            ),
+        );
+
+        let result =
+            ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness);
+
+        log::info!("    Proven child node parser recursion layer(initial)...");
+
+        result
+    }
+
+    pub fn prove_recursive(
+        mut self,
+        composed_proof: ProofWithPublicInputs<F, C, D>,
+    ) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+        log::info!("    Proving child node parser recursion layer...");
+        self.witness.set_bool_target(self.condition, true);
+        self.witness
+            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
+
+        let result =
+            ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness);
+
+        log::info!("    Proven child node parser recursion layer");
+
+        result
+    }
+
     pub fn build(inner_circuit: ChildNodeParser) -> Circuit {
+        log::info!("    Proving child node correctness...");
+
         let inner_proof = inner_circuit.prove();
+
+        log::info!("    Proven child node correctness");
+
+        log::info!("    Building child node parser recursion layer...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -186,6 +266,8 @@ impl Circuit {
 
         pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
 
+        log::info!("    Built child node parser recursion layer");
+
         Circuit {
             cyclic_circuit_data,
             common_data,
@@ -194,12 +276,80 @@ impl Circuit {
             witness: pw,
         }
     }
+}
 
-    pub fn prove_initial(self) {
-        //
+#[cfg(test)]
+mod tests {
+    use super::{child_node_parser::tests_common::*, *};
+
+    #[test]
+    fn test_child_node_array_parser_recursion_initial() {
+        use MockChildType::*;
+        test_case(vec![Claimed([0; BLAKE2_DIGEST_SIZE])]);
     }
 
-    pub fn prove_recursive(self) {
-        //
+    #[test]
+    fn test_child_node_array_parser_recursion_two_nodes() {
+        use MockChildType::*;
+        test_case(vec![Claimed([1; BLAKE2_DIGEST_SIZE]), NotClaimed(32)]);
+        test_case(vec![Claimed([1; BLAKE2_DIGEST_SIZE]), NotClaimed(20)]);
+        test_case(vec![NotClaimed(20), Claimed([1; BLAKE2_DIGEST_SIZE])]);
+    }
+
+    #[test]
+    fn test_child_node_array_parser_recursion_max_nodes() {
+        use MockChildType::*;
+
+        test_case(
+            iter::repeat(NotClaimed(32))
+                .take(15)
+                .chain(iter::once(Claimed([0xAA; BLAKE2_DIGEST_SIZE])))
+                .collect(),
+        );
+    }
+
+    fn test_case(child_types: Vec<MockChildType>) {
+        let (claimed_idx, claimed_hash) = child_types
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, child)| match child {
+                MockChildType::Claimed(hash) => Some((idx, hash)),
+                _ => None,
+            })
+            .next()
+            .unwrap();
+
+        let claimed_hash_bits = array_to_bits(claimed_hash).try_into().unwrap();
+        let node_data = compose_all_children(&child_types);
+
+        let mut read_offset = 0;
+        let mut cyclic_proof = None;
+        for child_type in &child_types {
+            let assert_child_hash = matches!(child_type, &MockChildType::Claimed(_));
+
+            let inner_circuit = ChildNodeParser {
+                node_data: node_data.clone(),
+                read_offset,
+                assert_child_hash,
+                claimed_child_hash: claimed_hash_bits,
+            };
+
+            let circuit = Circuit::build(inner_circuit);
+
+            cyclic_proof = Some(if let Some(cyclic_proof) = cyclic_proof {
+                circuit.prove_recursive(cyclic_proof).proof()
+            } else {
+                circuit
+                    .prove_initial(InitialData {
+                        node_data: node_data.clone(),
+                        read_offset: 0,
+                        claimed_child_index_in_array: claimed_idx,
+                        claimed_child_hash: claimed_hash.clone(),
+                    })
+                    .proof()
+            });
+
+            read_offset += child_type.encode().len();
+        }
     }
 }

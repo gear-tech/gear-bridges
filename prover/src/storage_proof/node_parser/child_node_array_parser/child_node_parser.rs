@@ -70,6 +70,7 @@ pub struct ChildNodeParser {
 }
 
 impl ChildNodeParser {
+    // TODO: Check claimed node length to be equal 32.
     pub fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
         log::info!("Proving child node parser...");
 
@@ -154,9 +155,8 @@ impl ChildNodeParser {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{common::array_to_bits, storage_proof::node_parser::tests_common::pad_byte_vec};
-    use parity_scale_codec::{Compact, Encode};
+    use super::{tests_common::*, *};
+    use crate::common::array_to_bits;
 
     #[test]
     fn test_child_node_parser() {
@@ -210,14 +210,7 @@ mod tests {
         expected_read_data_len: usize,
         child_hash: Option<[u8; BLAKE2_DIGEST_SIZE]>,
     ) {
-        let node_data_padded: [u8; NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] =
-            pad_byte_vec(node_data);
-        let node_data_blocks = node_data_padded
-            .chunks(NODE_DATA_BLOCK_BYTES)
-            .map(|chunk| chunk.try_into().unwrap())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        let node_data_blocks = compose_padded_node_data(node_data);
 
         let claimed_child_hash = child_hash
             .map(|data| array_to_bits(&data).try_into().unwrap())
@@ -242,14 +235,64 @@ mod tests {
 
         proof.verify();
     }
+}
 
-    fn encode_not_claimed_node(length: usize) -> impl Iterator<Item = u8> {
+#[cfg(test)]
+pub mod tests_common {
+    use super::*;
+    use crate::storage_proof::node_parser::tests_common::pad_byte_vec;
+    use parity_scale_codec::{Compact, Encode};
+
+    #[derive(Clone, Copy)]
+    pub enum MockChildType {
+        Claimed([u8; BLAKE2_DIGEST_SIZE]),
+        NotClaimed(usize),
+    }
+
+    impl MockChildType {
+        pub fn encode(&self) -> Vec<u8> {
+            match *self {
+                Self::Claimed(hash) => encode_claimed_node(&hash).collect(),
+                Self::NotClaimed(len) => encode_not_claimed_node(len).collect(),
+            }
+        }
+    }
+
+    pub fn compose_all_children(
+        types: &[MockChildType],
+    ) -> [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] {
+        let data = types
+            .into_iter()
+            .map(|ty| match ty {
+                MockChildType::Claimed(hash) => encode_claimed_node(hash).collect(),
+                MockChildType::NotClaimed(len) => encode_not_claimed_node(*len).collect::<Vec<_>>(),
+            })
+            .flatten()
+            .collect();
+
+        compose_padded_node_data(data)
+    }
+
+    pub fn compose_padded_node_data(
+        node_data: Vec<u8>,
+    ) -> [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] {
+        let node_data_padded: [u8; NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] =
+            pad_byte_vec(node_data);
+        node_data_padded
+            .chunks(NODE_DATA_BLOCK_BYTES)
+            .map(|chunk| chunk.try_into().unwrap())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    pub fn encode_not_claimed_node(length: usize) -> impl Iterator<Item = u8> {
         let mut data = Compact::<u32>(length as u32).encode();
         data.append(&mut vec![0; length]);
         data.into_iter()
     }
 
-    fn encode_claimed_node(hash: &[u8; BLAKE2_DIGEST_SIZE]) -> impl Iterator<Item = u8> {
+    pub fn encode_claimed_node(hash: &[u8; BLAKE2_DIGEST_SIZE]) -> impl Iterator<Item = u8> {
         let mut data = Compact::<u32>(BLAKE2_DIGEST_SIZE as u32).encode();
         data.append(&mut hash.to_vec());
         data.into_iter()

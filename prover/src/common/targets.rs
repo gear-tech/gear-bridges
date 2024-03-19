@@ -10,6 +10,7 @@ use crate::{
 };
 use itertools::Itertools;
 use plonky2::{
+    gates::public_input,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
@@ -142,6 +143,52 @@ macro_rules! impl_target_set {
             fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
                 ::std::iter::empty()
                 $(.chain(self.$field_name.into_targets_iter()))*
+            }
+        }
+    }
+}
+
+pub(crate) use crate::impl_parsable_target_set;
+
+#[macro_export]
+macro_rules! impl_parsable_target_set {
+    (
+        $vis:vis struct $struct_name:ident {
+            $($field_vis:vis $field_name:ident: $field_type:ty),*
+            $(,)?
+        }
+    ) => {
+        #[derive(Clone, Debug)]
+        $vis struct $struct_name {
+            $($field_vis $field_name: $field_type),*
+        }
+
+        impl $crate::common::targets::TargetSet for $struct_name {
+            fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+                Self {
+                    $($field_name: TargetSet::parse(raw)),*
+                }
+            }
+
+            fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+                ::std::iter::empty()
+                $(.chain(self.$field_name.into_targets_iter()))*
+            }
+        }
+
+        ::paste::paste! {
+            $vis struct [<$struct_name PublicInputs>] {
+                $($field_vis $field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::PublicInputsData),*
+            }
+
+            impl $crate::common::targets::ParsableTargetSet for $struct_name {
+                type PublicInputsData = [<$struct_name PublicInputs>];
+
+                fn parse_public_inputs(_public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+                    Self::PublicInputsData {
+                        $($field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::parse_public_inputs(_public_inputs)),*
+                    }
+                }
             }
         }
     }
@@ -514,6 +561,14 @@ impl Blake2Target {
         }
 
         equal
+    }
+}
+
+impl ParsableTargetSet for Blake2Target {
+    type PublicInputsData = [bool; BLAKE2_DIGEST_SIZE_IN_BITS];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        ArrayTarget::<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>::parse_public_inputs(public_inputs)
     }
 }
 

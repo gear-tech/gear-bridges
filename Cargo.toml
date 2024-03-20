@@ -27,6 +27,12 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 eth-client = { path = "./eth-client" }
 intermediate-proof-storage = { path = "./intermediate-proof-storage" }
 
+plonky2 = { git = "https://github.com/mertwole/plonky2" }
+plonky2_field = { git = "https://github.com/mertwole/plonky2" }
+plonky2_util = { git = "https://github.com/mertwole/plonky2" }
+plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2" }
+curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
+
 anyhow = "1.0.40"
 env_logger = "0.9.0"
 itertools = "0.10.5"
@@ -34,13 +40,6 @@ jemallocator = "0.5.0"
 keccak-hash = "0.8.0"
 log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
-
-plonky2 = { git = "https://github.com/mertwole/plonky2" }
-plonky2_field = { git = "https://github.com/mertwole/plonky2" }
-plonky2_util = { git = "https://github.com/mertwole/plonky2" }
-plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2" }
-curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
-
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 serde = { version = "1.0", features = ["alloc", "derive"] }
@@ -52,6 +51,34 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 blake2 = "0.10.6"
 ff = { version = "0.13.0", features = ["derive"] }
 lazy_static = "1.4.0"
+hex = "0.4.3"
+futures-util = "0.3.28"
+clap = { version = "4.4.13", features = ["derive", "env"] }
+tokio = { version = "1.23.0", features = ["full"] }
+pretty_env_logger = "*"
+
+# Gear/Substrate deps
+gsdk = { git = "https://github.com/gear-tech/gear.git", tag = "v1.0.2" }
+subxt = "0.32.1"
+pallet-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", features = [
+    "std",
+] }
+pallet-babe = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false, features = [
+    "std",
+] }
+sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes" }
+sp-runtime = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
+sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", features = [
+    "std",
+] }
+sp-consensus-babe = { version = "0.10.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", features = [
+    "std",
+] }
+sp-state-machine = { version = "0.13.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
+parity-scale-codec = { version = "3.6.4", default-features = false }
+trie-db = { version = "0.27.0", default-features = false }
+sp-trie = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
+sp-core = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
 
 [patch.crates-io]
 parity-wasm = { version = "0.45.0", git = "https://github.com/gear-tech/parity-wasm", branch = "v0.45.0-sign-ext" }

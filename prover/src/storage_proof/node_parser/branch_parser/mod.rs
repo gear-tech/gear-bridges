@@ -3,31 +3,28 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_field::types::Field;
-use plonky2_sha256::circuit::array_to_bits;
-
-use crate::{
-    common::{
-        targets::{ArrayTarget, Blake2Target, HalfByteTarget, SingleTarget, TargetSet},
-        ConstantRecursiveVerifier,
-    },
-    consts::BLAKE2_DIGEST_SIZE,
-    impl_parsable_target_set, impl_target_set,
-    prelude::*,
-    storage_proof::{
-        node_parser::branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
-        storage_address::{PartialStorageAddressTarget, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES},
-    },
-    ProofWithCircuitData,
-};
-
-use self::{bitmap_parser::BitmapParserInputTarget, child_node_array_parser::ChildNodeArrayParser};
 
 use super::{
-    compose_padded_node_data,
     header_parser::{self, HeaderParserInputTarget},
     nibble_parser::{self, NibbleParserInputTarget},
     BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
 };
+use crate::{
+    common::{
+        targets::{Blake2Target, HalfByteTarget, SingleTarget, TargetSet},
+        ConstantRecursiveVerifier,
+    },
+    consts::BLAKE2_DIGEST_SIZE,
+    impl_parsable_target_set,
+    prelude::*,
+    storage_proof::{
+        node_parser::branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
+        storage_address::PartialStorageAddressTarget,
+    },
+    ProofWithCircuitData,
+};
+use bitmap_parser::BitmapParserInputTarget;
+use child_node_array_parser::ChildNodeArrayParser;
 
 mod bitmap_parser;
 mod child_node_array_parser;
@@ -179,13 +176,13 @@ impl BranchParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{pad_byte_vec, targets::ParsableTargetSet};
     use parity_scale_codec::Encode;
     use sp_core::H256;
     use std::iter;
     use trie_db::{ChildReference, NibbleSlice, NodeCodec, TrieLayout};
 
-    use super::*;
+    use super::{super::compose_padded_node_data, *};
+    use crate::common::{pad_byte_vec, targets::ParsableTargetSet};
 
     #[test]
     fn test_branch_node_parser_single_child() {

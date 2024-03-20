@@ -1,29 +1,13 @@
+use plonky2::plonk::circuit_builder::CircuitBuilder;
 use std::iter;
-
-use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
-};
-use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
-use plonky2_field::types::Field;
 
 use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
 use crate::{
-    common::{
-        array_to_bits,
-        targets::{
-            impl_target_set, ArrayTarget, Blake2Target, ByteTarget, HalfByteTarget, SingleTarget,
-            TargetSet,
-        },
-    },
+    common::targets::{impl_target_set, ArrayTarget, HalfByteTarget, SingleTarget},
     prelude::*,
     storage_proof::storage_address::{
         MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
     },
-    ProofWithCircuitData,
 };
 
 impl_target_set! {
@@ -122,15 +106,8 @@ pub fn define(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::storage_proof::{
-        node_parser::{pad_byte_vec, NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
-        storage_address::{
-            tests_common::create_address_target, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
-        },
-    };
     use plonky2::{
-        iop::witness::PartialWitness,
+        iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder,
             circuit_data::{CircuitConfig, CircuitData},
@@ -138,6 +115,15 @@ mod tests {
         },
     };
     use plonky2_field::types::Field;
+
+    use super::*;
+    use crate::{
+        common::targets::TargetSet,
+        storage_proof::{
+            node_parser::{pad_byte_vec, NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
+            storage_address::tests_common::create_address_target,
+        },
+    };
 
     #[test]
     fn test_nibble_parser() {

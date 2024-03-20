@@ -1,11 +1,8 @@
-use std::{marker::PhantomData, sync::Arc};
-
-use crate::prelude::*;
 use plonky2::{
     gates::noop::NoopGate,
     hash::hash_types::HashOutTarget,
     iop::{
-        target::{BoolTarget, Target},
+        target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -18,6 +15,9 @@ use plonky2::{
         proof::{Proof, ProofWithPublicInputs},
     },
 };
+use std::{marker::PhantomData, sync::Arc};
+
+use crate::prelude::*;
 
 #[macro_use]
 pub mod targets;

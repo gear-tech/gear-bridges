@@ -1,6 +1,3 @@
-use std::iter;
-
-use itertools::Itertools;
 use plonky2::{
     iop::{
         target::Target,
@@ -8,17 +5,14 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_field::types::{Field, PrimeField64};
+use plonky2_field::types::Field;
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
+use std::iter;
 
 use crate::{
-    common::{
-        pad_byte_vec,
-        targets::{
-            impl_array_target_wrapper, impl_parsable_array_target_wrapper,
-            impl_parsable_target_set, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
-            ParsableTargetSet, SingleTarget, TargetSet,
-        },
+    common::targets::{
+        impl_parsable_array_target_wrapper, impl_parsable_target_set, ArrayTarget, HalfByteTarget,
+        ParsableTargetSet, SingleTarget, TargetSet,
     },
     prelude::*,
 };
@@ -190,6 +184,7 @@ impl PartialStorageAddressTarget {
 #[cfg(test)]
 mod tests {
     use super::{tests_common::create_address_target, *};
+    use crate::common::pad_byte_vec;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{

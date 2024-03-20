@@ -1,26 +1,13 @@
-use std::iter;
-
-use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
-};
-use plonky2_blake2b256::circuit::blake2_circuit_from_targets;
-use plonky2_field::{packed::PackedField, types::Field};
+use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2_field::types::Field;
 
 use crate::{
     common::{
-        array_to_bits,
-        targets::{impl_target_set, Blake2Target, HalfByteTarget, SingleTarget, TargetSet},
+        targets::{impl_target_set, HalfByteTarget, SingleTarget},
         xor_targets,
     },
     prelude::*,
-    storage_proof::{
-        node_parser::NodeDataBlockTarget, storage_address::PartialStorageAddressTarget,
-    },
-    ProofWithCircuitData,
+    storage_proof::node_parser::NodeDataBlockTarget,
 };
 
 impl_target_set! {
@@ -88,6 +75,8 @@ pub fn define(
 
 #[cfg(test)]
 mod tests {
+    use plonky2::{iop::witness::PartialWitness, plonk::circuit_data::CircuitConfig};
+
     use super::*;
     use crate::storage_proof::node_parser::pad_byte_vec;
 

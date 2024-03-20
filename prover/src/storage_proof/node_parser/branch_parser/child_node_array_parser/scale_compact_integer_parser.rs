@@ -2,7 +2,7 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ByteTarget, SingleTarget, TargetSet},
+    common::targets::{impl_target_set, ByteTarget, SingleTarget},
     prelude::*,
 };
 

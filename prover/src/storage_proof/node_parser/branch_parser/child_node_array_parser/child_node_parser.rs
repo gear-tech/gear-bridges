@@ -1,15 +1,3 @@
-use super::scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget};
-use crate::{
-    common::targets::{
-        impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, SingleTarget, TargetSet,
-    },
-    consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
-    prelude::*,
-    storage_proof::node_parser::{
-        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
-    },
-    ProofWithCircuitData,
-};
 use plonky2::{
     iop::{
         target::BoolTarget,
@@ -18,6 +6,21 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_field::types::Field;
+
+use super::scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget};
+use crate::{
+    common::targets::{
+        impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, SingleTarget, TargetSet,
+    },
+    prelude::{
+        consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
+        *,
+    },
+    storage_proof::node_parser::{
+        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
+    ProofWithCircuitData,
+};
 
 impl_target_set! {
     pub struct ChildNodeParserTarget {
@@ -237,9 +240,10 @@ mod tests {
 
 #[cfg(test)]
 pub mod tests_common {
+    use parity_scale_codec::{Compact, Encode};
+
     use super::*;
     use crate::storage_proof::node_parser::compose_padded_node_data;
-    use parity_scale_codec::{Compact, Encode};
 
     #[derive(Clone, Copy)]
     pub enum MockChildType {

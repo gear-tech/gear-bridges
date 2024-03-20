@@ -1,28 +1,22 @@
-use std::fmt::Debug;
-use std::ops::Deref;
-
-use self::consts::VALIDATOR_COUNT;
-
-use crate::{
-    common::{array_to_bits, bits_to_byte},
-    consts::*,
-    prelude::*,
-};
 use itertools::Itertools;
 use plonky2::{
-    gates::public_input,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::VerifierOnlyCircuitData},
+    plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_field::{
     goldilocks_field::GoldilocksField,
     types::{Field, PrimeField64},
 };
-use std::iter;
+use std::{fmt::Debug, iter, ops::Deref};
+
+use crate::{
+    common::{array_to_bits, bits_to_byte},
+    prelude::{consts::*, *},
+};
 
 pub trait TargetSet: Clone + Debug {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;

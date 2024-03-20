@@ -1,23 +1,3 @@
-use self::{
-    child_node_parser::{ChildNodeParser, ChildNodeParserTarget},
-    consts::BLAKE2_DIGEST_SIZE,
-};
-use crate::storage_proof::node_parser::{
-    BranchNodeDataPaddedTarget, NodeDataBlockTarget, PartialStorageAddressTarget,
-    MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
-};
-use crate::{
-    common::{
-        array_to_bits, common_data_for_recursion,
-        targets::{
-            impl_parsable_target_set, impl_target_set, Blake2Target, HalfByteTarget,
-            ParsableTargetSet, SingleTarget, TargetSet, VerifierDataTarget,
-        },
-        ConstantRecursiveVerifier,
-    },
-    prelude::*,
-    ProofWithCircuitData,
-};
 use plonky2::{
     iop::{
         target::BoolTarget,
@@ -31,6 +11,23 @@ use plonky2::{
     recursion::dummy_circuit::cyclic_base_proof,
 };
 use plonky2_field::types::Field;
+
+use self::child_node_parser::ChildNodeParser;
+use crate::{
+    common::{
+        array_to_bits, common_data_for_recursion,
+        targets::{
+            impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet,
+            SingleTarget, TargetSet, VerifierDataTarget,
+        },
+        ConstantRecursiveVerifier,
+    },
+    prelude::{consts::BLAKE2_DIGEST_SIZE, *},
+    storage_proof::node_parser::{
+        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
+    ProofWithCircuitData,
+};
 use std::iter;
 
 mod child_node_parser;

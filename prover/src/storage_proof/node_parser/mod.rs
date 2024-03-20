@@ -1,14 +1,3 @@
-use super::storage_address::{PartialStorageAddressTarget, StorageAddressPaddedTarget};
-use crate::{
-    common::{
-        pad_byte_vec,
-        targets::{
-            impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
-            ParsableTargetSet, SingleTarget, TargetSet,
-        },
-    },
-    prelude::*,
-};
 use itertools::Itertools;
 use plonky2::{
     iop::{
@@ -19,6 +8,18 @@ use plonky2::{
 };
 use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
+
+use super::storage_address::PartialStorageAddressTarget;
+use crate::{
+    common::{
+        pad_byte_vec,
+        targets::{
+            impl_array_target_wrapper, ArrayTarget, ByteTarget, ParsableTargetSet, SingleTarget,
+            TargetSet,
+        },
+    },
+    prelude::*,
+};
 
 mod branch_parser;
 mod header_parser;
@@ -211,8 +212,9 @@ pub fn compose_padded_node_data(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use plonky2::plonk::circuit_data::CircuitConfig;
+
+    use super::*;
 
     #[test]
     fn test_node_data_padded_random_read() {

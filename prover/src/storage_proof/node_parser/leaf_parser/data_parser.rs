@@ -3,11 +3,9 @@ use plonky2_field::types::Field;
 
 use crate::{
     common::targets::{impl_target_set, ArrayTarget, Blake2Target, SingleTarget, TargetSet},
-    prelude::*,
+    prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_proof::node_parser::NodeDataBlockTarget,
 };
-
-use self::consts::BLAKE2_DIGEST_SIZE;
 
 impl_target_set! {
     pub struct DataParserInputTarget {

@@ -1,3 +1,9 @@
+use plonky2::{
+    iop::witness::{PartialWitness, WitnessWrite},
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+};
+use plonky2_field::types::Field;
+
 use super::{
     header_parser::{self, HeaderParserInputTarget},
     nibble_parser::{self, NibbleParserInputTarget},
@@ -18,11 +24,6 @@ use crate::{
     },
     ProofWithCircuitData,
 };
-use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
-};
-use plonky2_field::types::Field;
 
 mod data_parser;
 
@@ -113,11 +114,13 @@ impl LeafParser {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::common::array_to_bits;
-    use crate::common::{pad_byte_vec, targets::ParsableTargetSet};
-    use crate::prelude::consts::BLAKE2_DIGEST_SIZE;
     use trie_db::{node::Value, NibbleSlice, NodeCodec, TrieLayout};
+
+    use super::*;
+    use crate::{
+        common::{array_to_bits, pad_byte_vec, targets::ParsableTargetSet},
+        prelude::consts::BLAKE2_DIGEST_SIZE,
+    };
 
     #[test]
     fn test_leaf_node_parser() {

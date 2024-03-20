@@ -2,7 +2,7 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ArrayTarget, ByteTarget, SingleTarget, TargetSet},
+    common::targets::{impl_target_set, ArrayTarget, ByteTarget, SingleTarget},
     prelude::*,
 };
 
@@ -104,8 +104,9 @@ pub fn define(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use plonky2::{iop::witness::PartialWitness, plonk::circuit_data::CircuitConfig};
+
+    use super::*;
 
     #[test]
     fn test_branch_header_parser() {

@@ -104,12 +104,14 @@ impl BranchParser {
         let first_node_data_block = node_data_target.constant_read(0);
 
         let parsed_node_header = {
-            let first_byte = first_node_data_block.constant_read(0);
-            let second_byte = first_node_data_block.constant_read(1);
-            let first_bytes = ArrayTarget([first_byte, second_byte]);
+            let first_bytes = first_node_data_block.constant_read_array(0);
 
             let input = HeaderParserInputTarget { first_bytes };
-            header_parser::define(input, header_parser::HeaderDescriptor::branch_without_value(), &mut builder)
+            header_parser::define(
+                input,
+                header_parser::HeaderDescriptor::branch_without_value(),
+                &mut builder,
+            )
         };
 
         let parsed_nibbles = {
@@ -169,7 +171,7 @@ impl BranchParser {
 
         let result = ProofWithCircuitData::from_builder(builder, witness);
 
-        log::info!("Proven branch node parser...");
+        log::info!("Proven branch node parser");
 
         result
     }

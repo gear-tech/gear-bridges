@@ -251,6 +251,16 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         self.0[at].clone()
     }
 
+    pub fn constant_read_array<const R: usize>(&self, at: usize) -> ArrayTarget<T, R> {
+        ArrayTarget(
+            (0..R)
+                .map(|offset| self.constant_read(at + offset))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
     pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> T {
         let self_targets = self
             .0

@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     common::{
         array_to_bits,
-        targets::{Sha256Target, TargetSet, ValidatorSetTarget},
+        targets::{Sha256Target, ValidatorSetTarget},
     },
     consts::{ED25519_PUBLIC_KEY_SIZE, ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
     impl_target_set,

@@ -72,12 +72,7 @@ where
                 .constants_sigmas_cap
                 .0
                 .into_iter()
-                .zip_eq(
-                    current_validator_set_proof
-                        .verifier_data
-                        .merkle_caps
-                        .into_iter(),
-                )
+                .zip_eq(current_validator_set_proof.verifier_data.merkle_caps)
                 .for_each(|(hash_lhs, hash_rhs)| hash_lhs.connect(&hash_rhs, builder));
 
             let desired_genesis_authority_set_id =

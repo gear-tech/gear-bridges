@@ -51,6 +51,7 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 blake2 = "0.10.6"
 ff = { version = "0.13.0", features = ["derive"] }
 lazy_static = "1.4.0"
+paste = "1.0.14"
 hex = "0.4.3"
 futures-util = "0.3.28"
 clap = { version = "4.4.13", features = ["derive", "env"] }

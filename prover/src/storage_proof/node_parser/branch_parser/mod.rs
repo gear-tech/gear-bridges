@@ -11,7 +11,7 @@ use crate::{
         ConstantRecursiveVerifier,
     },
     consts::BLAKE2_DIGEST_SIZE,
-    impl_target_set,
+    impl_parsable_target_set, impl_target_set,
     prelude::*,
     storage_proof::{
         node_parser::branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
@@ -35,7 +35,7 @@ mod bitmap_parser;
 mod branch_header_parser;
 mod child_node_array_parser;
 
-impl_target_set! {
+impl_parsable_target_set! {
     pub struct BranchParserTarget {
         pub padded_node_data: BranchNodeDataPaddedTarget,
         pub node_data_length: SingleTarget,
@@ -90,10 +90,15 @@ impl BranchParser {
         let node_data_target = BranchNodeDataPaddedTarget::add_virtual_safe(&mut builder);
 
         let partial_address_target = PartialStorageAddressTarget::add_virtual_unsafe(&mut builder);
+        partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
 
         let node_data_length_target: SingleTarget = builder.add_virtual_target().into();
 
         let claimed_child_node_nibble_target = builder.add_virtual_target();
+        witness.set_target(
+            claimed_child_node_nibble_target,
+            F::from_canonical_u8(self.claimed_child_node_nibble),
+        );
         let claimed_child_node_nibble_target =
             HalfByteTarget::from_target_safe(claimed_child_node_nibble_target, &mut builder);
 
@@ -170,5 +175,135 @@ impl BranchParser {
         log::info!("Proven branch node parser...");
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::{pad_byte_vec, targets::ParsableTargetSet};
+    use parity_scale_codec::Encode;
+    use sp_core::H256;
+    use std::iter;
+    use trie_db::{ChildReference, NibbleSlice, NodeCodec, TrieLayout};
+
+    use super::*;
+
+    #[test]
+    fn test_branch_node_parser_single_child() {
+        test_case(NibbleSlice::new(&[]), single_claimed_child([0; 32], 0), 0);
+
+        test_case(
+            NibbleSlice::new(&[]),
+            single_claimed_child([0xA; 32], 15),
+            15,
+        );
+    }
+
+    #[test]
+    fn test_branch_node_parser_all_children() {
+        let all_children = [Some(ChildReference::Hash(H256([0; 32]))); 16];
+
+        test_case(NibbleSlice::new(&[]), all_children, 15);
+    }
+
+    #[test]
+    fn test_branch_node_parser_nibbles() {
+        test_case(
+            NibbleSlice::new(&[0x22, 0xBB, 0x00, 0xDD]),
+            single_claimed_child([0; 32], 0),
+            0,
+        );
+
+        test_case(
+            NibbleSlice::new_offset(&[0x02, 0xBB, 0x00, 0xDD], 1),
+            single_claimed_child([0; 32], 15),
+            15,
+        );
+    }
+
+    fn single_claimed_child(
+        hash: [u8; BLAKE2_DIGEST_SIZE],
+        position: usize,
+    ) -> [Option<ChildReference<H256>>; 16] {
+        vec![None; position]
+            .into_iter()
+            .chain(iter::once(Some(ChildReference::Hash(H256(hash)))))
+            .chain(iter::repeat(None))
+            .take(16)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    fn test_case(
+        nibbles: NibbleSlice,
+        children: [Option<ChildReference<H256>>; 16],
+        claimed_child_node_nibble: u8,
+    ) {
+        type TrieCodec = <sp_trie::LayoutV1<sp_core::Blake2Hasher> as TrieLayout>::Codec;
+
+        let node_data = TrieCodec::branch_node_nibbled(
+            nibbles.right_iter(),
+            nibbles.len(),
+            children.into_iter(),
+            None,
+        );
+
+        let mut children_lengths = vec![];
+        for child_idx in 0..children.len() {
+            let serialized_size = match children[child_idx] {
+                Some(ChildReference::Hash(hash)) => hash.as_bytes().encode().len(),
+                Some(ChildReference::Inline(data, len)) => data[..len].encode().len(),
+                None => continue,
+            };
+            children_lengths.push(serialized_size);
+        }
+
+        let all_children_len: usize = children_lengths.iter().sum();
+
+        let claimed_child_hash = if let Some(ChildReference::Hash(hash)) =
+            children[claimed_child_node_nibble as usize]
+        {
+            hash.0
+        } else {
+            panic!("Invalid claimed_child_node_nibble");
+        };
+
+        let claimed_child_index_in_array = children[..claimed_child_node_nibble as usize]
+            .iter()
+            .filter(|child| child.is_some())
+            .count();
+
+        let circuit_input = BranchParser {
+            node_data_length: node_data.len(),
+            children_data_offset: node_data.len() - all_children_len,
+            children_lengths,
+            claimed_child_node_nibble,
+            claimed_child_hash,
+            claimed_child_index_in_array,
+            partial_address_nibbles: vec![],
+
+            padded_node_data: compose_padded_node_data(node_data),
+        };
+
+        let nibble_count = nibbles.len();
+        let expected_address_nibbles = (0..nibble_count)
+            .map(|idx| nibbles.at(idx))
+            .chain(std::iter::once(claimed_child_node_nibble))
+            .collect::<Vec<_>>();
+
+        let proof = circuit_input.prove();
+        let pis = BranchParserTarget::parse_public_inputs_exact(&mut proof.pis().into_iter());
+
+        assert!(proof.verify());
+
+        assert_eq!(
+            pis.resulting_partial_address.length,
+            expected_address_nibbles.len() as u64
+        );
+        assert_eq!(
+            pis.resulting_partial_address.address,
+            pad_byte_vec(expected_address_nibbles)
+        );
     }
 }

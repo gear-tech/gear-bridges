@@ -53,11 +53,7 @@ pub fn define(
 
     let first_bits = first_byte.to_bit_targets(builder);
     let second_bits = second_byte.to_bit_targets(builder);
-    let bits = first_bits
-        .0
-        .into_iter()
-        .rev()
-        .chain(second_bits.0.into_iter().rev());
+    let bits = first_bits.0.into_iter().chain(second_bits.0.into_iter());
 
     let mut child_amount_before_claimed_child = builder.zero();
     let mut before_claimed_child = builder._true();
@@ -98,7 +94,7 @@ mod tests {
     #[test]
     fn test_bitmap_parser() {
         test_case(
-            [0b10_00_00_00, 0b00_00_00_00],
+            [0b00_00_00_01, 0b00_00_00_00],
             0,
             Some(ExpectedData {
                 overall_children_amount: 1,
@@ -107,7 +103,7 @@ mod tests {
         );
 
         test_case(
-            [0b00_00_00_00, 0b00_10_00_00],
+            [0b00_00_00_00, 0b00_00_01_00],
             10,
             Some(ExpectedData {
                 overall_children_amount: 1,
@@ -116,7 +112,7 @@ mod tests {
         );
 
         test_case(
-            [0b11_00_11_10, 0b11_10_01_10],
+            [0b01_11_00_11, 0b01_10_01_11],
             10,
             Some(ExpectedData {
                 overall_children_amount: 10,
@@ -130,7 +126,7 @@ mod tests {
         expected = "Partition containing Wire(Wire { row: 7, column: 59 }) was set twice with different values: 0 != 1"
     )]
     fn test_bitmap_parser_wrong_claimed_child_fails() {
-        test_case([0b11_00_11_10, 0b11_10_01_10], 7, None);
+        test_case([0b01_11_11_11, 0b11_11_11_11], 7, None);
     }
 
     struct ExpectedData {

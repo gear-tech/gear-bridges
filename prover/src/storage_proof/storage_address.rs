@@ -15,7 +15,8 @@ use crate::{
     common::{
         pad_byte_vec,
         targets::{
-            impl_array_target_wrapper, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
+            impl_array_target_wrapper, impl_parsable_array_target_wrapper,
+            impl_parsable_target_set, impl_target_set, ArrayTarget, ByteTarget, HalfByteTarget,
             ParsableTargetSet, SingleTarget, TargetSet,
         },
     },
@@ -26,7 +27,7 @@ pub const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
 // TODO: Remove it and store just ArrayTarget inside PartialStorageAddressTarget
-impl_array_target_wrapper!(
+impl_parsable_array_target_wrapper!(
     StorageAddressPaddedTarget,
     HalfByteTarget,
     MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES
@@ -40,7 +41,7 @@ impl StorageAddressPaddedTarget {
     }
 }
 
-impl_target_set! {
+impl_parsable_target_set! {
     // Invariant: all the data after `length` is zeroed.
     pub struct PartialStorageAddressTarget {
         pub address: StorageAddressPaddedTarget,

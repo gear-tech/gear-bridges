@@ -452,6 +452,16 @@ impl TargetSet for HalfByteTarget {
     }
 }
 
+impl ParsableTargetSet for HalfByteTarget {
+    type PublicInputsData = u8;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        let value = public_inputs.next().unwrap().to_canonical_u64();
+        assert!(value < 16);
+        value as u8
+    }
+}
+
 impl HalfByteTarget {
     pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
         assert!(value < 16);
@@ -489,13 +499,50 @@ macro_rules! impl_array_target_wrapper {
             }
         }
 
-        impl TargetSet for $name {
+        impl $crate::common::targets::TargetSet for $name {
             fn parse(raw: &mut impl ::std::iter::Iterator<Item = Target>) -> Self {
                 Self($crate::common::targets::TargetSet::parse(raw))
             }
 
             fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = Target> {
                 self.0.into_targets_iter()
+            }
+        }
+    };
+}
+
+pub(crate) use crate::impl_parsable_array_target_wrapper;
+
+#[macro_export]
+macro_rules! impl_parsable_array_target_wrapper {
+    // TODO: Add access modifier to params.
+    ($name:ident, $target_ty:ty, $len:ident) => {
+        #[derive(::std::clone::Clone, ::std::fmt::Debug)]
+        pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);
+
+        impl ::std::ops::Deref for $name {
+            type Target = $crate::common::targets::ArrayTarget<$target_ty, $len>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl $crate::common::targets::TargetSet for $name {
+            fn parse(raw: &mut impl ::std::iter::Iterator<Item = Target>) -> Self {
+                Self($crate::common::targets::TargetSet::parse(raw))
+            }
+
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = Target> {
+                self.0.into_targets_iter()
+            }
+        }
+
+        impl $crate::common::targets::ParsableTargetSet for $name {
+            type PublicInputsData = <$crate::common::targets::ArrayTarget<$target_ty, $len> as ParsableTargetSet>::PublicInputsData;
+
+            fn parse_public_inputs(public_inputs: &mut impl ::std::iter::Iterator<Item = F>) -> Self::PublicInputsData {
+                $crate::common::targets::ArrayTarget::<$target_ty, $len>::parse_public_inputs(public_inputs)
             }
         }
     };
@@ -529,7 +576,7 @@ impl_array_target_wrapper!(
     MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
 );
 
-impl_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
+impl_parsable_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
 
 impl Blake2Target {
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
@@ -567,14 +614,6 @@ impl Blake2Target {
         }
 
         equal
-    }
-}
-
-impl ParsableTargetSet for Blake2Target {
-    type PublicInputsData = [bool; BLAKE2_DIGEST_SIZE_IN_BITS];
-
-    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        ArrayTarget::<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>::parse_public_inputs(public_inputs)
     }
 }
 

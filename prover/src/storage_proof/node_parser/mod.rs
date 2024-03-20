@@ -21,6 +21,8 @@ use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
 mod branch_parser;
+mod header_parser;
+mod leaf_parser;
 mod nibble_parser;
 
 const NODE_DATA_BLOCK_BYTES: usize = 128;
@@ -75,6 +77,8 @@ impl NodeDataBlockTarget {
             });
     }
 }
+
+type LeafNodeDataPaddedTarget = NodeDataBlockTarget;
 
 impl_array_target_wrapper!(
     BranchNodeDataPaddedTarget,

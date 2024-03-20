@@ -20,19 +20,16 @@ use crate::{
     ProofWithCircuitData,
 };
 
-use self::{
-    bitmap_parser::BitmapParserInputTarget, branch_header_parser::BranchHeaderParserInputTarget,
-    child_node_array_parser::ChildNodeArrayParser,
-};
+use self::{bitmap_parser::BitmapParserInputTarget, child_node_array_parser::ChildNodeArrayParser};
 
 use super::{
     compose_padded_node_data,
+    header_parser::{self, HeaderParserInputTarget},
     nibble_parser::{self, NibbleParserInputTarget},
     BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
 };
 
 mod bitmap_parser;
-mod branch_header_parser;
 mod child_node_array_parser;
 
 impl_parsable_target_set! {
@@ -111,8 +108,8 @@ impl BranchParser {
             let second_byte = first_node_data_block.constant_read(1);
             let first_bytes = ArrayTarget([first_byte, second_byte]);
 
-            let input = BranchHeaderParserInputTarget { first_bytes };
-            branch_header_parser::define(input, &mut builder)
+            let input = HeaderParserInputTarget { first_bytes };
+            header_parser::define(input, header_parser::HeaderDescriptor::branch_without_value(), &mut builder)
         };
 
         let parsed_nibbles = {

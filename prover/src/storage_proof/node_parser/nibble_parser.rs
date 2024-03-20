@@ -32,17 +32,16 @@ pub fn define(
 ) -> NibbleParserOutputTarget {
     let potential_address_bytes: ArrayTarget<_, MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES> = input
         .first_node_data_block
-        .random_read_array(input.read_offset.clone(), builder);
+        .random_read_array(input.read_offset, builder);
 
     let zero = HalfByteTarget::constant(0, builder);
     let mut potential_address_nibbles = potential_address_bytes
         .0
         .into_iter()
-        .map(|byte| {
+        .flat_map(|byte| {
             let (l, m) = byte.to_half_byte_targets(builder);
             [m, l]
         })
-        .flatten()
         .chain(iter::once(zero))
         .collect::<Vec<_>>();
 

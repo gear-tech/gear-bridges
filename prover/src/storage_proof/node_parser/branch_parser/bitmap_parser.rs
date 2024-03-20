@@ -40,7 +40,7 @@ pub fn define(
 
     let first_bits = first_byte.to_bit_targets(builder);
     let second_bits = second_byte.to_bit_targets(builder);
-    let bits = first_bits.0.into_iter().chain(second_bits.0.into_iter());
+    let bits = first_bits.0.into_iter().chain(second_bits.0);
 
     let mut child_amount_before_claimed_child = builder.zero();
     let mut before_claimed_child = builder._true();

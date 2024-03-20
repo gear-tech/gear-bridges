@@ -63,7 +63,7 @@ impl BranchParser {
     pub fn prove(&self) -> ProofWithCircuitData<BranchParserTarget> {
         let child_node_parser_proof = ChildNodeArrayParser {
             initial_data: child_node_array_parser::InitialData {
-                node_data: self.padded_node_data.clone(),
+                node_data: self.padded_node_data,
                 read_offset: self.children_data_offset,
                 claimed_child_index_in_array: self.claimed_child_index_in_array,
                 claimed_child_hash: self.claimed_child_hash,

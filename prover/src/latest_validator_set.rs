@@ -102,7 +102,7 @@ impl Circuit {
     pub fn prove_genesis(mut self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let genesis_data_pis = vec![GENESIS_AUTHORITY_SET_ID]
             .into_iter()
-            .chain(GENESIS_VALIDATOR_SET_HASH.into_iter())
+            .chain(GENESIS_VALIDATOR_SET_HASH)
             .map(F::from_noncanonical_u64)
             .enumerate()
             .collect();

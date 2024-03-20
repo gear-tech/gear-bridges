@@ -94,7 +94,7 @@ impl ChildNodeArrayParser {
             let assert_child_hash = child_idx == self.initial_data.claimed_child_index_in_array;
 
             let inner_circuit = ChildNodeParser {
-                node_data: self.initial_data.node_data.clone(),
+                node_data: self.initial_data.node_data,
                 read_offset,
                 assert_child_hash,
                 claimed_child_hash,
@@ -193,7 +193,7 @@ impl Circuit {
 
         // Length check.
         CyclicRecursionTargetWithoutCircuitData::parse_public_inputs_exact(
-            &mut public_inputs.clone().into_iter(),
+            &mut public_inputs.clone(),
         );
 
         let public_inputs = public_inputs.enumerate().collect();

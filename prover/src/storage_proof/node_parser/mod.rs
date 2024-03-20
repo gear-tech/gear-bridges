@@ -128,7 +128,7 @@ impl BranchNodeDataPaddedTarget {
         self.0
              .0
             .iter()
-            .zip_eq(data.into_iter())
+            .zip_eq(data)
             .for_each(|(target, data)| target.set_witness(data, witness));
     }
 

@@ -29,18 +29,14 @@ pub fn define(
         .first_node_data_block
         .random_read_array(input.read_offset, builder);
 
-    let mut hash_data_bits = hash_data
-        .0
-        .iter()
-        .map(|byte_target| {
-            byte_target
-                .to_bit_targets(builder)
-                .0
-                .into_iter()
-                .map(|target| target.target)
-                .rev()
-        })
-        .flatten();
+    let mut hash_data_bits = hash_data.0.iter().flat_map(|byte_target| {
+        byte_target
+            .to_bit_targets(builder)
+            .0
+            .into_iter()
+            .map(|target| target.target)
+            .rev()
+    });
     let data_hash = Blake2Target::parse_exact(&mut hash_data_bits);
 
     let resulting_offset = builder

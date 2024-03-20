@@ -210,8 +210,7 @@ impl<const NUM_CAP_ELEMENTS: usize> TargetSet for VerifierDataTarget<NUM_CAP_ELE
         self.circuit_digest.into_targets_iter().chain(
             self.merkle_caps
                 .into_iter()
-                .map(|hash| hash.into_targets_iter())
-                .flatten(),
+                .flat_map(|hash| hash.into_targets_iter()),
         )
     }
 }
@@ -642,8 +641,7 @@ impl ParsableTargetSet for Sha256TargetGoldilocks {
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
-            .map(|f| array_to_bits(&f.to_canonical_u64().to_le_bytes())[64 - 52..].to_vec())
-            .flatten()
+            .flat_map(|f| array_to_bits(&f.to_canonical_u64().to_le_bytes())[64 - 52..].to_vec())
             .skip(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * 52 - SHA256_DIGEST_SIZE_IN_BITS)
             .collect::<Vec<_>>()
             .chunks(8)

@@ -27,6 +27,12 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 eth-client = { path = "./eth-client" }
 intermediate-proof-storage = { path = "./intermediate-proof-storage" }
 
+plonky2 = { git = "https://github.com/mertwole/plonky2" }
+plonky2_field = { git = "https://github.com/mertwole/plonky2" }
+plonky2_util = { git = "https://github.com/mertwole/plonky2" }
+plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2" }
+curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
+
 anyhow = "1.0.40"
 env_logger = "0.9.0"
 itertools = "0.10.5"
@@ -34,13 +40,6 @@ jemallocator = "0.5.0"
 keccak-hash = "0.8.0"
 log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
-
-plonky2 = { git = "https://github.com/mertwole/plonky2" }
-plonky2_field = { git = "https://github.com/mertwole/plonky2" }
-plonky2_util = { git = "https://github.com/mertwole/plonky2" }
-plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2" }
-curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
-
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 serde = { version = "1.0", features = ["alloc", "derive"] }

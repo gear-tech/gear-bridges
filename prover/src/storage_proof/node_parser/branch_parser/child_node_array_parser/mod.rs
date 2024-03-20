@@ -36,6 +36,8 @@ use std::iter;
 mod child_node_parser;
 mod scale_compact_integer_parser;
 
+// TODO: Split into 2 files.
+
 impl_parsable_target_set! {
     pub struct ChildNodeArrayParserTarget {
         pub node_data: BranchNodeDataPaddedTarget,
@@ -56,8 +58,8 @@ pub struct InitialData {
 }
 
 pub struct ChildNodeArrayParser {
-    initial_data: InitialData,
-    children_lengths: Vec<usize>,
+    pub initial_data: InitialData,
+    pub children_lengths: Vec<usize>,
 }
 
 impl ChildNodeArrayParser {
@@ -354,6 +356,7 @@ impl Circuit {
     }
 }
 
+// TODO: Rewrite to use ChildNodeArrayParser.
 #[cfg(test)]
 mod tests {
     use super::{child_node_parser::tests_common::*, *};

@@ -537,6 +537,12 @@ impl Blake2Target {
         Blake2Target::parse_exact(&mut targets)
     }
 
+    pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
+        let mut targets =
+            (0..BLAKE2_DIGEST_SIZE_IN_BITS).map(|_| builder.add_virtual_bool_target_safe().target);
+        Blake2Target::parse_exact(&mut targets)
+    }
+
     pub fn set_witness(
         &self,
         data: &[bool; BLAKE2_DIGEST_SIZE_IN_BITS],

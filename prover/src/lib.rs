@@ -2,6 +2,7 @@
 #![feature(generic_const_exprs)]
 #![feature(type_alias_impl_trait)]
 #![feature(concat_idents)]
+#![feature(return_position_impl_trait_in_trait)]
 
 use jemallocator::Jemalloc;
 
@@ -15,11 +16,12 @@ pub mod latest_validator_set;
 pub mod merkle_proof;
 pub mod message_sent;
 pub mod next_validator_set;
+pub mod storage_proof;
 pub mod validator_set_hash;
 
 pub use common::ProofWithCircuitData;
 
-mod prelude {
+pub mod prelude {
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
@@ -28,6 +30,8 @@ mod prelude {
     pub const D: usize = 2;
 
     pub(crate) use super::consts;
+
+    pub use super::consts::GENESIS_AUTHORITY_SET_ID;
 }
 
 pub(crate) mod consts {
@@ -56,7 +60,7 @@ pub(crate) mod consts {
     pub const VALIDATOR_COUNT: usize = 6;
     pub const PROCESSED_VALIDATOR_COUNT: usize = 2;
 
-    pub const GENESIS_AUTHORITY_SET_ID: u64 = 270;
+    pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
     pub const GENESIS_VALIDATOR_SET_HASH: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
         2787997088524558,
         914341688072726,

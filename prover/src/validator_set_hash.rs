@@ -2,13 +2,13 @@ use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
-use plonky2_sha256::circuit::make_circuits as sha256_circuit;
+use plonky2_sha256::circuit::sha256_circuit;
 use sha2::{Digest, Sha256};
 
 use crate::{
     common::{
         array_to_bits,
-        targets::{Sha256Target, TargetSet, ValidatorSetTarget},
+        targets::{Sha256Target, ValidatorSetTarget},
     },
     consts::{ED25519_PUBLIC_KEY_SIZE, ED25519_PUBLIC_KEY_SIZE_IN_BITS, VALIDATOR_COUNT},
     impl_target_set,
@@ -34,7 +34,7 @@ impl ValidatorSetHash {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
 
         let message_len_in_bits = VALIDATOR_COUNT * ED25519_PUBLIC_KEY_SIZE_IN_BITS;
-        let targets = sha256_circuit(&mut builder, message_len_in_bits as u64);
+        let targets = sha256_circuit(&mut builder, message_len_in_bits);
 
         for target in &targets.digest {
             builder.register_public_input(target.target);

@@ -43,7 +43,7 @@ impl NextValidatorSet {
 
         let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data;
         let mut next_validator_set = vec![];
-        // REFACTOR
+        // TODO REFACTOR
         for validator_idx in 0..VALIDATOR_COUNT {
             next_validator_set.push(
                 next_validator_set_data[1
@@ -67,6 +67,7 @@ impl NextValidatorSet {
         .prove();
 
         let mut config = CircuitConfig::standard_recursion_config();
+        // TODO: Can be removed as it's not the latest proof in chain for now.
         config.fri_config.cap_height = 0;
         let composition_builder = ProofComposition::new_with_config(
             validator_set_hash_proof,

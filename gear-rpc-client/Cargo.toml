@@ -4,29 +4,21 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-gsdk = { git = "https://github.com/gear-tech/gear.git", tag = "v1.0.2" }
-subxt = "0.32.1"
-pallet-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", features = [
-    "std",
-] }
-pallet-babe = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false, features = [
-    "std",
-] }
-sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes" }
-sp-runtime = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
-sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", features = [
-    "std",
-] }
-sp-consensus-babe = { version = "0.10.0-dev", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", features = [
-    "std",
-] }
-sp-state-machine = { version = "0.13.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
-parity-scale-codec = { version = "3.6.4", default-features = false }
-trie-db = { version = "0.27.0", default-features = false }
-sp-trie = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
-sp-core = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false }
-
-hex = "0.4.3"
-futures-util = "0.3.28"
-
 prover.workspace = true
+
+hex.workspace = true
+futures-util.workspace = true
+
+gsdk.workspace = true
+subxt.workspace = true
+pallet-grandpa.workspace = true
+pallet-babe.workspace = true
+sc-consensus-grandpa.workspace = true
+sp-runtime.workspace = true
+sp-consensus-grandpa.workspace = true
+sp-consensus-babe.workspace = true
+sp-state-machine.workspace = true
+parity-scale-codec.workspace = true
+trie-db.workspace = true
+sp-trie.workspace = true
+sp-core.workspace = true

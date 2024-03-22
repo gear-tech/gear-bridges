@@ -1,19 +1,21 @@
-use std::fmt::Debug;
-use std::ops::Deref;
-
-use plonky2_field::goldilocks_field::GoldilocksField;
-use plonky2_field::types::Field64;
-
-use self::consts::VALIDATOR_COUNT;
-
-use crate::{common::array_to_bits, consts::*, prelude::*};
+use itertools::Itertools;
 use plonky2::{
-    hash::hash_types::HashOutTarget,
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
+};
+use plonky2_field::{
+    goldilocks_field::GoldilocksField,
+    types::{Field, PrimeField64},
+};
+use std::{fmt::Debug, iter, ops::Deref};
+
+use crate::{
+    common::{array_to_bits, bits_to_byte},
+    prelude::{consts::*, *},
 };
 
 pub trait TargetSet: Clone + Debug {
@@ -40,6 +42,20 @@ pub trait TargetSet: Clone + Debug {
     }
 }
 
+pub trait ParsableTargetSet: TargetSet {
+    type PublicInputsData;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData;
+
+    fn parse_public_inputs_exact(
+        public_inputs: &mut impl Iterator<Item = F>,
+    ) -> Self::PublicInputsData {
+        let data = Self::parse_public_inputs(public_inputs);
+        assert_eq!(public_inputs.next(), None);
+        data
+    }
+}
+
 impl TargetSet for Target {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
         raw.next().unwrap()
@@ -60,6 +76,16 @@ impl TargetSet for BoolTarget {
     }
 }
 
+impl ParsableTargetSet for BoolTarget {
+    type PublicInputsData = bool;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        let data = public_inputs.next().unwrap().to_canonical_u64();
+        assert!(data == 0 || data == 1);
+        data == 1
+    }
+}
+
 impl TargetSet for HashOutTarget {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
         let target = HashOutTarget::from_vec(raw.take(CIRCUIT_DIGEST_SIZE).collect());
@@ -72,7 +98,22 @@ impl TargetSet for HashOutTarget {
     }
 }
 
+impl ParsableTargetSet for HashOutTarget {
+    type PublicInputsData = HashOut<F>;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        HashOut {
+            elements: public_inputs
+                .take(NUM_HASH_OUT_ELTS)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        }
+    }
+}
+
 pub(crate) use crate::impl_target_set;
+
 #[macro_export]
 macro_rules! impl_target_set {
     (
@@ -87,15 +128,61 @@ macro_rules! impl_target_set {
         }
 
         impl $crate::common::targets::TargetSet for $struct_name {
-            fn parse(raw: &mut impl Iterator<Item = plonky2::iop::target::Target>) -> Self {
+            fn parse(_raw: &mut impl ::std::iter::Iterator<Item = plonky2::iop::target::Target>) -> Self {
                 Self {
-                    $($field_name: TargetSet::parse(raw)),*
+                    $($field_name: $crate::common::targets::TargetSet::parse(_raw)),*
                 }
             }
 
-            fn into_targets_iter(self) -> impl Iterator<Item = plonky2::iop::target::Target> {
+            fn into_targets_iter(self) -> impl Iterator<Item = ::plonky2::iop::target::Target> {
                 ::std::iter::empty()
                 $(.chain(self.$field_name.into_targets_iter()))*
+            }
+        }
+    }
+}
+
+pub(crate) use crate::impl_parsable_target_set;
+
+#[macro_export]
+macro_rules! impl_parsable_target_set {
+    (
+        $vis:vis struct $struct_name:ident {
+            $($field_vis:vis $field_name:ident: $field_type:ty),*
+            $(,)?
+        }
+    ) => {
+        #[derive(Clone, Debug)]
+        $vis struct $struct_name {
+            $($field_vis $field_name: $field_type),*
+        }
+
+        impl $crate::common::targets::TargetSet for $struct_name {
+            fn parse(raw: &mut impl ::std::iter::Iterator<Item = plonky2::iop::target::Target>) -> Self {
+                Self {
+                    $($field_name: $crate::common::targets::TargetSet::parse(raw)),*
+                }
+            }
+
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = ::plonky2::iop::target::Target> {
+                ::std::iter::empty()
+                $(.chain(self.$field_name.into_targets_iter()))*
+            }
+        }
+
+        ::paste::paste! {
+            $vis struct [<$struct_name PublicInputs>] {
+                $($field_vis $field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::PublicInputsData),*
+            }
+
+            impl $crate::common::targets::ParsableTargetSet for $struct_name {
+                type PublicInputsData = [<$struct_name PublicInputs>];
+
+                fn parse_public_inputs(_public_inputs: &mut impl ::std::iter::Iterator<Item = F>) -> Self::PublicInputsData {
+                    Self::PublicInputsData {
+                        $($field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::parse_public_inputs(_public_inputs)),*
+                    }
+                }
             }
         }
     }
@@ -123,13 +210,12 @@ impl<const NUM_CAP_ELEMENTS: usize> TargetSet for VerifierDataTarget<NUM_CAP_ELE
         self.circuit_digest.into_targets_iter().chain(
             self.merkle_caps
                 .into_iter()
-                .map(|hash| hash.into_targets_iter())
-                .flatten(),
+                .flat_map(|hash| hash.into_targets_iter()),
         )
     }
 }
 
-// REFACTOR: remove pub on inner type.
+// TODO REFACTOR: remove pub on inner type.
 #[derive(Clone, Debug, Copy)]
 pub struct ArrayTarget<T: TargetSet, const N: usize>(pub [T; N]);
 
@@ -150,6 +236,74 @@ impl<T: TargetSet, const N: usize> TargetSet for ArrayTarget<T, N> {
         self.0
             .into_iter()
             .flat_map(|element| element.into_targets_iter())
+    }
+}
+
+impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
+    pub fn constant_read(&self, at: usize) -> T {
+        self.0[at].clone()
+    }
+
+    pub fn constant_read_array<const R: usize>(&self, at: usize) -> ArrayTarget<T, R> {
+        ArrayTarget(
+            (0..R)
+                .map(|offset| self.constant_read(at + offset))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> T {
+        let self_targets = self
+            .0
+            .clone()
+            .into_iter()
+            .map(|ts| ts.into_targets_iter().collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let inner_target_len = self_targets[0].len();
+        assert!(self_targets.iter().all(|t| t.len() == inner_target_len));
+
+        let self_targets_padded_len = (self_targets.len() * inner_target_len).next_power_of_two();
+        let zero_target = builder.zero();
+        let self_targets = self_targets
+            .into_iter()
+            .flatten()
+            .chain(iter::repeat(zero_target))
+            .take(self_targets_padded_len)
+            .collect::<Vec<_>>();
+
+        let access_targets = (0..inner_target_len)
+            .map(|offset| {
+                let offset_const = builder.constant(F::from_canonical_usize(offset));
+                builder.add(at.0, offset_const)
+            })
+            .collect::<Vec<_>>();
+
+        let mut result_targets = access_targets
+            .into_iter()
+            .map(|access_at| builder.random_access(access_at, self_targets.clone()));
+
+        T::parse_exact(&mut result_targets)
+    }
+
+    pub fn random_read_array<const R: usize>(
+        &self,
+        at: SingleTarget,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> ArrayTarget<T, R> {
+        ArrayTarget(
+            (0..R)
+                .map(|offset| {
+                    let offset = builder.constant(F::from_canonical_usize(offset));
+                    let read_at = builder.add(at.to_target(), offset);
+                    self.random_read(read_at.into(), builder)
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
     }
 }
 
@@ -202,7 +356,7 @@ impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SingleTarget(Target);
 
 impl TargetSet for SingleTarget {
@@ -212,6 +366,14 @@ impl TargetSet for SingleTarget {
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
         std::iter::once(self.0)
+    }
+}
+
+impl ParsableTargetSet for SingleTarget {
+    type PublicInputsData = u64;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs.next().unwrap().to_canonical_u64()
     }
 }
 
@@ -227,29 +389,182 @@ impl SingleTarget {
     }
 }
 
-macro_rules! impl_array_target_wrapper {
-    ($name:ident, $target_ty:ty, $len:ident) => {
-        #[derive(Clone, Debug)]
-        pub struct $name(ArrayTarget<$target_ty, $len>);
+#[derive(Clone, Debug)]
+pub struct ByteTarget(Target);
 
-        impl Deref for $name {
-            type Target = ArrayTarget<$target_ty, $len>;
+impl TargetSet for ByteTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self(raw.next().unwrap())
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.0)
+    }
+}
+
+impl ByteTarget {
+    pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+        Self(builder.constant(F::from_canonical_u8(value)))
+    }
+
+    pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+        builder.range_check(target, 8);
+        Self(target)
+    }
+
+    pub fn from_target_unsafe(target: Target) -> ByteTarget {
+        Self(target)
+    }
+
+    pub fn to_target(&self) -> Target {
+        self.0
+    }
+
+    /// Splits byte into `(least_significant, most_significant)` half-bytes.
+    pub fn to_half_byte_targets(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> (HalfByteTarget, HalfByteTarget) {
+        let bits = self.to_bit_targets(builder);
+
+        let l_bits = &bits.0[..4];
+        let h_bits = &bits.0[4..];
+
+        (
+            HalfByteTarget::from_target_unsafe(builder.le_sum(l_bits.iter())),
+            HalfByteTarget::from_target_unsafe(builder.le_sum(h_bits.iter())),
+        )
+    }
+
+    /// Arranged from less to most significant bit.
+    pub fn to_bit_targets(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
+        ArrayTarget(builder.low_bits(self.0, 8, 8).try_into().unwrap())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HalfByteTarget(Target);
+
+impl TargetSet for HalfByteTarget {
+    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
+        Self(raw.next().unwrap())
+    }
+
+    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+        std::iter::once(self.0)
+    }
+}
+
+impl ParsableTargetSet for HalfByteTarget {
+    type PublicInputsData = u8;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        let value = public_inputs.next().unwrap().to_canonical_u64();
+        assert!(value < 16);
+        value as u8
+    }
+}
+
+impl HalfByteTarget {
+    pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
+        assert!(value < 16);
+        Self(builder.constant(F::from_canonical_u8(value)))
+    }
+
+    pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
+        builder.range_check(target, 4);
+        Self(target)
+    }
+
+    pub fn from_target_unsafe(target: Target) -> HalfByteTarget {
+        Self(target)
+    }
+
+    pub fn to_target(&self) -> Target {
+        self.0
+    }
+}
+
+pub(crate) use crate::impl_array_target_wrapper;
+
+#[macro_export]
+macro_rules! impl_array_target_wrapper {
+    // TODO: Add access modifier to params.
+    ($name:ident, $target_ty:ty, $len:ident) => {
+        #[derive(::std::clone::Clone, ::std::fmt::Debug)]
+        pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);
+
+        impl ::std::ops::Deref for $name {
+            type Target = $crate::common::targets::ArrayTarget<$target_ty, $len>;
 
             fn deref(&self) -> &Self::Target {
                 &self.0
             }
         }
 
-        impl TargetSet for $name {
-            fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-                Self(TargetSet::parse(raw))
+        impl $crate::common::targets::TargetSet for $name {
+            fn parse(raw: &mut impl ::std::iter::Iterator<Item = Target>) -> Self {
+                Self($crate::common::targets::TargetSet::parse(raw))
             }
 
-            fn into_targets_iter(self) -> impl Iterator<Item = Target> {
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = Target> {
                 self.0.into_targets_iter()
             }
         }
     };
+}
+
+pub(crate) use crate::impl_parsable_array_target_wrapper;
+
+#[macro_export]
+macro_rules! impl_parsable_array_target_wrapper {
+    // TODO: Add access modifier to params.
+    ($name:ident, $target_ty:ty, $len:ident) => {
+        #[derive(::std::clone::Clone, ::std::fmt::Debug)]
+        pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);
+
+        impl ::std::ops::Deref for $name {
+            type Target = $crate::common::targets::ArrayTarget<$target_ty, $len>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl $crate::common::targets::TargetSet for $name {
+            fn parse(raw: &mut impl ::std::iter::Iterator<Item = Target>) -> Self {
+                Self($crate::common::targets::TargetSet::parse(raw))
+            }
+
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = Target> {
+                self.0.into_targets_iter()
+            }
+        }
+
+        impl $crate::common::targets::ParsableTargetSet for $name {
+            type PublicInputsData = <$crate::common::targets::ArrayTarget<$target_ty, $len> as ParsableTargetSet>::PublicInputsData;
+
+            fn parse_public_inputs(public_inputs: &mut impl ::std::iter::Iterator<Item = F>) -> Self::PublicInputsData {
+                $crate::common::targets::ArrayTarget::<$target_ty, $len>::parse_public_inputs(public_inputs)
+            }
+        }
+    };
+}
+
+impl<T, const N: usize> ParsableTargetSet for ArrayTarget<T, N>
+where
+    T: ParsableTargetSet,
+    T::PublicInputsData: Debug,
+{
+    type PublicInputsData = [T::PublicInputsData; N];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        (0..N)
+            .map(|_| T::parse_public_inputs(public_inputs))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
 }
 
 impl_array_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
@@ -263,7 +578,48 @@ impl_array_target_wrapper!(
     Target,
     MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
 );
-impl_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
+
+impl_parsable_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
+
+impl Blake2Target {
+    pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
+        let mut targets = (0..BLAKE2_DIGEST_SIZE_IN_BITS).map(|_| builder.add_virtual_target());
+        Blake2Target::parse_exact(&mut targets)
+    }
+
+    pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
+        let mut targets =
+            (0..BLAKE2_DIGEST_SIZE_IN_BITS).map(|_| builder.add_virtual_bool_target_safe().target);
+        Blake2Target::parse_exact(&mut targets)
+    }
+
+    pub fn set_witness(
+        &self,
+        data: &[bool; BLAKE2_DIGEST_SIZE_IN_BITS],
+        witness: &mut PartialWitness<F>,
+    ) {
+        self.0
+             .0
+            .iter()
+            .zip_eq(data.iter())
+            .for_each(|(target, value)| witness.set_bool_target(*target, *value));
+    }
+
+    pub fn check_equal(
+        &self,
+        other: &Blake2Target,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> BoolTarget {
+        let mut equal = builder._true();
+        for (self_bit, other_bit) in self.0 .0.iter().zip_eq(other.0 .0.iter()) {
+            let bits_equal = builder.is_equal(self_bit.target, other_bit.target);
+            equal = builder.and(equal, bits_equal);
+        }
+
+        equal
+    }
+}
+
 impl_array_target_wrapper!(
     Ed25519PublicKeyTarget,
     BoolTarget,
@@ -274,8 +630,27 @@ impl_array_target_wrapper!(
     BoolTarget,
     ED25519_SIGNATURE_SIZE_IN_BITS
 );
-
 impl_array_target_wrapper!(ValidatorSetTarget, Ed25519PublicKeyTarget, VALIDATOR_COUNT);
+
+impl ParsableTargetSet for Sha256TargetGoldilocks {
+    type PublicInputsData = [u8; 32];
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs
+            .take(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .flat_map(|f| array_to_bits(&f.to_canonical_u64().to_le_bytes())[64 - 52..].to_vec())
+            .skip(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * 52 - SHA256_DIGEST_SIZE_IN_BITS)
+            .collect::<Vec<_>>()
+            .chunks(8)
+            .map(|bits| bits_to_byte(bits.try_into().unwrap()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+}
 
 impl TargetSetWitnessOperations for ValidatorSetTarget {
     fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
@@ -320,6 +695,14 @@ impl SingleTarget {
 
     pub fn from_u52_bits_le(
         bits: ArrayTarget<BoolTarget, 52>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> SingleTarget {
+        Self::from_bool_targets_le(bits, builder)
+    }
+
+    /// Bits are sorted from less to most significant.
+    pub fn from_u8_bits_le(
+        bits: ArrayTarget<BoolTarget, 8>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> SingleTarget {
         Self::from_bool_targets_le(bits, builder)

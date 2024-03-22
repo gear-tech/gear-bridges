@@ -1,23 +1,32 @@
 use itertools::Itertools;
 use plonky2::{
-    field::types::Field64,
-    gates::noop::NoopGate,
-    hash::hash_types::MerkleCapTarget,
+    field::types::Field,
+    hash::{
+        hash_types::{HashOutTarget, MerkleCapTarget},
+        merkle_tree::MerkleCap,
+    },
     iop::{
         target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget},
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
 };
 
 use crate::{
-    common::targets::{
-        impl_target_set, Sha256TargetGoldilocks, SingleTarget, TargetSet, VerifierDataTarget,
+    common::{
+        common_data_for_recursion,
+        targets::{
+            impl_target_set, ParsableTargetSet, Sha256TargetGoldilocks, SingleTarget, TargetSet,
+            VerifierDataTarget,
+        },
     },
     next_validator_set::{NextValidatorSet, NextValidatorSetTarget},
     prelude::*,
@@ -34,7 +43,43 @@ impl_target_set! {
         pub genesis_hash: Sha256TargetGoldilocks,
         pub current_set_id: SingleTarget,
         pub current_hash: Sha256TargetGoldilocks,
+
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
+    }
+}
+
+pub struct LatestValidatorSetPublicInputs {
+    pub genesis_set_id: u64,
+    pub genesis_hash: [u8; 32],
+    pub current_set_id: u64,
+    pub current_hash: [u8; 32],
+
+    pub verifier_only_data: VerifierOnlyCircuitData<C, D>,
+}
+
+impl ParsableTargetSet for LatestValidatorSetTarget {
+    type PublicInputsData = LatestValidatorSetPublicInputs;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        let pis = LatestValidatorSetPublicInputs {
+            genesis_set_id: SingleTarget::parse_public_inputs(public_inputs),
+            genesis_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
+            current_set_id: SingleTarget::parse_public_inputs(public_inputs),
+            current_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
+
+            verifier_only_data: VerifierOnlyCircuitData {
+                circuit_digest: HashOutTarget::parse_public_inputs(public_inputs),
+                constants_sigmas_cap: MerkleCap(
+                    (0..VERIFIER_DATA_NUM_CAP_ELEMENTS)
+                        .map(|_| HashOutTarget::parse_public_inputs(public_inputs))
+                        .collect(),
+                ),
+            },
+        };
+
+        assert_eq!(public_inputs.next(), None);
+
+        pis
     }
 }
 
@@ -49,7 +94,6 @@ struct Circuit {
 
     condition: BoolTarget,
     inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
-    verifier_data_target: VerifierCircuitTarget,
 
     witness: PartialWitness<F>,
 }
@@ -58,7 +102,7 @@ impl Circuit {
     pub fn prove_genesis(mut self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let genesis_data_pis = vec![GENESIS_AUTHORITY_SET_ID]
             .into_iter()
-            .chain(GENESIS_VALIDATOR_SET_HASH.into_iter())
+            .chain(GENESIS_VALIDATOR_SET_HASH)
             .map(F::from_noncanonical_u64)
             .enumerate()
             .collect();
@@ -72,10 +116,6 @@ impl Circuit {
                 genesis_data_pis,
             ),
         );
-        self.witness.set_verifier_data_target(
-            &self.verifier_data_target,
-            &self.cyclic_circuit_data.verifier_only,
-        );
 
         ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness)
     }
@@ -87,10 +127,6 @@ impl Circuit {
         self.witness.set_bool_target(self.condition, true);
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
-        self.witness.set_verifier_data_target(
-            &self.verifier_data_target,
-            &self.cyclic_circuit_data.verifier_only,
-        );
 
         ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness)
     }
@@ -110,6 +146,7 @@ impl LatestValidatorSet {
         circuit.prove_recursive(composed_proof)
     }
 
+    // TODO: use recursively_verify_constant_proof here.
     fn build_circuit(&self) -> Circuit {
         let next_validator_set_proof = self.change_proof.prove();
 
@@ -123,8 +160,8 @@ impl LatestValidatorSet {
         genesis_authority_set_hash.register_as_public_inputs(&mut builder);
 
         // Verify validator set change
-        let next_validator_set_proof_target = builder
-            .add_virtual_proof_with_pis::<C>(&next_validator_set_proof.circuit_data().common);
+        let next_validator_set_proof_target =
+            builder.add_virtual_proof_with_pis(&next_validator_set_proof.circuit_data().common);
 
         let desired_authority_set_change_proof_circuit_digest =
             builder.constant_hash(next_validator_set_proof.circuit_digest());
@@ -174,12 +211,17 @@ impl LatestValidatorSet {
             .register_as_public_inputs(&mut builder);
 
         // Recursion
+        // TODO: Check if verifier data target is asserted with previous.
         let verifier_data_target = builder.add_verifier_data_public_inputs();
-        let common_data = common_data_for_recursion(builder.num_public_inputs());
+        let common_data = common_data_for_recursion(
+            CircuitConfig::standard_recursion_config(),
+            builder.num_public_inputs(),
+            1 << 13,
+        );
 
         let condition = builder.add_virtual_bool_target_safe();
 
-        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis::<C>(&common_data);
+        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis(&common_data);
 
         let inner_cyclic_targets = LatestValidatorSetTarget::parse_exact(
             &mut inner_cyclic_proof_with_pis.public_inputs.iter().cloned(),
@@ -218,6 +260,8 @@ impl LatestValidatorSet {
 
         let cyclic_circuit_data = builder.build::<C>();
 
+        witness.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
+
         Circuit {
             cyclic_circuit_data,
 
@@ -225,40 +269,8 @@ impl LatestValidatorSet {
 
             condition,
             inner_cyclic_proof_with_pis,
-            verifier_data_target,
 
             witness,
         }
     }
-}
-
-fn common_data_for_recursion(public_input_count: usize) -> CommonCircuitData<F, D> {
-    let config = CircuitConfig::standard_recursion_config();
-    let builder = CircuitBuilder::<F, D>::new(config);
-    let data = builder.build::<C>();
-    let config = CircuitConfig::standard_recursion_config();
-    let mut builder = CircuitBuilder::<F, D>::new(config);
-    let proof = builder.add_virtual_proof_with_pis::<C>(&data.common);
-    let verifier_data = VerifierCircuitTarget {
-        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
-        circuit_digest: builder.add_virtual_hash(),
-    };
-
-    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
-    let data = builder.build::<C>();
-
-    let config = CircuitConfig::standard_recursion_config();
-    let mut builder = CircuitBuilder::<F, D>::new(config);
-    let proof = builder.add_virtual_proof_with_pis::<C>(&data.common);
-    let verifier_data = VerifierCircuitTarget {
-        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
-        circuit_digest: builder.add_virtual_hash(),
-    };
-    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
-    while builder.num_gates() < 1 << 13 {
-        builder.add_gate(NoopGate, vec![]);
-    }
-    let mut data = builder.build::<C>().common;
-    data.num_public_inputs = public_input_count;
-    data
 }

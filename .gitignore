@@ -1,7 +1,9 @@
 target/
 .vscode
-**/node_modules
+node_modules
 typechain-types
 artifacts
 cache
 .DS_Store
+data/
+/proof_storage

@@ -20,7 +20,7 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet,
             SingleTarget, TargetSet, VerifierDataTarget,
         },
-        ConstantRecursiveVerifier,
+        BuilderExt,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_proof::node_parser::{

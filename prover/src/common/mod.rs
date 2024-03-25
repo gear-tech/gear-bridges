@@ -26,7 +26,7 @@ pub mod poseidon_bn128;
 use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;
 
-use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
+use self::{poseidon_bn128::config::PoseidonBN128GoldilocksConfig, targets::VerifierDataTarget};
 
 type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
@@ -393,7 +393,7 @@ pub fn wrap_bn128(
     (proof, circuit_data)
 }
 
-pub trait ConstantRecursiveVerifier {
+pub trait BuilderExt {
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
         proof: ProofWithCircuitData<T>,
@@ -401,7 +401,7 @@ pub trait ConstantRecursiveVerifier {
     ) -> T;
 }
 
-impl ConstantRecursiveVerifier for CircuitBuilder<F, D> {
+impl BuilderExt for CircuitBuilder<F, D> {
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
         proof: ProofWithCircuitData<T>,

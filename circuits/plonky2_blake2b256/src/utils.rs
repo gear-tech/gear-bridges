@@ -36,6 +36,8 @@ pub trait CircuitBuilderExt {
     fn add_words_wrapping(&mut self, a: WordTargets, b: WordTargets) -> WordTargets;
 
     fn le_sum(&mut self, bits: impl Iterator<Item = BoolTarget>) -> Target;
+
+    fn split_target_to_word_targets(&mut self, target: Target) -> WordTargets;
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for CircuitBuilder<F, D> {
@@ -108,6 +110,17 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
             sum = self.mul_add(two, sum, bit.target);
         }
         sum
+    }
+
+    fn split_target_to_word_targets(&mut self, target: Target) -> WordTargets {
+        self.split_le(target, WORD_BITS)
+            .chunks(8)
+            .map(|bits| bits.into_iter().rev())
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
     }
 }
 

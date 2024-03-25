@@ -26,8 +26,8 @@ mod header_parser;
 mod leaf_parser;
 mod nibble_parser;
 
-const NODE_DATA_BLOCK_BYTES: usize = 128;
-const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
+pub const NODE_DATA_BLOCK_BYTES: usize = 128;
+pub const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
 

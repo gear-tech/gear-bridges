@@ -5,7 +5,7 @@
 
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::BoolTarget;
+use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::utils::*;
@@ -41,8 +41,8 @@ const R2: usize = 24;
 const R3: usize = 16;
 const R4: usize = 63;
 
-const BLOCK_BYTES: usize = 128;
-const BLOCK_BITS: usize = BLOCK_BYTES * 8;
+pub const BLOCK_BYTES: usize = 128;
+pub const BLOCK_BITS: usize = BLOCK_BYTES * 8;
 const BLOCK_WORDS: usize = 16;
 
 const INTERNAL_STATE_WORDS: usize = 8;
@@ -82,7 +82,21 @@ pub fn blake2_circuit<F: RichField + Extendable<D>, const D: usize>(
 
 pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
+    message: Vec<BoolTarget>,
+) -> [BoolTarget; HASH_BITS] {
+    assert!(message.len() % 8 == 0);
+    let length = builder.constant(F::from_canonical_usize(message.len() / 8));
+    blake2_circuit_from_message_targets_and_length_target(builder, message, length)
+}
+
+/// Calling side is responsible of controlling `length`.
+pub fn blake2_circuit_from_message_targets_and_length_target<
+    F: RichField + Extendable<D>,
+    const D: usize,
+>(
+    builder: &mut CircuitBuilder<F, D>,
     mut message: Vec<BoolTarget>,
+    length: Target,
 ) -> [BoolTarget; HASH_BITS] {
     assert!(message.len() % 8 == 0);
 
@@ -130,25 +144,13 @@ pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>
 
     #[allow(clippy::needless_range_loop)]
     for i in 0..dd - 1 {
-        h = F(
-            builder,
-            &iv,
-            h,
-            &message_blocks[i],
-            ((i + 1) * BLOCK_BYTES) as Word,
-            false,
-        );
+        let t = builder.constant(F::from_canonical_usize((i + 1) * BLOCK_BYTES));
+        h = F(builder, &iv, h, &message_blocks[i], t, false);
     }
 
     if KEY_BYTES == 0 {
-        h = F(
-            builder,
-            &iv,
-            h,
-            &message_blocks[dd - 1],
-            (msg_len_in_bits / 8) as Word,
-            true,
-        );
+        let t = length;
+        h = F(builder, &iv, h, &message_blocks[dd - 1], t, true);
     } else {
         unimplemented!("Hashing with key is not implemented");
     }
@@ -167,7 +169,7 @@ fn F<F: RichField + Extendable<D>, const D: usize>(
     iv: &[WordTargets; IV.len()],
     mut h: [WordTargets; INTERNAL_STATE_WORDS],
     m: &[WordTargets; BLOCK_WORDS],
-    t: Word,
+    t: Target,
     f: bool,
 ) -> [[BoolTarget; WORD_BITS]; INTERNAL_STATE_WORDS] {
     let mut v: [WordTargets; V_WORDS] = h
@@ -179,7 +181,7 @@ fn F<F: RichField + Extendable<D>, const D: usize>(
         .unwrap();
 
     // Offset is bounded by Word, so high word == 0.
-    let offset_low_word = word_array_to_word_targets([t], builder)[0];
+    let offset_low_word = builder.split_target_to_word_targets(t);
     let offset_high_word = word_array_to_word_targets([0], builder)[0];
 
     v[12] = builder.xor_words(v[12], offset_low_word);

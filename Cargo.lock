@@ -5813,6 +5813,7 @@ name = "prover"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake2",
  "env_logger 0.9.3",
  "ff 0.13.0",
  "itertools 0.10.5",

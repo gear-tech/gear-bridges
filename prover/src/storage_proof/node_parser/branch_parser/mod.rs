@@ -12,7 +12,7 @@ use super::{
 use crate::{
     common::{
         targets::{Blake2Target, HalfByteTarget, SingleTarget, TargetSet},
-        ConstantRecursiveVerifier,
+        BuilderExt,
     },
     consts::BLAKE2_DIGEST_SIZE,
     impl_parsable_target_set,

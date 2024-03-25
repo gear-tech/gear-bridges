@@ -402,6 +402,17 @@ impl TargetSet for ByteTarget {
     }
 }
 
+impl ParsableTargetSet for ByteTarget {
+    type PublicInputsData = u8;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs
+            .next()
+            .map(|pi| pi.to_canonical_u64() as u8)
+            .unwrap()
+    }
+}
+
 impl ByteTarget {
     pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
         Self(builder.constant(F::from_canonical_u8(value)))

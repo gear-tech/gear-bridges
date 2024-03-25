@@ -39,6 +39,9 @@ contract Relayer is IRelayer, AccessControl {
 
         _block_numbers[block_number] = bytes32(merkle_root);
         _merkle_roots[bytes32(merkle_root)] = block_number;
+
+        emit MerkleRoot(block_number, bytes32(merkle_root));
+
     }
 
     function get_merkle_root(uint256 block_number) external view returns(bytes32) {

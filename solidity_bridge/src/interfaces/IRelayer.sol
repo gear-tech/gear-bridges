@@ -4,7 +4,8 @@ interface IRelayer {
     error AlreadyInitialized();
     error InvalidProof();
     error BadInput();
- 
+
+    event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
 
     function get_merkle_root(uint256 blockNumber) external view returns(bytes32);
     function get_block_number(bytes32 merkleRoot) external view returns(uint256);

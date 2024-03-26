@@ -16,7 +16,7 @@ use crate::{
     },
     impl_parsable_target_set,
     prelude::*,
-    storage_proof::{
+    storage_proof::storage_trie_proof::{
         node_parser::{
             header_parser::HeaderDescriptor, leaf_parser::data_parser::DataParserInputTarget,
         },

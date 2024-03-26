@@ -16,7 +16,7 @@ use crate::{
         consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
         *,
     },
-    storage_proof::node_parser::{
+    storage_proof::storage_trie_proof::node_parser::{
         BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
     },
     ProofWithCircuitData,
@@ -154,7 +154,10 @@ impl ChildNodeParser {
 #[cfg(test)]
 mod tests {
     use super::{tests_common::*, *};
-    use crate::{common::array_to_bits, storage_proof::node_parser::compose_padded_node_data};
+    use crate::{
+        common::array_to_bits,
+        storage_proof::storage_trie_proof::node_parser::compose_padded_node_data,
+    };
 
     #[test]
     fn test_child_node_parser() {
@@ -240,7 +243,7 @@ pub mod tests_common {
     use parity_scale_codec::{Compact, Encode};
 
     use super::*;
-    use crate::storage_proof::node_parser::compose_padded_node_data;
+    use crate::storage_proof::storage_trie_proof::node_parser::compose_padded_node_data;
 
     #[derive(Clone, Copy)]
     pub enum MockChildType {

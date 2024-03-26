@@ -4,7 +4,7 @@ use plonky2_field::types::Field;
 use crate::{
     common::targets::{impl_target_set, ArrayTarget, Blake2Target, SingleTarget, TargetSet},
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
-    storage_proof::node_parser::NodeDataBlockTarget,
+    storage_proof::storage_trie_proof::node_parser::NodeDataBlockTarget,
 };
 
 impl_target_set! {

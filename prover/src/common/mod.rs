@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use plonky2::{
     gates::noop::NoopGate,
     hash::hash_types::HashOutTarget,
@@ -399,6 +400,9 @@ pub trait BuilderExt {
         proof: ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
     ) -> T;
+
+    /// Select if `condition` { `a` } else { `b` }
+    fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T;
 }
 
 impl BuilderExt for CircuitBuilder<F, D> {
@@ -419,6 +423,15 @@ impl BuilderExt for CircuitBuilder<F, D> {
         );
 
         T::parse_exact(&mut proof_with_pis_target.public_inputs.into_iter())
+    }
+
+    fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T {
+        let mut result = a
+            .clone()
+            .into_targets_iter()
+            .zip_eq(b.clone().into_targets_iter())
+            .map(|(a, b)| self.select(condition, a, b));
+        T::parse_exact(&mut result)
     }
 }
 

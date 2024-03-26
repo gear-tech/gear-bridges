@@ -21,13 +21,15 @@ use crate::{
     prelude::*,
 };
 
-mod branch_parser;
+pub mod branch_parser;
 mod header_parser;
-mod leaf_parser;
+pub mod leaf_parser;
 mod nibble_parser;
 
 pub const NODE_DATA_BLOCK_BYTES: usize = 128;
 pub const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
+pub const MAX_BRANCH_NODE_DATA_LENGTH_BYTES: usize =
+    MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
 

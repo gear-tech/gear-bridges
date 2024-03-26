@@ -1,13 +1,18 @@
+use parity_scale_codec::Encode;
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_field::types::Field;
+use trie_db::{
+    node::{Node, NodeHandle},
+    NodeCodec, TrieLayout,
+};
 
 use super::{
     header_parser::{self, HeaderParserInputTarget},
     nibble_parser::{self, NibbleParserInputTarget},
-    BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    BranchNodeDataPaddedTarget,
 };
 use crate::{
     common::{
@@ -18,7 +23,10 @@ use crate::{
     impl_parsable_target_set,
     prelude::*,
     storage_proof::{
-        node_parser::branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
+        node_parser::{
+            branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
+            compose_padded_node_data,
+        },
         storage_address::PartialStorageAddressTarget,
     },
     ProofWithCircuitData,
@@ -41,34 +49,32 @@ impl_parsable_target_set! {
     }
 }
 
-// TODO: Decode it from node_data using TrieCodec, providing:
-// node_data: Vec<u8>
-// claimed_child_node_nibble: u8
-// partial_address_nibbles: Vec<u8>
 pub struct BranchParser {
-    pub padded_node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
-    pub node_data_length: usize,
-
-    pub children_data_offset: usize,
-    pub children_lengths: Vec<usize>,
+    pub node_data: Vec<u8>,
 
     pub claimed_child_node_nibble: u8,
-    pub claimed_child_index_in_array: usize,
-    pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
-
     pub partial_address_nibbles: Vec<u8>,
+    pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
+}
+
+struct Metadata {
+    children_data_offset: usize,
+    children_lengths: Vec<usize>,
+    claimed_child_index_in_array: usize,
 }
 
 impl BranchParser {
-    pub fn prove(&self) -> ProofWithCircuitData<BranchParserTarget> {
+    pub fn prove(self) -> ProofWithCircuitData<BranchParserTarget> {
+        let metadata = self.parse_metadata();
+
         let child_node_parser_proof = ChildNodeArrayParser {
             initial_data: child_node_array_parser::InitialData {
-                node_data: self.padded_node_data,
-                read_offset: self.children_data_offset,
-                claimed_child_index_in_array: self.claimed_child_index_in_array,
+                node_data: compose_padded_node_data(self.node_data),
+                read_offset: metadata.children_data_offset,
+                claimed_child_index_in_array: metadata.claimed_child_index_in_array,
                 claimed_child_hash: self.claimed_child_hash,
             },
-            children_lengths: self.children_lengths.clone(),
+            children_lengths: metadata.children_lengths,
         }
         .prove();
 
@@ -172,16 +178,52 @@ impl BranchParser {
 
         result
     }
+
+    fn parse_metadata(&self) -> Metadata {
+        type TrieCodec = <sp_trie::LayoutV1<sp_core::Blake2Hasher> as TrieLayout>::Codec;
+        let node = TrieCodec::decode(&self.node_data).unwrap();
+
+        if let Node::NibbledBranch(_, children, value) = node {
+            assert!(value.is_none(), "Non-empty value is not supported");
+
+            let mut children_lengths = vec![];
+            for child in &children {
+                let serialized_size = match child {
+                    Some(NodeHandle::Hash(hash)) => hash.encode().len(),
+                    Some(NodeHandle::Inline(data)) => data.encode().len(),
+                    None => 0,
+                };
+                children_lengths.push(serialized_size);
+            }
+
+            let all_children_length: usize = children_lengths.iter().sum();
+            let children_data_offset = self.node_data.len() - all_children_length;
+
+            let mut claimed_child_index_in_array = 0;
+            for child_idx in 0..self.claimed_child_node_nibble {
+                if children[child_idx as usize].is_some() {
+                    claimed_child_index_in_array += 1;
+                }
+            }
+
+            Metadata {
+                children_data_offset,
+                children_lengths,
+                claimed_child_index_in_array,
+            }
+        } else {
+            panic!("Unexpected node type: expected NibbledBranch")
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use parity_scale_codec::Encode;
     use sp_core::H256;
     use std::iter;
-    use trie_db::{ChildReference, NibbleSlice, NodeCodec, TrieLayout};
+    use trie_db::{ChildReference, NibbleSlice};
 
-    use super::{super::compose_padded_node_data, *};
+    use super::*;
     use crate::common::{pad_byte_vec, targets::ParsableTargetSet};
 
     #[test]
@@ -245,18 +287,6 @@ mod tests {
             None,
         );
 
-        let mut children_lengths = vec![];
-        for child_idx in 0..children.len() {
-            let serialized_size = match children[child_idx] {
-                Some(ChildReference::Hash(hash)) => hash.as_bytes().encode().len(),
-                Some(ChildReference::Inline(data, len)) => data[..len].encode().len(),
-                None => continue,
-            };
-            children_lengths.push(serialized_size);
-        }
-
-        let all_children_len: usize = children_lengths.iter().sum();
-
         let claimed_child_hash = if let Some(ChildReference::Hash(hash)) =
             children[claimed_child_node_nibble as usize]
         {
@@ -265,21 +295,11 @@ mod tests {
             panic!("Invalid claimed_child_node_nibble");
         };
 
-        let claimed_child_index_in_array = children[..claimed_child_node_nibble as usize]
-            .iter()
-            .filter(|child| child.is_some())
-            .count();
-
         let circuit_input = BranchParser {
-            node_data_length: node_data.len(),
-            children_data_offset: node_data.len() - all_children_len,
-            children_lengths,
+            node_data,
             claimed_child_node_nibble,
             claimed_child_hash,
-            claimed_child_index_in_array,
             partial_address_nibbles: vec![],
-
-            padded_node_data: compose_padded_node_data(node_data),
         };
 
         let nibble_count = nibbles.len();

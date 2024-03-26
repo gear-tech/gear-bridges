@@ -26,13 +26,13 @@ use super::node_parser::{MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_
 
 const MAX_BLOCK_COUNT: usize =
     (NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS).div_ceil(BLOCK_BYTES);
-const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
+pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
 impl_parsable_target_set! {
     pub struct GenericBlake2Target {
-        data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
-        length: SingleTarget,
-        hash: Blake2Target
+        pub data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
+        pub length: SingleTarget,
+        pub hash: Blake2Target
     }
 }
 

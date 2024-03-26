@@ -31,9 +31,10 @@ ff.workspace = true
 lazy_static.workspace = true
 paste.workspace = true
 
-[dev-dependencies]
 parity-scale-codec.workspace = true
 sp-trie = { workspace = true, features = ["std"] }
 sp-core = { workspace = true, features = ["std"] }
 trie-db = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
 blake2.workspace = true

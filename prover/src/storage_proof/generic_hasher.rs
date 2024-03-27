@@ -22,10 +22,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
-use super::node_parser::{MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES};
-
-const MAX_BLOCK_COUNT: usize =
-    (NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS).div_ceil(BLOCK_BYTES);
+const MAX_BLOCK_COUNT: usize = 5;
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
 impl_parsable_target_set! {

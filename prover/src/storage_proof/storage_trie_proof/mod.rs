@@ -16,7 +16,6 @@ use self::{
 };
 
 mod branch_node_chain;
-mod generic_hasher;
 mod hashed_branch_parser;
 mod hashed_leaf_parser;
 mod node_parser;

@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    generic_hasher::GenericBlake2, node_parser::leaf_parser::LeafParser,
+    super::generic_hasher::GenericBlake2, node_parser::leaf_parser::LeafParser,
     storage_address::PartialStorageAddressTarget,
 };
 

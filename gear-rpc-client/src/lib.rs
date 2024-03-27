@@ -284,8 +284,8 @@ impl GearApi {
         // - block number           (4 bytes)
         // - merkle state root      (32 bytes)
         // - ...
-        let fetched_storage_root_hash =
-            Blake2Hasher::hash(&storage_inclusion_proof.branch_nodes_data[0].encoded_node);
+        let root_node = storage_inclusion_proof.branch_nodes_data.last().unwrap();
+        let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.encoded_node);
         assert_eq!(
             &encoded_header[32 + 4..32 + 4 + 32],
             &fetched_storage_root_hash.0

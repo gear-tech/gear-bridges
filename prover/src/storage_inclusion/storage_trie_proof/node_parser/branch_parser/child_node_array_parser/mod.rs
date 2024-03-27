@@ -83,7 +83,7 @@ impl ChildNodeArrayParser {
     }
 
     fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTarget> {
-        log::info!("Proving child node parser...");
+        log::info!("Proving child node array parser...");
         let claimed_child_hash = array_to_bits(&self.initial_data.claimed_child_hash)
             .try_into()
             .unwrap();
@@ -111,7 +111,7 @@ impl ChildNodeArrayParser {
             read_offset += child_length;
         }
 
-        log::info!("Proven child node parser");
+        log::info!("Proven child node array parser");
 
         cyclic_proof.unwrap()
     }

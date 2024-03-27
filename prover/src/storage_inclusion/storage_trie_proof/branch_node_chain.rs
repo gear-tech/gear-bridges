@@ -89,12 +89,11 @@ impl BranchNodeChain {
         let mut composed_proof: Option<ProofWithCircuitData<_>> = None;
         for node in self.nodes {
             let partial_address_nibbles = if let Some(composed_proof) = &composed_proof {
-                BranchNodeChainParserTarget::parse_public_inputs(
+                let address = BranchNodeChainParserTarget::parse_public_inputs(
                     &mut composed_proof.pis().into_iter(),
                 )
-                .partial_address
-                .address
-                .to_vec()
+                .partial_address;
+                address.address[..address.length as usize].to_vec()
             } else {
                 vec![]
             };

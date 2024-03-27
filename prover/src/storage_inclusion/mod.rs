@@ -31,13 +31,14 @@ impl_parsable_target_set! {
 #[derive(Clone)]
 
 pub struct BranchNodeData {
-    data: Vec<u8>,
-    child_nibble: u8,
+    pub data: Vec<u8>,
+    pub child_nibble: u8,
 }
 
 #[derive(Clone)]
 pub struct StorageInclusion {
     pub block_header_data: Vec<u8>,
+    /// Arranged from root to leaf.
     pub branch_node_data: Vec<BranchNodeData>,
     pub leaf_node_data: Vec<u8>,
 }

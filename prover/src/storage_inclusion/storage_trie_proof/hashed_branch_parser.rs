@@ -39,6 +39,8 @@ impl HashedBranchParser {
         .prove();
         let branch_parser_proof = self.branch_parser.prove();
 
+        log::info!("Composing hasher proof and branch parser proof...");
+
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
@@ -76,6 +78,10 @@ impl HashedBranchParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        let result = ProofWithCircuitData::from_builder(builder, witness);
+
+        log::info!("Composed hasher proof and branch parser proof");
+
+        result
     }
 }

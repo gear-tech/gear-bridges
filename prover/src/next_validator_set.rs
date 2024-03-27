@@ -10,8 +10,8 @@ use crate::{
         ProofComposition,
     },
     consts::VALIDATOR_COUNT,
-    merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,
+    storage_inclusion::{StorageInclusion, StorageInclusionTarget},
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
     ProofWithCircuitData,
 };
@@ -33,20 +33,19 @@ impl_target_set! {
 
 pub struct NextValidatorSet {
     pub current_epoch_block_finality: BlockFinality,
-    pub next_validator_set_inclusion_proof:
-        MerkleProof<SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS>,
+    pub next_validator_set_inclusion_proof: StorageInclusion,
+    pub next_validator_set_data: Vec<u8>,
 }
 
 impl NextValidatorSet {
     pub fn prove(&self) -> ProofWithCircuitData<NextValidatorSetTarget> {
         log::info!("Proving validator set hash change...");
 
-        let next_validator_set_data = self.next_validator_set_inclusion_proof.leaf_data;
         let mut next_validator_set = vec![];
         // TODO REFACTOR
         for validator_idx in 0..VALIDATOR_COUNT {
             next_validator_set.push(
-                next_validator_set_data[1
+                self.next_validator_set_data[1
                     + validator_idx * SESSION_KEYS_SIZE
                     + consts::ED25519_PUBLIC_KEY_SIZE * 2
                     ..1 + validator_idx * SESSION_KEYS_SIZE + consts::ED25519_PUBLIC_KEY_SIZE * 3]
@@ -141,12 +140,11 @@ impl ValidatorSetInStorageTarget {
 
 struct NextValidatorSetNonHashed {
     current_epoch_block_finality: BlockFinality,
-    next_validator_set_inclusion_proof:
-        MerkleProof<SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS>,
+    next_validator_set_inclusion_proof: StorageInclusion,
 }
 
 impl NextValidatorSetNonHashed {
-    pub fn prove(&self) -> ProofWithCircuitData<NextValidatorSetNonHashedTarget> {
+    pub fn prove(self) -> ProofWithCircuitData<NextValidatorSetNonHashedTarget> {
         log::info!("Proving validator set change...");
 
         let merkle_tree_proof = self.next_validator_set_inclusion_proof.prove();
@@ -155,12 +153,12 @@ impl NextValidatorSetNonHashed {
         let composition_builder = ProofComposition::new(merkle_tree_proof, block_finality_proof);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          merkle_proof: MerkleProofTarget<ValidatorSetInStorageTarget>,
+                          inclusion_proof: StorageInclusionTarget,
                           block_finality: BlockFinalityTarget| {
             block_finality
                 .message
                 .block_hash
-                .connect(&merkle_proof.root_hash, builder);
+                .connect(&inclusion_proof.block_hash, builder);
 
             NextValidatorSetNonHashedTarget {
                 current_validator_set_hash: block_finality.validator_set_hash,
@@ -168,7 +166,7 @@ impl NextValidatorSetNonHashed {
                     block_finality.message.authority_set_id,
                     builder,
                 ),
-                next_validator_set: merkle_proof.leaf_data.into_grandpa_authority_keys(),
+                next_validator_set: todo!(),
             }
         };
 

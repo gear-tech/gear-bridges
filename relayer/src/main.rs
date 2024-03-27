@@ -13,6 +13,7 @@ use prover::{
     message_sent::MessageSent,
     next_validator_set::NextValidatorSet,
     prelude::GENESIS_AUTHORITY_SET_ID,
+    storage_inclusion::StorageInclusion,
 };
 
 const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
@@ -108,11 +109,15 @@ async fn main() {
                 let (block, current_epoch_block_finality) = api
                     .fetch_finality_proof_for_session(GENESIS_AUTHORITY_SET_ID)
                     .await;
+
+                let next_session_keys_inclusion_proof =
+                    api.fetch_next_session_keys_inclusion_proof(block).await;
+                let next_validator_set_inclusion_proof: StorageInclusion = todo!();
+
                 let change_from_genesis = NextValidatorSet {
                     current_epoch_block_finality,
-                    next_validator_set_inclusion_proof: api
-                        .fetch_next_session_keys_merkle_proof(block)
-                        .await,
+                    next_validator_set_inclusion_proof,
+                    next_validator_set_data: todo!(),
                 };
 
                 let genesis_proof = LatestValidatorSet {
@@ -138,11 +143,15 @@ async fn main() {
 
                 let (block, current_epoch_block_finality) =
                     api.fetch_finality_proof_for_session(validator_set_id).await;
+
+                let next_session_keys_inclusion_proof =
+                    api.fetch_next_session_keys_inclusion_proof(block).await;
+                let next_validator_set_inclusion_proof: StorageInclusion = todo!();
+
                 let next_change = NextValidatorSet {
                     current_epoch_block_finality,
-                    next_validator_set_inclusion_proof: api
-                        .fetch_next_session_keys_merkle_proof(block)
-                        .await,
+                    next_validator_set_inclusion_proof,
+                    next_validator_set_data: todo!(),
                 };
 
                 let validator_set_change_proof = LatestValidatorSet {
@@ -173,9 +182,14 @@ async fn main() {
                     .search_for_validator_set_block(latest_proof_public_inputs.current_set_id)
                     .await;
                 let (block, block_finality) = api.fetch_finality_proof(block).await;
+
+                let sent_message_inclusion_proof =
+                    api.fetch_sent_message_inclusion_proof(block).await;
+                let inclusion_proof: StorageInclusion = todo!();
+
                 let message_sent = MessageSent {
                     block_finality,
-                    inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
+                    inclusion_proof,
                 };
 
                 let final_proof = FinalProof {

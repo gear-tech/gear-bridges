@@ -9,8 +9,8 @@ use crate::{
         },
         ProofComposition,
     },
-    merkle_proof::{MerkleProof, MerkleProofTarget},
     prelude::*,
+    storage_inclusion::{StorageInclusion, StorageInclusionTarget},
     ProofWithCircuitData,
 };
 
@@ -22,20 +22,13 @@ impl_target_set! {
     }
 }
 
-// TODO: Remove generic as we have constant-length message(keccak-256 hash).
-pub struct MessageSent<const MESSAGE_LENGTH_IN_BITS: usize>
-where
-    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
-{
+pub struct MessageSent {
     pub block_finality: BlockFinality,
-    pub inclusion_proof: MerkleProof<MESSAGE_LENGTH_IN_BITS>,
+    pub inclusion_proof: StorageInclusion,
 }
 
-impl<const MESSAGE_LENGTH_IN_BITS: usize> MessageSent<MESSAGE_LENGTH_IN_BITS>
-where
-    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
-{
-    pub fn prove(&self) -> ProofWithCircuitData<MessageSentTarget> {
+impl MessageSent {
+    pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
         log::info!("Proving message presense in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
@@ -49,20 +42,17 @@ where
             ProofComposition::new_with_config(inclusion_proof, finality_proof, config);
 
         let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          inclusion_proof: MerkleProofTarget<
-            BitArrayTarget<MESSAGE_LENGTH_IN_BITS>,
-        >,
+                          inclusion_proof: StorageInclusionTarget,
                           finality_proof: BlockFinalityTarget| {
             inclusion_proof
-                .root_hash
+                .block_hash
                 .connect(&finality_proof.message.block_hash, builder);
 
-            // TODO: Assert here that provided leaf data have the correct size(Keccak256 size)
-            // and pad it with zeroes.
+            // TODO: De-hash item here.
             let padding_targets = (0..4).map(|_| builder.constant_bool(false).target);
             let message_targets = BitArrayTarget::<260>::parse(
                 &mut inclusion_proof
-                    .leaf_data
+                    .storage_item_hash
                     .into_targets_iter()
                     .take(256)
                     .chain(padding_targets),

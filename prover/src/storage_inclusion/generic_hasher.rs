@@ -22,7 +22,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
-const MAX_BLOCK_COUNT: usize = 5;
+const MAX_BLOCK_COUNT: usize = 6;
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
 impl_parsable_target_set! {
@@ -40,6 +40,7 @@ pub struct GenericBlake2 {
 impl GenericBlake2 {
     pub fn prove(self) -> ProofWithCircuitData<GenericBlake2Target> {
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
+        assert!(block_count <= MAX_BLOCK_COUNT);
 
         let variative_proof = VariativeBlake2 { data: self.data }.prove();
 
@@ -62,6 +63,7 @@ impl GenericBlake2 {
         }
 
         let verifier_data_idx = builder.add_const(block_count_target, F::NEG_ONE);
+        // TODO: check range of verifier_data_idx here as verifier_data_targets is padded.
         let verifier_data_target =
             builder.random_access_verifier_data(verifier_data_idx, verifier_data_targets);
 

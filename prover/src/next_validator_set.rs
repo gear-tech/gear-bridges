@@ -1,15 +1,22 @@
-use plonky2::plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig};
+use plonky2::{
+    iop::witness::{PartialWitness, WitnessWrite},
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+};
+use plonky2_field::types::PrimeField64;
+use std::iter;
 
 use crate::{
     block_finality::{BlockFinality, BlockFinalityTarget},
     common::{
+        array_to_bits,
         targets::{
-            impl_target_set, ArrayTarget, BitArrayTarget, Ed25519PublicKeyTarget, Sha256Target,
-            Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
+            impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget,
+            Sha256Target, Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
         },
-        ProofComposition,
+        BuilderExt, ProofComposition,
     },
     consts::VALIDATOR_COUNT,
+    next_validator_set,
     prelude::*,
     storage_inclusion::{StorageInclusion, StorageInclusionTarget},
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
@@ -34,7 +41,7 @@ impl_target_set! {
 pub struct NextValidatorSet {
     pub current_epoch_block_finality: BlockFinality,
     pub next_validator_set_inclusion_proof: StorageInclusion,
-    pub next_validator_set_data: Vec<u8>,
+    pub next_validator_set_storage_data: Vec<u8>,
 }
 
 impl NextValidatorSet {
@@ -45,7 +52,7 @@ impl NextValidatorSet {
         // TODO REFACTOR
         for validator_idx in 0..VALIDATOR_COUNT {
             next_validator_set.push(
-                self.next_validator_set_data[1
+                self.next_validator_set_storage_data[1
                     + validator_idx * SESSION_KEYS_SIZE
                     + consts::ED25519_PUBLIC_KEY_SIZE * 2
                     ..1 + validator_idx * SESSION_KEYS_SIZE + consts::ED25519_PUBLIC_KEY_SIZE * 3]
@@ -62,6 +69,7 @@ impl NextValidatorSet {
         let non_hashed_next_validator_set_proof = NextValidatorSetNonHashed {
             current_epoch_block_finality: self.current_epoch_block_finality.clone(),
             next_validator_set_inclusion_proof: self.next_validator_set_inclusion_proof.clone(),
+            next_validator_set_storage_data: self.next_validator_set_storage_data.clone(),
         }
         .prove();
 
@@ -141,37 +149,66 @@ impl ValidatorSetInStorageTarget {
 struct NextValidatorSetNonHashed {
     current_epoch_block_finality: BlockFinality,
     next_validator_set_inclusion_proof: StorageInclusion,
+    next_validator_set_storage_data: Vec<u8>,
 }
 
 impl NextValidatorSetNonHashed {
     pub fn prove(self) -> ProofWithCircuitData<NextValidatorSetNonHashedTarget> {
         log::info!("Proving validator set change...");
 
-        let merkle_tree_proof = self.next_validator_set_inclusion_proof.prove();
+        let next_validator_set_bits = array_to_bits(&self.next_validator_set_storage_data);
+
+        let inclusion_proof = self.next_validator_set_inclusion_proof.prove();
         let block_finality_proof = self.current_epoch_block_finality.prove();
 
-        let composition_builder = ProofComposition::new(merkle_tree_proof, block_finality_proof);
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::new(config);
+        let mut witness = PartialWitness::new();
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          inclusion_proof: StorageInclusionTarget,
-                          block_finality: BlockFinalityTarget| {
-            block_finality
-                .message
-                .block_hash
-                .connect(&inclusion_proof.block_hash, builder);
+        let inclusion_proof_target =
+            builder.recursively_verify_constant_proof(inclusion_proof, &mut witness);
+        let block_finality_target =
+            builder.recursively_verify_constant_proof(block_finality_proof, &mut witness);
 
-            NextValidatorSetNonHashedTarget {
-                current_validator_set_hash: block_finality.validator_set_hash,
-                authority_set_id: SingleTarget::from_u64_bits_le_lossy(
-                    block_finality.message.authority_set_id,
-                    builder,
-                ),
-                next_validator_set: todo!(),
-            }
-        };
+        inclusion_proof_target
+            .block_hash
+            .connect(&block_finality_target.message.block_hash, &mut builder);
 
-        composition_builder
-            .assert_both_circuit_digests()
-            .compose(targets_op)
+        let authority_set_id = SingleTarget::from_u64_bits_le_lossy(
+            block_finality_target.message.authority_set_id,
+            &mut builder,
+        );
+
+        let next_validator_set_targets: Vec<_> = next_validator_set_bits
+            .into_iter()
+            .map(|bit| {
+                let target = builder.add_virtual_bool_target_safe();
+                witness.set_bool_target(target, bit);
+                target
+            })
+            .collect();
+
+        let next_validator_set_hash = plonky2_blake2b256::circuit::blake2_circuit_from_targets(
+            &mut builder,
+            next_validator_set_targets.clone(),
+        );
+        let next_validator_set_hash =
+            Blake2Target::parse_exact(&mut next_validator_set_hash.into_iter().map(|t| t.target));
+
+        next_validator_set_hash.connect(&inclusion_proof_target.storage_item_hash, &mut builder);
+
+        let next_validator_set = ValidatorSetInStorageTarget::parse_exact(
+            &mut next_validator_set_targets.into_iter().map(|t| t.target),
+        )
+        .into_grandpa_authority_keys();
+
+        NextValidatorSetNonHashedTarget {
+            current_validator_set_hash: block_finality_target.validator_set_hash,
+            authority_set_id,
+            next_validator_set,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }

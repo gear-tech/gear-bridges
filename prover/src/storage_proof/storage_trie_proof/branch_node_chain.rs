@@ -17,6 +17,7 @@ use std::iter;
 
 use super::{
     hashed_branch_parser::HashedBranchParser, storage_address::PartialStorageAddressTarget,
+    BranchNodeData,
 };
 use crate::{
     common::{
@@ -50,11 +51,6 @@ impl_target_set! {
 
         verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
     }
-}
-
-pub struct BranchNodeData {
-    pub data: Vec<u8>,
-    pub child_nibble: u8,
 }
 
 pub struct BranchNodeChain {

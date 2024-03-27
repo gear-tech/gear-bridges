@@ -28,9 +28,15 @@ impl_parsable_target_set! {
     }
 }
 
+pub struct BranchNodeData {
+    data: Vec<u8>,
+    child_nibble: u8,
+}
+
 pub struct StorageInclusion {
     pub block_header_data: Vec<u8>,
-    pub storage_trie: StorageTrieProof,
+    pub branch_node_data: Vec<BranchNodeData>,
+    pub leaf_node_data: Vec<u8>,
 }
 
 impl StorageInclusion {
@@ -40,7 +46,11 @@ impl StorageInclusion {
         }
         .prove();
 
-        let storage_trie_proof = self.storage_trie.prove();
+        let storage_trie_proof = StorageTrieProof {
+            branch_nodes: self.branch_node_data,
+            leaf_node_data: self.leaf_node_data,
+        }
+        .prove();
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);

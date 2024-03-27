@@ -2,16 +2,19 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::{
     common::{
-        targets::{impl_target_set, Blake2Target, TargetSet},
+        targets::{impl_target_set, Blake2Target, ParsableTargetSet, TargetSet},
         ProofComposition,
     },
     prelude::*,
     ProofWithCircuitData,
 };
 
+use super::BranchNodeData;
+
 use self::{
     branch_node_chain::BranchNodeChainParserTarget,
     hashed_leaf_parser::{HashedLeafParser, HashedLeafParserTarget},
+    node_parser::leaf_parser::LeafParser,
     storage_address::PartialStorageAddressTarget,
 };
 
@@ -32,15 +35,32 @@ impl_target_set! {
 }
 
 pub struct StorageTrieProof {
-    // TODO: Compose data from node vec.
-    pub branch_node_chain: BranchNodeChain,
-    pub hashed_leaf_parser: HashedLeafParser,
+    pub branch_nodes: Vec<BranchNodeData>,
+    pub leaf_node_data: Vec<u8>,
 }
 
 impl StorageTrieProof {
     pub fn prove(self) -> ProofWithCircuitData<StorageTrieProofTarget> {
-        let branch_node_chain_proof = self.branch_node_chain.prove();
-        let hashed_leaf_parser_proof = self.hashed_leaf_parser.prove();
+        let branch_node_chain_proof = BranchNodeChain {
+            nodes: self.branch_nodes,
+        }
+        .prove();
+
+        let partial_address_nibbles = {
+            let branch_node_chain_pis = BranchNodeChainParserTarget::parse_public_inputs_exact(
+                &mut branch_node_chain_proof.pis().into_iter(),
+            );
+            let partial_address = branch_node_chain_pis.partial_address;
+            partial_address.address[..partial_address.length as usize].to_vec()
+        };
+
+        let hashed_leaf_parser_proof = HashedLeafParser {
+            leaf_parser: LeafParser {
+                node_data: self.leaf_node_data,
+                partial_address_nibbles,
+            },
+        }
+        .prove();
 
         let composition_builder =
             ProofComposition::new(branch_node_chain_proof, hashed_leaf_parser_proof);

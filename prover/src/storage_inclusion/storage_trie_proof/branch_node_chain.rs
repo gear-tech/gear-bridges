@@ -17,6 +17,7 @@ use std::iter;
 
 use super::{
     hashed_branch_parser::HashedBranchParser, storage_address::PartialStorageAddressTarget,
+    BranchNodeData,
 };
 use crate::{
     common::{
@@ -28,7 +29,7 @@ use crate::{
         BuilderExt,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
-    storage_proof::node_parser::branch_parser::BranchParser,
+    storage_inclusion::storage_trie_proof::node_parser::branch_parser::BranchParser,
     ProofWithCircuitData,
 };
 
@@ -52,14 +53,8 @@ impl_target_set! {
     }
 }
 
-pub struct BranchNodeData {
-    pub data: Vec<u8>,
-    pub child_nibble: u8,
-}
-
 pub struct BranchNodeChain {
     pub nodes: Vec<BranchNodeData>,
-    pub claimed_leaf_hash: [u8; BLAKE2_DIGEST_SIZE],
 }
 
 impl BranchNodeChain {
@@ -89,27 +84,16 @@ impl BranchNodeChain {
     }
 
     fn inner_proof(self) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
-        let mut composed_proof: Option<ProofWithCircuitData<_>> = None;
-
-        let mut child_hashes = vec![];
-        for i in 0..self.nodes.len() {
-            if i == self.nodes.len() - 1 {
-                child_hashes.push(self.claimed_leaf_hash);
-            } else {
-                child_hashes.push(Blake2Hasher::hash(&self.nodes[i + 1].data).0);
-            }
-        }
-
         let root_hash = Blake2Hasher::hash(&self.nodes[0].data).0;
 
-        for (node, claimed_child_hash) in self.nodes.into_iter().zip_eq(child_hashes.into_iter()) {
+        let mut composed_proof: Option<ProofWithCircuitData<_>> = None;
+        for node in self.nodes {
             let partial_address_nibbles = if let Some(composed_proof) = &composed_proof {
-                BranchNodeChainParserTarget::parse_public_inputs(
+                let address = BranchNodeChainParserTarget::parse_public_inputs(
                     &mut composed_proof.pis().into_iter(),
                 )
-                .partial_address
-                .address
-                .to_vec()
+                .partial_address;
+                address.address[..address.length as usize].to_vec()
             } else {
                 vec![]
             };
@@ -119,7 +103,6 @@ impl BranchNodeChain {
                     node_data: node.data,
                     claimed_child_node_nibble: node.child_nibble,
                     partial_address_nibbles,
-                    claimed_child_hash,
                 },
             };
 

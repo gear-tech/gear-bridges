@@ -24,20 +24,14 @@ impl_target_set! {
     }
 }
 
-pub struct FinalProof<const MESSAGE_LENGTH_IN_BITS: usize>
-where
-    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
-{
+pub struct FinalProof {
     // TODO: we can get rid of CircuitData and provie only the proof here as CircuitData is constant.
     pub current_validator_set: ProofWithCircuitData<LatestValidatorSetTarget>,
-    pub message_sent: MessageSent<MESSAGE_LENGTH_IN_BITS>,
+    pub message_sent: MessageSent,
 }
 
-impl<const MESSAGE_LENGTH_IN_BITS: usize> FinalProof<MESSAGE_LENGTH_IN_BITS>
-where
-    [(); MESSAGE_LENGTH_IN_BITS / 8]:,
-{
-    pub fn prove(&self) -> ProofWithCircuitData<FinalProofTarget> {
+impl FinalProof {
+    pub fn prove(self) -> ProofWithCircuitData<FinalProofTarget> {
         log::info!("Final proof...");
 
         let message_sent_proof = self.message_sent.prove();

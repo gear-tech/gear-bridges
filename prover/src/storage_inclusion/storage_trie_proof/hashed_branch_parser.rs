@@ -13,51 +13,53 @@ use crate::{
 };
 
 use super::{
-    generic_hasher::GenericBlake2, node_parser::leaf_parser::LeafParser,
+    super::generic_hasher::GenericBlake2, node_parser::branch_parser::BranchParser,
     storage_address::PartialStorageAddressTarget,
 };
 
 impl_parsable_target_set! {
-    pub struct HashedLeafParserTarget {
+    pub struct HashedBranchParserTarget {
         pub node_hash: Blake2Target,
-        pub storage_data_hash: Blake2Target,
+        pub child_node_hash: Blake2Target,
 
         pub partial_address: PartialStorageAddressTarget,
-        pub final_address: PartialStorageAddressTarget,
+        pub resulting_partial_address: PartialStorageAddressTarget,
     }
 }
 
-pub struct HashedLeafParser {
-    pub leaf_parser: LeafParser,
+pub struct HashedBranchParser {
+    pub branch_parser: BranchParser,
 }
 
-impl HashedLeafParser {
-    pub fn prove(self) -> ProofWithCircuitData<HashedLeafParserTarget> {
+impl HashedBranchParser {
+    pub fn prove(self) -> ProofWithCircuitData<HashedBranchParserTarget> {
         let hasher_proof = GenericBlake2 {
-            data: self.leaf_parser.node_data.clone(),
+            data: self.branch_parser.node_data.clone(),
         }
         .prove();
-        let leaf_parser_proof = self.leaf_parser.prove();
+        let branch_parser_proof = self.branch_parser.prove();
+
+        log::info!("Composing hasher proof and branch parser proof...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
         let hasher_target = builder.recursively_verify_constant_proof(hasher_proof, &mut witness);
-        let leaf_parser_target =
-            builder.recursively_verify_constant_proof(leaf_parser_proof, &mut witness);
+        let branch_parser_target =
+            builder.recursively_verify_constant_proof(branch_parser_proof, &mut witness);
 
         hasher_target
             .length
-            .connect(&leaf_parser_target.node_data_length, &mut builder);
+            .connect(&branch_parser_target.node_data_length, &mut builder);
 
-        let mut leaf_parser_node_data = leaf_parser_target.padded_node_data.into_targets_iter();
+        let mut branch_parser_node_data = branch_parser_target.padded_node_data.into_targets_iter();
         let mut hasher_node_data = hasher_target.data.into_targets_iter();
         loop {
-            let leaf_parser_byte = leaf_parser_node_data.next();
+            let branch_parser_byte = branch_parser_node_data.next();
             let hasher_byte = hasher_node_data.next();
 
-            match (leaf_parser_byte, hasher_byte) {
+            match (branch_parser_byte, hasher_byte) {
                 (Some(a), Some(b)) => {
                     builder.connect(a, b);
                 }
@@ -68,14 +70,18 @@ impl HashedLeafParser {
             }
         }
 
-        HashedLeafParserTarget {
+        HashedBranchParserTarget {
             node_hash: hasher_target.hash,
-            storage_data_hash: leaf_parser_target.storage_data_hash,
-            partial_address: leaf_parser_target.partial_address,
-            final_address: leaf_parser_target.final_address,
+            child_node_hash: branch_parser_target.child_node_hash,
+            partial_address: branch_parser_target.partial_address,
+            resulting_partial_address: branch_parser_target.resulting_partial_address,
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        let result = ProofWithCircuitData::from_builder(builder, witness);
+
+        log::info!("Composed hasher proof and branch parser proof");
+
+        result
     }
 }

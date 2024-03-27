@@ -5,7 +5,7 @@ use intermediate_proof_storage::{PersistentMockProofStorage, ProofStorage};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use std::path::PathBuf;
 
-use gear_rpc_client::GearApi;
+use gear_rpc_client::{BlockInclusionProof, GearApi};
 use prover::{
     common::targets::ParsableTargetSet,
     final_proof::FinalProof,
@@ -13,6 +13,7 @@ use prover::{
     message_sent::MessageSent,
     next_validator_set::NextValidatorSet,
     prelude::GENESIS_AUTHORITY_SET_ID,
+    storage_inclusion::{BranchNodeData, StorageInclusion},
 };
 
 const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
@@ -108,11 +109,20 @@ async fn main() {
                 let (block, current_epoch_block_finality) = api
                     .fetch_finality_proof_for_session(GENESIS_AUTHORITY_SET_ID)
                     .await;
+
+                let next_validator_set_inclusion_proof =
+                    api.fetch_next_session_keys_inclusion_proof(block).await;
+                let next_validator_set_storage_data = next_validator_set_inclusion_proof
+                    .storage_inclusion_proof
+                    .storage_data
+                    .clone();
+                let next_validator_set_inclusion_proof =
+                    parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
+
                 let change_from_genesis = NextValidatorSet {
                     current_epoch_block_finality,
-                    next_validator_set_inclusion_proof: api
-                        .fetch_next_session_keys_merkle_proof(block)
-                        .await,
+                    next_validator_set_inclusion_proof,
+                    next_validator_set_storage_data,
                 };
 
                 let genesis_proof = LatestValidatorSet {
@@ -138,11 +148,20 @@ async fn main() {
 
                 let (block, current_epoch_block_finality) =
                     api.fetch_finality_proof_for_session(validator_set_id).await;
+
+                let next_validator_set_inclusion_proof =
+                    api.fetch_next_session_keys_inclusion_proof(block).await;
+                let next_validator_set_storage_data = next_validator_set_inclusion_proof
+                    .storage_inclusion_proof
+                    .storage_data
+                    .clone();
+                let next_validator_set_inclusion_proof =
+                    parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
+
                 let next_change = NextValidatorSet {
                     current_epoch_block_finality,
-                    next_validator_set_inclusion_proof: api
-                        .fetch_next_session_keys_merkle_proof(block)
-                        .await,
+                    next_validator_set_inclusion_proof,
+                    next_validator_set_storage_data,
                 };
 
                 let validator_set_change_proof = LatestValidatorSet {
@@ -173,9 +192,14 @@ async fn main() {
                     .search_for_validator_set_block(latest_proof_public_inputs.current_set_id)
                     .await;
                 let (block, block_finality) = api.fetch_finality_proof(block).await;
+
+                let sent_message_inclusion_proof =
+                    api.fetch_sent_message_inclusion_proof(block).await;
+                let inclusion_proof: StorageInclusion = todo!();
+
                 let message_sent = MessageSent {
                     block_finality,
-                    inclusion_proof: api.fetch_sent_message_merkle_proof(block).await,
+                    inclusion_proof,
                 };
 
                 let final_proof = FinalProof {
@@ -204,4 +228,21 @@ async fn main() {
             }
         },
     };
+}
+
+fn parse_rpc_inclusion_proof(proof: BlockInclusionProof) -> StorageInclusion {
+    StorageInclusion {
+        block_header_data: proof.encoded_header,
+        branch_node_data: proof
+            .storage_inclusion_proof
+            .branch_nodes_data
+            .into_iter()
+            .rev()
+            .map(|d| BranchNodeData {
+                data: d.encoded_node,
+                child_nibble: d.child_nibble,
+            })
+            .collect(),
+        leaf_node_data: proof.storage_inclusion_proof.encoded_leaf_node,
+    }
 }

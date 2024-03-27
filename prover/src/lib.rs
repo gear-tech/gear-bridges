@@ -13,10 +13,9 @@ pub mod block_finality;
 pub mod common;
 pub mod final_proof;
 pub mod latest_validator_set;
-pub mod merkle_proof;
 pub mod message_sent;
 pub mod next_validator_set;
-pub mod storage_proof;
+pub mod storage_inclusion;
 pub mod validator_set_hash;
 
 pub use common::ProofWithCircuitData;

@@ -4,9 +4,10 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_field::types::Field;
+use sp_core::H256;
 use trie_db::{
     node::{Node, NodeHandle},
-    NodeCodec, TrieLayout,
+    ChildReference, NodeCodec, TrieLayout,
 };
 
 use super::{
@@ -22,7 +23,7 @@ use crate::{
     consts::BLAKE2_DIGEST_SIZE,
     impl_parsable_target_set,
     prelude::*,
-    storage_proof::{
+    storage_inclusion::storage_trie_proof::{
         node_parser::{
             branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
             compose_padded_node_data,
@@ -54,13 +55,13 @@ pub struct BranchParser {
 
     pub claimed_child_node_nibble: u8,
     pub partial_address_nibbles: Vec<u8>,
-    pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
 }
 
 struct Metadata {
     children_data_offset: usize,
     children_lengths: Vec<usize>,
     claimed_child_index_in_array: usize,
+    claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
 }
 
 impl BranchParser {
@@ -72,7 +73,7 @@ impl BranchParser {
                 node_data: compose_padded_node_data(self.node_data),
                 read_offset: metadata.children_data_offset,
                 claimed_child_index_in_array: metadata.claimed_child_index_in_array,
-                claimed_child_hash: self.claimed_child_hash,
+                claimed_child_hash: metadata.claimed_child_hash,
             },
             children_lengths: metadata.children_lengths,
         }
@@ -186,18 +187,16 @@ impl BranchParser {
         if let Node::NibbledBranch(_, children, value) = node {
             assert!(value.is_none(), "Non-empty value is not supported");
 
-            let mut children_lengths = vec![];
-            for child in &children {
-                let serialized_size = match child {
-                    Some(NodeHandle::Hash(hash)) => hash.encode().len(),
-                    Some(NodeHandle::Inline(data)) => data.encode().len(),
-                    None => 0,
-                };
-                children_lengths.push(serialized_size);
-            }
+            let children: [Option<ChildReference<H256>>; 16] =
+                children.map(|child| child.map(|child| child.try_into().unwrap()));
 
-            let all_children_length: usize = children_lengths.iter().sum();
-            let children_data_offset = self.node_data.len() - all_children_length;
+            let claimed_child_hash = if let Some(ChildReference::Hash(child_hash)) =
+                &children[self.claimed_child_node_nibble as usize]
+            {
+                child_hash.0
+            } else {
+                panic!("Unsupported claimed child");
+            };
 
             let mut claimed_child_index_in_array = 0;
             for child_idx in 0..self.claimed_child_node_nibble {
@@ -206,10 +205,24 @@ impl BranchParser {
                 }
             }
 
+            let mut children_lengths = vec![];
+            for child in children {
+                let serialized_size = match child {
+                    Some(ChildReference::Hash(hash)) => hash.as_bytes().encode().len(),
+                    Some(ChildReference::Inline(data, len)) => data[..len].encode().len(),
+                    None => continue,
+                };
+                children_lengths.push(serialized_size);
+            }
+
+            let all_children_length: usize = children_lengths.iter().sum();
+            let children_data_offset = self.node_data.len() - all_children_length;
+
             Metadata {
                 children_data_offset,
                 children_lengths,
                 claimed_child_index_in_array,
+                claimed_child_hash,
             }
         } else {
             panic!("Unexpected node type: expected NibbledBranch")
@@ -219,7 +232,6 @@ impl BranchParser {
 
 #[cfg(test)]
 mod tests {
-    use sp_core::H256;
     use std::iter;
     use trie_db::{ChildReference, NibbleSlice};
 
@@ -298,7 +310,6 @@ mod tests {
         let circuit_input = BranchParser {
             node_data,
             claimed_child_node_nibble,
-            claimed_child_hash,
             partial_address_nibbles: vec![],
         };
 

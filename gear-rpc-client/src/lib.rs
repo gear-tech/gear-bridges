@@ -9,10 +9,9 @@ use gsdk::{
     GearConfig,
 };
 use parity_scale_codec::{Decode, Encode};
-use prover::merkle_proof::{MerkleProof, TrieNodeData};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
 use sp_consensus_grandpa::GrandpaJustification;
-use sp_core::crypto::Wraps;
+use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::{traits::AppVerify, AccountId32};
 use subxt::{
     blocks::Block as BlockImpl,
@@ -24,15 +23,28 @@ use subxt::{
 };
 use trie_db::{node::NodeHandle, ChildReference};
 
-const SESSION_KEYS_DATA_LENGTH_IN_BITS: usize = 8 + VALIDATOR_COUNT * (5 * 32) * 8;
 const VOTE_LENGTH_IN_BITS: usize = 424;
 const VALIDATOR_COUNT: usize = 6;
 const PROCESSED_VALIDATOR_COUNT: usize = 5;
-const CURRENT_TEST_MESSAGE_LEN_IN_BITS: usize = (1 + VALIDATOR_COUNT * 40) * 8;
 
 const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
+
+pub struct StorageBranchNodeData {
+    pub encoded_node: Vec<u8>,
+    pub child_nibble: u8,
+}
+pub struct StorageInclusionProof {
+    pub branch_nodes_data: Vec<StorageBranchNodeData>,
+    pub encoded_leaf_node: Vec<u8>,
+    pub storage_data: Vec<u8>,
+}
+
+pub struct BlockInclusionProof {
+    pub storage_inclusion_proof: StorageInclusionProof,
+    pub encoded_header: Vec<u8>,
+}
 
 pub struct GearApi {
     api: gsdk::Api,
@@ -244,33 +256,25 @@ impl GearApi {
     }
 
     /// NOTE: mock for now, returns some data with constant position in merkle trie.
-    pub async fn fetch_sent_message_merkle_proof(
-        &self,
-        block: H256,
-    ) -> MerkleProof<CURRENT_TEST_MESSAGE_LEN_IN_BITS> {
+    pub async fn fetch_sent_message_inclusion_proof(&self, block: H256) -> BlockInclusionProof {
         let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
-        self.fetch_merkle_proof_including_block_header(block, &address)
-            .await
+        self.fetch_block_inclusion_proof(block, &address).await
     }
 
-    pub async fn fetch_next_session_keys_merkle_proof(
+    pub async fn fetch_next_session_keys_inclusion_proof(
         &self,
         block: H256,
-    ) -> MerkleProof<SESSION_KEYS_DATA_LENGTH_IN_BITS> {
+    ) -> BlockInclusionProof {
         let address = gsdk::Api::storage_root(SessionStorage::QueuedKeys).to_root_bytes();
-        self.fetch_merkle_proof_including_block_header(block, &address)
-            .await
+        self.fetch_block_inclusion_proof(block, &address).await
     }
 
-    async fn fetch_merkle_proof_including_block_header<const LEAF_DATA_LEN_IN_BITS: usize>(
+    async fn fetch_block_inclusion_proof(
         &self,
         block: H256,
         address: &[u8],
-    ) -> MerkleProof<LEAF_DATA_LEN_IN_BITS>
-    where
-        [(); LEAF_DATA_LEN_IN_BITS / 8]:,
-    {
-        let merkle_proof = self.fetch_merkle_proof(block, address).await;
+    ) -> BlockInclusionProof {
+        let storage_inclusion_proof = self.fetch_storage_inclusion_proof(block, address).await;
 
         let block = (*self.api).blocks().at(block).await.unwrap();
         let encoded_header = block.header().encode();
@@ -280,35 +284,24 @@ impl GearApi {
         // - block number           (4 bytes)
         // - merkle state root      (32 bytes)
         // - ...
+        let root_node = storage_inclusion_proof.branch_nodes_data.last().unwrap();
+        let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.encoded_node);
+        assert_eq!(
+            &encoded_header[32 + 4..32 + 4 + 32],
+            &fetched_storage_root_hash.0
+        );
 
-        let (left_data, rem) = encoded_header.split_at(32 + 4);
-        let (state_root_hash, right_data) = rem.split_at(32);
-
-        assert_eq!(state_root_hash, merkle_proof.root_hash);
-
-        let mut merkle_proof_nodes = merkle_proof.nodes;
-        merkle_proof_nodes.push(TrieNodeData {
-            left_data: left_data.to_vec(),
-            right_data: right_data.to_vec(),
-        });
-
-        assert_eq!(merkle_proof.leaf_data.len() * 8, LEAF_DATA_LEN_IN_BITS);
-
-        MerkleProof {
-            leaf_data: merkle_proof.leaf_data,
-            root_hash: block.hash().as_bytes().try_into().unwrap(),
-            nodes: merkle_proof_nodes,
+        BlockInclusionProof {
+            storage_inclusion_proof,
+            encoded_header,
         }
     }
 
-    async fn fetch_merkle_proof<const LEAF_DATA_LEN_IN_BITS: usize>(
+    async fn fetch_storage_inclusion_proof(
         &self,
         block: H256,
         address: &[u8],
-    ) -> MerkleProof<LEAF_DATA_LEN_IN_BITS>
-    where
-        [(); LEAF_DATA_LEN_IN_BITS / 8]:,
-    {
+    ) -> StorageInclusionProof {
         use trie_db::{
             node::{Node, Value},
             NodeCodec, TrieLayout,
@@ -343,100 +336,68 @@ impl GearApi {
         >(&storage_proof, state_root, storage_keys.iter())
         .unwrap();
 
-        // Note: The following code depends on `TrieCodec` implementation.
-
-        let mut nodes = Vec::with_capacity(proof.len());
-
         let leaf = proof.pop().unwrap();
         let leaf = TrieCodec::decode(&leaf).unwrap();
-
-        let leaf_node_data = if let Node::Leaf(nibbles, value) = leaf {
+        let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
+        let encoded_leaf = if let Node::Leaf(nibbles, value) = leaf {
             assert!(matches!(value.clone(), Value::Inline(b) if b.is_empty()));
-            let mut leaf_data =
-                TrieCodec::leaf_node(nibbles.right_iter(), nibbles.len(), Value::Node(&[0; 32]));
-            assert_eq!(leaf_data[leaf_data.len() - 32..], [0; 32]);
-
-            leaf_data.resize(leaf_data.len() - 32, 0);
-
-            TrieNodeData {
-                left_data: leaf_data,
-                right_data: vec![],
-            }
+            TrieCodec::leaf_node(
+                nibbles.right_iter(),
+                nibbles.len(),
+                Value::Node(&storage_data_hash),
+            )
         } else {
             panic!("The last node in proof is expected to be leaf");
         };
 
-        nodes.push(leaf_node_data);
-
+        let mut current_hash = Blake2Hasher::hash(&encoded_leaf).0;
+        let mut branch_nodes = Vec::with_capacity(proof.len());
         for node_data in proof.iter().rev() {
             let node = TrieCodec::decode(node_data).unwrap();
-            let branch_node_data = if let Node::NibbledBranch(nibbles, children, value) = node {
+            if let Node::NibbledBranch(nibbles, children, value) = node {
                 // There will be only one NodeHandle::Inline(&[]) children and this
                 // children will lead to the target leaf.
-
-                let mut target_child_idx = None;
+                let mut target_child_nibble = None;
                 let children: Vec<Option<ChildReference<H256>>> = children
                     .into_iter()
                     .enumerate()
-                    .map(|(child_idx, mut child)| {
+                    .map(|(child_nibble, mut child)| {
                         if matches!(child, Some(NodeHandle::Inline(&[]))) {
-                            assert!(target_child_idx.is_none());
-                            target_child_idx = Some(child_idx);
-
-                            child = Some(NodeHandle::Hash(&[0; 32]));
+                            assert!(target_child_nibble.is_none());
+                            target_child_nibble = Some(child_nibble);
+                            child = Some(NodeHandle::Hash(&current_hash));
                         }
 
                         child.map(|child| child.try_into().unwrap())
                     })
                     .collect();
 
-                let target_child_idx = target_child_idx.unwrap();
+                let target_child_nibble = target_child_nibble.unwrap();
 
-                let mut target_child_offset_from_end = 0;
-
-                #[allow(clippy::needless_range_loop)]
-                for child_idx in target_child_idx..children.len() {
-                    let serialized_size = match children[child_idx] {
-                        Some(ChildReference::Hash(hash)) => hash.as_bytes().encode().len(),
-                        Some(ChildReference::Inline(data, len)) => data[..len].encode().len(),
-                        None => 0,
-                    };
-                    target_child_offset_from_end += serialized_size;
-                }
-
-                let node_data = TrieCodec::branch_node_nibbled(
+                let encoded_node = TrieCodec::branch_node_nibbled(
                     nibbles.right_iter(),
                     nibbles.len(),
                     children.into_iter(),
                     value,
                 );
 
-                // ChildReference::Hash(&[0; 32]) represented as {hash_bytes_length, [hash_bytes]}.
-                let (left_data, right_data) = node_data.split_at(
-                    node_data.len() - target_child_offset_from_end + 1, /*for length*/
-                );
+                current_hash = Blake2Hasher::hash(&encoded_node).0;
 
-                assert_eq!(right_data[..32], [0; 32]);
-
-                let right_data = &right_data[32..];
-
-                TrieNodeData {
-                    left_data: left_data.to_vec(),
-                    right_data: right_data.to_vec(),
-                }
+                branch_nodes.push(StorageBranchNodeData {
+                    encoded_node,
+                    child_nibble: target_child_nibble as u8,
+                });
             } else {
                 panic!("All remaining nodes are expected to be nibbled branches");
             };
-
-            nodes.push(branch_node_data);
         }
 
-        assert_eq!(storage_data.len() * 8, LEAF_DATA_LEN_IN_BITS);
+        assert_eq!(state_root.0, current_hash);
 
-        MerkleProof {
-            nodes,
-            leaf_data: storage_data.try_into().unwrap(),
-            root_hash: state_root.0,
+        StorageInclusionProof {
+            branch_nodes_data: branch_nodes,
+            encoded_leaf_node: encoded_leaf,
+            storage_data,
         }
     }
 

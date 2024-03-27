@@ -7,7 +7,7 @@ use crate::{
         xor_targets,
     },
     prelude::*,
-    storage_proof::storage_trie_proof::node_parser::NodeDataBlockTarget,
+    storage_inclusion::storage_trie_proof::node_parser::NodeDataBlockTarget,
 };
 
 impl_target_set! {
@@ -78,7 +78,7 @@ mod tests {
     use plonky2::{iop::witness::PartialWitness, plonk::circuit_data::CircuitConfig};
 
     use super::*;
-    use crate::storage_proof::storage_trie_proof::node_parser::pad_byte_vec;
+    use crate::storage_inclusion::storage_trie_proof::node_parser::pad_byte_vec;
 
     #[test]
     fn test_bitmap_parser() {

@@ -5,7 +5,7 @@ use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
 use crate::{
     common::targets::{impl_target_set, ArrayTarget, HalfByteTarget, SingleTarget},
     prelude::*,
-    storage_proof::storage_trie_proof::storage_address::{
+    storage_inclusion::storage_trie_proof::storage_address::{
         MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
     },
 };
@@ -118,7 +118,7 @@ mod tests {
     use super::*;
     use crate::{
         common::targets::TargetSet,
-        storage_proof::storage_trie_proof::{
+        storage_inclusion::storage_trie_proof::{
             node_parser::{pad_byte_vec, NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
             storage_address::tests_common::create_address_target,
         },

@@ -29,7 +29,7 @@ use crate::{
         BuilderExt,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
-    storage_proof::storage_trie_proof::node_parser::branch_parser::BranchParser,
+    storage_inclusion::storage_trie_proof::node_parser::branch_parser::BranchParser,
     ProofWithCircuitData,
 };
 

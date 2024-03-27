@@ -23,7 +23,7 @@ use crate::{
     consts::BLAKE2_DIGEST_SIZE,
     impl_parsable_target_set,
     prelude::*,
-    storage_proof::storage_trie_proof::{
+    storage_inclusion::storage_trie_proof::{
         node_parser::{
             branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
             compose_padded_node_data,

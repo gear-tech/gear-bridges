@@ -19,7 +19,7 @@ mod branch_node_chain;
 mod hashed_branch_parser;
 mod hashed_leaf_parser;
 mod node_parser;
-mod storage_address;
+pub mod storage_address;
 
 use branch_node_chain::BranchNodeChain;
 

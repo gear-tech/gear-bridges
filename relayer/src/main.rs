@@ -3,7 +3,7 @@ extern crate pretty_env_logger;
 use clap::{Args, Parser, Subcommand};
 use intermediate_proof_storage::{PersistentMockProofStorage, ProofStorage};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 
 use gear_rpc_client::{BlockInclusionProof, GearApi};
 use prover::{
@@ -119,6 +119,8 @@ async fn main() {
                 let next_validator_set_inclusion_proof =
                     parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
+                let now = Instant::now();
+
                 let change_from_genesis = NextValidatorSet {
                     current_epoch_block_finality,
                     next_validator_set_inclusion_proof,
@@ -129,6 +131,8 @@ async fn main() {
                     change_proof: change_from_genesis,
                 }
                 .prove_genesis();
+
+                log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
 
                 proof_storage
                     .init(genesis_proof.verifier_circuit_data(), genesis_proof.proof())
@@ -158,6 +162,8 @@ async fn main() {
                 let next_validator_set_inclusion_proof =
                     parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
+                let now = Instant::now();
+
                 let next_change = NextValidatorSet {
                     current_epoch_block_finality,
                     next_validator_set_inclusion_proof,
@@ -168,6 +174,8 @@ async fn main() {
                     change_proof: next_change,
                 }
                 .prove_recursive(latest_proof);
+
+                log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
 
                 proof_storage
                     .update(validator_set_change_proof.proof())

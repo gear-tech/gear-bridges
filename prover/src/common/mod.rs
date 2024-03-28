@@ -1,7 +1,6 @@
 use itertools::Itertools;
 use plonky2::{
     gates::noop::NoopGate,
-    hash::hash_types::HashOutTarget,
     iop::{
         target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
@@ -27,7 +26,7 @@ pub mod poseidon_bn128;
 use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;
 
-use self::{poseidon_bn128::config::PoseidonBN128GoldilocksConfig, targets::VerifierDataTarget};
+use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
 
 type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
@@ -229,7 +228,7 @@ pub fn wrap_bn128(
         CircuitBuilder::new(CircuitConfig::standard_recursion_config());
 
     let proof_with_pis_target = builder.add_virtual_proof_with_pis(&inner_circuit_data.common);
-    let circuit_digest = inner_circuit_data.verifier_only.circuit_digest;
+    //let circuit_digest = inner_circuit_data.verifier_only.circuit_digest;
     let verifier_circuit_target = VerifierCircuitTarget {
         constants_sigmas_cap: builder
             .add_virtual_cap(inner_circuit_data.common.config.fri_config.cap_height),

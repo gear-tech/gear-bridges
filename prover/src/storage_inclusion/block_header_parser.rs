@@ -48,17 +48,13 @@ impl BlockHeaderParser {
         let state_root_bytes: ArrayTarget<ByteTarget, BLAKE2_DIGEST_SIZE> = hasher_target
             .data
             .constant_read_array(STATE_ROOT_OFFSET_IN_BLOCK_HEADER);
-        let mut state_root_bits = state_root_bytes
-            .0
-            .into_iter()
-            .map(|byte| {
-                byte.to_bit_targets(&mut builder)
-                    .0
-                    .into_iter()
-                    .map(|t| t.target)
-                    .rev()
-            })
-            .flatten();
+        let mut state_root_bits = state_root_bytes.0.into_iter().flat_map(|byte| {
+            byte.to_bit_targets(&mut builder)
+                .0
+                .into_iter()
+                .map(|t| t.target)
+                .rev()
+        });
 
         let state_root = Blake2Target::parse_exact(&mut state_root_bits);
 

@@ -92,7 +92,7 @@ impl GenericBlake2 {
 lazy_static! {
     static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
         ..=MAX_BLOCK_COUNT)
-        .map(|block_count| blake2_circuit_verifier_data(block_count))
+        .map(blake2_circuit_verifier_data)
         .collect::<Vec<_>>()
         .try_into()
         .unwrap();
@@ -166,8 +166,7 @@ impl VariativeBlake2 {
         let data_target_bits = data_target
             .0
             .iter()
-            .map(|t| t.to_bit_targets(&mut builder).0.into_iter().rev())
-            .flatten();
+            .flat_map(|t| t.to_bit_targets(&mut builder).0.into_iter().rev());
 
         let hasher_input = data_target_bits
             .take(BLOCK_BITS * block_count)

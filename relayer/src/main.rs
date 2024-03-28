@@ -90,6 +90,20 @@ struct VaraEndpointArg {
     vara_endpoint: String,
 }
 
+// TODO: Move to prover.
+pub const NEXT_SESSION_KEYS_STORAGE_ADDRESS: [u8; 64] = [
+    0xc, 0xe, 0xc, 0x5, 0x0, 0x7, 0x0, 0xd, 0x6, 0x0, 0x9, 0xd, 0xd, 0x3, 0x4, 0x9, 0x7, 0xf, 0x7,
+    0x2, 0xb, 0xd, 0xe, 0x0, 0x7, 0xf, 0xc, 0x9, 0x6, 0xb, 0xa, 0x0, 0xe, 0x0, 0xc, 0xd, 0xd, 0x0,
+    0x6, 0x2, 0xe, 0x6, 0xe, 0xa, 0xf, 0x2, 0x4, 0x2, 0x9, 0x5, 0xa, 0xd, 0x4, 0xc, 0xc, 0xf, 0xc,
+    0x4, 0x1, 0xd, 0x4, 0x6, 0x0, 0x9,
+];
+pub const MESSAGE_STORAGE_ADDRESS: [u8; 64] = [
+    0x1, 0xc, 0xb, 0x6, 0xf, 0x3, 0x6, 0xe, 0x0, 0x2, 0x7, 0xa, 0xb, 0xb, 0x2, 0x0, 0x9, 0x1, 0xc,
+    0xf, 0xb, 0x5, 0x1, 0x1, 0x0, 0xa, 0xb, 0x5, 0x0, 0x8, 0x7, 0xf, 0xa, 0xa, 0xc, 0xf, 0x0, 0x0,
+    0xb, 0x9, 0xb, 0x4, 0x1, 0xf, 0xd, 0xa, 0x7, 0xa, 0x9, 0x2, 0x6, 0x8, 0x8, 0x2, 0x1, 0xc, 0x2,
+    0xa, 0x2, 0xb, 0x3, 0xe, 0x4, 0xc,
+];
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::formatted_builder()
@@ -116,8 +130,10 @@ async fn main() {
                     .storage_inclusion_proof
                     .storage_data
                     .clone();
-                let next_validator_set_inclusion_proof =
-                    parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
+                let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
+                    next_validator_set_inclusion_proof,
+                    NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
+                );
 
                 let now = Instant::now();
 
@@ -159,8 +175,10 @@ async fn main() {
                     .storage_inclusion_proof
                     .storage_data
                     .clone();
-                let next_validator_set_inclusion_proof =
-                    parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
+                let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
+                    next_validator_set_inclusion_proof,
+                    NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
+                );
 
                 let now = Instant::now();
 
@@ -203,8 +221,10 @@ async fn main() {
 
                 let sent_message_inclusion_proof =
                     api.fetch_sent_message_inclusion_proof(block).await;
-                let sent_message_inclusion_proof =
-                    parse_rpc_inclusion_proof(sent_message_inclusion_proof);
+                let sent_message_inclusion_proof = parse_rpc_inclusion_proof(
+                    sent_message_inclusion_proof,
+                    MESSAGE_STORAGE_ADDRESS.to_vec(),
+                );
 
                 let message_sent = MessageSent {
                     block_finality,
@@ -242,7 +262,10 @@ async fn main() {
     };
 }
 
-fn parse_rpc_inclusion_proof(proof: BlockInclusionProof) -> StorageInclusion {
+fn parse_rpc_inclusion_proof(
+    proof: BlockInclusionProof,
+    address_nibbles: Vec<u8>,
+) -> StorageInclusion {
     StorageInclusion {
         block_header_data: proof.encoded_header,
         branch_node_data: proof
@@ -256,5 +279,6 @@ fn parse_rpc_inclusion_proof(proof: BlockInclusionProof) -> StorageInclusion {
             })
             .collect(),
         leaf_node_data: proof.storage_inclusion_proof.encoded_leaf_node,
+        address_nibbles: address_nibbles,
     }
 }

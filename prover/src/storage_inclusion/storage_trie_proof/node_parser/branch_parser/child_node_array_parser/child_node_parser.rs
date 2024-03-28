@@ -71,7 +71,6 @@ pub struct ChildNodeParser {
 }
 
 impl ChildNodeParser {
-    // TODO: Check claimed node length to be equal 32.
     pub fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
         log::info!("Proving child node parser...");
 
@@ -127,6 +126,12 @@ impl ChildNodeParser {
 
         let invalid_child_hash = builder.and(child_hash_not_matches, assert_child_hash);
         builder.assert_zero(invalid_child_hash.target);
+
+        let hash_size_target = builder.constant(F::from_canonical_usize(BLAKE2_DIGEST_SIZE));
+        let encoded_data_size_valid = builder.is_equal(encoded_child_data_length, hash_size_target);
+        let encoded_data_size_invalid = builder.not(encoded_data_size_valid);
+        let invalid_encoded_data_size = builder.and(encoded_data_size_invalid, assert_child_hash);
+        builder.assert_zero(invalid_encoded_data_size.target);
 
         let resulting_read_offset = builder.add_many(vec![
             read_offset,

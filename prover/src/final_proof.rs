@@ -1,5 +1,11 @@
-use itertools::Itertools;
-use plonky2::plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig};
+use plonky2::{
+    iop::witness::{PartialWitness, WitnessWrite},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, VerifierCircuitData},
+        proof::ProofWithPublicInputs,
+    },
+};
 use plonky2_field::types::Field;
 
 use crate::{
@@ -8,11 +14,11 @@ use crate::{
             impl_target_set, MessageTargetGoldilocks, Sha256TargetGoldilocks, SingleTarget,
             TargetSet,
         },
-        ProofComposition,
+        BuilderExt,
     },
     consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
     latest_validator_set::LatestValidatorSetTarget,
-    message_sent::{MessageSent, MessageSentTarget},
+    message_sent::MessageSent,
     prelude::*,
     ProofWithCircuitData,
 };
@@ -25,72 +31,77 @@ impl_target_set! {
 }
 
 pub struct FinalProof {
-    // TODO: we can get rid of CircuitData and provie only the proof here as CircuitData is constant.
-    pub current_validator_set: ProofWithCircuitData<LatestValidatorSetTarget>,
+    pub current_validator_set_verifier_data: VerifierCircuitData<F, C, D>,
+    pub current_validator_set_proof: ProofWithPublicInputs<F, C, D>,
+
     pub message_sent: MessageSent,
 }
 
 impl FinalProof {
     pub fn prove(self) -> ProofWithCircuitData<FinalProofTarget> {
-        log::info!("Final proof...");
-
         let message_sent_proof = self.message_sent.prove();
-        let desired_verifier_data = &self.current_validator_set.circuit_data().verifier_only;
 
-        log::info!("Composing message sent and current validator set proofs...");
+        log::info!("Composing message sent and latest validator set proofs...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.fri_config.cap_height = 0;
-        let composition_builder = ProofComposition::new_with_config(
-            self.current_validator_set.clone(),
-            message_sent_proof,
-            config,
-        );
+        let mut builder = CircuitBuilder::new(config);
+        let mut witness = PartialWitness::new();
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          current_validator_set_proof: LatestValidatorSetTarget,
-                          message_sent_proof: MessageSentTarget| {
-            message_sent_proof
-                .validator_set_hash
-                .connect(&current_validator_set_proof.current_hash, builder);
-            message_sent_proof
-                .authority_set_id
-                .connect(&current_validator_set_proof.current_set_id, builder);
+        let message_sent_target =
+            builder.recursively_verify_constant_proof(message_sent_proof, &mut witness);
 
-            let desired_verifier_data = builder.constant_verifier_data(desired_verifier_data);
-            desired_verifier_data.circuit_digest.connect(
-                &current_validator_set_proof.verifier_data.circuit_digest,
-                builder,
-            );
-            desired_verifier_data
-                .constants_sigmas_cap
-                .0
-                .into_iter()
-                .zip_eq(current_validator_set_proof.verifier_data.merkle_caps)
-                .for_each(|(hash_lhs, hash_rhs)| hash_lhs.connect(&hash_rhs, builder));
+        let latest_validator_set_target = {
+            let proof_with_pis_target = builder
+                .add_virtual_proof_with_pis(&self.current_validator_set_verifier_data.common);
+            let verifier_data_target = builder
+                .constant_verifier_data(&self.current_validator_set_verifier_data.verifier_only);
 
-            let desired_genesis_authority_set_id =
-                builder.constant(F::from_noncanonical_u64(GENESIS_AUTHORITY_SET_ID));
-            builder.connect(
-                desired_genesis_authority_set_id,
-                current_validator_set_proof.genesis_set_id.to_target(),
+            witness.set_proof_with_pis_target(
+                &proof_with_pis_target,
+                &self.current_validator_set_proof,
             );
 
-            let desired_genesis_validator_set_hash = Sha256TargetGoldilocks::parse_exact(
-                &mut GENESIS_VALIDATOR_SET_HASH
-                    .iter()
-                    .map(|el| builder.constant(F::from_noncanonical_u64(*el))),
+            builder.verify_proof::<C>(
+                &proof_with_pis_target,
+                &verifier_data_target,
+                &self.current_validator_set_verifier_data.common,
             );
-            desired_genesis_validator_set_hash
-                .connect(&current_validator_set_proof.genesis_hash, builder);
 
-            // TODO: Replace with the actual block number.
-            FinalProofTarget {
-                message_contents: message_sent_proof.message_contents,
-                block_number: message_sent_proof.authority_set_id,
-            }
+            LatestValidatorSetTarget::parse_exact(
+                &mut proof_with_pis_target.public_inputs.into_iter(),
+            )
         };
 
-        composition_builder.compose(targets_op)
+        message_sent_target
+            .validator_set_hash
+            .connect(&latest_validator_set_target.current_hash, &mut builder);
+        message_sent_target
+            .authority_set_id
+            .connect(&latest_validator_set_target.current_set_id, &mut builder);
+
+        let desired_genesis_authority_set_id =
+            builder.constant(F::from_noncanonical_u64(GENESIS_AUTHORITY_SET_ID));
+        builder.connect(
+            desired_genesis_authority_set_id,
+            latest_validator_set_target.genesis_set_id.to_target(),
+        );
+
+        let desired_genesis_validator_set_hash = Sha256TargetGoldilocks::parse_exact(
+            &mut GENESIS_VALIDATOR_SET_HASH
+                .iter()
+                .map(|el| builder.constant(F::from_noncanonical_u64(*el))),
+        );
+        desired_genesis_validator_set_hash
+            .connect(&latest_validator_set_target.genesis_hash, &mut builder);
+
+        // TODO: Replace with the actual block number.
+        FinalProofTarget {
+            message_contents: message_sent_target.message_contents,
+            block_number: message_sent_target.authority_set_id,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }

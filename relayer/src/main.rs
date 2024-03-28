@@ -203,16 +203,20 @@ async fn main() {
 
                 let sent_message_inclusion_proof =
                     api.fetch_sent_message_inclusion_proof(block).await;
-                let inclusion_proof: StorageInclusion = todo!();
+                let sent_message_inclusion_proof =
+                    parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
                 let message_sent = MessageSent {
                     block_finality,
-                    inclusion_proof,
+                    inclusion_proof: sent_message_inclusion_proof,
                 };
 
+                let current_validator_set_verifier_data =
+                    proof_storage.get_verifier_circuit_data().unwrap();
                 let final_proof = FinalProof {
-                    current_validator_set: todo!(), // latest_proof here
                     message_sent,
+                    current_validator_set_proof: latest_proof,
+                    current_validator_set_verifier_data,
                 }
                 .prove();
 

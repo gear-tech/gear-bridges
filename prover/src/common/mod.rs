@@ -216,7 +216,6 @@ where
     }
 }
 
-// TODO: Assert wrapped proof circuit digest and constant merkle caps.
 pub fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
@@ -228,25 +227,12 @@ pub fn wrap_bn128(
         CircuitBuilder::new(CircuitConfig::standard_recursion_config());
 
     let proof_with_pis_target = builder.add_virtual_proof_with_pis(&inner_circuit_data.common);
-    //let circuit_digest = inner_circuit_data.verifier_only.circuit_digest;
-    let verifier_circuit_target = VerifierCircuitTarget {
-        constants_sigmas_cap: builder
-            .add_virtual_cap(inner_circuit_data.common.config.fri_config.cap_height),
-        circuit_digest: builder.add_virtual_hash(),
-    };
+    let verifier_circuit_target = builder.constant_verifier_data(&inner_circuit_data.verifier_only);
 
     builder.register_public_inputs(&proof_with_pis_target.public_inputs);
 
     let mut witness = PartialWitness::new();
     witness.set_proof_with_pis_target(&proof_with_pis_target, &proof_with_public_inputs);
-    witness.set_cap_target(
-        &verifier_circuit_target.constants_sigmas_cap,
-        &inner_circuit_data.verifier_only.constants_sigmas_cap,
-    );
-    witness.set_hash_target(
-        verifier_circuit_target.circuit_digest,
-        inner_circuit_data.verifier_only.circuit_digest,
-    );
 
     builder.verify_proof::<C>(
         &proof_with_pis_target,

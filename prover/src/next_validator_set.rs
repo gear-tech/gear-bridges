@@ -103,9 +103,7 @@ impl NextValidatorSet {
                 }
             };
 
-        composition_builder
-            .assert_both_circuit_digests()
-            .compose(targets_op)
+        composition_builder.compose(targets_op)
     }
 }
 

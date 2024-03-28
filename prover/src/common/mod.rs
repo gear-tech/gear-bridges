@@ -166,24 +166,6 @@ where
 
     first_public_inputs: TS1,
     second_public_inputs: TS2,
-
-    first_circuit_digest: CircuitDigest,
-    second_circuit_digest: CircuitDigest,
-
-    first_circuit_digest_target: HashOutTarget,
-    second_circuit_digest_target: HashOutTarget,
-}
-
-pub struct ExtendedComposeArgs<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    pub first_target_set: TS1,
-    pub second_target_set: TS2,
-
-    pub first_circuit_digest: HashOutTarget,
-    pub second_circuit_digest: HashOutTarget,
 }
 
 impl<TS1, TS2> ProofComposition<TS1, TS2>
@@ -198,118 +180,24 @@ where
         Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
     }
 
-    // TODO: Rewrite using recursively_verify_constant_proof.
     pub fn new_with_config(
         first: ProofWithCircuitData<TS1>,
         second: ProofWithCircuitData<TS2>,
         config: CircuitConfig,
     ) -> ProofComposition<TS1, TS2> {
         let mut builder = CircuitBuilder::<F, D>::new(config);
-        let proof_with_pis_target_1 =
-            builder.add_virtual_proof_with_pis(&first.circuit_data.common);
-        let proof_with_pis_target_2 =
-            builder.add_virtual_proof_with_pis(&second.circuit_data.common);
+        let mut witness = PartialWitness::new();
 
-        let first_circuit_digest = first.circuit_digest();
-        let second_circuit_digest = second.circuit_digest();
-
-        let verifier_circuit_target_1 = VerifierCircuitTarget {
-            constants_sigmas_cap: builder
-                .add_virtual_cap(first.circuit_data.common.config.fri_config.cap_height),
-            circuit_digest: builder.add_virtual_hash(),
-        };
-        let verifier_circuit_target_2 = VerifierCircuitTarget {
-            constants_sigmas_cap: builder
-                .add_virtual_cap(second.circuit_data.common.config.fri_config.cap_height),
-            circuit_digest: builder.add_virtual_hash(),
-        };
-
-        let mut pw = PartialWitness::new();
-        pw.set_proof_with_pis_target(
-            &proof_with_pis_target_1,
-            &ProofWithPublicInputs {
-                proof: first.proof,
-                public_inputs: first.public_inputs,
-            },
-        );
-        pw.set_proof_with_pis_target(
-            &proof_with_pis_target_2,
-            &ProofWithPublicInputs {
-                proof: second.proof,
-                public_inputs: second.public_inputs,
-            },
-        );
-        pw.set_cap_target(
-            &verifier_circuit_target_1.constants_sigmas_cap,
-            &first.circuit_data.verifier_only.constants_sigmas_cap,
-        );
-        pw.set_cap_target(
-            &verifier_circuit_target_2.constants_sigmas_cap,
-            &second.circuit_data.verifier_only.constants_sigmas_cap,
-        );
-        pw.set_hash_target(
-            verifier_circuit_target_1.circuit_digest,
-            first.circuit_data.verifier_only.circuit_digest,
-        );
-        pw.set_hash_target(
-            verifier_circuit_target_2.circuit_digest,
-            second.circuit_data.verifier_only.circuit_digest,
-        );
-
-        builder.verify_proof::<C>(
-            &proof_with_pis_target_1,
-            &verifier_circuit_target_1,
-            &first.circuit_data.common,
-        );
-        builder.verify_proof::<C>(
-            &proof_with_pis_target_2,
-            &verifier_circuit_target_2,
-            &second.circuit_data.common,
-        );
-
-        let first_public_inputs =
-            TS1::parse_exact(&mut proof_with_pis_target_1.public_inputs.into_iter());
-
-        let second_public_inputs =
-            TS2::parse_exact(&mut proof_with_pis_target_2.public_inputs.into_iter());
+        let first_public_inputs = builder.recursively_verify_constant_proof(first, &mut witness);
+        let second_public_inputs = builder.recursively_verify_constant_proof(second, &mut witness);
 
         ProofComposition {
             circuit_builder: builder,
-            witness: pw,
+            witness,
 
             first_public_inputs,
             second_public_inputs,
-
-            first_circuit_digest,
-            second_circuit_digest,
-
-            first_circuit_digest_target: verifier_circuit_target_1.circuit_digest,
-            second_circuit_digest_target: verifier_circuit_target_2.circuit_digest,
         }
-    }
-
-    // TODO: assert merkle caps too.
-    pub fn assert_both_circuit_digests(self) -> Self {
-        self.assert_first_circuit_digest()
-            .assert_second_circuit_digest()
-    }
-
-    pub fn assert_first_circuit_digest(mut self) -> Self {
-        let value_target = self
-            .circuit_builder
-            .constant_hash(self.first_circuit_digest);
-        self.circuit_builder
-            .connect_hashes(value_target, self.first_circuit_digest_target);
-        self
-    }
-
-    pub fn assert_second_circuit_digest(mut self) -> Self {
-        let value_target = self
-            .circuit_builder
-            .constant_hash(self.second_circuit_digest);
-        self.circuit_builder
-            .connect_hashes(value_target, self.second_circuit_digest_target);
-        self
     }
 
     pub fn compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
@@ -321,27 +209,6 @@ where
             &mut self.circuit_builder,
             self.first_public_inputs.clone(),
             self.second_public_inputs.clone(),
-        );
-
-        target_set.register_as_public_inputs(&mut self.circuit_builder);
-
-        ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
-    }
-
-    pub fn extended_compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
-    where
-        TS: TargetSet,
-        O: Fn(&mut CircuitBuilder<F, D>, ExtendedComposeArgs<TS1, TS2>) -> TS,
-    {
-        let target_set = op(
-            &mut self.circuit_builder,
-            ExtendedComposeArgs {
-                first_target_set: self.first_public_inputs.clone(),
-                second_target_set: self.second_public_inputs.clone(),
-
-                first_circuit_digest: self.first_circuit_digest_target,
-                second_circuit_digest: self.second_circuit_digest_target,
-            },
         );
 
         target_set.register_as_public_inputs(&mut self.circuit_builder);

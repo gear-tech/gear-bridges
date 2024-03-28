@@ -9,7 +9,7 @@ use num::bigint::BigUint;
 use num::{Integer, One};
 use serde::{Deserialize, Serialize};
 
-use plonky2::field::types::{Field, PrimeField, Sample};
+use plonky2_field::types::{Field, PrimeField, Sample};
 
 /// The base field of the curve25519 elliptic curve.
 ///
@@ -133,6 +133,14 @@ impl Field for Ed25519Base {
         Self([n, 0, 0, 0])
     }
 
+    fn from_noncanonical_u64(n: u64) -> Self {
+        todo!()
+    }
+
+    fn from_noncanonical_i64(n: i64) -> Self {
+        todo!()
+    }
+
     #[inline]
     fn from_noncanonical_u128(n: u128) -> Self {
         Self([n as u64, (n >> 64) as u64, 0, 0])
@@ -141,14 +149,6 @@ impl Field for Ed25519Base {
     #[inline]
     fn from_noncanonical_u96(n: (u64, u32)) -> Self {
         Self([n.0, n.1 as u64, 0, 0])
-    }
-
-    fn from_noncanonical_i64(n: i64) -> Self {
-        unimplemented!()
-    }
-
-    fn from_noncanonical_u64(n: u64) -> Self {
-        unimplemented!()
     }
 }
 

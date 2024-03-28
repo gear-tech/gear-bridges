@@ -2,8 +2,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Neg;
 
-use plonky2::field::ops::Square;
-use plonky2::field::types::{Field, PrimeField};
+use plonky2_field::ops::Square;
+use plonky2_field::types::{Field, PrimeField};
 use serde::{Deserialize, Serialize};
 
 // To avoid implementation conflicts from associated types,

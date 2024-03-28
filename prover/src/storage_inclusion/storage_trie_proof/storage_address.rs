@@ -10,9 +10,12 @@ use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 use std::iter;
 
 use crate::{
-    common::targets::{
-        impl_parsable_array_target_wrapper, impl_parsable_target_set, ArrayTarget, HalfByteTarget,
-        ParsableTargetSet, SingleTarget, TargetSet,
+    common::{
+        pad_byte_vec,
+        targets::{
+            impl_parsable_array_target_wrapper, impl_parsable_target_set, ArrayTarget,
+            HalfByteTarget, ParsableTargetSet, SingleTarget, TargetSet,
+        },
     },
     prelude::*,
 };
@@ -49,6 +52,22 @@ impl PartialStorageAddressTarget {
             address: StorageAddressPaddedTarget::empty(builder),
             length: builder.zero().into(),
         }
+    }
+
+    pub fn constant(nibbles: Vec<u8>, builder: &mut CircuitBuilder<F, D>) -> Self {
+        assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
+
+        let length = builder
+            .constant(F::from_canonical_usize(nibbles.len()))
+            .into();
+
+        let padded_address: [u8; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES] = pad_byte_vec(nibbles);
+        let mut address = padded_address
+            .into_iter()
+            .map(|nibble| HalfByteTarget::constant(nibble, builder).to_target());
+        let address = StorageAddressPaddedTarget::parse(&mut address);
+
+        Self { address, length }
     }
 
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {

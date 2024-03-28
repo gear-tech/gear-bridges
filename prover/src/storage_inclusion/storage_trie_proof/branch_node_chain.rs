@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use plonky2::{
     iop::{
         target::BoolTarget,
@@ -141,7 +140,7 @@ impl Circuit {
         let root_hash_bits = array_to_bits(&root_hash);
         let public_inputs = root_hash_bits
             .into_iter()
-            .map(|bit| F::from_bool(bit))
+            .map(F::from_bool)
             .enumerate()
             .collect();
 

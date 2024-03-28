@@ -5,10 +5,7 @@ use plonky2::{
 };
 use plonky2_field::types::Field;
 use sp_core::H256;
-use trie_db::{
-    node::{Node, NodeHandle},
-    ChildReference, NodeCodec, TrieLayout,
-};
+use trie_db::{node::Node, ChildReference, NodeCodec, TrieLayout};
 
 use super::{
     header_parser::{self, HeaderParserInputTarget},
@@ -298,14 +295,6 @@ mod tests {
             children.into_iter(),
             None,
         );
-
-        let claimed_child_hash = if let Some(ChildReference::Hash(hash)) =
-            children[claimed_child_node_nibble as usize]
-        {
-            hash.0
-        } else {
-            panic!("Invalid claimed_child_node_nibble");
-        };
 
         let circuit_input = BranchParser {
             node_data,

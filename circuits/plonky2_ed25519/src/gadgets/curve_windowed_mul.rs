@@ -1,17 +1,17 @@
 use std::marker::PhantomData;
 
 use num::BigUint;
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::{Field, Sample};
 use plonky2::hash::hash_types::RichField;
 use plonky2::hash::keccak::KeccakHash;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::config::{GenericHashOut, Hasher};
 use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
+use plonky2_field::extension::Extendable;
+use plonky2_field::types::Field;
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
-use crate::curve::curve_types::{Curve, CurveScalar};
+use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
 use crate::gadgets::curve::{AffinePointTarget, CircuitBuilderCurve};
 use crate::gadgets::nonnative::NonNativeTarget;
 use crate::gadgets::split_nonnative::CircuitBuilderSplit;
@@ -35,6 +35,15 @@ pub trait CircuitBuilderWindowedMul<F: RichField + Extendable<D>, const D: usize
         p: &AffinePointTarget<C>,
         n: &NonNativeTarget<C::ScalarField>,
     ) -> AffinePointTarget<C>;
+
+    // returns n(first num_limbs) * p + q_init
+    fn curve_scalar_mul_windowed_part<C: Curve>(
+        &mut self,
+        num_limbs: usize,
+        p: &AffinePointTarget<C>,
+        q_init: &AffinePointTarget<C>,
+        n: &NonNativeTarget<C::ScalarField>,
+    ) -> AffinePointTarget<C>;
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderWindowedMul<F, D>
@@ -44,7 +53,11 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderWindowedMul<F, 
         &mut self,
         p: &AffinePointTarget<C>,
     ) -> Vec<AffinePointTarget<C>> {
-        let g = (CurveScalar(C::ScalarField::rand()) * C::GENERATOR_PROJECTIVE).to_affine();
+        let hash_0 = KeccakHash::<25>::hash_no_pad(&[F::ZERO]);
+        let hash_0_scalar = C::ScalarField::from_noncanonical_biguint(BigUint::from_bytes_le(
+            &GenericHashOut::<F>::to_bytes(&hash_0),
+        ));
+        let g = (CurveScalar(hash_0_scalar) * C::GENERATOR_PROJECTIVE).to_affine();
         let neg = {
             let mut neg = g;
             neg.x = -neg.x;
@@ -112,25 +125,45 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderWindowedMul<F, 
         p: &AffinePointTarget<C>,
         n: &NonNativeTarget<C::ScalarField>,
     ) -> AffinePointTarget<C> {
+        let num_limbs = C::ScalarField::BITS / WINDOW_SIZE;
+        assert_eq!(num_limbs * WINDOW_SIZE, C::ScalarField::BITS);
+        let q_init = AffinePoint {
+            x: C::BaseField::ZERO,
+            y: C::BaseField::ONE,
+            zero: false,
+        };
+        let q_init = self.constant_affine_point(q_init);
+        self.curve_scalar_mul_windowed_part(num_limbs, p, &q_init, n)
+    }
+
+    fn curve_scalar_mul_windowed_part<C: Curve>(
+        &mut self,
+        num_limbs: usize,
+        p: &AffinePointTarget<C>,
+        q_init: &AffinePointTarget<C>,
+        n: &NonNativeTarget<C::ScalarField>,
+    ) -> AffinePointTarget<C> {
         let hash_0 = KeccakHash::<25>::hash_no_pad(&[F::ZERO]);
         let hash_0_scalar = C::ScalarField::from_noncanonical_biguint(BigUint::from_bytes_le(
             &GenericHashOut::<F>::to_bytes(&hash_0),
         ));
         let starting_point = CurveScalar(hash_0_scalar) * C::GENERATOR_PROJECTIVE;
+        let num_bits = num_limbs * WINDOW_SIZE;
         let starting_point_multiplied = {
             let mut cur = starting_point;
-            for _ in 0..C::ScalarField::BITS {
+            for _ in 0..num_bits {
                 cur = cur.double();
             }
             cur
         };
 
         let mut result = self.constant_affine_point(starting_point.to_affine());
+        result = self.curve_add(&result, &q_init);
 
         let precomputation = self.precompute_window(p);
         let zero = self.zero();
 
-        let windows = self.split_nonnative_to_4_bit_limbs(n);
+        let windows = &self.split_nonnative_to_4_bit_limbs(n)[0..num_limbs];
         for i in (0..windows.len()).rev() {
             result = self.curve_repeated_double(&result, WINDOW_SIZE);
             let window = windows[i];
@@ -154,11 +187,13 @@ mod tests {
     use std::ops::Neg;
 
     use anyhow::Result;
-    use plonky2::field::types::{Field, Sample};
+    use log::{Level, LevelFilter};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::util::timing::TimingTree;
+    use plonky2_field::types::{Field, Sample};
     use rand::Rng;
 
     use crate::curve::curve_types::{Curve, CurveScalar};
@@ -205,6 +240,12 @@ mod tests {
     #[test]
     #[ignore]
     fn test_curve_windowed_mul() -> Result<()> {
+        // Initialize logging
+        let mut builder = env_logger::Builder::from_default_env();
+        builder.format_timestamp(None);
+        builder.filter_level(LevelFilter::Info);
+        builder.try_init()?;
+
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -230,7 +271,9 @@ mod tests {
         builder.connect_affine_point(&neg_five_g_expected, &neg_five_g_actual);
 
         let data = builder.build::<C>();
+        let timing = TimingTree::new("prove curve_windowed_mul", Level::Info);
         let proof = data.prove(pw).unwrap();
+        timing.print();
 
         data.verify(proof)
     }

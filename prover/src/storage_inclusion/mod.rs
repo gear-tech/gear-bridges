@@ -24,7 +24,6 @@ impl_parsable_target_set! {
     pub struct StorageInclusionTarget {
         pub block_hash: Blake2Target,
         pub storage_item_hash: Blake2Target,
-        pub address: PartialStorageAddressTarget
     }
 }
 
@@ -41,6 +40,7 @@ pub struct StorageInclusion {
     /// Arranged from root to leaf.
     pub branch_node_data: Vec<BranchNodeData>,
     pub leaf_node_data: Vec<u8>,
+    pub address_nibbles: Vec<u8>,
 }
 
 impl StorageInclusion {
@@ -69,10 +69,13 @@ impl StorageInclusion {
             .state_root
             .connect(&storage_trie_target.root_hash, &mut builder);
 
+        let storage_address =
+            PartialStorageAddressTarget::constant(self.address_nibbles, &mut builder);
+        storage_address.connect(&storage_trie_target.address, &mut builder);
+
         StorageInclusionTarget {
             block_hash: block_header_target.block_hash,
             storage_item_hash: storage_trie_target.data_hash,
-            address: storage_trie_target.address,
         }
         .register_as_public_inputs(&mut builder);
 

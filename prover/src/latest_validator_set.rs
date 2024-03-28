@@ -1,20 +1,14 @@
 use itertools::Itertools;
 use plonky2::{
     field::types::Field,
-    hash::{
-        hash_types::{HashOutTarget, MerkleCapTarget},
-        merkle_tree::MerkleCap,
-    },
+    hash::{hash_types::HashOutTarget, merkle_tree::MerkleCap},
     iop::{
         target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
-            VerifierOnlyCircuitData,
-        },
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierOnlyCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
@@ -27,8 +21,9 @@ use crate::{
             impl_target_set, ParsableTargetSet, Sha256TargetGoldilocks, SingleTarget, TargetSet,
             VerifierDataTarget,
         },
+        BuilderExt,
     },
-    next_validator_set::{NextValidatorSet, NextValidatorSetTarget},
+    next_validator_set::NextValidatorSet,
     prelude::*,
     ProofWithCircuitData,
 };
@@ -146,7 +141,6 @@ impl LatestValidatorSet {
         circuit.prove_recursive(composed_proof)
     }
 
-    // TODO: use recursively_verify_constant_proof here.
     fn build_circuit(&self) -> Circuit {
         let next_validator_set_proof = self.change_proof.prove();
 
@@ -160,43 +154,10 @@ impl LatestValidatorSet {
         genesis_authority_set_hash.register_as_public_inputs(&mut builder);
 
         // Verify validator set change
-        let next_validator_set_proof_target =
-            builder.add_virtual_proof_with_pis(&next_validator_set_proof.circuit_data().common);
-
-        let desired_authority_set_change_proof_circuit_digest =
-            builder.constant_hash(next_validator_set_proof.circuit_digest());
-        let desired_next_validator_set_merkle_cap = MerkleCapTarget(
-            next_validator_set_proof
-                .circuit_data()
-                .verifier_only
-                .constants_sigmas_cap
-                .0
-                .iter()
-                .map(|value| builder.constant_hash(*value))
-                .collect::<Vec<_>>(),
-        );
-
-        let next_validator_set_verifier_target = VerifierCircuitTarget {
-            constants_sigmas_cap: desired_next_validator_set_merkle_cap,
-            circuit_digest: desired_authority_set_change_proof_circuit_digest,
-        };
-
         let mut witness = PartialWitness::new();
 
-        witness.set_proof_with_pis_target(
-            &next_validator_set_proof_target,
-            &next_validator_set_proof.proof(),
-        );
-
-        builder.verify_proof::<C>(
-            &next_validator_set_proof_target,
-            &next_validator_set_verifier_target,
-            &next_validator_set_proof.circuit_data().common,
-        );
-
-        let next_authority_set_public_inputs = NextValidatorSetTarget::parse_exact(
-            &mut next_validator_set_proof_target.public_inputs.into_iter(),
-        );
+        let next_authority_set_public_inputs =
+            builder.recursively_verify_constant_proof(next_validator_set_proof, &mut witness);
 
         let current_set_id = next_authority_set_public_inputs
             .current_authority_set_id
@@ -211,7 +172,6 @@ impl LatestValidatorSet {
             .register_as_public_inputs(&mut builder);
 
         // Recursion
-        // TODO: Check if verifier data target is asserted with previous.
         let verifier_data_target = builder.add_verifier_data_public_inputs();
         let common_data = common_data_for_recursion(
             CircuitConfig::standard_recursion_config(),

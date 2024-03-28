@@ -148,12 +148,12 @@ impl CyclicRecursionTarget {
 // TODO: Remove
 impl_parsable_target_set! {
     struct CyclicRecursionTargetWithoutCircuitData {
-        pub node_data: BranchNodeDataPaddedTarget,
-        pub initial_read_offset: SingleTarget,
-        pub read_offset: SingleTarget,
-        pub overall_children_amount: SingleTarget,
-        pub claimed_child_index_in_array: SingleTarget,
-        pub claimed_child_hash: Blake2Target,
+        node_data: BranchNodeDataPaddedTarget,
+        initial_read_offset: SingleTarget,
+        read_offset: SingleTarget,
+        overall_children_amount: SingleTarget,
+        claimed_child_index_in_array: SingleTarget,
+        claimed_child_hash: Blake2Target,
     }
 }
 

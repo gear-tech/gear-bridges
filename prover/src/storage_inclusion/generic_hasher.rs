@@ -63,7 +63,6 @@ impl GenericBlake2 {
         }
 
         let verifier_data_idx = builder.add_const(block_count_target, F::NEG_ONE);
-        // TODO: check range of verifier_data_idx here as verifier_data_targets is padded.
         let verifier_data_target =
             builder.random_access_verifier_data(verifier_data_idx, verifier_data_targets);
 
@@ -92,7 +91,7 @@ impl GenericBlake2 {
 lazy_static! {
     static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
         ..=MAX_BLOCK_COUNT)
-        .map(|block_count| blake2_circuit_verifier_data(block_count))
+        .map(blake2_circuit_verifier_data)
         .collect::<Vec<_>>()
         .try_into()
         .unwrap();
@@ -162,12 +161,23 @@ impl VariativeBlake2 {
             current_idx = builder.add_const(current_idx, F::ONE);
         }
 
+        // Assert upper bound for length.
+        let length_is_max = builder.is_equal(current_idx, length_target);
+        let length_valid = builder.or(length_is_max, data_end);
+        builder.assert_one(length_valid.target);
+
+        // Assert lower bound for length.
+        let max_length = builder.constant(F::from_canonical_usize(block_count * BLOCK_BYTES));
+        let padded_length = builder.sub(max_length, length_target);
+        let block_bytes_target = builder.constant(F::from_canonical_usize(BLOCK_BYTES));
+        let compare_with_zero = builder.sub(block_bytes_target, padded_length);
+        builder.range_check(compare_with_zero, 32);
+
         let data_target = ArrayTarget(data_target);
         let data_target_bits = data_target
             .0
             .iter()
-            .map(|t| t.to_bit_targets(&mut builder).0.into_iter().rev())
-            .flatten();
+            .flat_map(|t| t.to_bit_targets(&mut builder).0.into_iter().rev());
 
         let hasher_input = data_target_bits
             .take(BLOCK_BITS * block_count)

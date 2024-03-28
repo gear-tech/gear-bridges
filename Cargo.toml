@@ -1,7 +1,6 @@
 [workspace]
 
 members = [
-    "eth-client",
     "gear-rpc-client",
     "prover",
     "relayer",
@@ -24,7 +23,6 @@ plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
 plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
 plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
 plonky2_u32 = { path = "./circuits/plonky2_u32" }
-eth-client = { path = "./eth-client" }
 intermediate-proof-storage = { path = "./intermediate-proof-storage" }
 
 plonky2 = { git = "https://github.com/mertwole/plonky2" }

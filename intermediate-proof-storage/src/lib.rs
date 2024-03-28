@@ -29,6 +29,8 @@ pub trait ProofStorage {
         proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
     ) -> Result<(), ProofStorageError>;
 
+    fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError>;
+
     fn get_latest_proof(&self) -> Option<ProofWithPublicInputs<F, C, D>>;
 
     // TODO: Add fn to query any of the stored proofs
@@ -69,6 +71,12 @@ impl ProofStorage for MockProofStorage {
         self.latest_proof = Some(proof_with_public_inputs);
 
         Ok(())
+    }
+
+    fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError> {
+        self.verifier_circuit_data
+            .clone()
+            .ok_or(ProofStorageError::NotInitialized)
     }
 
     fn get_latest_proof(&self) -> Option<ProofWithPublicInputs<F, C, D>> {
@@ -195,6 +203,10 @@ impl ProofStorage for PersistentMockProofStorage {
         Ok(())
     }
 
+    fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError> {
+        self.mock.get_verifier_circuit_data()
+    }
+
     fn get_latest_proof(&self) -> Option<ProofWithPublicInputs<F, C, D>> {
         self.mock.get_latest_proof()
     }
@@ -214,6 +226,10 @@ impl ProofStorage for VaraProofStorage {
         verifier_circuit_data: VerifierCircuitData<F, C, D>,
         proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
     ) -> Result<(), ProofStorageError> {
+        todo!()
+    }
+
+    fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError> {
         todo!()
     }
 

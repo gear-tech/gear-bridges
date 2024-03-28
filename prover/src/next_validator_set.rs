@@ -2,11 +2,9 @@ use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
-use plonky2_field::types::PrimeField64;
-use std::iter;
 
 use crate::{
-    block_finality::{BlockFinality, BlockFinalityTarget},
+    block_finality::BlockFinality,
     common::{
         array_to_bits,
         targets::{
@@ -16,9 +14,8 @@ use crate::{
         BuilderExt, ProofComposition,
     },
     consts::VALIDATOR_COUNT,
-    next_validator_set,
     prelude::*,
-    storage_inclusion::{StorageInclusion, StorageInclusionTarget},
+    storage_inclusion::StorageInclusion,
     validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
     ProofWithCircuitData,
 };
@@ -26,9 +23,6 @@ use crate::{
 // record for each validator: (AccountId, SessionKeys)
 // SessionKeys = (Babe, Grandpa, ImOnline, AuthorityDiscovery)
 const SESSION_KEYS_SIZE: usize = 5 * 32;
-const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE: usize = 1 + VALIDATOR_COUNT * SESSION_KEYS_SIZE;
-const SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE_IN_BITS: usize =
-    SESSION_KEYS_ALL_VALIDATORS_SIZE_IN_STORAGE * 8;
 
 impl_target_set! {
     pub struct NextValidatorSetTarget {
@@ -73,13 +67,9 @@ impl NextValidatorSet {
         }
         .prove();
 
-        let mut config = CircuitConfig::standard_recursion_config();
-        // TODO: Can be removed as it's not the latest proof in chain for now.
-        config.fri_config.cap_height = 0;
-        let composition_builder = ProofComposition::new_with_config(
+        let composition_builder = ProofComposition::new(
             validator_set_hash_proof,
             non_hashed_next_validator_set_proof,
-            config,
         );
 
         let targets_op =
@@ -103,9 +93,7 @@ impl NextValidatorSet {
                 }
             };
 
-        composition_builder
-            .assert_both_circuit_digests()
-            .compose(targets_op)
+        composition_builder.compose(targets_op)
     }
 }
 

@@ -5,7 +5,7 @@ macro_rules! test_field_arithmetic {
             use std::vec::Vec;
 
             use num::bigint::BigUint;
-            use plonky2::field::types::{Field, Sample};
+            use plonky2_field::types::{Field, Sample};
             use rand::rngs::OsRng;
             use rand::Rng;
 

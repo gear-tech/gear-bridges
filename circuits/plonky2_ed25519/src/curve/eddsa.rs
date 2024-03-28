@@ -1,6 +1,6 @@
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use num::{BigUint, Integer};
-use plonky2::field::types::Field;
+use plonky2_field::types::Field;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 

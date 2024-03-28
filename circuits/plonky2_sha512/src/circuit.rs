@@ -310,7 +310,7 @@ fn add_biguint_2limbs<F: RichField + Extendable<D>, const D: usize>(
 // padded_msg_len = block_count x 1024 bits
 // Size: msg_len_in_bits (L) |  p bits   | 128 bits
 // Bits:      msg            | 100...000 |    L
-pub fn sha256_circuit<F: RichField + Extendable<D>, const D: usize>(
+pub fn sha512_circuit<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     msg_len_in_bits: u128,
 ) -> Sha512Targets {
@@ -443,7 +443,7 @@ pub fn sha256_circuit<F: RichField + Extendable<D>, const D: usize>(
 
 #[cfg(test)]
 mod tests {
-    use crate::circuit::{array_to_bits, sha256_circuit};
+    use crate::circuit::{array_to_bits, sha512_circuit};
     use anyhow::Result;
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -485,7 +485,7 @@ mod tests {
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-        let targets = sha256_circuit(&mut builder, len as u128);
+        let targets = sha512_circuit(&mut builder, len as u128);
         let mut pw = PartialWitness::new();
 
         for i in 0..len {
@@ -520,7 +520,7 @@ mod tests {
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
-        let targets = sha256_circuit(&mut builder, len as u128);
+        let targets = sha512_circuit(&mut builder, len as u128);
         let mut pw = PartialWitness::new();
 
         for i in 0..len {

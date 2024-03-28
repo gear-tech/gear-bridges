@@ -117,8 +117,7 @@ impl BlockFinality {
         };
 
         composition_builder
-            // TODO: Return assertion back when ValidatorSignsProof will have constant circuit digest
-            //.assert_both_circuit_digests()
+            .assert_both_circuit_digests()
             .compose(targets_op)
     }
 }
@@ -271,7 +270,9 @@ impl IndexedValidatorSign {
         };
 
         composition_builder
-            .assert_both_circuit_digests()
+            // TODO: Return assertion back when SingleValidatorSign will have constant circuit digest
+            //.assert_both_circuit_digests()
+            .assert_first_circuit_digest()
             .compose(targets_op)
     }
 }
@@ -318,6 +319,8 @@ impl SingleValidatorSign {
         }
 
         let proof = ProofWithCircuitData::from_builder(builder, pw);
+
+        println!("CD: {:?}", proof.circuit_digest());
 
         log::info!("        Proven single validator sign...");
 

@@ -22,11 +22,11 @@ use crate::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
             SingleTarget, TargetSet, TargetSetWitnessOperations, ValidatorSetTarget,
         },
-        ProofComposition,
+        BuilderExt,
     },
     consts::{GRANDPA_VOTE_LENGTH, PROCESSED_VALIDATOR_COUNT, VALIDATOR_COUNT},
     prelude::*,
-    validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
+    validator_set_hash::ValidatorSetHash,
     ProofWithCircuitData,
 };
 
@@ -100,23 +100,25 @@ impl BlockFinality {
 
         log::info!("Composing block finality and validator set hash proofs...");
 
-        let composition_builder =
-            ProofComposition::new(validator_set_hash_proof, validator_signs_proof);
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          validator_set_hash: ValidatorSetHashTarget,
-                          validator_signs: ValidatorSignsChainTarget| {
-            validator_set_hash
-                .validator_set
-                .connect(&validator_signs.validator_set, builder);
+        let validator_set_hash_target =
+            builder.recursively_verify_constant_proof(validator_set_hash_proof, &mut witness);
+        let validator_signs_target =
+            builder.recursively_verify_constant_proof(validator_signs_proof, &mut witness);
 
-            BlockFinalityTarget {
-                validator_set_hash: validator_set_hash.hash,
-                message: validator_signs.message,
-            }
-        };
+        validator_set_hash_target
+            .validator_set
+            .connect(&validator_signs_target.validator_set, &mut builder);
 
-        composition_builder.compose(targets_op)
+        BlockFinalityTarget {
+            validator_set_hash: validator_set_hash_target.hash,
+            message: validator_signs_target.message,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }
 
@@ -190,38 +192,40 @@ impl ComposedValidatorSigns {
     ) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::info!("    Proving validator signs composition...");
 
-        let composition_builder =
-            ProofComposition::new(previous_composed_proof, indexed_sign_proof);
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          previous_composed_proof: ValidatorSignsChainTarget,
-                          indexed_sign_proof: ValidatorSignsChainTarget| {
-            previous_composed_proof
-                .message
-                .connect(&indexed_sign_proof.message, builder);
+        let previous_proof_target =
+            builder.recursively_verify_constant_proof(previous_composed_proof, &mut witness);
+        let indexed_sign_target =
+            builder.recursively_verify_constant_proof(indexed_sign_proof, &mut witness);
 
-            previous_composed_proof
-                .validator_set
-                .connect(&indexed_sign_proof.validator_set, builder);
+        previous_proof_target
+            .message
+            .connect(&indexed_sign_target.message, &mut builder);
 
-            let new_index_sub_latest = builder.sub(
-                indexed_sign_proof.validator_idx.to_target(),
-                previous_composed_proof.validator_idx.to_target(),
-            );
-            let one = builder.one();
-            let to_compare_with_0 = builder.sub(new_index_sub_latest, one);
-            // Assert that `to_compare_with_0` >= 0.
-            // This works because new_index_sub_latest << 2^32.
-            builder.range_check(to_compare_with_0, 32);
+        previous_proof_target
+            .validator_set
+            .connect(&indexed_sign_target.validator_set, &mut builder);
 
-            ValidatorSignsChainTarget {
-                validator_idx: indexed_sign_proof.validator_idx,
-                validator_set: indexed_sign_proof.validator_set,
-                message: indexed_sign_proof.message,
-            }
-        };
+        let new_index_sub_latest = builder.sub(
+            indexed_sign_target.validator_idx.to_target(),
+            previous_proof_target.validator_idx.to_target(),
+        );
+        let one = builder.one();
+        let to_compare_with_0 = builder.sub(new_index_sub_latest, one);
+        // Assert that `to_compare_with_0` >= 0.
+        // This works because new_index_sub_latest << 2^32.
+        builder.range_check(to_compare_with_0, 32);
 
-        composition_builder.compose(targets_op)
+        ValidatorSignsChainTarget {
+            validator_idx: indexed_sign_target.validator_idx,
+            validator_set: indexed_sign_target.validator_set,
+            message: indexed_sign_target.message,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }
 
@@ -249,23 +253,25 @@ impl IndexedValidatorSign {
         }
         .prove();
 
-        let composition_builder = ProofComposition::new(selector_proof, sign_proof);
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          selector_proof: ValidatorSelectorTarget,
-                          sign_proof: SingleValidatorSignTarget| {
-            selector_proof
-                .validator
-                .connect(&sign_proof.public_key, builder);
+        let selector_target =
+            builder.recursively_verify_constant_proof(selector_proof, &mut witness);
+        let sign_target = builder.recursively_verify_constant_proof(sign_proof, &mut witness);
 
-            ValidatorSignsChainTarget {
-                validator_idx: selector_proof.index,
-                validator_set: selector_proof.validator_set,
-                message: sign_proof.message,
-            }
-        };
+        selector_target
+            .validator
+            .connect(&sign_target.public_key, &mut builder);
 
-        composition_builder.compose(targets_op)
+        ValidatorSignsChainTarget {
+            validator_idx: selector_target.index,
+            validator_set: selector_target.validator_set,
+            message: sign_target.message,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }
 

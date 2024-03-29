@@ -1,16 +1,18 @@
-use plonky2::plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig};
+use plonky2::{
+    iop::witness::PartialWitness,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+};
 
 use crate::{
-    block_finality::{BlockFinality, BlockFinalityTarget},
+    block_finality::BlockFinality,
     common::{
         targets::{
             impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
             SingleTarget, TargetSet,
         },
-        ProofComposition,
+        BuilderExt,
     },
-    prelude::*,
-    storage_inclusion::{StorageInclusion, StorageInclusionTarget},
+    storage_inclusion::StorageInclusion,
     ProofWithCircuitData,
 };
 
@@ -36,41 +38,44 @@ impl MessageSent {
 
         log::info!("Composing inclusion and finality proofs...");
 
-        let mut config = CircuitConfig::standard_recursion_config();
-        config.fri_config.cap_height = 0;
-        let composition_builder =
-            ProofComposition::new_with_config(inclusion_proof, finality_proof, config);
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op = |builder: &mut CircuitBuilder<F, D>,
-                          inclusion_proof: StorageInclusionTarget,
-                          finality_proof: BlockFinalityTarget| {
-            inclusion_proof
-                .block_hash
-                .connect(&finality_proof.message.block_hash, builder);
+        let inclusion_proof_target =
+            builder.recursively_verify_constant_proof(inclusion_proof, &mut witness);
+        let finality_proof_target =
+            builder.recursively_verify_constant_proof(finality_proof, &mut witness);
 
-            // TODO: De-hash item here.
-            let padding_targets = (0..4).map(|_| builder.constant_bool(false).target);
-            let message_targets = BitArrayTarget::<260>::parse(
-                &mut inclusion_proof
-                    .storage_item_hash
-                    .into_targets_iter()
-                    .take(256)
-                    .chain(padding_targets),
-            );
+        inclusion_proof_target
+            .block_hash
+            .connect(&finality_proof_target.message.block_hash, &mut builder);
 
-            MessageSentTarget {
-                validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                    finality_proof.validator_set_hash,
-                    builder,
-                ),
-                authority_set_id: SingleTarget::from_u64_bits_le_lossy(
-                    finality_proof.message.authority_set_id,
-                    builder,
-                ),
-                message_contents: MessageTargetGoldilocks::from_bit_array(message_targets, builder),
-            }
-        };
+        // TODO: De-hash item here.
+        let padding_targets = (0..4).map(|_| builder.constant_bool(false).target);
+        let message_targets = BitArrayTarget::<260>::parse(
+            &mut inclusion_proof_target
+                .storage_item_hash
+                .into_targets_iter()
+                .take(256)
+                .chain(padding_targets),
+        );
 
-        composition_builder.compose(targets_op)
+        MessageSentTarget {
+            validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                finality_proof_target.validator_set_hash,
+                &mut builder,
+            ),
+            authority_set_id: SingleTarget::from_u64_bits_le_lossy(
+                finality_proof_target.message.authority_set_id,
+                &mut builder,
+            ),
+            message_contents: MessageTargetGoldilocks::from_bit_array(
+                message_targets,
+                &mut builder,
+            ),
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }

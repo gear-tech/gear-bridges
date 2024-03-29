@@ -11,12 +11,12 @@ use crate::{
             impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget,
             Sha256Target, Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
         },
-        BuilderExt, ProofComposition,
+        BuilderExt,
     },
     consts::VALIDATOR_COUNT,
     prelude::*,
     storage_inclusion::StorageInclusion,
-    validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
+    validator_set_hash::ValidatorSetHash,
     ProofWithCircuitData,
 };
 
@@ -67,33 +67,32 @@ impl NextValidatorSet {
         }
         .prove();
 
-        let composition_builder = ProofComposition::new(
-            validator_set_hash_proof,
-            non_hashed_next_validator_set_proof,
-        );
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op =
-            |builder: &mut CircuitBuilder<F, D>,
-             validator_set_hash: ValidatorSetHashTarget,
-             next_validator_set: NextValidatorSetNonHashedTarget| {
-                validator_set_hash
-                    .validator_set
-                    .connect(&next_validator_set.next_validator_set, builder);
+        let validator_set_hash_target =
+            builder.recursively_verify_constant_proof(validator_set_hash_proof, &mut witness);
+        let next_validator_set_target = builder
+            .recursively_verify_constant_proof(non_hashed_next_validator_set_proof, &mut witness);
 
-                NextValidatorSetTarget {
-                    validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                        next_validator_set.current_validator_set_hash,
-                        builder,
-                    ),
-                    next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                        validator_set_hash.hash,
-                        builder,
-                    ),
-                    current_authority_set_id: next_validator_set.authority_set_id,
-                }
-            };
+        validator_set_hash_target
+            .validator_set
+            .connect(&next_validator_set_target.next_validator_set, &mut builder);
 
-        composition_builder.compose(targets_op)
+        NextValidatorSetTarget {
+            validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                next_validator_set_target.current_validator_set_hash,
+                &mut builder,
+            ),
+            next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                validator_set_hash_target.hash,
+                &mut builder,
+            ),
+            current_authority_set_id: next_validator_set_target.authority_set_id,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }
 

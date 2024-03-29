@@ -26,9 +26,12 @@ use crate::{
     },
     consts::{GRANDPA_VOTE_LENGTH, PROCESSED_VALIDATOR_COUNT, VALIDATOR_COUNT},
     prelude::*,
-    validator_set_hash::ValidatorSetHash,
     ProofWithCircuitData,
 };
+
+pub mod validator_set_hash;
+
+use validator_set_hash::ValidatorSetHash;
 
 const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 

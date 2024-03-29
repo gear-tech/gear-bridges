@@ -8,10 +8,10 @@ use std::{path::PathBuf, time::Instant};
 use gear_rpc_client::{BlockInclusionProof, GearApi};
 use prover::{
     common::targets::ParsableTargetSet,
-    final_proof::FinalProof,
-    latest_validator_set::{LatestValidatorSet, LatestValidatorSetTarget},
-    message_sent::MessageSent,
-    next_validator_set::NextValidatorSet,
+    final_proof::{message_sent::MessageSent, FinalProof},
+    latest_validator_set::{
+        next_validator_set::NextValidatorSet, LatestValidatorSet, LatestValidatorSetTarget,
+    },
     prelude::GENESIS_AUTHORITY_SET_ID,
     storage_inclusion::{BranchNodeData, StorageInclusion},
 };

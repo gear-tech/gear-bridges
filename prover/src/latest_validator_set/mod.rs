@@ -23,12 +23,16 @@ use crate::{
         },
         BuilderExt,
     },
-    next_validator_set::NextValidatorSet,
-    prelude::*,
+    prelude::{
+        consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
+        *,
+    },
     ProofWithCircuitData,
 };
 
-use self::consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH};
+pub mod next_validator_set;
+
+use next_validator_set::NextValidatorSet;
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 

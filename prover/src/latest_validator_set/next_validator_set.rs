@@ -7,6 +7,7 @@ use plonky2::{
 };
 
 use crate::{
+    block_finality::validator_set_hash::ValidatorSetHash,
     block_finality::BlockFinality,
     common::{
         array_to_bits,
@@ -20,7 +21,6 @@ use crate::{
     consts::VALIDATOR_COUNT,
     prelude::*,
     storage_inclusion::StorageInclusion,
-    validator_set_hash::ValidatorSetHash,
     ProofWithCircuitData,
 };
 
@@ -59,6 +59,7 @@ impl NextValidatorSet {
             );
         }
 
+        // TODO: Remove when pallet-gear-bridges will be implemented.
         let validator_set_hash_proof = ValidatorSetHash {
             validator_set: next_validator_set.try_into().unwrap(),
         }

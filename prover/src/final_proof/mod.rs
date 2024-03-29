@@ -18,10 +18,13 @@ use crate::{
     },
     consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
     latest_validator_set::LatestValidatorSetTarget,
-    message_sent::MessageSent,
     prelude::*,
     ProofWithCircuitData,
 };
+
+pub mod message_sent;
+
+use message_sent::MessageSent;
 
 impl_target_set! {
     pub struct FinalProofTarget {

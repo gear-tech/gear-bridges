@@ -120,6 +120,7 @@ impl ParsableTargetSet for Target {
     }
 }
 
+pub(crate) use crate::impl_parsable_target_set;
 pub(crate) use crate::impl_target_set;
 
 #[macro_export]
@@ -142,15 +143,13 @@ macro_rules! impl_target_set {
                 }
             }
 
-            fn into_targets_iter(self) -> impl Iterator<Item = ::plonky2::iop::target::Target> {
+            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = ::plonky2::iop::target::Target> {
                 ::std::iter::empty()
                 $(.chain(self.$field_name.into_targets_iter()))*
             }
         }
     }
 }
-
-pub(crate) use crate::impl_parsable_target_set;
 
 #[macro_export]
 macro_rules! impl_parsable_target_set {
@@ -160,25 +159,14 @@ macro_rules! impl_parsable_target_set {
             $(,)?
         }
     ) => {
-        #[derive(Clone, Debug)]
-        $vis struct $struct_name {
-            $($field_vis $field_name: $field_type),*
-        }
-
-        impl $crate::common::targets::TargetSet for $struct_name {
-            fn parse(raw: &mut impl ::std::iter::Iterator<Item = plonky2::iop::target::Target>) -> Self {
-                Self {
-                    $($field_name: $crate::common::targets::TargetSet::parse(raw)),*
-                }
-            }
-
-            fn into_targets_iter(self) -> impl ::std::iter::Iterator<Item = ::plonky2::iop::target::Target> {
-                ::std::iter::empty()
-                $(.chain(self.$field_name.into_targets_iter()))*
+        $crate::common::targets::impl_target_set! {
+            $vis struct $struct_name {
+                $($field_vis $field_name: $field_type),*
             }
         }
 
         ::paste::paste! {
+            #[derive(Clone, Debug)]
             $vis struct [<$struct_name PublicInputs>] {
                 $($field_vis $field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::PublicInputsData),*
             }

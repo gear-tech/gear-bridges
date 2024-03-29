@@ -11,13 +11,8 @@ plonky2_u32.workspace = true
 plonky2_ecdsa.workspace = true
 plonky2_sha512.workspace = true
 curve25519-dalek.workspace = true
-itertools = { version = "0.10.0", default-features = false, features = [
-    "use_alloc",
-] }
-num = { version = "0.4", default-features = false, features = [
-    "alloc",
-    "rand",
-] }
+itertools.workspace = true
+num.workspace = true
 rayon.workspace = true
 serde.workspace = true
 anyhow.workspace = true

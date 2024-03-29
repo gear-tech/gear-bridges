@@ -22,7 +22,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
-const MAX_BLOCK_COUNT: usize = 6;
+const MAX_BLOCK_COUNT: usize = 8;
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
 impl_parsable_target_set! {

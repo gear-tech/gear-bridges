@@ -1,7 +1,4 @@
 #![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
-#![feature(type_alias_impl_trait)]
-#![feature(concat_idents)]
 #![feature(return_position_impl_trait_in_trait)]
 
 use jemallocator::Jemalloc;

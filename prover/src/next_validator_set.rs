@@ -1,5 +1,8 @@
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
@@ -9,7 +12,8 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget,
-            Sha256Target, Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
+            Sha256Target, Sha256TargetGoldilocks, TargetBitOperations, TargetSet,
+            ValidatorSetTarget,
         },
         BuilderExt,
     },
@@ -28,7 +32,7 @@ impl_target_set! {
     pub struct NextValidatorSetTarget {
         pub validator_set_hash: Sha256TargetGoldilocks,
         pub next_validator_set_hash: Sha256TargetGoldilocks,
-        pub current_authority_set_id: SingleTarget,
+        pub current_authority_set_id: Target,
     }
 }
 
@@ -99,7 +103,7 @@ impl NextValidatorSet {
 impl_target_set! {
     struct NextValidatorSetNonHashedTarget {
         current_validator_set_hash: Sha256Target,
-        authority_set_id: SingleTarget,
+        authority_set_id: Target,
         next_validator_set: ValidatorSetTarget,
     }
 }
@@ -161,7 +165,7 @@ impl NextValidatorSetNonHashed {
             .block_hash
             .connect(&block_finality_target.message.block_hash, &mut builder);
 
-        let authority_set_id = SingleTarget::from_u64_bits_le_lossy(
+        let authority_set_id = Target::from_u64_bits_le_lossy(
             block_finality_target.message.authority_set_id,
             &mut builder,
         );

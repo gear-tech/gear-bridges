@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use plonky2::{
     iop::{
-        target::BoolTarget,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -20,7 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
-            SingleTarget, TargetSet, TargetSetWitnessOperations, ValidatorSetTarget,
+            TargetSet, TargetSetWitnessOperations, ValidatorSetTarget,
         },
         BuilderExt,
     },
@@ -130,7 +130,7 @@ struct ProcessedPreCommit {
 
 impl_target_set! {
     struct ValidatorSignsChainTarget {
-        validator_idx: SingleTarget,
+        validator_idx: Target,
         validator_set: ValidatorSetTarget,
         message: GrandpaVoteTarget,
     }
@@ -209,8 +209,8 @@ impl ComposedValidatorSigns {
             .connect(&indexed_sign_target.validator_set, &mut builder);
 
         let new_index_sub_latest = builder.sub(
-            indexed_sign_target.validator_idx.to_target(),
-            previous_proof_target.validator_idx.to_target(),
+            indexed_sign_target.validator_idx,
+            previous_proof_target.validator_idx,
         );
         let one = builder.one();
         let to_compare_with_0 = builder.sub(new_index_sub_latest, one);
@@ -326,7 +326,7 @@ impl SingleValidatorSign {
 
 impl_target_set! {
     struct ValidatorSelectorTarget {
-        index: SingleTarget,
+        index: Target,
         validator_set: ValidatorSetTarget,
         validator: Ed25519PublicKeyTarget,
     }
@@ -356,10 +356,7 @@ impl ValidatorSelector {
 
         let mut pw = PartialWitness::new();
 
-        pw.set_target(
-            targets.index.to_target(),
-            F::from_canonical_u32(self.index as u32),
-        );
+        pw.set_target(targets.index, F::from_canonical_u32(self.index as u32));
 
         targets.validator_set.set_partial_witness(
             &self

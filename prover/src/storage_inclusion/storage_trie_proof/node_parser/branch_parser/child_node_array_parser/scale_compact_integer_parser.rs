@@ -1,8 +1,8 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ByteTarget, SingleTarget},
+    common::targets::{impl_target_set, ByteTarget},
     prelude::*,
 };
 
@@ -14,7 +14,7 @@ impl_target_set! {
 
 impl_target_set! {
     pub struct ScaleCompactIntegerParserOutputTarget {
-        pub decoded: SingleTarget
+        pub decoded: Target
     }
 }
 
@@ -66,7 +66,7 @@ mod tests {
 
         if let Some(expected) = expected {
             let expected = builder.constant(F::from_canonical_usize(expected));
-            builder.connect(output.decoded.to_target(), expected);
+            builder.connect(output.decoded, expected);
         }
 
         let circuit = builder.build::<C>();

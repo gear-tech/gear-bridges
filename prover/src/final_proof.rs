@@ -1,5 +1,8 @@
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, VerifierCircuitData},
@@ -10,10 +13,7 @@ use plonky2_field::types::Field;
 
 use crate::{
     common::{
-        targets::{
-            impl_target_set, MessageTargetGoldilocks, Sha256TargetGoldilocks, SingleTarget,
-            TargetSet,
-        },
+        targets::{impl_target_set, MessageTargetGoldilocks, Sha256TargetGoldilocks, TargetSet},
         BuilderExt,
     },
     consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
@@ -26,7 +26,7 @@ use crate::{
 impl_target_set! {
     pub struct FinalProofTarget {
         message_contents: MessageTargetGoldilocks,
-        block_number: SingleTarget
+        block_number: Target
     }
 }
 
@@ -84,7 +84,7 @@ impl FinalProof {
             builder.constant(F::from_noncanonical_u64(GENESIS_AUTHORITY_SET_ID));
         builder.connect(
             desired_genesis_authority_set_id,
-            latest_validator_set_target.genesis_set_id.to_target(),
+            latest_validator_set_target.genesis_set_id,
         );
 
         let desired_genesis_validator_set_hash = Sha256TargetGoldilocks::parse_exact(

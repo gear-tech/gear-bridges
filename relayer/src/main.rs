@@ -151,7 +151,7 @@ async fn main() {
                 log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
 
                 proof_storage
-                    .init(genesis_proof.verifier_circuit_data(), genesis_proof.proof())
+                    .init(genesis_proof.circuit_data().clone(), genesis_proof.proof())
                     .unwrap();
             }
             ProveCommands::ValidatorSetChange { args } => {

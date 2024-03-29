@@ -112,6 +112,14 @@ impl ParsableTargetSet for HashOutTarget {
     }
 }
 
+impl ParsableTargetSet for Target {
+    type PublicInputsData = u64;
+
+    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
+        public_inputs.next().unwrap().to_canonical_u64()
+    }
+}
+
 pub(crate) use crate::impl_target_set;
 
 #[macro_export]
@@ -254,7 +262,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         )
     }
 
-    pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> T {
+    pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> T {
         let self_targets = self
             .0
             .clone()
@@ -277,7 +285,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         let access_targets = (0..inner_target_len)
             .map(|offset| {
                 let offset_const = builder.constant(F::from_canonical_usize(offset));
-                builder.add(at.0, offset_const)
+                builder.add(at, offset_const)
             })
             .collect::<Vec<_>>();
 
@@ -290,14 +298,14 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
 
     pub fn random_read_array<const R: usize>(
         &self,
-        at: SingleTarget,
+        at: Target,
         builder: &mut CircuitBuilder<F, D>,
     ) -> ArrayTarget<T, R> {
         ArrayTarget(
             (0..R)
                 .map(|offset| {
                     let offset = builder.constant(F::from_canonical_usize(offset));
-                    let read_at = builder.add(at.to_target(), offset);
+                    let read_at = builder.add(at, offset);
                     self.random_read(read_at.into(), builder)
                 })
                 .collect::<Vec<_>>()
@@ -323,14 +331,14 @@ where
     }
 }
 
-trait BoolTargetsArrayToSingleTargets<const PACK_BY: usize> {
-    fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<SingleTarget>;
+trait BoolTargetsArrayToTargets<const PACK_BY: usize> {
+    fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<Target>;
 }
 
-impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_BY>
+impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToTargets<PACK_BY>
     for ArrayTarget<BoolTarget, N>
 {
-    fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<SingleTarget> {
+    fn compress_to_goldilocks(&self, builder: &mut CircuitBuilder<F, D>) -> Vec<Target> {
         assert_eq!(N % PACK_BY, 0);
         assert!(PACK_BY <= 64);
 
@@ -346,46 +354,13 @@ impl<const N: usize, const PACK_BY: usize> BoolTargetsArrayToSingleTargets<PACK_
             .map(|bits| {
                 let bits: [BoolTarget; PACK_BY] = bits.try_into().unwrap();
 
-                SingleTarget::from_bool_targets_le_precomputed_exp::<PACK_BY>(
+                Target::from_bool_targets_le_precomputed_exp::<PACK_BY>(
                     ArrayTarget(bits),
                     &bit_exp_targets,
                     builder,
                 )
             })
             .collect()
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct SingleTarget(Target);
-
-impl TargetSet for SingleTarget {
-    fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(raw.next().unwrap())
-    }
-
-    fn into_targets_iter(self) -> impl Iterator<Item = Target> {
-        std::iter::once(self.0)
-    }
-}
-
-impl ParsableTargetSet for SingleTarget {
-    type PublicInputsData = u64;
-
-    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        public_inputs.next().unwrap().to_canonical_u64()
-    }
-}
-
-impl From<Target> for SingleTarget {
-    fn from(value: Target) -> Self {
-        Self(value)
-    }
-}
-
-impl SingleTarget {
-    pub fn to_target(&self) -> Target {
-        self.0
     }
 }
 
@@ -673,27 +648,63 @@ impl TargetSetWitnessOperations for ValidatorSetTarget {
     }
 }
 
-impl SingleTarget {
+pub trait TargetBitOperations {
+    fn from_bool_targets_le_precomputed_exp<const B: usize>(
+        bits: ArrayTarget<BoolTarget, B>,
+        bit_exp_targets: &[Target; B],
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target;
+
+    fn from_bool_targets_le<const B: usize>(
+        bits: ArrayTarget<BoolTarget, B>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target;
+
+    fn from_u52_bits_le(
+        bits: ArrayTarget<BoolTarget, 52>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
+        Self::from_bool_targets_le(bits, builder)
+    }
+
+    /// Bits are sorted from less to most significant.
+    fn from_u8_bits_le(
+        bits: ArrayTarget<BoolTarget, 8>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
+        Self::from_bool_targets_le(bits, builder)
+    }
+
+    fn from_u64_bits_le_lossy(
+        bits: ArrayTarget<BoolTarget, 64>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
+        Self::from_bool_targets_le(bits, builder)
+    }
+}
+
+// TODO: Use BaseSumGate.
+impl TargetBitOperations for Target {
     // TODO: Specify exact behaviour when `little-endian` is not appliable
     // like in case with B = 52
     fn from_bool_targets_le_precomputed_exp<const B: usize>(
         bits: ArrayTarget<BoolTarget, B>,
         bit_exp_targets: &[Target; B],
         builder: &mut CircuitBuilder<F, D>,
-    ) -> SingleTarget {
+    ) -> Target {
         assert!(B <= 64);
 
         let mut result = builder.zero();
         for (bit, exp) in bits.0.chunks(8).rev().flatten().zip(bit_exp_targets.iter()) {
             result = builder.mul_add(bit.target, *exp, result);
         }
-        SingleTarget(result)
+        result
     }
 
     fn from_bool_targets_le<const B: usize>(
         bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> SingleTarget {
+    ) -> Target {
         let bit_exp_targets = (0..B)
             .rev()
             .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
@@ -702,28 +713,6 @@ impl SingleTarget {
             .unwrap();
 
         Self::from_bool_targets_le_precomputed_exp(bits, &bit_exp_targets, builder)
-    }
-
-    pub fn from_u52_bits_le(
-        bits: ArrayTarget<BoolTarget, 52>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> SingleTarget {
-        Self::from_bool_targets_le(bits, builder)
-    }
-
-    /// Bits are sorted from less to most significant.
-    pub fn from_u8_bits_le(
-        bits: ArrayTarget<BoolTarget, 8>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> SingleTarget {
-        Self::from_bool_targets_le(bits, builder)
-    }
-
-    pub fn from_u64_bits_le_lossy(
-        bits: ArrayTarget<BoolTarget, 64>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> SingleTarget {
-        Self::from_bool_targets_le(bits, builder)
     }
 }
 
@@ -749,13 +738,10 @@ impl Sha256TargetGoldilocks {
             .unwrap();
 
         let targets: [_; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
-            BoolTargetsArrayToSingleTargets::<BITS_FOR_SINGLE_TARGET>::compress_to_goldilocks(
+            BoolTargetsArrayToTargets::<BITS_FOR_SINGLE_TARGET>::compress_to_goldilocks(
                 &ArrayTarget(bit_targets),
                 builder,
             )
-            .into_iter()
-            .map(|t| t.0)
-            .collect::<Vec<_>>()
             .try_into()
             .unwrap();
 
@@ -772,14 +758,9 @@ impl MessageTargetGoldilocks {
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
         let targets: [_; MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
-            BoolTargetsArrayToSingleTargets::<PACK_MESSAGE_BY>::compress_to_goldilocks(
-                &bits, builder,
-            )
-            .into_iter()
-            .map(|t| t.0)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+            BoolTargetsArrayToTargets::<PACK_MESSAGE_BY>::compress_to_goldilocks(&bits, builder)
+                .try_into()
+                .unwrap();
 
         Self(ArrayTarget(targets))
     }
@@ -800,8 +781,8 @@ fn test_single_target_from_u64_bits_le_lossy() {
             .unwrap();
 
         let resulting_target =
-            SingleTarget::from_u64_bits_le_lossy(ArrayTarget(bit_targets), &mut builder);
-        builder.register_public_input(resulting_target.0);
+            Target::from_u64_bits_le_lossy(ArrayTarget(bit_targets), &mut builder);
+        builder.register_public_input(resulting_target);
 
         let mut pw = PartialWitness::new();
 

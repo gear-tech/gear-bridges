@@ -1,7 +1,10 @@
 use lazy_static::lazy_static;
 use plonky2::{
     gates::noop::NoopGate,
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
@@ -15,8 +18,7 @@ use std::iter;
 
 use crate::{
     common::targets::{
-        impl_parsable_target_set, impl_target_set, ArrayTarget, Blake2Target, ByteTarget,
-        SingleTarget, TargetSet,
+        impl_parsable_target_set, impl_target_set, ArrayTarget, Blake2Target, ByteTarget, TargetSet,
     },
     prelude::*,
     ProofWithCircuitData,
@@ -28,7 +30,7 @@ pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 impl_parsable_target_set! {
     pub struct GenericBlake2Target {
         pub data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
-        pub length: SingleTarget,
+        pub length: Target,
         pub hash: Blake2Target
     }
 }
@@ -110,7 +112,7 @@ fn blake2_circuit_verifier_data(num_blocks: usize) -> VerifierOnlyCircuitData<C,
 impl_target_set! {
     struct VariativeBlake2Target {
         data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
-        length: SingleTarget,
+        length: Target,
         hash: Blake2Target
     }
 }

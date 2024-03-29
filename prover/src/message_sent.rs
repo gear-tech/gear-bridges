@@ -1,5 +1,5 @@
 use plonky2::{
-    iop::witness::PartialWitness,
+    iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
@@ -8,7 +8,7 @@ use crate::{
     common::{
         targets::{
             impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
-            SingleTarget, TargetSet,
+            TargetBitOperations, TargetSet,
         },
         BuilderExt,
     },
@@ -19,7 +19,7 @@ use crate::{
 impl_target_set! {
     pub struct MessageSentTarget {
         pub validator_set_hash: Sha256TargetGoldilocks,
-        pub authority_set_id: SingleTarget,
+        pub authority_set_id: Target,
         pub message_contents: MessageTargetGoldilocks,
     }
 }
@@ -65,7 +65,7 @@ impl MessageSent {
                 finality_proof_target.validator_set_hash,
                 &mut builder,
             ),
-            authority_set_id: SingleTarget::from_u64_bits_le_lossy(
+            authority_set_id: Target::from_u64_bits_le_lossy(
                 finality_proof_target.message.authority_set_id,
                 &mut builder,
             ),

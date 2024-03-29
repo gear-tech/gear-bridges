@@ -1,6 +1,6 @@
 use plonky2::{
     iop::{
-        target::BoolTarget,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -9,9 +9,7 @@ use plonky2_field::types::Field;
 
 use super::scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget};
 use crate::{
-    common::targets::{
-        impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, SingleTarget, TargetSet,
-    },
+    common::targets::{impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, TargetSet},
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
         *,
@@ -26,8 +24,8 @@ impl_target_set! {
     pub struct ChildNodeParserTarget {
         pub node_data: BranchNodeDataPaddedTarget,
 
-        pub read_offset: SingleTarget,
-        pub resulting_read_offset: SingleTarget,
+        pub read_offset: Target,
+        pub resulting_read_offset: Target,
 
         pub assert_child_hash: BoolTarget,
         pub claimed_child_hash: Blake2Target,
@@ -50,8 +48,8 @@ impl ParsableTargetSet for ChildNodeParserTarget {
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
         ChildNodeParserData {
             node_data: BranchNodeDataPaddedTarget::parse_public_inputs(public_inputs),
-            read_offset: SingleTarget::parse_public_inputs(public_inputs) as usize,
-            resulting_read_offset: SingleTarget::parse_public_inputs(public_inputs) as usize,
+            read_offset: Target::parse_public_inputs(public_inputs) as usize,
+            resulting_read_offset: Target::parse_public_inputs(public_inputs) as usize,
             assert_child_hash: BoolTarget::parse_public_inputs(public_inputs),
             claimed_child_hash:
                 ArrayTarget::<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>::parse_public_inputs(
@@ -102,8 +100,7 @@ impl ChildNodeParser {
             },
             &mut builder,
         )
-        .decoded
-        .to_target();
+        .decoded;
 
         let read_data_at = builder.add(read_offset, encoded_length_size);
         let potential_child_hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> =

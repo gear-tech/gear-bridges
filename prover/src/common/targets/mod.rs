@@ -303,19 +303,12 @@ impl_array_target_wrapper!(
 impl_array_target_wrapper!(ValidatorSetTarget, Ed25519PublicKeyTarget, VALIDATOR_COUNT);
 
 impl ParsableTargetSet for Sha256TargetGoldilocks {
-    type PublicInputsData = [u8; 32];
+    type PublicInputsData = [u8; SHA256_DIGEST_SIZE];
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
         public_inputs
             .take(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .flat_map(|f| array_to_bits(&f.to_canonical_u64().to_le_bytes())[64 - 52..].to_vec())
-            .skip(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * 52 - SHA256_DIGEST_SIZE_IN_BITS)
-            .collect::<Vec<_>>()
-            .chunks(8)
-            .map(|bits| bits_to_byte(bits.try_into().unwrap()))
+            .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
             .collect::<Vec<_>>()
             .try_into()
             .unwrap()
@@ -333,29 +326,15 @@ impl TargetSetWitnessOperations for ValidatorSetTarget {
 }
 
 impl Sha256TargetGoldilocks {
-    /// Packs underlying `BoolTarget`s to `Target`s by groups of 52.
+    /// Packs underlying `BoolTarget`s to `Target`s by groups of 32.
     pub fn from_sha256_target(
         sha256_target: Sha256Target,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
-        const BITS_FOR_SINGLE_TARGET: usize = 52;
-        const PADDED_SIZE: usize =
-            SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * BITS_FOR_SINGLE_TARGET;
-        const PADDING: usize = PADDED_SIZE - SHA256_DIGEST_SIZE_IN_BITS;
-
-        let padding_targets = (0..PADDING).map(|_| builder._false());
-        let bit_targets: [_; PADDED_SIZE] = sha256_target
-            .0
-             .0
-            .into_iter()
-            .chain(padding_targets)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-
+        const BITS_FOR_SINGLE_TARGET: usize = 32;
         let targets: [_; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
             BitArrayTarget::compress_to_goldilocks::<BITS_FOR_SINGLE_TARGET>(
-                &ArrayTarget(bit_targets),
+                &sha256_target.0,
                 builder,
             )
             .try_into()
@@ -365,7 +344,7 @@ impl Sha256TargetGoldilocks {
     }
 }
 
-const PACK_MESSAGE_BY: usize = 52;
+const PACK_MESSAGE_BY: usize = 32;
 const MESSAGE_INPUT_IN_BITS: usize = MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * PACK_MESSAGE_BY;
 
 impl MessageTargetGoldilocks {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/big"
 	"os"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -33,11 +34,16 @@ func main() {
 	prove()
 }
 
+// How much inner circuit public inputs will be packed into single outer public input.
+const PublicInputCompressionFactor = 6
+const MaxInnerPublicInputBits = 32
+
 type Plonky2VerifierCircuit struct {
-	PublicInputs []gl.Variable `gnark:",public"`
+	CompressedPublicInputs []frontend.Variable `gnark:",public"`
 
 	Proof        variables.Proof
 	VerifierData variables.VerifierOnlyCircuitData
+	PublicInputs []gl.Variable
 
 	CommonCircuitData types.CommonCircuitData `gnark:"-"`
 }
@@ -45,6 +51,23 @@ type Plonky2VerifierCircuit struct {
 func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
 	verifierChip := verifier.NewVerifierChip(api, c.CommonCircuitData)
 	verifierChip.Verify(c.Proof, c.PublicInputs, c.VerifierData)
+
+	for i := 0; i < len(c.CompressedPublicInputs); i++ {
+		compressed := frontend.Variable(0)
+		for j := 0; j < PublicInputCompressionFactor; j++ {
+			publicInputIdx := i*PublicInputCompressionFactor + j
+			if publicInputIdx == len(c.PublicInputs) {
+				break
+			}
+
+			exp := frontend.Variable(new(big.Int).Lsh(big.NewInt(1), uint((PublicInputCompressionFactor-j-1)*MaxInnerPublicInputBits)))
+			compressed = api.Add(compressed, api.Mul(c.PublicInputs[publicInputIdx].Limb, exp))
+		}
+
+		api.AssertIsEqual(c.CompressedPublicInputs[i], compressed)
+	}
+
+	// TODO: Assert verifier data (also constants merkle caps?)
 
 	return nil
 }
@@ -83,8 +106,8 @@ func compile() {
 }
 
 type ProofWithPublicInputs struct {
-	Proof        string   `json:"proof"`
-	PublicInputs []uint64 `json:"public_inputs"`
+	Proof        string     `json:"proof"`
+	PublicInputs []*big.Int `json:"public_inputs"`
 }
 
 func prove() {
@@ -117,9 +140,10 @@ func saveProof(proof plonk.Proof, glPublicInputs []gl.Variable) {
 	proofBytes := _proof.MarshalSolidity()
 	proofStr := hex.EncodeToString(proofBytes)
 
-	publicInputs := make([]uint64, len(glPublicInputs))
+	compressedPublicInputs := compressPublicInputs(glPublicInputs)
+	publicInputs := make([]*big.Int, len(compressedPublicInputs))
 	for i := 0; i < len(publicInputs); i++ {
-		publicInputs[i] = glPublicInputs[i].Limb.(uint64)
+		publicInputs[i] = compressedPublicInputs[i].(*big.Int)
 	}
 
 	jsonProof, err := json.MarshalIndent(ProofWithPublicInputs{
@@ -141,12 +165,46 @@ func loadCircuit() Plonky2VerifierCircuit {
 	proofWithPis := variables.DeserializeProofWithPublicInputs(types.ReadProofWithPublicInputs("data/proof_with_public_inputs.json"))
 	verifierOnlyCircuitData := variables.DeserializeVerifierOnlyCircuitData(types.ReadVerifierOnlyCircuitData("data/verifier_only_circuit_data.json"))
 
+	publicInputs := make([]gl.Variable, len(proofWithPis.PublicInputs))
+	for i := 0; i < len(publicInputs); i++ {
+		reduced := proofWithPis.PublicInputs[i].Limb.(uint64) % gl.MODULUS.Uint64()
+		if reduced >= 1<<MaxInnerPublicInputBits {
+			panic(fmt.Sprintf("Public input value too big: Expected < %d, got %d", 1<<MaxInnerPublicInputBits, reduced))
+		}
+		publicInputs[i] = gl.NewVariable(reduced)
+	}
+
 	return Plonky2VerifierCircuit{
-		Proof:             proofWithPis.Proof,
-		PublicInputs:      proofWithPis.PublicInputs,
-		VerifierData:      verifierOnlyCircuitData,
+		CompressedPublicInputs: compressPublicInputs(proofWithPis.PublicInputs),
+
+		Proof:        proofWithPis.Proof,
+		VerifierData: verifierOnlyCircuitData,
+		PublicInputs: publicInputs,
+
 		CommonCircuitData: commonCircuitData,
 	}
+}
+
+func compressPublicInputs(pis []gl.Variable) []frontend.Variable {
+	compressedLen := (len(pis) + PublicInputCompressionFactor - 1) / PublicInputCompressionFactor
+
+	compressedPis := make([]frontend.Variable, compressedLen)
+	for i := 0; i < compressedLen; i++ {
+		compressed := new(big.Int)
+		for j := 0; j < PublicInputCompressionFactor; j++ {
+			publicInputIdx := i*PublicInputCompressionFactor + j
+			if publicInputIdx >= len(pis) {
+				break
+			}
+
+			exp := new(big.Int).Lsh(big.NewInt(1), uint((PublicInputCompressionFactor-j-1)*MaxInnerPublicInputBits))
+			publicInput := new(big.Int).SetUint64(pis[publicInputIdx].Limb.(uint64))
+			compressed = new(big.Int).Add(compressed, new(big.Int).Mul(exp, publicInput))
+		}
+		compressedPis[i] = frontend.Variable(compressed)
+	}
+
+	return compressedPis
 }
 
 func loadVerifyingKey() plonk.VerifyingKey {

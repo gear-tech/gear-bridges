@@ -51,13 +51,11 @@ impl MessageSent {
             .connect(&finality_proof_target.message.block_hash, &mut builder);
 
         // TODO: De-hash item here.
-        let padding_targets = (0..4).map(|_| builder.constant_bool(false).target);
-        let message_targets = BitArrayTarget::<260>::parse(
+        let message_targets = BitArrayTarget::<256>::parse(
             &mut inclusion_proof_target
                 .storage_item_hash
                 .into_targets_iter()
-                .take(256)
-                .chain(padding_targets),
+                .take(256),
         );
 
         MessageSentTarget {

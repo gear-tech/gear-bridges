@@ -19,27 +19,27 @@ impl ParsableTargetSet for Target {
 }
 
 pub trait TargetBitOperations {
-    fn from_bool_targets_le_precomputed_exp<const B: usize>(
-        bits: ArrayTarget<BoolTarget, B>,
-        bit_exp_targets: &[Target; B],
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Target;
-
+    // TODO: forbid B % 8 != 0
     fn from_bool_targets_le<const B: usize>(
         bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Target;
+    ) -> Target {
+        assert!(B <= 64);
+
+        let mut bits = bits.0.chunks(8).rev().flatten().rev().collect::<Vec<_>>();
+
+        if B == 64 {
+            let most_significant_bit = bits.pop().unwrap().target;
+            let partial_sum = builder.le_sum(bits.into_iter());
+            let most_significant_exp = builder.constant(F::from_canonical_u64(1 << (B - 1)));
+            builder.mul_add(most_significant_exp, most_significant_bit, partial_sum)
+        } else {
+            builder.le_sum(bits.into_iter())
+        }
+    }
 
     fn from_u52_bits_le(
         bits: ArrayTarget<BoolTarget, 52>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        Self::from_bool_targets_le(bits, builder)
-    }
-
-    /// Bits are sorted from less to most significant.
-    fn from_u8_bits_le(
-        bits: ArrayTarget<BoolTarget, 8>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Target {
         Self::from_bool_targets_le(bits, builder)
@@ -53,38 +53,7 @@ pub trait TargetBitOperations {
     }
 }
 
-// TODO: Use BaseSumGate.
-impl TargetBitOperations for Target {
-    // TODO: Specify exact behaviour when `little-endian` is not appliable
-    // like in case with B = 52
-    fn from_bool_targets_le_precomputed_exp<const B: usize>(
-        bits: ArrayTarget<BoolTarget, B>,
-        bit_exp_targets: &[Target; B],
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        assert!(B <= 64);
-
-        let mut result = builder.zero();
-        for (bit, exp) in bits.0.chunks(8).rev().flatten().zip(bit_exp_targets.iter()) {
-            result = builder.mul_add(bit.target, *exp, result);
-        }
-        result
-    }
-
-    fn from_bool_targets_le<const B: usize>(
-        bits: ArrayTarget<BoolTarget, B>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        let bit_exp_targets = (0..B)
-            .rev()
-            .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-
-        Self::from_bool_targets_le_precomputed_exp(bits, &bit_exp_targets, builder)
-    }
-}
+impl TargetBitOperations for Target {}
 
 #[test]
 fn test_single_target_from_u64_bits_le_lossy() {

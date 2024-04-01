@@ -184,23 +184,12 @@ impl<const N: usize> ArrayTarget<BoolTarget, N> {
         assert_eq!(N % PACK_BY, 0);
         assert!(PACK_BY <= 64);
 
-        let bit_exp_targets = (0..PACK_BY)
-            .rev()
-            .map(|bit_no| builder.constant(GoldilocksField::from_noncanonical_u64(1 << bit_no)))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-
         self.0
             .chunks(PACK_BY)
             .map(|bits| {
                 let bits: [BoolTarget; PACK_BY] = bits.try_into().unwrap();
 
-                Target::from_bool_targets_le_precomputed_exp::<PACK_BY>(
-                    ArrayTarget(bits),
-                    &bit_exp_targets,
-                    builder,
-                )
+                Target::from_bool_targets_le::<PACK_BY>(ArrayTarget(bits), builder)
             })
             .collect()
     }

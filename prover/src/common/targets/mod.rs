@@ -7,10 +7,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_field::{
-    goldilocks_field::GoldilocksField,
-    types::{Field, PrimeField64},
-};
+use plonky2_field::types::{Field, PrimeField64};
 use std::{fmt::Debug, iter, ops::Deref};
 
 use crate::{

@@ -83,7 +83,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
                 .map(|offset| {
                     let offset = builder.constant(F::from_canonical_usize(offset));
                     let read_at = builder.add(at, offset);
-                    self.random_read(read_at.into(), builder)
+                    self.random_read(read_at, builder)
                 })
                 .collect::<Vec<_>>()
                 .try_into()

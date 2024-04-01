@@ -38,13 +38,6 @@ pub trait TargetBitOperations {
         }
     }
 
-    fn from_u52_bits_le(
-        bits: ArrayTarget<BoolTarget, 52>,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Target {
-        Self::from_bool_targets_le(bits, builder)
-    }
-
     fn from_u64_bits_le_lossy(
         bits: ArrayTarget<BoolTarget, 64>,
         builder: &mut CircuitBuilder<F, D>,
@@ -88,7 +81,7 @@ fn test_single_target_from_u64_bits_le_lossy() {
 
         println!("{}", num);
 
-        assert_eq!(result, GoldilocksField::from_noncanonical_u64(num));
+        assert_eq!(result, F::from_noncanonical_u64(num));
         assert!(circuit.verify(proof).is_ok());
     }
 

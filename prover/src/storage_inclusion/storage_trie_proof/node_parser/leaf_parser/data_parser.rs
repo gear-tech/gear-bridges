@@ -39,12 +39,10 @@ pub fn define(
     });
     let data_hash = Blake2Target::parse_exact(&mut hash_data_bits);
 
-    let resulting_offset = builder
-        .add_const(
-            input.read_offset,
-            F::from_canonical_usize(BLAKE2_DIGEST_SIZE),
-        )
-        .into();
+    let resulting_offset = builder.add_const(
+        input.read_offset,
+        F::from_canonical_usize(BLAKE2_DIGEST_SIZE),
+    );
 
     DataParserOutputTarget {
         resulting_offset,

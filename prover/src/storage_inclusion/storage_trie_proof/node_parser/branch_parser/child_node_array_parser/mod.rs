@@ -271,22 +271,18 @@ impl Circuit {
         );
         let mut inner_cyclic_proof_pis = inner_cyclic_proof_pis.remove_verifier_data();
 
-        inner_cyclic_proof_pis.read_offset = builder
-            .select(
-                condition,
-                inner_cyclic_proof_pis.read_offset,
-                inner_cyclic_proof_pis.initial_read_offset,
-            )
-            .into();
+        inner_cyclic_proof_pis.read_offset = builder.select(
+            condition,
+            inner_cyclic_proof_pis.read_offset,
+            inner_cyclic_proof_pis.initial_read_offset,
+        );
 
         let zero = builder.zero();
-        inner_cyclic_proof_pis.overall_children_amount = builder
-            .select(
-                condition,
-                inner_cyclic_proof_pis.overall_children_amount,
-                zero,
-            )
-            .into();
+        inner_cyclic_proof_pis.overall_children_amount = builder.select(
+            condition,
+            inner_cyclic_proof_pis.overall_children_amount,
+            zero,
+        );
 
         inner_proof_pis
             .node_data

@@ -141,7 +141,7 @@ impl BranchNodeDataPaddedTarget {
             .map(|offset| {
                 let offset = builder.constant(F::from_canonical_usize(offset));
                 let read_at = builder.add(at, offset);
-                self.random_read(read_at.into(), builder)
+                self.random_read(read_at, builder)
             })
             .collect::<Vec<_>>();
 
@@ -182,7 +182,7 @@ impl BranchNodeDataPaddedTarget {
             // Returns `if b { x } else { y }`.
             // If we don't select from current block then we don't care about actual data that's read.
             let read_from = builder.select(read_from_current_block, current_offset, zero);
-            let read_data = block.random_read(read_from.into(), builder);
+            let read_data = block.random_read(read_from, builder);
 
             let masked_read_data =
                 builder.mul(read_data.to_target(), read_from_current_block.target);

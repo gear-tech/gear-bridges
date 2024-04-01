@@ -50,16 +50,14 @@ impl PartialStorageAddressTarget {
     pub fn empty(builder: &mut CircuitBuilder<F, D>) -> Self {
         Self {
             address: StorageAddressPaddedTarget::empty(builder),
-            length: builder.zero().into(),
+            length: builder.zero(),
         }
     }
 
     pub fn constant(nibbles: Vec<u8>, builder: &mut CircuitBuilder<F, D>) -> Self {
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
 
-        let length = builder
-            .constant(F::from_canonical_usize(nibbles.len()))
-            .into();
+        let length = builder.constant(F::from_canonical_usize(nibbles.len()));
 
         let padded_address: [u8; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES] = pad_byte_vec(nibbles);
         let mut address = padded_address
@@ -134,7 +132,7 @@ impl PartialStorageAddressTarget {
 
         Self {
             address: StorageAddressPaddedTarget(ArrayTarget(targets)),
-            length: builder.one().into(),
+            length: builder.one(),
         }
     }
 
@@ -166,9 +164,7 @@ impl PartialStorageAddressTarget {
                 builder.select(appended_read_idx_valid, appended_read_idx, zero);
 
             let self_nibble = self.address.constant_read(i);
-            let appended_nibble = append
-                .address
-                .random_read(appended_read_idx.into(), builder);
+            let appended_nibble = append.address.random_read(appended_read_idx, builder);
 
             // Check if `self.length` <= `i`
             let select_nibble_from_appended =
@@ -186,7 +182,7 @@ impl PartialStorageAddressTarget {
 
         Self {
             address,
-            length: final_length.into(),
+            length: final_length,
         }
     }
 }

@@ -72,14 +72,14 @@ pub fn define(
         .unwrap();
     let first_nibble_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
         first_nibble_padded,
-        take_first_nibble.target.into(),
+        take_first_nibble.target,
         builder,
     );
 
     let take_from_remaining = builder.sub(input.nibble_count, take_first_nibble.target);
     let remaining_nibbles_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
         remaining_nibbles,
-        take_from_remaining.into(),
+        take_from_remaining,
         builder,
     );
 

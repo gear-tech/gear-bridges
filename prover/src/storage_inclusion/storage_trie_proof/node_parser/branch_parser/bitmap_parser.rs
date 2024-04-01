@@ -36,7 +36,7 @@ pub fn define(
     let read_offset = builder.add_const(input.read_offset, F::ONE);
     let second_byte = input
         .first_node_data_block
-        .random_read(read_offset.into(), builder);
+        .random_read(read_offset, builder);
 
     let first_bits = first_byte.to_bit_targets(builder);
     let second_bits = second_byte.to_bit_targets(builder);
@@ -63,11 +63,11 @@ pub fn define(
             builder.add(child_amount_before_claimed_child, masked_bit_value.target);
     }
 
-    let resulting_offset = builder.add_const(input.read_offset, F::TWO).into();
+    let resulting_offset = builder.add_const(input.read_offset, F::TWO);
     BitmapParserOutputTarget {
         resulting_offset,
-        overall_children_amount: overall_child_amount.into(),
-        child_index_in_array: child_amount_before_claimed_child.into(),
+        overall_children_amount: overall_child_amount,
+        child_index_in_array: child_amount_before_claimed_child,
     }
 }
 

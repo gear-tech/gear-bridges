@@ -97,8 +97,8 @@ pub fn define(
     let resulting_offset = builder.select(first_case_appliable, one_target, two_target);
 
     HeaderParserOutputTarget {
-        nibble_count: nibble_count.into(),
-        resulting_offset: resulting_offset.into(),
+        nibble_count,
+        resulting_offset,
     }
 }
 

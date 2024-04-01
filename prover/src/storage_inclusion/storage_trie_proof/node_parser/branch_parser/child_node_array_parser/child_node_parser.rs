@@ -93,7 +93,7 @@ impl ChildNodeParser {
 
         // Read only one byte as we don't support compact integers in other modes than single-byte.
         let encoded_length_size = builder.one();
-        let encoded_length = node_data.random_read(read_offset.into(), &mut builder);
+        let encoded_length = node_data.random_read(read_offset, &mut builder);
         let encoded_child_data_length = scale_compact_integer_parser::define(
             ScaleCompactIntegerParserInputTarget {
                 first_byte: encoded_length,
@@ -104,7 +104,7 @@ impl ChildNodeParser {
 
         let read_data_at = builder.add(read_offset, encoded_length_size);
         let potential_child_hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> =
-            node_data.random_read_array(read_data_at.into(), &mut builder);
+            node_data.random_read_array(read_data_at, &mut builder);
         let mut potential_child_hash_data_bits =
             potential_child_hash_data.0.into_iter().flat_map(|byte| {
                 byte.to_bit_targets(&mut builder)
@@ -138,8 +138,8 @@ impl ChildNodeParser {
 
         ChildNodeParserTarget {
             node_data,
-            read_offset: read_offset.into(),
-            resulting_read_offset: resulting_read_offset.into(),
+            read_offset,
+            resulting_read_offset,
             assert_child_hash,
             claimed_child_hash,
         }

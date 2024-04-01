@@ -194,7 +194,7 @@ impl VariativeBlake2 {
 
         VariativeBlake2Target {
             data: data_target,
-            length: length_target.into(),
+            length: length_target,
             hash,
         }
         .register_as_public_inputs(&mut builder);

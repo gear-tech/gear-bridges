@@ -430,7 +430,7 @@ fn validator_selector_circuit(
                 .flatten()
                 .map(|t| t.target),
         ),
-        index: index_target.into(),
+        index: index_target,
         validator: Ed25519PublicKeyTarget::parse(&mut validator_targets.into_iter()),
     }
 }

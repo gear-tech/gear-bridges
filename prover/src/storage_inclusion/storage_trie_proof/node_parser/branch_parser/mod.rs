@@ -93,7 +93,7 @@ impl BranchParser {
         let partial_address_target = PartialStorageAddressTarget::add_virtual_unsafe(&mut builder);
         partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
 
-        let node_data_length_target: Target = builder.add_virtual_target().into();
+        let node_data_length_target: Target = builder.add_virtual_target();
 
         let claimed_child_node_nibble_target = builder.add_virtual_target();
         witness.set_target(

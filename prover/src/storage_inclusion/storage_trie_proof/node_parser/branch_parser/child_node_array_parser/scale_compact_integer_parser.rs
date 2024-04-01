@@ -29,7 +29,7 @@ pub fn define(
     builder.assert_zero(bits.0[1].target);
 
     let shift = builder.constant(F::from_canonical_u8(4));
-    let decoded = builder.div(input.first_byte.to_target(), shift).into();
+    let decoded = builder.div(input.first_byte.to_target(), shift);
 
     ScaleCompactIntegerParserOutputTarget { decoded }
 }

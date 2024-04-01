@@ -1,5 +1,8 @@
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_field::types::Field;
@@ -12,7 +15,7 @@ use super::{
 use crate::{
     common::{
         pad_byte_vec,
-        targets::{Blake2Target, SingleTarget, TargetSet},
+        targets::{Blake2Target, TargetSet},
     },
     impl_parsable_target_set,
     prelude::*,
@@ -30,7 +33,7 @@ mod data_parser;
 impl_parsable_target_set! {
     pub struct LeafParserTarget {
         pub padded_node_data: LeafNodeDataPaddedTarget,
-        pub node_data_length: SingleTarget,
+        pub node_data_length: Target,
 
         pub storage_data_hash: Blake2Target,
 
@@ -55,9 +58,9 @@ impl LeafParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let node_data_length_target: SingleTarget = builder.add_virtual_target().into();
+        let node_data_length_target = builder.add_virtual_target();
         witness.set_target(
-            node_data_length_target.to_target(),
+            node_data_length_target,
             F::from_canonical_usize(self.node_data.len()),
         );
 

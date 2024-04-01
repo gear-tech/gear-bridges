@@ -3,7 +3,7 @@ use plonky2::{
     field::types::Field,
     hash::{hash_types::HashOutTarget, merkle_tree::MerkleCap},
     iop::{
-        target::BoolTarget,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -18,25 +18,29 @@ use crate::{
     common::{
         common_data_for_recursion,
         targets::{
-            impl_target_set, ParsableTargetSet, Sha256TargetGoldilocks, SingleTarget, TargetSet,
+            impl_target_set, ParsableTargetSet, Sha256TargetGoldilocks, TargetSet,
             VerifierDataTarget,
         },
         BuilderExt,
     },
-    next_validator_set::NextValidatorSet,
-    prelude::*,
+    prelude::{
+        consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
+        *,
+    },
     ProofWithCircuitData,
 };
 
-use self::consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH};
+pub mod next_validator_set;
+
+use next_validator_set::NextValidatorSet;
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_target_set! {
     pub struct LatestValidatorSetTarget {
-        pub genesis_set_id: SingleTarget,
+        pub genesis_set_id: Target,
         pub genesis_hash: Sha256TargetGoldilocks,
-        pub current_set_id: SingleTarget,
+        pub current_set_id: Target,
         pub current_hash: Sha256TargetGoldilocks,
 
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
@@ -57,9 +61,9 @@ impl ParsableTargetSet for LatestValidatorSetTarget {
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
         let pis = LatestValidatorSetPublicInputs {
-            genesis_set_id: SingleTarget::parse_public_inputs(public_inputs),
+            genesis_set_id: Target::parse_public_inputs(public_inputs),
             genesis_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
-            current_set_id: SingleTarget::parse_public_inputs(public_inputs),
+            current_set_id: Target::parse_public_inputs(public_inputs),
             current_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
 
             verifier_only_data: VerifierOnlyCircuitData {
@@ -159,9 +163,7 @@ impl LatestValidatorSet {
         let next_authority_set_public_inputs =
             builder.recursively_verify_constant_proof(next_validator_set_proof, &mut witness);
 
-        let current_set_id = next_authority_set_public_inputs
-            .current_authority_set_id
-            .to_target();
+        let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
         let next_set_id = builder.add(current_set_id, one);
 
         let current_set_hash = next_authority_set_public_inputs.validator_set_hash;
@@ -189,14 +191,14 @@ impl LatestValidatorSet {
 
         builder.connect(
             genesis_authority_set_id,
-            inner_cyclic_targets.genesis_set_id.to_target(),
+            inner_cyclic_targets.genesis_set_id,
         );
 
         genesis_authority_set_hash.connect(&inner_cyclic_targets.genesis_hash, &mut builder);
 
         let actual_current_authority_set_id = builder.select(
             condition,
-            inner_cyclic_targets.current_set_id.to_target(),
+            inner_cyclic_targets.current_set_id,
             genesis_authority_set_id,
         );
         builder.connect(actual_current_authority_set_id, current_set_id);

@@ -1,7 +1,4 @@
 #![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
-#![feature(type_alias_impl_trait)]
-#![feature(concat_idents)]
 #![feature(return_position_impl_trait_in_trait)]
 
 use jemallocator::Jemalloc;
@@ -13,10 +10,7 @@ pub mod block_finality;
 pub mod common;
 pub mod final_proof;
 pub mod latest_validator_set;
-pub mod message_sent;
-pub mod next_validator_set;
 pub mod storage_inclusion;
-pub mod validator_set_hash;
 
 pub use common::ProofWithCircuitData;
 

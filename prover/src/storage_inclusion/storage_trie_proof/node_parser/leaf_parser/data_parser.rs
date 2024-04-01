@@ -1,8 +1,8 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ArrayTarget, Blake2Target, SingleTarget, TargetSet},
+    common::targets::{impl_target_set, ArrayTarget, Blake2Target, TargetSet},
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_inclusion::storage_trie_proof::node_parser::NodeDataBlockTarget,
 };
@@ -10,13 +10,13 @@ use crate::{
 impl_target_set! {
     pub struct DataParserInputTarget {
         pub first_node_data_block: NodeDataBlockTarget,
-        pub read_offset: SingleTarget,
+        pub read_offset: Target,
     }
 }
 
 impl_target_set! {
     pub struct DataParserOutputTarget {
-        pub resulting_offset: SingleTarget,
+        pub resulting_offset: Target,
         pub data_hash: Blake2Target
     }
 }
@@ -39,12 +39,10 @@ pub fn define(
     });
     let data_hash = Blake2Target::parse_exact(&mut hash_data_bits);
 
-    let resulting_offset = builder
-        .add_const(
-            input.read_offset.to_target(),
-            F::from_canonical_usize(BLAKE2_DIGEST_SIZE),
-        )
-        .into();
+    let resulting_offset = builder.add_const(
+        input.read_offset,
+        F::from_canonical_usize(BLAKE2_DIGEST_SIZE),
+    );
 
     DataParserOutputTarget {
         resulting_offset,

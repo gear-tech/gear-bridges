@@ -1,10 +1,10 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
 use crate::{
     common::{
-        targets::{impl_target_set, HalfByteTarget, SingleTarget},
-        xor_targets,
+        targets::{impl_target_set, HalfByteTarget},
+        BuilderExt,
     },
     prelude::*,
     storage_inclusion::storage_trie_proof::node_parser::NodeDataBlockTarget,
@@ -13,16 +13,16 @@ use crate::{
 impl_target_set! {
     pub struct BitmapParserInputTarget {
         pub first_node_data_block: NodeDataBlockTarget,
-        pub read_offset: SingleTarget,
+        pub read_offset: Target,
         pub claimed_child_node_nibble: HalfByteTarget,
     }
 }
 
 impl_target_set! {
     pub struct BitmapParserOutputTarget {
-        pub resulting_offset: SingleTarget,
-        pub overall_children_amount: SingleTarget,
-        pub child_index_in_array: SingleTarget
+        pub resulting_offset: Target,
+        pub overall_children_amount: Target,
+        pub child_index_in_array: Target
     }
 }
 
@@ -33,10 +33,10 @@ pub fn define(
     let first_byte = input
         .first_node_data_block
         .random_read(input.read_offset, builder);
-    let read_offset = builder.add_const(input.read_offset.to_target(), F::ONE);
+    let read_offset = builder.add_const(input.read_offset, F::ONE);
     let second_byte = input
         .first_node_data_block
-        .random_read(read_offset.into(), builder);
+        .random_read(read_offset, builder);
 
     let first_bits = first_byte.to_bit_targets(builder);
     let second_bits = second_byte.to_bit_targets(builder);
@@ -57,19 +57,17 @@ pub fn define(
         let incorrect_state = builder.and(child_is_claimed, inv_bit);
         builder.assert_zero(incorrect_state.target);
 
-        before_claimed_child = xor_targets(before_claimed_child, child_is_claimed, builder);
+        before_claimed_child = builder.xor(before_claimed_child, child_is_claimed);
         let masked_bit_value = builder.and(before_claimed_child, bit);
         child_amount_before_claimed_child =
             builder.add(child_amount_before_claimed_child, masked_bit_value.target);
     }
 
-    let resulting_offset = builder
-        .add_const(input.read_offset.to_target(), F::TWO)
-        .into();
+    let resulting_offset = builder.add_const(input.read_offset, F::TWO);
     BitmapParserOutputTarget {
         resulting_offset,
-        overall_children_amount: overall_child_amount.into(),
-        child_index_in_array: child_amount_before_claimed_child.into(),
+        overall_children_amount: overall_child_amount,
+        child_index_in_array: child_amount_before_claimed_child,
     }
 }
 
@@ -151,13 +149,10 @@ mod tests {
         {
             let overall_children_amount =
                 builder.constant(F::from_canonical_usize(overall_children_amount));
-            builder.connect(
-                overall_children_amount,
-                output.overall_children_amount.to_target(),
-            );
+            builder.connect(overall_children_amount, output.overall_children_amount);
 
             let child_index = builder.constant(F::from_canonical_usize(child_index));
-            builder.connect(child_index, output.child_index_in_array.to_target());
+            builder.connect(child_index, output.child_index_in_array);
         }
 
         let circuit = builder.build::<C>();

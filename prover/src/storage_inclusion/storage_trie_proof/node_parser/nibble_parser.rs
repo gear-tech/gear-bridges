@@ -1,9 +1,9 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use std::iter;
 
 use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
 use crate::{
-    common::targets::{impl_target_set, ArrayTarget, HalfByteTarget, SingleTarget},
+    common::targets::{impl_target_set, ArrayTarget, HalfByteTarget},
     prelude::*,
     storage_inclusion::storage_trie_proof::storage_address::{
         MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
@@ -13,15 +13,15 @@ use crate::{
 impl_target_set! {
     pub struct NibbleParserInputTarget {
         pub first_node_data_block: NodeDataBlockTarget,
-        pub read_offset: SingleTarget,
-        pub nibble_count: SingleTarget,
+        pub read_offset: Target,
+        pub nibble_count: Target,
         pub partial_address: PartialStorageAddressTarget
     }
 }
 
 impl_target_set! {
     pub struct NibbleParserOutputTarget {
-        pub resulting_offset: SingleTarget,
+        pub resulting_offset: Target,
         pub partial_address: PartialStorageAddressTarget
     }
 }
@@ -49,7 +49,7 @@ pub fn define(
     let first_nibble = potential_address_nibbles.remove(0);
     let remaining_nibbles = potential_address_nibbles.try_into().unwrap();
 
-    let nibble_count_odd = builder.low_bits(input.nibble_count.to_target(), 1, 32)[0];
+    let nibble_count_odd = builder.low_bits(input.nibble_count, 1, 32)[0];
 
     // If nibble count is odd:
     //  we take `input.nibble_count` nibbles from `remaining_nibbles`
@@ -58,7 +58,7 @@ pub fn define(
     // If nibble count is even:
     //  we take `first_nibble` and input.nibble_count - 1` nibbles from `remaining_nibbles`
     let zero = builder.zero();
-    let nibble_count_is_zero = builder.is_equal(input.nibble_count.to_target(), zero);
+    let nibble_count_is_zero = builder.is_equal(input.nibble_count, zero);
     let dont_take_first_nibble = builder.or(nibble_count_odd, nibble_count_is_zero);
     let take_first_nibble = builder.not(dont_take_first_nibble);
 
@@ -72,14 +72,14 @@ pub fn define(
         .unwrap();
     let first_nibble_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
         first_nibble_padded,
-        take_first_nibble.target.into(),
+        take_first_nibble.target,
         builder,
     );
 
-    let take_from_remaining = builder.sub(input.nibble_count.to_target(), take_first_nibble.target);
+    let take_from_remaining = builder.sub(input.nibble_count, take_first_nibble.target);
     let remaining_nibbles_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
         remaining_nibbles,
-        take_from_remaining.into(),
+        take_from_remaining,
         builder,
     );
 
@@ -89,13 +89,11 @@ pub fn define(
         .append(remaining_nibbles_address_part, builder);
 
     // read_bytes = (nibble_count - nibble_count % 2) / 2 + nibble_count % 2
-    let read_bytes = builder.sub(input.nibble_count.to_target(), nibble_count_odd.target);
+    let read_bytes = builder.sub(input.nibble_count, nibble_count_odd.target);
     let two = builder.two();
     let read_bytes = builder.div(read_bytes, two);
     let read_bytes = builder.add(read_bytes, nibble_count_odd.target);
-    let resulting_offset: SingleTarget = builder
-        .add(input.read_offset.to_target(), read_bytes)
-        .into();
+    let resulting_offset = builder.add(input.read_offset, read_bytes);
 
     NibbleParserOutputTarget {
         partial_address,
@@ -231,7 +229,7 @@ mod tests {
                 resulting_offset_target,
                 F::from_canonical_usize(resulting_offset),
             );
-            builder.connect(resulting_offset_target, output.resulting_offset.to_target());
+            builder.connect(resulting_offset_target, output.resulting_offset);
 
             let address = create_address_target(&address, &mut builder, &mut pw);
             address.connect(&output.partial_address, &mut builder);

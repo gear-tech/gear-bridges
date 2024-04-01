@@ -1,21 +1,21 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    iop::witness::PartialWitness,
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+};
 
 use crate::{
     common::{
         targets::{impl_target_set, Blake2Target, ParsableTargetSet, TargetSet},
-        ProofComposition,
+        BuilderExt,
     },
-    prelude::*,
     ProofWithCircuitData,
 };
 
 use super::BranchNodeData;
 
 use self::{
-    branch_node_chain::BranchNodeChainParserTarget,
-    hashed_leaf_parser::{HashedLeafParser, HashedLeafParserTarget},
-    node_parser::leaf_parser::LeafParser,
-    storage_address::PartialStorageAddressTarget,
+    branch_node_chain::BranchNodeChainParserTarget, hashed_leaf_parser::HashedLeafParser,
+    node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget,
 };
 
 mod branch_node_chain;
@@ -62,28 +62,29 @@ impl StorageTrieProof {
         }
         .prove();
 
-        let composition_builder =
-            ProofComposition::new(branch_node_chain_proof, hashed_leaf_parser_proof);
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op =
-            |builder: &mut CircuitBuilder<F, D>,
-             branch_node_chain_proof: BranchNodeChainParserTarget,
-             hashed_leaf_parser_proof: HashedLeafParserTarget| {
-                branch_node_chain_proof
-                    .leaf_hash
-                    .connect(&hashed_leaf_parser_proof.node_hash, builder);
+        let branch_node_chain_target =
+            builder.recursively_verify_constant_proof(branch_node_chain_proof, &mut witness);
+        let hashed_leaf_parser_target =
+            builder.recursively_verify_constant_proof(hashed_leaf_parser_proof, &mut witness);
 
-                branch_node_chain_proof
-                    .partial_address
-                    .connect(&hashed_leaf_parser_proof.partial_address, builder);
+        branch_node_chain_target
+            .leaf_hash
+            .connect(&hashed_leaf_parser_target.node_hash, &mut builder);
 
-                StorageTrieProofTarget {
-                    root_hash: branch_node_chain_proof.root_hash,
-                    data_hash: hashed_leaf_parser_proof.storage_data_hash,
-                    address: hashed_leaf_parser_proof.final_address,
-                }
-            };
+        branch_node_chain_target
+            .partial_address
+            .connect(&hashed_leaf_parser_target.partial_address, &mut builder);
 
-        composition_builder.compose(targets_op)
+        StorageTrieProofTarget {
+            root_hash: branch_node_chain_target.root_hash,
+            data_hash: hashed_leaf_parser_target.storage_data_hash,
+            address: hashed_leaf_parser_target.final_address,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }

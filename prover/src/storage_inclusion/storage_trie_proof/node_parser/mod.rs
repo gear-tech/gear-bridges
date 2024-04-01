@@ -14,8 +14,7 @@ use crate::{
     common::{
         pad_byte_vec,
         targets::{
-            impl_array_target_wrapper, ArrayTarget, ByteTarget, ParsableTargetSet, SingleTarget,
-            TargetSet,
+            impl_array_target_wrapper, ArrayTarget, ByteTarget, ParsableTargetSet, TargetSet,
         },
     },
     prelude::*,
@@ -135,28 +134,28 @@ impl BranchNodeDataPaddedTarget {
 
     pub fn random_read_array<const L: usize>(
         &self,
-        at: SingleTarget,
+        at: Target,
         builder: &mut CircuitBuilder<F, D>,
     ) -> ArrayTarget<ByteTarget, L> {
         let targets = (0..L)
             .map(|offset| {
                 let offset = builder.constant(F::from_canonical_usize(offset));
-                let read_at = builder.add(at.to_target(), offset);
-                self.random_read(read_at.into(), builder)
+                let read_at = builder.add(at, offset);
+                self.random_read(read_at, builder)
             })
             .collect::<Vec<_>>();
 
         ArrayTarget(targets.try_into().unwrap())
     }
 
-    pub fn random_read(&self, at: SingleTarget, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+    pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
         let block_size = builder.constant(F::from_canonical_usize(NODE_DATA_BLOCK_BYTES));
         let max_data_size = builder.constant(F::from_canonical_usize(
             NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS,
         ));
 
         let shifted_block_size = builder.add(block_size, max_data_size);
-        let mut current_offset = at.to_target();
+        let mut current_offset = at;
         let mut block_already_selected = builder._false();
         let mut final_data = builder.zero();
         for block in &self.0 .0 {
@@ -183,7 +182,7 @@ impl BranchNodeDataPaddedTarget {
             // Returns `if b { x } else { y }`.
             // If we don't select from current block then we don't care about actual data that's read.
             let read_from = builder.select(read_from_current_block, current_offset, zero);
-            let read_data = block.random_read(read_from.into(), builder);
+            let read_data = block.random_read(read_from, builder);
 
             let masked_read_data =
                 builder.mul(read_data.to_target(), read_from_current_block.target);

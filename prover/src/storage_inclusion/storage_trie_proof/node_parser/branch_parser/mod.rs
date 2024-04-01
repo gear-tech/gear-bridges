@@ -1,6 +1,9 @@
 use parity_scale_codec::Encode;
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use plonky2_field::types::Field;
@@ -14,7 +17,7 @@ use super::{
 };
 use crate::{
     common::{
-        targets::{Blake2Target, HalfByteTarget, SingleTarget, TargetSet},
+        targets::{Blake2Target, HalfByteTarget, TargetSet},
         BuilderExt,
     },
     consts::BLAKE2_DIGEST_SIZE,
@@ -38,7 +41,7 @@ mod child_node_array_parser;
 impl_parsable_target_set! {
     pub struct BranchParserTarget {
         pub padded_node_data: BranchNodeDataPaddedTarget,
-        pub node_data_length: SingleTarget,
+        pub node_data_length: Target,
 
         pub child_node_hash: Blake2Target,
 
@@ -90,7 +93,7 @@ impl BranchParser {
         let partial_address_target = PartialStorageAddressTarget::add_virtual_unsafe(&mut builder);
         partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
 
-        let node_data_length_target: SingleTarget = builder.add_virtual_target().into();
+        let node_data_length_target: Target = builder.add_virtual_target();
 
         let claimed_child_node_nibble_target = builder.add_virtual_target();
         witness.set_target(

@@ -104,11 +104,6 @@ where
         }
     }
 
-    // TODO: REMOVE
-    pub fn verifier_circuit_data(&self) -> VerifierCircuitData<F, C, D> {
-        self.circuit_data.as_ref().clone()
-    }
-
     pub fn export(self) -> SerializedDataToVerify {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
@@ -155,67 +150,6 @@ pub struct SerializedDataToVerify {
     pub verifier_only_circuit_data: String,
 }
 
-pub struct ProofComposition<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    circuit_builder: CircuitBuilder<F, D>,
-    witness: PartialWitness<F>,
-
-    first_public_inputs: TS1,
-    second_public_inputs: TS2,
-}
-
-impl<TS1, TS2> ProofComposition<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    pub fn new(
-        first: ProofWithCircuitData<TS1>,
-        second: ProofWithCircuitData<TS2>,
-    ) -> ProofComposition<TS1, TS2> {
-        Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
-    }
-
-    pub fn new_with_config(
-        first: ProofWithCircuitData<TS1>,
-        second: ProofWithCircuitData<TS2>,
-        config: CircuitConfig,
-    ) -> ProofComposition<TS1, TS2> {
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        let mut witness = PartialWitness::new();
-
-        let first_public_inputs = builder.recursively_verify_constant_proof(first, &mut witness);
-        let second_public_inputs = builder.recursively_verify_constant_proof(second, &mut witness);
-
-        ProofComposition {
-            circuit_builder: builder,
-            witness,
-
-            first_public_inputs,
-            second_public_inputs,
-        }
-    }
-
-    pub fn compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
-    where
-        TS: TargetSet,
-        O: Fn(&mut CircuitBuilder<F, D>, TS1, TS2) -> TS,
-    {
-        let target_set = op(
-            &mut self.circuit_builder,
-            self.first_public_inputs.clone(),
-            self.second_public_inputs.clone(),
-        );
-
-        target_set.register_as_public_inputs(&mut self.circuit_builder);
-
-        ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
-    }
-}
-
 pub fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
@@ -255,6 +189,8 @@ pub trait BuilderExt {
 
     /// Select if `condition` { `a` } else { `b` }
     fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T;
+
+    fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget;
 }
 
 impl BuilderExt for CircuitBuilder<F, D> {
@@ -284,6 +220,18 @@ impl BuilderExt for CircuitBuilder<F, D> {
             .zip_eq(b.clone().into_targets_iter())
             .map(|(a, b)| self.select(condition, a, b));
         T::parse_exact(&mut result)
+    }
+
+    // !(!a & !b) & !(a & b)
+    fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget {
+        let not_a = self.not(a);
+        let not_b = self.not(b);
+
+        let c = self.and(not_a, not_b);
+        let c = self.not(c);
+        let d = self.and(a, b);
+        let d = self.not(d);
+        self.and(c, d)
     }
 }
 
@@ -317,18 +265,6 @@ pub fn common_data_for_recursion(
     let mut data = builder.build::<C>().common;
     data.num_public_inputs = public_input_count;
     data
-}
-
-// !(!a & !b) & !(a & b)
-pub fn xor_targets(a: BoolTarget, b: BoolTarget, builder: &mut CircuitBuilder<F, D>) -> BoolTarget {
-    let not_a = builder.not(a);
-    let not_b = builder.not(b);
-
-    let c = builder.and(not_a, not_b);
-    let c = builder.not(c);
-    let d = builder.and(a, b);
-    let d = builder.not(d);
-    builder.and(c, d)
 }
 
 pub fn array_to_bits(data: &[u8]) -> Vec<bool> {

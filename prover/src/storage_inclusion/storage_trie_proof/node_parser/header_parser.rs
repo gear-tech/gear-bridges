@@ -1,8 +1,8 @@
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ArrayTarget, ByteTarget, SingleTarget},
+    common::targets::{impl_target_set, ArrayTarget, ByteTarget},
     prelude::*,
 };
 
@@ -14,8 +14,8 @@ impl_target_set! {
 
 impl_target_set! {
     pub struct HeaderParserOutputTarget {
-        pub nibble_count: SingleTarget,
-        pub resulting_offset: SingleTarget,
+        pub nibble_count: Target,
+        pub resulting_offset: Target,
     }
 }
 
@@ -97,8 +97,8 @@ pub fn define(
     let resulting_offset = builder.select(first_case_appliable, one_target, two_target);
 
     HeaderParserOutputTarget {
-        nibble_count: nibble_count.into(),
-        resulting_offset: resulting_offset.into(),
+        nibble_count,
+        resulting_offset,
     }
 }
 
@@ -251,8 +251,8 @@ mod tests {
             let nibble_count = builder.constant(F::from_canonical_u64(nibble_count));
             let resulting_offset = builder.constant(F::from_canonical_u64(resulting_offset));
 
-            builder.connect(nibble_count, output_target.nibble_count.to_target());
-            builder.connect(resulting_offset, output_target.resulting_offset.to_target());
+            builder.connect(nibble_count, output_target.nibble_count);
+            builder.connect(resulting_offset, output_target.resulting_offset);
         }
 
         let circuit = builder.build::<C>();

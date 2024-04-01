@@ -25,10 +25,11 @@ plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
 plonky2_u32 = { path = "./circuits/plonky2_u32" }
 intermediate-proof-storage = { path = "./intermediate-proof-storage" }
 
-plonky2 = { git = "https://github.com/mertwole/plonky2" }
-plonky2_field = { git = "https://github.com/mertwole/plonky2" }
-plonky2_util = { git = "https://github.com/mertwole/plonky2" }
-plonky2_maybe_rayon = { git = "https://github.com/mertwole/plonky2" }
+plonky2 = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2_field = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2_util = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2_maybe_rayon = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+
 curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
 
 anyhow = "1.0.40"

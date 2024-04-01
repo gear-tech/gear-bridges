@@ -1,22 +1,26 @@
 use plonky2::{
-    iop::witness::{PartialWitness, WitnessWrite},
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
 use crate::{
+    block_finality::validator_set_hash::ValidatorSetHash,
     block_finality::BlockFinality,
     common::{
         array_to_bits,
         targets::{
             impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget,
-            Sha256Target, Sha256TargetGoldilocks, SingleTarget, TargetSet, ValidatorSetTarget,
+            Sha256Target, Sha256TargetGoldilocks, TargetBitOperations, TargetSet,
+            ValidatorSetTarget,
         },
-        BuilderExt, ProofComposition,
+        BuilderExt,
     },
     consts::VALIDATOR_COUNT,
     prelude::*,
     storage_inclusion::StorageInclusion,
-    validator_set_hash::{ValidatorSetHash, ValidatorSetHashTarget},
     ProofWithCircuitData,
 };
 
@@ -28,7 +32,7 @@ impl_target_set! {
     pub struct NextValidatorSetTarget {
         pub validator_set_hash: Sha256TargetGoldilocks,
         pub next_validator_set_hash: Sha256TargetGoldilocks,
-        pub current_authority_set_id: SingleTarget,
+        pub current_authority_set_id: Target,
     }
 }
 
@@ -55,6 +59,7 @@ impl NextValidatorSet {
             );
         }
 
+        // TODO: Remove when pallet-gear-bridges will be implemented.
         let validator_set_hash_proof = ValidatorSetHash {
             validator_set: next_validator_set.try_into().unwrap(),
         }
@@ -67,40 +72,39 @@ impl NextValidatorSet {
         }
         .prove();
 
-        let composition_builder = ProofComposition::new(
-            validator_set_hash_proof,
-            non_hashed_next_validator_set_proof,
-        );
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let mut witness = PartialWitness::new();
 
-        let targets_op =
-            |builder: &mut CircuitBuilder<F, D>,
-             validator_set_hash: ValidatorSetHashTarget,
-             next_validator_set: NextValidatorSetNonHashedTarget| {
-                validator_set_hash
-                    .validator_set
-                    .connect(&next_validator_set.next_validator_set, builder);
+        let validator_set_hash_target =
+            builder.recursively_verify_constant_proof(validator_set_hash_proof, &mut witness);
+        let next_validator_set_target = builder
+            .recursively_verify_constant_proof(non_hashed_next_validator_set_proof, &mut witness);
 
-                NextValidatorSetTarget {
-                    validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                        next_validator_set.current_validator_set_hash,
-                        builder,
-                    ),
-                    next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
-                        validator_set_hash.hash,
-                        builder,
-                    ),
-                    current_authority_set_id: next_validator_set.authority_set_id,
-                }
-            };
+        validator_set_hash_target
+            .validator_set
+            .connect(&next_validator_set_target.next_validator_set, &mut builder);
 
-        composition_builder.compose(targets_op)
+        NextValidatorSetTarget {
+            validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                next_validator_set_target.current_validator_set_hash,
+                &mut builder,
+            ),
+            next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+                validator_set_hash_target.hash,
+                &mut builder,
+            ),
+            current_authority_set_id: next_validator_set_target.authority_set_id,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        ProofWithCircuitData::from_builder(builder, witness)
     }
 }
 
 impl_target_set! {
     struct NextValidatorSetNonHashedTarget {
         current_validator_set_hash: Sha256Target,
-        authority_set_id: SingleTarget,
+        authority_set_id: Target,
         next_validator_set: ValidatorSetTarget,
     }
 }
@@ -162,7 +166,7 @@ impl NextValidatorSetNonHashed {
             .block_hash
             .connect(&block_finality_target.message.block_hash, &mut builder);
 
-        let authority_set_id = SingleTarget::from_u64_bits_le_lossy(
+        let authority_set_id = Target::from_u64_bits_le_lossy(
             block_finality_target.message.authority_set_id,
             &mut builder,
         );

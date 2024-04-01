@@ -1,6 +1,6 @@
 use plonky2::{
     iop::{
-        target::BoolTarget,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -17,8 +17,8 @@ use crate::{
     common::{
         array_to_bits, common_data_for_recursion,
         targets::{
-            impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet,
-            SingleTarget, TargetSet, VerifierDataTarget,
+            impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
+            VerifierDataTarget,
         },
         BuilderExt,
     },
@@ -38,10 +38,10 @@ mod scale_compact_integer_parser;
 impl_parsable_target_set! {
     pub struct ChildNodeArrayParserTarget {
         pub node_data: BranchNodeDataPaddedTarget,
-        pub initial_read_offset: SingleTarget,
-        pub final_read_offset: SingleTarget,
-        pub overall_children_amount: SingleTarget,
-        pub claimed_child_index_in_array: SingleTarget,
+        pub initial_read_offset: Target,
+        pub final_read_offset: Target,
+        pub overall_children_amount: Target,
+        pub claimed_child_index_in_array: Target,
         pub claimed_child_hash: Blake2Target,
     }
 }
@@ -122,10 +122,10 @@ const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 impl_target_set! {
     struct CyclicRecursionTarget {
         pub node_data: BranchNodeDataPaddedTarget,
-        pub initial_read_offset: SingleTarget,
-        pub read_offset: SingleTarget,
-        pub overall_children_amount: SingleTarget,
-        pub claimed_child_index_in_array: SingleTarget,
+        pub initial_read_offset: Target,
+        pub read_offset: Target,
+        pub overall_children_amount: Target,
+        pub claimed_child_index_in_array: Target,
         pub claimed_child_hash: Blake2Target,
 
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
@@ -149,10 +149,10 @@ impl CyclicRecursionTarget {
 impl_parsable_target_set! {
     struct CyclicRecursionTargetWithoutCircuitData {
         node_data: BranchNodeDataPaddedTarget,
-        initial_read_offset: SingleTarget,
-        read_offset: SingleTarget,
-        overall_children_amount: SingleTarget,
-        claimed_child_index_in_array: SingleTarget,
+        initial_read_offset: Target,
+        read_offset: Target,
+        overall_children_amount: Target,
+        claimed_child_index_in_array: Target,
         claimed_child_hash: Blake2Target,
     }
 }
@@ -271,22 +271,18 @@ impl Circuit {
         );
         let mut inner_cyclic_proof_pis = inner_cyclic_proof_pis.remove_verifier_data();
 
-        inner_cyclic_proof_pis.read_offset = builder
-            .select(
-                condition,
-                inner_cyclic_proof_pis.read_offset.to_target(),
-                inner_cyclic_proof_pis.initial_read_offset.to_target(),
-            )
-            .into();
+        inner_cyclic_proof_pis.read_offset = builder.select(
+            condition,
+            inner_cyclic_proof_pis.read_offset,
+            inner_cyclic_proof_pis.initial_read_offset,
+        );
 
         let zero = builder.zero();
-        inner_cyclic_proof_pis.overall_children_amount = builder
-            .select(
-                condition,
-                inner_cyclic_proof_pis.overall_children_amount.to_target(),
-                zero,
-            )
-            .into();
+        inner_cyclic_proof_pis.overall_children_amount = builder.select(
+            condition,
+            inner_cyclic_proof_pis.overall_children_amount,
+            zero,
+        );
 
         inner_proof_pis
             .node_data
@@ -295,10 +291,8 @@ impl Circuit {
             .read_offset
             .connect(&inner_cyclic_proof_pis.read_offset, &mut builder);
         let assert_child_hash = builder.is_equal(
-            inner_cyclic_proof_pis
-                .claimed_child_index_in_array
-                .to_target(),
-            inner_cyclic_proof_pis.overall_children_amount.to_target(),
+            inner_cyclic_proof_pis.claimed_child_index_in_array,
+            inner_cyclic_proof_pis.overall_children_amount,
         );
         inner_proof_pis
             .assert_child_hash
@@ -308,13 +302,8 @@ impl Circuit {
             &mut builder,
         );
 
-        let one = builder.one();
-        let overall_children_amount = builder
-            .add(
-                inner_cyclic_proof_pis.overall_children_amount.to_target(),
-                one,
-            )
-            .into();
+        let overall_children_amount =
+            builder.add_const(inner_cyclic_proof_pis.overall_children_amount, F::ONE);
 
         let resulting_read_offset = inner_proof_pis.resulting_read_offset;
 

@@ -13,7 +13,6 @@ use crate::{
 };
 
 mod block_header_parser;
-mod generic_hasher;
 mod storage_trie_proof;
 
 use storage_trie_proof::storage_address::PartialStorageAddressTarget;

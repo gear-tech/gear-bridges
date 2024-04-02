@@ -21,6 +21,7 @@ use crate::prelude::*;
 
 #[macro_use]
 pub mod targets;
+pub mod generic_blake2;
 pub mod poseidon_bn128;
 
 use plonky2_field::goldilocks_field::GoldilocksField;

@@ -5,14 +5,13 @@ use plonky2::{
 
 use crate::{
     common::{
+        generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, ByteTarget, TargetSet},
         BuilderExt,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     ProofWithCircuitData,
 };
-
-use super::generic_hasher::GenericBlake2;
 
 // Block header have the folowing structure:
 // - previous block hash    (32 bytes)

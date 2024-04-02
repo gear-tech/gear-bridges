@@ -5,6 +5,7 @@ use plonky2::{
 
 use crate::{
     common::{
+        generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
         BuilderExt,
     },
@@ -13,8 +14,7 @@ use crate::{
 };
 
 use super::{
-    super::generic_hasher::GenericBlake2, node_parser::branch_parser::BranchParser,
-    storage_address::PartialStorageAddressTarget,
+    node_parser::branch_parser::BranchParser, storage_address::PartialStorageAddressTarget,
 };
 
 impl_parsable_target_set! {

@@ -5,6 +5,7 @@ use plonky2::{
 
 use crate::{
     common::{
+        generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
         BuilderExt,
     },
@@ -12,10 +13,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
-use super::{
-    super::generic_hasher::GenericBlake2, node_parser::leaf_parser::LeafParser,
-    storage_address::PartialStorageAddressTarget,
-};
+use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget};
 
 impl_parsable_target_set! {
     pub struct HashedLeafParserTarget {

@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -20,7 +20,7 @@ use crate::{
         array_to_bits,
         targets::{
             impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
-            TargetSet, TargetSetWitnessOperations, ValidatorSetTarget,
+            TargetSet, ValidatorSetTarget,
         },
         BuilderExt,
     },
@@ -101,7 +101,7 @@ impl BlockFinality {
         }
         .prove();
 
-        log::info!("Composing block finality and validator set hash proofs...");
+        log::info!("Composing validator signs and validator set hash proofs...");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
@@ -243,12 +243,6 @@ impl IndexedValidatorSign {
     fn prove(&self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::info!("    Proving indexed validator sign...");
 
-        let selector_proof = ValidatorSelector {
-            validator_set: self.validator_set,
-            index: self.index,
-        }
-        .prove();
-
         let sign_proof = SingleValidatorSign {
             public_key: self.validator_set[self.index],
             signature: self.signature,
@@ -259,17 +253,27 @@ impl IndexedValidatorSign {
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
 
-        let selector_target =
-            builder.recursively_verify_constant_proof(selector_proof, &mut witness);
+        let validator_set_bits =
+            array_to_bits(&self.validator_set.into_iter().flatten().collect::<Vec<_>>());
+        let mut validator_set_targets = validator_set_bits.into_iter().map(|value| {
+            let target = builder.add_virtual_bool_target_safe();
+            witness.set_bool_target(target, value);
+            target.target
+        });
+        let validator_set_target = ValidatorSetTarget::parse_exact(&mut validator_set_targets);
+
+        let index_target = builder.add_virtual_target();
+        witness.set_target(index_target, F::from_canonical_usize(self.index));
+
+        let validator = validator_set_target.random_read(index_target, &mut builder);
+
         let sign_target = builder.recursively_verify_constant_proof(sign_proof, &mut witness);
 
-        selector_target
-            .validator
-            .connect(&sign_target.public_key, &mut builder);
+        validator.connect(&sign_target.public_key, &mut builder);
 
         ValidatorSignsChainTarget {
-            validator_idx: selector_target.index,
-            validator_set: selector_target.validator_set,
+            validator_idx: index_target,
+            validator_set: validator_set_target,
             message: sign_target.message,
         }
         .register_as_public_inputs(&mut builder);
@@ -324,113 +328,5 @@ impl SingleValidatorSign {
         log::info!("        Proven single validator sign...");
 
         proof
-    }
-}
-
-impl_target_set! {
-    struct ValidatorSelectorTarget {
-        index: Target,
-        validator_set: ValidatorSetTarget,
-        validator: Ed25519PublicKeyTarget,
-    }
-}
-
-struct ValidatorSelector {
-    validator_set: [[u8; consts::ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
-    index: usize,
-}
-
-impl ValidatorSelector {
-    fn prove(&self) -> ProofWithCircuitData<ValidatorSelectorTarget> {
-        log::info!("        Proving validator selection...");
-
-        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
-
-        let targets: ValidatorSelectorTarget =
-            validator_selector_circuit(&mut builder, self.validator_set.len());
-
-        targets.index.register_as_public_inputs(&mut builder);
-
-        targets
-            .validator_set
-            .register_as_public_inputs(&mut builder);
-
-        targets.validator.register_as_public_inputs(&mut builder);
-
-        let mut pw = PartialWitness::new();
-
-        pw.set_target(targets.index, F::from_canonical_u32(self.index as u32));
-
-        targets.validator_set.set_partial_witness(
-            &self
-                .validator_set
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>(),
-            &mut pw,
-        );
-
-        targets
-            .validator
-            .set_partial_witness(&self.validator_set[self.index], &mut pw);
-
-        ProofWithCircuitData::from_builder(builder, pw)
-    }
-}
-
-fn validator_selector_circuit(
-    builder: &mut CircuitBuilder<F, D>,
-    validator_count: usize,
-) -> ValidatorSelectorTarget {
-    let mut validator_set_targets = Vec::with_capacity(validator_count);
-    for _ in 0..validator_count {
-        let pk_targets: [BoolTarget; consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS] = (0
-            ..consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS)
-            .map(|_| builder.add_virtual_bool_target_safe())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        validator_set_targets.push(pk_targets);
-    }
-    let validator_set_targets: [_; VALIDATOR_COUNT] = validator_set_targets.try_into().unwrap();
-
-    let index_target = builder.add_virtual_target();
-
-    let mut equality_targets = Vec::with_capacity(validator_count);
-    for i in 0..validator_count {
-        let i_target = builder.constant(F::from_canonical_u32(i as u32));
-        let eq_target = builder.is_equal(i_target, index_target);
-        equality_targets.push(eq_target);
-    }
-
-    let mut validator_targets = Vec::with_capacity(consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS);
-    for bit_idx in 0..consts::ED25519_PUBLIC_KEY_SIZE_IN_BITS {
-        let target = validator_set_targets
-            .iter()
-            .zip(equality_targets.iter())
-            .map(|(validator, equality)| builder.and(validator[bit_idx], *equality))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .reduce(|acc, x| {
-                let not_acc = builder.not(acc);
-                let not_x = builder.not(x);
-                let not_res = builder.and(not_acc, not_x);
-                builder.not(not_res)
-            })
-            .unwrap();
-
-        validator_targets.push(target.target);
-    }
-
-    ValidatorSelectorTarget {
-        validator_set: ValidatorSetTarget::parse(
-            &mut validator_set_targets
-                .into_iter()
-                .flatten()
-                .map(|t| t.target),
-        ),
-        index: index_target,
-        validator: Ed25519PublicKeyTarget::parse(&mut validator_targets.into_iter()),
     }
 }

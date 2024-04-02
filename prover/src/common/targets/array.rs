@@ -1,3 +1,5 @@
+use crate::common::targets;
+
 use super::*;
 
 // TODO REFACTOR: remove pub on inner type.
@@ -39,6 +41,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         )
     }
 
+    // TODO: Check range of `at`.
     pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> T {
         let self_targets = self
             .0
@@ -50,27 +53,22 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         let inner_target_len = self_targets[0].len();
         assert!(self_targets.iter().all(|t| t.len() == inner_target_len));
 
-        let self_targets_padded_len = (self_targets.len() * inner_target_len).next_power_of_two();
-        let zero_target = builder.zero();
-        let self_targets = self_targets
-            .into_iter()
-            .flatten()
-            .chain(iter::repeat(zero_target))
-            .take(self_targets_padded_len)
-            .collect::<Vec<_>>();
+        let mut result_targets = Vec::with_capacity(inner_target_len);
+        let zero = builder.zero();
+        let selector_targets_padded_len = self_targets.len().next_power_of_two();
+        for i in 0..inner_target_len {
+            let selector_targets = self_targets
+                .iter()
+                .map(|t| t[i])
+                .chain(iter::repeat(zero))
+                .take(selector_targets_padded_len)
+                .collect();
 
-        let access_targets = (0..inner_target_len)
-            .map(|offset| {
-                let offset_const = builder.constant(F::from_canonical_usize(offset));
-                builder.add(at, offset_const)
-            })
-            .collect::<Vec<_>>();
+            let result = builder.random_access(at, selector_targets);
+            result_targets.push(result);
+        }
 
-        let mut result_targets = access_targets
-            .into_iter()
-            .map(|access_at| builder.random_access(access_at, self_targets.clone()));
-
-        T::parse_exact(&mut result_targets)
+        T::parse_exact(&mut result_targets.into_iter())
     }
 
     pub fn random_read_array<const R: usize>(

@@ -157,22 +157,6 @@ macro_rules! impl_parsable_target_set {
     }
 }
 
-pub trait TargetSetWitnessOperations {
-    fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>);
-}
-
-impl<T, const N: usize> TargetSetWitnessOperations for T
-where
-    T: Deref<Target = ArrayTarget<BoolTarget, N>>,
-{
-    fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
-        let data = array_to_bits(data);
-        for (target, bit) in self.into_targets_iter().zip(data.into_iter()) {
-            witness.set_bool_target(BoolTarget::new_unsafe(target), bit);
-        }
-    }
-}
-
 impl<const N: usize> ArrayTarget<BoolTarget, N> {
     fn compress_to_goldilocks<const PACK_BY: usize>(
         &self,
@@ -312,16 +296,6 @@ impl ParsableTargetSet for Sha256TargetGoldilocks {
             .collect::<Vec<_>>()
             .try_into()
             .unwrap()
-    }
-}
-
-impl TargetSetWitnessOperations for ValidatorSetTarget {
-    fn set_partial_witness(&self, data: &[u8], witness: &mut PartialWitness<F>) {
-        self.0
-             .0
-            .iter()
-            .zip(data.chunks(ED25519_PUBLIC_KEY_SIZE))
-            .for_each(|(validator, data)| validator.set_partial_witness(data, witness));
     }
 }
 

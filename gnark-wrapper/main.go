@@ -195,13 +195,13 @@ func loadCircuit(data string) (Plonky2VerifierCircuit, error) {
 	}
 
 	var rawProof types.ProofWithPublicInputsRaw
-	if err := json.Unmarshal([]byte(circuit.Proof), &data); err != nil {
+	if err := json.Unmarshal([]byte(circuit.Proof), &rawProof); err != nil {
 		return handleErr(fmt.Errorf("unmarshal proof: %w", err))
 	}
 	proofWithPis := variables.DeserializeProofWithPublicInputs(rawProof)
 
 	var rawVerifierData types.VerifierOnlyCircuitDataRaw
-	if err := json.Unmarshal([]byte(circuit.VerifierData), &data); err != nil {
+	if err := json.Unmarshal([]byte(circuit.VerifierData), &rawVerifierData); err != nil {
 		return handleErr(fmt.Errorf("unmarshal verifier data: %w", err))
 	}
 	verifierOnlyCircuitData := variables.DeserializeVerifierOnlyCircuitData(rawVerifierData)

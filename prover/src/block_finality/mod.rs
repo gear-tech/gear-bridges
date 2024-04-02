@@ -6,12 +6,11 @@ use plonky2::{
 use crate::{
     common::{
         targets::{
-            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target, Sha256Target,
-            TargetSet,
+            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target, TargetSet,
         },
         BuilderExt,
     },
-    consts::{GRANDPA_VOTE_LENGTH, PROCESSED_VALIDATOR_COUNT, VALIDATOR_COUNT},
+    consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
     ProofWithCircuitData,
 };
@@ -27,7 +26,7 @@ use self::validator_set_hash::ValidatorSetHashTarget;
 
 impl_target_set! {
     pub struct BlockFinalityTarget {
-        pub validator_set_hash: Sha256Target,
+        pub validator_set_hash: Blake2Target,
         pub message: GrandpaVoteTarget,
     }
 }
@@ -62,14 +61,18 @@ struct ProcessedPreCommit {
 
 #[derive(Clone)]
 pub struct BlockFinality {
-    pub validator_set: [[u8; consts::ED25519_PUBLIC_KEY_SIZE]; VALIDATOR_COUNT],
+    pub validator_set: Vec<[u8; consts::ED25519_PUBLIC_KEY_SIZE]>,
     pub pre_commits: Vec<PreCommit>,
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 
 impl BlockFinality {
-    pub fn prove(&self) -> ProofWithCircuitData<BlockFinalityTarget> {
+    pub fn prove(self) -> ProofWithCircuitData<BlockFinalityTarget> {
         log::info!("Proving block finality...");
+
+        // Find such a number that processed_validator_count > 2/3 * validator_count.
+        let processed_validator_count =
+            2 * self.validator_set.len() / 3 + self.validator_set.len() % 3;
 
         let processed_pre_commits: Vec<_> = self
             .pre_commits
@@ -82,10 +85,10 @@ impl BlockFinality {
                     signature: pc.signature,
                 })
             })
-            .take(PROCESSED_VALIDATOR_COUNT)
+            .take(processed_validator_count)
             .collect();
 
-        assert_eq!(processed_pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
+        assert_eq!(processed_pre_commits.len(), processed_validator_count);
 
         let validator_set_hash = ValidatorSetHash {
             validator_set: self.validator_set,

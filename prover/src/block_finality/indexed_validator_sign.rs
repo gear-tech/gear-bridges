@@ -12,7 +12,7 @@ use plonky2_field::types::Field;
 use crate::{
     common::{
         array_to_bits,
-        targets::{impl_target_set, Ed25519PublicKeyTarget, Sha256Target, TargetSet},
+        targets::{impl_target_set, Ed25519PublicKeyTarget, TargetSet},
         BuilderExt,
     },
     consts::GRANDPA_VOTE_LENGTH,
@@ -24,7 +24,7 @@ use super::*;
 
 impl_target_set! {
     pub struct IndexedValidatorSignTarget {
-        pub validator_set_hash: Sha256Target,
+        pub validator_set_hash: Blake2Target,
         pub validator_idx: Target,
         pub message: GrandpaVoteTarget,
     }

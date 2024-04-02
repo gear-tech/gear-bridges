@@ -7,7 +7,7 @@ use crate::{
     block_finality::BlockFinality,
     common::{
         targets::{
-            impl_target_set, BitArrayTarget, MessageTargetGoldilocks, Sha256TargetGoldilocks,
+            impl_target_set, BitArrayTarget, Blake2TargetGoldilocks, MessageTargetGoldilocks,
             TargetBitOperations, TargetSet,
         },
         BuilderExt,
@@ -18,7 +18,7 @@ use crate::{
 
 impl_target_set! {
     pub struct MessageSentTarget {
-        pub validator_set_hash: Sha256TargetGoldilocks,
+        pub validator_set_hash: Blake2TargetGoldilocks,
         pub authority_set_id: Target,
         pub message_contents: MessageTargetGoldilocks,
     }
@@ -59,7 +59,7 @@ impl MessageSent {
         );
 
         MessageSentTarget {
-            validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+            validator_set_hash: Blake2TargetGoldilocks::from_blake2_target(
                 finality_proof_target.validator_set_hash,
                 &mut builder,
             ),

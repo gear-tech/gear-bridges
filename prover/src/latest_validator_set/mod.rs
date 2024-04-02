@@ -18,7 +18,7 @@ use crate::{
     common::{
         common_data_for_recursion,
         targets::{
-            impl_target_set, ParsableTargetSet, Sha256TargetGoldilocks, TargetSet,
+            impl_target_set, Blake2TargetGoldilocks, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
         BuilderExt,
@@ -39,9 +39,9 @@ const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 impl_target_set! {
     pub struct LatestValidatorSetTarget {
         pub genesis_set_id: Target,
-        pub genesis_hash: Sha256TargetGoldilocks,
+        pub genesis_hash: Blake2TargetGoldilocks,
         pub current_set_id: Target,
-        pub current_hash: Sha256TargetGoldilocks,
+        pub current_hash: Blake2TargetGoldilocks,
 
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
     }
@@ -62,9 +62,9 @@ impl ParsableTargetSet for LatestValidatorSetTarget {
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
         let pis = LatestValidatorSetPublicInputs {
             genesis_set_id: Target::parse_public_inputs(public_inputs),
-            genesis_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
+            genesis_hash: Blake2TargetGoldilocks::parse_public_inputs(public_inputs),
             current_set_id: Target::parse_public_inputs(public_inputs),
-            current_hash: Sha256TargetGoldilocks::parse_public_inputs(public_inputs),
+            current_hash: Blake2TargetGoldilocks::parse_public_inputs(public_inputs),
 
             verifier_only_data: VerifierOnlyCircuitData {
                 circuit_digest: HashOutTarget::parse_public_inputs(public_inputs),
@@ -152,7 +152,7 @@ impl LatestValidatorSet {
         let one = builder.one();
 
         let genesis_authority_set_id = builder.add_virtual_public_input();
-        let genesis_authority_set_hash = Sha256TargetGoldilocks::parse(
+        let genesis_authority_set_hash = Blake2TargetGoldilocks::parse(
             &mut std::iter::repeat(()).map(|_| builder.add_virtual_target()),
         );
         genesis_authority_set_hash.register_as_public_inputs(&mut builder);
@@ -203,7 +203,7 @@ impl LatestValidatorSet {
         );
         builder.connect(actual_current_authority_set_id, current_set_id);
 
-        let actual_current_authority_set_hash = Sha256TargetGoldilocks::parse_exact(
+        let actual_current_authority_set_hash = Blake2TargetGoldilocks::parse_exact(
             &mut inner_cyclic_targets
                 .current_hash
                 .into_targets_iter()

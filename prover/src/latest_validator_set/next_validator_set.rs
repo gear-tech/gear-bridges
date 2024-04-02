@@ -12,13 +12,12 @@ use crate::{
     common::{
         array_to_bits,
         targets::{
-            impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget,
-            Sha256Target, Sha256TargetGoldilocks, TargetBitOperations, TargetSet,
-            ValidatorSetTarget,
+            impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Blake2TargetGoldilocks,
+            Ed25519PublicKeyTarget, PaddedValidatorSetTarget, TargetBitOperations, TargetSet,
         },
         BuilderExt,
     },
-    consts::VALIDATOR_COUNT,
+    consts::MAX_VALIDATOR_COUNT,
     prelude::*,
     storage_inclusion::StorageInclusion,
     ProofWithCircuitData,
@@ -30,8 +29,8 @@ const SESSION_KEYS_SIZE: usize = 5 * 32;
 
 impl_target_set! {
     pub struct NextValidatorSetTarget {
-        pub validator_set_hash: Sha256TargetGoldilocks,
-        pub next_validator_set_hash: Sha256TargetGoldilocks,
+        pub validator_set_hash: Blake2TargetGoldilocks,
+        pub next_validator_set_hash: Blake2TargetGoldilocks,
         pub current_authority_set_id: Target,
     }
 }
@@ -47,8 +46,8 @@ impl NextValidatorSet {
         log::info!("Proving validator set hash change...");
 
         let mut next_validator_set = vec![];
-        // TODO REFACTOR
-        for validator_idx in 0..VALIDATOR_COUNT {
+        // TODO Will be gone when pallet-gear-bridges will be implemented.
+        for validator_idx in 0..MAX_VALIDATOR_COUNT {
             next_validator_set.push(
                 self.next_validator_set_storage_data[1
                     + validator_idx * SESSION_KEYS_SIZE
@@ -85,11 +84,11 @@ impl NextValidatorSet {
             .connect(&next_validator_set_target.next_validator_set, &mut builder);
 
         NextValidatorSetTarget {
-            validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+            validator_set_hash: Blake2TargetGoldilocks::from_blake2_target(
                 next_validator_set_target.current_validator_set_hash,
                 &mut builder,
             ),
-            next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+            next_validator_set_hash: Blake2TargetGoldilocks::from_blake2_target(
                 validator_set_hash_target.hash,
                 &mut builder,
             ),
@@ -103,9 +102,9 @@ impl NextValidatorSet {
 
 impl_target_set! {
     struct NextValidatorSetNonHashedTarget {
-        current_validator_set_hash: Sha256Target,
+        current_validator_set_hash: Blake2Target,
         authority_set_id: Target,
-        next_validator_set: ValidatorSetTarget,
+        next_validator_set: PaddedValidatorSetTarget,
     }
 }
 
@@ -119,16 +118,17 @@ impl_target_set! {
     }
 }
 
+// TODO: Will be gone when pallet-gear-bridges get implemented.
 impl_target_set! {
     struct ValidatorSetInStorageTarget {
         _length: BitArrayTarget<8>,
-        validators: ArrayTarget<SessionKeysTarget, VALIDATOR_COUNT>,
+        validators: ArrayTarget<SessionKeysTarget, MAX_VALIDATOR_COUNT>,
     }
 }
 
 impl ValidatorSetInStorageTarget {
-    fn into_grandpa_authority_keys(self) -> ValidatorSetTarget {
-        ValidatorSetTarget::parse(
+    fn into_grandpa_authority_keys(self) -> PaddedValidatorSetTarget {
+        PaddedValidatorSetTarget::parse(
             &mut self
                 .validators
                 .0

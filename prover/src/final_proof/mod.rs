@@ -13,7 +13,7 @@ use plonky2_field::types::Field;
 
 use crate::{
     common::{
-        targets::{impl_target_set, MessageTargetGoldilocks, Sha256TargetGoldilocks, TargetSet},
+        targets::{impl_target_set, Blake2TargetGoldilocks, MessageTargetGoldilocks, TargetSet},
         BuilderExt,
     },
     consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
@@ -90,7 +90,7 @@ impl FinalProof {
             latest_validator_set_target.genesis_set_id,
         );
 
-        let desired_genesis_validator_set_hash = Sha256TargetGoldilocks::parse_exact(
+        let desired_genesis_validator_set_hash = Blake2TargetGoldilocks::parse_exact(
             &mut GENESIS_VALIDATOR_SET_HASH
                 .iter()
                 .map(|el| builder.constant(F::from_noncanonical_u64(*el))),

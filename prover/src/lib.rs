@@ -30,17 +30,15 @@ pub mod prelude {
 pub(crate) mod consts {
     pub const CIRCUIT_DIGEST_SIZE: usize = 4;
 
-    pub const SHA256_DIGEST_SIZE: usize = 32;
-    pub const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
-    /// If we pack `BoolTargets` into `Targets` by groups of 32 then
-    /// 8 Goldilocks field elements are required.
-    pub const SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 8;
-
     // For now we send a single Keccak256 hash.
     pub const MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 8;
 
     pub const BLAKE2_DIGEST_SIZE: usize = 32;
     pub const BLAKE2_DIGEST_SIZE_IN_BITS: usize = BLAKE2_DIGEST_SIZE * 8;
+    /// If we pack `BoolTargets` into `Targets` by groups of 32 then
+    /// 8 Goldilocks field elements are required.
+    pub const BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize =
+        BLAKE2_DIGEST_SIZE_IN_BITS / 32;
 
     pub const ED25519_PUBLIC_KEY_SIZE: usize = 32;
     pub const ED25519_PUBLIC_KEY_SIZE_IN_BITS: usize = ED25519_PUBLIC_KEY_SIZE * 8;
@@ -50,11 +48,10 @@ pub(crate) mod consts {
 
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
-    pub const VALIDATOR_COUNT: usize = 6;
-    pub const PROCESSED_VALIDATOR_COUNT: usize = 5;
+    pub const MAX_VALIDATOR_COUNT: usize = 6;
 
     pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
-    pub const GENESIS_VALIDATOR_SET_HASH: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
+    pub const GENESIS_VALIDATOR_SET_HASH: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
         672704782, 1704060843, 1664703656, 3374481395, 3359180011, 2226227131, 2127584258,
         4214279745,
     ];

@@ -22,17 +22,17 @@ use crate::{
     common::{
         array_to_bits, common_data_for_recursion,
         targets::{
-            impl_parsable_target_set, impl_target_set, ParsableTargetSet, Sha256Target, TargetSet,
+            impl_parsable_target_set, impl_target_set, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
         BuilderExt,
     },
-    consts::{GRANDPA_VOTE_LENGTH, VALIDATOR_COUNT},
+    consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
     ProofWithCircuitData,
 };
 
-use self::{consts::SHA256_DIGEST_SIZE, indexed_validator_sign::IndexedValidatorSignTarget};
+use self::{consts::BLAKE2_DIGEST_SIZE, indexed_validator_sign::IndexedValidatorSignTarget};
 
 use super::{indexed_validator_sign::IndexedValidatorSign, *};
 
@@ -40,7 +40,7 @@ const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
 impl_target_set! {
     pub struct ValidatorSignsChainTarget {
-        pub validator_set_hash: Sha256Target,
+        pub validator_set_hash: Blake2Target,
         pub message: GrandpaVoteTarget,
     }
 }
@@ -52,9 +52,10 @@ pub struct ValidatorSignsChain {
 }
 
 impl ValidatorSignsChain {
-    pub fn prove(&self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+    pub fn prove(self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::info!("Proving validator signs chain...");
 
+        let validator_set_hash = self.validator_set_hash.compute_hash();
         let validator_set_hash_proof = self.validator_set_hash.prove();
 
         let mut pre_commits = self.pre_commits.clone();
@@ -91,7 +92,7 @@ impl ValidatorSignsChain {
             .collect::<Vec<_>>();
 
         let initial_data = SignCompositionInitialData {
-            validator_set_hash: self.validator_set_hash.compute_hash(),
+            validator_set_hash,
             message: self.message,
         };
         let mut composed_proof =
@@ -107,13 +108,17 @@ impl ValidatorSignsChain {
         let composed_proof_pis =
             builder.recursively_verify_constant_proof(&composed_proof, &mut witness);
 
+        // TODO: Get validator count somehow else.
+        let validator_set_hash_pis =
+            builder.recursively_verify_constant_proof(&validator_set_hash_proof, &mut witness);
+
         // Assert that sign_count > 2/3 * validator_count
         // 3 * sign_count - 2 * validator_count - 1 >= 0
         {
             let triple_sign_count =
                 builder.mul_const(F::from_canonical_usize(3), composed_proof_pis.sign_count);
             let double_validator_count =
-                builder.constant(F::from_canonical_usize(VALIDATOR_COUNT * 2));
+                builder.mul_const(F::TWO, validator_set_hash_pis.validator_set_length);
             let lhs = builder.sub(triple_sign_count, double_validator_count);
             let lhs = builder.add_const(lhs, F::NEG_ONE);
             builder.range_check(lhs, 32);
@@ -137,7 +142,7 @@ const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_target_set! {
     struct SignCompositionTarget {
-        validator_set_hash: Sha256Target,
+        validator_set_hash: Blake2Target,
         message: GrandpaVoteTarget,
 
         latest_validator_idx: Target,
@@ -149,7 +154,7 @@ impl_target_set! {
 
 impl_parsable_target_set! {
     struct SignCompositionTargetWithoutCircuitData {
-        validator_set_hash: Sha256Target,
+        validator_set_hash: Blake2Target,
         message: GrandpaVoteTarget,
 
         latest_validator_idx: Target,
@@ -158,7 +163,7 @@ impl_parsable_target_set! {
 }
 
 struct SignCompositionInitialData {
-    validator_set_hash: [u8; SHA256_DIGEST_SIZE],
+    validator_set_hash: [u8; BLAKE2_DIGEST_SIZE],
     message: [u8; GRANDPA_VOTE_LENGTH],
 }
 

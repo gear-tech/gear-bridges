@@ -221,11 +221,10 @@ macro_rules! impl_parsable_array_target_wrapper {
     };
 }
 
-impl_parsable_array_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
 impl_array_target_wrapper!(
-    Sha256TargetGoldilocks,
+    Blake2TargetGoldilocks,
     Target,
-    SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
+    BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS
 );
 impl_array_target_wrapper!(
     MessageTargetGoldilocks,
@@ -284,14 +283,18 @@ impl_array_target_wrapper!(
     BoolTarget,
     ED25519_SIGNATURE_SIZE_IN_BITS
 );
-impl_array_target_wrapper!(ValidatorSetTarget, Ed25519PublicKeyTarget, VALIDATOR_COUNT);
+impl_array_target_wrapper!(
+    PaddedValidatorSetTarget,
+    Ed25519PublicKeyTarget,
+    MAX_VALIDATOR_COUNT
+);
 
-impl ParsableTargetSet for Sha256TargetGoldilocks {
-    type PublicInputsData = [u8; SHA256_DIGEST_SIZE];
+impl ParsableTargetSet for Blake2TargetGoldilocks {
+    type PublicInputsData = [u8; BLAKE2_DIGEST_SIZE];
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
         public_inputs
-            .take(SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS)
+            .take(BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS)
             .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
             .collect::<Vec<_>>()
             .try_into()
@@ -299,20 +302,14 @@ impl ParsableTargetSet for Sha256TargetGoldilocks {
     }
 }
 
-impl Sha256TargetGoldilocks {
+impl Blake2TargetGoldilocks {
     /// Packs underlying `BoolTarget`s to `Target`s by groups of 32.
-    pub fn from_sha256_target(
-        sha256_target: Sha256Target,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Self {
+    pub fn from_blake2_target(target: Blake2Target, builder: &mut CircuitBuilder<F, D>) -> Self {
         const BITS_FOR_SINGLE_TARGET: usize = 32;
-        let targets: [_; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
-            BitArrayTarget::compress_to_goldilocks::<BITS_FOR_SINGLE_TARGET>(
-                &sha256_target.0,
-                builder,
-            )
-            .try_into()
-            .unwrap();
+        let targets: [_; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
+            BitArrayTarget::compress_to_goldilocks::<BITS_FOR_SINGLE_TARGET>(&target.0, builder)
+                .try_into()
+                .unwrap();
 
         Self(ArrayTarget(targets))
     }

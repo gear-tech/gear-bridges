@@ -5135,21 +5135,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plonky2_sha256"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "itertools 0.10.5",
- "keccak-hash",
- "log",
- "plonky2",
- "plonky2_field",
- "plonky2_u32",
- "plonky2_util",
- "rand 0.8.5",
-]
-
-[[package]]
 name = "plonky2_sha512"
 version = "0.1.0"
 dependencies = [

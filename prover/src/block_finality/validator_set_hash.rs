@@ -11,7 +11,7 @@ use sp_core::blake2_256;
 use crate::{
     common::{
         generic_blake2::GenericBlake2,
-        targets::{Blake2Target, PaddedValidatorSetTarget},
+        targets::{Blake2Target, PaddedValidatorSetTarget, TargetSet},
         BuilderExt,
     },
     consts::ED25519_PUBLIC_KEY_SIZE,
@@ -59,33 +59,44 @@ impl ValidatorSetHash {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
 
-        let length_target = builder.add_virtual_target();
-        pw.set_target(length_target, F::from_canonical_usize(validator_count));
+        let validator_count_target = builder.add_virtual_target();
+        pw.set_target(
+            validator_count_target,
+            F::from_canonical_usize(validator_count),
+        );
 
         let hasher_pis = builder.recursively_verify_constant_proof(&hasher_proof, &mut pw);
+        let desired_data_len = builder.mul_const(
+            F::from_canonical_usize(ED25519_PUBLIC_KEY_SIZE),
+            validator_count_target,
+        );
+        builder.connect(desired_data_len, hasher_pis.length);
 
-        // let message_len_in_bits = VALIDATOR_COUNT * ED25519_PUBLIC_KEY_SIZE_IN_BITS;
-        // let targets = sha256_circuit(&mut builder, message_len_in_bits);
+        let mut validator_set = hasher_pis
+            .data
+            .0
+            .into_iter()
+            .map(|byte| {
+                byte.to_bit_targets(&mut builder)
+                    .0
+                    .into_iter()
+                    .rev()
+                    .map(|t| t.target)
+            })
+            .flatten();
+        let validator_set = PaddedValidatorSetTarget::parse(&mut validator_set);
 
-        // for target in &targets.digest {
-        //     builder.register_public_input(target.target);
-        // }
+        ValidatorSetHashTarget {
+            hash: hasher_pis.hash,
+            validator_set_length: validator_count_target,
+            validator_set,
+        }
+        .register_as_public_inputs(&mut builder);
 
-        // // The message gets padded so we register only first `message_len_in_bits` bits.
-        // for target in &targets.message[..message_len_in_bits] {
-        //     builder.register_public_input(target.target);
-        // }
+        let result = ProofWithCircuitData::from_builder(builder, pw);
 
-        // let hash_bits = array_to_bits(&self.compute_hash());
-        // for (target, value) in targets.digest.iter().zip(hash_bits) {
-        //     pw.set_bool_target(*target, value);
-        // }
+        log::info!("Proven correct hashing of validator set");
 
-        // let validator_set_bits = self.validator_set.iter().flat_map(|v| array_to_bits(v));
-        // for (target, value) in targets.message.iter().zip(validator_set_bits) {
-        //     pw.set_bool_target(*target, value);
-        // }
-
-        ProofWithCircuitData::from_builder(builder, pw)
+        result
     }
 }

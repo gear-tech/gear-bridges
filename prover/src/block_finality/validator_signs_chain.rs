@@ -56,6 +56,7 @@ impl ValidatorSignsChain {
         log::info!("Proving validator signs chain...");
 
         let validator_set_hash = self.validator_set_hash.compute_hash();
+
         let validator_set_hash_proof = self.validator_set_hash.prove();
 
         let mut pre_commits = self.pre_commits.clone();

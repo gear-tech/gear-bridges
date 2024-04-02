@@ -15,6 +15,7 @@ use plonky2::{
         proof::{Proof, ProofWithPublicInputs},
     },
 };
+use serde::{Deserialize, Serialize};
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::prelude::*;
@@ -144,6 +145,7 @@ where
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SerializedDataToVerify {
     pub proof_with_public_inputs: String,
     pub common_circuit_data: String,

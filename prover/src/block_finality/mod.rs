@@ -87,13 +87,12 @@ impl BlockFinality {
 
         assert_eq!(processed_pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
 
-        let validator_set_hash_proof = ValidatorSetHash {
+        let validator_set_hash = ValidatorSetHash {
             validator_set: self.validator_set,
-        }
-        .prove();
+        };
 
         let validator_signs_proof = ValidatorSignsChain {
-            validator_set_hash_proof,
+            validator_set_hash,
             pre_commits: processed_pre_commits,
             message: self.message,
         }

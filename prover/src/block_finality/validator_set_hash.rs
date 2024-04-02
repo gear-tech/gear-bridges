@@ -16,6 +16,8 @@ use crate::{
     ProofWithCircuitData,
 };
 
+use self::consts::SHA256_DIGEST_SIZE;
+
 impl_target_set! {
     pub struct ValidatorSetHashTarget {
         pub hash: Sha256Target,
@@ -28,6 +30,19 @@ pub struct ValidatorSetHash {
 }
 
 impl ValidatorSetHash {
+    pub fn compute_hash(&self) -> [u8; SHA256_DIGEST_SIZE] {
+        let mut hasher = Sha256::new();
+        hasher.update(
+            &self
+                .validator_set
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        hasher.finalize().into()
+    }
+
     pub fn prove(&self) -> ProofWithCircuitData<ValidatorSetHashTarget> {
         log::info!("Proving correct hashing of validator set...");
 
@@ -47,17 +62,7 @@ impl ValidatorSetHash {
 
         let mut pw = PartialWitness::new();
 
-        let mut hasher = Sha256::new();
-        hasher.update(
-            &self
-                .validator_set
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let hash = hasher.finalize();
-        let hash_bits = array_to_bits(&hash);
+        let hash_bits = array_to_bits(&self.compute_hash());
         for (target, value) in targets.digest.iter().zip(hash_bits) {
             pw.set_bool_target(*target, value);
         }

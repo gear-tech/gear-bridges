@@ -11,14 +11,12 @@ use plonky2::{
     },
     recursion::dummy_circuit::cyclic_base_proof,
 };
-use std::iter;
-
 use plonky2_field::types::Field;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     ThreadPoolBuilder,
 };
-use std::sync::mpsc::channel;
+use std::{iter, sync::mpsc::channel};
 
 use crate::{
     common::{
@@ -48,7 +46,7 @@ impl_target_set! {
 }
 
 pub struct ValidatorSignsChain {
-    pub validator_set_hash_proof: ProofWithCircuitData<ValidatorSetHashTarget>,
+    pub validator_set_hash: ValidatorSetHash,
     pub pre_commits: Vec<ProcessedPreCommit>,
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
@@ -56,6 +54,8 @@ pub struct ValidatorSignsChain {
 impl ValidatorSignsChain {
     pub fn prove(&self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::info!("Proving validator signs chain...");
+
+        let validator_set_hash_proof = self.validator_set_hash.prove();
 
         let mut pre_commits = self.pre_commits.clone();
         pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
@@ -77,7 +77,7 @@ impl ValidatorSignsChain {
                         signature: pre_commit.signature,
                         message: self.message,
                     }
-                    .prove(&self.validator_set_hash_proof);
+                    .prove(&validator_set_hash_proof);
 
                     sender.send((id, proof)).unwrap();
                 });
@@ -91,7 +91,7 @@ impl ValidatorSignsChain {
             .collect::<Vec<_>>();
 
         let initial_data = SignCompositionInitialData {
-            validator_set_hash: [0; 32],
+            validator_set_hash: self.validator_set_hash.compute_hash(),
             message: self.message,
         };
         let mut composed_proof =
@@ -125,7 +125,11 @@ impl ValidatorSignsChain {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        let result = ProofWithCircuitData::from_builder(builder, witness);
+
+        log::info!("Proven validator signs chain");
+
+        result
     }
 }
 
@@ -174,7 +178,7 @@ impl SignComposition {
         mut self,
         initial_data: SignCompositionInitialData,
     ) -> ProofWithCircuitData<SignCompositionTarget> {
-        log::info!("    Proving child node parser recursion layer(initial)...");
+        log::info!("    Proving sign composition recursion layer(initial)...");
 
         let validator_set_hash = array_to_bits(&initial_data.validator_set_hash);
         let message = array_to_bits(&initial_data.message);
@@ -207,7 +211,7 @@ impl SignComposition {
         let result =
             ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven child node parser recursion layer(initial)...");
+        log::info!("    Proven sign composition recursion layer(initial)...");
 
         result
     }
@@ -216,7 +220,7 @@ impl SignComposition {
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
     ) -> ProofWithCircuitData<SignCompositionTarget> {
-        log::info!("    Proving child node parser recursion layer...");
+        log::info!("    Proving sign composition recursion layer...");
         self.witness.set_bool_target(self.condition, true);
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
@@ -224,13 +228,13 @@ impl SignComposition {
         let result =
             ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven child node parser recursion layer");
+        log::info!("    Proven sign composition recursion layer");
 
         result
     }
 
     fn build(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> SignComposition {
-        log::info!("    Building child node parser recursion layer...");
+        log::info!("    Building sign composition recursion layer...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -315,7 +319,7 @@ impl SignComposition {
 
         pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
 
-        log::info!("    Built child node parser recursion layer");
+        log::info!("    Built sign composition recursion layer");
 
         SignComposition {
             cyclic_circuit_data,

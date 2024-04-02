@@ -51,7 +51,7 @@ pub(crate) mod consts {
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
     pub const VALIDATOR_COUNT: usize = 6;
-    pub const PROCESSED_VALIDATOR_COUNT: usize = 2;
+    pub const PROCESSED_VALIDATOR_COUNT: usize = 5;
 
     pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
     pub const GENESIS_VALIDATOR_SET_HASH: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [

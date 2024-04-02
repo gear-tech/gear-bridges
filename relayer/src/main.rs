@@ -280,8 +280,9 @@ pub mod gnark {
             // Convert the result pointer to a Rust string.
             let result_cstr = CStr::from_ptr(result_ptr);
             let result_str = result_cstr.to_str().expect("Invalid UTF-8 sequence");
+            let owned = result_str.to_owned();
             libc::free(result_ptr as *mut libc::c_void);
-            result_str.to_owned()
+            owned
         };
         result // todo decode
     }

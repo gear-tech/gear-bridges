@@ -1,25 +1,12 @@
-use itertools::Itertools;
 use plonky2::{
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-use plonky2_ed25519::gadgets::eddsa::make_verify_circuits as ed25519_circuit;
-use plonky2_field::types::Field;
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
-    ThreadPoolBuilder,
-};
-use std::sync::mpsc::channel;
-
 use crate::{
     common::{
-        array_to_bits,
         targets::{
-            impl_target_set, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget, Sha256Target,
+            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target, Sha256Target,
             TargetSet,
         },
         BuilderExt,
@@ -29,6 +16,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
+mod indexed_validator_sign;
 pub mod validator_set_hash;
 mod validator_signs_chain;
 
@@ -50,7 +38,7 @@ impl_target_set! {
 // - block number           (4 bytes)
 // - round number           (8 bytes)
 // - authority set id       (8 bytes)
-impl_target_set! {
+impl_parsable_target_set! {
     pub struct GrandpaVoteTarget {
         _aux_data: BitArrayTarget<8>,
         pub block_hash: Blake2Target,

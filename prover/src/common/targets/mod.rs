@@ -221,7 +221,7 @@ macro_rules! impl_parsable_array_target_wrapper {
     };
 }
 
-impl_array_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
+impl_parsable_array_target_wrapper!(Sha256Target, BoolTarget, SHA256_DIGEST_SIZE_IN_BITS);
 impl_array_target_wrapper!(
     Sha256TargetGoldilocks,
     Target,

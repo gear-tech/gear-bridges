@@ -5855,6 +5855,7 @@ dependencies = [
  "clap",
  "gear-rpc-client",
  "intermediate-proof-storage",
+ "libc",
  "log",
  "pretty_env_logger",
  "prover",

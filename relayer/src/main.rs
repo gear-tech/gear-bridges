@@ -252,7 +252,7 @@ fn parse_rpc_inclusion_proof(
 
 pub mod gnark {
     use core::ffi::c_char;
-    use std::ffi::CString;
+    use std::ffi::{CStr, CString};
 
     use prover::common::SerializedDataToVerify;
 
@@ -277,10 +277,10 @@ pub mod gnark {
             if result_ptr.is_null() {
                 panic!("prove returned null pointer");
             }
-            // Convert the result pointer to a Rust string
-            let result_cstr = std::ffi::CStr::from_ptr(result_ptr);
+            // Convert the result pointer to a Rust string.
+            let result_cstr = CStr::from_ptr(result_ptr);
             let result_str = result_cstr.to_str().expect("Invalid UTF-8 sequence");
-            // todo free c string
+            libc::free(result_ptr as *mut libc::c_void);
             result_str.to_owned()
         };
         result // todo decode

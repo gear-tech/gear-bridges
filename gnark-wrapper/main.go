@@ -67,7 +67,7 @@ func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
 
 //export compile
 func compile(circuitData *C.char) {
-	circuit, err := loadCircuit(C.GoString(circuitData))
+	circuit, err := deserializeCircuit(C.GoString(circuitData))
 	if err != nil {
 		panic(err)
 	}
@@ -112,7 +112,7 @@ func prove(circuitData *C.char) *C.char {
 	r1cs := loadR1CS()
 	pk := loadProvingKey()
 
-	assignment, err := loadCircuit(C.GoString(circuitData))
+	assignment, err := deserializeCircuit(C.GoString(circuitData))
 	if err != nil {
 		panic(err)
 	}
@@ -161,13 +161,13 @@ func serializeProof(proof plonk.Proof, glPublicInputs []gl.Variable) string {
 }
 
 type rawCircuit struct {
-	CircuitData  string `json:"common_circuit_data"`
+	CommonData  string `json:"common_circuit_data"`
 	Proof        string `json:"proof_with_public_inputs"`
-	VerifierData string `json:"verifier_only_circuit_data"`
+	VerifierOnlyData string `json:"verifier_only_circuit_data"`
 }
 
 // load circuit from json
-func loadCircuit(data string) (Plonky2VerifierCircuit, error) {
+func deserializeCircuit(data string) (Plonky2VerifierCircuit, error) {
 	handleErr := func(err error) (Plonky2VerifierCircuit, error) {
 		return Plonky2VerifierCircuit{}, fmt.Errorf("error loading circuit: %w", err)
 	}
@@ -186,7 +186,7 @@ func loadCircuit(data string) (Plonky2VerifierCircuit, error) {
 			return handleErr(fmt.Errorf("create temp file: %w", err))
 		}
 
-		_, err = io.WriteString(f, circuit.CircuitData)
+		_, err = io.WriteString(f, circuit.CommonData)
 		if err != nil {
 			return handleErr(fmt.Errorf("write temp file: %w", err))
 		}
@@ -201,7 +201,7 @@ func loadCircuit(data string) (Plonky2VerifierCircuit, error) {
 	proofWithPis := variables.DeserializeProofWithPublicInputs(rawProof)
 
 	var rawVerifierData types.VerifierOnlyCircuitDataRaw
-	if err := json.Unmarshal([]byte(circuit.VerifierData), &rawVerifierData); err != nil {
+	if err := json.Unmarshal([]byte(circuit.VerifierOnlyData), &rawVerifierData); err != nil {
 		return handleErr(fmt.Errorf("unmarshal verifier data: %w", err))
 	}
 	verifierOnlyCircuitData := variables.DeserializeVerifierOnlyCircuitData(rawVerifierData)

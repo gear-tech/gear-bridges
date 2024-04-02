@@ -161,7 +161,7 @@ impl LatestValidatorSet {
         let mut witness = PartialWitness::new();
 
         let next_authority_set_public_inputs =
-            builder.recursively_verify_constant_proof(next_validator_set_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&next_validator_set_proof, &mut witness);
 
         let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
         let next_set_id = builder.add(current_set_id, one);

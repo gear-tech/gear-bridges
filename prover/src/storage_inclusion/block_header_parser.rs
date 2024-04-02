@@ -42,7 +42,7 @@ impl BlockHeaderParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let hasher_target = builder.recursively_verify_constant_proof(hasher_proof, &mut witness);
+        let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
 
         let state_root_bytes: ArrayTarget<ByteTarget, BLAKE2_DIGEST_SIZE> = hasher_target
             .data

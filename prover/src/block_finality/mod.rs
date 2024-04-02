@@ -107,9 +107,9 @@ impl BlockFinality {
         let mut witness = PartialWitness::new();
 
         let validator_set_hash_target =
-            builder.recursively_verify_constant_proof(validator_set_hash_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&validator_set_hash_proof, &mut witness);
         let validator_signs_target =
-            builder.recursively_verify_constant_proof(validator_signs_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&validator_signs_proof, &mut witness);
 
         validator_set_hash_target
             .validator_set
@@ -199,9 +199,9 @@ impl ComposedValidatorSigns {
         let mut witness = PartialWitness::new();
 
         let previous_proof_target =
-            builder.recursively_verify_constant_proof(previous_composed_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&previous_composed_proof, &mut witness);
         let indexed_sign_target =
-            builder.recursively_verify_constant_proof(indexed_sign_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&indexed_sign_proof, &mut witness);
 
         previous_proof_target
             .message
@@ -267,7 +267,7 @@ impl IndexedValidatorSign {
 
         let validator = validator_set_target.random_read(index_target, &mut builder);
 
-        let sign_target = builder.recursively_verify_constant_proof(sign_proof, &mut witness);
+        let sign_target = builder.recursively_verify_constant_proof(&sign_proof, &mut witness);
 
         validator.connect(&sign_target.public_key, &mut builder);
 

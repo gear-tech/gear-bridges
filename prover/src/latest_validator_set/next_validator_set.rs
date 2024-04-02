@@ -76,9 +76,9 @@ impl NextValidatorSet {
         let mut witness = PartialWitness::new();
 
         let validator_set_hash_target =
-            builder.recursively_verify_constant_proof(validator_set_hash_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&validator_set_hash_proof, &mut witness);
         let next_validator_set_target = builder
-            .recursively_verify_constant_proof(non_hashed_next_validator_set_proof, &mut witness);
+            .recursively_verify_constant_proof(&non_hashed_next_validator_set_proof, &mut witness);
 
         validator_set_hash_target
             .validator_set
@@ -158,9 +158,9 @@ impl NextValidatorSetNonHashed {
         let mut witness = PartialWitness::new();
 
         let inclusion_proof_target =
-            builder.recursively_verify_constant_proof(inclusion_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
         let block_finality_target =
-            builder.recursively_verify_constant_proof(block_finality_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&block_finality_proof, &mut witness);
 
         inclusion_proof_target
             .block_hash

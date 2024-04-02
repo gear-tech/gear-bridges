@@ -66,9 +66,9 @@ impl StorageTrieProof {
         let mut witness = PartialWitness::new();
 
         let branch_node_chain_target =
-            builder.recursively_verify_constant_proof(branch_node_chain_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&branch_node_chain_proof, &mut witness);
         let hashed_leaf_parser_target =
-            builder.recursively_verify_constant_proof(hashed_leaf_parser_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&hashed_leaf_parser_proof, &mut witness);
 
         branch_node_chain_target
             .leaf_hash

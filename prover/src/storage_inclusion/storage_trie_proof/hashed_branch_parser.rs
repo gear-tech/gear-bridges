@@ -45,9 +45,9 @@ impl HashedBranchParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let hasher_target = builder.recursively_verify_constant_proof(hasher_proof, &mut witness);
+        let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
         let branch_parser_target =
-            builder.recursively_verify_constant_proof(branch_parser_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&branch_parser_proof, &mut witness);
 
         hasher_target
             .length

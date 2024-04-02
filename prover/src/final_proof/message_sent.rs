@@ -42,9 +42,9 @@ impl MessageSent {
         let mut witness = PartialWitness::new();
 
         let inclusion_proof_target =
-            builder.recursively_verify_constant_proof(inclusion_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
         let finality_proof_target =
-            builder.recursively_verify_constant_proof(finality_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&finality_proof, &mut witness);
 
         inclusion_proof_target
             .block_hash

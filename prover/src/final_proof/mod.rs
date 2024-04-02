@@ -52,7 +52,7 @@ impl FinalProof {
         let mut witness = PartialWitness::new();
 
         let message_sent_target =
-            builder.recursively_verify_constant_proof(message_sent_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&message_sent_proof, &mut witness);
 
         let latest_validator_set_target = {
             let proof_with_pis_target = builder

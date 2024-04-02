@@ -60,9 +60,9 @@ impl StorageInclusion {
         let mut witness = PartialWitness::new();
 
         let block_header_target =
-            builder.recursively_verify_constant_proof(block_header_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&block_header_proof, &mut witness);
         let storage_trie_target =
-            builder.recursively_verify_constant_proof(storage_trie_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&storage_trie_proof, &mut witness);
 
         block_header_target
             .state_root

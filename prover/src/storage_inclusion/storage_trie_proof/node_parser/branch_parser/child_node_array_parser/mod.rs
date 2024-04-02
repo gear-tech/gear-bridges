@@ -67,7 +67,7 @@ impl ChildNodeArrayParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut witness);
+        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut witness);
 
         ChildNodeArrayParserTarget {
             node_data: inner_proof_pis.node_data,
@@ -246,7 +246,7 @@ impl Circuit {
         let mut builder = CircuitBuilder::new(config);
         let mut pw = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut pw);
+        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut pw);
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis =

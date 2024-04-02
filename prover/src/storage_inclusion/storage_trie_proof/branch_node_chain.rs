@@ -66,7 +66,7 @@ impl BranchNodeChain {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let public_inputs = builder.recursively_verify_constant_proof(inner, &mut witness);
+        let public_inputs = builder.recursively_verify_constant_proof(&inner, &mut witness);
 
         BranchNodeChainParserTarget {
             root_hash: public_inputs.root_hash,
@@ -188,7 +188,7 @@ impl Circuit {
         let mut builder = CircuitBuilder::new(config);
         let mut pw = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut pw);
+        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut pw);
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis =

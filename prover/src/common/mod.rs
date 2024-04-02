@@ -21,6 +21,7 @@ use crate::prelude::*;
 
 #[macro_use]
 pub mod targets;
+pub mod generic_blake2;
 pub mod poseidon_bn128;
 
 use plonky2_field::goldilocks_field::GoldilocksField;
@@ -183,7 +184,7 @@ pub fn wrap_bn128(
 pub trait BuilderExt {
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
-        proof: ProofWithCircuitData<T>,
+        proof: &ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
     ) -> T;
 
@@ -196,7 +197,7 @@ pub trait BuilderExt {
 impl BuilderExt for CircuitBuilder<F, D> {
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
-        proof: ProofWithCircuitData<T>,
+        proof: &ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
     ) -> T {
         let proof_with_pis_target = self.add_virtual_proof_with_pis(&proof.circuit_data.common);

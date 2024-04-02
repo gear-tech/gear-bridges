@@ -154,7 +154,7 @@ impl BranchParser {
                 overall_children_amount,
                 claimed_child_index_in_array,
                 claimed_child_hash,
-            } = builder.recursively_verify_constant_proof(child_node_parser_proof, &mut witness);
+            } = builder.recursively_verify_constant_proof(&child_node_parser_proof, &mut witness);
 
             node_data.connect(&node_data_target, &mut builder);
             initial_read_offset.connect(&parsed_bitmap.resulting_offset, &mut builder);

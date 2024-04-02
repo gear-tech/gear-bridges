@@ -12,13 +12,12 @@ use crate::{
     common::{
         array_to_bits,
         targets::{
-            impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Ed25519PublicKeyTarget,
-            Sha256Target, Sha256TargetGoldilocks, TargetBitOperations, TargetSet,
-            ValidatorSetTarget,
+            impl_target_set, ArrayTarget, BitArrayTarget, Blake2Target, Blake2TargetGoldilocks,
+            Ed25519PublicKeyTarget, PaddedValidatorSetTarget, TargetBitOperations, TargetSet,
         },
         BuilderExt,
     },
-    consts::VALIDATOR_COUNT,
+    consts::MAX_VALIDATOR_COUNT,
     prelude::*,
     storage_inclusion::StorageInclusion,
     ProofWithCircuitData,
@@ -30,8 +29,8 @@ const SESSION_KEYS_SIZE: usize = 5 * 32;
 
 impl_target_set! {
     pub struct NextValidatorSetTarget {
-        pub validator_set_hash: Sha256TargetGoldilocks,
-        pub next_validator_set_hash: Sha256TargetGoldilocks,
+        pub validator_set_hash: Blake2TargetGoldilocks,
+        pub next_validator_set_hash: Blake2TargetGoldilocks,
         pub current_authority_set_id: Target,
     }
 }
@@ -47,8 +46,8 @@ impl NextValidatorSet {
         log::info!("Proving validator set hash change...");
 
         let mut next_validator_set = vec![];
-        // TODO REFACTOR
-        for validator_idx in 0..VALIDATOR_COUNT {
+        // TODO Will be gone when pallet-gear-bridges will be implemented.
+        for validator_idx in 0..MAX_VALIDATOR_COUNT {
             next_validator_set.push(
                 self.next_validator_set_storage_data[1
                     + validator_idx * SESSION_KEYS_SIZE
@@ -76,20 +75,20 @@ impl NextValidatorSet {
         let mut witness = PartialWitness::new();
 
         let validator_set_hash_target =
-            builder.recursively_verify_constant_proof(validator_set_hash_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&validator_set_hash_proof, &mut witness);
         let next_validator_set_target = builder
-            .recursively_verify_constant_proof(non_hashed_next_validator_set_proof, &mut witness);
+            .recursively_verify_constant_proof(&non_hashed_next_validator_set_proof, &mut witness);
 
         validator_set_hash_target
             .validator_set
             .connect(&next_validator_set_target.next_validator_set, &mut builder);
 
         NextValidatorSetTarget {
-            validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+            validator_set_hash: Blake2TargetGoldilocks::from_blake2_target(
                 next_validator_set_target.current_validator_set_hash,
                 &mut builder,
             ),
-            next_validator_set_hash: Sha256TargetGoldilocks::from_sha256_target(
+            next_validator_set_hash: Blake2TargetGoldilocks::from_blake2_target(
                 validator_set_hash_target.hash,
                 &mut builder,
             ),
@@ -103,9 +102,9 @@ impl NextValidatorSet {
 
 impl_target_set! {
     struct NextValidatorSetNonHashedTarget {
-        current_validator_set_hash: Sha256Target,
+        current_validator_set_hash: Blake2Target,
         authority_set_id: Target,
-        next_validator_set: ValidatorSetTarget,
+        next_validator_set: PaddedValidatorSetTarget,
     }
 }
 
@@ -119,16 +118,17 @@ impl_target_set! {
     }
 }
 
+// TODO: Will be gone when pallet-gear-bridges get implemented.
 impl_target_set! {
     struct ValidatorSetInStorageTarget {
         _length: BitArrayTarget<8>,
-        validators: ArrayTarget<SessionKeysTarget, VALIDATOR_COUNT>,
+        validators: ArrayTarget<SessionKeysTarget, MAX_VALIDATOR_COUNT>,
     }
 }
 
 impl ValidatorSetInStorageTarget {
-    fn into_grandpa_authority_keys(self) -> ValidatorSetTarget {
-        ValidatorSetTarget::parse(
+    fn into_grandpa_authority_keys(self) -> PaddedValidatorSetTarget {
+        PaddedValidatorSetTarget::parse(
             &mut self
                 .validators
                 .0
@@ -158,9 +158,9 @@ impl NextValidatorSetNonHashed {
         let mut witness = PartialWitness::new();
 
         let inclusion_proof_target =
-            builder.recursively_verify_constant_proof(inclusion_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
         let block_finality_target =
-            builder.recursively_verify_constant_proof(block_finality_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&block_finality_proof, &mut witness);
 
         inclusion_proof_target
             .block_hash

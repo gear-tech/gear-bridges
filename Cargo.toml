@@ -18,7 +18,6 @@ edition = "2021"
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
-plonky2_sha256 = { path = "./circuits/plonky2_sha256" }
 plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
 plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
 plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }

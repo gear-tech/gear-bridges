@@ -5,6 +5,7 @@ use plonky2::{
 
 use crate::{
     common::{
+        generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
         BuilderExt,
     },
@@ -12,10 +13,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
-use super::{
-    super::generic_hasher::GenericBlake2, node_parser::leaf_parser::LeafParser,
-    storage_address::PartialStorageAddressTarget,
-};
+use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget};
 
 impl_parsable_target_set! {
     pub struct HashedLeafParserTarget {
@@ -45,9 +43,9 @@ impl HashedLeafParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let hasher_target = builder.recursively_verify_constant_proof(hasher_proof, &mut witness);
+        let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
         let leaf_parser_target =
-            builder.recursively_verify_constant_proof(leaf_parser_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&leaf_parser_proof, &mut witness);
 
         hasher_target
             .length

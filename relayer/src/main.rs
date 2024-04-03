@@ -1,9 +1,10 @@
 extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
+
 use intermediate_proof_storage::{PersistentMockProofStorage, ProofStorage};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
-use std::{path::PathBuf, time::Instant};
+use std::time::Instant;
 
 use gear_rpc_client::{BlockInclusionProof, GearApi};
 use prover::{
@@ -53,24 +54,6 @@ enum ProveCommands {
     Wrapped {
         #[clap(flatten)]
         args: ProveArgs,
-        /// Where to write proof with public inputs
-        #[arg(
-            long = "proof-with-public-inputs-path",
-            default_value = "./gnark-wrapper/data/proof_with_public_inputs.json"
-        )]
-        proof_with_public_inputs_path: PathBuf,
-        /// Where to write common circuit data
-        #[arg(
-            long = "common-circuit-data-path",
-            default_value = "./gnark-wrapper/data/common_circuit_data.json"
-        )]
-        common_circuit_data_path: PathBuf,
-        /// Where to write verifier only circuit data
-        #[arg(
-            long = "verifier-only-circuit-data-path",
-            default_value = "./gnark-wrapper/data/verifier_only_circuit_data.json"
-        )]
-        verifier_only_circuit_data_path: PathBuf,
     },
 }
 
@@ -199,12 +182,7 @@ async fn main() {
                     .update(validator_set_change_proof.proof())
                     .unwrap();
             }
-            ProveCommands::Wrapped {
-                args,
-                proof_with_public_inputs_path,
-                common_circuit_data_path,
-                verifier_only_circuit_data_path,
-            } => {
+            ProveCommands::Wrapped { args } => {
                 let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
 
                 let latest_proof = proof_storage
@@ -242,21 +220,10 @@ async fn main() {
 
                 let final_serialized = final_proof.export_wrapped();
 
-                std::fs::write(
-                    proof_with_public_inputs_path,
-                    final_serialized.proof_with_public_inputs,
-                )
-                .unwrap();
-                std::fs::write(
-                    common_circuit_data_path,
-                    final_serialized.common_circuit_data,
-                )
-                .unwrap();
-                std::fs::write(
-                    verifier_only_circuit_data_path,
-                    final_serialized.verifier_only_circuit_data,
-                )
-                .unwrap();
+                gnark::compile_circuit(&final_serialized);
+
+                let proof = gnark::prove_circuit(&final_serialized);
+                dbg!(proof);
             }
         },
     };
@@ -280,5 +247,43 @@ fn parse_rpc_inclusion_proof(
             .collect(),
         leaf_node_data: proof.storage_inclusion_proof.encoded_leaf_node,
         address_nibbles: address_nibbles,
+    }
+}
+
+pub mod gnark {
+    use core::ffi::c_char;
+    use std::ffi::{CStr, CString};
+
+    use prover::common::SerializedDataToVerify;
+
+    extern "C" {
+        fn compile(circuit_data: *const c_char);
+        fn prove(circuit_data: *const c_char) -> *const c_char;
+    }
+
+    pub fn compile_circuit(s: &SerializedDataToVerify) {
+        let serialized = serde_json::to_string(s).expect("Failed to serialize data");
+        let c_string = CString::new(serialized).expect("CString::new failed");
+        unsafe {
+            compile(c_string.as_ptr());
+        }
+    }
+
+    pub fn prove_circuit(s: &SerializedDataToVerify) -> String {
+        let serialized = serde_json::to_string(s).expect("Failed to serialize data");
+        let c_string = CString::new(serialized).expect("CString::new failed");
+        let result = unsafe {
+            let result_ptr = prove(c_string.as_ptr());
+            if result_ptr.is_null() {
+                panic!("prove returned null pointer");
+            }
+            // Convert the result pointer to a Rust string.
+            let result_cstr = CStr::from_ptr(result_ptr);
+            let result_str = result_cstr.to_str().expect("Invalid UTF-8 sequence");
+            let owned = result_str.to_owned();
+            libc::free(result_ptr as *mut libc::c_void);
+            owned
+        };
+        result // todo decode
     }
 }

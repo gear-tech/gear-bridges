@@ -55,6 +55,7 @@ futures-util = "0.3.28"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 tokio = { version = "1.23.0", features = ["full"] }
 pretty_env_logger = "*"
+libc = "0.2.153"
 
 # Gear/Substrate deps
 gsdk = { git = "https://github.com/gear-tech/gear.git", tag = "v1.0.2" }

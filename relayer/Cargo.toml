@@ -10,6 +10,11 @@ intermediate-proof-storage.workspace = true
 
 log.workspace = true
 pretty_env_logger.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 clap.workspace = true
 tokio.workspace = true
+libc.workspace = true
+
+[build-dependencies]
+cgo_oligami = "0.3"

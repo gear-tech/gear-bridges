@@ -920,6 +920,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cgo_oligami"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a057e1a8721cc6e7d2835d8cf951dd8a8de32576f4aee310a662f93ef7049db"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "chacha20"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5825,12 +5834,15 @@ dependencies = [
 name = "relayer"
 version = "0.1.0"
 dependencies = [
+ "cgo_oligami",
  "clap",
  "gear-rpc-client",
  "intermediate-proof-storage",
+ "libc",
  "log",
  "pretty_env_logger",
  "prover",
+ "serde",
  "serde_json",
  "tokio",
 ]

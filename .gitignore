@@ -2,3 +2,4 @@ target/
 .vscode
 data/
 /proof_storage
+_obj

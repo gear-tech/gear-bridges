@@ -132,20 +132,20 @@ impl Circuit {
 }
 
 impl LatestValidatorSet {
-    pub fn prove_genesis(&self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+    pub fn prove_genesis(self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let circuit = self.build_circuit();
         circuit.prove_genesis()
     }
 
     pub fn prove_recursive(
-        &self,
+        self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let circuit = self.build_circuit();
         circuit.prove_recursive(composed_proof)
     }
 
-    fn build_circuit(&self) -> Circuit {
+    fn build_circuit(self) -> Circuit {
         let next_validator_set_proof = self.change_proof.prove();
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
@@ -166,11 +166,11 @@ impl LatestValidatorSet {
         let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
         let next_set_id = builder.add(current_set_id, one);
 
-        let current_set_hash = next_authority_set_public_inputs.validator_set_hash;
+        let current_set_hash = next_authority_set_public_inputs.current_validator_set_hash;
 
         builder.register_public_input(next_set_id);
         next_authority_set_public_inputs
-            .next_validator_set_hash
+            .next_validator_set
             .register_as_public_inputs(&mut builder);
 
         // Recursion

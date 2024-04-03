@@ -31,6 +31,8 @@ pub(crate) mod consts {
     pub const CIRCUIT_DIGEST_SIZE: usize = 4;
 
     // For now we send a single Keccak256 hash.
+    pub const MESSAGE_SIZE: usize = 32;
+    pub const MESSAGE_SIZE_IN_BITS: usize = MESSAGE_SIZE * 8;
     pub const MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 8;
 
     pub const BLAKE2_DIGEST_SIZE: usize = 32;

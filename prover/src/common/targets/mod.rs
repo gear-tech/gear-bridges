@@ -8,12 +8,9 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_field::types::{Field, PrimeField64};
-use std::{fmt::Debug, iter, ops::Deref};
+use std::{fmt::Debug, iter};
 
-use crate::{
-    common::{array_to_bits, bits_to_byte},
-    prelude::{consts::*, *},
-};
+use crate::prelude::{consts::*, *};
 
 mod array;
 mod bool;
@@ -315,12 +312,15 @@ impl Blake2TargetGoldilocks {
     }
 }
 
-const PACK_MESSAGE_BY: usize = 32;
-const MESSAGE_INPUT_IN_BITS: usize = MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS * PACK_MESSAGE_BY;
+const PACK_MESSAGE_BY: usize = MESSAGE_SIZE_IN_BITS / MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS;
+static_assertions::const_assert_eq!(
+    MESSAGE_SIZE_IN_BITS % MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
+    0
+);
 
 impl MessageTargetGoldilocks {
     pub fn from_bit_array(
-        bits: BitArrayTarget<MESSAGE_INPUT_IN_BITS>,
+        bits: BitArrayTarget<MESSAGE_SIZE_IN_BITS>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
         let targets: [_; MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =

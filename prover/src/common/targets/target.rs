@@ -1,3 +1,5 @@
+use crate::common::array_to_bits;
+
 use super::*;
 
 impl TargetSet for Target {

@@ -62,4 +62,19 @@ impl ByteTarget {
     pub fn to_bit_targets(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
         ArrayTarget(builder.low_bits(self.0, 8, 8).try_into().unwrap())
     }
+
+    /// Arranged from less to most significant bit.
+    pub fn from_bit_targets(bits: [BoolTarget; 8], builder: &mut CircuitBuilder<F, D>) -> Self {
+        let target = bits
+            .into_iter()
+            .enumerate()
+            .map(|(bit_idx, bit)| {
+                builder.mul_const(F::from_canonical_usize(1 << bit_idx), bit.target)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .reduce(|acc, x| builder.add(acc, x))
+            .unwrap();
+        Self(target)
+    }
 }

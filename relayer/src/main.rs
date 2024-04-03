@@ -199,6 +199,11 @@ async fn main() {
 
                 let sent_message_inclusion_proof =
                     api.fetch_sent_message_inclusion_proof(block).await;
+
+                let sent_message_storage_data = sent_message_inclusion_proof
+                    .storage_inclusion_proof
+                    .storage_data
+                    .clone();
                 let sent_message_inclusion_proof = parse_rpc_inclusion_proof(
                     sent_message_inclusion_proof,
                     MESSAGE_STORAGE_ADDRESS.to_vec(),
@@ -207,6 +212,7 @@ async fn main() {
                 let message_sent = MessageSent {
                     block_finality,
                     inclusion_proof: sent_message_inclusion_proof,
+                    message_storage_data: sent_message_storage_data,
                 };
 
                 let current_validator_set_verifier_data =

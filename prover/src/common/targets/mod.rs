@@ -8,12 +8,9 @@ use plonky2::{
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_field::types::{Field, PrimeField64};
-use std::{fmt::Debug, iter, ops::Deref};
+use std::{fmt::Debug, iter};
 
-use crate::{
-    common::{array_to_bits, bits_to_byte},
-    prelude::{consts::*, *},
-};
+use crate::prelude::{consts::*, *};
 
 mod array;
 mod bool;

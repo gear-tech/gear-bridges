@@ -1,5 +1,3 @@
-use crate::common::targets;
-
 use super::*;
 
 // TODO REFACTOR: remove pub on inner type.

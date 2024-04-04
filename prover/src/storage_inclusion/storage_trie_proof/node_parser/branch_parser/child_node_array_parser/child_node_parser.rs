@@ -7,15 +7,18 @@ use plonky2::{
 };
 use plonky2_field::types::Field;
 
-use super::scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget};
 use crate::{
     common::targets::{impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, TargetSet},
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
         *,
     },
-    storage_inclusion::storage_trie_proof::node_parser::{
-        BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    storage_inclusion::{
+        scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
+        storage_trie_proof::node_parser::{
+            BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS,
+            NODE_DATA_BLOCK_BYTES,
+        },
     },
     ProofWithCircuitData,
 };

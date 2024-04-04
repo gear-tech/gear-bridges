@@ -31,7 +31,6 @@ use crate::{
 use std::iter;
 
 mod child_node_parser;
-mod scale_compact_integer_parser;
 
 // TODO: Split into 2 files.
 

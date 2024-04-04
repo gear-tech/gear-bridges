@@ -33,7 +33,6 @@ impl_target_set! {
 impl_target_set! {
     pub struct MessageInStorageTarget {
         pub merkle_trie_root: ArrayTarget<BoolTarget, MESSAGE_SIZE_IN_BITS>,
-        pub padding: ArrayTarget<BoolTarget, 8>
     }
 }
 
@@ -50,12 +49,6 @@ impl MessageInStorageTarget {
                 .map(|t| t.target);
 
         Blake2Target::parse_exact(&mut hash_targets)
-    }
-
-    fn assert_padding(&self, builder: &mut CircuitBuilder<F, D>) {
-        for target in self.padding.0 {
-            builder.assert_zero(target.target);
-        }
     }
 }
 
@@ -94,8 +87,6 @@ impl MessageSent {
         });
         let storage_data_target =
             MessageInStorageTarget::parse_exact(&mut storage_data_bit_targets);
-
-        storage_data_target.assert_padding(&mut builder);
 
         storage_data_target
             .hash(&mut builder)

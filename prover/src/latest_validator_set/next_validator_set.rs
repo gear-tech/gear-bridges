@@ -11,8 +11,7 @@ use crate::{
     common::{
         array_to_bits,
         targets::{
-            impl_target_set, ArrayTarget, Blake2Target, Blake2TargetGoldilocks,
-            TargetBitOperations, TargetSet,
+            impl_target_set, Blake2Target, Blake2TargetGoldilocks, TargetBitOperations, TargetSet,
         },
         BuilderExt,
     },
@@ -24,7 +23,6 @@ use crate::{
 impl_target_set! {
     pub struct ValidatorSetStorageItemTarget {
         pub validator_set_hash: Blake2Target,
-        pub padding: ArrayTarget<BoolTarget, 8>
     }
 }
 
@@ -41,12 +39,6 @@ impl ValidatorSetStorageItemTarget {
                 .map(|t| t.target);
 
         Blake2Target::parse_exact(&mut hash_targets)
-    }
-
-    fn assert_padding(&self, builder: &mut CircuitBuilder<F, D>) {
-        for target in self.padding.0 {
-            builder.assert_zero(target.target);
-        }
     }
 }
 
@@ -101,8 +93,6 @@ impl NextValidatorSet {
 
         let storage_data_hash_target = storage_data_target.hash(&mut builder);
         storage_data_hash_target.connect(&inclusion_proof_target.storage_item_hash, &mut builder);
-
-        storage_data_target.assert_padding(&mut builder);
 
         NextValidatorSetTarget {
             current_validator_set_hash: Blake2TargetGoldilocks::from_blake2_target(

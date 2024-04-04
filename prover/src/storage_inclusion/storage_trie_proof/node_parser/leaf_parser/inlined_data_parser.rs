@@ -1,0 +1,73 @@
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
+use plonky2_field::types::Field;
+
+use crate::{
+    common::targets::{impl_target_set, ArrayTarget, Blake2Target, TargetSet},
+    prelude::*,
+    storage_inclusion::{
+        scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
+        storage_trie_proof::node_parser::NodeDataBlockTarget,
+    },
+};
+
+const INLINED_DATA_LENGTH: usize = 32;
+
+impl_target_set! {
+    pub struct InlindedDataParserInputTarget {
+        pub first_node_data_block: NodeDataBlockTarget,
+        pub read_offset: Target,
+    }
+}
+
+impl_target_set! {
+    pub struct InlinedDataParserOutputTarget {
+        pub resulting_offset: Target,
+        pub data_hash: Blake2Target
+    }
+}
+
+/// Supports only 32-byte inlined values for now.
+pub fn define(
+    input: InlindedDataParserInputTarget,
+    builder: &mut CircuitBuilder<F, D>,
+) -> InlinedDataParserOutputTarget {
+    log::info!("    Composing inlined data parser");
+
+    let first_byte = input
+        .first_node_data_block
+        .random_read(input.read_offset, builder);
+    let parsed_length = scale_compact_integer_parser::define(
+        ScaleCompactIntegerParserInputTarget { first_byte },
+        builder,
+    );
+
+    let desired_length = builder.constant(F::from_canonical_usize(INLINED_DATA_LENGTH));
+    builder.connect(parsed_length.decoded, desired_length);
+
+    let data_offset = builder.add_const(input.read_offset, F::ONE);
+
+    let inlined_data: ArrayTarget<_, INLINED_DATA_LENGTH> = input
+        .first_node_data_block
+        .random_read_array(data_offset, builder);
+
+    let inlined_data_bits = inlined_data
+        .0
+        .iter()
+        .flat_map(|byte_target| byte_target.to_bit_targets(builder).0.into_iter().rev())
+        .collect::<Vec<_>>();
+
+    let mut inlined_data_hash =
+        plonky2_blake2b256::circuit::blake2_circuit_from_targets(builder, inlined_data_bits)
+            .into_iter()
+            .map(|t| t.target);
+
+    let data_hash = Blake2Target::parse_exact(&mut inlined_data_hash);
+
+    let resulting_offset =
+        builder.add_const(data_offset, F::from_canonical_usize(INLINED_DATA_LENGTH));
+
+    InlinedDataParserOutputTarget {
+        resulting_offset,
+        data_hash,
+    }
+}

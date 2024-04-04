@@ -274,7 +274,7 @@ pub fn array_to_bits(data: &[u8]) -> Vec<bool> {
     data.iter().copied().flat_map(byte_to_bits).collect()
 }
 
-fn byte_to_bits(byte: u8) -> [bool; 8] {
+pub fn byte_to_bits(byte: u8) -> [bool; 8] {
     (0..8)
         .rev()
         .map(move |bit_idx| (byte >> bit_idx) % 2 == 1)

@@ -21,14 +21,19 @@ use crate::{
     prelude::*,
     storage_inclusion::storage_trie_proof::{
         node_parser::{
-            header_parser::HeaderDescriptor, leaf_parser::data_parser::DataParserInputTarget,
+            header_parser::HeaderDescriptor,
+            leaf_parser::{
+                hashed_data_parser::HashedDataParserInputTarget,
+                inlined_data_parser::InlindedDataParserInputTarget,
+            },
         },
         storage_address::PartialStorageAddressTarget,
     },
     ProofWithCircuitData,
 };
 
-mod data_parser;
+mod hashed_data_parser;
+mod inlined_data_parser;
 
 impl_parsable_target_set! {
     pub struct LeafParserTarget {
@@ -45,6 +50,11 @@ impl_parsable_target_set! {
 pub struct LeafParser {
     pub node_data: Vec<u8>,
     pub partial_address_nibbles: Vec<u8>,
+}
+
+enum LeafType {
+    Leaf,
+    HashedValueLeaf,
 }
 
 impl LeafParser {
@@ -64,6 +74,18 @@ impl LeafParser {
             F::from_canonical_usize(self.node_data.len()),
         );
 
+        let (leaf_type, header_descriptor) =
+            if HeaderDescriptor::hashed_value_leaf().prefix_matches(&self.node_data) {
+                (
+                    LeafType::HashedValueLeaf,
+                    HeaderDescriptor::hashed_value_leaf(),
+                )
+            } else if HeaderDescriptor::leaf().prefix_matches(&self.node_data) {
+                (LeafType::Leaf, HeaderDescriptor::leaf())
+            } else {
+                unimplemented!("Unsupported leaf type")
+            };
+
         let node_data_target = LeafNodeDataPaddedTarget::add_virtual_safe(&mut builder);
         node_data_target.set_witness(&pad_byte_vec(self.node_data), &mut witness);
 
@@ -73,7 +95,7 @@ impl LeafParser {
         let parsed_header = {
             let first_bytes = node_data_target.constant_read_array(0);
             let input = HeaderParserInputTarget { first_bytes };
-            header_parser::define(input, HeaderDescriptor::hashed_value_leaf(), &mut builder)
+            header_parser::define(input, header_descriptor, &mut builder)
         };
 
         let parsed_nibbles = {
@@ -86,22 +108,37 @@ impl LeafParser {
             nibble_parser::define(input, &mut builder)
         };
 
-        let parsed_data = {
-            let input = DataParserInputTarget {
-                first_node_data_block: node_data_target.clone(),
-                read_offset: parsed_nibbles.resulting_offset,
-            };
-            data_parser::define(input, &mut builder)
+        let (resulting_offset, data_hash) = match leaf_type {
+            LeafType::HashedValueLeaf => {
+                let parsed_data = {
+                    let input = HashedDataParserInputTarget {
+                        first_node_data_block: node_data_target.clone(),
+                        read_offset: parsed_nibbles.resulting_offset,
+                    };
+                    hashed_data_parser::define(input, &mut builder)
+                };
+
+                (parsed_data.resulting_offset, parsed_data.data_hash)
+            }
+            LeafType::Leaf => {
+                let parsed_data = {
+                    let input = InlindedDataParserInputTarget {
+                        first_node_data_block: node_data_target.clone(),
+                        read_offset: parsed_nibbles.resulting_offset,
+                    };
+                    inlined_data_parser::define(input, &mut builder)
+                };
+
+                (parsed_data.resulting_offset, parsed_data.data_hash)
+            }
         };
 
-        parsed_data
-            .resulting_offset
-            .connect(&node_data_length_target, &mut builder);
+        resulting_offset.connect(&node_data_length_target, &mut builder);
 
         LeafParserTarget {
             padded_node_data: node_data_target,
             node_data_length: node_data_length_target,
-            storage_data_hash: parsed_data.data_hash,
+            storage_data_hash: data_hash,
             partial_address: partial_address_target,
             final_address: parsed_nibbles.partial_address,
         }

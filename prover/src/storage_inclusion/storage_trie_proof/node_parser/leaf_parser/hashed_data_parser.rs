@@ -8,23 +8,25 @@ use crate::{
 };
 
 impl_target_set! {
-    pub struct DataParserInputTarget {
+    pub struct HashedDataParserInputTarget {
         pub first_node_data_block: NodeDataBlockTarget,
         pub read_offset: Target,
     }
 }
 
 impl_target_set! {
-    pub struct DataParserOutputTarget {
+    pub struct HashedDataParserOutputTarget {
         pub resulting_offset: Target,
         pub data_hash: Blake2Target
     }
 }
 
 pub fn define(
-    input: DataParserInputTarget,
+    input: HashedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
-) -> DataParserOutputTarget {
+) -> HashedDataParserOutputTarget {
+    log::info!("    Composing hashed data parser");
+
     let hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> = input
         .first_node_data_block
         .random_read_array(input.read_offset, builder);
@@ -44,7 +46,7 @@ pub fn define(
         F::from_canonical_usize(BLAKE2_DIGEST_SIZE),
     );
 
-    DataParserOutputTarget {
+    HashedDataParserOutputTarget {
         resulting_offset,
         data_hash,
     }

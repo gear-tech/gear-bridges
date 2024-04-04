@@ -257,7 +257,7 @@ impl GearApi {
 
     /// NOTE: mock for now, returns some data with constant position in merkle trie.
     pub async fn fetch_sent_message_inclusion_proof(&self, block: H256) -> BlockInclusionProof {
-        let address = gsdk::Api::storage_root(BabeStorage::NextAuthorities).to_root_bytes();
+        let address = gsdk::Api::storage_root(BabeStorage::Randomness).to_root_bytes();
         self.fetch_block_inclusion_proof(block, &address).await
     }
 
@@ -338,14 +338,19 @@ impl GearApi {
 
         let leaf = proof.pop().unwrap();
         let leaf = TrieCodec::decode(&leaf).unwrap();
-        let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
         let encoded_leaf = if let Node::Leaf(nibbles, value) = leaf {
             assert!(matches!(value.clone(), Value::Inline(b) if b.is_empty()));
-            TrieCodec::leaf_node(
-                nibbles.right_iter(),
-                nibbles.len(),
-                Value::Node(&storage_data_hash),
-            )
+
+            let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
+            let value = if storage_data.len() == 32 {
+                Value::Inline(&storage_data)
+            } else if storage_data.len() > 32 {
+                Value::Node(&storage_data_hash)
+            } else {
+                panic!("Unsupported leaf data length");
+            };
+
+            TrieCodec::leaf_node(nibbles.right_iter(), nibbles.len(), value)
         } else {
             panic!("The last node in proof is expected to be leaf");
         };

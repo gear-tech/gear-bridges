@@ -2,7 +2,10 @@ use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ArrayTarget, ByteTarget},
+    common::{
+        byte_to_bits,
+        targets::{impl_target_set, ArrayTarget, ByteTarget},
+    },
     prelude::*,
 };
 
@@ -37,6 +40,19 @@ impl HeaderDescriptor {
             masked_prefix: 0b00_10_00_00,
             prefix_length: 3,
         }
+    }
+
+    pub fn leaf() -> HeaderDescriptor {
+        HeaderDescriptor {
+            masked_prefix: 0b01_00_00_00,
+            prefix_length: 2,
+        }
+    }
+
+    pub fn prefix_matches(&self, node_data: &[u8]) -> bool {
+        let prefix = &byte_to_bits(node_data[0])[..self.prefix_length];
+        let desired_prefix = &byte_to_bits(self.masked_prefix)[..self.prefix_length];
+        prefix == desired_prefix
     }
 }
 

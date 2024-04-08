@@ -341,7 +341,6 @@ impl Circuit {
     }
 }
 
-// TODO: Rewrite to use ChildNodeArrayParser.
 #[cfg(test)]
 mod tests {
     use super::{child_node_parser::tests_common::*, *};
@@ -373,6 +372,8 @@ mod tests {
     }
 
     fn test_case(child_types: Vec<MockChildType>) {
+        let children_lengths = child_types.iter().map(|ty| ty.encode().len()).collect();
+
         let (claimed_idx, claimed_hash) = child_types
             .iter()
             .enumerate()
@@ -383,37 +384,17 @@ mod tests {
             .next()
             .unwrap();
 
-        let claimed_hash_bits = array_to_bits(claimed_hash).try_into().unwrap();
         let node_data = compose_all_children(&child_types);
 
-        let mut read_offset = 0;
-        let mut cyclic_proof = None;
-        for child_type in &child_types {
-            let assert_child_hash = matches!(child_type, &MockChildType::Claimed(_));
-
-            let inner_circuit = ChildNodeParser {
-                node_data: node_data.clone(),
-                read_offset,
-                assert_child_hash,
-                claimed_child_hash: claimed_hash_bits,
-            };
-
-            let circuit = Circuit::build(inner_circuit);
-
-            cyclic_proof = Some(if let Some(cyclic_proof) = cyclic_proof {
-                circuit.prove_recursive(cyclic_proof).proof()
-            } else {
-                circuit
-                    .prove_initial(InitialData {
-                        node_data: node_data.clone(),
-                        read_offset: 0,
-                        claimed_child_index_in_array: claimed_idx,
-                        claimed_child_hash: claimed_hash.clone(),
-                    })
-                    .proof()
-            });
-
-            read_offset += child_type.encode().len();
+        ChildNodeArrayParser {
+            initial_data: InitialData {
+                node_data,
+                read_offset: 0,
+                claimed_child_index_in_array: claimed_idx,
+                claimed_child_hash: *claimed_hash,
+            },
+            children_lengths,
         }
+        .prove();
     }
 }

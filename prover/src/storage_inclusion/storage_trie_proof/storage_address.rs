@@ -12,10 +12,7 @@ use std::iter;
 use crate::{
     common::{
         pad_byte_vec,
-        targets::{
-            impl_parsable_array_target_wrapper, impl_parsable_target_set, ArrayTarget,
-            HalfByteTarget, ParsableTargetSet, TargetSet,
-        },
+        targets::{impl_parsable_target_set, ArrayTarget, HalfByteTarget, TargetSet},
     },
     prelude::*,
 };
@@ -23,33 +20,21 @@ use crate::{
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
-// TODO: Remove it and store just ArrayTarget inside PartialStorageAddressTarget
-impl_parsable_array_target_wrapper!(
-    StorageAddressPaddedTarget,
-    HalfByteTarget,
-    MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES
-);
-
-impl StorageAddressPaddedTarget {
-    pub fn empty(builder: &mut CircuitBuilder<F, D>) -> Self {
-        let zero = builder.zero();
-        let mut nibbles = iter::repeat(zero).take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
-        Self::parse_exact(&mut nibbles)
-    }
-}
-
 impl_parsable_target_set! {
     // Invariant: all the data after `length` is zeroed.
     pub struct PartialStorageAddressTarget {
-        pub address: StorageAddressPaddedTarget,
+        pub padded_address: ArrayTarget<HalfByteTarget, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES>,
         pub length: Target
     }
 }
 
 impl PartialStorageAddressTarget {
     pub fn empty(builder: &mut CircuitBuilder<F, D>) -> Self {
+        let zero = builder.zero();
+        let mut nibbles = iter::repeat(zero).take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
+
         Self {
-            address: StorageAddressPaddedTarget::empty(builder),
+            padded_address: ArrayTarget::parse_exact(&mut nibbles),
             length: builder.zero(),
         }
     }
@@ -63,9 +48,12 @@ impl PartialStorageAddressTarget {
         let mut address = padded_address
             .into_iter()
             .map(|nibble| HalfByteTarget::constant(nibble, builder).to_target());
-        let address = StorageAddressPaddedTarget::parse(&mut address);
+        let padded_address = ArrayTarget::parse_exact(&mut address);
 
-        Self { address, length }
+        Self {
+            padded_address,
+            length,
+        }
     }
 
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
@@ -78,9 +66,8 @@ impl PartialStorageAddressTarget {
 
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
         for (target, value) in self
-            .address
+            .padded_address
             .0
-             .0
             .iter()
             .zip(nibbles.iter().copied().chain(iter::repeat(0)))
         {
@@ -117,7 +104,7 @@ impl PartialStorageAddressTarget {
             .unwrap();
 
         Self {
-            address: StorageAddressPaddedTarget(ArrayTarget(targets)),
+            padded_address: ArrayTarget(targets),
             length,
         }
     }
@@ -131,7 +118,7 @@ impl PartialStorageAddressTarget {
         targets[0] = nibble;
 
         Self {
-            address: StorageAddressPaddedTarget(ArrayTarget(targets)),
+            padded_address: ArrayTarget(targets),
             length: builder.one(),
         }
     }
@@ -163,8 +150,10 @@ impl PartialStorageAddressTarget {
             let appended_read_idx =
                 builder.select(appended_read_idx_valid, appended_read_idx, zero);
 
-            let self_nibble = self.address.constant_read(i);
-            let appended_nibble = append.address.random_read(appended_read_idx, builder);
+            let self_nibble = self.padded_address.constant_read(i);
+            let appended_nibble = append
+                .padded_address
+                .random_read(appended_read_idx, builder);
 
             // Check if `self.length` <= `i`
             let select_nibble_from_appended =
@@ -178,10 +167,10 @@ impl PartialStorageAddressTarget {
             )
         });
 
-        let address = StorageAddressPaddedTarget::parse_exact(&mut address_targets);
+        let padded_address = ArrayTarget::parse_exact(&mut address_targets);
 
         Self {
-            address,
+            padded_address,
             length: final_length,
         }
     }
@@ -352,7 +341,7 @@ pub mod tests_common {
 
         PartialStorageAddressTarget {
             length: length.into(),
-            address: StorageAddressPaddedTarget::parse_exact(&mut nibble_targets),
+            padded_address: ArrayTarget::parse_exact(&mut nibble_targets),
         }
     }
 }

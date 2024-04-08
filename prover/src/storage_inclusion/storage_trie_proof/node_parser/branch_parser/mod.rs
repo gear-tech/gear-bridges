@@ -321,7 +321,7 @@ mod tests {
             expected_address_nibbles.len() as u64
         );
         assert_eq!(
-            pis.resulting_partial_address.address,
+            pis.resulting_partial_address.padded_address,
             pad_byte_vec(expected_address_nibbles)
         );
     }

@@ -92,7 +92,7 @@ impl BranchNodeChain {
                     &mut composed_proof.pis().into_iter(),
                 )
                 .partial_address;
-                address.address[..address.length as usize].to_vec()
+                address.padded_address[..address.length as usize].to_vec()
             } else {
                 vec![]
             };

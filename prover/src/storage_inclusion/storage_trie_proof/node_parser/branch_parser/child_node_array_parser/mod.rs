@@ -32,8 +32,6 @@ use std::iter;
 
 mod child_node_parser;
 
-// TODO: Split into 2 files.
-
 impl_parsable_target_set! {
     pub struct ChildNodeArrayParserTarget {
         pub node_data: BranchNodeDataPaddedTarget,

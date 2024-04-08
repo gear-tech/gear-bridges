@@ -312,7 +312,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         let proof = circuit_input.prove();
-        let pis = BranchParserTarget::parse_public_inputs_exact(&mut proof.pis().into_iter());
+        let pis =
+            BranchParserTarget::parse_public_inputs_exact(&mut proof.public_inputs().into_iter());
 
         assert!(proof.verify());
 

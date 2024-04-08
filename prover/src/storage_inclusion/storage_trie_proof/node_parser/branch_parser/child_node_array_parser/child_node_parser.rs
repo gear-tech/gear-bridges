@@ -204,8 +204,9 @@ mod tests {
 
         let proof = parser.prove();
 
-        let public_inputs =
-            ChildNodeParserTarget::parse_public_inputs_exact(&mut proof.pis().into_iter());
+        let public_inputs = ChildNodeParserTarget::parse_public_inputs_exact(
+            &mut proof.public_inputs().into_iter(),
+        );
 
         assert_eq!(
             public_inputs.resulting_read_offset - public_inputs.read_offset,

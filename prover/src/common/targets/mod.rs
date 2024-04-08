@@ -179,7 +179,6 @@ pub(crate) use crate::impl_parsable_array_target_wrapper;
 
 #[macro_export]
 macro_rules! impl_array_target_wrapper {
-    // TODO: Add access modifier to params.
     ($name:ident, $target_ty:ty, $len:ident) => {
         #[derive(::std::clone::Clone, ::std::fmt::Debug)]
         pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);

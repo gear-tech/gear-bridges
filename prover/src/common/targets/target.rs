@@ -1,5 +1,3 @@
-use crate::common::array_to_bits;
-
 use super::*;
 
 impl TargetSet for Target {
@@ -57,7 +55,7 @@ fn test_single_target_from_u64_bits_le_lossy() {
     fn test_case(num: u64) {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_ecc_config());
 
-        let bits = array_to_bits(&num.to_le_bytes());
+        let bits = crate::common::array_to_bits(&num.to_le_bytes());
         let bit_targets: [BoolTarget; 64] = (0..bits.len())
             .map(|_| builder.add_virtual_bool_target_safe())
             .collect::<Vec<_>>()

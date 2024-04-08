@@ -31,7 +31,7 @@ impl ValidatorSetStorageItemTarget {
         let bit_targets = self
             .clone()
             .into_targets_iter()
-            .map(|t| BoolTarget::new_unsafe(t))
+            .map(BoolTarget::new_unsafe)
             .collect::<Vec<_>>();
         let mut hash_targets =
             plonky2_blake2b256::circuit::blake2_circuit_from_targets(builder, bit_targets)

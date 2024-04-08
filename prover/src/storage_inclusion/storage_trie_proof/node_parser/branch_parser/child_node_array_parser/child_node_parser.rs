@@ -8,7 +8,7 @@ use plonky2::{
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_target_set, ArrayTarget, Blake2Target, ParsableTargetSet, TargetSet},
+    common::targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
         *,
@@ -23,7 +23,7 @@ use crate::{
     ProofWithCircuitData,
 };
 
-impl_target_set! {
+impl_parsable_target_set! {
     pub struct ChildNodeParserTarget {
         pub node_data: BranchNodeDataPaddedTarget,
 
@@ -32,33 +32,6 @@ impl_target_set! {
 
         pub assert_child_hash: BoolTarget,
         pub claimed_child_hash: Blake2Target,
-    }
-}
-
-pub struct ChildNodeParserData {
-    node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
-
-    read_offset: usize,
-    resulting_read_offset: usize,
-
-    assert_child_hash: bool,
-    claimed_child_hash: [bool; BLAKE2_DIGEST_SIZE_IN_BITS],
-}
-
-impl ParsableTargetSet for ChildNodeParserTarget {
-    type PublicInputsData = ChildNodeParserData;
-
-    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        ChildNodeParserData {
-            node_data: BranchNodeDataPaddedTarget::parse_public_inputs(public_inputs),
-            read_offset: Target::parse_public_inputs(public_inputs) as usize,
-            resulting_read_offset: Target::parse_public_inputs(public_inputs) as usize,
-            assert_child_hash: BoolTarget::parse_public_inputs(public_inputs),
-            claimed_child_hash:
-                ArrayTarget::<BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS>::parse_public_inputs(
-                    public_inputs,
-                ),
-        }
     }
 }
 
@@ -160,7 +133,7 @@ impl ChildNodeParser {
 mod tests {
     use super::{tests_common::*, *};
     use crate::{
-        common::array_to_bits,
+        common::{array_to_bits, targets::ParsableTargetSet},
         storage_inclusion::storage_trie_proof::node_parser::compose_padded_node_data,
     };
 
@@ -236,7 +209,7 @@ mod tests {
 
         assert_eq!(
             public_inputs.resulting_read_offset - public_inputs.read_offset,
-            expected_read_data_len
+            expected_read_data_len as u64
         );
 
         proof.verify();

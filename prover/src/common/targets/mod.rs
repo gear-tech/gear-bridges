@@ -137,6 +137,7 @@ macro_rules! impl_parsable_target_set {
 
         ::paste::paste! {
             #[derive(Clone, Debug)]
+            #[allow(dead_code)]
             $vis struct [<$struct_name PublicInputs>] {
                 $($field_vis $field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::PublicInputsData),*
             }

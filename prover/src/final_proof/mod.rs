@@ -98,10 +98,9 @@ impl FinalProof {
         desired_genesis_validator_set_hash
             .connect(&latest_validator_set_target.genesis_hash, &mut builder);
 
-        // TODO: Replace with the actual block number.
         FinalProofTarget {
             message_contents: message_sent_target.message_contents,
-            block_number: message_sent_target.authority_set_id,
+            block_number: message_sent_target.block_number,
         }
         .register_as_public_inputs(&mut builder);
 

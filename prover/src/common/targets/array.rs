@@ -1,6 +1,5 @@
 use super::*;
 
-// TODO REFACTOR: remove pub on inner type.
 #[derive(Clone, Debug, Copy)]
 pub struct ArrayTarget<T: TargetSet, const N: usize>(pub [T; N]);
 
@@ -39,8 +38,11 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         )
     }
 
-    // TODO: Check range of `at`.
     pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> T {
+        let max_idx = builder.constant(F::from_canonical_usize(N - 1));
+        let max_idx_sub_at = builder.sub(max_idx, at);
+        builder.range_check(max_idx_sub_at, 32);
+
         let self_targets = self
             .0
             .clone()

@@ -48,10 +48,10 @@ impl StorageTrieProof {
 
         let partial_address_nibbles = {
             let branch_node_chain_pis = BranchNodeChainParserTarget::parse_public_inputs_exact(
-                &mut branch_node_chain_proof.pis().into_iter(),
+                &mut branch_node_chain_proof.public_inputs().into_iter(),
             );
             let partial_address = branch_node_chain_pis.partial_address;
-            partial_address.address[..partial_address.length as usize].to_vec()
+            partial_address.padded_address[..partial_address.length as usize].to_vec()
         };
 
         let hashed_leaf_parser_proof = HashedLeafParser {

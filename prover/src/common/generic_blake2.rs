@@ -254,7 +254,7 @@ mod tests {
 
         let proof = GenericBlake2 { data: data.clone() }.prove();
         let public_inputs =
-            GenericBlake2Target::parse_public_inputs_exact(&mut proof.pis().into_iter());
+            GenericBlake2Target::parse_public_inputs_exact(&mut proof.public_inputs().into_iter());
 
         assert_eq!(public_inputs.hash.to_vec(), array_to_bits(&real_hash));
         assert_eq!(public_inputs.length as usize, data.len());

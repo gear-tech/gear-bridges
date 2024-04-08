@@ -137,6 +137,7 @@ macro_rules! impl_parsable_target_set {
 
         ::paste::paste! {
             #[derive(Clone, Debug)]
+            #[allow(dead_code)]
             $vis struct [<$struct_name PublicInputs>] {
                 $($field_vis $field_name: <$field_type as $crate::common::targets::ParsableTargetSet>::PublicInputsData),*
             }
@@ -178,7 +179,6 @@ pub(crate) use crate::impl_parsable_array_target_wrapper;
 
 #[macro_export]
 macro_rules! impl_array_target_wrapper {
-    // TODO: Add access modifier to params.
     ($name:ident, $target_ty:ty, $len:ident) => {
         #[derive(::std::clone::Clone, ::std::fmt::Debug)]
         pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);

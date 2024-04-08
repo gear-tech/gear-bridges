@@ -1,5 +1,3 @@
-use crate::common::array_to_bits;
-
 use super::*;
 
 impl TargetSet for Target {
@@ -21,12 +19,12 @@ impl ParsableTargetSet for Target {
 }
 
 pub trait TargetBitOperations {
-    // TODO: forbid B % 8 != 0
     fn from_bool_targets_le<const B: usize>(
         bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Target {
         assert!(B <= 64);
+        assert!(B % 8 == 0);
 
         let mut bits = bits.0.chunks(8).rev().flatten().rev().collect::<Vec<_>>();
 
@@ -57,7 +55,7 @@ fn test_single_target_from_u64_bits_le_lossy() {
     fn test_case(num: u64) {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_ecc_config());
 
-        let bits = array_to_bits(&num.to_le_bytes());
+        let bits = crate::common::array_to_bits(&num.to_le_bytes());
         let bit_targets: [BoolTarget; 64] = (0..bits.len())
             .map(|_| builder.add_virtual_bool_target_safe())
             .collect::<Vec<_>>()

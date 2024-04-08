@@ -60,7 +60,19 @@ func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
 		api.AssertIsEqual(c.CompressedPublicInputs[i], compressed)
 	}
 
-	// TODO: Assert verifier data (also constants merkle caps?)
+	desiredCircuitDigest, success := api.Compiler().ConstantValue(c.VerifierData.CircuitDigest)
+	if !success {
+		panic("Failed to read circuit digest value")
+	}
+	api.AssertIsEqual(desiredCircuitDigest, c.VerifierData.CircuitDigest)
+
+	for i := 0; i < len(c.VerifierData.ConstantSigmasCap); i++ {
+		desiredMerkleCapHash, success := api.Compiler().ConstantValue(c.VerifierData.ConstantSigmasCap[i])
+		if !success {
+			panic("Failed to read constants sigmas cap value")
+		}
+		api.AssertIsEqual(desiredMerkleCapHash, c.VerifierData.ConstantSigmasCap[i])
+	}
 
 	return nil
 }
@@ -161,8 +173,8 @@ func serializeProof(proof plonk.Proof, glPublicInputs []gl.Variable) string {
 }
 
 type rawCircuit struct {
-	CommonData  string `json:"common_circuit_data"`
-	Proof        string `json:"proof_with_public_inputs"`
+	CommonData       string `json:"common_circuit_data"`
+	Proof            string `json:"proof_with_public_inputs"`
 	VerifierOnlyData string `json:"verifier_only_circuit_data"`
 }
 

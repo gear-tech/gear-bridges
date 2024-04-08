@@ -89,10 +89,10 @@ impl BranchNodeChain {
         for node in self.nodes {
             let partial_address_nibbles = if let Some(composed_proof) = &composed_proof {
                 let address = BranchNodeChainParserTarget::parse_public_inputs(
-                    &mut composed_proof.pis().into_iter(),
+                    &mut composed_proof.public_inputs().into_iter(),
                 )
                 .partial_address;
-                address.address[..address.length as usize].to_vec()
+                address.padded_address[..address.length as usize].to_vec()
             } else {
                 vec![]
             };

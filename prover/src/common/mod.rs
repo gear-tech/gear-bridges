@@ -11,7 +11,6 @@ use plonky2::{
             CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
             VerifierCircuitTarget,
         },
-        config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
 };
@@ -29,8 +28,6 @@ use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;
 
 use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
-
-type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
 #[derive(Clone)]
 pub struct ProofWithCircuitData<TS>
@@ -83,22 +80,14 @@ where
         }
     }
 
-    // TODO: REMOVE
-    pub fn circuit_digest(&self) -> CircuitDigest {
-        self.circuit_data.verifier_only.circuit_digest
-    }
-
-    // TODO: REMOVE
     pub fn circuit_data(&self) -> &VerifierCircuitData<F, C, D> {
         &self.circuit_data
     }
 
-    // TODO: REMOVE
-    pub fn pis(&self) -> Vec<GoldilocksField> {
+    pub fn public_inputs(&self) -> Vec<GoldilocksField> {
         self.public_inputs.clone()
     }
 
-    // TODO: REMOVE
     pub fn proof(&self) -> ProofWithPublicInputs<F, C, D> {
         ProofWithPublicInputs {
             proof: self.proof.clone(),
@@ -153,7 +142,7 @@ pub struct SerializedDataToVerify {
     pub verifier_only_circuit_data: String,
 }
 
-pub fn wrap_bn128(
+fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
 ) -> (

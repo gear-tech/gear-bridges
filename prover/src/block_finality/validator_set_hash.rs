@@ -72,18 +72,13 @@ impl ValidatorSetHash {
         );
         builder.connect(desired_data_len, hasher_pis.length);
 
-        let mut validator_set = hasher_pis
-            .data
-            .0
-            .into_iter()
-            .map(|byte| {
-                byte.to_bit_targets(&mut builder)
-                    .0
-                    .into_iter()
-                    .rev()
-                    .map(|t| t.target)
-            })
-            .flatten();
+        let mut validator_set = hasher_pis.data.0.into_iter().flat_map(|byte| {
+            byte.to_bit_targets(&mut builder)
+                .0
+                .into_iter()
+                .rev()
+                .map(|t| t.target)
+        });
         let validator_set = PaddedValidatorSetTarget::parse(&mut validator_set);
 
         ValidatorSetHashTarget {

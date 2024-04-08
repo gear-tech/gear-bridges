@@ -32,8 +32,6 @@ use std::iter;
 
 mod child_node_parser;
 
-// TODO: Split into 2 files.
-
 impl_parsable_target_set! {
     pub struct ChildNodeArrayParserTarget {
         pub node_data: BranchNodeDataPaddedTarget,
@@ -116,43 +114,23 @@ impl ChildNodeArrayParser {
     }
 }
 
-const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
-
-impl_target_set! {
-    struct CyclicRecursionTarget {
-        pub node_data: BranchNodeDataPaddedTarget,
-        pub initial_read_offset: Target,
-        pub read_offset: Target,
-        pub overall_children_amount: Target,
-        pub claimed_child_index_in_array: Target,
-        pub claimed_child_hash: Blake2Target,
-
-        pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
-    }
-}
-
-impl CyclicRecursionTarget {
-    fn remove_verifier_data(self) -> CyclicRecursionTargetWithoutCircuitData {
-        CyclicRecursionTargetWithoutCircuitData {
-            node_data: self.node_data,
-            initial_read_offset: self.initial_read_offset,
-            read_offset: self.read_offset,
-            overall_children_amount: self.overall_children_amount,
-            claimed_child_index_in_array: self.claimed_child_index_in_array,
-            claimed_child_hash: self.claimed_child_hash,
-        }
-    }
-}
-
-// TODO: Remove
 impl_parsable_target_set! {
-    struct CyclicRecursionTargetWithoutCircuitData {
+    struct CyclicRecursionTarget {
         node_data: BranchNodeDataPaddedTarget,
         initial_read_offset: Target,
         read_offset: Target,
         overall_children_amount: Target,
         claimed_child_index_in_array: Target,
         claimed_child_hash: Blake2Target,
+    }
+}
+
+const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
+
+impl_target_set! {
+    struct CyclicRecursionTargetWithVerifierData {
+        pub inner: CyclicRecursionTarget,
+        pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
     }
 }
 
@@ -191,9 +169,7 @@ impl Circuit {
             .map(F::from_canonical_usize);
 
         // Length check.
-        CyclicRecursionTargetWithoutCircuitData::parse_public_inputs_exact(
-            &mut public_inputs.clone(),
-        );
+        CyclicRecursionTarget::parse_public_inputs_exact(&mut public_inputs.clone());
 
         let public_inputs = public_inputs.enumerate().collect();
 
@@ -248,8 +224,7 @@ impl Circuit {
         let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut pw);
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
-        let future_inner_cyclic_proof_pis =
-            CyclicRecursionTargetWithoutCircuitData::parse(&mut virtual_targets);
+        let future_inner_cyclic_proof_pis = CyclicRecursionTarget::parse(&mut virtual_targets);
         future_inner_cyclic_proof_pis.register_as_public_inputs(&mut builder);
 
         let verifier_data_target = builder.add_verifier_data_public_inputs();
@@ -262,13 +237,13 @@ impl Circuit {
         let condition = builder.add_virtual_bool_target_safe();
 
         let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis(&common_data);
-        let inner_cyclic_proof_pis = CyclicRecursionTarget::parse_exact(
+        let mut inner_cyclic_proof_pis = CyclicRecursionTargetWithVerifierData::parse_exact(
             &mut inner_cyclic_proof_with_pis
                 .public_inputs
                 .clone()
                 .into_iter(),
-        );
-        let mut inner_cyclic_proof_pis = inner_cyclic_proof_pis.remove_verifier_data();
+        )
+        .inner;
 
         inner_cyclic_proof_pis.read_offset = builder.select(
             condition,
@@ -306,7 +281,7 @@ impl Circuit {
 
         let resulting_read_offset = inner_proof_pis.resulting_read_offset;
 
-        let final_pis = CyclicRecursionTargetWithoutCircuitData {
+        let final_pis = CyclicRecursionTarget {
             node_data: inner_cyclic_proof_pis.node_data,
             initial_read_offset: inner_cyclic_proof_pis.initial_read_offset,
             read_offset: resulting_read_offset,
@@ -341,7 +316,6 @@ impl Circuit {
     }
 }
 
-// TODO: Rewrite to use ChildNodeArrayParser.
 #[cfg(test)]
 mod tests {
     use super::{child_node_parser::tests_common::*, *};
@@ -373,6 +347,8 @@ mod tests {
     }
 
     fn test_case(child_types: Vec<MockChildType>) {
+        let children_lengths = child_types.iter().map(|ty| ty.encode().len()).collect();
+
         let (claimed_idx, claimed_hash) = child_types
             .iter()
             .enumerate()
@@ -383,37 +359,17 @@ mod tests {
             .next()
             .unwrap();
 
-        let claimed_hash_bits = array_to_bits(claimed_hash).try_into().unwrap();
         let node_data = compose_all_children(&child_types);
 
-        let mut read_offset = 0;
-        let mut cyclic_proof = None;
-        for child_type in &child_types {
-            let assert_child_hash = matches!(child_type, &MockChildType::Claimed(_));
-
-            let inner_circuit = ChildNodeParser {
-                node_data: node_data.clone(),
-                read_offset,
-                assert_child_hash,
-                claimed_child_hash: claimed_hash_bits,
-            };
-
-            let circuit = Circuit::build(inner_circuit);
-
-            cyclic_proof = Some(if let Some(cyclic_proof) = cyclic_proof {
-                circuit.prove_recursive(cyclic_proof).proof()
-            } else {
-                circuit
-                    .prove_initial(InitialData {
-                        node_data: node_data.clone(),
-                        read_offset: 0,
-                        claimed_child_index_in_array: claimed_idx,
-                        claimed_child_hash: claimed_hash.clone(),
-                    })
-                    .proof()
-            });
-
-            read_offset += child_type.encode().len();
+        ChildNodeArrayParser {
+            initial_data: InitialData {
+                node_data,
+                read_offset: 0,
+                claimed_child_index_in_array: claimed_idx,
+                claimed_child_hash: *claimed_hash,
+            },
+            children_lengths,
         }
+        .prove();
     }
 }

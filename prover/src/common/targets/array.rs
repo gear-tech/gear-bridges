@@ -1,6 +1,5 @@
 use super::*;
 
-// TODO REFACTOR: remove pub on inner type.
 #[derive(Clone, Debug, Copy)]
 pub struct ArrayTarget<T: TargetSet, const N: usize>(pub [T; N]);
 

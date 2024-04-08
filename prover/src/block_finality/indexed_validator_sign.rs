@@ -25,6 +25,8 @@ use super::*;
 impl_target_set! {
     pub struct IndexedValidatorSignTarget {
         pub validator_set_hash: Blake2Target,
+        pub validator_count: Target,
+
         pub validator_idx: Target,
         pub message: GrandpaVoteTarget,
     }
@@ -70,6 +72,8 @@ impl IndexedValidatorSign {
 
         IndexedValidatorSignTarget {
             validator_set_hash: validator_set_hash_target.hash,
+            validator_count: validator_set_hash_target.validator_set_length,
+
             validator_idx: index_target,
             message: sign_target.message,
         }

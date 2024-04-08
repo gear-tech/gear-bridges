@@ -41,7 +41,8 @@ impl_parsable_target_set! {
     pub struct GrandpaVoteTarget {
         _aux_data: BitArrayTarget<8>,
         pub block_hash: Blake2Target,
-        _aux_data_2: BitArrayTarget<96>,
+        pub block_number: BitArrayTarget<32>,
+        _aux_data_2: BitArrayTarget<64>,
         pub authority_set_id: BitArrayTarget<64>,
     }
 }

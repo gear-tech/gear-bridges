@@ -26,6 +26,7 @@ impl_target_set! {
     pub struct MessageSentTarget {
         pub validator_set_hash: Blake2TargetGoldilocks,
         pub authority_set_id: Target,
+        pub block_number: Target,
         pub message_contents: MessageTargetGoldilocks,
     }
 }
@@ -99,6 +100,10 @@ impl MessageSent {
             ),
             authority_set_id: Target::from_u64_bits_le_lossy(
                 finality_proof_target.message.authority_set_id,
+                &mut builder,
+            ),
+            block_number: Target::from_bool_targets_le(
+                finality_proof_target.message.block_number,
                 &mut builder,
             ),
             message_contents: MessageTargetGoldilocks::from_bit_array(

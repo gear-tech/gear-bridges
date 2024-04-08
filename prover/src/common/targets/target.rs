@@ -21,12 +21,12 @@ impl ParsableTargetSet for Target {
 }
 
 pub trait TargetBitOperations {
-    // TODO: forbid B % 8 != 0
     fn from_bool_targets_le<const B: usize>(
         bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Target {
         assert!(B <= 64);
+        assert!(B % 8 == 0);
 
         let mut bits = bits.0.chunks(8).rev().flatten().rev().collect::<Vec<_>>();
 

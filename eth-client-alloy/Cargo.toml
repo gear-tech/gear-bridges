@@ -3,36 +3,49 @@ name = "eth-client-alloy"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [dependencies]
-tokio = { version ="1.35.1",  features = ["full"] }
-#ethcontract = "0.25.4"
+tokio = { version = "1.35.1", features = ["full"] }
 serde = "1.0.195"
 serde_json = "1.0.111"
-primitive-types = "0.12.2"
-#web3 = { version = "0.19", default-features = false, features = ["signing"] }
+primitive-types = { version = "0.12.2", default-features = false, features = [] }
 reqwest = { version = "0.11.24" }
+binary-merkle-tree = { version = "15.0.0" }
+hash-db = { version = "0.16.0" }
+#sp-runtime = { version = "7.0.0", git = "https://github.com/gear-tech/substrate.git", branch = "gear-polkadot-v0.9.41-canary-no-sandbox-revert-oom-changes", default-features = false, features = ["default"] }
+ahash = "0.8.10"
+sp-runtime = { version = "34.0.0" }
 
-
-alloy-contract = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-contract", rev="34f5621"}
-alloy-rpc-types = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-types", rev="34f5621"}
-alloy-rpc-trace-types = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-trace-types", rev="34f5621"}
-alloy-node-bindings = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-node-bindings", rev="34f5621"}
-alloy-rpc-client = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-client", features = ["ws", "reqwest", "pubsub"], rev="34f5621"}
-alloy-transport = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-transport", rev="34f5621"}
+alloy-contract = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-contract", rev = "34f5621" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-types", rev = "34f5621" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-trace-types", rev = "34f5621" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-node-bindings", rev = "34f5621" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-client", features = ["ws", "reqwest", "pubsub"], rev = "34f5621" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-transport", rev = "34f5621" }
 #alloy-pubsub = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-pubsub", rev="34f5621"}
-alloy-transport-ws = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-transport-ws", rev="34f5621"}
-alloy-transport-http = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-transport-http", rev="34f5621"}
-alloy-network = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-network", rev="34f5621"}
-alloy-signer = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-signer", rev="34f5621"}
-alloy-signer-wallet = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-signer-wallet", rev="34f5621"}
-alloy-provider = {git =  "https://github.com/alloy-rs/alloy.git", package = "alloy-provider", rev="34f5621"}
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-transport-ws", rev = "34f5621" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-transport-http", rev = "34f5621" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-network", rev = "34f5621" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-signer", rev = "34f5621" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-signer-wallet", rev = "34f5621" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-provider", rev = "34f5621" }
 #alloy-primitives = "0.6.4"
-alloy-primitives = {git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev="1bac7678797fcd1bee2f2580825724b4165b12c1"}
-alloy-core = {git =  "https://github.com/alloy-rs/core.git", package = "alloy-core", rev="1bac7678797fcd1bee2f2580825724b4165b12c1"}
-alloy-sol-macro = {git =  "https://github.com/alloy-rs/core.git", package = "alloy-sol-macro", rev="1bac7678797fcd1bee2f2580825724b4165b12c1",  features = ["json"]}
-alloy-sol-types = {git =  "https://github.com/alloy-rs/core.git", package = "alloy-sol-types", rev="1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["json"]}
-alloy-dyn-abi = {git =  "https://github.com/alloy-rs/core.git", package = "alloy-dyn-abi", rev="1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["std"]}
-alloy-json-abi = {git =  "https://github.com/alloy-rs/core.git", package = "alloy-json-abi", rev="1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["std"]}
-alloy-sol-type-parser = {git =  "https://github.com/alloy-rs/core.git", package = "alloy-sol-type-parser", rev="1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["std"]}
+alloy-primitives = { git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-core = { git = "https://github.com/alloy-rs/core.git", package = "alloy-core", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-sol-macro = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-macro", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["json"] }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-types", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["json"] }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-dyn-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["std"] }
+alloy-json-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-json-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["std"] }
+alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-type-parser", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = ["std"] }
+bytes = "1.6.0"
 
 
+[patch.crates-io]
+alloy-primitives = { git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-core = { git = "https://github.com/alloy-rs/core.git", package = "alloy-core", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-sol-macro = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-macro", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-types", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-dyn-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-json-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-json-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-type-parser", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }

@@ -1,0 +1,40 @@
+use alloy_primitives::{Bytes, U256};
+use primitive_types::H256;
+
+#[derive(Clone, Debug)]
+pub struct ContentMessage {
+    pub eth_address: H256,
+    pub vara_address: H256,
+    pub nonce: U256,
+    pub data: Bytes,
+}
+
+impl ContentMessage {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut ret: Vec<u8> = Vec::with_capacity(96 + self.data.len());
+        ret.extend(self.eth_address.as_fixed_bytes());
+        ret.extend(self.vara_address.as_fixed_bytes());
+        ret.extend(self.nonce.to_be_bytes::<32>());
+        ret.extend(self.data.to_vec());
+        ret
+    }
+}
+
+/*
+impl AsRef<[u8]> for ContentMessage {
+    fn as_ref(&self) -> &[u8] {
+        &self.buf
+
+        /*let mut ret: Vec<u8>;
+        ret = self.eth_address.as_fixed_bytes().to_vec();
+
+        ret.append(&mut self.vara_address.as_fixed_bytes().to_vec());
+        ret.append(&mut self.nonce.to_be_bytes::<32>().to_vec());
+        ret.append(&mut self.data.to_vec());
+        ret.as_slice()
+
+         */
+    }
+}
+
+ */

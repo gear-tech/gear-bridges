@@ -3,31 +3,32 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 import {IProver} from "./interfaces/IProver.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 
 import {Constants} from "./libraries/Constants.sol";
 import {VaraMessage, ContentMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
+import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 
 
-
-contract MessageQueue is IMessageQueue,AccessControl {
+contract MessageQueue is IMessageQueue, AccessControl {
     using Address for address;
     IProver private _prover;
     IRelayer private _relayer;
     using Hasher for ContentMessage;
 
-    mapping(bytes32=>bool) private _processed_messages;
+    mapping(bytes32 => bool) private _processed_messages;
 
     constructor() {
     }
 
 
     function initialize(address prover, address relayer) public {
-        if(getRoleAdmin(Constants.ADMIN_ROLE) != DEFAULT_ADMIN_ROLE) revert AlreadyInitialized();
+        if (getRoleAdmin(Constants.ADMIN_ROLE) != DEFAULT_ADMIN_ROLE) revert AlreadyInitialized();
         _setRoleAdmin(Constants.ADMIN_ROLE, Constants.ADMIN_ROLE);
-        _grantRole(Constants.ADMIN_ROLE, msg.sender );
+        _grantRole(Constants.ADMIN_ROLE, msg.sender);
         _prover = IProver(prover);
         emit ProoverAddressUpdated(prover);
 
@@ -35,37 +36,37 @@ contract MessageQueue is IMessageQueue,AccessControl {
         emit RelayerAddressUpdated(relayer);
     }
 
-    function setProover(address prover) public onlyRole(Constants.ADMIN_ROLE) {    
+    function setProover(address prover) public onlyRole(Constants.ADMIN_ROLE) {
         _prover = IProver(prover);
         emit ProoverAddressUpdated(prover);
     }
 
-    function setRelayer(address relayer) public onlyRole(Constants.ADMIN_ROLE) {    
+    function setRelayer(address relayer) public onlyRole(Constants.ADMIN_ROLE) {
         _relayer = IRelayer(relayer);
         emit RelayerAddressUpdated(relayer);
     }
 
 
-    function process_message(VaraMessage calldata message) public {
-        bytes32 msg_hash = message.content.hash();
-        if( _processed_messages[msg_hash] ) revert MessageAlreadyProcessed(msg_hash);
+    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof) public {
+        bytes32 msg_hash = message.hash();
 
-        bytes32 merkle_root = _relayer.get_merkle_root(message.block_number);
-        if(merkle_root == bytes32(0)) revert MerkleRootNotSet(message.block_number);
+        if (_processed_messages[msg_hash]) revert MessageAlreadyProcessed(msg_hash);
 
-        uint256[] memory public_inputs = new uint256[](1);
-        public_inputs[0] = uint256(merkle_root) & 0xFFF;
+        bytes32 merkle_root = _relayer.get_merkle_root(block_number);
 
-        if(!_prover.verifyProof( message.proof, public_inputs) ) revert BadProof();
+        if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
-        _processed_messages[ msg_hash ] = true;
 
-        message.content.eth_address.functionCall(message.content.data);
+        if (MerkleProof.processProofCalldata(proof, msg_hash) != merkle_root) revert BadProof();
 
-        emit MessageProcessed(message.block_number, msg_hash);
+        _processed_messages[msg_hash] = true;
+
+        message.eth_address.functionCall(message.data);
+
+        emit MessageProcessed(block_number, msg_hash);
     }
 
-    function is_processed(VaraMessage calldata message) external view returns(bool) {
+    function is_processed(VaraMessage calldata message) external view returns (bool) {
         bytes32 msg_hash = message.content.hash();
         return _processed_messages[msg_hash];
     }

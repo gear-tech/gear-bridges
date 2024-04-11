@@ -1,12 +1,7 @@
 use alloy_sol_types::{sol, SolCall, SolInterface};
 //use alloy_transport::Transport;
 
-sol!{
-    struct VaraMessage {
-        uint256 block_number;
-        ContentMessage content;
-        bytes proof;
-    }
+sol! {
 
     struct ContentMessage  {
         address eth_address;
@@ -17,7 +12,7 @@ sol!{
 
     #[sol(rpc)]
     interface IMessageQueue {
-        function process_message(VaraMessage calldata message ) external;
+        function process_message(uint256 block, ContentMessage calldata message, bytes32[] calldata proof ) external;
     }
 
 
@@ -30,9 +25,3 @@ sol!{
         function submit_merkle_root(uint256[] calldata public_inputs, bytes calldata proof ) external;
     }
 }
-
-
-
-
-
-

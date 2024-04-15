@@ -4,15 +4,15 @@ use alloy_sol_types::{sol, SolCall, SolInterface};
 sol! {
 
     struct ContentMessage  {
-        address eth_address;
         bytes32 vara_address;
+        address eth_address;
         uint256 nonce;
         bytes data;
     }
 
     #[sol(rpc)]
     interface IMessageQueue {
-        function process_message(uint256 block, ContentMessage calldata message, bytes32[] calldata proof ) external;
+        function process_message(uint256 block, uint256 total_leaves, uint256 leaf_index, ContentMessage calldata message, bytes32[] calldata proof ) external;
     }
 
 

@@ -12,7 +12,7 @@ import {Treasury} from "../src/Treasury.sol";
 import {ITreasury} from "../src/interfaces/ITreasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
-import {IMessageQueue, ContentMessage, VaraMessage, Hasher} from "../src/interfaces/IMessageQueue.sol";
+import {IMessageQueue, VaraMessage, Hasher} from "../src/interfaces/IMessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {Constants} from "../src/libraries/Constants.sol";
 
@@ -25,7 +25,7 @@ contract MessageQueueTest is Test {
     Treasury public treasury;
     MessageQueue public message_queue;
     using Address for address;
-    using Hasher for ContentMessage;
+    using Hasher for VaraMessage;
 
     ERC20Mock public erc20_token;
 
@@ -47,7 +47,7 @@ contract MessageQueueTest is Test {
 
         ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_prover)));
 
-        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address,address)", address(_prover), address(_relayer_proxy)));
+        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address)", address(_relayer_proxy)));
         ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)));
 
         relayer = Relayer(address(_relayer_proxy));
@@ -148,7 +148,7 @@ contract MessageQueueTest is Test {
 
         bytes memory payload = abi.encodePacked(m);
 
-        ContentMessage memory content_message = ContentMessage({
+        VaraMessage memory content_message = VaraMessage({
             vara_address: VARA_ADDRESS,
             eth_address: ETH_ADDRESS,
             nonce: 3,
@@ -165,6 +165,9 @@ contract MessageQueueTest is Test {
 
         bytes32 messageHash = keccak256(ms);
         console.logBytes32(messageHash);
+
+        bytes32 msg_hash = content_message.hash();
+        assertEq(messageHash, msg_hash);
 
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = bytes32(0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e);
@@ -183,31 +186,6 @@ contract MessageQueueTest is Test {
         for (uint i = 0; i < ms.length; i ++) {
             ms[i] = bytes1(msgt[i]);
         }
-
-        /*
-        uint8[3] memory msgt = [3, 3, 3];
-            bytes memory m = new bytes(msgt.length);
-            for (uint i = 0; i < m.length; i ++) {
-                m[i] = bytes1(msgt[i]);
-            }
-
-            bytes memory payload = abi.encodePacked(m);
-
-
-            ContentMessage memory content_message = ContentMessage({
-                vara_address: VARA_ADDRESS_7,
-                eth_address: ETH_ADDRESS_5,
-                nonce: 10,
-                data: payload
-            });
-
-
-        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
-            */
-
-        /*for (uint i = 0; i < ms.length; i ++) {
-            console.log(uint256(uint8(ms[i])));
-        }*/
 
 
         bytes32 messageHash = keccak256(ms);
@@ -239,36 +217,11 @@ contract MessageQueueTest is Test {
             ms[i] = bytes1(msgt[i]);
         }
 
-        /*
-        uint8[3] memory msgt = [3, 3, 3];
-            bytes memory m = new bytes(msgt.length);
-            for (uint i = 0; i < m.length; i ++) {
-                m[i] = bytes1(msgt[i]);
-            }
-
-            bytes memory payload = abi.encodePacked(m);
-
-
-            ContentMessage memory content_message = ContentMessage({
-                vara_address: VARA_ADDRESS_7,
-                eth_address: ETH_ADDRESS_5,
-                nonce: 10,
-                data: payload
-            });
-
-
-        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
-            */
-
-        /*for (uint i = 0; i < ms.length; i ++) {
-            console.log(uint256(uint8(ms[i])));
-        }*/
-
 
         bytes32 messageHash = keccak256(ms);
         console.logBytes32(messageHash);
 
-        //assertEq(messageHash, bytes32(0x0bba4e1c18872dc9fb4ec6e1c9c3c842c2b1b06e9ef569a599fb0ed766989ff3));
+        assertEq(messageHash, bytes32(0xac9f1d13ebef420edd0101b06f534ec2495ca41af6c23cf14bc94f67bae8dfe1));
 
         bytes32[] memory proof = new bytes32[](7);
         proof[0] = bytes32(0x57caf83a5d10cdf3f3a28cdc6426da6a94ce5c2b966a8d08f948470358be53a8);
@@ -296,7 +249,7 @@ contract MessageQueueTest is Test {
         bytes memory payload = abi.encodePacked(m);
 
 
-        ContentMessage memory content_message = ContentMessage({
+        VaraMessage memory content_message = VaraMessage({
             vara_address: VARA_ADDRESS_7,
             eth_address: ETH_ADDRESS_5,
             nonce: 10,
@@ -305,9 +258,6 @@ contract MessageQueueTest is Test {
 
 
         bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
-        for (uint i = 0; i < ms.length; i ++) {
-            console.log(uint256(uint8(ms[i])));
-        }
 
         bytes32 messageHash = keccak256(ms);
         console.logBytes32(messageHash);

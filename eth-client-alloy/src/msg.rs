@@ -3,14 +3,14 @@ use primitive_types::H256;
 use std::io::Read;
 
 #[derive(Clone, Debug)]
-pub struct ContentMessage {
+pub struct VaraMessage {
     pub vara_address: H256,
     pub eth_address: Address,
     pub nonce: U256,
     pub data: Bytes,
 }
 
-impl ContentMessage {
+impl VaraMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut ret: Vec<u8> = Vec::with_capacity(96 + self.data.len());
         ret.extend(self.vara_address.as_fixed_bytes());

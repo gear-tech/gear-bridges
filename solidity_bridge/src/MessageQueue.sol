@@ -8,50 +8,34 @@ import {IProver} from "./interfaces/IProver.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 
 import {Constants} from "./libraries/Constants.sol";
-import {VaraMessage, ContentMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
+import {VaraMessage, VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 
 
 contract MessageQueue is IMessageQueue, AccessControl {
     using Address for address;
-    IProver private _prover;
-    IRelayer private _relayer;
-    using Hasher for ContentMessage;
+    using Hasher for VaraMessage;
 
+    IRelayer private _relayer;
     mapping(bytes32 => bool) private _processed_messages;
 
     constructor() {
     }
 
 
-    function initialize(address prover, address relayer) public {
-        if (getRoleAdmin(Constants.ADMIN_ROLE) != DEFAULT_ADMIN_ROLE) revert AlreadyInitialized();
-        _setRoleAdmin(Constants.ADMIN_ROLE, Constants.ADMIN_ROLE);
-        _grantRole(Constants.ADMIN_ROLE, msg.sender);
-        _prover = IProver(prover);
-        emit ProoverAddressUpdated(prover);
-
-        _relayer = IRelayer(relayer);
-        emit RelayerAddressUpdated(relayer);
-    }
-
-    function setProover(address prover) public onlyRole(Constants.ADMIN_ROLE) {
-        _prover = IProver(prover);
-        emit ProoverAddressUpdated(prover);
-    }
-
-    function setRelayer(address relayer) public onlyRole(Constants.ADMIN_ROLE) {
+    function initialize(address relayer) public {
+        if (address(_relayer) != address(0)) revert AlreadyInitialized();
         _relayer = IRelayer(relayer);
         emit RelayerAddressUpdated(relayer);
     }
 
 
-    function calc_merkle_root(
+    function _calc_merkle_root(
         bytes32[] calldata proof,
         bytes32 leaf,
         uint256 width,
         uint256 index
-    ) public pure returns (bytes32) {
+    ) internal pure returns (bytes32) {
         bytes32 hash = leaf;
 
         for (uint256 i = 0; i < proof.length; i++) {
@@ -78,11 +62,12 @@ contract MessageQueue is IMessageQueue, AccessControl {
         return hash;
     }
 
-    function calculate_root(bytes32[] calldata proof, bytes32 leaf_hash, uint256 width, uint256 leaf_index) public view returns (bytes32) {
-        return calc_merkle_root(proof, leaf_hash, width, leaf_index);
+    function calculate_root(bytes32[] calldata proof, bytes32 leaf_hash, uint256 width, uint256 leaf_index) public pure returns (bytes32) {
+        return _calc_merkle_root(proof, leaf_hash, width, leaf_index);
     }
 
-    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof, uint256 width, uint256 leaf_index) public {
+
+    function process_message(uint256 block_number, uint256 total_leaves, uint256 leaf_index, VaraMessage calldata message, bytes32[] calldata proof) public {
         bytes32 msg_hash = message.hash();
 
         if (_processed_messages[msg_hash]) revert MessageAlreadyProcessed(msg_hash);
@@ -91,7 +76,7 @@ contract MessageQueue is IMessageQueue, AccessControl {
 
         if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
-        if (calc_merkle_root(proof, msg_hash, width, leaf_index) != merkle_root) revert BadProof();
+        if (_calc_merkle_root(proof, msg_hash, total_leaves, leaf_index) != merkle_root) revert BadProof();
 
         _processed_messages[msg_hash] = true;
 
@@ -101,7 +86,7 @@ contract MessageQueue is IMessageQueue, AccessControl {
     }
 
     function is_processed(VaraMessage calldata message) external view returns (bool) {
-        bytes32 msg_hash = message.content.hash();
+        bytes32 msg_hash = message.hash();
         return _processed_messages[msg_hash];
     }
 

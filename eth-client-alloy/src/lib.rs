@@ -192,7 +192,7 @@ impl ContractVerifiers {
 
 #[cfg(test)]
 mod tests {
-    use crate::msg::ContentMessage;
+    use crate::msg::VaraMessage;
     use crate::*;
     use alloy_node_bindings::{Anvil, AnvilInstance};
     use alloy_primitives::keccak256;
@@ -328,21 +328,21 @@ mod tests {
 
     #[tokio::test]
     async fn verify_merkle_proof_for_msg() {
-        let msg0 = ContentMessage {
+        let msg0 = VaraMessage {
             eth_address: Address::repeat_byte(1),
             vara_address: H256::repeat_byte(1),
             nonce: U256::from(1),
             data: Bytes::from(vec![1, 1]),
             //buf: Default::default(),
         };
-        let msg1 = ContentMessage {
+        let msg1 = VaraMessage {
             eth_address: Address::repeat_byte(2),
             vara_address: H256::repeat_byte(2),
             nonce: U256::from(2),
             data: Bytes::from(vec![2, 2]),
             //buf: Default::default(),
         };
-        let msg2 = ContentMessage {
+        let msg2 = VaraMessage {
             vara_address: H256::repeat_byte(4),
             eth_address: Address::repeat_byte(3),
             nonce: U256::from(3),
@@ -378,7 +378,7 @@ mod tests {
         let mut leaves: Vec<Vec<u8>> = Vec::new();
 
         for i in 0..100 {
-            let msg = ContentMessage {
+            let msg = VaraMessage {
                 eth_address: Address::repeat_byte(i as u8),
                 vara_address: H256::repeat_byte(i as u8),
                 nonce: U256::from(i as u8),
@@ -387,7 +387,7 @@ mod tests {
             leaves.push(msg.to_bytes())
         }
 
-        let msg = ContentMessage {
+        let msg = VaraMessage {
             vara_address: H256::repeat_byte(7),
             eth_address: Address::repeat_byte(5),
             nonce: U256::from(10),

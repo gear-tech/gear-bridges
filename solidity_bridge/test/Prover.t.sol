@@ -21,27 +21,23 @@ contract ProoverTest is Test {
         prover = new Prover();
     }
 
-    function getBlockIdFromPublicInput(uint256[] memory public_inputs) private returns (uint256) {
+    function getBlockIdFromPublicInput(uint256[] memory public_inputs) private pure returns (uint256) {
         uint256 ret = uint256(public_inputs[1] >> 96) & MASK_32BITS;
         return ret;
     }
 
 
-    function getMerkleRootFromPublicInput(uint256[] memory public_inputs) private returns (bytes32) {
+    function getMerkleRootFromPublicInput(uint256[] memory public_inputs) private pure returns (bytes32) {
         uint256 ret = ((public_inputs[0] & MASK_192BITS) << 64) | ((public_inputs[1] >> 128) & MASK_64BITS);
         return bytes32(ret);
     }
 
-    /*
-    function getPublicInputsFromMerkleRoot(bytes32 merkle_root) private returns (uint256[] memory public_inputs) {
-        uint256 root = uint256(merkle_root);
-        public_inputs = new uint256[](5);
-        for (uint256 i = 0; i < 5; i++) {
-            public_inputs[i] = (root & MASK_52BITS);
-            root >>= 52;
-        }
+
+    function getPublicInputsFromMerkleRootAndBlockId(bytes32 merkle_root, uint256 block_id) private pure returns (uint256[] memory public_inputs) {
+        uint256[] memory ret = new uint256[](2);
+        return ret;
     }
-    */
+
 
     function test_merkle_root_from_public() public {
         uint256[] memory public_inputs = new uint256[](2);

@@ -1,13 +1,7 @@
 pragma solidity ^0.8.24;
 
+
     struct VaraMessage {
-        uint256 block_number;
-        ContentMessage content;
-        bytes proof;
-    }
-
-
-    struct ContentMessage {
         bytes32 vara_address;
         address eth_address;
         uint256 nonce;
@@ -26,12 +20,12 @@ interface IMessageQueue {
 
     function calculate_root(bytes32[] calldata proof, bytes32 hash, uint256 width, uint256 leaf_index) external view returns (bytes32);
 
-    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof, uint256 width, uint256 leaf_index) external;
+    function process_message(uint256 block_number, uint256 total_leaves, uint256 leaf_index, VaraMessage calldata message, bytes32[] calldata proof) external;
 }
 
 library Hasher {
-    function hash(ContentMessage calldata message) external pure returns (bytes32) {
-        bytes memory data = abi.encodePacked(message.eth_address, message.vara_address, message.nonce, message.data);
+    function hash(VaraMessage calldata message) external pure returns (bytes32) {
+        bytes memory data = abi.encodePacked(message.vara_address, message.eth_address, message.nonce, message.data);
         return keccak256(data);
     }
 }

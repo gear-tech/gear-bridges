@@ -38,7 +38,7 @@ contract TreasuryTest is Test {
 
         ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_prover)));
 
-        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address,address)", address(_prover), address(_relayer_proxy)));
+        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address)", address(_relayer_proxy)));
         ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)));
 
         relayer = Relayer(address(_relayer_proxy));
@@ -56,6 +56,17 @@ contract TreasuryTest is Test {
         assertEq(0, relayer.get_block_number(merkleRoot));
         assertEq(bytes32(0), relayer.get_merkle_root(blockNumber));
 
+    }
+
+    function test_build_public_inputs() public {
+        bytes32 merkleRoot = BLOCK_MERKLE_ROOT;
+        uint256 blockNumber = BLOCK_ID;
+
+
+        uint256[] memory public_inputs = relayer.build_public_inputs(merkleRoot, blockNumber);
+
+        assertEq(public_inputs[0], 3980403427572212499963242599334442163722879490045996792884);
+        assertEq(public_inputs[1], 1166562204472425303272494454897619262805894610326304849920);
     }
 
 

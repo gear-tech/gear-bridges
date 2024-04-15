@@ -1458,10 +1458,24 @@ checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "curve25519-dalek-derive",
+ "curve25519-dalek-derive 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "digest 0.10.7",
  "fiat-crypto",
  "platforms",
+ "rustc_version",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek"
+version = "4.1.2"
+source = "git+https://github.com/mertwole/curve25519-dalek.git#f63777fbeeb181944097bdcaeb9384ac158ec931"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "curve25519-dalek-derive 0.1.1 (git+https://github.com/mertwole/curve25519-dalek.git)",
+ "fiat-crypto",
  "rustc_version",
  "subtle",
  "zeroize",
@@ -1472,6 +1486,16 @@ name = "curve25519-dalek-derive"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.59",
+]
+
+[[package]]
+name = "curve25519-dalek-derive"
+version = "0.1.1"
+source = "git+https://github.com/mertwole/curve25519-dalek.git#f63777fbeeb181944097bdcaeb9384ac158ec931"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1874,7 +1898,7 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a3daa8e81a3963a60642bcc1f90a670680bd4a77535faa384e9d1c79d620871"
 dependencies = [
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "ed25519 2.2.3",
  "rand_core 0.6.4",
  "serde",
@@ -5102,7 +5126,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.1.2 (git+https://github.com/mertwole/curve25519-dalek.git)",
  "env_logger 0.9.3",
  "itertools 0.10.5",
  "keccak-hash",
@@ -6601,7 +6625,7 @@ checksum = "8de18f6d8ba0aad7045f5feae07ec29899c1112584a38509a84ad7b04451eaa0"
 dependencies = [
  "arrayref",
  "arrayvec 0.7.4",
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom_or_panic",
  "merlin 3.0.0",
  "rand_core 0.6.4",
@@ -6976,7 +7000,7 @@ dependencies = [
  "aes-gcm",
  "blake2",
  "chacha20poly1305",
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_core 0.6.4",
  "ring 0.17.8",
  "rustc_version",
@@ -7739,7 +7763,7 @@ version = "4.0.0-dev"
 source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.1.0#2dd122c65e27d0d09d84e1533e14565cf179aec1"
 dependencies = [
  "aes-gcm",
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "ed25519-dalek 2.1.1",
  "hkdf",
  "parity-scale-codec",
@@ -9620,7 +9644,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
 dependencies = [
- "curve25519-dalek 4.1.2",
+ "curve25519-dalek 4.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_core 0.6.4",
  "serde",
  "zeroize",

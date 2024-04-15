@@ -29,7 +29,8 @@ plonky2_field = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4
 plonky2_util = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_maybe_rayon = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 
-curve25519-dalek = "4.1.2"
+# Coordinates of `EdwardsPoint` made public in fork.
+curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
 
 anyhow = "1.0.40"
 env_logger = "0.9.0"

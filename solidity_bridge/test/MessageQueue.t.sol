@@ -29,9 +29,15 @@ contract MessageQueueTest is Test {
 
     ERC20Mock public erc20_token;
 
-    uint256 private constant BLOCK_ID = 274;
-    bytes32 private constant BLOCK_MERKLE_ROOT = keccak256(bytes("Block100"));
-    bytes32 private constant VARA_ID = keccak256(bytes("VARA_ID"));
+    uint256 private constant BLOCK_ID = 273;
+    bytes32 private constant BLOCK_MERKLE_ROOT = bytes32(0xa25559d02a45bf58afd5344964269d38e947a432c1097c342f937a4ad052a683);
+
+    bytes32 private constant VARA_ADDRESS = bytes32(0x0303030303030303030303030303030303030303030303030303030303030303);
+    address private constant ETH_ADDRESS = address(0x0303030303030303030303030303030303030303);
+
+    bytes32 private constant VARA_ADDRESS_7 = bytes32(0x0707070707070707070707070707070707070707070707070707070707070707);
+    address private constant ETH_ADDRESS_5 = address(0x0505050505050505050505050505050505050505);
+
 
     function setUp() public {
         Prover _prover = new Prover();
@@ -57,15 +63,10 @@ contract MessageQueueTest is Test {
         treasury.deposit(address(erc20_token), amount);
 
 
-        uint256[] memory public_inputs = new uint256[](6);
-        public_inputs[0] = 3544317610574872;
-        public_inputs[1] = 3818006324670434;
-        public_inputs[2] = 1609100126983798;
-        public_inputs[3] = 2043470627881931;
-        public_inputs[4] = 194624568354568;
-        public_inputs[5] = 18446744069414584595;
-
-        bytes memory proof = bytes(hex"18d39978105e6371129a8c670c4958719bf0b860646c2dd760a14c6b5aa04b8e1682aec235c07cc291c2bc14670ab30db45b6c6ce53e7d6e42d5d4837a6a0120183d34eb74c7afdf6d88b54e1bde6948e7f566f6cc374e8bec0ab5553e2b95392ecb009497004b9defb864e8756bbfc830dc0e1f505687c9c4779a32f6783943262140c77797264ea54462073603c736a6c78b20a3016f5493f5cf95556ee81e29ed533dc33499c78e45b8c3c36993a6ad812b7073d8f4ca1a61da68b44e28d00cca5e1481a5bf5fea36beae27af01d45bf45ae9d239fd0e03943c7572c4a7bc2a6770a5201926e0d1c6779e580553bc7cfffafd226b0db88be65e8e9f8a77f90ead631a96254c7ad8b6138976435cb6685e7dd5f567290ac6a4e6e4715cdd441418e1ec0c96cca970d2edc68c95b14e42a0bedb073038588c452fcc3ab85c5d1725a1a7880200a962e465e0f9d3f17fc3159f80fbfd30dc098cdc1a99737c44091712fdc9915499cb86525dca25f08198a7b402679d863eb2a02445fad7e28429afaf7c029fe6de81b785f1453e2f44c0c97c0618519c25c955c64156bc4ebe108f6d877fd532555f808b338826e1234c20bb2ccb22da3115fc75d93e41b0b21bd41532aafe2c5ac3ce6cc421cd2c4617aefb685fe0edeaa4938e6dd517820d09da9f3f01d8ede516dac6789e50a13567d2e439eeafdbfa2591a3ddfb128853087aae48a9d53e1d8fb48ee4515b37291704f31cf4d884035920a722325c47d404f63a5ab3833cc17c7117d088197ede501a1d2aa5e26cfbc4946734edf825a80c0bd829d71a6ff5be13ff2c21cb0e3dce66f73f7c30deae6c08738a0b6f231502620c55b44eeb77d256650ba7ade32188a7b72a1758cfc9b0df08e96db5728d2da080f494511bb845c10e66678a76337ebb3dd38980c827543059a159f7fdb62383d97cb2a8b89e16bbefd2111f7d67f0f396e10468e916e85c56b65222294520172052b927228118ade9c2a5345d38831c1ec55bb06534ee94ba43c072f7fa2303ac1d8973c436bb1c7b32bb904bb14c0bf00d8aaf28ff1c7f1f4cf8f7767e105c59c10c4daf99ddc0bcfb3cf4d124613dc9beeee7432d69312f3173edf7d31b1920e827a8ac303e56138695f31ea541b623e6b42cf3fc32635b806dc2f80c1a9c32580fe608a068ce6ad82d81aec14d4ff6e4289716e2d775764554fa24cb2e6766d5885115b9ba39aabcfe166368906efca5c804adecb21f7e84a9ba51b91cac472170ed426ab2407c18a25e5dd9dbdefaceed5249559e537100d9aad4df");
+        uint256[] memory public_inputs = new uint256[](2);
+        public_inputs[0] = 3980403427572212499963242599334442163722879490045996792884;
+        public_inputs[1] = 1166562204472425303272494454897619262805894610326304849920;
+        bytes memory proof = bytes(hex"203b6d7ee470fd6201aac1d849603241e3303f0ed38c6caeffeafa7708a700f0219f2065a8517c79e6c5dd7f3cf97709fea069f2e30787d283ea75461bcfb7231020f6d4cda614519936afcfd343abd4ec6620c722ca4ac82facdda42526927724e59115798dae55e08fbb386e18d9d843015168b94802845012f7943dd6e6560e90e844f40e7e20d1bbc1221f997cc57308601436354424e3ad38e5060dff630779a7b023f1af6923d9ec2d5f42ee311c387de28e24a5d4e689af858e8ff8b80182ca8d21874a644a26dafe33531d6f626aadd0436ff341ca72c5bad16506580c7e2ab7d32c38097c5ca47fe23bb118a75963b23ad671eff3edae03b30443ad28b05c94bb33b5dda0601a2e448e9bcff356a20aca2fca8548b3aa589d9ab3cf0661bc6e5fc4a2fd9cf752daa21d89c1c68300e0e6611d3461a6cf5b2111de14006cbc8af011601630a2940a972a880adfbe689f2bec6d53ecbda6a1408dece008702afebed1dbcf1be649d794abb58afac334310a248655ddba60e50076a05a206eaa36097d6572598071e178e79675c05ecf48bf64bb1fd19cb3df06c7c6af129bbdac42d8b090938ea97fc22f6cd607a44e168c625bf19254e1c4fe09b6a600b2f423299b72662a65ef56fce78a3ec88ade6ca54848619bf1da88764804b909d6f1e2d3e60e0b52622b64df9d56f5e743628b82c17a688be2b70cb37aef0211f854d5fa134e51a631225c700746d40ef9fdd8c10324949f4b50ab3ab25f5c1352fbaebb8b145be5c2f287899f0547d47254fd47a68ab2bdb4cfc6e9109d7a14d3b2e41225840451765085cd1799c88f270d6356e3a096cbf53a6f1c7838f5036e02246259487f2f340cd0d41ebe2b403e5596361f90c68fadde8aa891e7200b504aa7ff0b5dff127c695b0f7c33b4e1d4e57c03820ed492dc121796e096cc2ec27ee9037b56e0ca44693352ac335b687b757fdfb87136cfde7cf1865d54b9066ba8e5e9bdbf0fbdab7b1a02840ef1c415a51e74d9ef0812d9bd67e3a413b818d7fbab3649c5a5d8705d896f0a1a3b140d938486b99830c171108a862b0fa72e0943712e094e05cf1b5d50ee5422962bde5d533a4d7cc7ee7b2824148e71d81a3a3a8ec8091f8b52bc11ffe5189516441a01815250defe8d1e1e4150c4852c0ac274e45671a86b35be16b26f69bb60945f40e0caca8efbb998a268cf9db32927fd92d29a36c1b33d7bfe0540580c7a6628bcd28ead55135d8ad785b6e0424d1e870edf3353bad820bf5c7fa6e4fda335793fde58de57e062990001a8a30e07");
 
 
         relayer.submit_merkle_root(public_inputs, proof);
@@ -74,30 +75,255 @@ contract MessageQueueTest is Test {
     }
 
 
-    function testWithdraw() public {
-        ContentMessage memory content_message = ContentMessage({
-            eth_address: address(treasury),
-            vara_address: VARA_ID,
-            nonce: 1,
-            data: abi.encode(address(erc20_token), address(this), 100)
-        });
+    function test_calculate_root_buffer() public {
 
-        VaraMessage memory vara_message = VaraMessage({
-            block_number: BLOCK_ID,
-            content: content_message,
-            proof: bytes("")
-        });
+        uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
+        bytes memory m = new bytes(msgt.length);
+        for (uint i = 0; i < m.length; i ++) {
+            m[i] = bytes1(msgt[i]);
+        }
 
-        bytes32 messageHash = content_message.hash();
-        bytes32[] memory proof = new bytes32[](0);
+        bytes32 messageHash = keccak256(m);
+        console.logBytes32(messageHash);
 
-        message_queue.process_message(BLOCK_ID, content_message, proof);
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = bytes32(0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8);
 
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, messageHash));
-        message_queue.process_message(BLOCK_ID, content_message, proof);
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 3, 2);
 
+        assertEq(root, bytes32(0x9f88b3c5da39e8d08c9ce048d51e9be248a1c07b2abc986ea5522d2f8e662044));
 
     }
 
+
+    function test_calculate_root_buffer_2() public {
+
+        uint8[86] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
+        bytes memory m = new bytes(msgt.length);
+        for (uint i = 0; i < m.length; i ++) {
+            m[i] = bytes1(msgt[i]);
+        }
+
+        bytes32 messageHash = keccak256(m);
+        console.logBytes32(messageHash);
+
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = bytes32(0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e);
+        console.logBytes32(proof[0]);
+
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 3, 2);
+
+        assertEq(root, bytes32(0xbd0053b78e8ecfb691c483db70d9792b0ff1b9956dc78967af2c4d4f1872f206));
+
+    }
+
+
+    function test_calculate_root_buffer_3() public {
+
+        uint8[98] memory msgt = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
+        bytes memory m = new bytes(msgt.length);
+        for (uint i = 0; i < m.length; i ++) {
+            m[i] = bytes1(msgt[i]);
+        }
+
+        bytes32 messageHash = keccak256(m);
+        console.logBytes32(messageHash);
+
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = bytes32(0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8);
+        console.logBytes32(proof[0]);
+
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 3, 2);
+
+        assertEq(root, bytes32(0x7188ce46fd6dc24003be8667cd73ca4a4cef97687b21343020681d2e192f5fcc));
+
+    }
+
+    function test_calculate_root() public {
+        uint8[2] memory msgt = [3, 3];
+        bytes memory m = new bytes(msgt.length);
+        for (uint i = 0; i < m.length; i ++) {
+            m[i] = bytes1(msgt[i]);
+        }
+
+        bytes memory payload = abi.encodePacked(m);
+
+        ContentMessage memory content_message = ContentMessage({
+            vara_address: VARA_ADDRESS,
+            eth_address: ETH_ADDRESS,
+            nonce: 3,
+            data: payload
+        });
+
+
+        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
+
+        /*for (uint i = 0; i < ms.length; i ++) {
+            console.log(uint256(uint8(ms[i])));
+        }*/
+
+
+        bytes32 messageHash = keccak256(ms);
+        console.logBytes32(messageHash);
+
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = bytes32(0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e);
+
+
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 3, 2);
+
+        assertEq(root, bytes32(0xbd0053b78e8ecfb691c483db70d9792b0ff1b9956dc78967af2c4d4f1872f206));
+
+    }
+
+    function test_calculate_root_buffer_leaf_2() public {
+        uint8[98] memory msgt = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2];
+
+        bytes memory ms = new bytes(msgt.length);
+        for (uint i = 0; i < ms.length; i ++) {
+            ms[i] = bytes1(msgt[i]);
+        }
+
+        /*
+        uint8[3] memory msgt = [3, 3, 3];
+            bytes memory m = new bytes(msgt.length);
+            for (uint i = 0; i < m.length; i ++) {
+                m[i] = bytes1(msgt[i]);
+            }
+
+            bytes memory payload = abi.encodePacked(m);
+
+
+            ContentMessage memory content_message = ContentMessage({
+                vara_address: VARA_ADDRESS_7,
+                eth_address: ETH_ADDRESS_5,
+                nonce: 10,
+                data: payload
+            });
+
+
+        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
+            */
+
+        /*for (uint i = 0; i < ms.length; i ++) {
+            console.log(uint256(uint8(ms[i])));
+        }*/
+
+
+        bytes32 messageHash = keccak256(ms);
+        console.logBytes32(messageHash);
+
+        //assertEq(messageHash, bytes32(0x0bba4e1c18872dc9fb4ec6e1c9c3c842c2b1b06e9ef569a599fb0ed766989ff3));
+
+        bytes32[] memory proof = new bytes32[](7);
+        proof[0] = bytes32(0xac9f1d13ebef420edd0101b06f534ec2495ca41af6c23cf14bc94f67bae8dfe1);
+        proof[1] = bytes32(0x30cdfaedf81fed4b4564ef0e8c04c56d3481e0121501c2dcc12288e01f3ceb94);
+        proof[2] = bytes32(0xf87bc57ba7962a2b733f78df0e777ca31499b78c4d6f64c6d49ab0fd1dc60f44);
+        proof[3] = bytes32(0xed0dcf662c10b0827133e6e99e415b0d97da1a92ce69eb717838d55cc9067c49);
+        proof[4] = bytes32(0x2387406c963403e53d56621d1cef73b80089994ee4c5866ae2d21eaa9fcdfe01);
+        proof[5] = bytes32(0x08ab6b1030ad30cece656ac2638a8aed651bd759a6486241a293610f84927f52);
+        proof[6] = bytes32(0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac);
+
+
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 101, 2);
+
+        assertEq(root, bytes32(0xbd18567f3cd28d09dc4f8b0f367415dc19f0e32d47424015eaf22103a4bf4cb3));
+
+    }
+
+    function test_calculate_root_buffer_leaf_3() public {
+        uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
+
+        bytes memory ms = new bytes(msgt.length);
+        for (uint i = 0; i < ms.length; i ++) {
+            ms[i] = bytes1(msgt[i]);
+        }
+
+        /*
+        uint8[3] memory msgt = [3, 3, 3];
+            bytes memory m = new bytes(msgt.length);
+            for (uint i = 0; i < m.length; i ++) {
+                m[i] = bytes1(msgt[i]);
+            }
+
+            bytes memory payload = abi.encodePacked(m);
+
+
+            ContentMessage memory content_message = ContentMessage({
+                vara_address: VARA_ADDRESS_7,
+                eth_address: ETH_ADDRESS_5,
+                nonce: 10,
+                data: payload
+            });
+
+
+        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
+            */
+
+        /*for (uint i = 0; i < ms.length; i ++) {
+            console.log(uint256(uint8(ms[i])));
+        }*/
+
+
+        bytes32 messageHash = keccak256(ms);
+        console.logBytes32(messageHash);
+
+        //assertEq(messageHash, bytes32(0x0bba4e1c18872dc9fb4ec6e1c9c3c842c2b1b06e9ef569a599fb0ed766989ff3));
+
+        bytes32[] memory proof = new bytes32[](7);
+        proof[0] = bytes32(0x57caf83a5d10cdf3f3a28cdc6426da6a94ce5c2b966a8d08f948470358be53a8);
+        proof[1] = bytes32(0x30cdfaedf81fed4b4564ef0e8c04c56d3481e0121501c2dcc12288e01f3ceb94);
+        proof[2] = bytes32(0xf87bc57ba7962a2b733f78df0e777ca31499b78c4d6f64c6d49ab0fd1dc60f44);
+        proof[3] = bytes32(0xed0dcf662c10b0827133e6e99e415b0d97da1a92ce69eb717838d55cc9067c49);
+        proof[4] = bytes32(0x2387406c963403e53d56621d1cef73b80089994ee4c5866ae2d21eaa9fcdfe01);
+        proof[5] = bytes32(0x08ab6b1030ad30cece656ac2638a8aed651bd759a6486241a293610f84927f52);
+        proof[6] = bytes32(0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac);
+
+
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 101, 3);
+
+        assertEq(root, bytes32(0xbd18567f3cd28d09dc4f8b0f367415dc19f0e32d47424015eaf22103a4bf4cb3));
+
+    }
+
+    function test_calculate_root_buffer_leaf_100() public {
+        uint8[3] memory msgt = [3, 3, 3];
+        bytes memory m = new bytes(msgt.length);
+        for (uint i = 0; i < m.length; i ++) {
+            m[i] = bytes1(msgt[i]);
+        }
+
+        bytes memory payload = abi.encodePacked(m);
+
+
+        ContentMessage memory content_message = ContentMessage({
+            vara_address: VARA_ADDRESS_7,
+            eth_address: ETH_ADDRESS_5,
+            nonce: 10,
+            data: payload
+        });
+
+
+        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
+        for (uint i = 0; i < ms.length; i ++) {
+            console.log(uint256(uint8(ms[i])));
+        }
+
+        bytes32 messageHash = keccak256(ms);
+        console.logBytes32(messageHash);
+
+        assertEq(messageHash, bytes32(0xcee28748a98c81d3eb24f23af4876c8d71c75efc61416bfd2bb018390b138794));
+
+        bytes32[] memory proof = new bytes32[](3);
+        proof[0] = bytes32(0x69b655dccf32e0c3e4d4f427875a09b8cde36a2e6d1b980a8b1f8b134425652f);
+        proof[1] = bytes32(0x6d6e07bcb08ba34a789918ab09f0a8aabd1c42a1e7b8625448dab3ed03a02b59);
+        proof[2] = bytes32(0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b);
+
+
+        bytes32 root = message_queue.calculate_root(proof, messageHash, 101, 100);
+
+        assertEq(root, bytes32(0x8db8d383e63f1ff7bbd1b35d7d1f240f6fce68aa12e60cd3a446021f8cd04226));
+
+    }
 
 }

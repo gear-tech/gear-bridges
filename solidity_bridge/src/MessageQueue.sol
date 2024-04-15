@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 import {IProver} from "./interfaces/IProver.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
@@ -47,7 +46,43 @@ contract MessageQueue is IMessageQueue, AccessControl {
     }
 
 
-    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof) public {
+    function calc_merkle_root(
+        bytes32[] calldata proof,
+        bytes32 leaf,
+        uint256 width,
+        uint256 index
+    ) public pure returns (bytes32) {
+        bytes32 hash = leaf;
+
+        for (uint256 i = 0; i < proof.length; i++) {
+            bytes32 proofElement = proof[i];
+
+            if ((index % 2 == 1) || (index + 1 == width)) {
+                assembly {
+                    mstore(0x00, proofElement)
+                    mstore(0x20, hash)
+                    hash := keccak256(0x00, 0x40)
+                }
+            } else {
+                assembly {
+                    mstore(0x00, hash)
+                    mstore(0x20, proofElement)
+                    hash := keccak256(0x00, 0x40)
+                }
+            }
+
+            index = index / 2;
+            width = ((width - 1) / 2) + 1;
+        }
+
+        return hash;
+    }
+
+    function calculate_root(bytes32[] calldata proof, bytes32 leaf_hash, uint256 width, uint256 leaf_index) public view returns (bytes32) {
+        return calc_merkle_root(proof, leaf_hash, width, leaf_index);
+    }
+
+    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof, uint256 width, uint256 leaf_index) public {
         bytes32 msg_hash = message.hash();
 
         if (_processed_messages[msg_hash]) revert MessageAlreadyProcessed(msg_hash);
@@ -56,8 +91,7 @@ contract MessageQueue is IMessageQueue, AccessControl {
 
         if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
-
-        if (MerkleProof.processProofCalldata(proof, msg_hash) != merkle_root) revert BadProof();
+        if (calc_merkle_root(proof, msg_hash, width, leaf_index) != merkle_root) revert BadProof();
 
         _processed_messages[msg_hash] = true;
 

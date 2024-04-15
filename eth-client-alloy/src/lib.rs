@@ -195,10 +195,12 @@ mod tests {
     use crate::msg::ContentMessage;
     use crate::*;
     use alloy_node_bindings::{Anvil, AnvilInstance};
+    use alloy_primitives::keccak256;
     use alloy_provider::HttpProvider;
     use alloy_transport_http::Http;
     use binary_merkle_tree::{merkle_proof, merkle_root, verify_proof, Leaf, MerkleProof};
     use primitive_types::H256;
+    use sp_runtime::app_crypto::sp_core::keccak_256;
 
     #[allow(unused, unreachable_pub)]
     pub fn spawn_anvil() -> (HttpProvider<Ethereum>, AnvilInstance) {
@@ -327,24 +329,24 @@ mod tests {
     #[tokio::test]
     async fn verify_merkle_proof_for_msg() {
         let msg0 = ContentMessage {
-            eth_address: H256::random(),
-            vara_address: H256::random(),
+            eth_address: Address::repeat_byte(1),
+            vara_address: H256::repeat_byte(1),
             nonce: U256::from(1),
-            data: Bytes::from(vec![0]),
+            data: Bytes::from(vec![1, 1]),
             //buf: Default::default(),
         };
         let msg1 = ContentMessage {
-            eth_address: H256::random(),
-            vara_address: H256::random(),
+            eth_address: Address::repeat_byte(2),
+            vara_address: H256::repeat_byte(2),
             nonce: U256::from(2),
-            data: Bytes::from(vec![0]),
+            data: Bytes::from(vec![2, 2]),
             //buf: Default::default(),
         };
         let msg2 = ContentMessage {
-            eth_address: H256::random(),
-            vara_address: H256::random(),
+            vara_address: H256::repeat_byte(4),
+            eth_address: Address::repeat_byte(3),
             nonce: U256::from(3),
-            data: Bytes::from(vec![0]),
+            data: Bytes::from(vec![3, 3]),
             //buf: Default::default(),
         };
 
@@ -352,10 +354,64 @@ mod tests {
         let leaves = vec![msg0.to_bytes(), msg1.to_bytes(), msg2.to_bytes()];
 
         let root = merkle_root::<Keccak256, _>(leaves.clone());
-        let proof: MerkleProof<H256, _> = merkle_proof::<Keccak256, _, _>(leaves.clone(), 2);
+        let proof: MerkleProof<H256, Vec<u8>> =
+            merkle_proof::<Keccak256, _, Vec<u8>>(leaves.clone(), 2);
 
-        println!("leaves : {:?}", leaves);
-
+        let hash = keccak256(msg2.to_bytes());
         println!("Proof : {:?}", proof);
+        println!("leaves : {:?}", leaves);
+        println!("leaf hash: {:?}", hash);
+
+        let is_ok = verify_proof::<Keccak256, _, _>(
+            &proof.root,
+            proof.proof,
+            proof.number_of_leaves,
+            proof.leaf_index,
+            &proof.leaf,
+        );
+
+        println!("Ok: {:?}", is_ok);
+    }
+
+    #[tokio::test]
+    async fn verify_merkle_proof_for_msgs() {
+        let mut leaves: Vec<Vec<u8>> = Vec::new();
+
+        for i in 0..100 {
+            let msg = ContentMessage {
+                eth_address: Address::repeat_byte(i as u8),
+                vara_address: H256::repeat_byte(i as u8),
+                nonce: U256::from(i as u8),
+                data: Bytes::from(vec![i as u8, i as u8]),
+            };
+            leaves.push(msg.to_bytes())
+        }
+
+        let msg = ContentMessage {
+            vara_address: H256::repeat_byte(7),
+            eth_address: Address::repeat_byte(5),
+            nonce: U256::from(10),
+            data: Bytes::from(vec![3, 3, 3]),
+        };
+        leaves.push(msg.to_bytes());
+
+        let root = merkle_root::<Keccak256, _>(leaves.clone());
+        let proof: MerkleProof<H256, Vec<u8>> =
+            merkle_proof::<Keccak256, _, Vec<u8>>(leaves.clone(), 100);
+
+        let hash = keccak256(msg.to_bytes());
+        println!("Proof : {:?}", proof);
+        println!("leaves : {:?}", leaves);
+        println!("leaf hash: {:?}", hash);
+
+        let is_ok = verify_proof::<Keccak256, _, _>(
+            &proof.root,
+            proof.proof,
+            proof.number_of_leaves,
+            proof.leaf_index,
+            &proof.leaf,
+        );
+
+        println!("Ok: {:?}", is_ok);
     }
 }

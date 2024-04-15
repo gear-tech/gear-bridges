@@ -8,8 +8,8 @@ pragma solidity ^0.8.24;
 
 
     struct ContentMessage {
-        address eth_address;
         bytes32 vara_address;
+        address eth_address;
         uint256 nonce;
         bytes data;
     }
@@ -24,8 +24,9 @@ interface IMessageQueue {
     event ProoverAddressUpdated(address proover);
     event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash);
 
+    function calculate_root(bytes32[] calldata proof, bytes32 hash, uint256 width, uint256 leaf_index) external view returns (bytes32);
 
-    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof) external;
+    function process_message(uint256 block_number, ContentMessage calldata message, bytes32[] calldata proof, uint256 width, uint256 leaf_index) external;
 }
 
 library Hasher {

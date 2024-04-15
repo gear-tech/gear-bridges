@@ -28,7 +28,6 @@ impl_parsable_target_set! {
 }
 
 #[derive(Clone)]
-
 pub struct BranchNodeData {
     pub data: Vec<u8>,
     pub child_nibble: u8,

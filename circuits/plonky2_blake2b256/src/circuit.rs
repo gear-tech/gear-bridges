@@ -118,15 +118,7 @@ pub fn blake2_circuit_from_message_targets_and_length_target<
             block
                 .to_vec()
                 .chunks(WORD_BITS)
-                .map(|bits| {
-                    bits.to_vec()
-                        .chunks(8)
-                        .flatten()
-                        .copied()
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .unwrap()
-                })
+                .map(|bits| bits.to_vec().try_into().unwrap())
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap()

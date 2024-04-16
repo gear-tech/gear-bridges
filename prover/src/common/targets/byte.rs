@@ -5,7 +5,10 @@ pub struct ByteTarget(Target);
 
 impl TargetSet for ByteTarget {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(raw.next().unwrap())
+        Self(
+            raw.next()
+                .expect("Insufficient targets to construct ByteTarget"),
+        )
     }
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
@@ -20,7 +23,7 @@ impl ParsableTargetSet for ByteTarget {
         public_inputs
             .next()
             .map(|pi| pi.to_canonical_u64() as u8)
-            .unwrap()
+            .expect("Insufficient public inputs to construct ByteTarget public inputs")
     }
 }
 
@@ -60,21 +63,22 @@ impl ByteTarget {
 
     /// Arranged from less to most significant bit.
     pub fn to_bit_targets(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
-        ArrayTarget(builder.low_bits(self.0, 8, 8).try_into().unwrap())
+        ArrayTarget(
+            builder
+                .low_bits(self.0, 8, 8)
+                .try_into()
+                .expect("8 bits to be returned from CircuitBuilder::low_bits"),
+        )
     }
 
     /// Arranged from less to most significant bit.
     pub fn from_bit_targets(bits: [BoolTarget; 8], builder: &mut CircuitBuilder<F, D>) -> Self {
-        let target = bits
-            .into_iter()
-            .enumerate()
-            .map(|(bit_idx, bit)| {
-                builder.mul_const(F::from_canonical_usize(1 << bit_idx), bit.target)
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .reduce(|acc, x| builder.add(acc, x))
-            .unwrap();
-        Self(target)
+        let mut sum = builder.zero();
+        for bit_idx in 0..bits.len() {
+            let bit_value =
+                builder.mul_const(F::from_canonical_usize(1 << bit_idx), bits[bit_idx].target);
+            sum = builder.add(sum, bit_value);
+        }
+        Self(sum)
     }
 }

@@ -282,7 +282,7 @@ mod tests {
             .take(16)
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap()
+            .expect("Correct length of iterator")
     }
 
     fn test_case(

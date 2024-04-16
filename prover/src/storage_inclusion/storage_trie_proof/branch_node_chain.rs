@@ -115,7 +115,7 @@ impl BranchNodeChain {
             composed_proof = Some(new_proof);
         }
 
-        composed_proof.unwrap()
+        composed_proof.expect("Non-zero node count")
     }
 }
 

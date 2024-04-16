@@ -24,6 +24,8 @@ use crate::{
     ProofWithCircuitData,
 };
 
+use super::pad_byte_vec;
+
 const MAX_BLOCK_COUNT: usize = 8;
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
@@ -61,7 +63,12 @@ impl GenericBlake2 {
             .map(|verifier_data| builder.constant_verifier_data(verifier_data))
             .collect::<Vec<_>>();
         for _ in verifier_data_targets.len()..verifier_data_targets.len().next_power_of_two() {
-            verifier_data_targets.push(verifier_data_targets.last().unwrap().clone());
+            verifier_data_targets.push(
+                verifier_data_targets
+                    .last()
+                    .expect("VERIFIER_DATA_BY_BLOCK_COUNT >= 1")
+                    .clone(),
+            );
         }
 
         let verifier_data_idx = builder.add_const(block_count_target, F::NEG_ONE);
@@ -96,7 +103,7 @@ lazy_static! {
         .map(blake2_circuit_verifier_data)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap();
+        .expect("Correct max block count");
 }
 
 fn blake2_circuit_verifier_data(num_blocks: usize) -> VerifierOnlyCircuitData<C, D> {
@@ -132,19 +139,11 @@ impl VariativeBlake2 {
         let length_target = builder.add_virtual_target();
         witness.set_target(length_target, F::from_canonical_usize(self.data.len()));
 
-        let data_target: [ByteTarget; MAX_DATA_BYTES] = self
-            .data
-            .into_iter()
-            .chain(iter::repeat(0))
-            .take(MAX_DATA_BYTES)
-            .map(|byte| {
-                let target = builder.add_virtual_target();
-                witness.set_target(target, F::from_canonical_u8(byte));
-                ByteTarget::from_target_safe(target, &mut builder)
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec(self.data).map(|byte| {
+            let target = builder.add_virtual_target();
+            witness.set_target(target, F::from_canonical_u8(byte));
+            ByteTarget::from_target_safe(target, &mut builder)
+        });
 
         // Assert that padding is zeroed.
         let mut data_end = builder._false();
@@ -215,7 +214,6 @@ mod tests {
         Blake2bVar,
     };
     use plonky2::plonk::circuit_data::VerifierCircuitData;
-    use plonky2_blake2b256::circuit::BLOCK_BYTES;
 
     use super::*;
     use crate::common::{array_to_bits, targets::ParsableTargetSet};
@@ -247,10 +245,12 @@ mod tests {
     }
 
     fn test_case(data: Vec<u8>) -> VerifierCircuitData<F, C, D> {
-        let mut hasher = Blake2bVar::new(32).unwrap();
+        let mut hasher = Blake2bVar::new(32).expect("Blake2bVar instantiated");
         hasher.update(&data);
         let mut real_hash = [0; 32];
-        hasher.finalize_variable(&mut real_hash).unwrap();
+        hasher
+            .finalize_variable(&mut real_hash)
+            .expect("Hash of correct length");
 
         let proof = GenericBlake2 { data: data.clone() }.prove();
         let public_inputs =

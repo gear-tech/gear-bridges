@@ -298,7 +298,7 @@ impl Circuit {
                 &inner_cyclic_proof_with_pis,
                 &common_data,
             )
-            .unwrap();
+            .expect("Failed to build circuit");
 
         let cyclic_circuit_data = builder.build::<C>();
 

@@ -182,13 +182,18 @@ impl BranchParser {
 
     fn parse_metadata(&self) -> Metadata {
         type TrieCodec = <sp_trie::LayoutV1<sp_core::Blake2Hasher> as TrieLayout>::Codec;
-        let node = TrieCodec::decode(&self.node_data).unwrap();
+        let node = TrieCodec::decode(&self.node_data).expect("Failed to decode node data");
 
         if let Node::NibbledBranch(_, children, value) = node {
             assert!(value.is_none(), "Non-empty value is not supported");
 
-            let children: [Option<ChildReference<H256>>; 16] =
-                children.map(|child| child.map(|child| child.try_into().unwrap()));
+            let children: [Option<ChildReference<H256>>; 16] = children.map(|child| {
+                child.map(|child| {
+                    child
+                        .try_into()
+                        .expect("Failed to convert NodeHandle to ChildReference")
+                })
+            });
 
             let claimed_child_hash = if let Some(ChildReference::Hash(child_hash)) =
                 &children[self.claimed_child_node_nibble as usize]
@@ -233,7 +238,7 @@ impl BranchParser {
 #[cfg(test)]
 mod tests {
     use std::iter;
-    use trie_db::{ChildReference, NibbleSlice};
+    use trie_db::NibbleSlice;
 
     use super::*;
     use crate::common::{pad_byte_vec, targets::ParsableTargetSet};

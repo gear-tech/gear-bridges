@@ -102,13 +102,18 @@ async fn main() {
     match cli.command {
         CliCommands::Prove(prove_command) => match prove_command {
             ProveCommands::Genesis { args } => {
-                let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                let api = GearApi::new(&args.vara_endpoint.vara_endpoint)
+                    .await
+                    .unwrap();
                 let (block, current_epoch_block_finality) = api
                     .fetch_finality_proof_for_session(GENESIS_AUTHORITY_SET_ID)
-                    .await;
+                    .await
+                    .unwrap();
 
-                let next_validator_set_inclusion_proof =
-                    api.fetch_next_session_keys_inclusion_proof(block).await;
+                let next_validator_set_inclusion_proof = api
+                    .fetch_next_session_keys_inclusion_proof(block)
+                    .await
+                    .unwrap();
                 let next_validator_set_storage_data = next_validator_set_inclusion_proof
                     .storage_inclusion_proof
                     .storage_data
@@ -138,7 +143,9 @@ async fn main() {
                     .unwrap();
             }
             ProveCommands::ValidatorSetChange { args } => {
-                let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                let api = GearApi::new(&args.vara_endpoint.vara_endpoint)
+                    .await
+                    .unwrap();
 
                 let latest_proof = proof_storage
                     .get_latest_proof()
@@ -149,11 +156,15 @@ async fn main() {
 
                 let validator_set_id = latest_proof_public_inputs.current_set_id;
 
-                let (block, current_epoch_block_finality) =
-                    api.fetch_finality_proof_for_session(validator_set_id).await;
+                let (block, current_epoch_block_finality) = api
+                    .fetch_finality_proof_for_session(validator_set_id)
+                    .await
+                    .unwrap();
 
-                let next_validator_set_inclusion_proof =
-                    api.fetch_next_session_keys_inclusion_proof(block).await;
+                let next_validator_set_inclusion_proof = api
+                    .fetch_next_session_keys_inclusion_proof(block)
+                    .await
+                    .unwrap();
                 let next_validator_set_storage_data = next_validator_set_inclusion_proof
                     .storage_inclusion_proof
                     .storage_data
@@ -183,7 +194,9 @@ async fn main() {
                     .unwrap();
             }
             ProveCommands::Wrapped { args } => {
-                let api = GearApi::new(&args.vara_endpoint.vara_endpoint).await;
+                let api = GearApi::new(&args.vara_endpoint.vara_endpoint)
+                    .await
+                    .unwrap();
 
                 let latest_proof = proof_storage
                     .get_latest_proof()
@@ -194,11 +207,12 @@ async fn main() {
 
                 let block = api
                     .search_for_validator_set_block(latest_proof_public_inputs.current_set_id)
-                    .await;
-                let (block, block_finality) = api.fetch_finality_proof(block).await;
+                    .await
+                    .unwrap();
+                let (block, block_finality) = api.fetch_finality_proof(block).await.unwrap();
 
                 let sent_message_inclusion_proof =
-                    api.fetch_sent_message_inclusion_proof(block).await;
+                    api.fetch_sent_message_inclusion_proof(block).await.unwrap();
 
                 let sent_message_storage_data = sent_message_inclusion_proof
                     .storage_inclusion_proof

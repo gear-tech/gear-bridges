@@ -9,6 +9,7 @@ prover.workspace = true
 hex.workspace = true
 futures-util.workspace = true
 
+anyhow.workspace = true
 gsdk.workspace = true
 subxt.workspace = true
 pallet-grandpa.workspace = true

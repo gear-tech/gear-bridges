@@ -73,15 +73,20 @@ contract TreasuryTest is Test {
     }
 
     function test_withdraw() public {
-        uint256 amount = 100 * (10 ** 18);
+        uint128 amount = 100 * (10 ** 18);
         erc20_token.approve(address(treasury), amount);
         treasury.deposit(address(erc20_token), amount);
 
+        bytes memory call_data = abi.encodePacked(address(this), address(erc20_token), amount);
+        console.log(amount);
+        console.logBytes(call_data);
+
         vm.expectRevert();
-        address(treasury).functionCall(abi.encode(address(erc20_token), address(this), amount));
+        address(treasury).functionCall(call_data);
+
 
         vm.prank(address(message_queue));
-        address(treasury).functionCall(abi.encode(address(erc20_token), address(this), amount));
+        address(treasury).functionCall(call_data);
 
     }
 

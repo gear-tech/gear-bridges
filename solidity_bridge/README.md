@@ -3,27 +3,39 @@
 ./interfaces/IMessageQueue.sol
 
 ```solidity
-
-
-    struct VaraMessage {
-        bytes32 vara_address;
-        address eth_address;
-        uint256 nonce;
-        bytes data;
-    }
+struct VaraMessage {
+    bytes32 vara_address;
+    address eth_address;
+    uint256 nonce;
+    bytes data;
+}
 
 
     function process_message(VaraMessage calldata message) external;
 ```
 
-Bytes[0..=0x1F] VaraAddress
-Bytes[0x20..=0x33] EthAddress
-Nonce[0x34..=0x53] Nonce
-Data[0x54..]
+- Bytes[0..=0x1F] VaraAddress
+- Bytes[0x20..=0x33] EthAddress
+- Bytes[0x34..=0x53] Nonce
+- Bytes[0x54..]
+
+./interfaces/ITreasury.sol
+
+```solidity
+struct WithdrawMessage {
+    address receiver;
+    address token;
+    uint128 amount;
+}
+```
+
+- Bytes[0..=0x13] Receiver
+- Bytes[0x14..=0x27] Token
+- Bytes[0x28..=0x37] Amount
 
 ./interfaces/IMessageQueue.sol
 
-```
+```solidity
 library Hasher {
     function hash(VaraMessage calldata message) external pure returns (bytes32) {
         bytes memory data = abi.encodePacked(message.vara_address, message.eth_address, message.nonce, message.data);

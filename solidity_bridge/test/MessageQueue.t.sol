@@ -7,9 +7,10 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Test, console} from "forge-std/Test.sol";
 import {Prover} from "../src/mocks/ProverMock.sol";
 import {Relayer} from "../src/Relayer.sol";
+import {IRelayer} from "../src/interfaces/IRelayer.sol";
 
 import {Treasury} from "../src/Treasury.sol";
-import {ITreasury} from "../src/interfaces/ITreasury.sol";
+import {ITreasury, Packer, WithdrawMessage} from "../src/interfaces/ITreasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {IMessageQueue, VaraMessage, Hasher} from "../src/interfaces/IMessageQueue.sol";
@@ -26,6 +27,7 @@ contract MessageQueueTest is Test {
     MessageQueue public message_queue;
     using Address for address;
     using Hasher for VaraMessage;
+    using Packer for WithdrawMessage;
 
     ERC20Mock public erc20_token;
 
@@ -276,4 +278,43 @@ contract MessageQueueTest is Test {
 
     }
 
+    function test_submit_transaction() public {
+        WithdrawMessage memory withdraw_msg = WithdrawMessage({
+            receiver: address(1),
+            token: address(erc20_token),
+            amount: 10 * (10 ** 18)
+        });
+
+
+        VaraMessage memory vara_message = VaraMessage({
+            vara_address: VARA_ADDRESS_7,
+            eth_address: address(treasury),
+            nonce: 10,
+            data: withdraw_msg.pack()
+        });
+
+        bytes32 msg_hash = vara_message.hash();
+        bytes32[] memory proof = new bytes32[](3);
+
+        proof[0] = bytes32(0x69b655dccf32e0c3e4d4f427875a09b8cde36a2e6d1b980a8b1f8b134425652f);
+        proof[1] = bytes32(0x6d6e07bcb08ba34a789918ab09f0a8aabd1c42a1e7b8625448dab3ed03a02b59);
+        proof[2] = bytes32(0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b);
+
+        bytes32 root = message_queue.calculate_root(proof, msg_hash, 101, 100);
+
+
+        assertEq(root, bytes32(0x67c7ab96d419d665ed1ebdc8a1a10c96de96e9d84b58f018d3def90c3b6353cf));
+
+        uint256[] memory public_inputs = relayer.build_public_inputs(root, 1234);
+
+        bytes memory block_proof = bytes(hex"00");
+
+        vm.expectEmit(true, true, false, false);
+        emit IRelayer.MerkleRoot(1234, root);
+
+        relayer.submit_merkle_root(public_inputs, block_proof);
+
+        message_queue.process_message(1234, 101, 100, vara_message, proof);
+
+    }
 }

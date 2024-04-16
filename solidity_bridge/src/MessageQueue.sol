@@ -79,15 +79,14 @@ contract MessageQueue is IMessageQueue, AccessControl {
         if (_calc_merkle_root(proof, msg_hash, total_leaves, leaf_index) != merkle_root) revert BadProof();
 
         _processed_messages[msg_hash] = true;
-
+        
         message.eth_address.functionCall(message.data);
 
         emit MessageProcessed(block_number, msg_hash);
     }
 
     function is_processed(VaraMessage calldata message) external view returns (bool) {
-        bytes32 msg_hash = message.hash();
-        return _processed_messages[msg_hash];
+        return _processed_messages[message.hash()];
     }
 
 

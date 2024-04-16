@@ -27,15 +27,24 @@ contract Treasury is ITreasury, Context, AccessControl {
         emit Deposit(_msgSender(), token, amount);
     }
 
-    function withdraw(address token, address to, uint256 amount) internal {
+    function _withdraw(address token, address to, uint256 amount) internal {
         IERC20(token).safeTransfer(to, amount);
         emit Withdraw(token, to, amount);
     }
 
-    fallback(bytes calldata data) onlyRole(Constants.MESSAGE_QUEUE_ROLE) external returns (bytes memory){
-        (address token, address to, uint256 amount) = abi.decode(data, (address, address, uint256));
-        withdraw(token, to, amount);
-        return (bytes(""));
+
+    fallback() onlyRole(Constants.MESSAGE_QUEUE_ROLE) external {
+        uint160 receiver;
+        uint160 token;
+        uint256 amount;
+
+        assembly {
+            receiver := shr(96, calldataload(0))
+            token := shr(96, calldataload(20))
+            amount := shr(128, calldataload(40))
+        }
+        _withdraw(address(token), address(receiver), amount);
+
     }
 
 }

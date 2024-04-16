@@ -2,10 +2,11 @@ use itertools::Itertools;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
-        witness::WitnessWrite,
+        witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
-        circuit_data::{CircuitData, CommonCircuitData},
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
@@ -17,19 +18,30 @@ use rayon::{
 };
 use std::{iter, sync::mpsc::channel};
 
+mod indexed_validator_sign;
+mod single_validator_sign;
+
 use crate::{
     common::{
         array_to_bits, common_data_for_recursion,
         targets::{
-            impl_parsable_target_set, impl_target_set, ParsableTargetSet, VerifierDataTarget,
+            impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
+            VerifierDataTarget,
         },
+        BuilderExt,
     },
-    prelude::*,
+    prelude::{
+        consts::{BLAKE2_DIGEST_SIZE, GRANDPA_VOTE_LENGTH},
+        *,
+    },
+    ProofWithCircuitData,
 };
 
-use self::{consts::BLAKE2_DIGEST_SIZE, indexed_validator_sign::IndexedValidatorSignTarget};
+use self::indexed_validator_sign::IndexedValidatorSignTarget;
 
-use super::{indexed_validator_sign::IndexedValidatorSign, *};
+use indexed_validator_sign::IndexedValidatorSign;
+
+use super::{validator_set_hash::ValidatorSetHash, GrandpaVoteTarget, ProcessedPreCommit};
 
 const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
@@ -213,7 +225,7 @@ impl SignComposition {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven sign composition recursion layer(initial)...");
 
@@ -230,7 +242,7 @@ impl SignComposition {
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven sign composition recursion layer");
 

@@ -1,5 +1,4 @@
 #![allow(incomplete_features)]
-#![feature(return_position_impl_trait_in_trait)]
 
 use jemallocator::Jemalloc;
 
@@ -22,12 +21,10 @@ pub mod prelude {
     pub type C = PoseidonGoldilocksConfig;
     pub const D: usize = 2;
 
-    pub(crate) use super::consts;
-
-    pub use super::consts::GENESIS_AUTHORITY_SET_ID;
+    pub use super::consts;
 }
 
-pub(crate) mod consts {
+pub mod consts {
     pub const CIRCUIT_DIGEST_SIZE: usize = 4;
 
     // For now we send a single Keccak256 hash.

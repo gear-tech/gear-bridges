@@ -15,14 +15,11 @@ use crate::{
     ProofWithCircuitData,
 };
 
-mod indexed_validator_sign;
 pub mod validator_set_hash;
 mod validator_signs_chain;
 
 use validator_set_hash::ValidatorSetHash;
 use validator_signs_chain::ValidatorSignsChain;
-
-use self::validator_set_hash::ValidatorSetHashTarget;
 
 impl_target_set! {
     pub struct BlockFinalityTarget {

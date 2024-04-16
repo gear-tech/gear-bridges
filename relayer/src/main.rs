@@ -2,7 +2,7 @@ extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
 
-use intermediate_proof_storage::{PersistentMockProofStorage, ProofStorage};
+use intermediate_proof_storage::{FileSystemProofStorage, ProofStorage};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use std::time::Instant;
 
@@ -97,7 +97,7 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let mut proof_storage = PersistentMockProofStorage::new("./proof_storage".into());
+    let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
 
     match cli.command {
         CliCommands::Prove(prove_command) => match prove_command {

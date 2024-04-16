@@ -2620,6 +2620,7 @@ dependencies = [
 name = "gear-rpc-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "futures-util",
  "gsdk",
  "hex",
@@ -3231,6 +3232,7 @@ name = "intermediate-proof-storage"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "log",
  "plonky2",
  "prover",
  "serde_json",

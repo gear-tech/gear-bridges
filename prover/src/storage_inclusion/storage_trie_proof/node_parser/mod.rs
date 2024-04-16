@@ -39,7 +39,7 @@ impl ParsableTargetSet for NodeDataBlockTarget {
             .map(|pi| pi.to_canonical_u64() as u8)
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap()
+            .expect("Insufficient amount of public inputs to construct NodeDataBlockTarget public inputs")
     }
 }
 
@@ -91,11 +91,8 @@ impl ParsableTargetSet for BranchNodeDataPaddedTarget {
     type PublicInputsData = [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS];
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        (0..MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
+        [(); MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS]
             .map(|_| NodeDataBlockTarget::parse_public_inputs(public_inputs))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
     }
 }
 
@@ -112,11 +109,7 @@ impl BranchNodeDataPaddedTarget {
         builder: &mut CircuitBuilder<F, D>,
         create_block: impl Fn(&mut CircuitBuilder<F, D>) -> NodeDataBlockTarget,
     ) -> Self {
-        let targets = (0..MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS)
-            .map(|_| create_block(builder))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        let targets = [(); MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS].map(|_| create_block(builder));
         Self(ArrayTarget(targets))
     }
 
@@ -143,9 +136,11 @@ impl BranchNodeDataPaddedTarget {
                 let read_at = builder.add(at, offset);
                 self.random_read(read_at, builder)
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Correct amount of targets");
 
-        ArrayTarget(targets.try_into().unwrap())
+        ArrayTarget(targets)
     }
 
     pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
@@ -202,12 +197,13 @@ pub fn compose_padded_node_data(
 
     let node_data_padded: [u8; NODE_DATA_BLOCK_BYTES * MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] =
         pad_byte_vec(node_data);
+
     node_data_padded
         .chunks(NODE_DATA_BLOCK_BYTES)
-        .map(|chunk| chunk.try_into().unwrap())
+        .map(|chunk| chunk.try_into().expect("Correct length of chunk"))
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("Correct length of node_data_padded")
 }
 
 #[cfg(test)]

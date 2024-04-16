@@ -85,7 +85,9 @@ impl ParsableTargetSet for HashOutTarget {
                 .take(NUM_HASH_OUT_ELTS)
                 .collect::<Vec<_>>()
                 .try_into()
-                .unwrap(),
+                .expect(
+                    "Insufficient public input count to counstruct HashOutTarget public inputs",
+                ),
         }
     }
 }
@@ -156,21 +158,23 @@ macro_rules! impl_parsable_target_set {
 }
 
 impl<const N: usize> ArrayTarget<BoolTarget, N> {
-    fn compress_to_goldilocks<const PACK_BY: usize>(
+    fn compress_to_goldilocks<const PACK_BY: usize, const PACKED_SIZE: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> Vec<Target> {
-        assert_eq!(N % PACK_BY, 0);
+    ) -> [Target; PACKED_SIZE] {
         assert!(PACK_BY <= 64);
+        assert_eq!(PACK_BY * PACKED_SIZE, N);
 
         self.0
             .chunks(PACK_BY)
             .map(|bits| {
-                let bits: [BoolTarget; PACK_BY] = bits.try_into().unwrap();
-
+                let bits: [BoolTarget; PACK_BY] =
+                    bits.try_into().expect("Chunks to be of correct length");
                 Target::from_bool_targets_le::<PACK_BY>(ArrayTarget(bits), builder)
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Correct amount of elements in ArrayTarget")
     }
 }
 
@@ -295,7 +299,9 @@ impl ParsableTargetSet for Blake2TargetGoldilocks {
             .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap()
+            .expect(
+                "Insufficient public input count to construct Blake2TargetGoldilocks public inputs",
+            )
     }
 }
 
@@ -303,10 +309,10 @@ impl Blake2TargetGoldilocks {
     /// Packs underlying `BoolTarget`s to `Target`s by groups of 32.
     pub fn from_blake2_target(target: Blake2Target, builder: &mut CircuitBuilder<F, D>) -> Self {
         const BITS_FOR_SINGLE_TARGET: usize = 32;
-        let targets: [_; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
-            BitArrayTarget::compress_to_goldilocks::<BITS_FOR_SINGLE_TARGET>(&target.0, builder)
-                .try_into()
-                .unwrap();
+        let targets = BitArrayTarget::compress_to_goldilocks::<
+            BITS_FOR_SINGLE_TARGET,
+            BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
+        >(&target.0, builder);
 
         Self(ArrayTarget(targets))
     }
@@ -323,10 +329,10 @@ impl MessageTargetGoldilocks {
         bits: BitArrayTarget<MESSAGE_SIZE_IN_BITS>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
-        let targets: [_; MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] =
-            BitArrayTarget::compress_to_goldilocks::<PACK_MESSAGE_BY>(&bits, builder)
-                .try_into()
-                .unwrap();
+        let targets = BitArrayTarget::compress_to_goldilocks::<
+            PACK_MESSAGE_BY,
+            MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS,
+        >(&bits, builder);
 
         Self(ArrayTarget(targets))
     }

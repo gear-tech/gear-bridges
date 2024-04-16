@@ -143,11 +143,11 @@ mod tests {
 
         let child_hash = vec![120, 200, 3, 10]
             .into_iter()
-            .chain(vec![0; 27].into_iter())
-            .chain(vec![99].into_iter())
+            .chain([0; 27].into_iter())
+            .chain(std::iter::once(99))
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap();
+            .expect("Correct length of iterator");
         let claimed_node: Vec<_> = encode_claimed_node(&child_hash).collect();
 
         test_case(
@@ -192,7 +192,11 @@ mod tests {
         let node_data_blocks = compose_padded_node_data(node_data);
 
         let claimed_child_hash = child_hash
-            .map(|data| array_to_bits(&data).try_into().unwrap())
+            .map(|data| {
+                array_to_bits(&data)
+                    .try_into()
+                    .expect("Correct array length")
+            })
             .unwrap_or_else(|| [false; BLAKE2_DIGEST_SIZE_IN_BITS]);
 
         let parser = ChildNodeParser {

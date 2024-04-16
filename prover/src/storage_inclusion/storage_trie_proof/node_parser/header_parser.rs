@@ -246,12 +246,7 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let pw = PartialWitness::new();
 
-        let byte_targets = first_bytes
-            .into_iter()
-            .map(|value| ByteTarget::constant(*value, &mut builder))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
+        let byte_targets = first_bytes.map(|value| ByteTarget::constant(value, &mut builder));
 
         let input_target = HeaderParserInputTarget {
             first_bytes: ArrayTarget(byte_targets),

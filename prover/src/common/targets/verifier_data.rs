@@ -10,11 +10,7 @@ impl<const NUM_CAP_ELEMENTS: usize> TargetSet for VerifierDataTarget<NUM_CAP_ELE
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
         Self {
             circuit_digest: HashOutTarget::parse(raw),
-            merkle_caps: (0..NUM_CAP_ELEMENTS)
-                .map(|_| HashOutTarget::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
+            merkle_caps: [(); NUM_CAP_ELEMENTS].map(|_| HashOutTarget::parse(raw)),
         }
     }
 

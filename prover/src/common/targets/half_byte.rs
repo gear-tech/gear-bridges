@@ -5,7 +5,10 @@ pub struct HalfByteTarget(Target);
 
 impl TargetSet for HalfByteTarget {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(raw.next().unwrap())
+        Self(
+            raw.next()
+                .expect("Insufficient targets to construct HalfByteTarget"),
+        )
     }
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
@@ -17,7 +20,10 @@ impl ParsableTargetSet for HalfByteTarget {
     type PublicInputsData = u8;
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        let value = public_inputs.next().unwrap().to_canonical_u64();
+        let value = public_inputs
+            .next()
+            .expect("Insufficient public input count to counstruct HalfByteTarget public inputs")
+            .to_canonical_u64();
         assert!(value < 16);
         value as u8
     }

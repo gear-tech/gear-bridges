@@ -83,7 +83,7 @@ impl ChildNodeArrayParser {
         log::info!("Proving child node array parser...");
         let claimed_child_hash = array_to_bits(&self.initial_data.claimed_child_hash)
             .try_into()
-            .unwrap();
+            .expect("Correct array length");
 
         let mut read_offset = self.initial_data.read_offset;
         let mut cyclic_proof: Option<ProofWithCircuitData<CyclicRecursionTarget>> = None;
@@ -110,7 +110,7 @@ impl ChildNodeArrayParser {
 
         log::info!("Proven child node array parser");
 
-        cyclic_proof.unwrap()
+        cyclic_proof.expect("At least one child")
     }
 }
 
@@ -298,7 +298,7 @@ impl Circuit {
                 &inner_cyclic_proof_with_pis,
                 &common_data,
             )
-            .unwrap();
+            .expect("Failed to build circuit");
 
         let cyclic_circuit_data = builder.build::<C>();
 
@@ -357,7 +357,7 @@ mod tests {
                 _ => None,
             })
             .next()
-            .unwrap();
+            .expect("At least one claimed child");
 
         let node_data = compose_all_children(&child_types);
 

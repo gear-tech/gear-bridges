@@ -2,11 +2,10 @@ use itertools::Itertools;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
+        witness::WitnessWrite,
     },
     plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
+        circuit_data::{CircuitData, CommonCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
@@ -22,14 +21,10 @@ use crate::{
     common::{
         array_to_bits, common_data_for_recursion,
         targets::{
-            impl_parsable_target_set, impl_target_set, ParsableTargetSet, TargetSet,
-            VerifierDataTarget,
+            impl_parsable_target_set, impl_target_set, ParsableTargetSet, VerifierDataTarget,
         },
-        BuilderExt,
     },
-    consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use self::{consts::BLAKE2_DIGEST_SIZE, indexed_validator_sign::IndexedValidatorSignTarget};
@@ -67,7 +62,7 @@ impl ValidatorSignsChain {
         let thread_pool = ThreadPoolBuilder::new()
             .stack_size(VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE)
             .build()
-            .unwrap();
+            .expect("Failed to create ThreadPool");
 
         pre_commits.into_par_iter().enumerate().for_each_with(
             sender,
@@ -81,7 +76,9 @@ impl ValidatorSignsChain {
                     }
                     .prove(&validator_set_hash_proof);
 
-                    sender.send((id, proof)).unwrap();
+                    sender
+                        .send((id, proof))
+                        .expect("Failed to send proof over channel");
                 });
             },
         );
@@ -332,7 +329,7 @@ impl SignComposition {
                 &inner_cyclic_proof_with_pis,
                 &common_data,
             )
-            .unwrap();
+            .expect("Failed to build circuit");
 
         let cyclic_circuit_data = builder.build::<C>();
 

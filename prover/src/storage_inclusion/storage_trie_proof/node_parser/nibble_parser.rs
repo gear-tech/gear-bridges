@@ -47,7 +47,9 @@ pub fn define(
 
     // It can be droppped, so we process it separately.
     let first_nibble = potential_address_nibbles.remove(0);
-    let remaining_nibbles = potential_address_nibbles.try_into().unwrap();
+    let remaining_nibbles = potential_address_nibbles
+        .try_into()
+        .expect("Correct amount of nibbles");
 
     let nibble_count_odd = builder.low_bits(input.nibble_count, 1, 32)[0];
 
@@ -63,13 +65,12 @@ pub fn define(
     let take_first_nibble = builder.not(dont_take_first_nibble);
 
     let zero = HalfByteTarget::constant(0, builder);
-    let first_nibble_padded = vec![first_nibble]
-        .into_iter()
+    let first_nibble_padded = iter::once(first_nibble)
         .chain(iter::repeat(zero))
         .take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap();
+        .expect("Correct amount of nibbles");
     let first_nibble_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
         first_nibble_padded,
         take_first_nibble.target,

@@ -118,10 +118,10 @@ pub fn blake2_circuit_from_message_targets_and_length_target<
             block
                 .to_vec()
                 .chunks(WORD_BITS)
-                .map(|bits| bits.to_vec().try_into().unwrap())
+                .map(|bits| bits.to_vec().try_into().expect("Chunks of correct size"))
                 .collect::<Vec<_>>()
                 .try_into()
-                .unwrap()
+                .expect("Chunks of correct size")
         })
         .collect();
 
@@ -152,7 +152,7 @@ pub fn blake2_circuit_from_message_targets_and_length_target<
         .take(HASH_BITS)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("Correct array length")
 }
 
 #[allow(non_snake_case)]
@@ -170,7 +170,7 @@ fn F<F: RichField + Extendable<D>, const D: usize>(
         .copied()
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap();
+        .expect("Correct word count");
 
     // Offset is bounded by Word, so high word == 0.
     let offset_low_word = builder.split_target_to_word_targets(t);
@@ -241,7 +241,10 @@ mod tests {
             config::PoseidonGoldilocksConfig,
         },
     };
-    use plonky2_field::{goldilocks_field::GoldilocksField, types::Field64};
+    use plonky2_field::{
+        goldilocks_field::GoldilocksField,
+        types::{Field64, PrimeField64},
+    };
 
     pub type F = GoldilocksField;
     pub type C = PoseidonGoldilocksConfig;
@@ -264,10 +267,12 @@ mod tests {
     }
 
     fn compute_digest_using_library(data: &[u8]) -> [u8; 32] {
-        let mut hasher = Blake2bVar::new(32).unwrap();
+        let mut hasher = Blake2bVar::new(32).expect("Instantiate Blake2bVar");
         hasher.update(data);
         let mut hash = [0; 32];
-        hasher.finalize_variable(&mut hash).unwrap();
+        hasher
+            .finalize_variable(&mut hash)
+            .expect("Hash of correct size");
         hash
     }
 
@@ -287,7 +292,7 @@ mod tests {
         }
 
         let circuit = builder.build::<C>();
-        let proof = circuit.prove(pw).unwrap();
+        let proof = circuit.prove(pw).expect("Proven true");
         let digest = &proof.public_inputs[data.len() * 8..];
 
         let digest = digest
@@ -296,14 +301,14 @@ mod tests {
                 byte_out
                     .iter()
                     .enumerate()
-                    .map(|(bit_no, bit)| (bit.0 % GoldilocksField::ORDER) * (1u64 << (7 - bit_no)))
+                    .map(|(bit_no, bit)| bit.to_canonical_u64() * (1u64 << (7 - bit_no)))
                     .sum::<u64>() as u8
             })
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap();
+            .expect("Correct hash size");
 
-        circuit.verify(proof).unwrap();
+        circuit.verify(proof).expect("Verified true");
 
         digest
     }

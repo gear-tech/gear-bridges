@@ -7,13 +7,7 @@ pub type BitArrayTarget<const N: usize> = ArrayTarget<BoolTarget, N>;
 
 impl<T: TargetSet, const N: usize> TargetSet for ArrayTarget<T, N> {
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self {
-        Self(
-            (0..N)
-                .map(|_| TargetSet::parse(raw))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        )
+        Self([(); N].map(|_| TargetSet::parse(raw)))
     }
 
     fn into_targets_iter(self) -> impl Iterator<Item = Target> {
@@ -34,7 +28,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
                 .map(|offset| self.constant_read(at + offset))
                 .collect::<Vec<_>>()
                 .try_into()
-                .unwrap(),
+                .expect("Vec of correct length"),
         )
     }
 
@@ -85,7 +79,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
                 })
                 .collect::<Vec<_>>()
                 .try_into()
-                .unwrap(),
+                .expect("Vec of correct length"),
         )
     }
 }
@@ -98,10 +92,6 @@ where
     type PublicInputsData = [T::PublicInputsData; N];
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        (0..N)
-            .map(|_| T::parse_public_inputs(public_inputs))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
+        [(); N].map(|_| T::parse_public_inputs(public_inputs))
     }
 }

@@ -269,7 +269,7 @@ pub fn byte_to_bits(byte: u8) -> [bool; 8] {
         .map(move |bit_idx| (byte >> bit_idx) % 2 == 1)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("8 bits in byte")
 }
 
 pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
@@ -280,12 +280,9 @@ pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
         .sum()
 }
 
-pub fn pad_byte_vec<const L: usize>(data: Vec<u8>) -> [u8; L] {
+pub fn pad_byte_vec<const L: usize>(mut data: Vec<u8>) -> [u8; L] {
     assert!(data.len() <= L);
-    data.into_iter()
-        .chain(std::iter::repeat(0))
-        .take(L)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
+
+    data.append(&mut vec![0; L - data.len()]);
+    data.try_into().expect("Correct length of Vec")
 }

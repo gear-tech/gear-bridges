@@ -101,7 +101,7 @@ impl PartialStorageAddressTarget {
             })
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap();
+            .expect("Correct number of targets");
 
         Self {
             padded_address: ArrayTarget(targets),
@@ -179,13 +179,9 @@ impl PartialStorageAddressTarget {
 #[cfg(test)]
 mod tests {
     use super::{tests_common::create_address_target, *};
-    use crate::common::pad_byte_vec;
-    use plonky2::{
-        iop::witness::PartialWitness,
-        plonk::{
-            circuit_data::{CircuitConfig, CircuitData},
-            proof::ProofWithPublicInputs,
-        },
+    use plonky2::plonk::{
+        circuit_data::{CircuitConfig, CircuitData},
+        proof::ProofWithPublicInputs,
     };
 
     #[test]
@@ -293,7 +289,7 @@ mod tests {
             .map(|byte| HalfByteTarget::constant(*byte, &mut builder))
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap();
+            .expect("Correct length of data");
 
         let length = builder.constant(F::from_canonical_usize(length));
 

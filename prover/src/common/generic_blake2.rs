@@ -14,12 +14,9 @@ use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
 };
 use plonky2_field::types::Field;
-use std::iter;
 
 use crate::{
-    common::targets::{
-        impl_parsable_target_set, impl_target_set, ArrayTarget, Blake2Target, ByteTarget, TargetSet,
-    },
+    common::targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
     prelude::*,
     ProofWithCircuitData,
 };

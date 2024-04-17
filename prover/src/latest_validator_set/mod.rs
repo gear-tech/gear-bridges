@@ -116,7 +116,7 @@ impl Circuit {
             ),
         );
 
-        ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness)
+        ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 
     pub fn prove_recursive(
@@ -127,7 +127,7 @@ impl Circuit {
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
-        ProofWithCircuitData::from_circuit_data(self.cyclic_circuit_data, self.witness)
+        ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 }
 

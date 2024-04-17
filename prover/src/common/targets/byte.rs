@@ -74,9 +74,9 @@ impl ByteTarget {
     /// Arranged from less to most significant bit.
     pub fn from_bit_targets(bits: [BoolTarget; 8], builder: &mut CircuitBuilder<F, D>) -> Self {
         let mut sum = builder.zero();
-        for bit_idx in 0..bits.len() {
+        for (bit_idx, bit_target) in bits.iter().enumerate() {
             let bit_value =
-                builder.mul_const(F::from_canonical_usize(1 << bit_idx), bits[bit_idx].target);
+                builder.mul_const(F::from_canonical_usize(1 << bit_idx), bit_target.target);
             sum = builder.add(sum, bit_value);
         }
         Self(sum)

@@ -64,7 +64,7 @@ where
     }
 
     pub fn from_circuit_data(
-        circuit_data: CircuitData<F, C, D>,
+        circuit_data: &CircuitData<F, C, D>,
         witness: PartialWitness<F>,
     ) -> ProofWithCircuitData<TS> {
         let ProofWithPublicInputs {
@@ -132,6 +132,39 @@ where
                 public_inputs: self.public_inputs.clone(),
             })
             .is_ok()
+    }
+}
+
+pub trait CircuitImplBuilder {
+    type WitnessTargets: Clone;
+    type PublicInputsTarget: TargetSet;
+
+    fn build() -> (CircuitData<F, C, D>, Self::WitnessTargets);
+    fn set_witness(&self, targets: Self::WitnessTargets, witness: &mut PartialWitness<F>);
+}
+
+pub struct CircuitDataCache<BUILDER: CircuitImplBuilder> {
+    circuit_data: CircuitData<F, C, D>,
+    witness_targets: BUILDER::WitnessTargets,
+}
+
+impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
+    pub fn new() -> CircuitDataCache<BUILDER> {
+        let (circuit_data, witness_targets) = BUILDER::build();
+
+        CircuitDataCache {
+            circuit_data,
+            witness_targets,
+        }
+    }
+
+    pub fn prove(
+        &self,
+        impl_builder: BUILDER,
+    ) -> ProofWithCircuitData<BUILDER::PublicInputsTarget> {
+        let mut witness = PartialWitness::new();
+        impl_builder.set_witness(self.witness_targets.clone(), &mut witness);
+        ProofWithCircuitData::from_circuit_data(&self.circuit_data, witness)
     }
 }
 

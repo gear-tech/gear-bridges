@@ -6,21 +6,19 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-use plonky2_ed25519::gadgets::eddsa::make_verify_circuits as ed25519_circuit;
 use plonky2_field::types::Field;
 
+use super::{single_validator_sign::SingleValidatorSign, GrandpaVoteTarget};
 use crate::{
+    block_finality::validator_set_hash::ValidatorSetHashTarget,
     common::{
-        array_to_bits,
-        targets::{impl_target_set, Ed25519PublicKeyTarget, TargetSet},
+        targets::{impl_target_set, Blake2Target, TargetSet},
         BuilderExt,
     },
     consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
     ProofWithCircuitData,
 };
-
-use super::*;
 
 impl_target_set! {
     pub struct IndexedValidatorSignTarget {
@@ -83,51 +81,4 @@ impl IndexedValidatorSign {
     }
 }
 
-impl_target_set! {
-    struct SingleValidatorSignTarget {
-        message: GrandpaVoteTarget,
-        public_key: Ed25519PublicKeyTarget,
-    }
-}
-
-struct SingleValidatorSign {
-    public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
-    signature: [u8; consts::ED25519_SIGNATURE_SIZE],
-    message: [u8; GRANDPA_VOTE_LENGTH],
-}
-
-impl SingleValidatorSign {
-    fn prove(&self) -> ProofWithCircuitData<SingleValidatorSignTarget> {
-        log::info!("        Proving single validator sign...");
-
-        let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());
-
-        // This fn registers public inputs as:
-        //  - message contents as `BoolTarget`s
-        //  - public key as `BoolTarget`s
-        let targets = ed25519_circuit(&mut builder, self.message.len());
-
-        let mut pw = PartialWitness::new();
-
-        let pk_bits = array_to_bits(&self.public_key).into_iter();
-        for (target, value) in targets.pk.iter().zip(pk_bits) {
-            pw.set_bool_target(*target, value);
-        }
-
-        let signature_bits = array_to_bits(&self.signature).into_iter();
-        for (target, value) in targets.sig.iter().zip(signature_bits) {
-            pw.set_bool_target(*target, value);
-        }
-
-        let msg_bits = array_to_bits(&self.message).into_iter();
-        for (target, value) in targets.msg.iter().zip(msg_bits) {
-            pw.set_bool_target(*target, value);
-        }
-
-        let proof = ProofWithCircuitData::from_builder(builder, pw);
-
-        log::info!("        Proven single validator sign...");
-
-        proof
-    }
-}
+mod single_validator_sign {}

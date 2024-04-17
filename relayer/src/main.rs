@@ -13,7 +13,7 @@ use prover::{
     latest_validator_set::{
         next_validator_set::NextValidatorSet, LatestValidatorSet, LatestValidatorSetTarget,
     },
-    prelude::GENESIS_AUTHORITY_SET_ID,
+    prelude::consts::GENESIS_AUTHORITY_SET_ID,
     storage_inclusion::{BranchNodeData, StorageInclusion},
 };
 

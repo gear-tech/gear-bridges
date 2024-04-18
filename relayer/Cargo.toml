@@ -8,6 +8,7 @@ gear-rpc-client.workspace = true
 prover.workspace = true
 intermediate-proof-storage.workspace = true
 
+actix-web.workspace = true
 log.workspace = true
 pretty_env_logger.workspace = true
 serde.workspace = true

@@ -32,6 +32,7 @@ plonky2_maybe_rayon = { git = "https://github.com/0xPolygonZero/plonky2.git", re
 # Coordinates of `EdwardsPoint` made public in fork.
 curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
 
+actix-web = "4.5.1"
 anyhow = "1.0.40"
 env_logger = "0.9.0"
 itertools = "0.10.5"

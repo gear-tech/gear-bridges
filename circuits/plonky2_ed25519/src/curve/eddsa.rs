@@ -1,6 +1,6 @@
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use num::{BigUint, Integer};
-use plonky2::field::types::Field;
+use plonky2_field::types::Field;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 
@@ -41,8 +41,8 @@ pub fn point_decompress(s: &[u8]) -> AffinePoint<Ed25519> {
     s32.copy_from_slice(s);
     let compressed = CompressedEdwardsY(s32);
     let point = compressed.decompress().unwrap();
-    let x_biguint = BigUint::from_bytes_le(&point.get_x().to_bytes());
-    let y_biguint = BigUint::from_bytes_le(&point.get_y().to_bytes());
+    let x_biguint = BigUint::from_bytes_le(&point.X.as_bytes());
+    let y_biguint = BigUint::from_bytes_le(&point.Y.as_bytes());
     AffinePoint::nonzero(
         Ed25519Base::from_noncanonical_biguint(x_biguint),
         Ed25519Base::from_noncanonical_biguint(y_biguint),

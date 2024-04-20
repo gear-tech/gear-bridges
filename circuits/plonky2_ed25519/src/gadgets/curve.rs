@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::{Field, PrimeField, Sample};
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartitionWitness, Witness};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecdsa::gadgets::biguint::GeneratedValuesBigUint;
+use plonky2_field::extension::Extendable;
+use plonky2_field::types::{Field, PrimeField, Sample};
 use plonky2_sha512::circuit::biguint_to_bits_target;
 
 use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
@@ -321,7 +321,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CurvePointDecompressionGenerator<F: RichField + Extendable<D>, const D: usize, C: Curve> {
     pv: Vec<BoolTarget>,
     p: AffinePointTarget<C>,
@@ -332,7 +332,25 @@ impl<F: RichField + Extendable<D>, const D: usize, C: Curve> SimpleGenerator<F, 
     for CurvePointDecompressionGenerator<F, D, C>
 {
     fn id(&self) -> String {
-        unimplemented!()
+        todo!()
+    }
+
+    fn serialize(
+        &self,
+        dst: &mut Vec<u8>,
+        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+    ) -> plonky2::util::serialization::IoResult<()> {
+        todo!()
+    }
+
+    fn deserialize(
+        src: &mut plonky2::util::serialization::Buffer,
+        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+    ) -> plonky2::util::serialization::IoResult<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
     }
 
     fn dependencies(&self) -> Vec<Target> {
@@ -357,24 +375,6 @@ impl<F: RichField + Extendable<D>, const D: usize, C: Curve> SimpleGenerator<F, 
         out_buffer.set_biguint_target(&self.p.x.value, &point.x.to_canonical_biguint());
         out_buffer.set_biguint_target(&self.p.y.value, &point.y.to_canonical_biguint());
     }
-
-    fn serialize(
-        &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
-    ) -> plonky2::util::serialization::IoResult<()> {
-        unimplemented!()
-    }
-
-    fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
-    ) -> plonky2::util::serialization::IoResult<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
 }
 
 #[cfg(test)]
@@ -382,11 +382,11 @@ mod tests {
     use std::ops::Neg;
 
     use anyhow::Result;
-    use plonky2::field::types::{Field, Sample};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2_field::types::{Field, Sample};
 
     use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
     use crate::curve::ed25519::Ed25519;

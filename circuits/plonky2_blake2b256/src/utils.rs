@@ -3,7 +3,6 @@ use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::{field::extension::Extendable, iop::target::Target};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
-use plonky2_util::log_floor;
 
 pub type Word = u64;
 pub const WORD_BITS: usize = 64;
@@ -35,16 +34,12 @@ pub trait CircuitBuilderExt {
 
     fn add_words_wrapping(&mut self, a: WordTargets, b: WordTargets) -> WordTargets;
 
-    fn le_sum(&mut self, bits: impl Iterator<Item = BoolTarget>) -> Target;
+    fn split_target_to_word_targets(&mut self, target: Target) -> WordTargets;
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for CircuitBuilder<F, D> {
     fn not_word(&mut self, w: WordTargets) -> WordTargets {
-        w.into_iter()
-            .map(|w| self.not(w))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
+        w.map(|w| self.not(w))
     }
 
     fn xor_words(&mut self, a: WordTargets, b: WordTargets) -> WordTargets {
@@ -53,7 +48,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
             .map(|(a, b)| self.xor(a, b))
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap()
+            .expect("Correct bit count")
     }
 
     // !(!a & !b) & !(a & b)
@@ -83,31 +78,27 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
         let (res_l, carry) = self.add_u32(a_l, b_l);
         let (res_h, _) = self.add_u32s_with_carry(&[a_h, b_h], carry);
 
-        let res_l = self.split_le(res_l.0, WORD_BITS / 2).try_into().unwrap();
-        let res_h = self.split_le(res_h.0, WORD_BITS / 2).try_into().unwrap();
+        let res_l = self
+            .split_le(res_l.0, WORD_BITS / 2)
+            .try_into()
+            .expect("WORD_BITS / 2 bits");
+        let res_h = self
+            .split_le(res_h.0, WORD_BITS / 2)
+            .try_into()
+            .expect("WORD_BITS / 2 bits");
 
         collect_word(res_l, res_h)
     }
 
-    fn le_sum(&mut self, bits: impl Iterator<Item = BoolTarget>) -> Target {
-        let bits: Vec<_> = bits.collect();
-        let num_bits = bits.len();
-        assert!(
-            num_bits <= log_floor(F::ORDER, 2),
-            "{} bits may overflow the field",
-            num_bits
-        );
-        if num_bits == 0 {
-            return self.zero();
-        }
-
-        let two = self.two();
-        let mut rev_bits = bits.iter().rev();
-        let mut sum = rev_bits.next().unwrap().target;
-        for &bit in rev_bits {
-            sum = self.mul_add(two, sum, bit.target);
-        }
-        sum
+    fn split_target_to_word_targets(&mut self, target: Target) -> WordTargets {
+        self.split_le(target, WORD_BITS)
+            .chunks(8)
+            .map(|bits| bits.into_iter().rev())
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Correct word bit count")
     }
 }
 
@@ -120,7 +111,7 @@ fn collect_word(l: [BoolTarget; WORD_BITS / 2], h: [BoolTarget; WORD_BITS / 2]) 
         .copied()
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("Correct bit count")
 }
 
 fn split_word(w: WordTargets) -> ([BoolTarget; WORD_BITS / 2], [BoolTarget; WORD_BITS / 2]) {
@@ -133,8 +124,8 @@ fn split_word(w: WordTargets) -> ([BoolTarget; WORD_BITS / 2], [BoolTarget; WORD
     let (a_l_bits, a_h_bits) = w_bits.split_at(WORD_BITS / 2);
 
     (
-        a_l_bits.to_vec().try_into().unwrap(),
-        a_h_bits.to_vec().try_into().unwrap(),
+        a_l_bits.to_vec().try_into().expect("Correct bit count"),
+        a_h_bits.to_vec().try_into().expect("Correct bit count"),
     )
 }
 
@@ -148,7 +139,7 @@ pub fn rright_word(inp: WordTargets, amount: usize) -> WordTargets {
         .copied()
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap();
+        .expect("Correct bit count");
 
     inp.rotate_right(amount);
 
@@ -158,25 +149,14 @@ pub fn rright_word(inp: WordTargets, amount: usize) -> WordTargets {
         .copied()
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("Correct bit count")
 }
 
 pub fn word_array_to_word_targets<const N: usize, F: RichField + Extendable<D>, const D: usize>(
     arr: [Word; N],
     builder: &mut CircuitBuilder<F, D>,
 ) -> [WordTargets; N] {
-    arr.into_iter()
-        .map(|w| {
-            word_to_bits_le(w)
-                .into_iter()
-                .map(|bit| builder.constant_bool(bit))
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap()
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
+    arr.map(|w| word_to_bits_le(w).map(|bit| builder.constant_bool(bit)))
 }
 
 fn word_to_bits_le(w: Word) -> [bool; WORD_BITS] {
@@ -185,7 +165,7 @@ fn word_to_bits_le(w: Word) -> [bool; WORD_BITS] {
         .flat_map(|byte| (0..8).rev().map(move |bit_idx| (byte >> bit_idx) % 2 == 1))
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("Correct amount of bits")
 }
 
 #[cfg(test)]
@@ -235,11 +215,9 @@ mod tests {
         }
 
         let data = builder.build::<C>();
-        let proof = data.prove(pw).unwrap();
+        let proof = data.prove(pw).expect("Proven succesfully");
 
         let a_rotate_res_bits = &proof.public_inputs[WORD_BITS..WORD_BITS * 2];
-
-        println!("{:?} {:?}", &a_rotate_res_bits, &a_rotate_bits);
 
         for i in 0..WORD_BITS {
             assert_eq!(a_rotate_res_bits[i].0, a_rotate_bits[i] as u64);
@@ -284,7 +262,7 @@ mod tests {
         }
 
         let data = builder.build::<C>();
-        let proof = data.prove(pw).unwrap();
+        let proof = data.prove(pw).expect("Proven succesfully");
 
         let result_bits = &proof.public_inputs[WORD_BITS * 2..WORD_BITS * 3];
         let c_bits = word_to_bits_le(c);

@@ -4,8 +4,9 @@ import (
 	"bufio"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
+	"io"
+	"math/big"
 	"os"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -22,22 +23,20 @@ import (
 	"github.com/succinctlabs/gnark-plonky2-verifier/verifier"
 )
 
-func main() {
-	compileCircuit := flag.Bool("compile-circuit", false, "create proving key, verifying key, R1CS and solidity verifier")
-	flag.Parse()
+import (
+	"C"
+)
 
-	if *compileCircuit {
-		compile()
-	}
-
-	prove()
-}
+// How much inner circuit public inputs will be packed into single outer public input.
+const PublicInputCompressionFactor = 6
+const MaxInnerPublicInputBits = 32
 
 type Plonky2VerifierCircuit struct {
-	PublicInputs []gl.Variable `gnark:",public"`
+	CompressedPublicInputs []frontend.Variable `gnark:",public"`
 
 	Proof        variables.Proof
 	VerifierData variables.VerifierOnlyCircuitData
+	PublicInputs []gl.Variable
 
 	CommonCircuitData types.CommonCircuitData `gnark:"-"`
 }
@@ -46,11 +45,44 @@ func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
 	verifierChip := verifier.NewVerifierChip(api, c.CommonCircuitData)
 	verifierChip.Verify(c.Proof, c.PublicInputs, c.VerifierData)
 
+	for i := 0; i < len(c.CompressedPublicInputs); i++ {
+		compressed := frontend.Variable(0)
+		for j := 0; j < PublicInputCompressionFactor; j++ {
+			publicInputIdx := i*PublicInputCompressionFactor + j
+			if publicInputIdx == len(c.PublicInputs) {
+				break
+			}
+
+			exp := frontend.Variable(new(big.Int).Lsh(big.NewInt(1), uint((PublicInputCompressionFactor-j-1)*MaxInnerPublicInputBits)))
+			compressed = api.Add(compressed, api.Mul(c.PublicInputs[publicInputIdx].Limb, exp))
+		}
+
+		api.AssertIsEqual(c.CompressedPublicInputs[i], compressed)
+	}
+
+	desiredCircuitDigest, success := api.Compiler().ConstantValue(c.VerifierData.CircuitDigest)
+	if !success {
+		panic("Failed to read circuit digest value")
+	}
+	api.AssertIsEqual(desiredCircuitDigest, c.VerifierData.CircuitDigest)
+
+	for i := 0; i < len(c.VerifierData.ConstantSigmasCap); i++ {
+		desiredMerkleCapHash, success := api.Compiler().ConstantValue(c.VerifierData.ConstantSigmasCap[i])
+		if !success {
+			panic("Failed to read constants sigmas cap value")
+		}
+		api.AssertIsEqual(desiredMerkleCapHash, c.VerifierData.ConstantSigmasCap[i])
+	}
+
 	return nil
 }
 
-func compile() {
-	circuit := loadCircuit()
+//export compile
+func compile(circuitData *C.char) {
+	circuit, err := deserializeCircuit(C.GoString(circuitData))
+	if err != nil {
+		panic(err)
+	}
 
 	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), scs.NewBuilder, &circuit)
 	if err != nil {
@@ -83,23 +115,25 @@ func compile() {
 }
 
 type ProofWithPublicInputs struct {
-	Proof        string   `json:"proof"`
-	PublicInputs []uint64 `json:"public_inputs"`
+	Proof        string     `json:"proof"`
+	PublicInputs []*big.Int `json:"public_inputs"`
 }
 
-func prove() {
+//export prove
+func prove(circuitData *C.char) *C.char {
 	r1cs := loadR1CS()
 	pk := loadProvingKey()
 
-	assignment := loadCircuit()
+	assignment, err := deserializeCircuit(C.GoString(circuitData))
+	if err != nil {
+		panic(err)
+	}
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
 
 	proof, err := plonk.Prove(r1cs, pk, witness)
 	if err != nil {
 		panic(err)
 	}
-
-	saveProof(proof, assignment.PublicInputs)
 
 	vk := loadVerifyingKey()
 	publicWitness, err := witness.Public()
@@ -110,16 +144,21 @@ func prove() {
 	if err != nil {
 		panic(err)
 	}
+
+	rawProof := serializeProof(proof, assignment.PublicInputs)
+
+	return C.CString(rawProof)
 }
 
-func saveProof(proof plonk.Proof, glPublicInputs []gl.Variable) {
+func serializeProof(proof plonk.Proof, glPublicInputs []gl.Variable) string {
 	_proof := proof.(*plonk_bn254.Proof)
 	proofBytes := _proof.MarshalSolidity()
 	proofStr := hex.EncodeToString(proofBytes)
 
-	publicInputs := make([]uint64, len(glPublicInputs))
+	compressedPublicInputs := compressPublicInputs(glPublicInputs)
+	publicInputs := make([]*big.Int, len(compressedPublicInputs))
 	for i := 0; i < len(publicInputs); i++ {
-		publicInputs[i] = glPublicInputs[i].Limb.(uint64)
+		publicInputs[i] = compressedPublicInputs[i].(*big.Int)
 	}
 
 	jsonProof, err := json.MarshalIndent(ProofWithPublicInputs{
@@ -130,23 +169,95 @@ func saveProof(proof plonk.Proof, glPublicInputs []gl.Variable) {
 		panic(err)
 	}
 
-	err = os.WriteFile("data/final_proof.json", jsonProof, 0644)
-	if err != nil {
-		panic(err)
-	}
+	return string(jsonProof)
 }
 
-func loadCircuit() Plonky2VerifierCircuit {
-	commonCircuitData := types.ReadCommonCircuitData("data/common_circuit_data.json")
-	proofWithPis := variables.DeserializeProofWithPublicInputs(types.ReadProofWithPublicInputs("data/proof_with_public_inputs.json"))
-	verifierOnlyCircuitData := variables.DeserializeVerifierOnlyCircuitData(types.ReadVerifierOnlyCircuitData("data/verifier_only_circuit_data.json"))
+type rawCircuit struct {
+	CommonData       string `json:"common_circuit_data"`
+	Proof            string `json:"proof_with_public_inputs"`
+	VerifierOnlyData string `json:"verifier_only_circuit_data"`
+}
+
+// load circuit from json
+func deserializeCircuit(data string) (Plonky2VerifierCircuit, error) {
+	handleErr := func(err error) (Plonky2VerifierCircuit, error) {
+		return Plonky2VerifierCircuit{}, fmt.Errorf("error loading circuit: %w", err)
+	}
+	var circuit rawCircuit
+
+	err := json.Unmarshal([]byte(data), &circuit)
+	if err != nil {
+		return handleErr(fmt.Errorf("unmarshal circuit data: %w", err))
+	}
+
+	var commonCircuitData types.CommonCircuitData
+
+	{ // hack until https://github.com/succinctlabs/gnark-plonky2-verifier/pull/52 is merged
+		f, err := os.CreateTemp("/tmp/", "circuit_data_*.json")
+		if err != nil {
+			return handleErr(fmt.Errorf("create temp file: %w", err))
+		}
+
+		_, err = io.WriteString(f, circuit.CommonData)
+		if err != nil {
+			return handleErr(fmt.Errorf("write temp file: %w", err))
+		}
+
+		commonCircuitData = types.ReadCommonCircuitData(f.Name())
+	}
+
+	var rawProof types.ProofWithPublicInputsRaw
+	if err := json.Unmarshal([]byte(circuit.Proof), &rawProof); err != nil {
+		return handleErr(fmt.Errorf("unmarshal proof: %w", err))
+	}
+	proofWithPis := variables.DeserializeProofWithPublicInputs(rawProof)
+
+	var rawVerifierData types.VerifierOnlyCircuitDataRaw
+	if err := json.Unmarshal([]byte(circuit.VerifierOnlyData), &rawVerifierData); err != nil {
+		return handleErr(fmt.Errorf("unmarshal verifier data: %w", err))
+	}
+	verifierOnlyCircuitData := variables.DeserializeVerifierOnlyCircuitData(rawVerifierData)
+
+	publicInputs := make([]gl.Variable, len(proofWithPis.PublicInputs))
+	for i := 0; i < len(publicInputs); i++ {
+		reduced := proofWithPis.PublicInputs[i].Limb.(uint64) % gl.MODULUS.Uint64()
+		if reduced >= 1<<MaxInnerPublicInputBits {
+			panic(fmt.Sprintf("Public input value too big: Expected < %d, got %d", 1<<MaxInnerPublicInputBits, reduced))
+		}
+		publicInputs[i] = gl.NewVariable(reduced)
+	}
 
 	return Plonky2VerifierCircuit{
-		Proof:             proofWithPis.Proof,
-		PublicInputs:      proofWithPis.PublicInputs,
-		VerifierData:      verifierOnlyCircuitData,
+		CompressedPublicInputs: compressPublicInputs(proofWithPis.PublicInputs),
+
+		Proof:        proofWithPis.Proof,
+		VerifierData: verifierOnlyCircuitData,
+		PublicInputs: publicInputs,
+
 		CommonCircuitData: commonCircuitData,
+	}, nil
+}
+
+func compressPublicInputs(pis []gl.Variable) []frontend.Variable {
+	compressedLen := (len(pis) + PublicInputCompressionFactor - 1) / PublicInputCompressionFactor
+
+	compressedPis := make([]frontend.Variable, compressedLen)
+	for i := 0; i < compressedLen; i++ {
+		compressed := new(big.Int)
+		for j := 0; j < PublicInputCompressionFactor; j++ {
+			publicInputIdx := i*PublicInputCompressionFactor + j
+			if publicInputIdx >= len(pis) {
+				break
+			}
+
+			exp := new(big.Int).Lsh(big.NewInt(1), uint((PublicInputCompressionFactor-j-1)*MaxInnerPublicInputBits))
+			publicInput := new(big.Int).SetUint64(pis[publicInputIdx].Limb.(uint64))
+			compressed = new(big.Int).Add(compressed, new(big.Int).Mul(exp, publicInput))
+		}
+		compressedPis[i] = frontend.Variable(compressed)
 	}
+
+	return compressedPis
 }
 
 func loadVerifyingKey() plonk.VerifyingKey {
@@ -215,3 +326,5 @@ func loadSRS() kzg.SRS {
 
 	return srs
 }
+
+func main() {}

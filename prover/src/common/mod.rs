@@ -1,6 +1,6 @@
+use itertools::Itertools;
 use plonky2::{
     gates::noop::NoopGate,
-    hash::hash_types::HashOutTarget,
     iop::{
         target::BoolTarget,
         witness::{PartialWitness, WitnessWrite},
@@ -11,24 +11,23 @@ use plonky2::{
             CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
             VerifierCircuitTarget,
         },
-        config::{GenericConfig, Hasher},
         proof::{Proof, ProofWithPublicInputs},
     },
 };
+use serde::{Deserialize, Serialize};
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::prelude::*;
 
 #[macro_use]
 pub mod targets;
+pub mod generic_blake2;
 pub mod poseidon_bn128;
 
 use plonky2_field::goldilocks_field::GoldilocksField;
 use targets::TargetSet;
 
 use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
-
-type CircuitDigest = <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash;
 
 #[derive(Clone)]
 pub struct ProofWithCircuitData<TS>
@@ -65,7 +64,7 @@ where
     }
 
     pub fn from_circuit_data(
-        circuit_data: CircuitData<F, C, D>,
+        circuit_data: &CircuitData<F, C, D>,
         witness: PartialWitness<F>,
     ) -> ProofWithCircuitData<TS> {
         let ProofWithPublicInputs {
@@ -81,32 +80,19 @@ where
         }
     }
 
-    // TODO: REMOVE
-    pub fn circuit_digest(&self) -> CircuitDigest {
-        self.circuit_data.verifier_only.circuit_digest
-    }
-
-    // TODO: REMOVE
     pub fn circuit_data(&self) -> &VerifierCircuitData<F, C, D> {
         &self.circuit_data
     }
 
-    // TODO: REMOVE
-    pub fn pis(&self) -> Vec<GoldilocksField> {
+    pub fn public_inputs(&self) -> Vec<GoldilocksField> {
         self.public_inputs.clone()
     }
 
-    // TODO: REMOVE
     pub fn proof(&self) -> ProofWithPublicInputs<F, C, D> {
         ProofWithPublicInputs {
             proof: self.proof.clone(),
             public_inputs: self.public_inputs.clone(),
         }
-    }
-
-    // TODO: REMOVE
-    pub fn verifier_circuit_data(&self) -> VerifierCircuitData<F, C, D> {
-        self.circuit_data.as_ref().clone()
     }
 
     pub fn export(self) -> SerializedDataToVerify {
@@ -149,208 +135,47 @@ where
     }
 }
 
+pub trait CircuitImplBuilder {
+    type WitnessTargets: Clone;
+    type PublicInputsTarget: TargetSet;
+
+    fn build() -> (CircuitData<F, C, D>, Self::WitnessTargets);
+    fn set_witness(&self, targets: Self::WitnessTargets, witness: &mut PartialWitness<F>);
+}
+
+pub struct CircuitDataCache<BUILDER: CircuitImplBuilder> {
+    circuit_data: CircuitData<F, C, D>,
+    witness_targets: BUILDER::WitnessTargets,
+}
+
+impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
+    pub fn new() -> CircuitDataCache<BUILDER> {
+        let (circuit_data, witness_targets) = BUILDER::build();
+
+        CircuitDataCache {
+            circuit_data,
+            witness_targets,
+        }
+    }
+
+    pub fn prove(
+        &self,
+        impl_builder: BUILDER,
+    ) -> ProofWithCircuitData<BUILDER::PublicInputsTarget> {
+        let mut witness = PartialWitness::new();
+        impl_builder.set_witness(self.witness_targets.clone(), &mut witness);
+        ProofWithCircuitData::from_circuit_data(&self.circuit_data, witness)
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SerializedDataToVerify {
     pub proof_with_public_inputs: String,
     pub common_circuit_data: String,
     pub verifier_only_circuit_data: String,
 }
 
-pub struct ProofComposition<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    circuit_builder: CircuitBuilder<F, D>,
-    witness: PartialWitness<F>,
-
-    first_public_inputs: TS1,
-    second_public_inputs: TS2,
-
-    first_circuit_digest: CircuitDigest,
-    second_circuit_digest: CircuitDigest,
-
-    first_circuit_digest_target: HashOutTarget,
-    second_circuit_digest_target: HashOutTarget,
-}
-
-pub struct ExtendedComposeArgs<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    pub first_target_set: TS1,
-    pub second_target_set: TS2,
-
-    pub first_circuit_digest: HashOutTarget,
-    pub second_circuit_digest: HashOutTarget,
-}
-
-impl<TS1, TS2> ProofComposition<TS1, TS2>
-where
-    TS1: TargetSet,
-    TS2: TargetSet,
-{
-    pub fn new(
-        first: ProofWithCircuitData<TS1>,
-        second: ProofWithCircuitData<TS2>,
-    ) -> ProofComposition<TS1, TS2> {
-        Self::new_with_config(first, second, CircuitConfig::standard_recursion_config())
-    }
-
-    // TODO: Rewrite using recursively_verify_constant_proof.
-    pub fn new_with_config(
-        first: ProofWithCircuitData<TS1>,
-        second: ProofWithCircuitData<TS2>,
-        config: CircuitConfig,
-    ) -> ProofComposition<TS1, TS2> {
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        let proof_with_pis_target_1 =
-            builder.add_virtual_proof_with_pis(&first.circuit_data.common);
-        let proof_with_pis_target_2 =
-            builder.add_virtual_proof_with_pis(&second.circuit_data.common);
-
-        let first_circuit_digest = first.circuit_digest();
-        let second_circuit_digest = second.circuit_digest();
-
-        let verifier_circuit_target_1 = VerifierCircuitTarget {
-            constants_sigmas_cap: builder
-                .add_virtual_cap(first.circuit_data.common.config.fri_config.cap_height),
-            circuit_digest: builder.add_virtual_hash(),
-        };
-        let verifier_circuit_target_2 = VerifierCircuitTarget {
-            constants_sigmas_cap: builder
-                .add_virtual_cap(second.circuit_data.common.config.fri_config.cap_height),
-            circuit_digest: builder.add_virtual_hash(),
-        };
-
-        let mut pw = PartialWitness::new();
-        pw.set_proof_with_pis_target(
-            &proof_with_pis_target_1,
-            &ProofWithPublicInputs {
-                proof: first.proof,
-                public_inputs: first.public_inputs,
-            },
-        );
-        pw.set_proof_with_pis_target(
-            &proof_with_pis_target_2,
-            &ProofWithPublicInputs {
-                proof: second.proof,
-                public_inputs: second.public_inputs,
-            },
-        );
-        pw.set_cap_target(
-            &verifier_circuit_target_1.constants_sigmas_cap,
-            &first.circuit_data.verifier_only.constants_sigmas_cap,
-        );
-        pw.set_cap_target(
-            &verifier_circuit_target_2.constants_sigmas_cap,
-            &second.circuit_data.verifier_only.constants_sigmas_cap,
-        );
-        pw.set_hash_target(
-            verifier_circuit_target_1.circuit_digest,
-            first.circuit_data.verifier_only.circuit_digest,
-        );
-        pw.set_hash_target(
-            verifier_circuit_target_2.circuit_digest,
-            second.circuit_data.verifier_only.circuit_digest,
-        );
-
-        builder.verify_proof::<C>(
-            &proof_with_pis_target_1,
-            &verifier_circuit_target_1,
-            &first.circuit_data.common,
-        );
-        builder.verify_proof::<C>(
-            &proof_with_pis_target_2,
-            &verifier_circuit_target_2,
-            &second.circuit_data.common,
-        );
-
-        let first_public_inputs =
-            TS1::parse_exact(&mut proof_with_pis_target_1.public_inputs.into_iter());
-
-        let second_public_inputs =
-            TS2::parse_exact(&mut proof_with_pis_target_2.public_inputs.into_iter());
-
-        ProofComposition {
-            circuit_builder: builder,
-            witness: pw,
-
-            first_public_inputs,
-            second_public_inputs,
-
-            first_circuit_digest,
-            second_circuit_digest,
-
-            first_circuit_digest_target: verifier_circuit_target_1.circuit_digest,
-            second_circuit_digest_target: verifier_circuit_target_2.circuit_digest,
-        }
-    }
-
-    // TODO: assert merkle caps too.
-    pub fn assert_both_circuit_digests(self) -> Self {
-        self.assert_first_circuit_digest()
-            .assert_second_circuit_digest()
-    }
-
-    pub fn assert_first_circuit_digest(mut self) -> Self {
-        let value_target = self
-            .circuit_builder
-            .constant_hash(self.first_circuit_digest);
-        self.circuit_builder
-            .connect_hashes(value_target, self.first_circuit_digest_target);
-        self
-    }
-
-    pub fn assert_second_circuit_digest(mut self) -> Self {
-        let value_target = self
-            .circuit_builder
-            .constant_hash(self.second_circuit_digest);
-        self.circuit_builder
-            .connect_hashes(value_target, self.second_circuit_digest_target);
-        self
-    }
-
-    pub fn compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
-    where
-        TS: TargetSet,
-        O: Fn(&mut CircuitBuilder<F, D>, TS1, TS2) -> TS,
-    {
-        let target_set = op(
-            &mut self.circuit_builder,
-            self.first_public_inputs.clone(),
-            self.second_public_inputs.clone(),
-        );
-
-        target_set.register_as_public_inputs(&mut self.circuit_builder);
-
-        ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
-    }
-
-    pub fn extended_compose<O, TS>(mut self, op: O) -> ProofWithCircuitData<TS>
-    where
-        TS: TargetSet,
-        O: Fn(&mut CircuitBuilder<F, D>, ExtendedComposeArgs<TS1, TS2>) -> TS,
-    {
-        let target_set = op(
-            &mut self.circuit_builder,
-            ExtendedComposeArgs {
-                first_target_set: self.first_public_inputs.clone(),
-                second_target_set: self.second_public_inputs.clone(),
-
-                first_circuit_digest: self.first_circuit_digest_target,
-                second_circuit_digest: self.second_circuit_digest_target,
-            },
-        );
-
-        target_set.register_as_public_inputs(&mut self.circuit_builder);
-
-        ProofWithCircuitData::from_builder(self.circuit_builder, self.witness)
-    }
-}
-
-// TODO: Assert wrapped proof circuit digest and constant merkle caps.
-pub fn wrap_bn128(
+fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
 ) -> (
@@ -361,25 +186,12 @@ pub fn wrap_bn128(
         CircuitBuilder::new(CircuitConfig::standard_recursion_config());
 
     let proof_with_pis_target = builder.add_virtual_proof_with_pis(&inner_circuit_data.common);
-    let circuit_digest = inner_circuit_data.verifier_only.circuit_digest;
-    let verifier_circuit_target = VerifierCircuitTarget {
-        constants_sigmas_cap: builder
-            .add_virtual_cap(inner_circuit_data.common.config.fri_config.cap_height),
-        circuit_digest: builder.add_virtual_hash(),
-    };
+    let verifier_circuit_target = builder.constant_verifier_data(&inner_circuit_data.verifier_only);
 
     builder.register_public_inputs(&proof_with_pis_target.public_inputs);
 
     let mut witness = PartialWitness::new();
     witness.set_proof_with_pis_target(&proof_with_pis_target, &proof_with_public_inputs);
-    witness.set_cap_target(
-        &verifier_circuit_target.constants_sigmas_cap,
-        &inner_circuit_data.verifier_only.constants_sigmas_cap,
-    );
-    witness.set_hash_target(
-        verifier_circuit_target.circuit_digest,
-        inner_circuit_data.verifier_only.circuit_digest,
-    );
 
     builder.verify_proof::<C>(
         &proof_with_pis_target,
@@ -393,18 +205,23 @@ pub fn wrap_bn128(
     (proof, circuit_data)
 }
 
-pub trait ConstantRecursiveVerifier {
+pub trait BuilderExt {
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
-        proof: ProofWithCircuitData<T>,
+        proof: &ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
     ) -> T;
+
+    /// Select if `condition` { `a` } else { `b` }
+    fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T;
+
+    fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget;
 }
 
-impl ConstantRecursiveVerifier for CircuitBuilder<F, D> {
+impl BuilderExt for CircuitBuilder<F, D> {
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
-        proof: ProofWithCircuitData<T>,
+        proof: &ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
     ) -> T {
         let proof_with_pis_target = self.add_virtual_proof_with_pis(&proof.circuit_data.common);
@@ -419,6 +236,27 @@ impl ConstantRecursiveVerifier for CircuitBuilder<F, D> {
         );
 
         T::parse_exact(&mut proof_with_pis_target.public_inputs.into_iter())
+    }
+
+    fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T {
+        let mut result = a
+            .clone()
+            .into_targets_iter()
+            .zip_eq(b.clone().into_targets_iter())
+            .map(|(a, b)| self.select(condition, a, b));
+        T::parse_exact(&mut result)
+    }
+
+    // !(!a & !b) & !(a & b)
+    fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget {
+        let not_a = self.not(a);
+        let not_b = self.not(b);
+
+        let c = self.and(not_a, not_b);
+        let c = self.not(c);
+        let d = self.and(a, b);
+        let d = self.not(d);
+        self.and(c, d)
     }
 }
 
@@ -454,29 +292,17 @@ pub fn common_data_for_recursion(
     data
 }
 
-// !(!a & !b) & !(a & b)
-pub fn xor_targets(a: BoolTarget, b: BoolTarget, builder: &mut CircuitBuilder<F, D>) -> BoolTarget {
-    let not_a = builder.not(a);
-    let not_b = builder.not(b);
-
-    let c = builder.and(not_a, not_b);
-    let c = builder.not(c);
-    let d = builder.and(a, b);
-    let d = builder.not(d);
-    builder.and(c, d)
-}
-
 pub fn array_to_bits(data: &[u8]) -> Vec<bool> {
     data.iter().copied().flat_map(byte_to_bits).collect()
 }
 
-fn byte_to_bits(byte: u8) -> [bool; 8] {
+pub fn byte_to_bits(byte: u8) -> [bool; 8] {
     (0..8)
         .rev()
         .map(move |bit_idx| (byte >> bit_idx) % 2 == 1)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("8 bits in byte")
 }
 
 pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
@@ -487,12 +313,9 @@ pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
         .sum()
 }
 
-pub fn pad_byte_vec<const L: usize>(data: Vec<u8>) -> [u8; L] {
+pub fn pad_byte_vec<const L: usize>(mut data: Vec<u8>) -> [u8; L] {
     assert!(data.len() <= L);
-    data.into_iter()
-        .chain(std::iter::repeat(0))
-        .take(L)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
+
+    data.append(&mut vec![0; L - data.len()]);
+    data.try_into().expect("Correct length of Vec")
 }

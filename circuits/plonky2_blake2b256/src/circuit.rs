@@ -5,7 +5,7 @@
 
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::BoolTarget;
+use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::utils::*;
@@ -41,8 +41,8 @@ const R2: usize = 24;
 const R3: usize = 16;
 const R4: usize = 63;
 
-const BLOCK_BYTES: usize = 128;
-const BLOCK_BITS: usize = BLOCK_BYTES * 8;
+pub const BLOCK_BYTES: usize = 128;
+pub const BLOCK_BITS: usize = BLOCK_BYTES * 8;
 const BLOCK_WORDS: usize = 16;
 
 const INTERNAL_STATE_WORDS: usize = 8;
@@ -82,7 +82,21 @@ pub fn blake2_circuit<F: RichField + Extendable<D>, const D: usize>(
 
 pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
+    message: Vec<BoolTarget>,
+) -> [BoolTarget; HASH_BITS] {
+    assert!(message.len() % 8 == 0);
+    let length = builder.constant(F::from_canonical_usize(message.len() / 8));
+    blake2_circuit_from_message_targets_and_length_target(builder, message, length)
+}
+
+/// Calling side is responsible of controlling `length`.
+pub fn blake2_circuit_from_message_targets_and_length_target<
+    F: RichField + Extendable<D>,
+    const D: usize,
+>(
+    builder: &mut CircuitBuilder<F, D>,
     mut message: Vec<BoolTarget>,
+    length: Target,
 ) -> [BoolTarget; HASH_BITS] {
     assert!(message.len() % 8 == 0);
 
@@ -104,18 +118,10 @@ pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>
             block
                 .to_vec()
                 .chunks(WORD_BITS)
-                .map(|bits| {
-                    bits.to_vec()
-                        .chunks(8)
-                        .flatten()
-                        .copied()
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .unwrap()
-                })
+                .map(|bits| bits.to_vec().try_into().expect("Chunks of correct size"))
                 .collect::<Vec<_>>()
                 .try_into()
-                .unwrap()
+                .expect("Chunks of correct size")
         })
         .collect();
 
@@ -130,25 +136,13 @@ pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>
 
     #[allow(clippy::needless_range_loop)]
     for i in 0..dd - 1 {
-        h = F(
-            builder,
-            &iv,
-            h,
-            &message_blocks[i],
-            ((i + 1) * BLOCK_BYTES) as Word,
-            false,
-        );
+        let t = builder.constant(F::from_canonical_usize((i + 1) * BLOCK_BYTES));
+        h = F(builder, &iv, h, &message_blocks[i], t, false);
     }
 
     if KEY_BYTES == 0 {
-        h = F(
-            builder,
-            &iv,
-            h,
-            &message_blocks[dd - 1],
-            (msg_len_in_bits / 8) as Word,
-            true,
-        );
+        let t = length;
+        h = F(builder, &iv, h, &message_blocks[dd - 1], t, true);
     } else {
         unimplemented!("Hashing with key is not implemented");
     }
@@ -158,7 +152,7 @@ pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>
         .take(HASH_BITS)
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap()
+        .expect("Correct array length")
 }
 
 #[allow(non_snake_case)]
@@ -167,7 +161,7 @@ fn F<F: RichField + Extendable<D>, const D: usize>(
     iv: &[WordTargets; IV.len()],
     mut h: [WordTargets; INTERNAL_STATE_WORDS],
     m: &[WordTargets; BLOCK_WORDS],
-    t: Word,
+    t: Target,
     f: bool,
 ) -> [[BoolTarget; WORD_BITS]; INTERNAL_STATE_WORDS] {
     let mut v: [WordTargets; V_WORDS] = h
@@ -176,10 +170,10 @@ fn F<F: RichField + Extendable<D>, const D: usize>(
         .copied()
         .collect::<Vec<_>>()
         .try_into()
-        .unwrap();
+        .expect("Correct word count");
 
     // Offset is bounded by Word, so high word == 0.
-    let offset_low_word = word_array_to_word_targets([t], builder)[0];
+    let offset_low_word = builder.split_target_to_word_targets(t);
     let offset_high_word = word_array_to_word_targets([0], builder)[0];
 
     v[12] = builder.xor_words(v[12], offset_low_word);
@@ -247,7 +241,10 @@ mod tests {
             config::PoseidonGoldilocksConfig,
         },
     };
-    use plonky2_field::{goldilocks_field::GoldilocksField, types::Field64};
+    use plonky2_field::{
+        goldilocks_field::GoldilocksField,
+        types::{Field64, PrimeField64},
+    };
 
     pub type F = GoldilocksField;
     pub type C = PoseidonGoldilocksConfig;
@@ -270,10 +267,12 @@ mod tests {
     }
 
     fn compute_digest_using_library(data: &[u8]) -> [u8; 32] {
-        let mut hasher = Blake2bVar::new(32).unwrap();
+        let mut hasher = Blake2bVar::new(32).expect("Instantiate Blake2bVar");
         hasher.update(data);
         let mut hash = [0; 32];
-        hasher.finalize_variable(&mut hash).unwrap();
+        hasher
+            .finalize_variable(&mut hash)
+            .expect("Hash of correct size");
         hash
     }
 
@@ -293,7 +292,7 @@ mod tests {
         }
 
         let circuit = builder.build::<C>();
-        let proof = circuit.prove(pw).unwrap();
+        let proof = circuit.prove(pw).expect("Proven true");
         let digest = &proof.public_inputs[data.len() * 8..];
 
         let digest = digest
@@ -302,14 +301,14 @@ mod tests {
                 byte_out
                     .iter()
                     .enumerate()
-                    .map(|(bit_no, bit)| (bit.0 % GoldilocksField::ORDER) * (1u64 << (7 - bit_no)))
+                    .map(|(bit_no, bit)| bit.to_canonical_u64() * (1u64 << (7 - bit_no)))
                     .sum::<u64>() as u8
             })
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap();
+            .expect("Correct hash size");
 
-        circuit.verify(proof).unwrap();
+        circuit.verify(proof).expect("Verified true");
 
         digest
     }

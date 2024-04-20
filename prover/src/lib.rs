@@ -1,8 +1,4 @@
 #![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
-#![feature(type_alias_impl_trait)]
-#![feature(concat_idents)]
-#![feature(return_position_impl_trait_in_trait)]
 
 use jemallocator::Jemalloc;
 
@@ -13,11 +9,7 @@ pub mod block_finality;
 pub mod common;
 pub mod final_proof;
 pub mod latest_validator_set;
-pub mod merkle_proof;
-pub mod message_sent;
-pub mod next_validator_set;
-pub mod storage_proof;
-pub mod validator_set_hash;
+pub mod storage_inclusion;
 
 pub use common::ProofWithCircuitData;
 
@@ -29,25 +21,23 @@ pub mod prelude {
     pub type C = PoseidonGoldilocksConfig;
     pub const D: usize = 2;
 
-    pub(crate) use super::consts;
-
-    pub use super::consts::GENESIS_AUTHORITY_SET_ID;
+    pub use super::consts;
 }
 
-pub(crate) mod consts {
+pub mod consts {
     pub const CIRCUIT_DIGEST_SIZE: usize = 4;
 
-    pub const SHA256_DIGEST_SIZE: usize = 32;
-    pub const SHA256_DIGEST_SIZE_IN_BITS: usize = SHA256_DIGEST_SIZE * 8;
-    /// If we pack `BoolTargets` into `Targets` by groups of 52 then
-    /// 5 Goldilocks field elements are required.
-    pub const SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 5;
-
     // For now we send a single Keccak256 hash.
-    pub const MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 5;
+    pub const MESSAGE_SIZE: usize = 32;
+    pub const MESSAGE_SIZE_IN_BITS: usize = MESSAGE_SIZE * 8;
+    pub const MESSAGE_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize = 8;
 
     pub const BLAKE2_DIGEST_SIZE: usize = 32;
     pub const BLAKE2_DIGEST_SIZE_IN_BITS: usize = BLAKE2_DIGEST_SIZE * 8;
+    /// If we pack `BoolTargets` into `Targets` by groups of 32 then
+    /// 8 Goldilocks field elements are required.
+    pub const BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS: usize =
+        BLAKE2_DIGEST_SIZE_IN_BITS / 32;
 
     pub const ED25519_PUBLIC_KEY_SIZE: usize = 32;
     pub const ED25519_PUBLIC_KEY_SIZE_IN_BITS: usize = ED25519_PUBLIC_KEY_SIZE * 8;
@@ -57,15 +47,11 @@ pub(crate) mod consts {
 
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
-    pub const VALIDATOR_COUNT: usize = 6;
-    pub const PROCESSED_VALIDATOR_COUNT: usize = 2;
+    pub const MAX_VALIDATOR_COUNT: usize = 6;
 
     pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
-    pub const GENESIS_VALIDATOR_SET_HASH: [u64; SHA256_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
-        2787997088524558,
-        914341688072726,
-        3440393019007615,
-        3418656939423883,
-        276187037400784,
+    pub const GENESIS_VALIDATOR_SET_HASH: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
+        0x3E453535, 0x39A1043B, 0x8D1265E7, 0xB47E1B16, 0x3E263D42, 0x9EF6888C, 0x137A20F1,
+        0x6696DBA1,
     ];
 }

@@ -3,6 +3,7 @@ use alloy_sol_types::{sol, SolCall, SolInterface};
 
 sol! {
 
+    #[derive(Debug,PartialEq, Eq)]
     struct ContentMessage  {
         bytes32 vara_address;
         address eth_address;
@@ -11,6 +12,7 @@ sol! {
     }
 
     #[sol(rpc)]
+    #[derive(Debug,PartialEq, Eq)]
     interface IMessageQueue {
         function process_message(uint256 block, uint256 total_leaves, uint256 leaf_index, ContentMessage calldata message, bytes32[] calldata proof ) external;
     }

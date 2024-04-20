@@ -3,7 +3,7 @@ name = "eth-client-alloy"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
+#[workspace]
 
 [dependencies]
 tokio = { version = "1.35.1", features = ["full"] }
@@ -41,11 +41,4 @@ alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core.git", package 
 bytes = "1.6.0"
 
 
-[patch.crates-io]
-alloy-primitives = { git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-core = { git = "https://github.com/alloy-rs/core.git", package = "alloy-core", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-sol-macro = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-macro", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-sol-types = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-types", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-dyn-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-dyn-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-json-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-json-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-type-parser", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
+

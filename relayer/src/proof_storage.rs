@@ -1,4 +1,4 @@
-use std::{fs, io, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
 
@@ -6,12 +6,6 @@ use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
 pub enum ProofStorageError {
     AlreadyInitialized,
     NotInitialized,
-
-    InvalidProof(anyhow::Error),
-    InvalidCircuitData,
-    InvalidValidatorSetId,
-    InvalidGenesis,
-    InvalidVerifierData,
 }
 
 pub trait ProofStorage {
@@ -23,17 +17,19 @@ pub trait ProofStorage {
 
     fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError>;
 
-    fn get_latest_proof(&self) -> Option<Proof>;
+    fn get_latest_proof(&self) -> Option<(ProofWithCircuitData, u64)>;
 
     // TODO: Add fn to query any of the stored proofs
 
     fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError>;
 }
 
+type ValidatorSetId = u64;
+
 #[derive(Default)]
 struct MockProofStorage {
-    latest: Option<ProofWithCircuitData>,
-    latest_validator_set_id: u64,
+    proofs: BTreeMap<ValidatorSetId, Proof>,
+    circuit_data: Option<CircuitData>,
 }
 
 impl ProofStorage for MockProofStorage {
@@ -42,39 +38,51 @@ impl ProofStorage for MockProofStorage {
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
-        if self.latest.is_some() {
+        if !self.proofs.is_empty() {
             return Err(ProofStorageError::AlreadyInitialized);
         }
 
-        self.latest = Some(proof_with_circuit_data);
-        self.latest_validator_set_id = genesis_validator_set_id;
+        self.circuit_data = Some(proof_with_circuit_data.circuit_data);
+        self.proofs
+            .insert(genesis_validator_set_id + 1, proof_with_circuit_data.proof);
 
         Ok(())
     }
 
     fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
-        self.latest
-            .as_ref()
-            .map(|cd| cd.circuit_data.clone())
+        self.circuit_data
+            .clone()
             .ok_or(ProofStorageError::NotInitialized)
     }
 
-    fn get_latest_proof(&self) -> Option<Proof> {
-        self.latest.as_ref().map(|cd| cd.proof.clone())
+    fn get_latest_proof(&self) -> Option<(ProofWithCircuitData, ValidatorSetId)> {
+        self.proofs.last_key_value().map(|(k, v)| {
+            (
+                ProofWithCircuitData {
+                    proof: v.clone(),
+                    circuit_data: self
+                        .circuit_data
+                        .clone()
+                        .expect("Proof storage not initialized"),
+                },
+                *k,
+            )
+        })
     }
 
     fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError> {
-        let circuit_data = self
-            .latest
-            .as_ref()
-            .map(|cd| cd.circuit_data.clone())
-            .ok_or_else(|| ProofStorageError::NotInitialized)?;
+        let validator_set_id = self
+            .proofs
+            .last_key_value()
+            .map(|(k, _)| *k)
+            .expect("Proof storage not initialized");
 
-        self.latest = Some(ProofWithCircuitData {
-            proof,
-            circuit_data,
-        });
-        self.latest_validator_set_id += 1;
+        self.proofs
+            .insert(validator_set_id + 1, proof)
+            .expect(&format!(
+                "Proof for validator set id = {} already present",
+                validator_set_id + 1
+            ));
 
         Ok(())
     }
@@ -101,7 +109,7 @@ impl ProofStorage for FileSystemProofStorage {
         self.cache.get_circuit_data()
     }
 
-    fn get_latest_proof(&self) -> Option<Proof> {
+    fn get_latest_proof(&self) -> Option<(ProofWithCircuitData, u64)> {
         self.cache.get_latest_proof()
     }
 
@@ -134,40 +142,72 @@ impl FileSystemProofStorage {
     }
 
     fn save_state(&self) -> Result<(), ProofStorageError> {
-        let proof_with_circuit_data = self
+        let circuit_data = self
             .cache
-            .latest
+            .circuit_data
             .clone()
             .ok_or_else(|| ProofStorageError::NotInitialized)?;
 
-        let write_files = || -> Result<(), io::Error> {
-            fs::write(
-                &self.save_to.join("circuit_data.bin"),
-                proof_with_circuit_data.circuit_data.into_bytes(),
-            )?;
-            fs::write(
-                &self.save_to.join("proof.bin"),
-                proof_with_circuit_data.proof.into_bytes(),
-            )?;
-            Ok(())
-        };
+        fs::write(
+            &self.save_to.join("circuit_data.bin"),
+            circuit_data.clone().into_bytes(),
+        )
+        .map_err(|_| ProofStorageError::NotInitialized)?;
 
-        write_files().map_err(|_| ProofStorageError::NotInitialized)
+        for (validator_set_id, proof) in &self.cache.proofs {
+            fs::write(
+                &self
+                    .save_to
+                    .join(&format!("proof_{}.bin", validator_set_id)),
+                proof.clone().into_bytes(),
+            )
+            .map_err(|_| ProofStorageError::NotInitialized)?;
+        }
+
+        Ok(())
     }
 
     fn load_state(&mut self) -> Result<(), ProofStorageError> {
-        let mut load = || -> io::Result<()> {
-            let circuit_data = fs::read(&self.save_to.join("circuit_data.bin"))?;
-            let proof = fs::read(&self.save_to.join("proof.bin"))?;
+        let circuit_data = fs::read(&self.save_to.join("circuit_data.bin"))
+            .map_err(|_| ProofStorageError::NotInitialized)?;
+        self.cache.circuit_data = Some(CircuitData::from_bytes(circuit_data));
 
-            self.cache.latest = Some(ProofWithCircuitData {
-                proof: Proof::from_bytes(proof),
-                circuit_data: CircuitData::from_bytes(circuit_data),
+        let prefix = "proof_";
+        let postfix = ".bin";
+        let found_validator_set_ids = fs::read_dir(&self.save_to)
+            .map_err(|_| ProofStorageError::NotInitialized)?
+            .filter_map(|file| {
+                let file_name = file.expect("Failed to read file").file_name();
+                let file_name = file_name.to_str();
+
+                let valid_name = file_name
+                    .map(|str| (&str[..prefix.len()], &str[str.len() - postfix.len()..]))
+                    == Some((prefix, postfix));
+
+                if valid_name {
+                    let file_name = file_name.expect("Invalid file name");
+                    let set_id = &file_name[prefix.len()..file_name.len() - postfix.len()];
+                    let set_id: u64 = set_id.parse().expect("Invalid file name");
+                    Some(set_id)
+                } else {
+                    None
+                }
             });
 
-            Ok(())
-        };
+        for validator_set_id in found_validator_set_ids {
+            let proof = fs::read(
+                &self
+                    .save_to
+                    .join(&format!("proof_{}.bin", validator_set_id)),
+            )
+            .map_err(|_| ProofStorageError::NotInitialized)?;
 
-        load().map_err(|_| ProofStorageError::NotInitialized)
+            self.cache
+                .proofs
+                .insert(validator_set_id, Proof::from_bytes(proof))
+                .expect("Files with the same name detected");
+        }
+
+        Ok(())
     }
 }

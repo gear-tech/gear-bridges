@@ -21,13 +21,12 @@ use crate::{
             impl_target_set, Blake2TargetGoldilocks, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{
         consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
         *,
     },
-    ProofWithCircuitData,
 };
 
 pub mod next_validator_set;
@@ -116,7 +115,7 @@ impl Circuit {
             ),
         );
 
-        ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness)
+        ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 
     pub fn prove_recursive(
@@ -127,7 +126,7 @@ impl Circuit {
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
-        ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness)
+        ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 }
 

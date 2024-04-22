@@ -13,11 +13,10 @@ use crate::{
         targets::{
             impl_target_set, Blake2Target, Blake2TargetGoldilocks, TargetBitOperations, TargetSet,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
     storage_inclusion::StorageInclusion,
-    ProofWithCircuitData,
 };
 
 impl_target_set! {
@@ -107,6 +106,6 @@ impl NextValidatorSet {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

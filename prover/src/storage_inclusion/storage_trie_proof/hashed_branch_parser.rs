@@ -7,10 +7,9 @@ use crate::{
     common::{
         generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use super::{
@@ -78,7 +77,7 @@ impl HashedBranchParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
         log::info!("Composed hasher proof and branch parser proof");
 

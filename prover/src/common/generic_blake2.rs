@@ -16,9 +16,11 @@ use plonky2_blake2b256::circuit::{
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+    common::{
+        targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+        ProofWithCircuitData,
+    },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use super::pad_byte_vec;
@@ -90,7 +92,7 @@ impl GenericBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
 
@@ -200,7 +202,7 @@ impl VariativeBlake2 {
             builder.add_gate(NoopGate, vec![]);
         }
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
 

@@ -8,11 +8,10 @@ use crate::{
         targets::{
             impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target, TargetSet,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 pub mod validator_set_hash;
@@ -65,7 +64,7 @@ pub struct BlockFinality {
 }
 
 impl BlockFinality {
-    pub fn prove(self) -> ProofWithCircuitData<BlockFinalityTarget> {
+    pub(crate) fn prove(self) -> ProofWithCircuitData<BlockFinalityTarget> {
         log::info!("Proving block finality...");
 
         // Find such a number that processed_validator_count > 2/3 * validator_count.
@@ -116,6 +115,6 @@ impl BlockFinality {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

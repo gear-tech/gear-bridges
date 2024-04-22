@@ -10,11 +10,10 @@ use crate::{
     common::{
         array_to_bits,
         targets::{impl_target_set, Ed25519PublicKeyTarget},
-        CircuitImplBuilder,
+        CircuitImplBuilder, ProofWithCircuitData,
     },
     consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use lazy_static::lazy_static;

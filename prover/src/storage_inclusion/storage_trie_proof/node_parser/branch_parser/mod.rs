@@ -18,7 +18,7 @@ use super::{
 use crate::{
     common::{
         targets::{Blake2Target, HalfByteTarget, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::BLAKE2_DIGEST_SIZE,
     impl_parsable_target_set,
@@ -30,7 +30,6 @@ use crate::{
         },
         storage_address::PartialStorageAddressTarget,
     },
-    ProofWithCircuitData,
 };
 use bitmap_parser::BitmapParserInputTarget;
 use child_node_array_parser::ChildNodeArrayParser;
@@ -173,7 +172,7 @@ impl BranchParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
         log::info!("Proven branch node parser");
 

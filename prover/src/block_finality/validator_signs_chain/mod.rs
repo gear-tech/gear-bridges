@@ -28,13 +28,12 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, GRANDPA_VOTE_LENGTH},
         *,
     },
-    ProofWithCircuitData,
 };
 
 use self::indexed_validator_sign::IndexedValidatorSignTarget;
@@ -136,7 +135,7 @@ impl ValidatorSignsChain {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
         log::info!("Proven validator signs chain");
 
@@ -225,7 +224,7 @@ impl SignComposition {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven sign composition recursion layer(initial)...");
 
@@ -242,7 +241,7 @@ impl SignComposition {
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven sign composition recursion layer");
 

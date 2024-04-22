@@ -13,11 +13,10 @@ use crate::{
     block_finality::validator_set_hash::ValidatorSetHashTarget,
     common::{
         targets::{impl_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 impl_target_set! {
@@ -77,7 +76,7 @@ impl IndexedValidatorSign {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
 

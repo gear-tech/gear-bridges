@@ -14,12 +14,11 @@ use plonky2_field::types::Field;
 use crate::{
     common::{
         targets::{impl_target_set, Blake2TargetGoldilocks, MessageTargetGoldilocks, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
     latest_validator_set::LatestValidatorSetTarget,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 pub mod message_sent;
@@ -104,6 +103,6 @@ impl FinalProof {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

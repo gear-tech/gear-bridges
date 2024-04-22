@@ -3,12 +3,9 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-use crate::{
-    common::{
-        targets::{impl_target_set, Blake2Target, ParsableTargetSet, TargetSet},
-        BuilderExt,
-    },
-    ProofWithCircuitData,
+use crate::common::{
+    targets::{impl_target_set, Blake2Target, ParsableTargetSet, TargetSet},
+    BuilderExt, ProofWithCircuitData,
 };
 
 use super::BranchNodeData;
@@ -85,6 +82,6 @@ impl StorageTrieProof {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

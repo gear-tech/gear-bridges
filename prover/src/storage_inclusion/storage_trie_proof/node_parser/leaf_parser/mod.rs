@@ -16,6 +16,7 @@ use crate::{
     common::{
         pad_byte_vec,
         targets::{Blake2Target, TargetSet},
+        ProofWithCircuitData,
     },
     impl_parsable_target_set,
     prelude::*,
@@ -29,7 +30,6 @@ use crate::{
         },
         storage_address::PartialStorageAddressTarget,
     },
-    ProofWithCircuitData,
 };
 
 mod hashed_data_parser;
@@ -144,7 +144,7 @@ impl LeafParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
         log::info!("Proven leaf node parser");
 

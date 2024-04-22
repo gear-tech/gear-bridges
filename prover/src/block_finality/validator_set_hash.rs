@@ -12,12 +12,11 @@ use crate::{
     common::{
         generic_blake2::GenericBlake2,
         targets::{Blake2Target, PaddedValidatorSetTarget, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::ED25519_PUBLIC_KEY_SIZE,
     impl_target_set,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use self::consts::BLAKE2_DIGEST_SIZE;
@@ -88,7 +87,7 @@ impl ValidatorSetHash {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, pw);
+        let result = ProofWithCircuitData::prove_from_builder(builder, pw);
 
         log::info!("Proven correct hashing of validator set");
 

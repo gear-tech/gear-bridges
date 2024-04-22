@@ -91,8 +91,17 @@ pub mod proving {
             ProofWithPublicInputs::from_bytes(self.0, common_data)
                 .expect("Failed to deserialize proof")
         }
+
+        pub fn from_bytes(data: Vec<u8>) -> Self {
+            Self(data)
+        }
+
+        pub fn into_bytes(self) -> Vec<u8> {
+            self.0
+        }
     }
 
+    #[derive(Clone)]
     pub struct CircuitData(pub Vec<u8>);
 
     impl CircuitData {
@@ -108,8 +117,17 @@ pub mod proving {
             VerifierCircuitData::from_bytes(self.0, &DefaultGateSerializer)
                 .expect("Failed to deserialize circuit data")
         }
+
+        pub fn from_bytes(data: Vec<u8>) -> Self {
+            Self(data)
+        }
+
+        pub fn into_bytes(self) -> Vec<u8> {
+            self.0
+        }
     }
 
+    #[derive(Clone)]
     pub struct ProofWithCircuitData {
         pub proof: Proof,
         pub circuit_data: CircuitData,

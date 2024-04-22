@@ -1,238 +1,173 @@
-// use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
-// use plonky2::{
-//     plonk::{
-//         circuit_data::{CommonCircuitData, VerifierCircuitData, VerifierOnlyCircuitData},
-//         proof::ProofWithPublicInputs,
-//     },
-//     util::serialization::DefaultGateSerializer,
-// };
-// use prover::{
-//     common::targets::ParsableTargetSet, latest_validator_set::LatestValidatorSetTarget, prelude::*,
-// };
+use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
 
-// #[derive(Debug)]
-// pub enum ProofStorageError {
-//     AlreadyInitialized,
-//     NotInitialized,
+#[derive(Debug)]
+pub enum ProofStorageError {
+    AlreadyInitialized,
+    NotInitialized,
 
-//     InvalidProof(anyhow::Error),
-//     InvalidCircuitData,
-//     InvalidValidatorSetId,
-//     InvalidGenesis,
-//     InvalidVerifierData,
-// }
+    InvalidProof(anyhow::Error),
+    InvalidCircuitData,
+    InvalidValidatorSetId,
+    InvalidGenesis,
+    InvalidVerifierData,
+}
 
-// pub trait ProofStorage {
-//     fn init(
-//         &mut self,
-//         verifier_circuit_data: VerifierCircuitData<F, C, D>,
-//         proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
-//     ) -> Result<(), ProofStorageError>;
+pub trait ProofStorage {
+    fn init(
+        &mut self,
+        proof_with_circuit_data: ProofWithCircuitData,
+        genesis_validator_set_id: u64,
+    ) -> Result<(), ProofStorageError>;
 
-//     fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError>;
+    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError>;
 
-//     fn get_latest_proof(&self) -> Option<ProofWithPublicInputs<F, C, D>>;
+    fn get_latest_proof(&self) -> Option<Proof>;
 
-//     // TODO: Add fn to query any of the stored proofs
+    // TODO: Add fn to query any of the stored proofs
 
-//     fn update(&mut self, proof: ProofWithPublicInputs<F, C, D>) -> Result<(), ProofStorageError>;
-// }
+    fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError>;
+}
 
-// #[derive(Default)]
-// struct MockProofStorage {
-//     latest_proof: Option<ProofWithPublicInputs<F, C, D>>,
-//     verifier_circuit_data: Option<VerifierCircuitData<F, C, D>>,
-// }
+#[derive(Default)]
+struct MockProofStorage {
+    latest: Option<ProofWithCircuitData>,
+    latest_validator_set_id: u64,
+}
 
-// impl ProofStorage for MockProofStorage {
-//     fn init(
-//         &mut self,
-//         verifier_circuit_data: VerifierCircuitData<F, C, D>,
-//         proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
-//     ) -> Result<(), ProofStorageError> {
-//         if self.verifier_circuit_data.is_some() {
-//             return Err(ProofStorageError::AlreadyInitialized);
-//         }
+impl ProofStorage for MockProofStorage {
+    fn init(
+        &mut self,
+        proof_with_circuit_data: ProofWithCircuitData,
+        genesis_validator_set_id: u64,
+    ) -> Result<(), ProofStorageError> {
+        if self.latest.is_some() {
+            return Err(ProofStorageError::AlreadyInitialized);
+        }
 
-//         let verified = verifier_circuit_data.verify(proof_with_public_inputs.clone());
-//         if let Err(err) = verified {
-//             return Err(ProofStorageError::InvalidProof(err));
-//         }
+        self.latest = Some(proof_with_circuit_data);
+        self.latest_validator_set_id = genesis_validator_set_id;
 
-//         let public_inputs = LatestValidatorSetTarget::parse_public_inputs(
-//             &mut proof_with_public_inputs.public_inputs.clone().into_iter(),
-//         );
+        Ok(())
+    }
 
-//         if public_inputs.verifier_only_data != verifier_circuit_data.verifier_only {
-//             return Err(ProofStorageError::InvalidVerifierData);
-//         }
+    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
+        self.latest
+            .as_ref()
+            .map(|cd| cd.circuit_data.clone())
+            .ok_or(ProofStorageError::NotInitialized)
+    }
 
-//         self.verifier_circuit_data = Some(verifier_circuit_data);
-//         self.latest_proof = Some(proof_with_public_inputs);
+    fn get_latest_proof(&self) -> Option<Proof> {
+        self.latest.as_ref().map(|cd| cd.proof.clone())
+    }
 
-//         Ok(())
-//     }
+    fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError> {
+        let circuit_data = self
+            .latest
+            .as_ref()
+            .map(|cd| cd.circuit_data.clone())
+            .ok_or_else(|| ProofStorageError::NotInitialized)?;
 
-//     fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError> {
-//         self.verifier_circuit_data
-//             .clone()
-//             .ok_or(ProofStorageError::NotInitialized)
-//     }
+        self.latest = Some(ProofWithCircuitData {
+            proof,
+            circuit_data,
+        });
+        self.latest_validator_set_id += 1;
 
-//     fn get_latest_proof(&self) -> Option<ProofWithPublicInputs<F, C, D>> {
-//         self.latest_proof.clone()
-//     }
+        Ok(())
+    }
+}
 
-//     fn update(&mut self, proof: ProofWithPublicInputs<F, C, D>) -> Result<(), ProofStorageError> {
-//         let mut public_inputs = proof.public_inputs.clone().into_iter();
-//         let public_inputs = LatestValidatorSetTarget::parse_public_inputs(&mut public_inputs);
+pub struct FileSystemProofStorage {
+    cache: MockProofStorage,
+    save_to: PathBuf,
+}
 
-//         let (verifier_data, latest_proof) = match (
-//             self.verifier_circuit_data.as_ref(),
-//             self.latest_proof.as_ref(),
-//         ) {
-//             (Some(verifier_data), Some(latest_proof)) => (verifier_data, latest_proof),
-//             _ => return Err(ProofStorageError::NotInitialized),
-//         };
+impl ProofStorage for FileSystemProofStorage {
+    fn init(
+        &mut self,
+        proof_with_circuit_data: ProofWithCircuitData,
+        genesis_validator_set_id: u64,
+    ) -> Result<(), ProofStorageError> {
+        self.cache
+            .init(proof_with_circuit_data, genesis_validator_set_id)?;
+        self.save_state()?;
+        Ok(())
+    }
 
-//         if let Err(err) = verifier_data.verify(proof.clone()) {
-//             return Err(ProofStorageError::InvalidProof(err));
-//         }
+    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
+        self.cache.get_circuit_data()
+    }
 
-//         let latest_proof_public_inputs = LatestValidatorSetTarget::parse_public_inputs(
-//             &mut latest_proof.public_inputs.clone().into_iter(),
-//         );
+    fn get_latest_proof(&self) -> Option<Proof> {
+        self.cache.get_latest_proof()
+    }
 
-//         if latest_proof_public_inputs.current_set_id + 1 != public_inputs.current_set_id {
-//             return Err(ProofStorageError::InvalidValidatorSetId);
-//         }
+    fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError> {
+        self.cache.update(proof)?;
+        self.save_state()?;
+        Ok(())
+    }
+}
 
-//         if latest_proof_public_inputs.genesis_hash != public_inputs.genesis_hash
-//             || latest_proof_public_inputs.genesis_set_id != public_inputs.genesis_set_id
-//         {
-//             return Err(ProofStorageError::InvalidGenesis);
-//         }
+impl FileSystemProofStorage {
+    pub fn new(save_to: PathBuf) -> FileSystemProofStorage {
+        fs::create_dir_all(&save_to).expect("Failed to create directory for proof storage");
+        if !save_to.is_dir() {
+            panic!("Please provide directory as a path");
+        }
 
-//         if latest_proof_public_inputs.verifier_only_data != public_inputs.verifier_only_data {
-//             return Err(ProofStorageError::InvalidVerifierData);
-//         }
+        let mut storage = FileSystemProofStorage {
+            cache: MockProofStorage::default(),
+            save_to,
+        };
 
-//         self.latest_proof = Some(proof);
+        if storage.load_state().is_ok() {
+            log::info!("Proof storage state loaded succesfully");
+        } else {
+            log::info!("Proof storage state not found. Waiting for initialization");
+        }
 
-//         Ok(())
-//     }
-// }
+        storage
+    }
 
-// pub struct FileSystemProofStorage {
-//     cache: MockProofStorage,
-//     save_to: PathBuf,
-// }
+    fn save_state(&self) -> Result<(), ProofStorageError> {
+        let proof_with_circuit_data = self
+            .cache
+            .latest
+            .clone()
+            .ok_or_else(|| ProofStorageError::NotInitialized)?;
 
-// impl ProofStorage for FileSystemProofStorage {
-//     fn init(
-//         &mut self,
-//         verifier_circuit_data: VerifierCircuitData<F, C, D>,
-//         proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
-//     ) -> Result<(), ProofStorageError> {
-//         self.cache
-//             .init(verifier_circuit_data, proof_with_public_inputs)?;
-//         self.save_state()?;
-//         Ok(())
-//     }
+        let write_files = || -> Result<(), io::Error> {
+            fs::write(
+                &self.save_to.join("circuit_data.bin"),
+                proof_with_circuit_data.circuit_data.into_bytes(),
+            )?;
+            fs::write(
+                &self.save_to.join("proof.bin"),
+                proof_with_circuit_data.proof.into_bytes(),
+            )?;
+            Ok(())
+        };
 
-//     fn get_verifier_circuit_data(&self) -> Result<VerifierCircuitData<F, C, D>, ProofStorageError> {
-//         self.cache.get_verifier_circuit_data()
-//     }
+        write_files().map_err(|_| ProofStorageError::NotInitialized)
+    }
 
-//     fn get_latest_proof(&self) -> Option<ProofWithPublicInputs<F, C, D>> {
-//         self.cache.get_latest_proof()
-//     }
+    fn load_state(&mut self) -> Result<(), ProofStorageError> {
+        let mut load = || -> io::Result<()> {
+            let circuit_data = fs::read(&self.save_to.join("circuit_data.bin"))?;
+            let proof = fs::read(&self.save_to.join("proof.bin"))?;
 
-//     fn update(&mut self, proof: ProofWithPublicInputs<F, C, D>) -> Result<(), ProofStorageError> {
-//         self.cache.update(proof)?;
-//         self.save_state()?;
-//         Ok(())
-//     }
-// }
+            self.cache.latest = Some(ProofWithCircuitData {
+                proof: Proof::from_bytes(proof),
+                circuit_data: CircuitData::from_bytes(circuit_data),
+            });
 
-// impl FileSystemProofStorage {
-//     pub fn new(save_to: PathBuf) -> FileSystemProofStorage {
-//         fs::create_dir_all(&save_to).expect("Failed to create directory for proof storage");
-//         if !save_to.is_dir() {
-//             panic!("Please provide directory as a path");
-//         }
+            Ok(())
+        };
 
-//         let mut storage = FileSystemProofStorage {
-//             cache: MockProofStorage::default(),
-//             save_to,
-//         };
-
-//         if storage.load_state().is_ok() {
-//             log::info!("Proof storage state loaded succesfully");
-//         } else {
-//             log::info!("Proof storage state not found. Waiting for initialization");
-//         }
-
-//         storage
-//     }
-
-//     fn save_state(&self) -> Result<(), ProofStorageError> {
-//         let (verifier_data, latest_proof) = match (
-//             self.cache.verifier_circuit_data.as_ref(),
-//             self.cache.latest_proof.as_ref(),
-//         ) {
-//             (Some(verifier_data), Some(latest_proof)) => (verifier_data, latest_proof),
-//             _ => return Err(ProofStorageError::NotInitialized),
-//         };
-
-//         let common = verifier_data
-//             .common
-//             .to_bytes(&DefaultGateSerializer {})
-//             .expect("Failed to serialize CommonCircuitData");
-//         let verifier_only = verifier_data
-//             .verifier_only
-//             .to_bytes()
-//             .expect("Failed to serialize VerifierOnlyCircuitData");
-//         let proof = latest_proof.to_bytes();
-
-//         let write_files = || -> Result<(), io::Error> {
-//             fs::write(&self.save_to.join("common_circuit_data.bin"), common)?;
-//             fs::write(
-//                 &self.save_to.join("verifier_only_circuit_data.bin"),
-//                 verifier_only,
-//             )?;
-//             fs::write(&self.save_to.join("proof_with_public_inputs.bin"), proof)?;
-//             Ok(())
-//         };
-
-//         write_files().map_err(|_| ProofStorageError::NotInitialized)
-//     }
-
-//     fn load_state(&mut self) -> Result<(), ProofStorageError> {
-//         let mut load = || -> io::Result<()> {
-//             let common_data = fs::read(&self.save_to.join("common_circuit_data.bin"))?;
-//             let verifier_only_data =
-//                 fs::read(&self.save_to.join("verifier_only_circuit_data.bin"))?;
-//             let proof_data = fs::read(&self.save_to.join("proof_with_public_inputs.bin"))?;
-
-//             let common =
-//                 CommonCircuitData::<F, D>::from_bytes(common_data, &DefaultGateSerializer {})
-//                     .expect("Failed to deserialize CommonCircuitData");
-//             let verifier_only = VerifierOnlyCircuitData::<C, D>::from_bytes(verifier_only_data)
-//                 .expect("Failed to deserialize VerifierOnlyCircuitData");
-//             let proof = ProofWithPublicInputs::<F, C, D>::from_bytes(proof_data, &common)
-//                 .expect("Failed to deserialize ProofWithPublicInputs");
-
-//             self.cache.latest_proof = Some(proof);
-//             self.cache.verifier_circuit_data = Some(VerifierCircuitData {
-//                 verifier_only,
-//                 common,
-//             });
-
-//             Ok(())
-//         };
-
-//         load().map_err(|_| ProofStorageError::NotInitialized)
-//     }
-// }
+        load().map_err(|_| ProofStorageError::NotInitialized)
+    }
+}

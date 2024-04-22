@@ -52,10 +52,10 @@ pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
 pub async fn prove_validator_set_change(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
-    validator_set_id: u64,
+    previous_validator_set_id: u64,
 ) -> ProofWithCircuitData {
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(validator_set_id)
+        .fetch_finality_proof_for_session(previous_validator_set_id)
         .await
         .unwrap();
 
@@ -86,10 +86,10 @@ pub async fn prove_validator_set_change(
 pub async fn prove_final(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
-    validator_set_id: u64,
+    previous_validator_set_id: u64,
 ) -> String {
     let block = gear_api
-        .search_for_validator_set_block(validator_set_id)
+        .search_for_validator_set_block(previous_validator_set_id)
         .await
         .unwrap();
     let (block, block_finality) = gear_api.fetch_finality_proof(block).await.unwrap();

@@ -14,10 +14,9 @@ use plonky2::{
         proof::{Proof, ProofWithPublicInputs},
     },
 };
-use serde::{Deserialize, Serialize};
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::prelude::*;
+use crate::{prelude::*, proving::ExportedProofWithCircuitData};
 
 #[macro_use]
 pub mod targets;
@@ -45,7 +44,7 @@ impl<TS> ProofWithCircuitData<TS>
 where
     TS: TargetSet,
 {
-    pub fn from_builder(
+    pub fn prove_from_builder(
         builder: CircuitBuilder<F, D>,
         witness: PartialWitness<F>,
     ) -> ProofWithCircuitData<TS> {
@@ -63,7 +62,7 @@ where
         }
     }
 
-    pub fn from_circuit_data(
+    pub fn prove_from_circuit_data(
         circuit_data: &CircuitData<F, C, D>,
         witness: PartialWitness<F>,
     ) -> ProofWithCircuitData<TS> {
@@ -75,6 +74,23 @@ where
         ProofWithCircuitData {
             proof,
             circuit_data: Arc::from(circuit_data.verifier_data()),
+            public_inputs,
+            public_inputs_parser: PhantomData,
+        }
+    }
+
+    pub fn from_proof_and_circuit_data(
+        proof: ProofWithPublicInputs<F, C, D>,
+        circuit_data: VerifierCircuitData<F, C, D>,
+    ) -> Self {
+        let ProofWithPublicInputs {
+            proof,
+            public_inputs,
+        } = proof;
+
+        Self {
+            proof,
+            circuit_data: Arc::from(circuit_data),
             public_inputs,
             public_inputs_parser: PhantomData,
         }
@@ -95,13 +111,13 @@ where
         }
     }
 
-    pub fn export(self) -> SerializedDataToVerify {
+    pub fn export(self) -> ExportedProofWithCircuitData {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
             public_inputs: self.public_inputs,
         };
 
-        SerializedDataToVerify {
+        ExportedProofWithCircuitData {
             proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
             common_circuit_data: serde_json::to_string(&self.circuit_data.common).unwrap(),
             verifier_only_circuit_data: serde_json::to_string(&self.circuit_data.verifier_only)
@@ -109,7 +125,7 @@ where
         }
     }
 
-    pub fn export_wrapped(self) -> SerializedDataToVerify {
+    pub fn export_wrapped(self) -> ExportedProofWithCircuitData {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
             public_inputs: self.public_inputs,
@@ -118,7 +134,7 @@ where
         let (proof_with_public_inputs, circuit_data) =
             wrap_bn128(&self.circuit_data, proof_with_public_inputs);
 
-        SerializedDataToVerify {
+        ExportedProofWithCircuitData {
             proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
             common_circuit_data: serde_json::to_string(&circuit_data.common).unwrap(),
             verifier_only_circuit_data: serde_json::to_string(&circuit_data.verifier_only).unwrap(),
@@ -164,15 +180,8 @@ impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
     ) -> ProofWithCircuitData<BUILDER::PublicInputsTarget> {
         let mut witness = PartialWitness::new();
         impl_builder.set_witness(self.witness_targets.clone(), &mut witness);
-        ProofWithCircuitData::from_circuit_data(&self.circuit_data, witness)
+        ProofWithCircuitData::prove_from_circuit_data(&self.circuit_data, witness)
     }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SerializedDataToVerify {
-    pub proof_with_public_inputs: String,
-    pub common_circuit_data: String,
-    pub verifier_only_circuit_data: String,
 }
 
 fn wrap_bn128(

@@ -8,7 +8,10 @@ use plonky2::{
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
+    common::{
+        targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
+        ProofWithCircuitData,
+    },
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
         *,
@@ -20,7 +23,6 @@ use crate::{
             NODE_DATA_BLOCK_BYTES,
         },
     },
-    ProofWithCircuitData,
 };
 
 impl_parsable_target_set! {
@@ -121,7 +123,7 @@ impl ChildNodeParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let data = ProofWithCircuitData::from_builder(builder, pw);
+        let data = ProofWithCircuitData::prove_from_builder(builder, pw);
 
         log::info!("Proven child node parser");
 

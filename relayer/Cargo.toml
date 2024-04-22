@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 gear-rpc-client.workspace = true
 prover.workspace = true
-intermediate-proof-storage.workspace = true
 
 actix-web.workspace = true
 log.workspace = true
@@ -16,6 +15,7 @@ serde_json.workspace = true
 clap.workspace = true
 tokio.workspace = true
 libc.workspace = true
+anyhow.workspace = true
 
 [build-dependencies]
 cgo_oligami = "0.3"

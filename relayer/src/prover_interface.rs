@@ -1,17 +1,11 @@
-use intermediate_proof_storage::ProofStorage;
 use std::time::Instant;
 
-use gear_rpc_client::{BlockInclusionProof, GearApi};
-use prover::{
-    common::targets::ParsableTargetSet,
-    final_proof::{message_sent::MessageSent, FinalProof},
-    latest_validator_set::{
-        next_validator_set::NextValidatorSet, LatestValidatorSet, LatestValidatorSetTarget,
-    },
-    prelude::consts::GENESIS_AUTHORITY_SET_ID,
-    storage_inclusion::{BranchNodeData, StorageInclusion},
+use gear_rpc_client::{dto, GearApi};
+use prover::proving::{
+    self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
 
+const GENESIS_AUTHORITY_SET_ID: u64 = 272;
 // TODO: Move to prover.
 pub const NEXT_SESSION_KEYS_STORAGE_ADDRESS: [u8; 64] = [
     0xc, 0xe, 0xc, 0x5, 0x0, 0x7, 0x0, 0xd, 0x6, 0x0, 0x9, 0xd, 0xd, 0x3, 0x4, 0x9, 0x7, 0xf, 0x7,
@@ -26,183 +20,137 @@ pub const MESSAGE_STORAGE_ADDRESS: [u8; 64] = [
     0xa, 0xb, 0xd, 0xd, 0x6, 0x7, 0x2,
 ];
 
-pub struct ProverInterface {
-    proof_storage: Box<dyn ProofStorage>,
-    gear_api: GearApi,
+pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
+    let (block, current_epoch_block_finality) = gear_api
+        .fetch_finality_proof_for_session(GENESIS_AUTHORITY_SET_ID)
+        .await
+        .unwrap();
+
+    let next_validator_set_inclusion_proof = gear_api
+        .fetch_next_session_keys_inclusion_proof(block)
+        .await
+        .unwrap();
+    let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
+    let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
+        next_validator_set_inclusion_proof,
+        NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
+    );
+
+    let now = Instant::now();
+
+    let proof = prover::proving::prove_genesis(
+        parse_rpc_block_finality_proof(current_epoch_block_finality),
+        next_validator_set_inclusion_proof,
+        next_validator_set_storage_data,
+    );
+
+    log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
+
+    proof
 }
 
-impl ProverInterface {
-    pub fn new(proof_storage: Box<dyn ProofStorage>, gear_api: GearApi) -> ProverInterface {
-        ProverInterface {
-            proof_storage,
-            gear_api,
-        }
-    }
+pub async fn prove_validator_set_change(
+    gear_api: &GearApi,
+    previous_proof: ProofWithCircuitData,
+    validator_set_id: u64,
+) -> ProofWithCircuitData {
+    let (block, current_epoch_block_finality) = gear_api
+        .fetch_finality_proof_for_session(validator_set_id)
+        .await
+        .unwrap();
 
-    pub async fn prove_genesis(&mut self) {
-        let (block, current_epoch_block_finality) = self
-            .gear_api
-            .fetch_finality_proof_for_session(GENESIS_AUTHORITY_SET_ID)
-            .await
-            .unwrap();
+    let next_validator_set_inclusion_proof = gear_api
+        .fetch_next_session_keys_inclusion_proof(block)
+        .await
+        .unwrap();
+    let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
+    let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
+        next_validator_set_inclusion_proof,
+        NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
+    );
 
-        let next_validator_set_inclusion_proof = self
-            .gear_api
-            .fetch_next_session_keys_inclusion_proof(block)
-            .await
-            .unwrap();
-        let next_validator_set_storage_data = next_validator_set_inclusion_proof
-            .storage_inclusion_proof
-            .storage_data
-            .clone();
-        let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
-            next_validator_set_inclusion_proof,
-            NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
-        );
+    let now = Instant::now();
 
-        let now = Instant::now();
+    let proof = proving::prove_validator_set_change(
+        previous_proof,
+        parse_rpc_block_finality_proof(current_epoch_block_finality),
+        next_validator_set_inclusion_proof,
+        next_validator_set_storage_data,
+    );
 
-        let change_from_genesis = NextValidatorSet {
-            current_epoch_block_finality,
-            next_validator_set_inclusion_proof,
-            next_validator_set_storage_data,
-        };
+    log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
 
-        let genesis_proof = LatestValidatorSet {
-            change_proof: change_from_genesis,
-        }
-        .prove_genesis();
+    proof
+}
 
-        log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
+pub async fn prove_final(
+    gear_api: &GearApi,
+    previous_proof: ProofWithCircuitData,
+    validator_set_id: u64,
+) -> String {
+    let block = gear_api
+        .search_for_validator_set_block(validator_set_id)
+        .await
+        .unwrap();
+    let (block, block_finality) = gear_api.fetch_finality_proof(block).await.unwrap();
 
-        self.proof_storage
-            .init(genesis_proof.circuit_data().clone(), genesis_proof.proof())
-            .unwrap();
-    }
+    let sent_message_inclusion_proof = gear_api
+        .fetch_sent_message_inclusion_proof(block)
+        .await
+        .unwrap();
 
-    pub async fn prove_validator_set_change(&mut self) {
-        let latest_proof = self
-            .proof_storage
-            .get_latest_proof()
-            .expect("No latest proof found");
-        let latest_proof_public_inputs = LatestValidatorSetTarget::parse_public_inputs(
-            &mut latest_proof.public_inputs.clone().into_iter(),
-        );
+    let message_contents = sent_message_inclusion_proof.stored_data.clone();
+    let sent_message_inclusion_proof = parse_rpc_inclusion_proof(
+        sent_message_inclusion_proof,
+        MESSAGE_STORAGE_ADDRESS.to_vec(),
+    );
 
-        let validator_set_id = latest_proof_public_inputs.current_set_id;
+    let proof = proving::prove_message_sent(
+        previous_proof,
+        parse_rpc_block_finality_proof(block_finality),
+        sent_message_inclusion_proof,
+        message_contents,
+    );
 
-        let (block, current_epoch_block_finality) = self
-            .gear_api
-            .fetch_finality_proof_for_session(validator_set_id)
-            .await
-            .unwrap();
-
-        let next_validator_set_inclusion_proof = self
-            .gear_api
-            .fetch_next_session_keys_inclusion_proof(block)
-            .await
-            .unwrap();
-        let next_validator_set_storage_data = next_validator_set_inclusion_proof
-            .storage_inclusion_proof
-            .storage_data
-            .clone();
-        let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
-            next_validator_set_inclusion_proof,
-            NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
-        );
-
-        let now = Instant::now();
-
-        let next_change = NextValidatorSet {
-            current_epoch_block_finality,
-            next_validator_set_inclusion_proof,
-            next_validator_set_storage_data,
-        };
-
-        let validator_set_change_proof = LatestValidatorSet {
-            change_proof: next_change,
-        }
-        .prove_recursive(latest_proof);
-
-        log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
-
-        self.proof_storage
-            .update(validator_set_change_proof.proof())
-            .unwrap();
-    }
-
-    pub async fn prove_final(&mut self) -> String {
-        let latest_proof = self
-            .proof_storage
-            .get_latest_proof()
-            .expect("No latest proof found");
-        let latest_proof_public_inputs = LatestValidatorSetTarget::parse_public_inputs(
-            &mut latest_proof.public_inputs.clone().into_iter(),
-        );
-
-        let block = self
-            .gear_api
-            .search_for_validator_set_block(latest_proof_public_inputs.current_set_id)
-            .await
-            .unwrap();
-        let (block, block_finality) = self.gear_api.fetch_finality_proof(block).await.unwrap();
-
-        let sent_message_inclusion_proof = self
-            .gear_api
-            .fetch_sent_message_inclusion_proof(block)
-            .await
-            .unwrap();
-
-        let sent_message_storage_data = sent_message_inclusion_proof
-            .storage_inclusion_proof
-            .storage_data
-            .clone();
-        let sent_message_inclusion_proof = parse_rpc_inclusion_proof(
-            sent_message_inclusion_proof,
-            MESSAGE_STORAGE_ADDRESS.to_vec(),
-        );
-
-        let message_sent = MessageSent {
-            block_finality,
-            inclusion_proof: sent_message_inclusion_proof,
-            message_storage_data: sent_message_storage_data,
-        };
-
-        let current_validator_set_verifier_data =
-            self.proof_storage.get_verifier_circuit_data().unwrap();
-        let final_proof = FinalProof {
-            message_sent,
-            current_validator_set_proof: latest_proof,
-            current_validator_set_verifier_data,
-        }
-        .prove();
-
-        let final_serialized = final_proof.export_wrapped();
-
-        gnark::compile_circuit(&final_serialized);
-
-        gnark::prove_circuit(&final_serialized)
-    }
+    gnark::compile_circuit(&proof);
+    gnark::prove_circuit(&proof)
 }
 
 fn parse_rpc_inclusion_proof(
-    proof: BlockInclusionProof,
+    proof: dto::StorageInclusionProof,
     address_nibbles: Vec<u8>,
 ) -> StorageInclusion {
     StorageInclusion {
-        block_header_data: proof.encoded_header,
+        block_header_data: proof.block_header,
         branch_node_data: proof
-            .storage_inclusion_proof
             .branch_nodes_data
             .into_iter()
             .rev()
             .map(|d| BranchNodeData {
-                data: d.encoded_node,
-                child_nibble: d.child_nibble,
+                data: d.data,
+                child_nibble: d.target_child,
             })
             .collect(),
-        leaf_node_data: proof.storage_inclusion_proof.encoded_leaf_node,
+        leaf_node_data: proof.leaf_node_data,
         address_nibbles: address_nibbles,
+    }
+}
+
+fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof) -> BlockFinality {
+    BlockFinality {
+        validator_set: proof.validator_set,
+        pre_commits: proof
+            .pre_commits
+            .into_iter()
+            .map(|pc| PreCommit {
+                public_key: pc.public_key,
+                signature: pc.signature,
+            })
+            .collect(),
+        message: proof
+            .message
+            .try_into()
+            .expect("Not expected GRANDPA message length"),
     }
 }
 
@@ -210,14 +158,14 @@ pub mod gnark {
     use core::ffi::c_char;
     use std::ffi::{CStr, CString};
 
-    use prover::common::SerializedDataToVerify;
+    use prover::proving::ExportedProofWithCircuitData;
 
     extern "C" {
         fn compile(circuit_data: *const c_char);
         fn prove(circuit_data: *const c_char) -> *const c_char;
     }
 
-    pub fn compile_circuit(s: &SerializedDataToVerify) {
+    pub fn compile_circuit(s: &ExportedProofWithCircuitData) {
         let serialized = serde_json::to_string(s).expect("Failed to serialize data");
         let c_string = CString::new(serialized).expect("CString::new failed");
         unsafe {
@@ -225,7 +173,7 @@ pub mod gnark {
         }
     }
 
-    pub fn prove_circuit(s: &SerializedDataToVerify) -> String {
+    pub fn prove_circuit(s: &ExportedProofWithCircuitData) -> String {
         let serialized = serde_json::to_string(s).expect("Failed to serialize data");
         let c_string = CString::new(serialized).expect("CString::new failed");
         let result = unsafe {

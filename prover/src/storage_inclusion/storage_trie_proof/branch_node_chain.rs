@@ -25,11 +25,10 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_inclusion::storage_trie_proof::node_parser::branch_parser::BranchParser,
-    ProofWithCircuitData,
 };
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
@@ -75,7 +74,7 @@ impl BranchNodeChain {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
         log::info!("Proven branch node chain");
 
@@ -155,7 +154,7 @@ impl Circuit {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven storage trie recursion layer(initial)...");
 
@@ -172,7 +171,7 @@ impl Circuit {
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven storage trie recursion layer");
 

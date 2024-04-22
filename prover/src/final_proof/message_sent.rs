@@ -14,12 +14,11 @@ use crate::{
             impl_target_set, ArrayTarget, Blake2Target, Blake2TargetGoldilocks,
             MessageTargetGoldilocks, TargetBitOperations, TargetSet,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::MESSAGE_SIZE_IN_BITS,
     prelude::*,
     storage_inclusion::StorageInclusion,
-    ProofWithCircuitData,
 };
 
 impl_target_set! {
@@ -113,6 +112,6 @@ impl MessageSent {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

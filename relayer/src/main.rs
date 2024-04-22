@@ -2,12 +2,11 @@ extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
 
-use intermediate_proof_storage::FileSystemProofStorage;
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
-use prover_interface::ProverInterface;
 
 use gear_rpc_client::GearApi;
 
+mod proof_storage;
 mod prover_interface;
 
 const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
@@ -95,7 +94,7 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let proof_storage = Box::new(FileSystemProofStorage::new("./proof_storage".into()));
+    //let proof_storage = Box::new(FileSystemProofStorage::new("./proof_storage".into()));
 
     match cli.command {
         CliCommands::Prove(prove_command) => match prove_command {
@@ -103,25 +102,25 @@ async fn main() {
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await
                     .unwrap();
-                ProverInterface::new(proof_storage, gear_api)
-                    .prove_genesis()
-                    .await;
+                // ProverInterface::new(proof_storage, gear_api)
+                //     .prove_genesis()
+                //     .await;
             }
             ProveCommands::ValidatorSetChange { args } => {
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await
                     .unwrap();
-                ProverInterface::new(proof_storage, gear_api)
-                    .prove_validator_set_change()
-                    .await;
+                // ProverInterface::new(proof_storage, gear_api)
+                //     .prove_validator_set_change()
+                //     .await;
             }
             ProveCommands::Wrapped { args } => {
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await
                     .unwrap();
-                ProverInterface::new(proof_storage, gear_api)
-                    .prove_final()
-                    .await;
+                // ProverInterface::new(proof_storage, gear_api)
+                //     .prove_final()
+                //     .await;
             }
         },
         CliCommands::Serve(ServeArgs {
@@ -130,9 +129,9 @@ async fn main() {
             prove_args: ProveArgs { vara_endpoint },
         }) => {
             let gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
-            let mut prover = ProverInterface::new(proof_storage, gear_api);
+            //let mut prover = ProverInterface::new(proof_storage, gear_api);
 
-            prover.prove_genesis().await;
+            //prover.prove_genesis().await;
         }
     };
 }

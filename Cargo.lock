@@ -2871,7 +2871,6 @@ dependencies = [
  "pallet-babe",
  "pallet-grandpa",
  "parity-scale-codec",
- "prover",
  "sc-consensus-grandpa",
  "sp-consensus-babe",
  "sp-consensus-grandpa",
@@ -3469,17 +3468,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "276ec31bcb4a9ee45f58bec6f9ec700ae4cf4f4f8f2fa7e06cb406bd5ffdd770"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "intermediate-proof-storage"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "plonky2",
- "prover",
- "serde_json",
 ]
 
 [[package]]
@@ -6135,10 +6123,10 @@ name = "relayer"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "anyhow",
  "cgo_oligami",
  "clap",
  "gear-rpc-client",
- "intermediate-proof-storage",
  "libc",
  "log",
  "pretty_env_logger",

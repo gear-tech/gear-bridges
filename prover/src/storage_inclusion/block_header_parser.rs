@@ -7,10 +7,9 @@ use crate::{
     common::{
         generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, ByteTarget, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
-    ProofWithCircuitData,
 };
 
 // Block header have the folowing structure:
@@ -63,6 +62,6 @@ impl BlockHeaderParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

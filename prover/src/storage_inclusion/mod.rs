@@ -6,10 +6,9 @@ use plonky2::{
 use crate::{
     common::{
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 mod block_header_parser;
@@ -43,7 +42,7 @@ pub struct StorageInclusion {
 }
 
 impl StorageInclusion {
-    pub fn prove(self) -> ProofWithCircuitData<StorageInclusionTarget> {
+    pub(crate) fn prove(self) -> ProofWithCircuitData<StorageInclusionTarget> {
         let block_header_proof = BlockHeaderParser {
             header_data: self.block_header_data,
         }
@@ -78,6 +77,6 @@ impl StorageInclusion {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

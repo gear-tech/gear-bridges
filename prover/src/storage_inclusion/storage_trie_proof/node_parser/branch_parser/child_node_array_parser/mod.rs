@@ -20,13 +20,12 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_inclusion::storage_trie_proof::node_parser::{
         BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
     },
-    ProofWithCircuitData,
 };
 use std::iter;
 
@@ -76,7 +75,7 @@ impl ChildNodeArrayParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 
     fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTarget> {
@@ -184,7 +183,7 @@ impl Circuit {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven child node parser recursion layer(initial)...");
 
@@ -201,7 +200,7 @@ impl Circuit {
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
         log::info!("    Proven child node parser recursion layer");
 

@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
@@ -10,9 +9,7 @@ use plonky2::gates::gate::Gate;
 use plonky2::gates::util::StridedConstraintConsumer;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::ext_target::ExtensionTarget;
-use plonky2::iop::generator::{
-    GeneratedValues, SimpleGenerator, WitnessGenerator, WitnessGeneratorRef,
-};
+use plonky2::iop::generator::{GeneratedValues, SimpleGenerator, WitnessGeneratorRef};
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -165,15 +162,15 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for U32RangeCheckG
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         unimplemented!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,
@@ -228,15 +225,15 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         unimplemented!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,
@@ -251,7 +248,7 @@ mod tests {
     use itertools::unfold;
     use plonky2::field::extension::quartic::QuarticExtension;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::field::types::{Field, Sample};
+    use plonky2::field::types::Sample;
     use plonky2::gates::gate_testing::{test_eval_fns, test_low_degree};
     use plonky2::hash::hash_types::HashOut;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};

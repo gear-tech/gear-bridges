@@ -6,12 +6,18 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use gear_rpc_client::GearApi;
 use proof_storage::{FileSystemProofStorage, ProofStorage};
+use prover::proving::GenesisConfig;
 
 mod proof_storage;
 mod prover_interface;
 
-const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
+const DEFAULT_VARA_RPC: &str = "ws://65.21.117.24:9944";
 const DEFAULT_SERVE_ENDPOINT: &str = "localhost:1723";
+
+const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
+    validator_set_id: 1,
+    validator_set_hash: [0, 0, 0, 0, 0, 0, 0, 0],
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -106,7 +112,7 @@ async fn main() {
 
                 let proof = prover_interface::prove_genesis(&gear_api).await;
                 proof_storage
-                    .init(proof, prover_interface::GENESIS_AUTHORITY_SET_ID)
+                    .init(proof, GENESIS_CONFIG.validator_set_id)
                     .unwrap();
             }
             ProveCommands::ValidatorSetChange { args } => {
@@ -142,11 +148,11 @@ async fn main() {
             }
         },
         CliCommands::Serve(ServeArgs {
-            endpoint,
-            genesis_block,
+            endpoint: _,
+            genesis_block: _,
             prove_args: ProveArgs { vara_endpoint },
         }) => {
-            let gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
+            let _gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
             todo!()
         }
     };

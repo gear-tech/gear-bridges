@@ -20,7 +20,6 @@ mod target;
 mod verifier_data;
 
 pub use array::*;
-pub use bool::*;
 pub use byte::*;
 pub use half_byte::*;
 pub use target::*;

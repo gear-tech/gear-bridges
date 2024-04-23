@@ -16,9 +16,9 @@ use crate::{
         targets::{impl_target_set, Blake2TargetGoldilocks, MessageTargetGoldilocks, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
-    consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
     latest_validator_set::LatestValidatorSetTarget,
     prelude::*,
+    proving::GenesisConfig,
 };
 
 pub mod message_sent;
@@ -40,10 +40,10 @@ pub struct FinalProof {
 }
 
 impl FinalProof {
-    pub fn prove(self) -> ProofWithCircuitData<FinalProofTarget> {
+    pub fn prove(self, genesis_config: GenesisConfig) -> ProofWithCircuitData<FinalProofTarget> {
         let message_sent_proof = self.message_sent.prove();
 
-        log::info!("Composing message sent and latest validator set proofs...");
+        log::debug!("Composing message sent and latest validator set proofs...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.fri_config.cap_height = 0;
@@ -83,14 +83,15 @@ impl FinalProof {
             .connect(&latest_validator_set_target.current_set_id, &mut builder);
 
         let desired_genesis_authority_set_id =
-            builder.constant(F::from_noncanonical_u64(GENESIS_AUTHORITY_SET_ID));
+            builder.constant(F::from_noncanonical_u64(genesis_config.validator_set_id));
         builder.connect(
             desired_genesis_authority_set_id,
             latest_validator_set_target.genesis_set_id,
         );
 
         let desired_genesis_validator_set_hash = Blake2TargetGoldilocks::parse_exact(
-            &mut GENESIS_VALIDATOR_SET_HASH
+            &mut genesis_config
+                .validator_set_hash
                 .iter()
                 .map(|el| builder.constant(F::from_noncanonical_u64(*el))),
         );

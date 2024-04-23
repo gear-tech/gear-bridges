@@ -36,7 +36,7 @@ impl HashedLeafParser {
         .prove();
         let leaf_parser_proof = self.leaf_parser.prove();
 
-        log::info!("Composing hasher proof and leaf parser proof...");
+        log::debug!("Composing hasher proof and leaf parser proof...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -77,7 +77,7 @@ impl HashedLeafParser {
 
         let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Composed hasher proof and leaf parser proof...");
+        log::debug!("Composed hasher proof and leaf parser proof...");
 
         result
     }

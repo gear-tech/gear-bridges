@@ -65,7 +65,7 @@ pub struct BlockFinality {
 
 impl BlockFinality {
     pub(crate) fn prove(self) -> ProofWithCircuitData<BlockFinalityTarget> {
-        log::info!("Proving block finality...");
+        log::debug!("Proving block finality...");
 
         // Find such a number that processed_validator_count > 2/3 * validator_count.
         let processed_validator_count = match self.validator_set.len() % 3 {
@@ -101,7 +101,7 @@ impl BlockFinality {
         }
         .prove();
 
-        log::info!("Composing validator signs and validator set hash proofs...");
+        log::debug!("Composing validator signs and validator set hash proofs...");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();

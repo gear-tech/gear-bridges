@@ -1,11 +1,11 @@
 use std::time::Instant;
 
+use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};
 use prover::proving::{
     self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
 
-pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
 // TODO: Move to prover.
 pub const NEXT_SESSION_KEYS_STORAGE_ADDRESS: [u8; 64] = [
     0xc, 0xe, 0xc, 0x5, 0x0, 0x7, 0x0, 0xd, 0x6, 0x0, 0x9, 0xd, 0xd, 0x3, 0x4, 0x9, 0x7, 0xf, 0x7,
@@ -22,7 +22,7 @@ pub const MESSAGE_STORAGE_ADDRESS: [u8; 64] = [
 
 pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(GENESIS_AUTHORITY_SET_ID)
+        .fetch_finality_proof_for_session(GENESIS_CONFIG.validator_set_id)
         .await
         .unwrap();
 
@@ -40,6 +40,7 @@ pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
 
     let proof = prover::proving::prove_genesis(
         parse_rpc_block_finality_proof(current_epoch_block_finality),
+        GENESIS_CONFIG,
         next_validator_set_inclusion_proof,
         next_validator_set_storage_data,
     );
@@ -108,6 +109,7 @@ pub async fn prove_final(
     let proof = proving::prove_message_sent(
         previous_proof,
         parse_rpc_block_finality_proof(block_finality),
+        GENESIS_CONFIG,
         sent_message_inclusion_proof,
         message_contents,
     );
@@ -132,7 +134,7 @@ fn parse_rpc_inclusion_proof(
             })
             .collect(),
         leaf_node_data: proof.leaf_node_data,
-        address_nibbles: address_nibbles,
+        address_nibbles,
     }
 }
 

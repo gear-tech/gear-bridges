@@ -158,7 +158,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderWindowedMul<F, 
         };
 
         let mut result = self.constant_affine_point(starting_point.to_affine());
-        result = self.curve_add(&result, &q_init);
+        result = self.curve_add(&result, q_init);
 
         let precomputation = self.precompute_window(p);
         let zero = self.zero();

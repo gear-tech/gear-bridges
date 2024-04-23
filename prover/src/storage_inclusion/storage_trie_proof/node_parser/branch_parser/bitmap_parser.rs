@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "Partition containing Wire(Wire { row: 7, column: 59 }) was set twice with different values: 0 != 1"
+        expected = "Partition containing Wire(Wire { row: 9, column: 59 }) was set twice with different values: 0 != 1"
     )]
     fn test_bitmap_parser_wrong_claimed_child_fails() {
         test_case([0b01_11_11_11, 0b11_11_11_11], 7, None);

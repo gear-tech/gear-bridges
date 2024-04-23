@@ -48,7 +48,7 @@ pub struct ChildNodeParser {
 
 impl ChildNodeParser {
     pub fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
-        log::info!("Proving child node parser...");
+        log::debug!("Proving child node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.num_wires = 160;
@@ -125,7 +125,7 @@ impl ChildNodeParser {
 
         let data = ProofWithCircuitData::prove_from_builder(builder, pw);
 
-        log::info!("Proven child node parser");
+        log::debug!("Proven child node parser");
 
         data
     }

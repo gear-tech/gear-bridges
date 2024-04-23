@@ -154,9 +154,7 @@ impl GearApi {
             finality.block,
             dto::BlockFinalityProof {
                 validator_set,
-                message: signed_data
-                    .try_into()
-                    .expect("Correct grandpa message length"),
+                message: signed_data,
                 pre_commits,
             },
         ))
@@ -345,7 +343,7 @@ impl GearApi {
             _,
             _,
         >(&storage_proof, state_root, storage_keys.iter())
-        .expect(&format!("Failed to generate trie proof for {:?}", address));
+        .unwrap_or_else(|err| panic!("Failed to generate trie proof for {:?}: {}", address, err));
 
         let leaf = proof.pop().expect("At least one node in trie proof");
         let leaf = TrieCodec::decode(&leaf).expect("Failed to decode last node in trie proof");
@@ -353,12 +351,11 @@ impl GearApi {
             assert!(matches!(value.clone(), Value::Inline(b) if b.is_empty()));
 
             let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
-            let value = if storage_data.len() == 32 {
-                Value::Inline(&storage_data)
-            } else if storage_data.len() > 32 {
-                Value::Node(&storage_data_hash)
-            } else {
-                panic!("Unsupported leaf data length");
+
+            let value = match storage_data.len() {
+                32 => Value::Inline(&storage_data),
+                l if l > 32 => Value::Node(&storage_data_hash),
+                _ => panic!("Unsupported leaf data length"),
             };
 
             TrieCodec::leaf_node(nibbles.right_iter(), nibbles.len(), value)

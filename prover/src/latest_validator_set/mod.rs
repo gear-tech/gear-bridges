@@ -1,14 +1,13 @@
 use itertools::Itertools;
 use plonky2::{
     field::types::Field,
-    hash::{hash_types::HashOutTarget, merkle_tree::MerkleCap},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
@@ -17,16 +16,11 @@ use plonky2::{
 use crate::{
     common::{
         common_data_for_recursion,
-        targets::{
-            impl_target_set, Blake2TargetGoldilocks, ParsableTargetSet, TargetSet,
-            VerifierDataTarget,
-        },
+        targets::{impl_target_set, Blake2TargetGoldilocks, TargetSet, VerifierDataTarget},
         BuilderExt, ProofWithCircuitData,
     },
-    prelude::{
-        consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
-        *,
-    },
+    prelude::*,
+    proving::GenesisConfig,
 };
 
 pub mod next_validator_set;
@@ -46,41 +40,6 @@ impl_target_set! {
     }
 }
 
-pub struct LatestValidatorSetPublicInputs {
-    pub genesis_set_id: u64,
-    pub genesis_hash: [u8; 32],
-    pub current_set_id: u64,
-    pub current_hash: [u8; 32],
-
-    pub verifier_only_data: VerifierOnlyCircuitData<C, D>,
-}
-
-impl ParsableTargetSet for LatestValidatorSetTarget {
-    type PublicInputsData = LatestValidatorSetPublicInputs;
-
-    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        let pis = LatestValidatorSetPublicInputs {
-            genesis_set_id: Target::parse_public_inputs(public_inputs),
-            genesis_hash: Blake2TargetGoldilocks::parse_public_inputs(public_inputs),
-            current_set_id: Target::parse_public_inputs(public_inputs),
-            current_hash: Blake2TargetGoldilocks::parse_public_inputs(public_inputs),
-
-            verifier_only_data: VerifierOnlyCircuitData {
-                circuit_digest: HashOutTarget::parse_public_inputs(public_inputs),
-                constants_sigmas_cap: MerkleCap(
-                    (0..VERIFIER_DATA_NUM_CAP_ELEMENTS)
-                        .map(|_| HashOutTarget::parse_public_inputs(public_inputs))
-                        .collect(),
-                ),
-            },
-        };
-
-        assert_eq!(public_inputs.next(), None);
-
-        pis
-    }
-}
-
 pub struct LatestValidatorSet {
     pub change_proof: NextValidatorSet,
 }
@@ -97,10 +56,13 @@ struct Circuit {
 }
 
 impl Circuit {
-    pub fn prove_genesis(mut self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        let genesis_data_pis = vec![GENESIS_AUTHORITY_SET_ID]
+    pub fn prove_genesis(
+        mut self,
+        config: GenesisConfig,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        let genesis_data_pis = vec![config.validator_set_id]
             .into_iter()
-            .chain(GENESIS_VALIDATOR_SET_HASH)
+            .chain(config.validator_set_hash)
             .map(F::from_noncanonical_u64)
             .enumerate()
             .collect();
@@ -131,9 +93,12 @@ impl Circuit {
 }
 
 impl LatestValidatorSet {
-    pub fn prove_genesis(self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+    pub fn prove_genesis(
+        self,
+        config: GenesisConfig,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let circuit = self.build_circuit();
-        circuit.prove_genesis()
+        circuit.prove_genesis(config)
     }
 
     pub fn prove_recursive(

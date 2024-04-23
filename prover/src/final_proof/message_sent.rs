@@ -60,12 +60,12 @@ pub struct MessageSent {
 
 impl MessageSent {
     pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
-        log::info!("Proving message presense in finalized block...");
+        log::debug!("Proving message presense in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
 
-        log::info!("Composing inclusion and finality proofs...");
+        log::debug!("Composing inclusion and finality proofs...");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();

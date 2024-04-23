@@ -46,7 +46,7 @@ impl ValidatorSetHash {
     }
 
     pub fn prove(self) -> ProofWithCircuitData<ValidatorSetHashTarget> {
-        log::info!("Proving correct hashing of validator set...");
+        log::debug!("Proving correct hashing of validator set...");
 
         let validator_count = self.validator_set.len();
 
@@ -89,7 +89,7 @@ impl ValidatorSetHash {
 
         let result = ProofWithCircuitData::prove_from_builder(builder, pw);
 
-        log::info!("Proven correct hashing of validator set");
+        log::debug!("Proven correct hashing of validator set");
 
         result
     }

@@ -31,7 +31,7 @@ pub fn define(
     input: InlindedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> InlinedDataParserOutputTarget {
-    log::info!("    Composing inlined data parser");
+    log::debug!("    Composing inlined data parser");
 
     let first_byte = input
         .first_node_data_block

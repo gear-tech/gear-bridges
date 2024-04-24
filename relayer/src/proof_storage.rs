@@ -206,8 +206,7 @@ impl FileSystemProofStorage {
 
             self.cache
                 .proofs
-                .insert(validator_set_id, Proof::from_bytes(proof))
-                .expect("Files with the same name detected");
+                .insert(validator_set_id, Proof::from_bytes(proof));
         }
 
         Ok(())

@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use dto::BranchNodeData;
 use gsdk::{
     metadata::{
-        storage::{BabeStorage, GrandpaStorage, SessionStorage},
+        storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
     GearConfig,
@@ -37,10 +37,11 @@ struct StorageTrieInclusionProof {
 }
 
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const VALIDATOR_COUNT: usize = 6;
-const PROCESSED_VALIDATOR_COUNT: usize = 5;
-
 const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
+const MERKLE_ROOT_STORAGE_ADDRESS: &str =
+    "ea31e171c2cd790a23350b5e593ed882df509310bc655bbf75a5b563fc3c8eee";
+const NEXT_VALIDATOR_SET_ADDRESS: &str =
+    "ea31e171c2cd790a23350b5e593ed8827d9fe37370ac390779f35763d98106e8";
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -89,6 +90,7 @@ impl GearApi {
         let block = self
             .search_for_validator_set_block(validator_set_id)
             .await?;
+
         self.fetch_finality_proof(block).await
     }
 
@@ -135,20 +137,16 @@ impl GearApi {
         }
 
         let validator_set = self.fetch_validator_set(required_validator_set_id).await?;
-        assert_eq!(VALIDATOR_COUNT, validator_set.len());
 
         let pre_commits: Vec<_> = justification
             .commit
             .precommits
             .into_iter()
-            .take(PROCESSED_VALIDATOR_COUNT)
             .map(|pc| dto::PreCommit {
                 public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                 signature: pc.signature.as_inner_ref().0.to_owned(),
             })
             .collect();
-
-        assert_eq!(pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
 
         Ok((
             finality.block,
@@ -253,12 +251,11 @@ impl GearApi {
             .collect::<Vec<_>>())
     }
 
-    /// NOTE: mock for now, returns some data with constant position in merkle trie.
     pub async fn fetch_sent_message_inclusion_proof(
         &self,
         block: H256,
     ) -> anyhow::Result<dto::StorageInclusionProof> {
-        let address = gsdk::Api::storage_root(BabeStorage::Randomness).to_root_bytes();
+        let address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
         self.fetch_block_inclusion_proof(block, &address).await
     }
 
@@ -266,7 +263,7 @@ impl GearApi {
         &self,
         block: H256,
     ) -> anyhow::Result<dto::StorageInclusionProof> {
-        let address = gsdk::Api::storage_root(SessionStorage::QueuedKeys).to_root_bytes();
+        let address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
         self.fetch_block_inclusion_proof(block, &address).await
     }
 
@@ -290,6 +287,7 @@ impl GearApi {
             .last()
             .expect("At least one node in storage inclusion proof");
         let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.data);
+        // TODO: #48
         assert_eq!(
             &encoded_header[32 + 4..32 + 4 + 32],
             &fetched_storage_root_hash.0

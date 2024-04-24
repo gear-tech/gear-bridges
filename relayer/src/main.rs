@@ -15,8 +15,12 @@ const DEFAULT_VARA_RPC: &str = "ws://65.21.117.24:9944";
 const DEFAULT_SERVE_ENDPOINT: &str = "localhost:1723";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    validator_set_id: 1,
-    validator_set_hash: [0, 0, 0, 0, 0, 0, 0, 0],
+    validator_set_id: 0,
+    // 0xd560eb8d00e57357cf76492334e43bb2ecaa9f28df6a8c4426d7b6090f7ad3c9
+    validator_set_hash: [
+        0x8deb60d5, 0x5773e500, 0x234976cf, 0xb23be434, 0x289faaec, 0x448c6adf, 0x09b6d726,
+        0xc9d37a0f,
+    ],
 };
 
 #[derive(Parser)]
@@ -94,8 +98,9 @@ struct VaraEndpointArg {
 #[tokio::main]
 async fn main() {
     pretty_env_logger::formatted_builder()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Off)
         .format_target(false)
+        .filter(Some("prover"), log::LevelFilter::Debug)
         .format_timestamp(Some(TimestampPrecision::Seconds))
         .init();
 

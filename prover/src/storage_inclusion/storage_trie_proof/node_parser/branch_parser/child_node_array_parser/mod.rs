@@ -66,26 +66,27 @@ impl ChildNodeArrayParser {
         let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut witness);
 
         ChildNodeArrayParserTarget {
-            node_data: inner_proof_pis.node_data,
-            initial_read_offset: inner_proof_pis.initial_read_offset,
-            final_read_offset: inner_proof_pis.read_offset,
-            overall_children_amount: inner_proof_pis.overall_children_amount,
-            claimed_child_index_in_array: inner_proof_pis.claimed_child_index_in_array,
-            claimed_child_hash: inner_proof_pis.claimed_child_hash,
+            node_data: inner_proof_pis.inner.node_data,
+            initial_read_offset: inner_proof_pis.inner.initial_read_offset,
+            final_read_offset: inner_proof_pis.inner.read_offset,
+            overall_children_amount: inner_proof_pis.inner.overall_children_amount,
+            claimed_child_index_in_array: inner_proof_pis.inner.claimed_child_index_in_array,
+            claimed_child_hash: inner_proof_pis.inner.claimed_child_hash,
         }
         .register_as_public_inputs(&mut builder);
 
         ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 
-    fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTarget> {
+    fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
         log::debug!("Proving child node array parser...");
         let claimed_child_hash = array_to_bits(&self.initial_data.claimed_child_hash)
             .try_into()
             .expect("Correct array length");
 
         let mut read_offset = self.initial_data.read_offset;
-        let mut cyclic_proof: Option<ProofWithCircuitData<CyclicRecursionTarget>> = None;
+        let mut cyclic_proof: Option<ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>> =
+            None;
         for (child_idx, child_length) in self.children_lengths.into_iter().enumerate() {
             let assert_child_hash = child_idx == self.initial_data.claimed_child_index_in_array;
 
@@ -109,7 +110,7 @@ impl ChildNodeArrayParser {
 
         log::debug!("Proven child node array parser");
 
-        cyclic_proof.expect("At least one child")
+        cyclic_proof.expect("Expected at least one child node in array")
     }
 }
 
@@ -148,7 +149,7 @@ impl Circuit {
     fn prove_initial(
         mut self,
         initial_data: InitialData,
-    ) -> ProofWithCircuitData<CyclicRecursionTarget> {
+    ) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
         log::debug!("    Proving child node parser recursion layer(initial)...");
 
         let public_inputs = initial_data
@@ -193,7 +194,7 @@ impl Circuit {
     fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<CyclicRecursionTarget> {
+    ) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
         log::debug!("    Proving child node parser recursion layer...");
         self.witness.set_bool_target(self.condition, true);
         self.witness

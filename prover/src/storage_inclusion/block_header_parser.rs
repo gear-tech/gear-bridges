@@ -12,6 +12,7 @@ use crate::{
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
 };
 
+// TODO: Remove when #48 will be implemented.
 // Block header have the folowing structure:
 // - previous block hash    (32 bytes)
 // - block number           (4 bytes)

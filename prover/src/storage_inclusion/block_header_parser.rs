@@ -1,7 +1,8 @@
 use plonky2::{
-    iop::witness::PartialWitness,
+    iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
+use plonky2_field::types::Field;
 
 use crate::{
     common::{
@@ -10,6 +11,9 @@ use crate::{
         BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
+    storage_inclusion::scale_compact_integer_parser::full::{
+        define as define_full_int_parser, InputTarget as FullIntParserInput,
+    },
 };
 
 // Block header have the folowing structure:
@@ -18,11 +22,12 @@ use crate::{
 // - state root             (32 bytes)
 // - extrinsics root        (32 bytes)
 // - digest                 (generic)
-const STATE_ROOT_OFFSET_IN_BLOCK_HEADER: usize = 32 + 4;
+const BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER: usize = 32;
 
 impl_parsable_target_set! {
     pub struct BlockHeaderParserTarget {
         pub block_hash: Blake2Target,
+        pub block_number: Target,
         pub state_root: Blake2Target,
     }
 }
@@ -44,9 +49,25 @@ impl BlockHeaderParser {
 
         let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
 
+        // Will already have at least 4 bytes as block number isn't last field in header.
+        let block_number_targets = hasher_target
+            .data
+            .constant_read_array(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER);
+        let parsed_block_number = define_full_int_parser(
+            FullIntParserInput {
+                padded_bytes: block_number_targets,
+            },
+            &mut builder,
+        );
+
+        let state_root_offset = builder.add_const(
+            parsed_block_number.length,
+            F::from_canonical_usize(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER),
+        );
+
         let state_root_bytes: ArrayTarget<ByteTarget, BLAKE2_DIGEST_SIZE> = hasher_target
             .data
-            .constant_read_array(STATE_ROOT_OFFSET_IN_BLOCK_HEADER);
+            .random_read_array(state_root_offset, &mut builder);
         let mut state_root_bits = state_root_bytes.0.into_iter().flat_map(|byte| {
             byte.to_bit_targets(&mut builder)
                 .0
@@ -59,6 +80,7 @@ impl BlockHeaderParser {
 
         BlockHeaderParserTarget {
             block_hash: hasher_target.hash,
+            block_number: parsed_block_number.decoded,
             state_root,
         }
         .register_as_public_inputs(&mut builder);

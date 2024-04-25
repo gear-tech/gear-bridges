@@ -75,6 +75,13 @@ impl MessageSent {
         let finality_proof_target =
             builder.recursively_verify_constant_proof(&finality_proof, &mut witness);
 
+        let block_number =
+            Target::from_bool_targets_le(finality_proof_target.message.block_number, &mut builder);
+
+        inclusion_proof_target
+            .block_number
+            .connect(&block_number, &mut builder);
+
         inclusion_proof_target
             .block_hash
             .connect(&finality_proof_target.message.block_hash, &mut builder);
@@ -101,10 +108,7 @@ impl MessageSent {
                 finality_proof_target.message.authority_set_id,
                 &mut builder,
             ),
-            block_number: Target::from_bool_targets_le(
-                finality_proof_target.message.block_number,
-                &mut builder,
-            ),
+            block_number,
             message_contents: MessageTargetGoldilocks::from_bit_array(
                 storage_data_target.merkle_trie_root,
                 &mut builder,

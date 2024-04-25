@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ByteTarget(Target);
 
 impl TargetSet for ByteTarget {

@@ -17,7 +17,9 @@ use crate::{
         *,
     },
     storage_inclusion::{
-        scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
+        scale_compact_integer_parser::single_byte::{
+            define as define_single_byte_int_parser, InputTarget as SingleByteIntParserInput,
+        },
         storage_trie_proof::node_parser::{
             BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS,
             NODE_DATA_BLOCK_BYTES,
@@ -72,8 +74,8 @@ impl ChildNodeParser {
         // Read only one byte as we don't support compact integers in other modes than single-byte.
         let encoded_length_size = builder.one();
         let encoded_length = node_data.random_read(read_offset, &mut builder);
-        let encoded_child_data_length = scale_compact_integer_parser::define(
-            ScaleCompactIntegerParserInputTarget {
+        let encoded_child_data_length = define_single_byte_int_parser(
+            SingleByteIntParserInput {
                 first_byte: encoded_length,
             },
             &mut builder,

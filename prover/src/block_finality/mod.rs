@@ -28,11 +28,11 @@ impl_target_set! {
 }
 
 // Assume the layout for vote:
-// - ???                    (1 byte)
-// - block hash             (32 bytes)
-// - block number           (4 bytes)
-// - round number           (8 bytes)
-// - authority set id       (8 bytes)
+// - enum discriminant(1 for pre-commit)    (1 byte)
+// - block hash                             (32 bytes)
+// - block number                           (4 bytes)
+// - round number                           (8 bytes)
+// - authority set id                       (8 bytes)
 impl_parsable_target_set! {
     pub struct GrandpaVoteTarget {
         _aux_data: BitArrayTarget<8>,

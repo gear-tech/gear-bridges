@@ -133,7 +133,7 @@ impl GearApi {
         assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
 
         for pc in &justification.commit.precommits {
-            pc.signature.verify(&signed_data[..], &pc.id);
+            assert!(pc.signature.verify(&signed_data[..], &pc.id));
         }
 
         let validator_set = self.fetch_validator_set(required_validator_set_id).await?;

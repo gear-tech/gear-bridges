@@ -12,12 +12,12 @@ use crate::{
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
 };
 
-// TODO: Remove when #48 will be implemented.
 // Block header have the folowing structure:
 // - previous block hash    (32 bytes)
-// - block number           (4 bytes)
+// - block number           (1-4 bytes)
 // - state root             (32 bytes)
-// - ...
+// - extrinsics root        (32 bytes)
+// - digest                 (generic)
 const STATE_ROOT_OFFSET_IN_BLOCK_HEADER: usize = 32 + 4;
 
 impl_parsable_target_set! {

@@ -118,7 +118,7 @@ pub async fn prove_final(
         message_contents,
     );
 
-    //gnark::compile_circuit(&proof);
+    gnark::compile_circuit(&proof);
     gnark::prove_circuit(&proof)
 }
 

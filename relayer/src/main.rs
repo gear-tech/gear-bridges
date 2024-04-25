@@ -11,7 +11,7 @@ use prover::proving::GenesisConfig;
 mod proof_storage;
 mod prover_interface;
 
-const DEFAULT_VARA_RPC: &str = "ws://65.21.117.24:9944";
+const DEFAULT_VARA_RPC: &str = "ws://localhost:9944";
 const DEFAULT_SERVE_ENDPOINT: &str = "localhost:1723";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {

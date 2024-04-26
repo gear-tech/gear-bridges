@@ -27,7 +27,6 @@ const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
 impl_parsable_target_set! {
     pub struct BlockHeaderParserTarget {
         pub block_hash: Blake2Target,
-        pub block_number: Target,
         pub state_root: Blake2Target,
     }
 }
@@ -79,7 +78,6 @@ impl BlockHeaderParser {
 
         BlockHeaderParserTarget {
             block_hash: hasher_target.hash,
-            block_number: parsed_block_number.decoded,
             state_root,
         }
         .register_as_public_inputs(&mut builder);

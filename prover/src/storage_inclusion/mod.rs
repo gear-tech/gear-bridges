@@ -22,7 +22,6 @@ use self::{block_header_parser::BlockHeaderParser, storage_trie_proof::StorageTr
 impl_parsable_target_set! {
     pub struct StorageInclusionTarget {
         pub block_hash: Blake2Target,
-        pub block_number: Target,
         pub storage_item_hash: Blake2Target,
     }
 }
@@ -76,7 +75,6 @@ impl StorageInclusion {
 
         StorageInclusionTarget {
             block_hash: block_header_target.block_hash,
-            block_number: block_header_target.block_number,
             storage_item_hash: storage_trie_target.data_hash,
         }
         .register_as_public_inputs(&mut builder);

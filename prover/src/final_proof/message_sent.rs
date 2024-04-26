@@ -79,10 +79,6 @@ impl MessageSent {
             Target::from_bool_targets_le(finality_proof_target.message.block_number, &mut builder);
 
         inclusion_proof_target
-            .block_number
-            .connect(&block_number, &mut builder);
-
-        inclusion_proof_target
             .block_hash
             .connect(&finality_proof_target.message.block_hash, &mut builder);
 

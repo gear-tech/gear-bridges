@@ -73,13 +73,6 @@ impl NextValidatorSet {
         let block_finality_target =
             builder.recursively_verify_constant_proof(&block_finality_proof, &mut witness);
 
-        let block_number =
-            Target::from_bool_targets_le(block_finality_target.message.block_number, &mut builder);
-
-        inclusion_proof_target
-            .block_number
-            .connect(&block_number, &mut builder);
-
         inclusion_proof_target
             .block_hash
             .connect(&block_finality_target.message.block_hash, &mut builder);

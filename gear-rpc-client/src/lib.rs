@@ -10,7 +10,7 @@ use gsdk::{
     },
     GearConfig,
 };
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
 use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
@@ -287,9 +287,10 @@ impl GearApi {
             .last()
             .expect("At least one node in storage inclusion proof");
         let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.data);
-        // TODO: #48
+
+        let block_number_length = Compact::<u32>(block.number()).encode().len();
         assert_eq!(
-            &encoded_header[32 + 4..32 + 4 + 32],
+            &encoded_header[32 + block_number_length..32 + block_number_length + 32],
             &fetched_storage_root_hash.0
         );
 

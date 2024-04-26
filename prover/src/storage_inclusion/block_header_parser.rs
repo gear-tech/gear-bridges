@@ -2,12 +2,11 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
-use plonky2_field::types::Field;
 
 use crate::{
     common::{
         generic_blake2::GenericBlake2,
-        targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+        targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
@@ -23,6 +22,7 @@ use crate::{
 // - extrinsics root        (32 bytes)
 // - digest                 (generic)
 const BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER: usize = 32;
+const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
 
 impl_parsable_target_set! {
     pub struct BlockHeaderParserTarget {
@@ -49,7 +49,7 @@ impl BlockHeaderParser {
 
         let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
 
-        // Will already have at least 4 bytes as block number isn't last field in header.
+        // Will have all neccesary padding as block number isn't last field in header.
         let block_number_targets = hasher_target
             .data
             .constant_read_array(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER);
@@ -60,14 +60,13 @@ impl BlockHeaderParser {
             &mut builder,
         );
 
-        let state_root_offset = builder.add_const(
-            parsed_block_number.length,
-            F::from_canonical_usize(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER),
-        );
-
-        let state_root_bytes: ArrayTarget<ByteTarget, BLAKE2_DIGEST_SIZE> = hasher_target
+        const USEFUL_DATA_OFFSET: usize = MAX_BLOCK_NUMBER_DATA_LENGTH + BLAKE2_DIGEST_SIZE;
+        let useful_header_data: ArrayTarget<_, USEFUL_DATA_OFFSET> = hasher_target
             .data
-            .random_read_array(state_root_offset, &mut builder);
+            .constant_read_array(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER);
+
+        let state_root_bytes: ArrayTarget<_, BLAKE2_DIGEST_SIZE> =
+            useful_header_data.random_read_array(parsed_block_number.length, &mut builder);
         let mut state_root_bits = state_root_bytes.0.into_iter().flat_map(|byte| {
             byte.to_bit_targets(&mut builder)
                 .0

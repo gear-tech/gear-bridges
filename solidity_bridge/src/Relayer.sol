@@ -16,40 +16,20 @@ contract Relayer is IRelayer {
     uint256 private constant MASK_192BITS = (2 ** 192) - 1;
 
 
-    function get_block_id_from_inputs(uint256[] calldata public_inputs) public pure returns (uint256) {
-        uint256 ret = uint256(public_inputs[1] >> 96) & MASK_32BITS;
-        return ret;
-    }
-
-
-    function get_merkle_root_from_inputs(uint256[] calldata public_inputs) public pure returns (bytes32) {
-        uint256 ret = ((public_inputs[0] & MASK_192BITS) << 64) | ((public_inputs[1] >> 128) & MASK_64BITS);
-        return bytes32(ret);
-    }
-
-    function build_public_inputs(bytes32 merkle_root, uint256 block_id) public pure returns (uint256[] memory public_inputs) {
-        uint256[] memory ret = new uint256[](2);
-        ret[0] = (uint256(merkle_root) >> 64) & MASK_192BITS;
-        ret[1] = ((uint256(block_id) & MASK_32BITS) << 96) | ((uint256(merkle_root) & MASK_64BITS) << 128);
-
-        return ret;
-    }
-
-
     function initialize(address prover) external {
         if (address(_prover) != address(0)) revert AlreadyInitialized();
         _prover = IProver(prover);
     }
 
 
-    function submit_merkle_root(uint256[] calldata public_inputs, bytes calldata proof) external {
+    function submitMerkleRoot(uint256[] calldata public_inputs, bytes calldata proof) external {
         if (!_prover.verifyProof(proof, public_inputs)) {
             revert InvalidProof();
         }
 
-        bytes32 merkle_root = get_merkle_root_from_inputs(public_inputs);
+        bytes32 merkle_root = getMerkleRootFromInputs(public_inputs);
 
-        uint256 block_number = get_block_id_from_inputs(public_inputs);
+        uint256 block_number = getBlockIdFromInputs(public_inputs);
 
         _block_numbers[block_number] = merkle_root;
         _merkle_roots[merkle_root] = block_number;
@@ -58,12 +38,31 @@ contract Relayer is IRelayer {
 
     }
 
-    function get_merkle_root(uint256 block_number) external view returns (bytes32) {
+    function getMerkleRoot(uint256 block_number) external view returns (bytes32) {
         return _block_numbers[block_number];
     }
 
-    function get_block_number(bytes32 merkle_root) external view returns (uint256) {
+    function getBlockNumber(bytes32 merkle_root) external view returns (uint256) {
         return _merkle_roots[merkle_root];
+    }
+
+    function getBlockIdFromInputs(uint256[] calldata public_inputs) public pure returns (uint256) {
+        uint256 ret = uint256(public_inputs[1] >> 96) & MASK_32BITS;
+        return ret;
+    }
+
+
+    function getMerkleRootFromInputs(uint256[] calldata public_inputs) public pure returns (bytes32) {
+        uint256 ret = ((public_inputs[0] & MASK_192BITS) << 64) | ((public_inputs[1] >> 128) & MASK_64BITS);
+        return bytes32(ret);
+    }
+
+    function buildPublicInputs(bytes32 merkle_root, uint256 block_id) public pure returns (uint256[] memory public_inputs) {
+        uint256[] memory ret = new uint256[](2);
+        ret[0] = (uint256(merkle_root) >> 64) & MASK_192BITS;
+        ret[1] = ((uint256(block_id) & MASK_32BITS) << 96) | ((uint256(merkle_root) & MASK_64BITS) << 128);
+
+        return ret;
     }
 
 

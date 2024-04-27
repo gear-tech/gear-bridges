@@ -11,6 +11,7 @@ import {Relayer} from "../src/Relayer.sol";
 import {Treasury} from "../src/Treasury.sol";
 import {ITreasury} from "../src/interfaces/ITreasury.sol";
 
+import {IMessageQueue, VaraMessage, IMessageQueueReceiver} from "../src/interfaces/IMessageQueue.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {Constants} from "../src/libraries/Constants.sol";
@@ -26,6 +27,9 @@ contract TreasuryTest is Test {
     using Address for address;
 
     ERC20Mock public erc20_token;
+
+    bytes32 private constant VARA_ADDRESS_7 = bytes32(0x0707070707070707070707070707070707070707070707070707070707070707);
+
 
     function setUp() public {
         Prover _prover = new Prover();
@@ -82,11 +86,18 @@ contract TreasuryTest is Test {
         console.logBytes(call_data);
 
         vm.expectRevert();
-        address(treasury).functionCall(call_data);
 
+        VaraMessage memory vara_msg = VaraMessage({
+            vara_address: VARA_ADDRESS_7,
+            eth_address: address(treasury),
+            nonce: 10,
+            data: call_data
+        });
+
+        IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
 
         vm.prank(address(message_queue));
-        address(treasury).functionCall(call_data);
+        IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
 
     }
 

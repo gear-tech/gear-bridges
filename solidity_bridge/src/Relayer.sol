@@ -22,14 +22,11 @@ contract Relayer is IRelayer {
     }
 
 
-    function submitMerkleRoot(uint256[] calldata public_inputs, bytes calldata proof) external {
+    function submitMerkleRoot(uint256 block_number, bytes32 merkle_root, bytes calldata proof) external {
+        uint256[] memory public_inputs = _buildPublicInputs(block_number, merkle_root);
         if (!_prover.verifyProof(proof, public_inputs)) {
             revert InvalidProof();
         }
-
-        bytes32 merkle_root = getMerkleRootFromInputs(public_inputs);
-
-        uint256 block_number = getBlockIdFromInputs(public_inputs);
 
         _block_numbers[block_number] = merkle_root;
         _merkle_roots[merkle_root] = block_number;
@@ -46,7 +43,7 @@ contract Relayer is IRelayer {
         return _merkle_roots[merkle_root];
     }
 
-    function getBlockIdFromInputs(uint256[] calldata public_inputs) public pure returns (uint256) {
+    function getBlockNumberFromInputs(uint256[] calldata public_inputs) public pure returns (uint256) {
         uint256 ret = uint256(public_inputs[1] >> 96) & MASK_32BITS;
         return ret;
     }
@@ -57,10 +54,14 @@ contract Relayer is IRelayer {
         return bytes32(ret);
     }
 
-    function buildPublicInputs(bytes32 merkle_root, uint256 block_id) public pure returns (uint256[] memory public_inputs) {
+    function buildPublicInputs(uint256 block_number, bytes32 merkle_root) public pure returns (uint256[] memory public_inputs) {
+        return _buildPublicInputs(block_number, merkle_root);
+    }
+
+    function _buildPublicInputs(uint256 block_number, bytes32 merkle_root) public pure returns (uint256[] memory public_inputs) {
         uint256[] memory ret = new uint256[](2);
         ret[0] = (uint256(merkle_root) >> 64) & MASK_192BITS;
-        ret[1] = ((uint256(block_id) & MASK_32BITS) << 96) | ((uint256(merkle_root) & MASK_64BITS) << 128);
+        ret[1] = ((uint256(block_number) & MASK_32BITS) << 96) | ((uint256(merkle_root) & MASK_64BITS) << 128);
 
         return ret;
     }

@@ -18,7 +18,6 @@ import {Constants} from "../src/libraries/Constants.sol";
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 
-
 contract DeployScript is Script {
     Relayer public relayer;
     Prover public prover;
@@ -41,17 +40,17 @@ contract DeployScript is Script {
         MessageQueue _message_queue = new MessageQueue();
 
         vm.broadcast();
-        ProxyContract _relayer_proxy = new ProxyContract( address(_relayer), abi.encodeWithSignature("initialize(address)", address(_prover) ));
+        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_prover)));
 
         vm.broadcast();
-        ProxyContract _message_queue_proxy = new ProxyContract( address(_message_queue), abi.encodeWithSignature("initialize(address,address)", address(_prover), address(_relayer_proxy) ));
+        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address)", address(_relayer_proxy)));
 
         vm.broadcast();
-        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)  ));
+        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)));
 
         relayer = Relayer(address(_relayer_proxy));
         treasury = Treasury(address(_treasury_proxy));
-        message_queue = MessageQueue(address(_message_queue_proxy) );
+        message_queue = MessageQueue(address(_message_queue_proxy));
         prover = Prover(address(_prover));
 
         console.log("Prover:", address(prover));

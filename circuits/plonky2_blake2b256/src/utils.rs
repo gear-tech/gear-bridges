@@ -93,8 +93,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderExt for Circuit
     fn split_target_to_word_targets(&mut self, target: Target) -> WordTargets {
         self.split_le(target, WORD_BITS)
             .chunks(8)
-            .map(|bits| bits.into_iter().rev())
-            .flatten()
+            .flat_map(|bits| bits.iter().rev())
             .cloned()
             .collect::<Vec<_>>()
             .try_into()

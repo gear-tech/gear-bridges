@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -11,9 +10,7 @@ use plonky2::gates::gate::Gate;
 use plonky2::gates::util::StridedConstraintConsumer;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::ext_target::ExtensionTarget;
-use plonky2::iop::generator::{
-    GeneratedValues, SimpleGenerator, WitnessGenerator, WitnessGeneratorRef,
-};
+use plonky2::iop::generator::{GeneratedValues, SimpleGenerator, WitnessGeneratorRef};
 use plonky2::iop::target::Target;
 use plonky2::iop::wire::Wire;
 use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
@@ -272,15 +269,15 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for U32AddManyGate
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         unimplemented!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,
@@ -366,15 +363,15 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         unimplemented!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,

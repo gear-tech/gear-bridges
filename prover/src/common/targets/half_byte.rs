@@ -44,7 +44,7 @@ impl HalfByteTarget {
         Self(target)
     }
 
-    pub fn to_target(&self) -> Target {
+    pub fn to_target(self) -> Target {
         self.0
     }
 }

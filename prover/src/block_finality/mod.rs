@@ -1,12 +1,13 @@
 use plonky2::{
-    iop::witness::PartialWitness,
+    iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
 use crate::{
     common::{
         targets::{
-            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target, TargetSet,
+            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target,
+            TargetBitOperations, TargetSet,
         },
         BuilderExt, ProofWithCircuitData,
     },
@@ -28,14 +29,14 @@ impl_target_set! {
 }
 
 // Assume the layout for vote:
-// - ???                    (1 byte)
-// - block hash             (32 bytes)
-// - block number           (4 bytes)
-// - round number           (8 bytes)
-// - authority set id       (8 bytes)
+// - enum discriminant(1 for pre-commit)    (1 byte)
+// - block hash                             (32 bytes)
+// - block number                           (4 bytes)
+// - round number                           (8 bytes)
+// - authority set id                       (8 bytes)
 impl_parsable_target_set! {
     pub struct GrandpaVoteTarget {
-        _aux_data: BitArrayTarget<8>,
+        pub discriminant: BitArrayTarget<8>,
         pub block_hash: Blake2Target,
         pub block_number: BitArrayTarget<32>,
         _aux_data_2: BitArrayTarget<64>,
@@ -65,12 +66,12 @@ pub struct BlockFinality {
 
 impl BlockFinality {
     pub(crate) fn prove(self) -> ProofWithCircuitData<BlockFinalityTarget> {
-        log::info!("Proving block finality...");
+        log::debug!("Proving block finality...");
 
         // Find such a number that processed_validator_count > 2/3 * validator_count.
         let processed_validator_count = match self.validator_set.len() % 3 {
-            0 | 1 => 2 * self.validator_set.len() / 3 + 1,
-            2 => 2 * self.validator_set.len() / 3 + 2,
+            0 | 1 => 2 * (self.validator_set.len() / 3) + 1,
+            2 => 2 * (self.validator_set.len() - 2) / 3 + 2,
             _ => unreachable!(),
         };
 
@@ -101,7 +102,7 @@ impl BlockFinality {
         }
         .prove();
 
-        log::info!("Composing validator signs and validator set hash proofs...");
+        log::debug!("Composing validator signs and validator set hash proofs...");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
@@ -109,9 +110,14 @@ impl BlockFinality {
         let validator_signs_target =
             builder.recursively_verify_constant_proof(&validator_signs_proof, &mut witness);
 
+        let message = validator_signs_target.message;
+        let discriminant = Target::from_bool_targets_le(message.discriminant, &mut builder);
+        let pre_commit_discriminant = builder.one();
+        builder.connect(discriminant, pre_commit_discriminant);
+
         BlockFinalityTarget {
             validator_set_hash: validator_signs_target.validator_set_hash,
-            message: validator_signs_target.message,
+            message,
         }
         .register_as_public_inputs(&mut builder);
 

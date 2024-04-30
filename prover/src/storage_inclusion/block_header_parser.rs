@@ -6,18 +6,23 @@ use plonky2::{
 use crate::{
     common::{
         generic_blake2::GenericBlake2,
-        targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+        targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
+    storage_inclusion::scale_compact_integer_parser::full::{
+        define as define_full_int_parser, InputTarget as FullIntParserInput,
+    },
 };
 
 // Block header have the folowing structure:
 // - previous block hash    (32 bytes)
-// - block number           (4 bytes)
+// - block number           (1-4 bytes)
 // - state root             (32 bytes)
-// - ...
-const STATE_ROOT_OFFSET_IN_BLOCK_HEADER: usize = 32 + 4;
+// - extrinsics root        (32 bytes)
+// - digest                 (generic)
+const BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER: usize = 32;
+const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
 
 impl_parsable_target_set! {
     pub struct BlockHeaderParserTarget {
@@ -43,9 +48,24 @@ impl BlockHeaderParser {
 
         let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
 
-        let state_root_bytes: ArrayTarget<ByteTarget, BLAKE2_DIGEST_SIZE> = hasher_target
+        // Will have all neccesary padding as block number isn't last field in header.
+        let block_number_targets = hasher_target
             .data
-            .constant_read_array(STATE_ROOT_OFFSET_IN_BLOCK_HEADER);
+            .constant_read_array(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER);
+        let parsed_block_number = define_full_int_parser(
+            FullIntParserInput {
+                padded_bytes: block_number_targets,
+            },
+            &mut builder,
+        );
+
+        const USEFUL_DATA_OFFSET: usize = MAX_BLOCK_NUMBER_DATA_LENGTH + BLAKE2_DIGEST_SIZE;
+        let useful_header_data: ArrayTarget<_, USEFUL_DATA_OFFSET> = hasher_target
+            .data
+            .constant_read_array(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER);
+
+        let state_root_bytes: ArrayTarget<_, BLAKE2_DIGEST_SIZE> =
+            useful_header_data.random_read_array(parsed_block_number.length, &mut builder);
         let mut state_root_bits = state_root_bytes.0.into_iter().flat_map(|byte| {
             byte.to_bit_targets(&mut builder)
                 .0

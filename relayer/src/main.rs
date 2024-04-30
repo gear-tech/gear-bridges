@@ -6,12 +6,22 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use gear_rpc_client::GearApi;
 use proof_storage::{FileSystemProofStorage, ProofStorage};
+use prover::proving::GenesisConfig;
 
 mod proof_storage;
 mod prover_interface;
 
-const DEFAULT_VARA_RPC: &str = "wss://testnet-archive.vara-network.io:443";
+const DEFAULT_VARA_RPC: &str = "ws://localhost:9944";
 const DEFAULT_SERVE_ENDPOINT: &str = "localhost:1723";
+
+const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
+    validator_set_id: 1,
+    // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
+    validator_set_hash: [
+        0xb23a85b9, 0x025758fb, 0x0e04d9df, 0x949fbce8, 0xbd0a5bdc, 0x9e800f8b, 0x02dc3fc2,
+        0x241eb265,
+    ],
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -88,8 +98,9 @@ struct VaraEndpointArg {
 #[tokio::main]
 async fn main() {
     pretty_env_logger::formatted_builder()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Off)
         .format_target(false)
+        .filter(Some("prover"), log::LevelFilter::Debug)
         .format_timestamp(Some(TimestampPrecision::Seconds))
         .init();
 
@@ -106,7 +117,7 @@ async fn main() {
 
                 let proof = prover_interface::prove_genesis(&gear_api).await;
                 proof_storage
-                    .init(proof, prover_interface::GENESIS_AUTHORITY_SET_ID)
+                    .init(proof, GENESIS_CONFIG.validator_set_id)
                     .unwrap();
             }
             ProveCommands::ValidatorSetChange { args } => {
@@ -142,11 +153,11 @@ async fn main() {
             }
         },
         CliCommands::Serve(ServeArgs {
-            endpoint,
-            genesis_block,
+            endpoint: _,
+            genesis_block: _,
             prove_args: ProveArgs { vara_endpoint },
         }) => {
-            let gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
+            let _gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
             todo!()
         }
     };

@@ -1,4 +1,5 @@
 use alloc::vec;
+#[cfg(not(test))]
 use alloc::vec::Vec;
 
 use plonky2::field::extension::Extendable;

@@ -77,12 +77,12 @@ impl ProofStorage for MockProofStorage {
             .map(|(k, _)| *k)
             .expect("Proof storage not initialized");
 
-        self.proofs
-            .insert(validator_set_id + 1, proof)
-            .expect(&format!(
+        if self.proofs.insert(validator_set_id + 1, proof).is_some() {
+            panic!(
                 "Proof for validator set id = {} already present",
                 validator_set_id + 1
-            ));
+            )
+        }
 
         Ok(())
     }
@@ -146,10 +146,10 @@ impl FileSystemProofStorage {
             .cache
             .circuit_data
             .clone()
-            .ok_or_else(|| ProofStorageError::NotInitialized)?;
+            .ok_or(ProofStorageError::NotInitialized)?;
 
         fs::write(
-            &self.save_to.join("circuit_data.bin"),
+            self.save_to.join("circuit_data.bin"),
             circuit_data.clone().into_bytes(),
         )
         .map_err(|_| ProofStorageError::NotInitialized)?;
@@ -168,7 +168,7 @@ impl FileSystemProofStorage {
     }
 
     fn load_state(&mut self) -> Result<(), ProofStorageError> {
-        let circuit_data = fs::read(&self.save_to.join("circuit_data.bin"))
+        let circuit_data = fs::read(self.save_to.join("circuit_data.bin"))
             .map_err(|_| ProofStorageError::NotInitialized)?;
         self.cache.circuit_data = Some(CircuitData::from_bytes(circuit_data));
 
@@ -204,8 +204,7 @@ impl FileSystemProofStorage {
 
             self.cache
                 .proofs
-                .insert(validator_set_id, Proof::from_bytes(proof))
-                .expect("Files with the same name detected");
+                .insert(validator_set_id, Proof::from_bytes(proof));
         }
 
         Ok(())

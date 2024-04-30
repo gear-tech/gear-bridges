@@ -78,7 +78,7 @@ impl BranchParser {
         }
         .prove();
 
-        log::info!("Proving branch node parser...");
+        log::debug!("Proving branch node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.num_wires = 160;
@@ -174,7 +174,7 @@ impl BranchParser {
 
         let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Proven branch node parser");
+        log::debug!("Proven branch node parser");
 
         result
     }

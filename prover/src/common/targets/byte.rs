@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ByteTarget(Target);
 
 impl TargetSet for ByteTarget {
@@ -28,10 +28,6 @@ impl ParsableTargetSet for ByteTarget {
 }
 
 impl ByteTarget {
-    pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
-        Self(builder.constant(F::from_canonical_u8(value)))
-    }
-
     pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
         builder.range_check(target, 8);
         Self(target)
@@ -71,14 +67,8 @@ impl ByteTarget {
         )
     }
 
-    /// Arranged from less to most significant bit.
-    pub fn from_bit_targets(bits: [BoolTarget; 8], builder: &mut CircuitBuilder<F, D>) -> Self {
-        let mut sum = builder.zero();
-        for (bit_idx, bit_target) in bits.iter().enumerate() {
-            let bit_value =
-                builder.mul_const(F::from_canonical_usize(1 << bit_idx), bit_target.target);
-            sum = builder.add(sum, bit_value);
-        }
-        Self(sum)
+    #[cfg(test)]
+    pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
+        Self(builder.constant(F::from_canonical_u8(value)))
     }
 }

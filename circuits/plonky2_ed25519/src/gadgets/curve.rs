@@ -79,7 +79,7 @@ pub trait CircuitBuilderCurve<F: RichField + Extendable<D>, const D: usize> {
 
     fn point_compress<C: Curve>(&mut self, p: &AffinePointTarget<C>) -> Vec<BoolTarget>;
 
-    fn point_decompress<C: Curve>(&mut self, p: &Vec<BoolTarget>) -> AffinePointTarget<C>;
+    fn point_decompress<C: Curve>(&mut self, p: &[BoolTarget]) -> AffinePointTarget<C>;
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
@@ -294,7 +294,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
         let mut bits = biguint_to_bits_target::<F, D, 2>(self, &p.y.value);
         let x_bits_low_32 = self.split_le_base::<2>(p.x.value.get_limb(0).0, 32);
 
-        let a = bits[0].target.clone();
+        let a = bits[0].target;
         let b = x_bits_low_32[0];
         // a | b = a + b - a * b
         let a_add_b = self.add(a, b);
@@ -303,12 +303,12 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
         bits
     }
 
-    fn point_decompress<C: Curve>(&mut self, pv: &Vec<BoolTarget>) -> AffinePointTarget<C> {
+    fn point_decompress<C: Curve>(&mut self, pv: &[BoolTarget]) -> AffinePointTarget<C> {
         assert_eq!(pv.len(), 256);
         let p = self.add_virtual_affine_point_target();
 
         self.add_simple_generator(CurvePointDecompressionGenerator::<F, D, C> {
-            pv: pv.clone(),
+            pv: pv.to_vec(),
             p: p.clone(),
             _phantom: PhantomData,
         });
@@ -337,15 +337,15 @@ impl<F: RichField + Extendable<D>, const D: usize, C: Curve> SimpleGenerator<F, 
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         todo!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,
@@ -360,7 +360,7 @@ impl<F: RichField + Extendable<D>, const D: usize, C: Curve> SimpleGenerator<F, 
     fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
         let mut bits = Vec::new();
         for i in 0..256 {
-            bits.push(witness.get_bool_target(self.pv[i].clone()));
+            bits.push(witness.get_bool_target(self.pv[i]));
         }
         let mut s: [u8; 32] = [0; 32];
         for i in 0..32 {

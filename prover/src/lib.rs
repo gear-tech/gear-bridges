@@ -46,12 +46,6 @@ pub mod consts {
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
     pub const MAX_VALIDATOR_COUNT: usize = 6;
-
-    pub const GENESIS_AUTHORITY_SET_ID: u64 = 272;
-    pub const GENESIS_VALIDATOR_SET_HASH: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] = [
-        0x3E453535, 0x39A1043B, 0x8D1265E7, 0xB47E1B16, 0x3E263D42, 0x9EF6888C, 0x137A20F1,
-        0x6696DBA1,
-    ];
 }
 
 pub mod proving {
@@ -75,6 +69,8 @@ pub mod proving {
 
     pub use crate::block_finality::{BlockFinality, PreCommit};
     pub use crate::storage_inclusion::{BranchNodeData, StorageInclusion};
+
+    use self::consts::BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS;
 
     #[derive(Clone)]
     pub struct Proof(pub Vec<u8>);
@@ -162,8 +158,15 @@ pub mod proving {
         pub verifier_only_circuit_data: String,
     }
 
+    #[derive(Clone, Copy)]
+    pub struct GenesisConfig {
+        pub validator_set_id: u64,
+        pub validator_set_hash: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
+    }
+
     pub fn prove_genesis(
         current_epoch_block_finality: BlockFinality,
+        genesis_config: GenesisConfig,
         next_validator_set_inclusion_proof: StorageInclusion,
         next_validator_set_data: Vec<u8>,
     ) -> ProofWithCircuitData {
@@ -176,7 +179,7 @@ pub mod proving {
         let proof = LatestValidatorSet {
             change_proof: change_from_genesis,
         }
-        .prove_genesis();
+        .prove_genesis(genesis_config);
 
         ProofWithCircuitData::from_plonky2_repr(&proof)
     }
@@ -207,6 +210,7 @@ pub mod proving {
     pub fn prove_message_sent(
         previous_proof: ProofWithCircuitData,
         block_finality_proof: BlockFinality,
+        genesis_config: GenesisConfig,
         message_inclusion_proof: StorageInclusion,
         message_contents: Vec<u8>,
     ) -> ExportedProofWithCircuitData {
@@ -219,13 +223,13 @@ pub mod proving {
         let previous_proof: common::ProofWithCircuitData<NextValidatorSetTarget> =
             previous_proof.into_plonky2_repr();
 
-        FinalProof {
+        let proof = FinalProof {
             current_validator_set_verifier_data: previous_proof.circuit_data().clone(),
             current_validator_set_proof: previous_proof.proof(),
             message_sent,
         }
-        .prove();
+        .prove(genesis_config);
 
-        todo!()
+        proof.export_wrapped()
     }
 }

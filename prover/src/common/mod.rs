@@ -111,20 +111,6 @@ where
         }
     }
 
-    pub fn export(self) -> ExportedProofWithCircuitData {
-        let proof_with_public_inputs = ProofWithPublicInputs {
-            proof: self.proof,
-            public_inputs: self.public_inputs,
-        };
-
-        ExportedProofWithCircuitData {
-            proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
-            common_circuit_data: serde_json::to_string(&self.circuit_data.common).unwrap(),
-            verifier_only_circuit_data: serde_json::to_string(&self.circuit_data.verifier_only)
-                .unwrap(),
-        }
-    }
-
     pub fn export_wrapped(self) -> ExportedProofWithCircuitData {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
@@ -141,6 +127,7 @@ where
         }
     }
 
+    #[cfg(test)]
     pub fn verify(&self) -> bool {
         self.circuit_data
             .verify(ProofWithPublicInputs {
@@ -312,14 +299,6 @@ pub fn byte_to_bits(byte: u8) -> [bool; 8] {
         .collect::<Vec<_>>()
         .try_into()
         .expect("8 bits in byte")
-}
-
-pub fn bits_to_byte(bits: [bool; 8]) -> u8 {
-    bits.into_iter()
-        .rev()
-        .enumerate()
-        .map(|(no, bit)| (bit as u8) << no)
-        .sum()
 }
 
 pub fn pad_byte_vec<const L: usize>(mut data: Vec<u8>) -> [u8; L] {

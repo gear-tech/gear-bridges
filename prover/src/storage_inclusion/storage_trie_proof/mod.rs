@@ -59,6 +59,8 @@ impl StorageTrieProof {
         }
         .prove();
 
+        log::debug!("Composing branch node chain proof and hashed leaf parser proof...");
+
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
 
@@ -82,6 +84,10 @@ impl StorageTrieProof {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        let res = ProofWithCircuitData::prove_from_builder(builder, witness);
+
+        log::debug!("Composed branch node chain proof and hashed leaf parser proof");
+
+        res
     }
 }

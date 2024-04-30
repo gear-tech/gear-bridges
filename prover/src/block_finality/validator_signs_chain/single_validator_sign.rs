@@ -36,9 +36,9 @@ pub struct SingleValidatorSign {
 
 impl SingleValidatorSign {
     pub fn prove(self) -> ProofWithCircuitData<PublicInputsTarget> {
-        log::info!("        Proving single validator sign...");
+        log::debug!("        Proving single validator sign...");
         let res = CACHE.prove(self);
-        log::info!("        Proven single validator sign...");
+        log::debug!("        Proven single validator sign...");
         res
     }
 }

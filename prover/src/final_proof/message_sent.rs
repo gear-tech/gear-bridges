@@ -60,12 +60,12 @@ pub struct MessageSent {
 
 impl MessageSent {
     pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
-        log::info!("Proving message presense in finalized block...");
+        log::debug!("Proving message presense in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
 
-        log::info!("Composing inclusion and finality proofs...");
+        log::debug!("Composing inclusion and finality proofs...");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
@@ -74,6 +74,9 @@ impl MessageSent {
             builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
         let finality_proof_target =
             builder.recursively_verify_constant_proof(&finality_proof, &mut witness);
+
+        let block_number =
+            Target::from_bool_targets_le(finality_proof_target.message.block_number, &mut builder);
 
         inclusion_proof_target
             .block_hash
@@ -101,10 +104,7 @@ impl MessageSent {
                 finality_proof_target.message.authority_set_id,
                 &mut builder,
             ),
-            block_number: Target::from_bool_targets_le(
-                finality_proof_target.message.block_number,
-                &mut builder,
-            ),
+            block_number,
             message_contents: MessageTargetGoldilocks::from_bit_array(
                 storage_data_target.merkle_trie_root,
                 &mut builder,

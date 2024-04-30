@@ -107,7 +107,6 @@ mod tests {
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
-            circuit_builder::CircuitBuilder,
             circuit_data::{CircuitConfig, CircuitData},
             proof::ProofWithPublicInputs,
         },
@@ -118,7 +117,7 @@ mod tests {
     use crate::{
         common::targets::TargetSet,
         storage_inclusion::storage_trie_proof::{
-            node_parser::{pad_byte_vec, NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
+            node_parser::{pad_byte_vec, NODE_DATA_BLOCK_BYTES},
             storage_address::tests_common::create_address_target,
         },
     };

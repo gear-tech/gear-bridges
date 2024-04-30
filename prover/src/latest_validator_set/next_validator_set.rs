@@ -57,7 +57,7 @@ pub struct NextValidatorSet {
 
 impl NextValidatorSet {
     pub fn prove(self) -> ProofWithCircuitData<NextValidatorSetTarget> {
-        log::info!("Proving validator set change...");
+        log::debug!("Proving validator set change...");
 
         let storage_data_bits = array_to_bits(&self.next_validator_set_storage_data);
 

@@ -5,7 +5,9 @@ use crate::{
     common::targets::{impl_target_set, ArrayTarget, Blake2Target, TargetSet},
     prelude::*,
     storage_inclusion::{
-        scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
+        scale_compact_integer_parser::single_byte::{
+            define as define_single_byte_int_parser, InputTarget as SingleByteIntParserInput,
+        },
         storage_trie_proof::node_parser::NodeDataBlockTarget,
     },
 };
@@ -31,15 +33,13 @@ pub fn define(
     input: InlindedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> InlinedDataParserOutputTarget {
-    log::info!("    Composing inlined data parser");
+    log::debug!("    Composing inlined data parser");
 
     let first_byte = input
         .first_node_data_block
         .random_read(input.read_offset, builder);
-    let parsed_length = scale_compact_integer_parser::define(
-        ScaleCompactIntegerParserInputTarget { first_byte },
-        builder,
-    );
+    let parsed_length =
+        define_single_byte_int_parser(SingleByteIntParserInput { first_byte }, builder);
 
     let desired_length = builder.constant(F::from_canonical_usize(INLINED_DATA_LENGTH));
     builder.connect(parsed_length.decoded, desired_length);

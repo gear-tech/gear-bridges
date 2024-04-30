@@ -41,7 +41,7 @@ impl IndexedValidatorSign {
         &self,
         valiadtor_set_hash_proof: &ProofWithCircuitData<ValidatorSetHashTarget>,
     ) -> ProofWithCircuitData<IndexedValidatorSignTarget> {
-        log::info!("    Proving indexed validator sign...");
+        log::debug!("    Proving indexed validator sign...");
 
         let sign_proof = SingleValidatorSign {
             public_key: self.public_key,

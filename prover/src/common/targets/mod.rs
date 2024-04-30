@@ -20,7 +20,6 @@ mod target;
 mod verifier_data;
 
 pub use array::*;
-pub use bool::*;
 pub use byte::*;
 pub use half_byte::*;
 pub use target::*;
@@ -32,7 +31,12 @@ pub trait TargetSet: Clone + Debug {
 
     fn parse_exact(raw: &mut impl Iterator<Item = Target>) -> Self {
         let out = Self::parse(raw);
-        assert_eq!(raw.next(), None);
+        assert_eq!(
+            raw.next(),
+            None,
+            "Too much targets are provided to parse_exact. Found {} excess targets.",
+            raw.collect::<Vec<_>>().len() + 1
+        );
         out
     }
 

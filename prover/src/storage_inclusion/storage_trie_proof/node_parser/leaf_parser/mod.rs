@@ -59,7 +59,7 @@ enum LeafType {
 
 impl LeafParser {
     pub fn prove(self) -> ProofWithCircuitData<LeafParserTarget> {
-        log::info!("Proving leaf node parser...");
+        log::debug!("Proving leaf node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.num_wires = 160;
@@ -146,7 +146,7 @@ impl LeafParser {
 
         let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Proven leaf node parser");
+        log::debug!("Proven leaf node parser");
 
         result
     }
@@ -158,7 +158,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        common::{array_to_bits, pad_byte_vec, targets::ParsableTargetSet},
+        common::{array_to_bits, targets::ParsableTargetSet},
         prelude::consts::BLAKE2_DIGEST_SIZE,
     };
 

@@ -25,7 +25,7 @@ pub fn define(
     input: HashedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> HashedDataParserOutputTarget {
-    log::info!("    Composing hashed data parser");
+    log::debug!("    Composing hashed data parser");
 
     let hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> = input
         .first_node_data_block

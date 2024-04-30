@@ -54,6 +54,8 @@ impl StorageInclusion {
         }
         .prove();
 
+        log::debug!("Composing block header proof and storage trie proof...");
+
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
@@ -77,6 +79,10 @@ impl StorageInclusion {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        let res = ProofWithCircuitData::prove_from_builder(builder, witness);
+
+        log::debug!("Composed block header proof and storage trie proof");
+
+        res
     }
 }

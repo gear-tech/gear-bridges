@@ -1,12 +1,13 @@
 use plonky2::{
-    iop::witness::PartialWitness,
+    iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
 use crate::{
     common::{
         targets::{
-            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target, TargetSet,
+            impl_parsable_target_set, impl_target_set, BitArrayTarget, Blake2Target,
+            TargetBitOperations, TargetSet,
         },
         BuilderExt, ProofWithCircuitData,
     },
@@ -35,7 +36,7 @@ impl_target_set! {
 // - authority set id                       (8 bytes)
 impl_parsable_target_set! {
     pub struct GrandpaVoteTarget {
-        _aux_data: BitArrayTarget<8>,
+        pub discriminant: BitArrayTarget<8>,
         pub block_hash: Blake2Target,
         pub block_number: BitArrayTarget<32>,
         _aux_data_2: BitArrayTarget<64>,
@@ -109,9 +110,14 @@ impl BlockFinality {
         let validator_signs_target =
             builder.recursively_verify_constant_proof(&validator_signs_proof, &mut witness);
 
+        let message = validator_signs_target.message;
+        let discriminant = Target::from_bool_targets_le(message.discriminant, &mut builder);
+        let pre_commit_discriminant = builder.one();
+        builder.connect(discriminant, pre_commit_discriminant);
+
         BlockFinalityTarget {
             validator_set_hash: validator_signs_target.validator_set_hash,
-            message: validator_signs_target.message,
+            message,
         }
         .register_as_public_inputs(&mut builder);
 

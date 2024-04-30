@@ -77,14 +77,12 @@ impl ProofStorage for MockProofStorage {
             .map(|(k, _)| *k)
             .expect("Proof storage not initialized");
 
-        self.proofs
-            .insert(validator_set_id + 1, proof)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Proof for validator set id = {} already present",
-                    validator_set_id + 1
-                )
-            });
+        if self.proofs.insert(validator_set_id + 1, proof).is_some() {
+            panic!(
+                "Proof for validator set id = {} already present",
+                validator_set_id + 1
+            )
+        }
 
         Ok(())
     }

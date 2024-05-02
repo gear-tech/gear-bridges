@@ -1,3 +1,5 @@
+//! Contains circuit definition that's used to prove correct parsing of leaf node.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -15,16 +17,20 @@ use crate::{
 use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget};
 
 impl_parsable_target_set! {
+    /// Public inputs for `HashedLeafParser`.
     pub struct HashedLeafParserTarget {
         pub node_hash: Blake2Target,
         pub storage_data_hash: Blake2Target,
 
+        /// Address composed from all the nodes from root to this.
         pub partial_address: PartialStorageAddressTarget,
+        /// Address of storage item.
         pub final_address: PartialStorageAddressTarget,
     }
 }
 
 pub struct HashedLeafParser {
+    /// Inner non-hashed leaf parser.
     pub leaf_parser: LeafParser,
 }
 

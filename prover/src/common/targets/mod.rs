@@ -102,14 +102,22 @@ pub(crate) use crate::impl_target_set;
 #[macro_export]
 macro_rules! impl_target_set {
     (
+        $(#[$($struct_attributes:tt)*])*
         $vis:vis struct $struct_name:ident {
-            $($field_vis:vis $field_name:ident: $field_type:ty),*
+            $(
+                $(#[$($attributes:tt)*])*
+                $field_vis:vis $field_name:ident: $field_type:ty
+            ),*
             $(,)?
         }
     ) => {
         #[derive(Clone, Debug)]
+        $(#[$($struct_attributes)*])*
         $vis struct $struct_name {
-            $($field_vis $field_name: $field_type),*
+            $(
+                $(#[$($attributes)*])*
+                $field_vis $field_name: $field_type
+            ),*
         }
 
         impl $crate::common::targets::TargetSet for $struct_name {
@@ -130,14 +138,22 @@ macro_rules! impl_target_set {
 #[macro_export]
 macro_rules! impl_parsable_target_set {
     (
+        $(#[$($struct_attributes:tt)*])*
         $vis:vis struct $struct_name:ident {
-            $($field_vis:vis $field_name:ident: $field_type:ty),*
+            $(
+                $(#[$($field_attributes:tt)*])*
+                $field_vis:vis $field_name:ident: $field_type:ty
+            ),*
             $(,)?
         }
     ) => {
         $crate::common::targets::impl_target_set! {
+            $(#[$($struct_attributes)*])*
             $vis struct $struct_name {
-                $($field_vis $field_name: $field_type),*
+                $(
+                    $(#[$($field_attributes)*])*
+                    $field_vis $field_name: $field_type
+                ),*
             }
         }
 

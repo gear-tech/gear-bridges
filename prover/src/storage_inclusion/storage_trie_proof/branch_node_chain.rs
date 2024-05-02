@@ -1,3 +1,6 @@
+//! Contains circuit definition that's used to prove correct parsing of all the branch nodes
+//! from root to leaf.
+
 use plonky2::{
     iop::{
         target::BoolTarget,
@@ -34,24 +37,26 @@ use crate::{
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_parsable_target_set! {
+    /// Public inputs for `BranchNodeChain`.
     pub struct BranchNodeChainParserTarget {
+        /// Storage root.
         pub root_hash: Blake2Target,
         pub leaf_hash: Blake2Target,
+        /// Result of composition of all addresses from root node to the last branch node.
         pub partial_address: PartialStorageAddressTarget,
     }
 }
 
 impl_target_set! {
+    /// Intermediate target for cyclic recursion.
     struct BranchNodeChainParserTargetWithVerifierData {
-        root_hash: Blake2Target,
-        leaf_hash: Blake2Target,
-        partial_address: PartialStorageAddressTarget,
-
+        inner: BranchNodeChainParserTarget,
         verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
     }
 }
 
 pub struct BranchNodeChain {
+    /// Encoded branch nodes, arranged from root to leaf.
     pub nodes: Vec<BranchNodeData>,
 }
 
@@ -68,9 +73,9 @@ impl BranchNodeChain {
         let public_inputs = builder.recursively_verify_constant_proof(&inner, &mut witness);
 
         BranchNodeChainParserTarget {
-            root_hash: public_inputs.root_hash,
-            leaf_hash: public_inputs.leaf_hash,
-            partial_address: public_inputs.partial_address,
+            root_hash: public_inputs.inner.root_hash,
+            leaf_hash: public_inputs.inner.leaf_hash,
+            partial_address: public_inputs.inner.partial_address,
         }
         .register_as_public_inputs(&mut builder);
 
@@ -211,9 +216,9 @@ impl Circuit {
                 .into_iter(),
         );
         let mut inner_cyclic_proof_pis = BranchNodeChainParserTarget {
-            root_hash: inner_cyclic_proof_pis.root_hash,
-            leaf_hash: inner_cyclic_proof_pis.leaf_hash,
-            partial_address: inner_cyclic_proof_pis.partial_address,
+            root_hash: inner_cyclic_proof_pis.inner.root_hash,
+            leaf_hash: inner_cyclic_proof_pis.inner.leaf_hash,
+            partial_address: inner_cyclic_proof_pis.inner.partial_address,
         };
 
         inner_cyclic_proof_pis.leaf_hash = builder.select_target_set(

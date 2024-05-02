@@ -1,3 +1,5 @@
+//! Contains circuit definition that's used to prove correct parsing of branch node.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -21,12 +23,15 @@ impl_parsable_target_set! {
         pub node_hash: Blake2Target,
         pub child_node_hash: Blake2Target,
 
+        /// Address composed from all the nodes from root to this.
         pub partial_address: PartialStorageAddressTarget,
+        /// `partial_address` concatenated with this node address part.
         pub resulting_partial_address: PartialStorageAddressTarget,
     }
 }
 
 pub struct HashedBranchParser {
+    /// Inner non-hashed branch parser.
     pub branch_parser: BranchParser,
 }
 

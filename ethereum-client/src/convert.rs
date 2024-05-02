@@ -1,4 +1,4 @@
-use alloy_primitives::{Bytes as aBytes, U256 as aU256};
+use alloy_primitives::{Bytes as aBytes, B256 as aB256, U256 as aU256};
 use primitive_types::U256 as eU256;
 
 pub trait Convert<T> {
@@ -28,5 +28,11 @@ impl Convert<aBytes> for aBytes {
 impl Convert<aBytes> for &[u8] {
     fn convert(self) -> aBytes {
         aBytes::copy_from_slice(self)
+    }
+}
+
+impl Convert<aB256> for aB256 {
+    fn convert(self) -> aB256 {
+        self
     }
 }

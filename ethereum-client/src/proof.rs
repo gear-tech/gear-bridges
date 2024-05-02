@@ -1,14 +1,14 @@
-use crate::abi::ContentMessage;
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Proof {
+pub struct BlockMerkleRootProof {
     pub proof: Bytes,
-    pub public_inputs: Vec<U256>,
+    pub block_number: U256,
+    pub merkle_root: B256,
 }
 
-impl Proof {
+impl BlockMerkleRootProof {
     pub fn try_from_json_string(data: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(data)
     }

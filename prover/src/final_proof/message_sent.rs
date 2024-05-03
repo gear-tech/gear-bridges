@@ -1,3 +1,5 @@
+//! ### Contains circuit definition that's used to prove that message was sent.
+
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -22,6 +24,7 @@ use crate::{
 };
 
 impl_target_set! {
+    /// Public inputs for `MessageSent`.
     pub struct MessageSentTarget {
         pub validator_set_hash: Blake2TargetGoldilocks,
         pub authority_set_id: Target,
@@ -31,13 +34,13 @@ impl_target_set! {
 }
 
 impl_target_set! {
-    pub struct MessageInStorageTarget {
-        pub merkle_trie_root: ArrayTarget<BoolTarget, MESSAGE_SIZE_IN_BITS>,
+    struct MessageInStorageTarget {
+        merkle_trie_root: ArrayTarget<BoolTarget, MESSAGE_SIZE_IN_BITS>,
     }
 }
 
 impl MessageInStorageTarget {
-    pub fn hash(&self, builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
+    fn hash(&self, builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
         let bit_targets = self
             .clone()
             .into_targets_iter()

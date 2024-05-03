@@ -1,3 +1,5 @@
+//! ### Contains circuit that's used to prove validator set change.
+
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -20,8 +22,8 @@ use crate::{
 };
 
 impl_target_set! {
-    pub struct ValidatorSetStorageItemTarget {
-        pub validator_set_hash: Blake2Target,
+    struct ValidatorSetStorageItemTarget {
+        validator_set_hash: Blake2Target,
     }
 }
 
@@ -42,6 +44,7 @@ impl ValidatorSetStorageItemTarget {
 }
 
 impl_target_set! {
+    /// `NextValidatorSet` public inputs.
     pub struct NextValidatorSetTarget {
         pub current_validator_set_hash: Blake2TargetGoldilocks,
         pub current_authority_set_id: Target,

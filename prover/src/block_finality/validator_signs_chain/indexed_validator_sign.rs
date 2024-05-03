@@ -1,3 +1,6 @@
+//! ### Circuit that's used to prove that validator with particular index in validator set have
+//! ### signed GRANDPA message.
+
 use plonky2::{
     iop::{
         target::Target,
@@ -20,11 +23,15 @@ use crate::{
 };
 
 impl_target_set! {
+    /// Public inputs for `IndexedValidatorSign`.
     pub struct IndexedValidatorSignTarget {
+        /// Blake2 hash of concatenated validator set public inputs.
         pub validator_set_hash: Blake2Target,
+        /// Overall validator count in validator set.
         pub validator_count: Target,
-
+        /// Validator index that have signed GRANDPA message.
         pub validator_idx: Target,
+        /// GRANDPA message.
         pub message: GrandpaVoteTarget,
     }
 }
@@ -79,5 +86,3 @@ impl IndexedValidatorSign {
         ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
-
-mod single_validator_sign {}

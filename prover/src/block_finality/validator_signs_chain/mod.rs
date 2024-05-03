@@ -1,3 +1,5 @@
+//! Circuit that's used to prove that majority of validators have signed GRANDPA message.
+
 use itertools::Itertools;
 use plonky2::{
     iop::{
@@ -45,8 +47,11 @@ use super::{validator_set_hash::ValidatorSetHash, GrandpaVoteTarget, ProcessedPr
 const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
 impl_target_set! {
+    /// Public inputs for `ValidatorSignsChain`.
     pub struct ValidatorSignsChainTarget {
+        /// Blake2 hash of concatenated validator public keys.
         pub validator_set_hash: Blake2Target,
+        /// GRANDPA message.
         pub message: GrandpaVoteTarget,
     }
 }
@@ -145,6 +150,7 @@ impl ValidatorSignsChain {
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
+// TODO: Put nested target here.
 impl_target_set! {
     struct SignCompositionTarget {
         validator_set_hash: Blake2Target,
@@ -176,6 +182,7 @@ struct SignCompositionInitialData {
     message: [u8; GRANDPA_VOTE_LENGTH],
 }
 
+/// Inner cyclic recursion proof.
 struct SignComposition {
     cyclic_circuit_data: CircuitData<F, C, D>,
 

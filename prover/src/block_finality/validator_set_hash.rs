@@ -1,3 +1,5 @@
+//! ### Circuit that's used to prove correct hashing of validator set.
+
 use plonky2::{
     iop::{
         target::Target,

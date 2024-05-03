@@ -1,3 +1,5 @@
+//! ### Contains definition of circuit used to parse encoded leaf node.
+
 use plonky2::{
     iop::{
         target::Target,
@@ -36,19 +38,24 @@ mod hashed_data_parser;
 mod inlined_data_parser;
 
 impl_parsable_target_set! {
+    /// `LeafParser` public inputs.
     pub struct LeafParserTarget {
         pub padded_node_data: LeafNodeDataPaddedTarget,
         pub node_data_length: Target,
-
+        /// Expected blake2b hash of data stored in this leaf.
         pub storage_data_hash: Blake2Target,
-
+        /// Address that was previously composed by parsing all the parent nodes.
         pub partial_address: PartialStorageAddressTarget,
+        /// Final address of storage item.
         pub final_address: PartialStorageAddressTarget
     }
 }
 
 pub struct LeafParser {
+    /// Encoded leaf node data.
     pub node_data: Vec<u8>,
+    /// Previously composed address nibbles. Note that we store nibbles as `u8` but they're must be
+    /// in range (0..=15).
     pub partial_address_nibbles: Vec<u8>,
 }
 

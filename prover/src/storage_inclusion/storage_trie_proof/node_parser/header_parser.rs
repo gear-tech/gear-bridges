@@ -1,3 +1,9 @@
+//! ### Contains circuit definition that's used to parse prefix from encoded node.
+//!
+//! Prefix contains node type(`BranchWithoutValue`, `HashedValueLeaf`, e.t.c.) and nibble count.
+//! Prefix can be 1, 2 or more bytes long. 1 and 2 byte long prefixes support encoding nibble count
+//! in range (0..=8291), so we don't support 3 and more byte preixes.
+
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
@@ -11,13 +17,17 @@ use crate::{
 
 impl_target_set! {
     pub struct HeaderParserInputTarget {
+        /// Prefix is guaranteed to be located in the first 2 bytes for both `leaf` and `branch`
+        /// nodes.
         pub first_bytes: ArrayTarget<ByteTarget, 2>,
     }
 }
 
 impl_target_set! {
     pub struct HeaderParserOutputTarget {
+        /// Nibble count contained in this node's partial address.
         pub nibble_count: Target,
+        /// Offset of remaining node data.
         pub resulting_offset: Target,
     }
 }
@@ -28,6 +38,7 @@ pub struct HeaderDescriptor {
 }
 
 impl HeaderDescriptor {
+    /// Create `BranchWithoutValue` descriptor.
     pub fn branch_without_value() -> HeaderDescriptor {
         HeaderDescriptor {
             masked_prefix: 0b10_00_00_00,
@@ -35,6 +46,7 @@ impl HeaderDescriptor {
         }
     }
 
+    /// Create `HashedValueLeaf` descriptor.
     pub fn hashed_value_leaf() -> HeaderDescriptor {
         HeaderDescriptor {
             masked_prefix: 0b00_10_00_00,
@@ -42,6 +54,7 @@ impl HeaderDescriptor {
         }
     }
 
+    /// Create `Leaf` descriptor.
     pub fn leaf() -> HeaderDescriptor {
         HeaderDescriptor {
             masked_prefix: 0b01_00_00_00,
@@ -49,6 +62,7 @@ impl HeaderDescriptor {
         }
     }
 
+    /// Check if `node_data` prefix matches with current descriptor.
     pub fn prefix_matches(&self, node_data: &[u8]) -> bool {
         let prefix = &byte_to_bits(node_data[0])[..self.prefix_length];
         let desired_prefix = &byte_to_bits(self.masked_prefix)[..self.prefix_length];

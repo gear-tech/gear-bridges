@@ -5794,7 +5794,6 @@ dependencies = [
  "paste",
  "plonky2",
  "plonky2_blake2b256",
- "plonky2_ecdsa",
  "plonky2_ed25519",
  "plonky2_field",
  "plonky2_u32",

@@ -74,6 +74,7 @@ impl ChildNodeParser {
         // Read only one byte as we don't support compact integers in other modes than single-byte.
         let encoded_length_size = builder.one();
         let encoded_length = node_data.random_read(read_offset, &mut builder);
+        // TODO: Assert that it's <= 32 or increase max block count in node_parser.
         let encoded_child_data_length = define_single_byte_int_parser(
             SingleByteIntParserInput {
                 first_byte: encoded_length,

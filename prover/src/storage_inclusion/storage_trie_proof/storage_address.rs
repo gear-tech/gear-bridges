@@ -23,6 +23,7 @@ pub const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
 impl_parsable_target_set! {
+    // TODO REFACTOR: rename to `StorageAddressTarget`.
     // Invariant: all the data after `length` is zeroed.
     pub struct PartialStorageAddressTarget {
         /// Storage address padded with zeroes.

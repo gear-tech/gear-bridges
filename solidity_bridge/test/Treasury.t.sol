@@ -51,6 +51,7 @@ contract TreasuryTest is Test {
         erc20_token = new ERC20Mock("wVARA");
     }
 
+
     function test_messageQueueRole() public {
         address not_admin = address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34);
 
@@ -60,7 +61,7 @@ contract TreasuryTest is Test {
         treasury.grantRole(Constants.ADMIN_ROLE, not_admin);
 
         bytes32 role_admin = treasury.getRoleAdmin(Constants.MESSAGE_QUEUE_ROLE);
-        console.logBytes32(role_admin);
+        assertEq(role_admin, Constants.ADMIN_ROLE);
 
         vm.expectRevert();
         treasury.grantRole(Constants.MESSAGE_QUEUE_ROLE, not_admin);
@@ -98,8 +99,5 @@ contract TreasuryTest is Test {
 
         vm.prank(address(message_queue));
         IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
-
     }
-
-
 }

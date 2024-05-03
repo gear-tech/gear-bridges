@@ -46,7 +46,6 @@ contract TreasuryTest is Test {
         message_queue = MessageQueue(address(_message_queue_proxy));
         prover = Prover(address(_prover));
 
-
         erc20_token = new ERC20Mock("wVARA");
     }
 
@@ -55,7 +54,6 @@ contract TreasuryTest is Test {
         uint256 blockNumber = 274;
         assertEq(0, relayer.getBlockNumber(merkleRoot));
         assertEq(bytes32(0), relayer.getMerkleRoot(blockNumber));
-
     }
 
     function test_build_public_inputs() public {
@@ -81,9 +79,19 @@ contract TreasuryTest is Test {
 
 
         relayer.submitMerkleRoot(BLOCK_ID, BLOCK_MERKLE_ROOT, proof);
-
-
     }
 
+    function test_merkle_root_from_public() public {
+        uint256[] memory public_inputs = new uint256[](2);
+        public_inputs[0] = 3980403427572212499963242599334442163722879490045996792884;
+        public_inputs[1] = 1166562204472425303272494454897619262805894610326304849920;
 
+        bytes32 merkle_root = relayer.getMerkleRootFromPublicInputs(public_inputs);
+        console.logBytes32(merkle_root);
+        assertEq(merkle_root, BLOCK_MERKLE_ROOT);
+
+        uint256 block_id = relayer.getBlockNumberFromPublicInputs(public_inputs);
+        console.log("Block:", block_id);
+        assertEq(block_id, BLOCK_ID);
+    }
 }

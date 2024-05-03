@@ -16,19 +16,10 @@ contract ProxyContract is ERC1967Proxy {
         ERC1967Utils.changeAdmin(msg.sender);
     }
 
-    /**
-     * @dev Returns the admin of this proxy.
-     */
-    function _proxyAdmin() internal view virtual returns (address) {
-        return ERC1967Utils.getAdmin();
-    }
 
     /**
      * @dev If caller is the admin process the call internally, otherwise transparently fallback to the proxy behavior.
      */
-
-
-
     fallback() override external payable  {
         super._fallback();
     }
@@ -46,19 +37,16 @@ contract ProxyContract is ERC1967Proxy {
      */
 
     function upgradeToAndCall(address newImplementation, bytes calldata data) public {
-        if (msg.sender != _proxyAdmin()) {
+        if (msg.sender != ERC1967Utils.getAdmin()) {
             revert ProxyDeniedAdminAccess();
         }else{
-            _dispatchUpgradeToAndCall(newImplementation, data);
+            ERC1967Utils.upgradeToAndCall(newImplementation, data);
         }    
     }
 
-    function _dispatchUpgradeToAndCall(address newImplementation, bytes calldata data) private {
-        ERC1967Utils.upgradeToAndCall(newImplementation, data);
-    }
-
+ 
     function changeProxyAdmin(address newAdmin) public {
-        if (msg.sender != _proxyAdmin()) {
+        if (msg.sender != ERC1967Utils.getAdmin()) {
             revert ProxyDeniedAdminAccess();
         }else{
             ERC1967Utils.changeAdmin(newAdmin);
@@ -71,7 +59,7 @@ contract ProxyContract is ERC1967Proxy {
     }
 
     function proxyAdmin() public view returns(address) {
-       return  _proxyAdmin();
+        return ERC1967Utils.getAdmin();
     }
     
 

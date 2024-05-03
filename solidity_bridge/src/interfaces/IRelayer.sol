@@ -15,5 +15,7 @@ interface IRelayer {
 
     function buildPublicInputs(uint256 block_number, bytes32 merkle_root) external pure returns (uint256[] memory public_inputs);
 
+    function getBlockNumberFromPublicInputs(uint256[] calldata public_inputs) external pure returns (uint256);
 
+    function getMerkleRootFromPublicInputs(uint256[] calldata public_inputs) external pure returns (bytes32);
 }

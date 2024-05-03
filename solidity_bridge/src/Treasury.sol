@@ -25,6 +25,8 @@ contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
     }
 
 
+    /// @dev deposit token to Treasury. 
+    ///
     function deposit(address token, uint256 amount) public {
         IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
         emit Deposit(_msgSender(), token, amount);

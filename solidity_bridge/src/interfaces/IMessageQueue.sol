@@ -1,12 +1,12 @@
 pragma solidity ^0.8.24;
 
 
-    struct VaraMessage {
-        bytes32 vara_address;
-        address eth_address;
-        uint256 nonce;
-        bytes data;
-    }
+struct VaraMessage {
+    bytes32 vara_address;
+    address eth_address;
+    uint256 nonce;
+    bytes data;
+}
 
 interface IMessageQueue {
     error AlreadyInitialized();

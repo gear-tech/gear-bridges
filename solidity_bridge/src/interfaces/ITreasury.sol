@@ -1,10 +1,10 @@
 pragma solidity ^0.8.24;
 
-    struct WithdrawMessage {
-        address receiver;
-        address token;
-        uint128 amount;
-    }
+struct WithdrawMessage {
+    address receiver;
+    address token;
+    uint128 amount;
+}
 
 interface ITreasury {
     error AlreadyInitialized();

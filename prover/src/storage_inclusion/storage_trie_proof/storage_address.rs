@@ -1,4 +1,4 @@
-//! ### Contains target definition that represents address in substrate storage.
+//! ### Target definition that represents address in substrate storage.
 
 use plonky2::{
     iop::{

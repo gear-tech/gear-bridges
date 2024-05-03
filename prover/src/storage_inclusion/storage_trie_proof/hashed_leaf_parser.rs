@@ -1,4 +1,4 @@
-//! Contains circuit definition that's used to prove correct parsing of leaf node.
+//! Circuit that's used to prove correct parsing of leaf node.
 
 use plonky2::{
     iop::witness::PartialWitness,
@@ -19,7 +19,9 @@ use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorag
 impl_parsable_target_set! {
     /// Public inputs for `HashedLeafParser`.
     pub struct HashedLeafParserTarget {
+        /// Blake2 hash of encoded node data.
         pub node_hash: Blake2Target,
+        /// Blake2 hash of data present in storage.
         pub storage_data_hash: Blake2Target,
 
         /// Address composed from all the nodes from root to this.

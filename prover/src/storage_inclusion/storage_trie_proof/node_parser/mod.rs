@@ -1,4 +1,4 @@
-//! ### Contains definitions of circuits used to parse branch and leaf trie nodes.
+//! ### Circuits that're used to parse branch and leaf trie nodes.
 
 use itertools::Itertools;
 use plonky2::{

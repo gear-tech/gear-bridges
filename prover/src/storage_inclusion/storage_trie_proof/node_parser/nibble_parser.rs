@@ -1,4 +1,4 @@
-//! ### Contains circuit definition that's used to parse nibble array from encoded node.
+//! ### Circuit that's used to parse nibble array from encoded node.
 
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use std::iter;

@@ -1,4 +1,4 @@
-//! ### Contains circuit that's used to prove validator set change.
+//! ### Circuit that's used to prove authority set change.
 
 use plonky2::{
     iop::{
@@ -44,17 +44,24 @@ impl ValidatorSetStorageItemTarget {
 }
 
 impl_target_set! {
-    /// `NextValidatorSet` public inputs.
+    /// `NextValidatorSet` public inputs. Don't contain `next_authority_set_id` because it's implied
+    /// that authority set id increments each time it changes.
     pub struct NextValidatorSetTarget {
+        /// Current validator set hash.
         pub current_validator_set_hash: Blake2TargetGoldilocks,
+        /// Current authority set id.
         pub current_authority_set_id: Target,
+        /// Next validator set hash.
         pub next_validator_set: Blake2TargetGoldilocks,
     }
 }
 
 pub struct NextValidatorSet {
+    /// Proof of finality of the block where storage contains next validator set in storage.
     pub current_epoch_block_finality: BlockFinality,
+    /// Proof of inclusion of queued validator set into storage.
     pub next_validator_set_inclusion_proof: StorageInclusion,
+    /// Queued keys storage data.
     pub next_validator_set_storage_data: Vec<u8>,
 }
 

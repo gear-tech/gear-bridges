@@ -27,6 +27,7 @@ use plonky2::{iop::target::BoolTarget, plonk::circuit_data::CircuitData};
 use crate::common::CircuitDataCache;
 
 impl_target_set! {
+    /// Public inputs for `SingleValidatorSign`.
     pub struct PublicInputsTarget {
         /// GRANDPA message.
         pub message: GrandpaVoteTarget,
@@ -36,8 +37,11 @@ impl_target_set! {
 }
 
 pub struct SingleValidatorSign {
+    /// Public key of validator that've signed the message.
     pub public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    /// Signature of validator that've signed the message.
     pub signature: [u8; consts::ED25519_SIGNATURE_SIZE],
+    /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 

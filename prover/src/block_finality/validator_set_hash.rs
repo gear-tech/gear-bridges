@@ -24,14 +24,19 @@ use crate::{
 use self::consts::BLAKE2_DIGEST_SIZE;
 
 impl_target_set! {
+    /// Public inputs for `ValidatorSetHash`.
     pub struct ValidatorSetHashTarget {
+        /// Blake2 hash of validator set.
         pub hash: Blake2Target,
+        /// Validator set. It's padded to allow for generic validator set length to be processed.
         pub validator_set: PaddedValidatorSetTarget,
+        /// Actual length of validator set.
         pub validator_set_length: Target
     }
 }
 
 pub struct ValidatorSetHash {
+    /// All the validators participating in GRANDPA voting.
     pub validator_set: Vec<[u8; ED25519_PUBLIC_KEY_SIZE]>,
 }
 

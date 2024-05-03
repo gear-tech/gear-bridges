@@ -1,4 +1,4 @@
-//! ### Contains definitions for `Target`.
+//! ### Contains extensions for `Target`.
 
 use super::*;
 

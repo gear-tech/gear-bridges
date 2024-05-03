@@ -57,8 +57,11 @@ impl_target_set! {
 }
 
 pub struct ValidatorSignsChain {
+    /// `ValidatorSetHash` proof builder.
     pub validator_set_hash: ValidatorSetHash,
+    /// All the pre-commits that're planned to process(that is, prove that they're all signed message).
     pub pre_commits: Vec<ProcessedPreCommit>,
+    /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 

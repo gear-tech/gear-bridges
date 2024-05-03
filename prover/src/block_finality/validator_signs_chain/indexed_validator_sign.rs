@@ -37,9 +37,13 @@ impl_target_set! {
 }
 
 pub struct IndexedValidatorSign {
+    /// Public key corresponding to validator at specified index.
     pub public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    /// Index of validator that've signed the message.
     pub index: usize,
+    /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
+    /// Signature corresponding to validator at specified index.
     pub signature: [u8; consts::ED25519_SIGNATURE_SIZE],
 }
 

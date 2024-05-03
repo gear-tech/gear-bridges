@@ -1,4 +1,4 @@
-//! ### Contains definition of circuit used to parse encoded leaf node.
+//! ### Circuit that's used to parse encoded leaf node.
 
 use plonky2::{
     iop::{
@@ -40,7 +40,9 @@ mod inlined_data_parser;
 impl_parsable_target_set! {
     /// `LeafParser` public inputs.
     pub struct LeafParserTarget {
+        /// Encoded node data, padded to max leaf node encoded length.
         pub padded_node_data: LeafNodeDataPaddedTarget,
+        /// Actual encoded data length.
         pub node_data_length: Target,
         /// Expected blake2b hash of data stored in this leaf.
         pub storage_data_hash: Blake2Target,

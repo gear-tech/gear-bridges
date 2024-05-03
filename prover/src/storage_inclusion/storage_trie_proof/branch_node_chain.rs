@@ -1,5 +1,4 @@
-//! Contains circuit definition that's used to prove correct parsing of all the branch nodes
-//! from root to leaf.
+//! Circuit that's used to prove correct parsing of all the branch nodes from root to leaf.
 
 use plonky2::{
     iop::{
@@ -41,6 +40,7 @@ impl_parsable_target_set! {
     pub struct BranchNodeChainParserTarget {
         /// Storage root.
         pub root_hash: Blake2Target,
+        /// Blake2 hash of encoded leaf data.
         pub leaf_hash: Blake2Target,
         /// Result of composition of all addresses from root node to the last branch node.
         pub partial_address: PartialStorageAddressTarget,

@@ -1,4 +1,4 @@
-//! ### Contains definition of circuit that's used to extract data from block header.
+//! ### Circuit that's used to extract data from block header.
 //!
 //! Extracts state root from encoded block header and asserts that block hash equals to claimed.
 
@@ -31,6 +31,7 @@ const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
 impl_parsable_target_set! {
     /// Public inputs for `BlockHeaderParser` circuit.
     pub struct BlockHeaderParserTarget {
+        /// Block hash.
         pub block_hash: Blake2Target,
         /// Storage trie root.
         pub state_root: Blake2Target,
@@ -38,6 +39,7 @@ impl_parsable_target_set! {
 }
 
 pub struct BlockHeaderParser {
+    /// Encoded block header data.
     pub header_data: Vec<u8>,
 }
 

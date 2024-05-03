@@ -1,4 +1,4 @@
-//! Contains circuit definition that's used to prove correct parsing of branch node.
+//! Circuit that's used to prove correct parsing of branch node.
 
 use plonky2::{
     iop::witness::PartialWitness,
@@ -19,8 +19,11 @@ use super::{
 };
 
 impl_parsable_target_set! {
+    /// Public inputs for `HashedBranchParser`.
     pub struct HashedBranchParserTarget {
+        /// Blake2 hash of encoded node data.
         pub node_hash: Blake2Target,
+        /// Blake2 hash of the children node.
         pub child_node_hash: Blake2Target,
 
         /// Address composed from all the nodes from root to this.

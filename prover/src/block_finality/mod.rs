@@ -49,17 +49,24 @@ impl_target_set! {
 impl_parsable_target_set! {
     /// Target that reflects the way GRANDPA vote is implemented in substrate.
     pub struct GrandpaVoteTarget {
+        /// Discriminant determining sub-round of voting. 1 here stands for pre-commit.
         pub discriminant: BitArrayTarget<8>,
+        /// Block hash that's being finalized.
         pub block_hash: Blake2Target,
+        /// Block number that's being finalized.
         pub block_number: BitArrayTarget<32>,
         _round_number: BitArrayTarget<64>,
+        /// Current GRANDPA authority set id.
         pub authority_set_id: BitArrayTarget<64>,
     }
 }
 
+/// Pre-commit data that's used to prove validator signs.
 #[derive(Clone)]
 pub struct PreCommit {
+    /// Public key of validator this pre-commit belongs to.
     pub public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    /// Signature casted by validator this pre-commit belongs to.
     pub signature: [u8; consts::ED25519_SIGNATURE_SIZE],
 }
 

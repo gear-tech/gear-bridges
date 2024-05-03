@@ -1,4 +1,4 @@
-//! ### Contains definition of circuit that's used to prove inclusion of some data into block storage.
+//! ### Circuit that's used to prove inclusion of some data into block storage.
 //!
 //! Currently it supports only `StorageValue` (not `StorageMap` and `StorageDoubleMap`) entries into
 //! storage. Also trie node containing value must be either `Leaf` or `HashedValueLeaf`
@@ -34,6 +34,7 @@ use self::{block_header_parser::BlockHeaderParser, storage_trie_proof::StorageTr
 impl_parsable_target_set! {
     /// Public inputs for `StorageInclusion` proof.
     pub struct StorageInclusionTarget {
+        /// Block hash where storage gets read.
         pub block_hash: Blake2Target,
         /// Blake2 hash of data included into storage. We don't use original data here as it'll
         /// potentially have generic length.

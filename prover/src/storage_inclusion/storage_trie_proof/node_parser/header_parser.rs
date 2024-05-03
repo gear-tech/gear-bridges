@@ -1,4 +1,4 @@
-//! ### Contains circuit definition that's used to parse prefix from encoded node.
+//! ### Circuit that's used to parse prefix from encoded node.
 //!
 //! Prefix contains node type(`BranchWithoutValue`, `HashedValueLeaf`, e.t.c.) and nibble count.
 //! Prefix can be 1, 2 or more bytes long. 1 and 2 byte long prefixes support encoding nibble count

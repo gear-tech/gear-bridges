@@ -2,6 +2,7 @@
 
 use super::*;
 
+/// Represents 8-bit value.
 #[derive(Clone, Copy, Debug)]
 pub struct ByteTarget(Target);
 

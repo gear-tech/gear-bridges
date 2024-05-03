@@ -1,4 +1,4 @@
-//! ### Contains circuit that's used to compute blake2 hash.
+//! ### Contains circuit that's used to compute blake2 hash of generic-length data.
 
 use lazy_static::lazy_static;
 use plonky2::{
@@ -44,8 +44,8 @@ impl_parsable_target_set! {
     }
 }
 
-/// Unlike `VariativeBlake2`, this circuit will have constant `VerifierOnlyCircuitData` across all
-/// the valid inputs.
+// Unlike `VariativeBlake2`, this circuit will have constant `VerifierOnlyCircuitData` across all
+// the valid inputs.
 pub struct GenericBlake2 {
     /// Data to be hashed.
     pub data: Vec<u8>,

@@ -223,6 +223,7 @@ pub trait BuilderExt {
     /// Select if `condition` { `a` } else { `b` }
     fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T;
 
+    /// XOR two `BoolTarget`s together.
     fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget;
 }
 

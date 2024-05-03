@@ -1,4 +1,4 @@
-//! ### Contains circuit definitions that're used to parse SCALE-encoded compact integers.
+//! ### Circuits that're used to parse SCALE-encoded compact integers.
 //!
 //! There're 2 circuits present: `single_byte` and `full`.
 //!
@@ -24,12 +24,14 @@ pub mod single_byte {
 
     impl_target_set! {
         pub struct InputTarget {
+            /// First byte of parsed integer.
             pub first_byte: ByteTarget
         }
     }
 
     impl_target_set! {
         pub struct OutputTarget {
+            /// Decoded integer.
             pub decoded: Target
         }
     }
@@ -101,12 +103,14 @@ pub mod full {
 
     impl_target_set! {
         pub struct InputTarget {
+            /// First 4 bytes of parsed integer, padded if there're less than 4.
             pub padded_bytes: ArrayTarget<ByteTarget, 4>
         }
     }
 
     impl_target_set! {
         pub struct OutputTarget {
+            /// Decoded integer.
             pub decoded: Target,
             /// Length of encoded integer in bytes.
             pub length: Target

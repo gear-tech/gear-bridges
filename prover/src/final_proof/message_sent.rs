@@ -1,4 +1,4 @@
-//! ### Contains circuit definition that's used to prove that message was sent.
+//! ### Circuit that's used to prove that message was queued for relaying.
 
 use plonky2::{
     iop::{
@@ -26,9 +26,13 @@ use crate::{
 impl_target_set! {
     /// Public inputs for `MessageSent`.
     pub struct MessageSentTarget {
+        /// Blake2 hash of concatenated validator public inputs.
         pub validator_set_hash: Blake2TargetGoldilocks,
+        /// Actual GRANDPA authority set id.
         pub authority_set_id: Target,
+        /// Block number where message was sent.
         pub block_number: Target,
+        /// Contents of the message that gets relayed.
         pub message_contents: MessageTargetGoldilocks,
     }
 }
@@ -56,8 +60,11 @@ impl MessageInStorageTarget {
 }
 
 pub struct MessageSent {
+    /// Proof that block where message is present in storage is finalized.
     pub block_finality: BlockFinality,
+    /// Proof that message is present in the storage.
     pub inclusion_proof: StorageInclusion,
+    /// Original data stored in substrate storage.
     pub message_storage_data: Vec<u8>,
 }
 

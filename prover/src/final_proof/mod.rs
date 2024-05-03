@@ -1,4 +1,4 @@
-//! ### Contains circuit definition used to ceate proof that will be submitted to ethereum.
+//! ### Circuit that's used to ceate proof that will be submitted to ethereum.
 
 use plonky2::{
     iop::{
@@ -40,8 +40,9 @@ impl_target_set! {
 pub struct FinalProof {
     /// Verifier data that will be the same for all the `LatestValidatorSet` proofs.
     pub current_validator_set_verifier_data: VerifierCircuitData<F, C, D>,
+    /// Proof of `LatestValidatorSet` circuit.
     pub current_validator_set_proof: ProofWithPublicInputs<F, C, D>,
-
+    /// Proof that message was queued for relaying.
     pub message_sent: MessageSent,
 }
 

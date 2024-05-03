@@ -1,5 +1,8 @@
+//! ### `HalfByteTarget` implementation.
+
 use super::*;
 
+/// Represents 4-bit value.
 #[derive(Clone, Copy, Debug)]
 pub struct HalfByteTarget(Target);
 
@@ -30,20 +33,24 @@ impl ParsableTargetSet for HalfByteTarget {
 }
 
 impl HalfByteTarget {
+    /// Create constant `HalfByteTarget`.
     pub fn constant(value: u8, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
         assert!(value < 16);
         Self(builder.constant(F::from_canonical_u8(value)))
     }
 
+    /// Create `HalfByteTarget` from `Target` and perform range check on it.
     pub fn from_target_safe(target: Target, builder: &mut CircuitBuilder<F, D>) -> HalfByteTarget {
         builder.range_check(target, 4);
         Self(target)
     }
 
+    /// Create `HalfByteTarget` from `Target` without performing range check on it.
     pub fn from_target_unsafe(target: Target) -> HalfByteTarget {
         Self(target)
     }
 
+    /// Convert `HalfByteTarget` to `Target`,
     pub fn to_target(self) -> Target {
         self.0
     }

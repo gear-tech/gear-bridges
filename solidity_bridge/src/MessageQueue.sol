@@ -76,7 +76,7 @@ contract MessageQueue is IMessageQueue, AccessControl {
 
         _processed_messages[msg_hash] = true;
 
-        if (!IMessageQueueReceiver(message.eth_address).processVaraMessage(message)) {
+        if (!IMessageQueueReceiver(message.receiver).processVaraMessage(message)) {
             revert MessageNotProcessed();
         } else {
             emit MessageProcessed(block_number, msg_hash);

@@ -89,8 +89,8 @@ contract TreasuryTest is Test {
         vm.expectRevert();
 
         VaraMessage memory vara_msg = VaraMessage({
-            vara_address: VARA_ADDRESS_7,
-            eth_address: address(treasury),
+            sender: VARA_ADDRESS_7,
+            receiver: address(treasury),
             nonce: 10,
             data: call_data
         });

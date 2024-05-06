@@ -2,8 +2,8 @@ pragma solidity ^0.8.24;
 
 
 struct VaraMessage {
-    bytes32 vara_address;
-    address eth_address;
+    bytes32 sender;
+    address receiver;
     uint256 nonce;
     bytes data;
 }
@@ -31,7 +31,7 @@ interface IMessageQueueReceiver {
 
 library Hasher {
     function hash(VaraMessage calldata message) external pure returns (bytes32) {
-        bytes memory data = abi.encodePacked(message.vara_address, message.eth_address, message.nonce, message.data);
+        bytes memory data = abi.encodePacked(message.sender, message.receiver, message.nonce, message.data);
         return keccak256(data);
     }
 }

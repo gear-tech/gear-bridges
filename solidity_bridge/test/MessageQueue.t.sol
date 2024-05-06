@@ -139,13 +139,13 @@ contract MessageQueueTest is Test {
         bytes memory payload = abi.encodePacked(m);
 
         VaraMessage memory content_message = VaraMessage({
-            vara_address: VARA_ADDRESS_3,
-            eth_address: ETH_ADDRESS_3,
+            sender: VARA_ADDRESS_3,
+            receiver: ETH_ADDRESS_3,
             nonce: 3,
             data: payload
         });
 
-        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
+        bytes memory ms = abi.encodePacked(content_message.sender, content_message.receiver, content_message.nonce, content_message.data);
 
 
         bytes32 expectedMessageHash = keccak256(ms);
@@ -226,14 +226,14 @@ contract MessageQueueTest is Test {
 
 
         VaraMessage memory content_message = VaraMessage({
-            vara_address: VARA_ADDRESS_7,
-            eth_address: ETH_ADDRESS_5,
+            sender: VARA_ADDRESS_7,
+            receiver: ETH_ADDRESS_5,
             nonce: 10,
             data: payload
         });
 
 
-        bytes memory ms = abi.encodePacked(content_message.vara_address, content_message.eth_address, content_message.nonce, content_message.data);
+        bytes memory ms = abi.encodePacked(content_message.sender, content_message.receiver, content_message.nonce, content_message.data);
 
         bytes32 expectedMessageHash = keccak256(ms);
         
@@ -258,8 +258,8 @@ contract MessageQueueTest is Test {
 
 
         VaraMessage memory vara_message = VaraMessage({
-            vara_address: VARA_ADDRESS_7,
-            eth_address: address(treasury),
+            sender: VARA_ADDRESS_7,
+            receiver: address(treasury),
             nonce: 10,
             data: withdraw_msg.pack()
         });

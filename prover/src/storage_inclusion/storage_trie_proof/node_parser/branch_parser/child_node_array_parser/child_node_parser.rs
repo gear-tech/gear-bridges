@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse a single child node from encoded branch node.
+
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -28,23 +30,30 @@ use crate::{
 };
 
 impl_parsable_target_set! {
+    /// Public inputs for `ChildNodeParser`.
     pub struct ChildNodeParserTarget {
+        /// Encoded node data, padded to a max branch node encoded length.
         pub node_data: BranchNodeDataPaddedTarget,
-
+        /// Offset to read child info from `node_data`.
         pub read_offset: Target,
+        /// Offset of the subsequent node data.
         pub resulting_read_offset: Target,
-
+        /// Whether hash was asserted.
         pub assert_child_hash: BoolTarget,
+        /// Hash to compare with when `assert_child_hash` is set to true.
         pub claimed_child_hash: Blake2Target,
     }
 }
 
 pub struct ChildNodeParser {
+    /// Padded SCALE encoded node data.
     pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
-
+    /// Offset to read child info from `node_data`.
     pub read_offset: usize,
-
+    // TODO: Replace following 2 fields with one `Option`
+    /// Whether to assert hash of this child node.
     pub assert_child_hash: bool,
+    /// Hash to compare with in case `assert_child_hash` is set to `true`.
     pub claimed_child_hash: [bool; BLAKE2_DIGEST_SIZE_IN_BITS],
 }
 

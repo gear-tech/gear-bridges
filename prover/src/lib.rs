@@ -72,6 +72,7 @@ pub mod proving {
 
     use self::consts::BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS;
 
+    /// Represents proof along with public inputs. Can be verified using `CircuitData`.
     #[derive(Clone)]
     pub struct Proof(pub Vec<u8>);
 
@@ -97,6 +98,7 @@ pub mod proving {
         }
     }
 
+    /// Represents circuit data that's sufficient to verify a `Proof`.
     #[derive(Clone)]
     pub struct CircuitData(pub Vec<u8>);
 
@@ -151,6 +153,7 @@ pub mod proving {
         }
     }
 
+    /// All the data that's exported to `gnark-wrapper` as `JSON` strings.
     #[derive(Clone, Serialize, Deserialize)]
     pub struct ExportedProofWithCircuitData {
         pub proof_with_public_inputs: String,
@@ -158,12 +161,24 @@ pub mod proving {
         pub verifier_only_circuit_data: String,
     }
 
+    /// Genesis config of a bridge. Note that any change in genesis config renders all the subsequent
+    /// proofs invalid(they will NOT get verified on ethereum) as circuit digest will change.
     #[derive(Clone, Copy)]
     pub struct GenesisConfig {
         pub validator_set_id: u64,
         pub validator_set_hash: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
     }
 
+    /// Prove very first transition from genesis authority set to the subsequent.
+    /// # Arguments
+    ///
+    /// * `current_epoch_block_finality` - Finality proof of some block present in the last epoch of
+    ///     the first bridge era. The first bridge era is defined in `genesis_config`
+    /// * `genesis_config` - Defines starting point for all the bridge operation.
+    /// * `next_validator_set_inclusion_proof` - Proof of inclusion of next authority set into
+    ///     storage of the block that proven final by `current_epoch_block_finality`.
+    /// * `next_validator_set_data` - Hash of next validator set(as it's stored in the
+    ///     `pallet_gear_bridge` storage).
     pub fn prove_genesis(
         current_epoch_block_finality: BlockFinality,
         genesis_config: GenesisConfig,
@@ -184,6 +199,18 @@ pub mod proving {
         ProofWithCircuitData::from_plonky2_repr(&proof)
     }
 
+    /// Add one more layer to the proof of authority set changes.
+    ///
+    /// # Arguments
+    ///
+    /// * `previous_proof` - Proof that we previously composed. Proves transition of authority set
+    ///     from genesis to current.
+    /// * `current_epoch_block_finality` - Finality proof of some block present in the last epoch of
+    ///     the current era.
+    /// * `next_validator_set_inclusion_proof` - Proof of inclusion of next authority set into
+    ///     storage of block that's proven final by `current_epoch_block_finality`.
+    /// * `next_validator_set_data` - Hash of next validator set(as it's stored in the
+    ///     `pallet_gear_bridge` storage).
     pub fn prove_validator_set_change(
         previous_proof: ProofWithCircuitData,
         current_epoch_block_finality: BlockFinality,
@@ -207,6 +234,21 @@ pub mod proving {
         ProofWithCircuitData::from_plonky2_repr(&proof)
     }
 
+    /// Add one layer on top of authority set change proof chain that will prove that merkle trie
+    /// root of queued messages is present in storage of some finalized block.
+    ///
+    /// # Arguments
+    ///
+    /// * `previous_proof` - Proof that proves transition of authority set from genesis to current.
+    ///     It can be obtained by calling `prove_genesis` once and then `prove_validator_set_change`
+    ///     `N` times where `N` means number of eras passes from bridge genesis to the current era.
+    /// * `block_finality_proof` - Finality proof of block that contain merkle trie root(in the
+    ///     storage of `pallet-gear-bridge`) that we want to relay.
+    /// * `genesis_config` - `GenesisConfig` that was used in the `prove_genesis` call.
+    /// * `message_inclusion_proof` - Proof of inclusion of merkle trie root of queued messages into
+    ///     storage of `pallet-gear-bridge`.
+    /// * `message_contents` - Root of merkle trie root as it's stored in `pallet-gear-bridge`
+    ///     storage.
     pub fn prove_message_sent(
         previous_proof: ProofWithCircuitData,
         block_finality_proof: BlockFinality,

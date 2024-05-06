@@ -1,3 +1,5 @@
+//! ### Circuit that's used to prove correct transition from genesis to current validator set.
+
 use itertools::Itertools;
 use plonky2::{
     field::types::Field,
@@ -27,23 +29,33 @@ pub mod next_validator_set;
 
 use next_validator_set::NextValidatorSet;
 
+// Depends on the `CircuitConfig` used to generate this proof.
+// `CircuitConfig::dtandard_recurion_config()` sets 16 merkle cap elements.
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_target_set! {
+    /// Public inputs for `LatestValidatorSet`.
     pub struct LatestValidatorSetTarget {
+        /// Genesis authority set id.
         pub genesis_set_id: Target,
+        /// Genesis validator set hash.
         pub genesis_hash: Blake2TargetGoldilocks,
+        /// Current authority set id.
         pub current_set_id: Target,
+        /// Current validator set hash.
         pub current_hash: Blake2TargetGoldilocks,
 
+        /// Common verifier data for all the `LatestValidatorSet` proofs.
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
     }
 }
 
 pub struct LatestValidatorSet {
+    /// Proof of transition from `current_set_id - 1` to `current_set_id`.
     pub change_proof: NextValidatorSet,
 }
 
+/// Intermediate data that's used in the process of building circuit.
 struct Circuit {
     cyclic_circuit_data: CircuitData<F, C, D>,
 
@@ -56,7 +68,7 @@ struct Circuit {
 }
 
 impl Circuit {
-    pub fn prove_genesis(
+    fn prove_genesis(
         mut self,
         config: GenesisConfig,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
@@ -80,7 +92,7 @@ impl Circuit {
         ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 
-    pub fn prove_recursive(
+    fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
@@ -93,6 +105,7 @@ impl Circuit {
 }
 
 impl LatestValidatorSet {
+    /// Create very first proof.
     pub fn prove_genesis(
         self,
         config: GenesisConfig,
@@ -101,6 +114,7 @@ impl LatestValidatorSet {
         circuit.prove_genesis(config)
     }
 
+    /// Add one more layer to laready existing proof.
     pub fn prove_recursive(
         self,
         composed_proof: ProofWithPublicInputs<F, C, D>,

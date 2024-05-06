@@ -1,3 +1,5 @@
+//! ### Contains newtypes that structurize target arrays.
+
 use itertools::Itertools;
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
@@ -25,10 +27,17 @@ pub use half_byte::*;
 pub use target::*;
 pub use verifier_data::*;
 
+/// Common trait that all the target array wrappers implement.
 pub trait TargetSet: Clone + Debug {
+    /// Parse `TargetSet` from iterator over raw targets. This function will read as much elements
+    /// from an iterator as it requires. If amount of targets is insufficient it will panic.
     fn parse(raw: &mut impl Iterator<Item = Target>) -> Self;
+
+    /// Erase structure of current `TargetSet` and return iterator over raw targets.
     fn into_targets_iter(self) -> impl Iterator<Item = Target>;
 
+    /// Parse `TargetSet` from iterator over raw targets, checking that provided iterator contains
+    /// exact amount of targets.
     fn parse_exact(raw: &mut impl Iterator<Item = Target>) -> Self {
         let out = Self::parse(raw);
         assert_eq!(
@@ -40,6 +49,7 @@ pub trait TargetSet: Clone + Debug {
         out
     }
 
+    /// Create constraint that will force two `TargetSet`s to be equal.
     fn connect(&self, other: &Self, builder: &mut CircuitBuilder<F, D>) {
         self.clone()
             .into_targets_iter()
@@ -47,6 +57,8 @@ pub trait TargetSet: Clone + Debug {
             .for_each(|(t_0, t_1)| builder.connect(t_0, t_1));
     }
 
+    /// Register all the underlying targets as public inputs in order defined by
+    /// `TargetSet::into_targets_iter`.
     fn register_as_public_inputs(&self, builder: &mut CircuitBuilder<F, D>) {
         self.clone()
             .into_targets_iter()
@@ -54,11 +66,18 @@ pub trait TargetSet: Clone + Debug {
     }
 }
 
+/// Extension for `TargetSet` that allows to parse public input values structure defined as
+/// `PublicInputsData`.
 pub trait ParsableTargetSet: TargetSet {
     type PublicInputsData;
 
+    /// Parse public input values into `PublicInputsData`. This function will read as much public
+    /// input values as it needs. In case of insufficient amount of public inputs it will panic.
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData;
 
+    /// Parse public input values into `PublicInputsData`. This function will assert that amount of
+    /// items in iterator is the same as required to fill `PublicInputsData`. If this don't hold,
+    /// this function will panic.
     fn parse_public_inputs_exact(
         public_inputs: &mut impl Iterator<Item = F>,
     ) -> Self::PublicInputsData {
@@ -99,17 +118,28 @@ impl ParsableTargetSet for HashOutTarget {
 pub(crate) use crate::impl_parsable_target_set;
 pub(crate) use crate::impl_target_set;
 
+/// Implement `TargetSet` for structure. Order in which targets will be parsed and converted back
+/// into iterator over `Target`s is guaranteed to be the same as order that fields are defined in
+/// provided structure definition.
 #[macro_export]
 macro_rules! impl_target_set {
     (
+        $(#[$($struct_attributes:tt)*])*
         $vis:vis struct $struct_name:ident {
-            $($field_vis:vis $field_name:ident: $field_type:ty),*
+            $(
+                $(#[$($attributes:tt)*])*
+                $field_vis:vis $field_name:ident: $field_type:ty
+            ),*
             $(,)?
         }
     ) => {
         #[derive(Clone, Debug)]
+        $(#[$($struct_attributes)*])*
         $vis struct $struct_name {
-            $($field_vis $field_name: $field_type),*
+            $(
+                $(#[$($attributes)*])*
+                $field_vis $field_name: $field_type
+            ),*
         }
 
         impl $crate::common::targets::TargetSet for $struct_name {
@@ -127,17 +157,29 @@ macro_rules! impl_target_set {
     }
 }
 
+/// Implement `TargetSet` and `ParsableTargetSet` for structure. Order in which targets/public
+/// input values will be parsed and converted back into iterator over `Target`s/`GoldilocksField`
+/// elements is guaranteed to be the same as order that fields are defined in provided structure
+/// definition.
 #[macro_export]
 macro_rules! impl_parsable_target_set {
     (
+        $(#[$($struct_attributes:tt)*])*
         $vis:vis struct $struct_name:ident {
-            $($field_vis:vis $field_name:ident: $field_type:ty),*
+            $(
+                $(#[$($field_attributes:tt)*])*
+                $field_vis:vis $field_name:ident: $field_type:ty
+            ),*
             $(,)?
         }
     ) => {
         $crate::common::targets::impl_target_set! {
+            $(#[$($struct_attributes)*])*
             $vis struct $struct_name {
-                $($field_vis $field_name: $field_type),*
+                $(
+                    $(#[$($field_attributes)*])*
+                    $field_vis $field_name: $field_type
+                ),*
             }
         }
 
@@ -161,30 +203,10 @@ macro_rules! impl_parsable_target_set {
     }
 }
 
-impl<const N: usize> ArrayTarget<BoolTarget, N> {
-    fn compress_to_goldilocks<const PACK_BY: usize, const PACKED_SIZE: usize>(
-        &self,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> [Target; PACKED_SIZE] {
-        assert!(PACK_BY <= 64);
-        assert_eq!(PACK_BY * PACKED_SIZE, N);
-
-        self.0
-            .chunks(PACK_BY)
-            .map(|bits| {
-                let bits: [BoolTarget; PACK_BY] =
-                    bits.try_into().expect("Chunks to be of correct length");
-                Target::from_bool_targets_le::<PACK_BY>(ArrayTarget(bits), builder)
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("Correct amount of elements in ArrayTarget")
-    }
-}
-
 pub(crate) use crate::impl_array_target_wrapper;
 pub(crate) use crate::impl_parsable_array_target_wrapper;
 
+/// Implement newtype wrapper over `ArrayTarget`.
 #[macro_export]
 macro_rules! impl_array_target_wrapper {
     ($name:ident, $target_ty:ty, $len:ident) => {
@@ -211,6 +233,7 @@ macro_rules! impl_array_target_wrapper {
     };
 }
 
+/// Implement newtype wrapper over `ArrayTarget` and auto-implement `ParsableTargetSet` for it.
 #[macro_export]
 macro_rules! impl_parsable_array_target_wrapper {
     ($name:ident, $target_ty:ty, $len:ident) => {
@@ -240,17 +263,20 @@ impl_array_target_wrapper!(
 impl_parsable_array_target_wrapper!(Blake2Target, BoolTarget, BLAKE2_DIGEST_SIZE_IN_BITS);
 
 impl Blake2Target {
+    /// Add virtual `Blake2Target` without inserting assertions that underlying targets are binary.
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
         let mut targets = (0..BLAKE2_DIGEST_SIZE_IN_BITS).map(|_| builder.add_virtual_target());
         Blake2Target::parse_exact(&mut targets)
     }
 
+    /// Add virtual `Blake2Target` and insert assertions that each underlying bit is, in fact, binary.
     pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
         let mut targets =
             (0..BLAKE2_DIGEST_SIZE_IN_BITS).map(|_| builder.add_virtual_bool_target_safe().target);
         Blake2Target::parse_exact(&mut targets)
     }
 
+    /// Set witness for `Blake2Target`,
     pub fn set_witness(
         &self,
         data: &[bool; BLAKE2_DIGEST_SIZE_IN_BITS],
@@ -263,6 +289,9 @@ impl Blake2Target {
             .for_each(|(target, value)| witness.set_bool_target(*target, *value));
     }
 
+    /// Check if two `Blake2Target`s are equal. Unlike `connect` this check doesn't add constraint
+    /// on each pair of corresponding bits, so it's correct situation to have outcome of this
+    /// comparison `false`.
     pub fn check_equal(
         &self,
         other: &Blake2Target,
@@ -329,6 +358,8 @@ static_assertions::const_assert_eq!(
 );
 
 impl MessageTargetGoldilocks {
+    /// Pack 256 bits of message into by grouops of 32 to get 8 `Targets`. That will be the
+    /// representation of message in compact form.
     pub fn from_bit_array(
         bits: BitArrayTarget<MESSAGE_SIZE_IN_BITS>,
         builder: &mut CircuitBuilder<F, D>,

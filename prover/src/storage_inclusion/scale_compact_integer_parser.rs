@@ -1,3 +1,12 @@
+//! ### Circuits that're used to parse SCALE-encoded compact integers.
+//!
+//! There're 2 circuits present: `single_byte` and `full`.
+//!
+//! - `single_byte` allows to parse only integers encoded in so-called single-byte mode, having values
+//! in range (0..=63).
+//! - `full` allows to parse integers encoded in single-, two- and four-byte modes, having values in
+//! range (0..=2^30 - 1).
+
 use crate::{
     common::{
         targets::{impl_target_set, ArrayTarget, ByteTarget},
@@ -15,12 +24,14 @@ pub mod single_byte {
 
     impl_target_set! {
         pub struct InputTarget {
+            /// First byte of parsed integer.
             pub first_byte: ByteTarget
         }
     }
 
     impl_target_set! {
         pub struct OutputTarget {
+            /// Decoded integer.
             pub decoded: Target
         }
     }
@@ -31,8 +42,7 @@ pub mod single_byte {
         builder.assert_zero(bits.0[0].target);
         builder.assert_zero(bits.0[1].target);
 
-        let shift = builder.constant(F::from_canonical_u8(4));
-        let decoded = builder.div(input.first_byte.to_target(), shift);
+        let decoded = builder.le_sum(bits.0[2..8].into_iter());
 
         OutputTarget { decoded }
     }
@@ -93,13 +103,16 @@ pub mod full {
 
     impl_target_set! {
         pub struct InputTarget {
+            /// First 4 bytes of parsed integer, padded if there're less than 4.
             pub padded_bytes: ArrayTarget<ByteTarget, 4>
         }
     }
 
     impl_target_set! {
         pub struct OutputTarget {
+            /// Decoded integer.
             pub decoded: Target,
+            /// Length of encoded integer in bytes.
             pub length: Target
         }
     }

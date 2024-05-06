@@ -1,3 +1,5 @@
+//! ### `VerifierDataTarget` implementation.
+
 use super::*;
 
 #[derive(Clone, Debug)]

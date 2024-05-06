@@ -1,3 +1,5 @@
+//! ### Circuits that're used to parse branch and leaf trie nodes.
+
 use itertools::Itertools;
 use plonky2::{
     iop::{
@@ -21,11 +23,21 @@ use crate::{
 };
 
 pub mod branch_parser;
+// TODO: Rename to `prefix_parser`.
 mod header_parser;
 pub mod leaf_parser;
 mod nibble_parser;
 
+// TODO: Compute these 2 constans based on existing ones?
+/// Aligned with blake2 block size to optimize generic hasher circuit.
 pub const NODE_DATA_BLOCK_BYTES: usize = 128;
+// TODO: Assert that child node data length <= 32 in `branch_node_parser``
+/// Branch node contains of prefix(1 byte), partial address(up to 32 bytes, as we assume in
+/// `storage_address::MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES`), bitmap(2 bytes) and encoded child
+/// nodes. There can be up to 16 child nodes and each node is up to 33 bytes(1 byte for data length
+/// and 32 bytes is the max data length)
+///
+/// Which gives upper bound for branch node encoded data length = 563.
 pub const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
@@ -45,6 +57,7 @@ impl ParsableTargetSet for NodeDataBlockTarget {
 
 impl NodeDataBlockTarget {
     #[cfg(test)]
+    /// Create constant `NodeDataBlockTarget`
     pub fn constant(
         data: &[u8; NODE_DATA_BLOCK_BYTES],
         builder: &mut CircuitBuilder<F, D>,
@@ -55,11 +68,13 @@ impl NodeDataBlockTarget {
         Self::parse_exact(&mut data_targets)
     }
 
+    /// Add virtual `NodeDataBlockTarget` without adding range checks on `ByteTarget`s contained inside.
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
         let mut targets = (0..NODE_DATA_BLOCK_BYTES).map(|_| builder.add_virtual_target());
         Self::parse_exact(&mut targets)
     }
 
+    /// Add virtual `NodeDataBlockTarget` adding range checks for all the underlying `ByteTarget`s.
     pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Self {
         let mut targets = (0..NODE_DATA_BLOCK_BYTES).map(|_| {
             let target = builder.add_virtual_target();
@@ -68,6 +83,7 @@ impl NodeDataBlockTarget {
         Self::parse_exact(&mut targets)
     }
 
+    /// Set witness for `NodeDataBlockTarget`.
     pub fn set_witness(&self, data: &[u8; NODE_DATA_BLOCK_BYTES], witness: &mut PartialWitness<F>) {
         self.0
              .0
@@ -79,6 +95,11 @@ impl NodeDataBlockTarget {
     }
 }
 
+/// Leaf node data consists of: prefix(1 byte), partial address(up to 32 bytes), data length(1 byte,
+/// which is guaranteed by `LeafParser`) and data itself (32 bytes, as guaranteed by `LeafParser`).
+///
+/// Which gives upper bound for leaf data length = 66 bytes. So a single block will be enough to
+/// represent encoded leaf data.
 type LeafNodeDataPaddedTarget = NodeDataBlockTarget;
 
 impl_array_target_wrapper!(
@@ -97,10 +118,13 @@ impl ParsableTargetSet for BranchNodeDataPaddedTarget {
 }
 
 impl BranchNodeDataPaddedTarget {
+    /// Create `BranchNodeDataPaddedTarget` without inserting range checks on underlying
+    /// `ByteTarget`s.
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
         Self::add_virtual(builder, NodeDataBlockTarget::add_virtual_unsafe)
     }
 
+    /// Create `BranchNodeDataPaddedTarget` inserting range checks for underlying `ByteTarget`s.
     pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Self {
         Self::add_virtual(builder, NodeDataBlockTarget::add_virtual_safe)
     }
@@ -113,6 +137,8 @@ impl BranchNodeDataPaddedTarget {
         Self(ArrayTarget(targets))
     }
 
+    // TODO REFACTOR: Implement set_witness for all `ParsableTargetSet`s?
+    /// Set `BranchNodeDataPaddedTarget` witness.
     pub fn set_witness(
         &self,
         data: &[[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
@@ -125,6 +151,8 @@ impl BranchNodeDataPaddedTarget {
             .for_each(|(target, data)| target.set_witness(data, witness));
     }
 
+    /// Read array of constant size starting from specified index. This function checks that `at`
+    /// have valid value.
     pub fn random_read_array<const L: usize>(
         &self,
         at: Target,
@@ -143,6 +171,7 @@ impl BranchNodeDataPaddedTarget {
         ArrayTarget(targets)
     }
 
+    /// Read a byte from `self` at specified index. This function checks range of `at`.
     pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> ByteTarget {
         let block_size = builder.constant(F::from_canonical_usize(NODE_DATA_BLOCK_BYTES));
         let max_data_size = builder.constant(F::from_canonical_usize(
@@ -190,6 +219,7 @@ impl BranchNodeDataPaddedTarget {
     }
 }
 
+/// Pads `Vec<u8>` with zeroes to fit the desired size.
 pub fn compose_padded_node_data(
     node_data: Vec<u8>,
 ) -> [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] {

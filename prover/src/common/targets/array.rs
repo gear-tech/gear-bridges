@@ -1,3 +1,5 @@
+//! ### `ArrayTarget` implementation.
+
 use super::*;
 
 #[derive(Clone, Debug, Copy)]
@@ -18,10 +20,12 @@ impl<T: TargetSet, const N: usize> TargetSet for ArrayTarget<T, N> {
 }
 
 impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
+    /// Read a single element at constant index.
     pub fn constant_read(&self, at: usize) -> T {
         self.0[at].clone()
     }
 
+    /// Read a constant-sized array starting from constant index.
     pub fn constant_read_array<const R: usize>(&self, at: usize) -> ArrayTarget<T, R> {
         ArrayTarget(
             (0..R)
@@ -32,6 +36,7 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         )
     }
 
+    /// Read a singe element at variable index. This function range-checks value of `at`.
     pub fn random_read(&self, at: Target, builder: &mut CircuitBuilder<F, D>) -> T {
         let max_idx = builder.constant(F::from_canonical_usize(N - 1));
         let max_idx_sub_at = builder.sub(max_idx, at);
@@ -65,6 +70,8 @@ impl<T: TargetSet, const N: usize> ArrayTarget<T, N> {
         T::parse_exact(&mut result_targets.into_iter())
     }
 
+    /// Read a constant sized array starting from variable index. This function range-checks value
+    /// of `at`.
     pub fn random_read_array<const R: usize>(
         &self,
         at: Target,
@@ -93,5 +100,26 @@ where
 
     fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
         [(); N].map(|_| T::parse_public_inputs(public_inputs))
+    }
+}
+
+impl<const N: usize> BitArrayTarget<N> {
+    pub fn compress_to_goldilocks<const PACK_BY: usize, const PACKED_SIZE: usize>(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> [Target; PACKED_SIZE] {
+        assert!(PACK_BY <= 64);
+        assert_eq!(PACK_BY * PACKED_SIZE, N);
+
+        self.0
+            .chunks(PACK_BY)
+            .map(|bits| {
+                let bits: [BoolTarget; PACK_BY] =
+                    bits.try_into().expect("Chunks to be of correct length");
+                Target::from_bool_targets_le::<PACK_BY>(ArrayTarget(bits), builder)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Correct amount of elements in ArrayTarget")
     }
 }

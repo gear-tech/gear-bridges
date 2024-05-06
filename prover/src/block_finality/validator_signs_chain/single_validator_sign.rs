@@ -1,3 +1,8 @@
+//! ### Circuit that's used to prove that a single validator have signed GRANDPA message.
+//!
+//! Proving this circuit is the most time-consuming proof among all the others, so the circuit
+//! is built only on first call to `prove` and taken from cache on the next calls.
+
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -22,15 +27,21 @@ use plonky2::{iop::target::BoolTarget, plonk::circuit_data::CircuitData};
 use crate::common::CircuitDataCache;
 
 impl_target_set! {
+    /// Public inputs for `SingleValidatorSign`.
     pub struct PublicInputsTarget {
+        /// GRANDPA message.
         pub message: GrandpaVoteTarget,
+        /// Validator public key.
         pub public_key: Ed25519PublicKeyTarget,
     }
 }
 
 pub struct SingleValidatorSign {
+    /// Public key of validator that've signed the message.
     pub public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    /// Signature of validator that've signed the message.
     pub signature: [u8; consts::ED25519_SIGNATURE_SIZE],
+    /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 

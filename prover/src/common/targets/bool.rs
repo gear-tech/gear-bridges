@@ -1,3 +1,5 @@
+//! ### `BoolTarget` implementation.
+
 use super::*;
 
 impl TargetSet for BoolTarget {

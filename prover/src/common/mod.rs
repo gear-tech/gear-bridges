@@ -1,3 +1,5 @@
+//! ### Commonly used abstractions and wrappers.
+
 use itertools::Itertools;
 use plonky2::{
     gates::noop::NoopGate,
@@ -28,6 +30,7 @@ use targets::TargetSet;
 
 use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
 
+/// Type-safe wrapper around `ProofWithPublicInputs` and `VerifierCircuitData`.
 #[derive(Clone)]
 pub struct ProofWithCircuitData<TS>
 where
@@ -44,6 +47,7 @@ impl<TS> ProofWithCircuitData<TS>
 where
     TS: TargetSet,
 {
+    /// Build a circuit and run prove on it.
     pub fn prove_from_builder(
         builder: CircuitBuilder<F, D>,
         witness: PartialWitness<F>,
@@ -62,6 +66,7 @@ where
         }
     }
 
+    /// Prove using circuit data and witness.
     pub fn prove_from_circuit_data(
         circuit_data: &CircuitData<F, C, D>,
         witness: PartialWitness<F>,
@@ -79,6 +84,7 @@ where
         }
     }
 
+    /// Create a new `ProofWithCircuitData` from proof and circuit data.
     pub fn from_proof_and_circuit_data(
         proof: ProofWithPublicInputs<F, C, D>,
         circuit_data: VerifierCircuitData<F, C, D>,
@@ -96,14 +102,17 @@ where
         }
     }
 
+    /// Get circuit data.
     pub fn circuit_data(&self) -> &VerifierCircuitData<F, C, D> {
         &self.circuit_data
     }
 
+    /// Get type-erased public inouts.
     pub fn public_inputs(&self) -> Vec<GoldilocksField> {
         self.public_inputs.clone()
     }
 
+    /// Get `ProofWithPublicInputs`.
     pub fn proof(&self) -> ProofWithPublicInputs<F, C, D> {
         ProofWithPublicInputs {
             proof: self.proof.clone(),
@@ -111,6 +120,7 @@ where
         }
     }
 
+    /// Wrap proof in a recursion layer using `PoseidonBN128GoldilocksConfig` and serialize it.
     pub fn export_wrapped(self) -> ExportedProofWithCircuitData {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
@@ -127,6 +137,7 @@ where
         }
     }
 
+    /// Verify proof.
     #[cfg(test)]
     pub fn verify(&self) -> bool {
         self.circuit_data
@@ -202,6 +213,7 @@ fn wrap_bn128(
 }
 
 pub trait BuilderExt {
+    /// Declare verifier data as a constant and recursively verify provided proof.
     fn recursively_verify_constant_proof<T: TargetSet>(
         &mut self,
         proof: &ProofWithCircuitData<T>,
@@ -211,6 +223,7 @@ pub trait BuilderExt {
     /// Select if `condition` { `a` } else { `b` }
     fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T;
 
+    /// XOR two `BoolTarget`s together.
     fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget;
 }
 
@@ -243,8 +256,8 @@ impl BuilderExt for CircuitBuilder<F, D> {
         T::parse_exact(&mut result)
     }
 
-    // !(!a & !b) & !(a & b)
     fn xor(&mut self, a: BoolTarget, b: BoolTarget) -> BoolTarget {
+        // !(!a & !b) & !(a & b)
         let not_a = self.not(a);
         let not_b = self.not(b);
 
@@ -256,6 +269,7 @@ impl BuilderExt for CircuitBuilder<F, D> {
     }
 }
 
+/// Compute `CommonCircuitData` to use in cyclic recursion.
 pub fn common_data_for_recursion(
     config: CircuitConfig,
     public_input_count: usize,
@@ -288,10 +302,12 @@ pub fn common_data_for_recursion(
     data
 }
 
+/// Perform conversion from byte array to bits, placing most significant bit of each byte first.
 pub fn array_to_bits(data: &[u8]) -> Vec<bool> {
     data.iter().copied().flat_map(byte_to_bits).collect()
 }
 
+/// Perform conversion from byte to bits, placing most significant bit first.
 pub fn byte_to_bits(byte: u8) -> [bool; 8] {
     (0..8)
         .rev()
@@ -301,6 +317,7 @@ pub fn byte_to_bits(byte: u8) -> [bool; 8] {
         .expect("8 bits in byte")
 }
 
+/// Pad `Vec<u8>` with zeroes to fit in desired length.
 pub fn pad_byte_vec<const L: usize>(mut data: Vec<u8>) -> [u8; L] {
     assert!(data.len() <= L);
 

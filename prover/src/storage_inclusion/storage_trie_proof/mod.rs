@@ -1,3 +1,5 @@
+//! ### Circuit that's used to prove inclusion of storage item into storage trie.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -24,15 +26,21 @@ pub mod storage_address;
 use branch_node_chain::BranchNodeChain;
 
 impl_target_set! {
+    /// Public inputs for `StorageTrieProof`.
     pub struct StorageTrieProofTarget {
+        /// State root hash.
         pub root_hash: Blake2Target,
+        /// Blake2 hash of data present in storage.
         pub data_hash: Blake2Target,
+        /// Address by which storage gets read.
         pub address: PartialStorageAddressTarget
     }
 }
 
 pub struct StorageTrieProof {
+    /// Encoded branch nodes, arranged from root to leaf.
     pub branch_nodes: Vec<BranchNodeData>,
+    /// Encoded leaf node.
     pub leaf_node_data: Vec<u8>,
 }
 

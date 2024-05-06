@@ -1,3 +1,7 @@
+//! ### Circuit that's used to extract data from block header.
+//!
+//! Extracts state root from encoded block header and asserts that block hash equals to claimed.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -25,13 +29,17 @@ const BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER: usize = 32;
 const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
 
 impl_parsable_target_set! {
+    /// Public inputs for `BlockHeaderParser` circuit.
     pub struct BlockHeaderParserTarget {
+        /// Block hash.
         pub block_hash: Blake2Target,
+        /// Storage trie root.
         pub state_root: Blake2Target,
     }
 }
 
 pub struct BlockHeaderParser {
+    /// Encoded block header data.
     pub header_data: Vec<u8>,
 }
 
@@ -48,10 +56,11 @@ impl BlockHeaderParser {
 
         let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
 
-        // Will have all neccesary padding as block number isn't last field in header.
+        // Will not exceed the length as block number isn't last field in header.
         let block_number_targets = hasher_target
             .data
             .constant_read_array(BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER);
+        // Parse block number just to get encoded length and compute offset of state root later.
         let parsed_block_number = define_full_int_parser(
             FullIntParserInput {
                 padded_bytes: block_number_targets,

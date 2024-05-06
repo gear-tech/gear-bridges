@@ -1,3 +1,11 @@
+//! ### Circuit that's used to prove that some block was finalized.
+//!
+//! In order to keep `VerifierOnlyCircuitData` constant this circuit exposes blake2b hash of
+//! concatenated validator set keys instead of validator set itself.
+//!
+//! NOTE: This circuit decides that block is finalized when more than 2/3 of validator set have
+//! signed it.
+
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -22,8 +30,11 @@ use validator_set_hash::ValidatorSetHash;
 use validator_signs_chain::ValidatorSignsChain;
 
 impl_target_set! {
+    /// Public inputs for `BlockFinality`.
     pub struct BlockFinalityTarget {
+        /// Blake2 hash of concatenated validator public keys.
         pub validator_set_hash: Blake2Target,
+        /// GRANDPA message.
         pub message: GrandpaVoteTarget,
     }
 }
@@ -34,19 +45,28 @@ impl_target_set! {
 // - block number                           (4 bytes)
 // - round number                           (8 bytes)
 // - authority set id                       (8 bytes)
+// TODO: Rename to GrandpaMessageTarget
 impl_parsable_target_set! {
+    /// Target that reflects the way GRANDPA vote is implemented in substrate.
     pub struct GrandpaVoteTarget {
+        /// Discriminant determining sub-round of voting. 1 here stands for pre-commit.
         pub discriminant: BitArrayTarget<8>,
+        /// Block hash that's being finalized.
         pub block_hash: Blake2Target,
+        /// Block number that's being finalized.
         pub block_number: BitArrayTarget<32>,
-        _aux_data_2: BitArrayTarget<64>,
+        _round_number: BitArrayTarget<64>,
+        /// Current GRANDPA authority set id.
         pub authority_set_id: BitArrayTarget<64>,
     }
 }
 
+/// Pre-commit data that's used to prove validator signs.
 #[derive(Clone)]
 pub struct PreCommit {
+    /// Public key of validator this pre-commit belongs to.
     pub public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    /// Signature casted by validator this pre-commit belongs to.
     pub signature: [u8; consts::ED25519_SIGNATURE_SIZE],
 }
 
@@ -59,8 +79,13 @@ struct ProcessedPreCommit {
 
 #[derive(Clone)]
 pub struct BlockFinality {
+    /// Actual validator set for current authority set id.
     pub validator_set: Vec<[u8; consts::ED25519_PUBLIC_KEY_SIZE]>,
+    /// Pre-commits casted from GRANDPA voters. To successfully prove block finalization there
+    /// should be at least > 2/3 signatures of entire validator set. These pre-commits can be
+    /// gathered using grandpa_proveFinality RPC call.
     pub pre_commits: Vec<PreCommit>,
+    /// Message that GRANDPA voters sign.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 

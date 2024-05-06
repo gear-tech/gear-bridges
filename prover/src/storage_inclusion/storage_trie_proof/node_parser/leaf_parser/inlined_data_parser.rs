@@ -1,3 +1,7 @@
+//! ### Circuit that's used to parse storage data from `Leaf` node.
+//!
+//! Currently supports only leafs with 32 bytes of inlined data.
+
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
@@ -16,19 +20,23 @@ const INLINED_DATA_LENGTH: usize = 32;
 
 impl_target_set! {
     pub struct InlindedDataParserInputTarget {
+        // TODO: replace to `LeafNodeData`
+        /// Node encoded data.
         pub first_node_data_block: NodeDataBlockTarget,
+        /// From which offset to read stored data.
         pub read_offset: Target,
     }
 }
 
 impl_target_set! {
     pub struct InlinedDataParserOutputTarget {
+        /// Offset of remaining node data.
         pub resulting_offset: Target,
+        /// Blake2 hash of stored data.
         pub data_hash: Blake2Target
     }
 }
 
-/// Supports only 32-byte inlined values for now.
 pub fn define(
     input: InlindedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,

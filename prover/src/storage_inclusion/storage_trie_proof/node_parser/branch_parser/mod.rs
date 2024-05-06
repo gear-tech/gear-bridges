@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse encoded branch node.
+
 use parity_scale_codec::Encode;
 use plonky2::{
     iop::{
@@ -38,21 +40,31 @@ mod bitmap_parser;
 mod child_node_array_parser;
 
 impl_parsable_target_set! {
+    /// `BranchParser` public inputs.
     pub struct BranchParserTarget {
+        /// Encoded node data, padded to a max branch node encoded length.
         pub padded_node_data: BranchNodeDataPaddedTarget,
+        /// Actual length of encoded data.
         pub node_data_length: Target,
-
+        /// Hash of next node when we move from root to leaf.
         pub child_node_hash: Blake2Target,
-
+        /// Address that was previously composed from all the partial addresses found in nodes from
+        /// the root to the current node.
         pub partial_address: PartialStorageAddressTarget,
+        /// `partial_address` with current node nibbles amd child nibble appended.
         pub resulting_partial_address: PartialStorageAddressTarget,
     }
 }
 
 pub struct BranchParser {
+    /// Encoded branch node data.
     pub node_data: Vec<u8>,
-
+    /// Next trie node when we move from the root to a leaf. Note that it's represented as u8, but
+    /// valid values are only 0..=15.
     pub claimed_child_node_nibble: u8,
+    /// Address that was previously composed from all the partial addresses found in nodes from
+    /// the root to the current node. Note that it's a `Vec` of nibbles, so each element must have
+    /// values in range 0..=15.
     pub partial_address_nibbles: Vec<u8>,
 }
 

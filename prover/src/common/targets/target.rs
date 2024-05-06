@@ -1,3 +1,5 @@
+//! ### Contains extensions for `Target`.
+
 use super::*;
 
 impl TargetSet for Target {
@@ -22,6 +24,9 @@ impl ParsableTargetSet for Target {
 }
 
 pub trait TargetBitOperations {
+    /// Compute little-endian sum of provided bits.
+    ///
+    /// Note: If 64 bits are provided result may overflow. This case is not processed.
     fn from_bool_targets_le<const B: usize>(
         bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
@@ -32,7 +37,7 @@ pub trait TargetBitOperations {
         let mut bits = bits.0.chunks(8).rev().flatten().rev().collect::<Vec<_>>();
 
         if B == 64 {
-            let most_significant_bit = bits.pop().expect("Non-empty bits").target;
+            let most_significant_bit = bits.pop().expect("bits mustn't be empty").target;
             let partial_sum = builder.le_sum(bits.into_iter());
             let most_significant_exp = builder.constant(F::from_canonical_u64(1 << (B - 1)));
             builder.mul_add(most_significant_exp, most_significant_bit, partial_sum)
@@ -41,6 +46,9 @@ pub trait TargetBitOperations {
         }
     }
 
+    /// Compute little-endian sum of provided bits.
+    ///
+    /// Note: Result may overflow. This case is not processed.
     fn from_u64_bits_le_lossy(
         bits: ArrayTarget<BoolTarget, 64>,
         builder: &mut CircuitBuilder<F, D>,

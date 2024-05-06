@@ -1,3 +1,5 @@
+//! ### Circuit that's used to ceate proof that will be submitted to ethereum.
+
 use plonky2::{
     iop::{
         target::Target,
@@ -26,16 +28,21 @@ pub mod message_sent;
 use message_sent::MessageSent;
 
 impl_target_set! {
+    /// Public inputs for `FinalProof`.
     pub struct FinalProofTarget {
+        /// Merkle trie root of queued messages.
         message_contents: MessageTargetGoldilocks,
+        /// Block which contains merkle trie root of queued messages.
         block_number: Target
     }
 }
 
 pub struct FinalProof {
+    /// Verifier data that will be the same for all the `LatestValidatorSet` proofs.
     pub current_validator_set_verifier_data: VerifierCircuitData<F, C, D>,
+    /// Proof of `LatestValidatorSet` circuit.
     pub current_validator_set_proof: ProofWithPublicInputs<F, C, D>,
-
+    /// Proof that message was queued for relaying.
     pub message_sent: MessageSent,
 }
 

@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse children nodes from encoded branch node.
+
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -32,26 +34,42 @@ use std::iter;
 mod child_node_parser;
 
 impl_parsable_target_set! {
+    /// Public inputs for `ChildNodeArrayParser`.
     pub struct ChildNodeArrayParserTarget {
+        /// Encoded node data, padded to a max branch node encoded length.
         pub node_data: BranchNodeDataPaddedTarget,
+        /// Offset to read children info from `node_data`.
         pub initial_read_offset: Target,
+        /// Should point to the end of a data, as children are located at the end of encoded branch
+        /// node.
         pub final_read_offset: Target,
+        /// Overall amount of non-empty children nodes.
         pub overall_children_amount: Target,
+        /// Index of a child that we claim will be next in our trie traversal. Note that it's not a
+        /// nibble, but basically index in the array of nodes that we read from encoded data.
         pub claimed_child_index_in_array: Target,
+        /// Hash of a child that we claim will be next in our trie traversal.
         pub claimed_child_hash: Blake2Target,
     }
 }
 
 #[derive(Clone)]
 pub struct InitialData {
+    /// Padded SCALE encoded node data.
     pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
+    /// Offset to read children info from `node_data`.
     pub read_offset: usize,
+    /// Index of a child that we claim will be next in our trie traversal. Note that it's not a
+    /// nibble, but basically index in the array of nodes that we read from encoded data.
     pub claimed_child_index_in_array: usize,
+    /// Hash of a child that we claim will be next in our trie traversal.
     pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
 }
 
 pub struct ChildNodeArrayParser {
+    /// Initial data for recursive circuit.
     pub initial_data: InitialData,
+    /// Lengths of encoded children nodes.
     pub children_lengths: Vec<usize>,
 }
 

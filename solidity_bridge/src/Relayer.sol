@@ -1,12 +1,12 @@
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {IProver} from "./interfaces/IProver.sol";
+import {IVerifier} from "./interfaces/IVerifier.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 import {Constants} from "./libraries/Constants.sol";
 
 contract Relayer is IRelayer {
-    IProver private _prover;
+    IVerifier private _verifier;
     mapping(uint256 => bytes32) private _block_numbers;
     mapping(bytes32 => uint256) private _merkle_roots;
 
@@ -20,8 +20,8 @@ contract Relayer is IRelayer {
      * @param prover - address of `Verifier` contract
      */
     function initialize(address prover) external {
-        if (address(_prover) != address(0)) revert AlreadyInitialized();
-        _prover = IProver(prover);
+        if (address(_verifier) != address(0)) revert AlreadyInitialized();
+        _verifier = IVerifier(prover);
     }
 
     /**  @dev Verifies and stores a `merkle_root` for specified `block_number`. Calls `verifyProof`
@@ -40,7 +40,7 @@ contract Relayer is IRelayer {
             block_number,
             merkle_root
         );
-        if (!_prover.verifyProof(proof, public_inputs)) {
+        if (!_verifier.verifyProof(proof, public_inputs)) {
             revert InvalidProof();
         }
 

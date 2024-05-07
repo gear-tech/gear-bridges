@@ -1,14 +1,14 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Prover} from "../src/Prover.sol";
+import {Verifier} from "../src/Verifier.sol";
 
 contract ProoverTest is Test {
 
-    Prover public prover;
+    Verifier public verifier;
 
     function setUp() public {
-        prover = new Prover();        
+        verifier = new Verifier();        
     }
 
     function test_block_proof() public {
@@ -18,7 +18,7 @@ contract ProoverTest is Test {
         public_inputs[0] = 3980403427572212499963242599334442163722879490045996792884;
         public_inputs[1] = 1166562204472425303272494454897619262805894610326304849920;
 
-        assertEq(prover.verifyProof(proof, public_inputs), true);       
+        assertEq(verifier.verifyProof(proof, public_inputs), true);       
     }
 }
 

@@ -1,9 +1,9 @@
 pragma solidity ^0.8.24;
 
 struct VaraMessage {
+    uint256 nonce;
     bytes32 sender;
     address receiver;
-    uint256 nonce;
     bytes data;
 }
 
@@ -49,9 +49,9 @@ library Hasher {
         VaraMessage calldata message
     ) external pure returns (bytes32) {
         bytes memory data = abi.encodePacked(
+            message.nonce,
             message.sender,
             message.receiver,
-            message.nonce,
             message.data
         );
         return keccak256(data);

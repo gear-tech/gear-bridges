@@ -5,7 +5,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 
 import {Test, console} from "forge-std/Test.sol";
-import {Prover} from "../src/Prover.sol";
+import {Verifier} from "../src/Verifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 
 import {Treasury} from "../src/Treasury.sol";
@@ -19,7 +19,7 @@ import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 contract TreasuryTest is Test {
     Relayer public relayer;
-    Prover public prover;
+    Verifier public verifier;
     Treasury public treasury;
     MessageQueue public message_queue;
     using Address for address;
@@ -31,12 +31,12 @@ contract TreasuryTest is Test {
 
 
     function setUp() public {
-        Prover _prover = new Prover();
+        Verifier _verifier = new Verifier();
         Relayer _relayer = new Relayer();
         Treasury _treasury = new Treasury();
         MessageQueue _message_queue = new MessageQueue();
 
-        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_prover)));
+        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_verifier)));
 
         ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address)", address(_relayer_proxy)));
         ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)));
@@ -44,7 +44,7 @@ contract TreasuryTest is Test {
         relayer = Relayer(address(_relayer_proxy));
         treasury = Treasury(address(_treasury_proxy));
         message_queue = MessageQueue(address(_message_queue_proxy));
-        prover = Prover(address(_prover));
+        verifier = Verifier(address(_verifier));
 
         erc20_token = new ERC20Mock("wVARA");
     }

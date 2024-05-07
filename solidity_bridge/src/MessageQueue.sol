@@ -4,7 +4,6 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
-import {IProver} from "./interfaces/IProver.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 
 import {Constants} from "./libraries/Constants.sol";

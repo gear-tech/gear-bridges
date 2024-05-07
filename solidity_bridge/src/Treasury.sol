@@ -14,7 +14,7 @@ import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IM
 contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
 
-    bytes32 private constant VARA_TRUSTED_ADDRESS =
+    bytes32 private constant GRC_20_GATEWAY_ADDRESS =
         bytes32(
             0x0707070707070707070707070707070707070707070707070707070707070707
         );
@@ -63,7 +63,7 @@ contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
         if (vara_msg.receiver != address(this)) {
             revert BadEthAddress();
         }
-        if (vara_msg.sender != VARA_TRUSTED_ADDRESS) {
+        if (vara_msg.sender != GRC_20_GATEWAY_ADDRESS) {
             revert BadVaraAddress();
         }
 

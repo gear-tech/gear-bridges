@@ -11,7 +11,6 @@ import {Constants} from "./libraries/Constants.sol";
 import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 
-
 contract MessageQueue is IMessageQueue, AccessControl {
     using Address for address;
     using Hasher for VaraMessage;
@@ -20,9 +19,11 @@ contract MessageQueue is IMessageQueue, AccessControl {
     mapping(bytes32 => bool) private _processed_messages;
 
     /**
-    * @dev Initialize MessageQueue instance with relayer address. Should be called through Proxy contract immediately after deployment.
-    * @param relayer - address of Relayer
-    */
+     * @dev Initialize MessageQueue instance with relayer address. Should be called through Proxy
+     * contract immediately after deployment.
+     *
+     * @param relayer - Address of `Relayer`.
+     */
     function initialize(address relayer) public {
         if (address(_relayer) != address(0)) revert AlreadyInitialized();
         _relayer = IRelayer(relayer);
@@ -30,57 +31,75 @@ contract MessageQueue is IMessageQueue, AccessControl {
     }
 
     /**
-    * @dev Processes Vara message. Needs block number, message and  binary merkle tree proof as parameters.
-    * Checks if merkle tree is submitted to relayer, verifies proof, stores message hash.
-    * Calls processVaraMessage(message) at message.receiver
-    * Emits MessageProcessed event in case callback returns true, otherwise reverts.
-    *
-    * @param block_number - target block number
-    * @param block_number - total_leaves - number of leaves in binary merkle tree in target block
-    * @param block_number - leaf_index - index of verifying leaf
-    * @param message - VaraMessage - check documentation
-    * @param proof - binary merkle tree proof
-    */
-    function processMessage(uint256 block_number, uint256 total_leaves, uint256 leaf_index, VaraMessage calldata message, bytes32[] calldata proof) public {
+     * @dev Unpack message from merkle tree and relay it to the receiver.
+     *
+     * @param block_number - Block number of block containing target merkle tree.
+     * @param total_leaves - Number of leaves in target merkle tree.
+     * @param leaf_index - Index of leaf containing target message. See `binary_merkle_tree` for
+     *  reference.
+     * @param message - Target message.
+     * @param proof - Merkle proof of inclusion of leaf #`leaf_index` into target merkle tree that
+     *  was included into `block_number`.
+     */
+    function processMessage(
+        uint256 block_number,
+        uint256 total_leaves,
+        uint256 leaf_index,
+        VaraMessage calldata message,
+        bytes32[] calldata proof
+    ) public {
         bytes32 msg_hash = message.hash();
 
-        if (_processed_messages[msg_hash]) revert MessageAlreadyProcessed(msg_hash);
+        if (_processed_messages[msg_hash])
+            revert MessageAlreadyProcessed(msg_hash);
 
         bytes32 merkle_root = _relayer.getMerkleRoot(block_number);
 
         if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
-        if (_calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) != merkle_root) revert BadProof();
+        if (
+            _calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) !=
+            merkle_root
+        ) revert BadProof();
 
         _processed_messages[msg_hash] = true;
 
-        if (!IMessageQueueReceiver(message.receiver).processVaraMessage(message)) {
+        if (
+            !IMessageQueueReceiver(message.receiver).processVaraMessage(message)
+        ) {
             revert MessageNotProcessed();
         } else {
             emit MessageProcessed(block_number, msg_hash);
         }
-
     }
 
     /**
-    * @dev Calculated binary merkle tree root for a provided proof.
-    * @param proof - binary merkle tree proof
-    * @param leaf_hash - hash of data in verifying leaf
-    * @param total_leaves - number of leaves in binary merkle tree in target block
-    * @param leaf_index - index of verifying leaf
-    */
-    function calculateMerkleRoot(bytes32[] calldata proof, bytes32 leaf_hash, uint256 total_leaves, uint256 leaf_index) public pure returns (bytes32) {
+     * @dev Calculated merkle tree root for a provided merkle proof.
+     *
+     * @param proof - Merkle proof.
+     * @param leaf_hash - Hash of data stored in target leaf.
+     * @param total_leaves - Number of leaves in merkle tree.
+     * @param leaf_index - Index of target leaf.
+     */
+    function calculateMerkleRoot(
+        bytes32[] calldata proof,
+        bytes32 leaf_hash,
+        uint256 total_leaves,
+        uint256 leaf_index
+    ) public pure returns (bytes32) {
         return _calculateMerkleRoot(proof, leaf_hash, total_leaves, leaf_index);
     }
 
     /**
-    * @dev checks if VaraMessage is already processed
-    * @param message - VaraMessage - check documentation
-    */
-    function isProcessed(VaraMessage calldata message) external view returns (bool) {
+     * @dev Checks if `VaraMessage` already was processed.
+     *
+     * @param message - Message it checks agaiunst.
+     */
+    function isProcessed(
+        VaraMessage calldata message
+    ) external view returns (bool) {
         return _processed_messages[message.hash()];
     }
-
 
     function _calculateMerkleRoot(
         bytes32[] calldata proof,
@@ -113,5 +132,4 @@ contract MessageQueue is IMessageQueue, AccessControl {
 
         return hash;
     }
-
 }

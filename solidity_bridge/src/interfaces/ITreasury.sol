@@ -17,7 +17,10 @@ interface ITreasury {
 }
 
 library Packer {
-    function pack(WithdrawMessage calldata message) external pure returns (bytes memory) {
-        return abi.encodePacked(message.receiver, message.token, message.amount);
+    function pack(
+        WithdrawMessage calldata message
+    ) external pure returns (bytes memory) {
+        return
+            abi.encodePacked(message.receiver, message.token, message.amount);
     }
 }

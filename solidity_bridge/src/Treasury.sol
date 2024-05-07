@@ -11,41 +11,47 @@ import {ITreasury, WithdrawMessage} from "./interfaces/ITreasury.sol";
 import {Constants} from "./libraries/Constants.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 
-
 contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
 
-    bytes32 private constant VARA_TRUSTED_ADDRESS = bytes32(0x0707070707070707070707070707070707070707070707070707070707070707);
+    bytes32 private constant VARA_TRUSTED_ADDRESS =
+        bytes32(
+            0x0707070707070707070707070707070707070707070707070707070707070707
+        );
 
-
-    /** @dev initializes contract. Should be called through proxy immediately after deployment
-    *
-    * @param message_queue - address of message queue that is authorized to send messages
-    */
+    /** @dev Initialize contract. Should be called through proxy immediately after deployment
+     *
+     * @param message_queue - address of message queue that is authorized to send messages
+     */
     function initialize(address message_queue) public {
-        if (getRoleAdmin(Constants.MESSAGE_QUEUE_ROLE) != DEFAULT_ADMIN_ROLE) revert AlreadyInitialized();
+        if (getRoleAdmin(Constants.MESSAGE_QUEUE_ROLE) != DEFAULT_ADMIN_ROLE)
+            revert AlreadyInitialized();
         _setRoleAdmin(Constants.MESSAGE_QUEUE_ROLE, Constants.ADMIN_ROLE);
         _grantRole(Constants.MESSAGE_QUEUE_ROLE, message_queue);
     }
 
-
-    /** @dev deposit token to Treasury using transferFrom. Allowance needs to allow treasury contract transferring
-    * amount of tokens. Emits Deposit event.
-    *
-    * @param token token address to deposit
-    * @param amount quantity of deposited token
-    */
+    /** @dev Deposit token to `Treasury` using `safeTransferFrom`. Allowance needs to allow treasury
+     * contract transferring `amount` of tokens. Emits `Deposit` event.
+     *
+     * @param token token address to deposit
+     * @param amount quantity of deposited token
+     */
     function deposit(address token, uint256 amount) public {
         IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
         emit Deposit(_msgSender(), token, amount);
     }
 
-    /** @dev callback function receiving VaraMessage as a parameter. Validates sender and receiver and transfers Tokens
-    * to specified address. Emits Withdraw event.
-    *
-    * @param vara_msg VaraMessage received from MessageQueue. Please check original documentation for description.
-    */
-    function processVaraMessage(VaraMessage calldata vara_msg) onlyRole(Constants.MESSAGE_QUEUE_ROLE) external returns (bool){
+    /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only. Expected
+     * `payload` in `VaraMessage` consisits of these:
+     *  - `receiver` - account to withdraw tokens to
+     *  - `token` - token to withdraw
+     *  - `amount` - amount of tokens to withdraw
+     *
+     * @param vara_msg `VaraMessage` received from MessageQueue.
+     */
+    function processVaraMessage(
+        VaraMessage calldata vara_msg
+    ) external onlyRole(Constants.MESSAGE_QUEUE_ROLE) returns (bool) {
         uint160 receiver;
         uint160 token;
         uint256 amount;
@@ -69,6 +75,4 @@ contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
         emit Withdraw(address(token), address(receiver), amount);
         return true;
     }
-
-
 }

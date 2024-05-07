@@ -12,8 +12,13 @@ interface ITreasury {
     error BadEthAddress();
     error BadVaraAddress();
 
-    event Deposit(address indexed token, address indexed from, uint256 amount);
-    event Withdraw(address indexed token, address indexed to, uint256 amount);
+    event Deposit(
+        address indexed from,
+        bytes32 indexed to,
+        address indexed token,
+        uint256 amount
+    );
+    event Withdraw(address indexed to, address indexed token, uint256 amount);
 }
 
 library Packer {

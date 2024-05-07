@@ -35,10 +35,11 @@ contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
      *
      * @param token token address to deposit
      * @param amount quantity of deposited token
+     * @param to quantity of deposited token
      */
-    function deposit(address token, uint256 amount) public {
+    function deposit(address token, uint256 amount, bytes32 to) public {
         IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
-        emit Deposit(_msgSender(), token, amount);
+        emit Deposit(_msgSender(), to, token, amount);
     }
 
     /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only. Expected
@@ -72,7 +73,7 @@ contract Treasury is ITreasury, Context, AccessControl, IMessageQueueReceiver {
             amount := shr(128, calldataload(0xEC))
         }
         IERC20(address(token)).safeTransfer(address(receiver), amount);
-        emit Withdraw(address(token), address(receiver), amount);
+        emit Withdraw(address(receiver), address(token), amount);
         return true;
     }
 }

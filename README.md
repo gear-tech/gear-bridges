@@ -2,6 +2,29 @@
 
 Implementation of zk-based bridge to ethereum for gear-based blockchains.
 
+## High-level gear -> eth design
+
+Gear -> eth protocol allows relaying messages from gear-based blockchains to ethereum. Messages are
+some generic data defined by protocols built on top of bridge. Protocol doesn't guarantee order in which messages are relayed.
+
+This repository contains implementation of token bridging protocol built on top of more generic messaging protocol.
+
+![gear -> eth](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth.png)
+
+##### Components present in one-directional gear -> eth bridge:
+
+- `GRC-20` - program capable of transferring, burning and minting `GRC-20` tokens.
+- `GRC-20 gateway` - receive `GRC-20` tokens from users, burns them and emits message to `pallet-gear-bridge` built-in actor. This message contains information about which token is getting bridged, how much of it and receipient of funds on ethereum network.
+- `pallet-gear-bridges` built-in actor - entrypoint into generic bridging protocol. Receives messages from any actor on gear network and relays into `pallet-gear-bridge`.
+- `pallet-gear-bridge` - receives messages from `pallet-gear-bridges` built-in actor and stores them in the binary merkle trie. This merkle trie gets slashed at the end of each `era`.
+- `backend` - reads gear state, queues zk-proof generation and submits zk-proofs to ethereums.
+- `prover` - generally capable of creating 2 types of zk-proofs: proof of authority set changes and proof of inclusion of merkle trie root into the storage of `pallet-gear-bridge`. Combination of these  proofs allows for trustless relaying of merkle trie roots from `pallet-gear-brisge` storage to ethereum.
+- `relayer contract` - accept proofs of merkle trie root inclusion and if they're valid then stores merkle trie roots in the memory.
+- `gnark-verifier` - contract capable of verifying `plonk` proofs created by [gnark](https://github.com/Consensys/gnark). The submitted proofs are just [plonky2](https://github.com/0xPolygonZero/plonky2) proofs wrapped by `gnark`.
+- `message queue contract` - used to recover messages from merkle tries. User can request message to be relayed further onto ethereum by providing proof of inclusion of some message that's actually included into merkle trie and given that this merkle root was already relayed by `backend`(or some other party). Also it's an exit point of generic gear -> eth bridging protocol.
+- `ERC20 treasury` - treasury that accept user funds and release them. Release can only be triggered by message relayed over bridge which source is `GRC-20 gateway`.
+
+
 ## Circuits
 
 ### block finality

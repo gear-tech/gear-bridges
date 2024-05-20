@@ -9,9 +9,9 @@ some generic data defined by protocols built on top of bridge. Protocol doesn't 
 
 This repository contains implementation of token bridging protocol built on top of more generic messaging protocol.
 
-![gear -> eth](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth.png)
-
 ##### Components present in one-directional gear -> eth bridge:
+
+![gear -> eth](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth.png)
 
 - `GRC-20` - program capable of transferring, burning and minting `GRC-20` tokens.
 - `GRC-20 gateway` - receive `GRC-20` tokens from users, burns them and emits message to `pallet-gear-bridge` built-in actor. This message contains information about which token is getting bridged, how much of it and receipient of funds on ethereum network.
@@ -24,6 +24,18 @@ This repository contains implementation of token bridging protocol built on top 
 - `message queue contract` - used to recover messages from merkle tries. User can request message to be relayed further onto ethereum by providing proof of inclusion of some message that's actually included into merkle trie and given that this merkle root was already relayed by `backend`(or some other party). Also it's an exit point of generic gear -> eth bridging protocol.
 - `ERC20 treasury` - treasury that accept user funds and release them. Release can only be triggered by message relayed over bridge which source is `GRC-20 gateway`.
 
+##### Workflow of gear -> eth token transfer:
+
+![gear -> eth transfer](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth_transfer.png)
+
+- user submits message to `GRC-20 gateway` to initiate bridging.
+- `GRC20 gateway` burns `GRC-20` tokens and emits message to `pallet-gear-bridge` built-in actor.
+- `pallet-gear-bridge` built-in actor relays message to `pallet-gear-bridge`.
+- `pallet-gear-bridge` stores message in merkle trie.
+- eventually `backend`(or some other party) relays message to `relayer contract` and it gets stored there.
+- user see that his message was relayed and submits merkle proof of inclusion to `message queue contract`.
+- `message queue contract` reads merkle root from `relayer contract`, checks merkle proof and relays message to `ERC20 treasury`.
+- `ERC20 treasury` releases funds to user account on ethereum.
 
 ## Circuits
 

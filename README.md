@@ -37,42 +37,42 @@ This repository contains implementation of token bridging protocol built on top 
 - `message queue contract` reads merkle root from `relayer contract`, checks merkle proof and relays message to `ERC20 treasury`.
 - `ERC20 treasury` releases funds to user account on ethereum.
 
-## Circuits
+## Prover circuits
 
-### block finality
-Proves that some block was correctly finalized on the gear chain.
+### Block finality
+Proves that some block was finalized by some authority set on the gear chain.
 
 ![block finality circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/block_finality_circuit.png)
 
-### validator set change
-Used to compose `recent validator set` proof.
+### Validator set change
+Proves that validator set have changed.Validator set change means that current validator set finalized a block containing next validator set in its storage.
 
 ![validator set change circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/next_validator_set_circuit.png)
 
-### substrate storage trie circuit
+### Substrate storage trie circuits
 There are only two types of nodes currently supported for now:
 
-#### branch node without value
+#### Branch node without value
 ![branch node parser circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/mpt_branch_node_parser_circuit.png)
 
-#### hashed value leaf
+#### Hashed value leaf
 ![leaf node parser circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/mpt_leaf_node_parser_circuit.png)
 
-They're composed into storage proof, which prove that some block contains data in storage at particular address
+These proofs are composed into storage proof, which can prove that some block contains data in its storage at particular address:
 
 ![storage proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/storage_proof_circuit.png)
 
-### recent validator set
-Used to prove chain of validator set changes to prove transition from genesis to the recent validator set in one proof.
+### Recent validator set
+Used to prove chain of validator set changes to prove transition from genesis to the recent validator set in one proof. Genesis validator set is present as a constant in the circuit.
 
 ![recent validator set circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/recent_validator_set_circuit.png)
 
-### message sent
-Used to prove that specific message was submitted on gear chain for bridging.
+### Message inclusion
+Used to prove that specific message merkle root was submitted on gear chain for bridging, that is, included into `pallet-gear-bridge` storage.
 
 ![message sent circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/message_sent_circuit.png)
 
-### final proof
-Proof that's submitted to ethereum.
+### Final proof
+Proof that's submitted to ethereum. Proves that message merkle root was present in storage of `pallet-gear-bridge` at some finalized block.
 
 ![final proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/final_proof_circuit.png)

@@ -13,11 +13,11 @@ contract ProxyTest is Test {
     ProxyContract public treasury_proxy;
     ProxyContract public message_queue_proxy;
 
-    function setUp() public {
+    function setUp() public  {
         Treasury treasury = new Treasury();
         MessageQueue message_queue = new MessageQueue();
         message_queue_proxy = new ProxyContract( address(message_queue), bytes("") ); 
-        treasury_proxy = new ProxyContract(address(treasury), abi.encodeWithSignature("initialize(address)", address(message_queue_proxy)  ));
+        treasury_proxy = new ProxyContract(address(treasury), bytes("")  );
     }
 
 
@@ -29,9 +29,6 @@ contract ProxyTest is Test {
     function test_renewImplementation() public {
         Treasury new_treasury = new Treasury();
 
-        // from proxyAdmin with init
-        vm.expectRevert(ITreasury.AlreadyInitialized.selector);
-        treasury_proxy.upgradeToAndCall(address(new_treasury), abi.encodeWithSignature("initialize(address)", address(message_queue_proxy)));
 
         // from pranker
         vm.prank(address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34), address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34) );

@@ -7,7 +7,7 @@ struct WithdrawMessage {
 }
 
 interface ITreasury {
-    error AlreadyInitialized();
+    error NotAuthorized();
     error BadArguments();
     error BadEthAddress();
     error BadVaraAddress();

@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
-import {Constants} from "./libraries/Constants.sol";
+import  "./libraries/Environment.sol";
 
 contract Relayer is IRelayer {
     IVerifier private _verifier;
@@ -14,15 +14,6 @@ contract Relayer is IRelayer {
     uint256 private constant MASK_64BITS = (2 ** 64) - 1;
     uint256 private constant MASK_192BITS = (2 ** 192) - 1;
 
-    /**
-     * @dev Initialize relayer instance with verifier address
-     *
-     * @param prover - address of `Verifier` contract
-     */
-    function initialize(address prover) external {
-        if (address(_verifier) != address(0)) revert AlreadyInitialized();
-        _verifier = IVerifier(prover);
-    }
 
     /**  @dev Verifies and stores a `merkle_root` for specified `block_number`. Calls `verifyProof`
      * in `PlonkVerifier` and reverts if the proof or the public inputs are malformed.
@@ -40,7 +31,7 @@ contract Relayer is IRelayer {
             block_number,
             merkle_root
         );
-        if (!_verifier.verifyProof(proof, public_inputs)) {
+        if (!IVerifier(VERIFIER_ADDRESS).verifyProof(proof, public_inputs)) {
             revert InvalidProof();
         }
 
@@ -74,33 +65,6 @@ contract Relayer is IRelayer {
         bytes32 merkle_root
     ) external view returns (uint256) {
         return _merkle_roots[merkle_root];
-    }
-
-    /**
-     * @dev Calculates block number from provided public inputs
-     *
-     * @param public_inputs - proof's public inputs
-     * @return block_number returns block number
-     */
-    function getBlockNumberFromPublicInputs(
-        uint256[] calldata public_inputs
-    ) public pure returns (uint256 block_number) {
-        uint256 ret = uint256(public_inputs[1] >> 96) & MASK_32BITS;
-        return ret;
-    }
-
-    /**
-     * @dev Calculates merkle root from provided public inputs
-     *
-     * @param public_inputs - proof's public inputs
-     * @return merkle_root - merkle root of target block
-     */
-    function getMerkleRootFromPublicInputs(
-        uint256[] calldata public_inputs
-    ) public pure returns (bytes32 merkle_root) {
-        uint256 ret = ((public_inputs[0] & MASK_192BITS) << 64) |
-            ((public_inputs[1] >> 128) & MASK_64BITS);
-        return bytes32(ret);
     }
 
     /**

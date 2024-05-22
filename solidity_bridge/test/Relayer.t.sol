@@ -13,40 +13,20 @@ import {ITreasury} from "../src/interfaces/ITreasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
-import {Constants} from "../src/libraries/Constants.sol";
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
+import {TestHelper} from "./TestHelper.t.sol";
 
-contract TreasuryTest is Test {
-    Relayer public relayer;
-    Verifier public verifier;
-    Treasury public treasury;
-    MessageQueue public message_queue;
+
+contract RelayerTest is TestHelper {
     using Address for address;
-
-    ERC20Mock public erc20_token;
 
     uint256 private constant BLOCK_ID = 273;
     bytes32 private constant BLOCK_MERKLE_ROOT = bytes32(0xa25559d02a45bf58afd5344964269d38e947a432c1097c342f937a4ad052a683);
 
 
-    function setUp() public {
-        Verifier _verifier = new Verifier();
-        Relayer _relayer = new Relayer();
-        Treasury _treasury = new Treasury();
-        MessageQueue _message_queue = new MessageQueue();
-
-        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_verifier)));
-
-        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address)", address(_relayer_proxy)));
-        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)));
-
-        relayer = Relayer(address(_relayer_proxy));
-        treasury = Treasury(address(_treasury_proxy));
-        message_queue = MessageQueue(address(_message_queue_proxy));
-        verifier = Verifier(address(_verifier));
-
-        erc20_token = new ERC20Mock("wVARA");
+    function setUp() public override {
+        super.setUp();
     }
 
     function test_empty() public {
@@ -81,17 +61,5 @@ contract TreasuryTest is Test {
         relayer.submitMerkleRoot(BLOCK_ID, BLOCK_MERKLE_ROOT, proof);
     }
 
-    function test_merkle_root_from_public() public {
-        uint256[] memory public_inputs = new uint256[](2);
-        public_inputs[0] = 3980403427572212499963242599334442163722879490045996792884;
-        public_inputs[1] = 1166562204472425303272494454897619262805894610326304849920;
 
-        bytes32 merkle_root = relayer.getMerkleRootFromPublicInputs(public_inputs);
-        console.logBytes32(merkle_root);
-        assertEq(merkle_root, BLOCK_MERKLE_ROOT);
-
-        uint256 block_id = relayer.getBlockNumberFromPublicInputs(public_inputs);
-        console.log("Block:", block_id);
-        assertEq(block_id, BLOCK_ID);
-    }
 }

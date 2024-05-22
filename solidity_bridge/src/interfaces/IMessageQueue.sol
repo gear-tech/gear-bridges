@@ -9,7 +9,7 @@ struct VaraMessage {
 
 interface IMessageQueue {
     error AlreadyInitialized();
-    error MessageAlreadyProcessed(bytes32 messageHash);
+    error MessageAlreadyProcessed(uint256 messageNonce);
     error MessageNotProcessed();
     error MerkleRootNotSet(uint256 blockNumber);
     error BadProof();
@@ -19,7 +19,8 @@ interface IMessageQueue {
 
     event MessageProcessed(
         uint256 indexed blockNumber,
-        bytes32 indexed messageHash
+        bytes32 indexed messageHash,
+        uint256 indexed messageNonce
     );
 
     function calculateMerkleRoot(

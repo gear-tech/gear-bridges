@@ -6,28 +6,15 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {IRelayer} from "./interfaces/IRelayer.sol";
 
-import {Constants} from "./libraries/Constants.sol";
 import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
+import {RELAYER_ADDRESS} from "./libraries/Environment.sol";
 
-contract MessageQueue is IMessageQueue, AccessControl {
+contract MessageQueue is IMessageQueue {
     using Address for address;
     using Hasher for VaraMessage;
 
-    IRelayer private _relayer;
-    mapping(bytes32 => bool) private _processed_messages;
-
-    /**
-     * @dev Initialize MessageQueue instance with relayer address. Should be called through Proxy
-     * contract immediately after deployment.
-     *
-     * @param relayer - Address of `Relayer`.
-     */
-    function initialize(address relayer) public {
-        if (address(_relayer) != address(0)) revert AlreadyInitialized();
-        _relayer = IRelayer(relayer);
-        emit RelayerAddressUpdated(relayer);
-    }
+    mapping(uint256 => bool) private _processed_messages;
 
     /**
      * @dev Unpack message from merkle tree and relay it to the receiver.
@@ -47,12 +34,12 @@ contract MessageQueue is IMessageQueue, AccessControl {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) public {
+        if (_processed_messages[message.nonce])
+            revert MessageAlreadyProcessed(message.nonce);
+
         bytes32 msg_hash = message.hash();
 
-        if (_processed_messages[msg_hash])
-            revert MessageAlreadyProcessed(msg_hash);
-
-        bytes32 merkle_root = _relayer.getMerkleRoot(block_number);
+        bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(block_number);
 
         if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
@@ -61,14 +48,14 @@ contract MessageQueue is IMessageQueue, AccessControl {
             merkle_root
         ) revert BadProof();
 
-        _processed_messages[msg_hash] = true;
+        _processed_messages[message.nonce] = true;
 
         if (
             !IMessageQueueReceiver(message.receiver).processVaraMessage(message)
         ) {
             revert MessageNotProcessed();
         } else {
-            emit MessageProcessed(block_number, msg_hash);
+            emit MessageProcessed(block_number, msg_hash, message.nonce);
         }
     }
 
@@ -94,10 +81,12 @@ contract MessageQueue is IMessageQueue, AccessControl {
      *
      * @param message - Message it checks agaiunst.
      */
+
+
     function isProcessed(
         VaraMessage calldata message
     ) external view returns (bool) {
-        return _processed_messages[message.hash()];
+        return _processed_messages[message.nonce];
     }
 
     function _calculateMerkleRoot(

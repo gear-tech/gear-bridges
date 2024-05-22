@@ -13,7 +13,6 @@ import {ITreasury} from "../src/interfaces/ITreasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
-import {Constants} from "../src/libraries/Constants.sol";
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
@@ -53,7 +52,7 @@ contract DeployScript is Script {
         message_queue = MessageQueue(address(_message_queue_proxy));
         verifier = Verifier(address(_verifier));
 
-        console.log("Prover:", address(verifier));
+        console.log("Verifier:", address(verifier));
         console.log("Relayer:", address(_relayer));
         console.log("Treasury:", address(_treasury));
         console.log("MessageQueue:", address(_treasury));

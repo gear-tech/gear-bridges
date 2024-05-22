@@ -8,9 +8,6 @@ import {Test, console} from "forge-std/Test.sol";
 import {Verifier} from "../src/Verifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 
-import {Treasury} from "../src/Treasury.sol";
-import {ITreasury} from "../src/interfaces/ITreasury.sol";
-
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 

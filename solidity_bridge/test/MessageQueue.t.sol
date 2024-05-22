@@ -11,8 +11,8 @@ import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 import {IRelayer} from "../src/interfaces/IRelayer.sol";
 
-import {Treasury} from "../src/Treasury.sol";
-import {ITreasury, Packer, WithdrawMessage} from "../src/interfaces/ITreasury.sol";
+import {ERC20Treasury} from "../src/ERC20Treasury.sol";
+import {IERC20Treasury, Packer, WithdrawMessage} from "../src/interfaces/IERC20Treasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {IMessageQueue, VaraMessage, Hasher} from "../src/interfaces/IMessageQueue.sol";
@@ -40,7 +40,7 @@ contract MessageQueueTest is TestHelper {
         Verifier _verifier = new Verifier();
 
         Relayer _relayer = new Relayer();
-        Treasury _treasury = new Treasury();
+        ERC20Treasury _treasury = new ERC20Treasury();
         MessageQueue _message_queue = new MessageQueue();
 
         ProxyContract _relayer_proxy = new ProxyContract(
@@ -58,7 +58,7 @@ contract MessageQueueTest is TestHelper {
         );
 
         relayer = Relayer(address(_relayer_proxy));
-        treasury = Treasury(address(_treasury_proxy));
+        treasury = ERC20Treasury(address(_treasury_proxy));
         message_queue = MessageQueue(address(_message_queue_proxy));
 
         verifier = IVerifier(address(_verifier));

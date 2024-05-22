@@ -6,8 +6,8 @@ import {Test, console} from "forge-std/Test.sol";
 import {Verifier} from "../src/Verifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 
-import {Treasury} from "../src/Treasury.sol";
-import {ITreasury} from "../src/interfaces/ITreasury.sol";
+import {ERC20Treasury} from "../src/ERC20Treasury.sol";
+import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
 
 import {IMessageQueue, VaraMessage, IMessageQueueReceiver} from "../src/interfaces/IMessageQueue.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";

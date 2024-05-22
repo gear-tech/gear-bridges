@@ -6,7 +6,7 @@ struct WithdrawMessage {
     uint128 amount;
 }
 
-interface ITreasury {
+interface IERC20Treasury {
     error NotAuthorized();
     error BadArguments();
     error BadEthAddress();

@@ -1,20 +1,18 @@
 pragma solidity ^0.8.13;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Treasury} from "../src/Treasury.sol";
-import {ITreasury} from "../src/interfaces/ITreasury.sol";
+import {ERC20Treasury} from "../src/ERC20Treasury.sol";
+import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 
 
 contract ProxyTest is Test {
-    //Treasury public treasury;
-    //MessageQueue public message_queue;
     ProxyContract public treasury_proxy;
     ProxyContract public message_queue_proxy;
 
     function setUp() public  {
-        Treasury treasury = new Treasury();
+        ERC20Treasury treasury = new ERC20Treasury();
         MessageQueue message_queue = new MessageQueue();
         message_queue_proxy = new ProxyContract( address(message_queue), bytes("") ); 
         treasury_proxy = new ProxyContract(address(treasury), bytes("")  );
@@ -27,7 +25,7 @@ contract ProxyTest is Test {
     }
 
     function test_renewImplementation() public {
-        Treasury new_treasury = new Treasury();
+        ERC20Treasury new_treasury = new ERC20Treasury();
 
 
         // from pranker

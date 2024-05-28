@@ -1,78 +1,92 @@
-# Gear bridges
+# Gear Bridges
 
-Implementation of zk-based bridge to ethereum for gear-based blockchains.
+Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge facilitating the transfer of assets between Ethereum and Gear-based blockchains, such as the [Vara network](https://vara.network/).
 
-## High-level gear -> eth design
+## High-Level One-Directional `Gear -> Eth` Design
 
-Gear -> eth protocol allows relaying messages from gear-based blockchains to ethereum. Messages are
-some generic data defined by protocols built on top of bridge. Protocol doesn't guarantee order in which messages are relayed.
+The **Gear -> Eth** transfer protocol allows relaying messages from Gear-based blockchains to Ethereum. These messages consist of generic data defined by protocols built on top of the bridge. The protocol doesn't guarantee the order in which messages are relayed.
 
-This repository contains implementation of token bridging protocol built on top of more generic messaging protocol.
+This repository contains the implementation of a token bridging protocol built on top of a more generic messaging protocol.
 
-##### Components present in one-directional gear -> eth bridge:
+### Components Present in `Gear -> Eth` Bridge
 
-![gear -> eth](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth.png)
+![Components of Gear -> Eth Bridge](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth.png)
 
-- `GRC-20` - program capable of transferring, burning and minting `GRC-20` tokens.
-- `GRC-20 gateway` - receive `GRC-20` tokens from users, burns them and emits message to `pallet-gear-bridge` built-in actor. This message contains information about which token is getting bridged, how much of it and receipient of funds on ethereum network.
-- `pallet-gear-bridges` built-in actor - entrypoint into generic bridging protocol. Receives messages from any actor on gear network and relays into `pallet-gear-bridge`.
-- `pallet-gear-bridge` - receives messages from `pallet-gear-bridges` built-in actor and stores them in the binary merkle trie. This merkle trie gets slashed at the end of each `era`.
-- `backend` - reads gear state, queues zk-proof generation and submits zk-proofs to ethereums.
-- `prover` - generally capable of creating 2 types of zk-proofs: proof of authority set changes and proof of inclusion of merkle trie root into the storage of `pallet-gear-bridge`. Combination of these  proofs allows for trustless relaying of merkle trie roots from `pallet-gear-brisge` storage to ethereum.
-- `relayer contract` - accept proofs of merkle trie root inclusion and if they're valid then stores merkle trie roots in the memory.
-- `gnark-verifier` - contract capable of verifying `plonk` proofs created by [gnark](https://github.com/Consensys/gnark). The submitted proofs are just [plonky2](https://github.com/0xPolygonZero/plonky2) proofs wrapped by `gnark`.
-- `message queue contract` - used to recover messages from merkle tries. User can request message to be relayed further onto ethereum by providing proof of inclusion of some message that's actually included into merkle trie and given that this merkle root was already relayed by `backend`(or some other party). Also it's an exit point of generic gear -> eth bridging protocol.
-- `ERC20 treasury` - treasury that accept user funds and release them. Release can only be triggered by message relayed over bridge which source is `GRC-20 gateway`.
+- **GRC-20**: A program capable of transferring, burning, and minting `GRC-20` tokens. It repeats the implementation of the `ERC20` standard on the Gear network, the standard implementation `GRC-20` can be found [here](https://github.com/gear-foundation/standards/tree/master/gear-erc20).
+- **GRC-20 Gateway**: Receives `GRC-20` tokens from users, burns them, and emits a message to the `pallet-gear-bridge` built-in actor. This message contains information about which token is being bridged, how much of it, and the recipient of funds on the Ethereum network.
+- **Pallet-Gear-Bridges**: a [Built-in Actor](https://wiki.gear-tech.io/docs/gear/features/builtin-actors) - the entry point into the generic bridging protocol. Receives messages from any actor on the Gear network and relays them to `pallet-gear-bridge`.
+- **Pallet-Gear-Bridge**: Receives messages from the `pallet-gear-bridges` built-in actor and stores them in the binary Merkle trie. This Merkle trie gets slashed at the end of each `ERA`.
+- **Backend**: Reads Gear state, queues ZK-proof generation, and submits ZK-proofs to Ethereum.
+- **Prover**: Capable of creating two types of ZK-proofs: proof of authority set changes and proof of inclusion of Merkle trie root into the storage of `pallet-gear-bridge`. The combination of these proofs allows for trustless relaying of Merkle trie roots from `pallet-gear-bridge` storage to Ethereum.
+- **Relayer Contract**: Accepts proofs of Merkle trie root inclusion and, if they're valid, stores Merkle trie roots in memory.
+- **Gnark-Verifier**: A contract capable of verifying `plonk` proofs created by [gnark](https://github.com/Consensys/gnark). The submitted proofs are [plonky2](https://github.com/0xPolygonZero/plonky2) proofs wrapped by `gnark`.
+- **Message Queue Contract**: Used to recover messages from Merkle tries. A user can request a message to be relayed further onto Ethereum by providing proof of inclusion of a message actually included in the Merkle trie, given that this Merkle root was already relayed by `backend` (or another party). This is also the exit point of the generic Gear -> Eth bridging protocol.
+- **ERC20 Treasury**: A treasury that accepts user funds and releases them. Release can only be triggered by a message relayed over the bridge from the `GRC-20 gateway`.
 
-##### Workflow of gear -> eth token transfer:
+### Workflow of `Gear -> Eth` Token* Transfer
 
-![gear -> eth transfer](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth_transfer.png)
+> [!NOTE]
+> *Gear itself is not a blockchain network and has no native token. This refers to the token of any network built on Gear technology, such as Vara.
 
-- user submits message to `GRC-20 gateway` to initiate bridging.
-- `GRC20 gateway` burns `GRC-20` tokens and emits message to `pallet-gear-bridge` built-in actor.
-- `pallet-gear-bridge` built-in actor relays message to `pallet-gear-bridge`.
-- `pallet-gear-bridge` stores message in merkle trie.
-- eventually `backend`(or some other party) relays message to `relayer contract` and it gets stored there.
-- user see that his message was relayed and submits merkle proof of inclusion to `message queue contract`.
-- `message queue contract` reads merkle root from `relayer contract`, checks merkle proof and relays message to `ERC20 treasury`.
-- `ERC20 treasury` releases funds to user account on ethereum.
+![Workflow of Gear -> Eth Transferr](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth_transfer.png)
 
-## Prover circuits
+- The user submits a message to the `GRC-20 gateway` to initiate bridging.
+- The `GRC-20 gateway` burns `GRC-20` tokens and emits a message to the `pallet-gear-bridge` built-in actor.
+- The `pallet-gear-bridge` built-in actor relays the message to `pallet-gear-bridge`.
+- The `pallet-gear-bridge` stores the message in a Merkle trie.
+- Eventually, the `backend` (or another party) relays the message to the `relayer contract`, and it gets stored there.
+- The user sees that their message was relayed and submits a Merkle proof of inclusion to the `message queue contract`.
+- The `message queue contract` reads the Merkle root from the `relayer contract`, checks the Merkle proof, and relays the message to the `ERC20 treasury`.
+- The `ERC20 treasury` releases funds to the user's account on Ethereum.
 
-### Block finality
-Proves that some block was finalized by some authority set on the gear chain.
+## Prover Circuits
+
+### Block Finality
+
+The Block Finality circuit proves that a specific block was finalized by an authority set on the Gear chain. This involves verifying that a majority (>2/3) of validators have signed the GRANDPA vote for the block.
 
 ![block finality circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/block_finality_circuit.png)
 
-### Validator set change
-Proves that validator set have changed.Validator set change means that current validator set finalized a block containing next validator set in its storage.
+### Validator Set Change
+
+The Validator Set Change circuit proves that the validator set has changed. This change means that the current validator set finalized a block containing the next validator set in its storage. The circuit verifies that a majority of validators from the current set have set hash inclusion into the storage of `pallet-gear-bridge` and signed the vote for the change.
 
 ![validator set change circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/next_validator_set_circuit.png)
 
-### Substrate storage trie circuits
-There are only two types of nodes currently supported for now:
+### Substrate Storage Trie Circuits
 
-#### Branch node without value
+Substrate storage trie circuits are used to prove the inclusion of data into the Substrate storage trie. Currently, there are two types of nodes supported:
+
+#### Branch Node Without Value
+
+This circuit parses branch nodes in the trie, which do not contain a value but help navigate the structure.
+
 ![branch node parser circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/mpt_branch_node_parser_circuit.png)
 
-#### Hashed value leaf
+#### Hashed Value Leaf
+
+This circuit parses leaf nodes in the trie, which contain the hashed values of the stored data.
+
 ![leaf node parser circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/mpt_leaf_node_parser_circuit.png)
 
-These proofs are composed into storage proof, which can prove that some block contains data in its storage at particular address:
+These individual proofs are composed into a storage proof, which proves that specific data exists at a particular address within a block's storage.
 
 ![storage proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/storage_proof_circuit.png)
 
-### Recent validator set
-Used to prove chain of validator set changes to prove transition from genesis to the recent validator set in one proof. Genesis validator set is present as a constant in the circuit.
+### Recent Validator Set
+
+The Recent Validator Set circuit is used to prove a chain of validator set changes, demonstrating the transition from the genesis validator set to the most recent validator set. The genesis validator set is encoded as a constant within the circuit.
 
 ![recent validator set circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/recent_validator_set_circuit.png)
 
-### Message inclusion
-Used to prove that specific message merkle root was submitted on gear chain for bridging, that is, included into `pallet-gear-bridge` storage.
+### Message Inclusion
+
+The Message Inclusion circuit is used to prove that a specific message Merkle root was submitted on the Gear chain for bridging, indicating its inclusion in the `pallet-gear-bridge` storage.
 
 ![message sent circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/message_sent_circuit.png)
 
-### Final proof
-Proof that's submitted to ethereum. Proves that message merkle root was present in storage of `pallet-gear-bridge` at some finalized block.
+### Final Proof
+
+The Final Proof circuit is the proof submitted to Ethereum. It proves that a message Merkle root was present in the storage of `pallet-gear-bridge` at a specific finalized block. This final proof ensures the validity of the cross-chain message.
 
 ![final proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/final_proof_circuit.png)

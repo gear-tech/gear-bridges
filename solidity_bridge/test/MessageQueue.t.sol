@@ -151,12 +151,14 @@ contract MessageQueueTest is TestHelper {
             data: payload
         });
 
-        bytes memory ms = abi.encodePacked(content_message.sender, content_message.receiver, content_message.nonce, content_message.data);
+        bytes memory ms = abi.encodePacked(content_message.nonce, content_message.sender, content_message.receiver, content_message.data);
 
 
         bytes32 expectedMessageHash = keccak256(ms);
         
         bytes32 msg_hash = content_message.hash();
+        assertEq(msg_hash, bytes32(0xa366f34b585366d69a71c36c6831ec5d4588ff1fe04e8fb146865d86a9acead2));
+
         assertEq(expectedMessageHash, msg_hash);
 
         bytes32[] memory proof = new bytes32[](1);
@@ -164,7 +166,7 @@ contract MessageQueueTest is TestHelper {
 
         bytes32 root = message_queue.calculateMerkleRoot(proof, expectedMessageHash, 3, 2);
 
-        assertEq(root, bytes32(0xbd0053b78e8ecfb691c483db70d9792b0ff1b9956dc78967af2c4d4f1872f206));
+        assertEq(root, bytes32(0xf7ac03b7b0c8d3fecf2c7b3a9ce64d064ed0dff9912886ad2f1e51d2fc487367));
     }
 
     function test_calculate_root_buffer_leaf_2() public {
@@ -271,15 +273,20 @@ contract MessageQueueTest is TestHelper {
         });
 
         bytes32 msg_hash = vara_message.hash();
+        assertEq(msg_hash, bytes32(0x450c549c1ab481d9e6c247d867086809f1c599a87218ba74a5ab04c2d70f387f));
+
+
         bytes32[] memory proof = new bytes32[](3);
 
-        proof[0] = bytes32(0x69b655dccf32e0c3e4d4f427875a09b8cde36a2e6d1b980a8b1f8b134425652f);
-        proof[1] = bytes32(0x6d6e07bcb08ba34a789918ab09f0a8aabd1c42a1e7b8625448dab3ed03a02b59);
-        proof[2] = bytes32(0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b);
+
+
+        proof[0] = bytes32(0x88ccaf73d4bd4c768ad9cba30c457d0e2b6e8a425902130885796282b2251338);
+        proof[1] = bytes32(0x799a4f8d4ebba9468c54944bcf41156bad48de11ae6aa62eeb581a17678c532b);
+        proof[2] = bytes32(0xf0ac28723c4a3e05cb2489c4ff0abe4a236486375c4337c81b80199a9c01892d);
 
         bytes32 calculatedRoot = message_queue.calculateMerkleRoot(proof, msg_hash, 101, 100);
 
-        assertEq(calculatedRoot, bytes32(0x25059660e16a5d756dbb2bbfba28886149e02593e28d64e9256f6b93d5351aaa));
+        assertEq(calculatedRoot, bytes32(0x58b0eab7ac0e2a6f31eb89e3d2d2187d7aa623db11aa0d8cb513b93c4a21df2c));
 
         bytes memory block_proof = bytes(hex"00");
 

@@ -39,13 +39,13 @@ contract DeployScript is Script {
         MessageQueue _message_queue = new MessageQueue();
 
         vm.broadcast();
-        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), abi.encodeWithSignature("initialize(address)", address(_verifier)));
+        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), bytes(""));
 
         vm.broadcast();
-        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), abi.encodeWithSignature("initialize(address)", address(_relayer_proxy)));
+        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), bytes(""));
 
         vm.broadcast();
-        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), abi.encodeWithSignature("initialize(address)", address(_message_queue_proxy)));
+        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), bytes(""));
 
         relayer = Relayer(address(_relayer_proxy));
         treasury = ERC20Treasury(address(_treasury_proxy));
@@ -55,7 +55,7 @@ contract DeployScript is Script {
         console.log("Verifier:", address(verifier));
         console.log("Relayer:", address(_relayer));
         console.log("Treasury:", address(_treasury));
-        console.log("MessageQueue:", address(_treasury));
+        console.log("MessageQueue:", address(_message_queue));
         console.log("Relayer Proxy:", address(relayer));
         console.log("Treasury Proxy:", address(treasury));
         console.log("MessageQueue Proxy:", address(message_queue));

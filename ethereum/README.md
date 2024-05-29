@@ -1,4 +1,4 @@
-## Vara Bridge
+## Solidity smart contracts
 
 ./interfaces/IMessageQueue.sol
 

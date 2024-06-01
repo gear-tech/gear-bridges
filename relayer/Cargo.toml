@@ -6,8 +6,8 @@ edition.workspace = true
 [dependencies]
 gear-rpc-client.workspace = true
 prover.workspace = true
+ethereum-client.workspace = true
 
-actix-web.workspace = true
 log.workspace = true
 pretty_env_logger.workspace = true
 serde.workspace = true

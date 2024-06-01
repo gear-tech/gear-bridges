@@ -4,6 +4,7 @@ use clap::{Args, Parser, Subcommand};
 
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
+use ethereum_client::Contracts as EthContracts;
 use gear_rpc_client::GearApi;
 use proof_storage::{FileSystemProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
@@ -12,7 +13,7 @@ mod proof_storage;
 mod prover_interface;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:9944";
-const DEFAULT_SERVE_ENDPOINT: &str = "localhost:1723";
+const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
     validator_set_id: 1,
@@ -37,7 +38,7 @@ enum CliCommands {
     #[clap(visible_alias("p"))]
     #[command(subcommand)]
     Prove(ProveCommands),
-    /// Start HTTP server on specified endpoint
+    /// Start service constantly relaying messages to ethereum
     #[clap(visible_alias("s"))]
     Serve(ServeArgs),
 }
@@ -66,17 +67,13 @@ enum ProveCommands {
 
 #[derive(Args)]
 struct ServeArgs {
-    /// Endpoint to expose API
-    #[arg(
-        long = "endpoint",
-        default_value = DEFAULT_SERVE_ENDPOINT
-    )]
-    endpoint: String,
     /// Genesis block for bridge
     #[arg(long = "genesis-block", short = 'g')]
     genesis_block: Option<u32>,
     #[clap(flatten)]
-    prove_args: ProveArgs,
+    vara_endpoint: VaraEndpointArg,
+    #[clap(flatten)]
+    ethereum_args: EthereumArgs,
 }
 
 #[derive(Args)]
@@ -93,6 +90,25 @@ struct VaraEndpointArg {
         default_value = DEFAULT_VARA_RPC
     )]
     vara_endpoint: String,
+}
+
+#[derive(Args)]
+struct EthereumArgs {
+    /// Address of the ethereum endpoint
+    #[arg(
+        long = "ethereum-endpoint",
+        default_value = DEFAULT_ETH_RPC
+    )]
+    eth_endpoint: String,
+    /// Private key for fee payer
+    #[arg(long = "fee-payer")]
+    fee_payer: Option<String>,
+    /// Ethereum address of relayer contract
+    #[arg(long = "relayer-address")]
+    relayer_address: String,
+    /// Ethereum address of message queue contract
+    #[arg(long = "mq-address")]
+    mq_address: String,
 }
 
 #[tokio::main]
@@ -153,11 +169,27 @@ async fn main() {
             }
         },
         CliCommands::Serve(ServeArgs {
-            endpoint: _,
             genesis_block: _,
-            prove_args: ProveArgs { vara_endpoint },
+            vara_endpoint,
+            ethereum_args,
         }) => {
-            let _gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
+            let gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
+            let eth_api = {
+                let EthereumArgs {
+                    eth_endpoint,
+                    fee_payer,
+                    relayer_address,
+                    mq_address,
+                } = ethereum_args;
+
+                EthContracts::new(
+                    &eth_endpoint,
+                    &mq_address,
+                    &relayer_address,
+                    fee_payer.as_ref().map(|s| s.as_str()),
+                )
+            };
+
             todo!()
         }
     };

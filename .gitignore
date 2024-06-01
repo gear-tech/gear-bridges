@@ -3,3 +3,16 @@ target/
 data/
 /proof_storage
 _obj
+
+
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Dotenv file
+.env

@@ -230,8 +230,8 @@ mod tests {
     use alloy_provider::HttpProvider;
     use alloy_transport_http::Http;
     use binary_merkle_tree::{merkle_proof, merkle_root, verify_proof, Leaf, MerkleProof};
-    use primitive_types::H256;
     use hash_db::Hasher;
+    use primitive_types::H256;
 
     #[allow(unused, unreachable_pub)]
     pub fn spawn_anvil() -> (HttpProvider<Ethereum>, AnvilInstance) {
@@ -292,7 +292,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn verify_message_hash() {
         let msg = ContentMessage {
@@ -305,7 +304,15 @@ mod tests {
         };
         let hash = Keccak256::hash(msg.to_bytes().as_slice());
 
-        let expected_hash : H256 = H256::from_slice(U256::from_str_radix("a366f34b585366d69a71c36c6831ec5d4588ff1fe04e8fb146865d86a9acead2", 16).unwrap().to_be_bytes_vec().as_slice());
+        let expected_hash: H256 = H256::from_slice(
+            U256::from_str_radix(
+                "a366f34b585366d69a71c36c6831ec5d4588ff1fe04e8fb146865d86a9acead2",
+                16,
+            )
+            .unwrap()
+            .to_be_bytes_vec()
+            .as_slice(),
+        );
 
         assert_eq!(hash, expected_hash)
     }
@@ -432,7 +439,11 @@ mod tests {
             sender: U256::from_be_bytes(H256::repeat_byte(7).to_fixed_bytes())
                 .try_into()
                 .unwrap(),
-            receiver: Address::parse_checksummed("0xa513E6E4b8f2a923D98304ec87F64353C4D5C853", None).unwrap(),
+            receiver: Address::parse_checksummed(
+                "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+                None,
+            )
+            .unwrap(),
             nonce: U256::from(10),
             data: Bytes::from(vec![3, 3, 3]),
         };

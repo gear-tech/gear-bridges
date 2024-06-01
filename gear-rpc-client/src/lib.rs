@@ -77,7 +77,7 @@ impl GearApi {
         Ok(self.api.rpc().chain_get_finalized_head().await?)
     }
 
-    pub async fn validator_set_id(&self, block: H256) -> anyhow::Result<u64> {
+    pub async fn authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
         let block = (*self.api).blocks().at(block).await?;
         let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
         Self::fetch_from_storage(&block, &set_id_address).await
@@ -100,7 +100,7 @@ impl GearApi {
         &self,
         after_block: H256,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
-        let required_validator_set_id = self.validator_set_id(after_block).await?;
+        let required_validator_set_id = self.authority_set_id(after_block).await?;
 
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
@@ -170,7 +170,7 @@ impl GearApi {
         validator_set_id: u64,
     ) -> anyhow::Result<H256> {
         let latest_block = self.latest_finalized_block().await?;
-        let latest_vs_id = self.validator_set_id(latest_block).await?;
+        let latest_vs_id = self.authority_set_id(latest_block).await?;
 
         if latest_vs_id == validator_set_id {
             return Ok(latest_block);
@@ -192,7 +192,7 @@ impl GearApi {
                 State::SearchBack { latest_bn, step } => {
                     let next_bn = latest_bn.saturating_sub(step);
                     let next_block = self.block_number_to_hash(next_bn).await?;
-                    let next_vs = self.validator_set_id(next_block).await?;
+                    let next_vs = self.authority_set_id(next_block).await?;
 
                     if next_vs == validator_set_id {
                         return Ok(next_block);
@@ -216,7 +216,7 @@ impl GearApi {
                 } => {
                     let mid_bn = (lower_bn + higher_bn) / 2;
                     let mid_block = self.block_number_to_hash(mid_bn).await?;
-                    let mid_vs = self.validator_set_id(mid_block).await?;
+                    let mid_vs = self.authority_set_id(mid_block).await?;
 
                     if mid_vs == validator_set_id {
                         return Ok(mid_block);

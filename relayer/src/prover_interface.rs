@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};
+use num::BigUint;
 use prover::proving::{
     self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
@@ -26,7 +27,7 @@ pub const MESSAGE_STORAGE_ADDRESS: [u8; 64] = [
 
 pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(GENESIS_CONFIG.validator_set_id)
+        .fetch_finality_proof_for_session(GENESIS_CONFIG.authority_set_id)
         .await
         .unwrap();
 
@@ -88,11 +89,46 @@ pub async fn prove_validator_set_change(
     proof
 }
 
+pub struct FinalProof {
+    pub proof: Vec<u8>,
+    pub block_number: u32,
+    pub merkle_root: [u8; 32],
+}
+
+impl FinalProof {
+    pub fn from_proof_and_public_inputs(proof: String, public_inputs: [BigUint; 2]) -> Self {
+        // data layout:
+        // pad pad root[0] root[1] root[2] root[3] root[4] root[5]
+        // pad pad root[6] root[7] block_n   pad     pad     pad
+
+        let pi_0 = public_inputs[0].to_bytes_le();
+        let first_root_part = &pi_0[pi_0.len() - 24..];
+
+        let pi_1 = public_inputs[1].to_bytes_le();
+        let second_root_part = &pi_1[pi_1.len() - 24..pi_1.len() - 16];
+
+        let root_bytes = [first_root_part, second_root_part].concat();
+        let block_number = &pi_1[pi_1.len() - 16..pi_1.len() - 12];
+
+        Self {
+            proof: hex::decode(&proof).expect("Got invalid proof string from gnark prover"),
+            block_number: u32::from_le_bytes(
+                block_number
+                    .try_into()
+                    .expect("Wrong amount of bytes to build block number"),
+            ),
+            merkle_root: root_bytes
+                .try_into()
+                .expect("Wrong amount of bytes to build merkle tree root"),
+        }
+    }
+}
+
 pub async fn prove_final(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     previous_validator_set_id: u64,
-) -> String {
+) -> FinalProof {
     let block = gear_api
         .search_for_validator_set_block(previous_validator_set_id)
         .await
@@ -118,8 +154,17 @@ pub async fn prove_final(
         message_contents,
     );
 
+    // TODO: Compile only when not initialized
     gnark::compile_circuit(&proof);
-    gnark::prove_circuit(&proof)
+
+    let proof = gnark::prove_circuit(&proof);
+    FinalProof::from_proof_and_public_inputs(
+        proof.proof,
+        proof
+            .public_inputs
+            .try_into()
+            .expect("Got wrong public input count from gnark prover"),
+    )
 }
 
 fn parse_rpc_inclusion_proof(
@@ -156,7 +201,7 @@ fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof) -> BlockFinali
         message: proof
             .message
             .try_into()
-            .expect("Not expected GRANDPA message length"),
+            .expect("Unexpected GRANDPA message length"),
     }
 }
 
@@ -164,7 +209,15 @@ pub mod gnark {
     use core::ffi::c_char;
     use std::ffi::{CStr, CString};
 
+    use num::BigUint;
     use prover::proving::ExportedProofWithCircuitData;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    pub struct ProveResult {
+        pub proof: String,
+        pub public_inputs: Vec<BigUint>,
+    }
 
     extern "C" {
         fn compile(circuit_data: *const c_char);
@@ -179,7 +232,7 @@ pub mod gnark {
         }
     }
 
-    pub fn prove_circuit(s: &ExportedProofWithCircuitData) -> String {
+    pub fn prove_circuit(s: &ExportedProofWithCircuitData) -> ProveResult {
         let serialized = serde_json::to_string(s).expect("Failed to serialize data");
         let c_string = CString::new(serialized).expect("CString::new failed");
         let result = unsafe {
@@ -194,6 +247,7 @@ pub mod gnark {
             libc::free(result_ptr as *mut libc::c_void);
             owned
         };
-        result // todo decode
+
+        serde_json::from_str(&result).expect("Got wrong output from gnark prover")
     }
 }

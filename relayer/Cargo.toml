@@ -16,6 +16,8 @@ clap.workspace = true
 tokio.workspace = true
 libc.workspace = true
 anyhow.workspace = true
+num = { workspace = true, features = ["serde"] }
+hex.workspace = true
 
 [build-dependencies]
 cgo_oligami = "0.3"

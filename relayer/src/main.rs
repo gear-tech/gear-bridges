@@ -4,19 +4,19 @@ use clap::{Args, Parser, Subcommand};
 
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
-use ethereum_client::Contracts as EthContracts;
 use gear_rpc_client::GearApi;
 use proof_storage::{FileSystemProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 
 mod proof_storage;
 mod prover_interface;
+mod serve;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:9944";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    validator_set_id: 1,
+    authority_set_id: 1,
     // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
     validator_set_hash: [
         0xb23a85b9, 0x025758fb, 0x0e04d9df, 0x949fbce8, 0xbd0a5bdc, 0x9e800f8b, 0x02dc3fc2,
@@ -67,9 +67,6 @@ enum ProveCommands {
 
 #[derive(Args)]
 struct ServeArgs {
-    /// Genesis block for bridge
-    #[arg(long = "genesis-block", short = 'g')]
-    genesis_block: Option<u32>,
     #[clap(flatten)]
     vara_endpoint: VaraEndpointArg,
     #[clap(flatten)]
@@ -133,7 +130,7 @@ async fn main() {
 
                 let proof = prover_interface::prove_genesis(&gear_api).await;
                 proof_storage
-                    .init(proof, GENESIS_CONFIG.validator_set_id)
+                    .init(proof, GENESIS_CONFIG.authority_set_id)
                     .unwrap();
             }
             ProveCommands::ValidatorSetChange { args } => {
@@ -158,39 +155,16 @@ async fn main() {
 
                 let (previous_proof, previous_validator_set_id) =
                     proof_storage.get_latest_proof().unwrap();
-                let proof = prover_interface::prove_final(
+                let _proof = prover_interface::prove_final(
                     &gear_api,
                     previous_proof,
                     previous_validator_set_id,
                 )
                 .await;
-
-                println!("{}", proof);
             }
         },
-        CliCommands::Serve(ServeArgs {
-            genesis_block: _,
-            vara_endpoint,
-            ethereum_args,
-        }) => {
-            let gear_api = GearApi::new(&vara_endpoint.vara_endpoint).await.unwrap();
-            let eth_api = {
-                let EthereumArgs {
-                    eth_endpoint,
-                    fee_payer,
-                    relayer_address,
-                    mq_address,
-                } = ethereum_args;
-
-                EthContracts::new(
-                    &eth_endpoint,
-                    &mq_address,
-                    &relayer_address,
-                    fee_payer.as_ref().map(|s| s.as_str()),
-                )
-            };
-
-            todo!()
+        CliCommands::Serve(args) => {
+            let _ = serve::serve(args).await;
         }
     };
 }

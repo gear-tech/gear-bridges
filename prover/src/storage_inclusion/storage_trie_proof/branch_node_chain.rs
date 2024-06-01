@@ -1,3 +1,5 @@
+//! Circuit that's used to prove correct parsing of all the branch nodes from root to leaf.
+
 use plonky2::{
     iop::{
         target::BoolTarget,
@@ -25,40 +27,42 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_inclusion::storage_trie_proof::node_parser::branch_parser::BranchParser,
-    ProofWithCircuitData,
 };
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_parsable_target_set! {
+    /// Public inputs for `BranchNodeChain`.
     pub struct BranchNodeChainParserTarget {
+        /// Storage root.
         pub root_hash: Blake2Target,
+        /// Blake2 hash of encoded leaf data.
         pub leaf_hash: Blake2Target,
+        /// Result of composition of all addresses from root node to the last branch node.
         pub partial_address: PartialStorageAddressTarget,
     }
 }
 
 impl_target_set! {
+    /// Intermediate target for cyclic recursion.
     struct BranchNodeChainParserTargetWithVerifierData {
-        root_hash: Blake2Target,
-        leaf_hash: Blake2Target,
-        partial_address: PartialStorageAddressTarget,
-
+        inner: BranchNodeChainParserTarget,
         verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
     }
 }
 
 pub struct BranchNodeChain {
+    /// Encoded branch nodes, arranged from root to leaf.
     pub nodes: Vec<BranchNodeData>,
 }
 
 impl BranchNodeChain {
     pub fn prove(self) -> ProofWithCircuitData<BranchNodeChainParserTarget> {
-        log::info!("Proving branch node chain...");
+        log::debug!("Proving branch node chain...");
 
         let inner = self.inner_proof();
 
@@ -69,15 +73,15 @@ impl BranchNodeChain {
         let public_inputs = builder.recursively_verify_constant_proof(&inner, &mut witness);
 
         BranchNodeChainParserTarget {
-            root_hash: public_inputs.root_hash,
-            leaf_hash: public_inputs.leaf_hash,
-            partial_address: public_inputs.partial_address,
+            root_hash: public_inputs.inner.root_hash,
+            leaf_hash: public_inputs.inner.leaf_hash,
+            partial_address: public_inputs.inner.partial_address,
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Proven branch node chain");
+        log::debug!("Proven branch node chain");
 
         result
     }
@@ -135,7 +139,7 @@ impl Circuit {
         mut self,
         root_hash: [u8; BLAKE2_DIGEST_SIZE],
     ) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
-        log::info!("    Proving storage trie recursion layer(initial)...");
+        log::debug!("    Proving storage trie recursion layer(initial)...");
 
         let root_hash_bits = array_to_bits(&root_hash);
         let public_inputs = root_hash_bits
@@ -155,9 +159,9 @@ impl Circuit {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven storage trie recursion layer(initial)...");
+        log::debug!("    Proven storage trie recursion layer(initial)...");
 
         result
     }
@@ -166,15 +170,15 @@ impl Circuit {
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
     ) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
-        log::info!("    Proving storage trie recursion layer...");
+        log::debug!("    Proving storage trie recursion layer...");
         self.witness.set_bool_target(self.condition, true);
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven storage trie recursion layer");
+        log::debug!("    Proven storage trie recursion layer");
 
         result
     }
@@ -182,7 +186,7 @@ impl Circuit {
     fn build(inner: HashedBranchParser) -> Circuit {
         let inner_proof = inner.prove();
 
-        log::info!("    Building storage trie recursion layer...");
+        log::debug!("    Building storage trie recursion layer...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -212,9 +216,9 @@ impl Circuit {
                 .into_iter(),
         );
         let mut inner_cyclic_proof_pis = BranchNodeChainParserTarget {
-            root_hash: inner_cyclic_proof_pis.root_hash,
-            leaf_hash: inner_cyclic_proof_pis.leaf_hash,
-            partial_address: inner_cyclic_proof_pis.partial_address,
+            root_hash: inner_cyclic_proof_pis.inner.root_hash,
+            leaf_hash: inner_cyclic_proof_pis.inner.leaf_hash,
+            partial_address: inner_cyclic_proof_pis.inner.partial_address,
         };
 
         inner_cyclic_proof_pis.leaf_hash = builder.select_target_set(
@@ -256,7 +260,7 @@ impl Circuit {
 
         pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
 
-        log::info!("    Built storage parser recursion layer");
+        log::debug!("    Built storage parser recursion layer");
 
         Circuit {
             cyclic_circuit_data,

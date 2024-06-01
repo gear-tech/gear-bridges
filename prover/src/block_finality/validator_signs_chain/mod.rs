@@ -1,3 +1,5 @@
+//! Circuit that's used to prove that majority of validators have signed GRANDPA message.
+
 use itertools::Itertools;
 use plonky2::{
     iop::{
@@ -28,13 +30,12 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, GRANDPA_VOTE_LENGTH},
         *,
     },
-    ProofWithCircuitData,
 };
 
 use self::indexed_validator_sign::IndexedValidatorSignTarget;
@@ -46,21 +47,27 @@ use super::{validator_set_hash::ValidatorSetHash, GrandpaVoteTarget, ProcessedPr
 const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
 impl_target_set! {
+    /// Public inputs for `ValidatorSignsChain`.
     pub struct ValidatorSignsChainTarget {
+        /// Blake2 hash of concatenated validator public keys.
         pub validator_set_hash: Blake2Target,
+        /// GRANDPA message.
         pub message: GrandpaVoteTarget,
     }
 }
 
 pub struct ValidatorSignsChain {
+    /// `ValidatorSetHash` proof builder.
     pub validator_set_hash: ValidatorSetHash,
+    /// All the pre-commits that're planned to process(that is, prove that they're all signed message).
     pub pre_commits: Vec<ProcessedPreCommit>,
+    /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 
 impl ValidatorSignsChain {
     pub fn prove(self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
-        log::info!("Proving validator signs chain...");
+        log::debug!("Proving validator signs chain...");
 
         let validator_set_hash = self.validator_set_hash.compute_hash();
 
@@ -136,9 +143,9 @@ impl ValidatorSignsChain {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Proven validator signs chain");
+        log::debug!("Proven validator signs chain");
 
         result
     }
@@ -146,6 +153,7 @@ impl ValidatorSignsChain {
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
+// TODO: Put nested target here.
 impl_target_set! {
     struct SignCompositionTarget {
         validator_set_hash: Blake2Target,
@@ -177,6 +185,7 @@ struct SignCompositionInitialData {
     message: [u8; GRANDPA_VOTE_LENGTH],
 }
 
+/// Inner cyclic recursion proof.
 struct SignComposition {
     cyclic_circuit_data: CircuitData<F, C, D>,
 
@@ -193,7 +202,7 @@ impl SignComposition {
         mut self,
         initial_data: SignCompositionInitialData,
     ) -> ProofWithCircuitData<SignCompositionTarget> {
-        log::info!("    Proving sign composition recursion layer(initial)...");
+        log::debug!("    Proving sign composition recursion layer(initial)...");
 
         let validator_set_hash = array_to_bits(&initial_data.validator_set_hash);
         let message = array_to_bits(&initial_data.message);
@@ -225,9 +234,9 @@ impl SignComposition {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven sign composition recursion layer(initial)...");
+        log::debug!("    Proven sign composition recursion layer(initial)...");
 
         result
     }
@@ -236,21 +245,21 @@ impl SignComposition {
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
     ) -> ProofWithCircuitData<SignCompositionTarget> {
-        log::info!("    Proving sign composition recursion layer...");
+        log::debug!("    Proving sign composition recursion layer...");
         self.witness.set_bool_target(self.condition, true);
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven sign composition recursion layer");
+        log::debug!("    Proven sign composition recursion layer");
 
         result
     }
 
     fn build(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> SignComposition {
-        log::info!("    Building sign composition recursion layer...");
+        log::debug!("    Building sign composition recursion layer...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -347,7 +356,7 @@ impl SignComposition {
 
         pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
 
-        log::info!("    Built sign composition recursion layer");
+        log::debug!("    Built sign composition recursion layer");
 
         SignComposition {
             cyclic_circuit_data,

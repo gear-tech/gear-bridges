@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse nibble array from encoded node.
+
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use std::iter;
 
@@ -12,16 +14,23 @@ use crate::{
 
 impl_target_set! {
     pub struct NibbleParserInputTarget {
+        /// Nibbles are guaranteed to be located in the first block of node data, being either `leaf`
+        /// or `branch` node, so we provide this first block.
         pub first_node_data_block: NodeDataBlockTarget,
+        /// Read nibbles starting from this index.
         pub read_offset: Target,
+        /// Nibble count to read.
         pub nibble_count: Target,
+        /// Previously composed address, to which we should append read nibbles.
         pub partial_address: PartialStorageAddressTarget
     }
 }
 
 impl_target_set! {
     pub struct NibbleParserOutputTarget {
+        /// Next data offset.
         pub resulting_offset: Target,
+        /// Provided partial address composed with parsed nibbles.
         pub partial_address: PartialStorageAddressTarget
     }
 }
@@ -107,7 +116,6 @@ mod tests {
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
-            circuit_builder::CircuitBuilder,
             circuit_data::{CircuitConfig, CircuitData},
             proof::ProofWithPublicInputs,
         },
@@ -118,7 +126,7 @@ mod tests {
     use crate::{
         common::targets::TargetSet,
         storage_inclusion::storage_trie_proof::{
-            node_parser::{pad_byte_vec, NodeDataBlockTarget, NODE_DATA_BLOCK_BYTES},
+            node_parser::{pad_byte_vec, NODE_DATA_BLOCK_BYTES},
             storage_address::tests_common::create_address_target,
         },
     };

@@ -1,3 +1,16 @@
+//! ### Circuit that's used to parse bitmap from encoded branch node.
+//!
+//! Bitmap is a 2-byte data that describes which child nodes are present. For example, if bitmap
+//! value is `0b00_11_10_00_11_00_01_10` then it means that only child nodes with nibbles
+//! 2, 3, 4, 8, 9, 13, 14 are present.
+//!
+//! This circuit computes 2 things:
+//! - Overall amount of children nodes. It's used to assert that amount is correct.
+//! - Converts nibble to index in the array of children nodes. They differ because empty nodes aren't
+//!     stored in this array. For example, if we have bitmap `0b00_11_10_00_11_00_01_10` and provide
+//!     `nibble = 4` as input, we should get `index = 2` as first 2 nodes are empty. It's used later
+//!     to assert that this node have correct hash.
+
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
@@ -12,16 +25,26 @@ use crate::{
 
 impl_target_set! {
     pub struct BitmapParserInputTarget {
+        /// First block from encoded node data. We can process only the first block as it's
+        /// guaranteed that bitmap will be present right after prefix and nibbles, so will
+        /// definitely lay in a first data block.
         pub first_node_data_block: NodeDataBlockTarget,
+        /// Offset of bitmap data in `first_node_data_block`.
         pub read_offset: Target,
+        /// Nibble of the node that we claim will be next in our traversal of trie. Used to compute
+        /// `BitmapParserOutputTarget::child_index_in_array`
         pub claimed_child_node_nibble: HalfByteTarget,
     }
 }
 
 impl_target_set! {
     pub struct BitmapParserOutputTarget {
+        /// Offset of the subsequent data.
         pub resulting_offset: Target,
+        /// Amount of children present in this node.
         pub overall_children_amount: Target,
+        /// Index of the claimed child in children array. It differs from nibble as only non-empty
+        /// nodes are stored in children array.
         pub child_index_in_array: Target
     }
 }
@@ -110,7 +133,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "Partition containing Wire(Wire { row: 7, column: 59 }) was set twice with different values: 0 != 1"
+        expected = "Partition containing Wire(Wire { row: 9, column: 59 }) was set twice with different values: 0 != 1"
     )]
     fn test_bitmap_parser_wrong_claimed_child_fails() {
         test_case([0b01_11_11_11, 0b11_11_11_11], 7, None);

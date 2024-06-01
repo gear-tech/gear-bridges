@@ -1,3 +1,5 @@
+//! ### Contains circuit that's used to compute blake2 hash of generic-length data.
+
 use lazy_static::lazy_static;
 use plonky2::{
     gates::noop::NoopGate,
@@ -16,25 +18,36 @@ use plonky2_blake2b256::circuit::{
 use plonky2_field::types::Field;
 
 use crate::{
-    common::targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+    common::{
+        targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+        ProofWithCircuitData,
+    },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use super::pad_byte_vec;
 
+/// Maximum amount of blake2 blocks.
 const MAX_BLOCK_COUNT: usize = 8;
+/// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
 impl_parsable_target_set! {
+    /// Public inputs for `GenericBlake2`.
     pub struct GenericBlake2Target {
+        /// It's guaranteed that padding of data will be zeroed and asserted to be equal 0.
         pub data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
+        /// Length of a useful data.
         pub length: Target,
+        /// Resulting hash.
         pub hash: Blake2Target
     }
 }
 
+// Unlike `VariativeBlake2`, this circuit will have constant `VerifierOnlyCircuitData` across all
+// the valid inputs.
 pub struct GenericBlake2 {
+    /// Data to be hashed.
     pub data: Vec<u8>,
 }
 
@@ -63,11 +76,15 @@ impl GenericBlake2 {
             verifier_data_targets.push(
                 verifier_data_targets
                     .last()
-                    .expect("VERIFIER_DATA_BY_BLOCK_COUNT >= 1")
+                    .expect("VERIFIER_DATA_BY_BLOCK_COUNT must be >= 1")
                     .clone(),
             );
         }
 
+        // It's ok not to check `verifier_data_idx` range as `GenericBlake2` just exposes all the
+        // public inputs of `VariativeBlake2`, so we need to check just that it's contained in
+        // pre-computed verifier data array. All the other assertions must be performed in
+        // `VariativeBlake2`.
         let verifier_data_idx = builder.add_const(block_count_target, F::NEG_ONE);
         let verifier_data_target =
             builder.random_access_verifier_data(verifier_data_idx, verifier_data_targets);
@@ -90,11 +107,12 @@ impl GenericBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
 
 lazy_static! {
+    /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
     static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
         ..=MAX_BLOCK_COUNT)
         .map(blake2_circuit_verifier_data)
@@ -121,6 +139,8 @@ impl_target_set! {
     }
 }
 
+/// Inner circuit that will have different `VerifierOnlyCircuitData` for each block count.
+/// This circuit asserts that data padding is zeroed(it applies to targets, not the `data` field).
 struct VariativeBlake2 {
     data: Vec<u8>,
 }
@@ -200,7 +220,7 @@ impl VariativeBlake2 {
             builder.add_gate(NoopGate, vec![]);
         }
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
 

@@ -1,3 +1,5 @@
+//! Circuit that's used to prove correct parsing of leaf node.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -7,25 +9,30 @@ use crate::{
     common::{
         generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget};
 
 impl_parsable_target_set! {
+    /// Public inputs for `HashedLeafParser`.
     pub struct HashedLeafParserTarget {
+        /// Blake2 hash of encoded node data.
         pub node_hash: Blake2Target,
+        /// Blake2 hash of data present in storage.
         pub storage_data_hash: Blake2Target,
 
+        /// Address composed from all the nodes from root to this.
         pub partial_address: PartialStorageAddressTarget,
+        /// Address of storage item.
         pub final_address: PartialStorageAddressTarget,
     }
 }
 
 pub struct HashedLeafParser {
+    /// Inner non-hashed leaf parser.
     pub leaf_parser: LeafParser,
 }
 
@@ -37,7 +44,7 @@ impl HashedLeafParser {
         .prove();
         let leaf_parser_proof = self.leaf_parser.prove();
 
-        log::info!("Composing hasher proof and leaf parser proof...");
+        log::debug!("Composing hasher proof and leaf parser proof...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -76,9 +83,9 @@ impl HashedLeafParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Composed hasher proof and leaf parser proof...");
+        log::debug!("Composed hasher proof and leaf parser proof...");
 
         result
     }

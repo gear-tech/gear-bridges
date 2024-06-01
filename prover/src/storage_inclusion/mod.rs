@@ -1,3 +1,15 @@
+//! ### Circuit that's used to prove inclusion of some data into block storage.
+//!
+//! Currently it supports only `StorageValue` (not `StorageMap` and `StorageDoubleMap`) entries into
+//! storage. Also trie node containing value must be either `Leaf` or `HashedValueLeaf`
+//! (not `BranchWithValue`).
+//!
+//! In case data in leaf node is less or equal to 32 bytes in length, it gets inlined by substrate
+//! storage logic. Currently we don't support inlined data with length != 32 bytes.
+//!
+//! All the above means that any data that's stored in `Leaf` or `HashedValueLeaf` will be parsed,
+//! except ones that have length < 32 bytes.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -6,10 +18,9 @@ use plonky2::{
 use crate::{
     common::{
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 mod block_header_parser;
@@ -21,29 +32,38 @@ use storage_trie_proof::storage_address::PartialStorageAddressTarget;
 use self::{block_header_parser::BlockHeaderParser, storage_trie_proof::StorageTrieProof};
 
 impl_parsable_target_set! {
+    /// Public inputs for `StorageInclusion` proof.
     pub struct StorageInclusionTarget {
+        /// Block hash where storage gets read.
         pub block_hash: Blake2Target,
+        /// Blake2 hash of data included into storage. We don't use original data here as it'll
+        /// potentially have generic length.
         pub storage_item_hash: Blake2Target,
     }
 }
 
 #[derive(Clone)]
 pub struct BranchNodeData {
+    /// Encoded data for branch node.
     pub data: Vec<u8>,
+    /// Address of the child node that leads to requested storage item.
     pub child_nibble: u8,
 }
 
 #[derive(Clone)]
 pub struct StorageInclusion {
+    /// Encoded block header.
     pub block_header_data: Vec<u8>,
-    /// Arranged from root to leaf.
+    /// Encoded branch nodes, arranged from root to leaf.
     pub branch_node_data: Vec<BranchNodeData>,
+    /// Encoded leaf node.
     pub leaf_node_data: Vec<u8>,
+    /// Full storage item address. Note that nibble values are in range 0..=15.
     pub address_nibbles: Vec<u8>,
 }
 
 impl StorageInclusion {
-    pub fn prove(self) -> ProofWithCircuitData<StorageInclusionTarget> {
+    pub(crate) fn prove(self) -> ProofWithCircuitData<StorageInclusionTarget> {
         let block_header_proof = BlockHeaderParser {
             header_data: self.block_header_data,
         }
@@ -54,6 +74,8 @@ impl StorageInclusion {
             leaf_node_data: self.leaf_node_data,
         }
         .prove();
+
+        log::debug!("Composing block header proof and storage trie proof...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -78,6 +100,10 @@ impl StorageInclusion {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        let res = ProofWithCircuitData::prove_from_builder(builder, witness);
+
+        log::debug!("Composed block header proof and storage trie proof");
+
+        res
     }
 }

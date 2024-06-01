@@ -23,17 +23,17 @@ plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
 plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
 plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
 plonky2_u32 = { path = "./circuits/plonky2_u32" }
-intermediate-proof-storage = { path = "./intermediate-proof-storage" }
 ethereum-client = { path = "./ethereum-client" }
 
-plonky2 = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_field = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_util = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_maybe_rayon = { git = "https://github.com/0xPolygonZero/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 
 # Coordinates of `EdwardsPoint` made public in fork.
-curve25519-dalek = { git = "https://github.com/mertwole/curve25519-dalek.git" }
+curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek" }
 
+actix-web = "4.5.1"
 anyhow = "1.0.40"
 env_logger = "0.9.0"
 itertools = "0.10.5"

@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse encoded leaf node.
+
 use plonky2::{
     iop::{
         target::Target,
@@ -16,6 +18,7 @@ use crate::{
     common::{
         pad_byte_vec,
         targets::{Blake2Target, TargetSet},
+        ProofWithCircuitData,
     },
     impl_parsable_target_set,
     prelude::*,
@@ -29,26 +32,32 @@ use crate::{
         },
         storage_address::PartialStorageAddressTarget,
     },
-    ProofWithCircuitData,
 };
 
 mod hashed_data_parser;
 mod inlined_data_parser;
 
 impl_parsable_target_set! {
+    /// `LeafParser` public inputs.
     pub struct LeafParserTarget {
+        /// Encoded node data, padded to max leaf node encoded length.
         pub padded_node_data: LeafNodeDataPaddedTarget,
+        /// Actual encoded data length.
         pub node_data_length: Target,
-
+        /// Expected blake2b hash of data stored in this leaf.
         pub storage_data_hash: Blake2Target,
-
+        /// Address that was previously composed by parsing all the parent nodes.
         pub partial_address: PartialStorageAddressTarget,
+        /// Final address of storage item.
         pub final_address: PartialStorageAddressTarget
     }
 }
 
 pub struct LeafParser {
+    /// Encoded leaf node data.
     pub node_data: Vec<u8>,
+    /// Previously composed address nibbles. Note that we store nibbles as `u8` but they're must be
+    /// in range (0..=15).
     pub partial_address_nibbles: Vec<u8>,
 }
 
@@ -59,7 +68,7 @@ enum LeafType {
 
 impl LeafParser {
     pub fn prove(self) -> ProofWithCircuitData<LeafParserTarget> {
-        log::info!("Proving leaf node parser...");
+        log::debug!("Proving leaf node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.num_wires = 160;
@@ -144,9 +153,9 @@ impl LeafParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Proven leaf node parser");
+        log::debug!("Proven leaf node parser");
 
         result
     }
@@ -158,7 +167,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        common::{array_to_bits, pad_byte_vec, targets::ParsableTargetSet},
+        common::{array_to_bits, targets::ParsableTargetSet},
         prelude::consts::BLAKE2_DIGEST_SIZE,
     };
 

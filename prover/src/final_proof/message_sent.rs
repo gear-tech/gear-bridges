@@ -1,3 +1,5 @@
+//! ### Circuit that's used to prove that message was queued for relaying.
+
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -14,31 +16,35 @@ use crate::{
             impl_target_set, ArrayTarget, Blake2Target, Blake2TargetGoldilocks,
             MessageTargetGoldilocks, TargetBitOperations, TargetSet,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::MESSAGE_SIZE_IN_BITS,
     prelude::*,
     storage_inclusion::StorageInclusion,
-    ProofWithCircuitData,
 };
 
 impl_target_set! {
+    /// Public inputs for `MessageSent`.
     pub struct MessageSentTarget {
+        /// Blake2 hash of concatenated validator public inputs.
         pub validator_set_hash: Blake2TargetGoldilocks,
+        /// Actual GRANDPA authority set id.
         pub authority_set_id: Target,
+        /// Block number where message was sent.
         pub block_number: Target,
+        /// Contents of the message that gets relayed.
         pub message_contents: MessageTargetGoldilocks,
     }
 }
 
 impl_target_set! {
-    pub struct MessageInStorageTarget {
-        pub merkle_trie_root: ArrayTarget<BoolTarget, MESSAGE_SIZE_IN_BITS>,
+    struct MessageInStorageTarget {
+        merkle_trie_root: ArrayTarget<BoolTarget, MESSAGE_SIZE_IN_BITS>,
     }
 }
 
 impl MessageInStorageTarget {
-    pub fn hash(&self, builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
+    fn hash(&self, builder: &mut CircuitBuilder<F, D>) -> Blake2Target {
         let bit_targets = self
             .clone()
             .into_targets_iter()
@@ -54,19 +60,22 @@ impl MessageInStorageTarget {
 }
 
 pub struct MessageSent {
+    /// Proof that block where message is present in storage is finalized.
     pub block_finality: BlockFinality,
+    /// Proof that message is present in the storage.
     pub inclusion_proof: StorageInclusion,
+    /// Original data stored in substrate storage.
     pub message_storage_data: Vec<u8>,
 }
 
 impl MessageSent {
     pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
-        log::info!("Proving message presense in finalized block...");
+        log::debug!("Proving message presense in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
 
-        log::info!("Composing inclusion and finality proofs...");
+        log::debug!("Composing inclusion and finality proofs...");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
@@ -75,6 +84,9 @@ impl MessageSent {
             builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
         let finality_proof_target =
             builder.recursively_verify_constant_proof(&finality_proof, &mut witness);
+
+        let block_number =
+            Target::from_bool_targets_le(finality_proof_target.message.block_number, &mut builder);
 
         inclusion_proof_target
             .block_hash
@@ -102,10 +114,7 @@ impl MessageSent {
                 finality_proof_target.message.authority_set_id,
                 &mut builder,
             ),
-            block_number: Target::from_bool_targets_le(
-                finality_proof_target.message.block_number,
-                &mut builder,
-            ),
+            block_number,
             message_contents: MessageTargetGoldilocks::from_bit_array(
                 storage_data_target.merkle_trie_root,
                 &mut builder,
@@ -113,6 +122,6 @@ impl MessageSent {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

@@ -87,31 +87,31 @@ pub fn load_curve_scalar_mul_windowed_part_circuit_public_inputs_target<
     let mut index = 0;
     for x in &p_target.x.value.limbs {
         builder.connect(public_input_targets[index], x.0);
-        index = index + 1;
+        index += 1;
     }
     for y in &p_target.y.value.limbs {
         builder.connect(public_input_targets[index], y.0);
-        index = index + 1;
+        index += 1;
     }
     for x in &q_init_target.x.value.limbs {
         builder.connect(public_input_targets[index], x.0);
-        index = index + 1;
+        index += 1;
     }
     for y in &q_init_target.y.value.limbs {
         builder.connect(public_input_targets[index], y.0);
-        index = index + 1;
+        index += 1;
     }
     for x in &n_target.value.limbs {
         builder.connect(public_input_targets[index], x.0);
-        index = index + 1;
+        index += 1;
     }
     for x in &q_target.x.value.limbs {
         builder.connect(public_input_targets[index], x.0);
-        index = index + 1;
+        index += 1;
     }
     for y in &q_target.y.value.limbs {
         builder.connect(public_input_targets[index], y.0);
-        index = index + 1;
+        index += 1;
     }
     assert_eq!(index, public_input_targets.len());
 
@@ -332,8 +332,8 @@ where
         y: Ed25519Base::ONE,
         zero: false,
     };
-    let q1_init = (CurveScalar::<Ed25519>(n0.clone()) * p.to_projective()).to_affine();
-    let q_expected = (CurveScalar::<Ed25519>(n.clone()) * p.to_projective()).to_affine();
+    let q1_init = (CurveScalar::<Ed25519>(n0) * p.to_projective()).to_affine();
+    let q_expected = (CurveScalar::<Ed25519>(*n) * p.to_projective()).to_affine();
 
     let mut builder = CircuitBuilder::<F, D>::new(config.clone());
     let mut pw = PartialWitness::new();
@@ -342,20 +342,12 @@ where
         &mut builder,
     )?;
 
-    let (proof0, _, _) = prove_curve_scalar_mul_windowed_part::<F, Ed25519, C, D>(
-        config.clone(),
-        &p,
-        &q0_init,
-        &n0,
-    )?;
+    let (proof0, _, _) =
+        prove_curve_scalar_mul_windowed_part::<F, Ed25519, C, D>(config.clone(), p, &q0_init, &n0)?;
     pw.set_proof_with_pis_target(&targets.proof0, &proof0);
 
-    let (proof1, _, _) = prove_curve_scalar_mul_windowed_part::<F, Ed25519, C, D>(
-        config.clone(),
-        &p,
-        &q1_init,
-        &n1,
-    )?;
+    let (proof1, _, _) =
+        prove_curve_scalar_mul_windowed_part::<F, Ed25519, C, D>(config.clone(), p, &q1_init, &n1)?;
     pw.set_proof_with_pis_target(&targets.proof1, &proof1);
 
     pw.set_biguint_target(&targets.n_target.value, &n_biguint);

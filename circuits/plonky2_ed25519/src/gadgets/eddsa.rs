@@ -79,7 +79,7 @@ pub fn make_verify_circuits<F: RichField + Extendable<D>, const D: usize>(
     let rhs = builder.curve_add(&r, &ha);
     builder.connect_affine_point(&sb, &rhs);
 
-    return EDDSATargets { msg, sig, pk };
+    EDDSATargets { msg, sig, pk }
 }
 
 pub fn fill_circuits<F: RichField + Extendable<D>, const D: usize>(

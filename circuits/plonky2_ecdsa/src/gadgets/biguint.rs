@@ -1,5 +1,7 @@
+#[cfg(not(test))]
 use alloc::string::String;
 use alloc::vec;
+#[cfg(not(test))]
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
@@ -350,15 +352,15 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         unimplemented!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,

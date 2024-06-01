@@ -2,7 +2,6 @@ use std::borrow::Borrow;
 
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
-use plonky2::field::types::Field;
 use plonky2::gates::arithmetic_base::ArithmeticGate;
 use plonky2::gates::arithmetic_extension::ArithmeticExtensionGate;
 
@@ -127,15 +126,15 @@ impl<F: RichField + Extendable<D>, const B: usize, const D: usize> SimpleGenerat
 
     fn serialize(
         &self,
-        dst: &mut Vec<u8>,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _dst: &mut Vec<u8>,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
         unimplemented!()
     }
 
     fn deserialize(
-        src: &mut plonky2::util::serialization::Buffer,
-        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        _src: &mut plonky2::util::serialization::Buffer,
+        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,

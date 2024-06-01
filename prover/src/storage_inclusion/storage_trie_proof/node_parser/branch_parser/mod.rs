@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse encoded branch node.
+
 use parity_scale_codec::Encode;
 use plonky2::{
     iop::{
@@ -18,7 +20,7 @@ use super::{
 use crate::{
     common::{
         targets::{Blake2Target, HalfByteTarget, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::BLAKE2_DIGEST_SIZE,
     impl_parsable_target_set,
@@ -30,7 +32,6 @@ use crate::{
         },
         storage_address::PartialStorageAddressTarget,
     },
-    ProofWithCircuitData,
 };
 use bitmap_parser::BitmapParserInputTarget;
 use child_node_array_parser::ChildNodeArrayParser;
@@ -39,21 +40,31 @@ mod bitmap_parser;
 mod child_node_array_parser;
 
 impl_parsable_target_set! {
+    /// `BranchParser` public inputs.
     pub struct BranchParserTarget {
+        /// Encoded node data, padded to a max branch node encoded length.
         pub padded_node_data: BranchNodeDataPaddedTarget,
+        /// Actual length of encoded data.
         pub node_data_length: Target,
-
+        /// Hash of next node when we move from root to leaf.
         pub child_node_hash: Blake2Target,
-
+        /// Address that was previously composed from all the partial addresses found in nodes from
+        /// the root to the current node.
         pub partial_address: PartialStorageAddressTarget,
+        /// `partial_address` with current node nibbles amd child nibble appended.
         pub resulting_partial_address: PartialStorageAddressTarget,
     }
 }
 
 pub struct BranchParser {
+    /// Encoded branch node data.
     pub node_data: Vec<u8>,
-
+    /// Next trie node when we move from the root to a leaf. Note that it's represented as u8, but
+    /// valid values are only 0..=15.
     pub claimed_child_node_nibble: u8,
+    /// Address that was previously composed from all the partial addresses found in nodes from
+    /// the root to the current node. Note that it's a `Vec` of nibbles, so each element must have
+    /// values in range 0..=15.
     pub partial_address_nibbles: Vec<u8>,
 }
 
@@ -79,7 +90,7 @@ impl BranchParser {
         }
         .prove();
 
-        log::info!("Proving branch node parser...");
+        log::debug!("Proving branch node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
         config.num_wires = 160;
@@ -173,9 +184,9 @@ impl BranchParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Proven branch node parser");
+        log::debug!("Proven branch node parser");
 
         result
     }

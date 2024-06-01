@@ -2,14 +2,15 @@
 #![feature(generic_const_exprs)]
 
 use anyhow::anyhow;
+use dto::BranchNodeData;
 use gsdk::{
     metadata::{
-        storage::{BabeStorage, GrandpaStorage, SessionStorage},
+        storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
     GearConfig,
 };
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
 use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
@@ -24,28 +25,25 @@ use subxt::{
 };
 use trie_db::{node::NodeHandle, ChildReference};
 
-const VOTE_LENGTH_IN_BITS: usize = 424;
-const VALIDATOR_COUNT: usize = 6;
-const PROCESSED_VALIDATOR_COUNT: usize = 5;
+use crate::dto::StorageInclusionProof;
 
+pub mod dto;
+
+struct StorageTrieInclusionProof {
+    branch_nodes_data: Vec<BranchNodeData>,
+    leaf_node_data: Vec<u8>,
+
+    leaf_data: Vec<u8>,
+}
+
+const VOTE_LENGTH_IN_BITS: usize = 424;
 const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
+const MERKLE_ROOT_STORAGE_ADDRESS: &str =
+    "ea31e171c2cd790a23350b5e593ed882df509310bc655bbf75a5b563fc3c8eee";
+const NEXT_VALIDATOR_SET_ADDRESS: &str =
+    "ea31e171c2cd790a23350b5e593ed8827d9fe37370ac390779f35763d98106e8";
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
-
-pub struct StorageBranchNodeData {
-    pub encoded_node: Vec<u8>,
-    pub child_nibble: u8,
-}
-pub struct StorageInclusionProof {
-    pub branch_nodes_data: Vec<StorageBranchNodeData>,
-    pub encoded_leaf_node: Vec<u8>,
-    pub storage_data: Vec<u8>,
-}
-
-pub struct BlockInclusionProof {
-    pub storage_inclusion_proof: StorageInclusionProof,
-    pub encoded_header: Vec<u8>,
-}
 
 pub struct GearApi {
     api: gsdk::Api,
@@ -88,10 +86,11 @@ impl GearApi {
     pub async fn fetch_finality_proof_for_session(
         &self,
         validator_set_id: u64,
-    ) -> anyhow::Result<(H256, prover::block_finality::BlockFinality)> {
+    ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
         let block = self
             .search_for_validator_set_block(validator_set_id)
             .await?;
+
         self.fetch_finality_proof(block).await
     }
 
@@ -100,7 +99,7 @@ impl GearApi {
     pub async fn fetch_finality_proof(
         &self,
         after_block: H256,
-    ) -> anyhow::Result<(H256, prover::block_finality::BlockFinality)> {
+    ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
         let required_validator_set_id = self.validator_set_id(after_block).await?;
 
         let after_block_number = self.block_hash_to_number(after_block).await?;
@@ -134,32 +133,26 @@ impl GearApi {
         assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
 
         for pc in &justification.commit.precommits {
-            pc.signature.verify(&signed_data[..], &pc.id);
+            assert!(pc.signature.verify(&signed_data[..], &pc.id));
         }
 
         let validator_set = self.fetch_validator_set(required_validator_set_id).await?;
-        assert_eq!(VALIDATOR_COUNT, validator_set.len());
 
         let pre_commits: Vec<_> = justification
             .commit
             .precommits
             .into_iter()
-            .take(PROCESSED_VALIDATOR_COUNT)
-            .map(|pc| prover::block_finality::PreCommit {
+            .map(|pc| dto::PreCommit {
                 public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                 signature: pc.signature.as_inner_ref().0.to_owned(),
             })
             .collect();
 
-        assert_eq!(pre_commits.len(), PROCESSED_VALIDATOR_COUNT);
-
         Ok((
             finality.block,
-            prover::block_finality::BlockFinality {
+            dto::BlockFinalityProof {
                 validator_set,
-                message: signed_data
-                    .try_into()
-                    .expect("Correct grandpa message length"),
+                message: signed_data,
                 pre_commits,
             },
         ))
@@ -258,20 +251,19 @@ impl GearApi {
             .collect::<Vec<_>>())
     }
 
-    /// NOTE: mock for now, returns some data with constant position in merkle trie.
     pub async fn fetch_sent_message_inclusion_proof(
         &self,
         block: H256,
-    ) -> anyhow::Result<BlockInclusionProof> {
-        let address = gsdk::Api::storage_root(BabeStorage::Randomness).to_root_bytes();
+    ) -> anyhow::Result<dto::StorageInclusionProof> {
+        let address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
         self.fetch_block_inclusion_proof(block, &address).await
     }
 
     pub async fn fetch_next_session_keys_inclusion_proof(
         &self,
         block: H256,
-    ) -> anyhow::Result<BlockInclusionProof> {
-        let address = gsdk::Api::storage_root(SessionStorage::QueuedKeys).to_root_bytes();
+    ) -> anyhow::Result<dto::StorageInclusionProof> {
+        let address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
         self.fetch_block_inclusion_proof(block, &address).await
     }
 
@@ -279,7 +271,7 @@ impl GearApi {
         &self,
         block: H256,
         address: &[u8],
-    ) -> anyhow::Result<BlockInclusionProof> {
+    ) -> anyhow::Result<dto::StorageInclusionProof> {
         let storage_inclusion_proof = self.fetch_storage_inclusion_proof(block, address).await?;
 
         let block = (*self.api).blocks().at(block).await?;
@@ -294,15 +286,19 @@ impl GearApi {
             .branch_nodes_data
             .last()
             .expect("At least one node in storage inclusion proof");
-        let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.encoded_node);
+        let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.data);
+
+        let block_number_length = Compact::<u32>(block.number()).encode().len();
         assert_eq!(
-            &encoded_header[32 + 4..32 + 4 + 32],
+            &encoded_header[32 + block_number_length..32 + block_number_length + 32],
             &fetched_storage_root_hash.0
         );
 
-        Ok(BlockInclusionProof {
-            storage_inclusion_proof,
-            encoded_header,
+        Ok(StorageInclusionProof {
+            block_header: encoded_header,
+            branch_nodes_data: storage_inclusion_proof.branch_nodes_data,
+            leaf_node_data: storage_inclusion_proof.leaf_node_data,
+            stored_data: storage_inclusion_proof.leaf_data,
         })
     }
 
@@ -310,7 +306,7 @@ impl GearApi {
         &self,
         block: H256,
         address: &[u8],
-    ) -> anyhow::Result<StorageInclusionProof> {
+    ) -> anyhow::Result<StorageTrieInclusionProof> {
         use trie_db::{
             node::{Node, Value},
             NodeCodec, TrieLayout,
@@ -346,7 +342,7 @@ impl GearApi {
             _,
             _,
         >(&storage_proof, state_root, storage_keys.iter())
-        .expect(&format!("Failed to generate trie proof for {:?}", address));
+        .unwrap_or_else(|err| panic!("Failed to generate trie proof for {:?}: {}", address, err));
 
         let leaf = proof.pop().expect("At least one node in trie proof");
         let leaf = TrieCodec::decode(&leaf).expect("Failed to decode last node in trie proof");
@@ -354,12 +350,11 @@ impl GearApi {
             assert!(matches!(value.clone(), Value::Inline(b) if b.is_empty()));
 
             let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
-            let value = if storage_data.len() == 32 {
-                Value::Inline(&storage_data)
-            } else if storage_data.len() > 32 {
-                Value::Node(&storage_data_hash)
-            } else {
-                panic!("Unsupported leaf data length");
+
+            let value = match storage_data.len() {
+                32 => Value::Inline(&storage_data),
+                l if l > 32 => Value::Node(&storage_data_hash),
+                _ => panic!("Unsupported leaf data length"),
             };
 
             TrieCodec::leaf_node(nibbles.right_iter(), nibbles.len(), value)
@@ -381,7 +376,7 @@ impl GearApi {
                     .map(|(child_nibble, mut child)| {
                         if matches!(child, Some(NodeHandle::Inline(&[]))) {
                             assert!(target_child_nibble.is_none());
-                            target_child_nibble = Some(child_nibble);
+                            target_child_nibble = Some(child_nibble as u8);
                             child = Some(NodeHandle::Hash(&current_hash));
                         }
 
@@ -405,9 +400,9 @@ impl GearApi {
 
                 current_hash = Blake2Hasher::hash(&encoded_node).0;
 
-                branch_nodes.push(StorageBranchNodeData {
-                    encoded_node,
-                    child_nibble: target_child_nibble as u8,
+                branch_nodes.push(BranchNodeData {
+                    data: encoded_node,
+                    target_child: target_child_nibble,
                 });
             } else {
                 panic!("All remaining nodes are expected to be nibbled branches");
@@ -416,10 +411,10 @@ impl GearApi {
 
         assert_eq!(state_root.0, current_hash);
 
-        Ok(StorageInclusionProof {
+        Ok(StorageTrieInclusionProof {
             branch_nodes_data: branch_nodes,
-            encoded_leaf_node: encoded_leaf,
-            storage_data,
+            leaf_node_data: encoded_leaf,
+            leaf_data: storage_data,
         })
     }
 

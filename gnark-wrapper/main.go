@@ -38,10 +38,36 @@ type Plonky2VerifierCircuit struct {
 	VerifierData variables.VerifierOnlyCircuitData
 	PublicInputs []gl.Variable
 
-	CommonCircuitData types.CommonCircuitData `gnark:"-"`
+	VerifierOnlyCircuitData types.VerifierOnlyCircuitDataRaw `gnark:"-"`
+	CommonCircuitData       types.CommonCircuitData          `gnark:"-"`
 }
 
 func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
+	desiredCircuitDigestValue, success := new(big.Int).SetString(c.VerifierOnlyCircuitData.CircuitDigest, 10)
+	if !success {
+		panic("Failed to convert CircuitDigest to big.Int")
+	}
+
+	desiredCircuitDigest, success := api.Compiler().ConstantValue(desiredCircuitDigestValue)
+	if !success {
+		panic("Failed to read circuit digest value")
+	}
+	api.AssertIsEqual(desiredCircuitDigest, c.VerifierData.CircuitDigest)
+
+	for i := 0; i < len(c.VerifierData.ConstantSigmasCap); i++ {
+		desiredMerkleCapHashValue, success := new(big.Int).SetString(c.VerifierOnlyCircuitData.ConstantsSigmasCap[i], 10)
+		if !success {
+			errorString := fmt.Sprintf("Failed to convert ConstantsSigmasCap[%d] to big.Int", i)
+			panic(errorString)
+		}
+
+		desiredMerkleCapHash, success := api.Compiler().ConstantValue(desiredMerkleCapHashValue)
+		if !success {
+			panic("Failed to read constants sigmas cap value")
+		}
+		api.AssertIsEqual(desiredMerkleCapHash, c.VerifierData.ConstantSigmasCap[i])
+	}
+
 	verifierChip := verifier.NewVerifierChip(api, c.CommonCircuitData)
 	verifierChip.Verify(c.Proof, c.PublicInputs, c.VerifierData)
 
@@ -58,20 +84,6 @@ func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
 		}
 
 		api.AssertIsEqual(c.CompressedPublicInputs[i], compressed)
-	}
-
-	desiredCircuitDigest, success := api.Compiler().ConstantValue(c.VerifierData.CircuitDigest)
-	if !success {
-		panic("Failed to read circuit digest value")
-	}
-	api.AssertIsEqual(desiredCircuitDigest, c.VerifierData.CircuitDigest)
-
-	for i := 0; i < len(c.VerifierData.ConstantSigmasCap); i++ {
-		desiredMerkleCapHash, success := api.Compiler().ConstantValue(c.VerifierData.ConstantSigmasCap[i])
-		if !success {
-			panic("Failed to read constants sigmas cap value")
-		}
-		api.AssertIsEqual(desiredMerkleCapHash, c.VerifierData.ConstantSigmasCap[i])
 	}
 
 	return nil
@@ -234,7 +246,8 @@ func deserializeCircuit(data string) (Plonky2VerifierCircuit, error) {
 		VerifierData: verifierOnlyCircuitData,
 		PublicInputs: publicInputs,
 
-		CommonCircuitData: commonCircuitData,
+		VerifierOnlyCircuitData: rawVerifierData,
+		CommonCircuitData:       commonCircuitData,
 	}, nil
 }
 

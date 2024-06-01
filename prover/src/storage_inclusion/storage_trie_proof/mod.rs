@@ -1,14 +1,13 @@
+//! ### Circuit that's used to prove inclusion of storage item into storage trie.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
-use crate::{
-    common::{
-        targets::{impl_target_set, Blake2Target, ParsableTargetSet, TargetSet},
-        BuilderExt,
-    },
-    ProofWithCircuitData,
+use crate::common::{
+    targets::{impl_target_set, Blake2Target, ParsableTargetSet, TargetSet},
+    BuilderExt, ProofWithCircuitData,
 };
 
 use super::BranchNodeData;
@@ -27,15 +26,21 @@ pub mod storage_address;
 use branch_node_chain::BranchNodeChain;
 
 impl_target_set! {
+    /// Public inputs for `StorageTrieProof`.
     pub struct StorageTrieProofTarget {
+        /// State root hash.
         pub root_hash: Blake2Target,
+        /// Blake2 hash of data present in storage.
         pub data_hash: Blake2Target,
+        /// Address by which storage gets read.
         pub address: PartialStorageAddressTarget
     }
 }
 
 pub struct StorageTrieProof {
+    /// Encoded branch nodes, arranged from root to leaf.
     pub branch_nodes: Vec<BranchNodeData>,
+    /// Encoded leaf node.
     pub leaf_node_data: Vec<u8>,
 }
 
@@ -62,6 +67,8 @@ impl StorageTrieProof {
         }
         .prove();
 
+        log::debug!("Composing branch node chain proof and hashed leaf parser proof...");
+
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
 
@@ -85,6 +92,10 @@ impl StorageTrieProof {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        let res = ProofWithCircuitData::prove_from_builder(builder, witness);
+
+        log::debug!("Composed branch node chain proof and hashed leaf parser proof");
+
+        res
     }
 }

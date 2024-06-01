@@ -236,15 +236,9 @@ mod tests {
     };
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig,
-            config::PoseidonGoldilocksConfig,
-        },
+        plonk::{circuit_data::CircuitConfig, config::PoseidonGoldilocksConfig},
     };
-    use plonky2_field::{
-        goldilocks_field::GoldilocksField,
-        types::{Field64, PrimeField64},
-    };
+    use plonky2_field::{goldilocks_field::GoldilocksField, types::PrimeField64};
 
     pub type F = GoldilocksField;
     pub type C = PoseidonGoldilocksConfig;

@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse storage data from `HashedValueLeaf` node.
+
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
@@ -9,14 +11,19 @@ use crate::{
 
 impl_target_set! {
     pub struct HashedDataParserInputTarget {
+        // TODO: replace to `LeafNodeData`
+        /// Node encoded data.
         pub first_node_data_block: NodeDataBlockTarget,
+        /// From which offset to read stored data.
         pub read_offset: Target,
     }
 }
 
 impl_target_set! {
     pub struct HashedDataParserOutputTarget {
+        /// Offset of remaining node data.
         pub resulting_offset: Target,
+        /// Blake2 hash of stored data.
         pub data_hash: Blake2Target
     }
 }
@@ -25,7 +32,7 @@ pub fn define(
     input: HashedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> HashedDataParserOutputTarget {
-    log::info!("    Composing hashed data parser");
+    log::debug!("    Composing hashed data parser");
 
     let hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> = input
         .first_node_data_block

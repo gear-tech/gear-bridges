@@ -1,3 +1,7 @@
+//! ### Circuit that's used to parse storage data from `Leaf` node.
+//!
+//! Currently supports only leafs with 32 bytes of inlined data.
+
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 
@@ -5,7 +9,9 @@ use crate::{
     common::targets::{impl_target_set, ArrayTarget, Blake2Target, TargetSet},
     prelude::*,
     storage_inclusion::{
-        scale_compact_integer_parser::{self, ScaleCompactIntegerParserInputTarget},
+        scale_compact_integer_parser::single_byte::{
+            define as define_single_byte_int_parser, InputTarget as SingleByteIntParserInput,
+        },
         storage_trie_proof::node_parser::NodeDataBlockTarget,
     },
 };
@@ -14,32 +20,34 @@ const INLINED_DATA_LENGTH: usize = 32;
 
 impl_target_set! {
     pub struct InlindedDataParserInputTarget {
+        // TODO: replace to `LeafNodeData`
+        /// Node encoded data.
         pub first_node_data_block: NodeDataBlockTarget,
+        /// From which offset to read stored data.
         pub read_offset: Target,
     }
 }
 
 impl_target_set! {
     pub struct InlinedDataParserOutputTarget {
+        /// Offset of remaining node data.
         pub resulting_offset: Target,
+        /// Blake2 hash of stored data.
         pub data_hash: Blake2Target
     }
 }
 
-/// Supports only 32-byte inlined values for now.
 pub fn define(
     input: InlindedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> InlinedDataParserOutputTarget {
-    log::info!("    Composing inlined data parser");
+    log::debug!("    Composing inlined data parser");
 
     let first_byte = input
         .first_node_data_block
         .random_read(input.read_offset, builder);
-    let parsed_length = scale_compact_integer_parser::define(
-        ScaleCompactIntegerParserInputTarget { first_byte },
-        builder,
-    );
+    let parsed_length =
+        define_single_byte_int_parser(SingleByteIntParserInput { first_byte }, builder);
 
     let desired_length = builder.constant(F::from_canonical_usize(INLINED_DATA_LENGTH));
     builder.connect(parsed_length.decoded, desired_length);

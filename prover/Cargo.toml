@@ -12,7 +12,6 @@ keccak-hash.workspace = true
 log.workspace = true
 num.workspace = true
 plonky2.workspace = true
-plonky2_ecdsa.workspace = true
 plonky2_ed25519.workspace = true
 plonky2_field.workspace = true
 plonky2_u32.workspace = true

@@ -1,3 +1,5 @@
+//! ### Circuit that's used to parse children nodes from encoded branch node.
+
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -20,39 +22,54 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_inclusion::storage_trie_proof::node_parser::{
         BranchNodeDataPaddedTarget, MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
     },
-    ProofWithCircuitData,
 };
 use std::iter;
 
 mod child_node_parser;
 
 impl_parsable_target_set! {
+    /// Public inputs for `ChildNodeArrayParser`.
     pub struct ChildNodeArrayParserTarget {
+        /// Encoded node data, padded to a max branch node encoded length.
         pub node_data: BranchNodeDataPaddedTarget,
+        /// Offset to read children info from `node_data`.
         pub initial_read_offset: Target,
+        /// Should point to the end of a data, as children are located at the end of encoded branch
+        /// node.
         pub final_read_offset: Target,
+        /// Overall amount of non-empty children nodes.
         pub overall_children_amount: Target,
+        /// Index of a child that we claim will be next in our trie traversal. Note that it's not a
+        /// nibble, but basically index in the array of nodes that we read from encoded data.
         pub claimed_child_index_in_array: Target,
+        /// Hash of a child that we claim will be next in our trie traversal.
         pub claimed_child_hash: Blake2Target,
     }
 }
 
 #[derive(Clone)]
 pub struct InitialData {
+    /// Padded SCALE encoded node data.
     pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
+    /// Offset to read children info from `node_data`.
     pub read_offset: usize,
+    /// Index of a child that we claim will be next in our trie traversal. Note that it's not a
+    /// nibble, but basically index in the array of nodes that we read from encoded data.
     pub claimed_child_index_in_array: usize,
+    /// Hash of a child that we claim will be next in our trie traversal.
     pub claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
 }
 
 pub struct ChildNodeArrayParser {
+    /// Initial data for recursive circuit.
     pub initial_data: InitialData,
+    /// Lengths of encoded children nodes.
     pub children_lengths: Vec<usize>,
 }
 
@@ -67,26 +84,27 @@ impl ChildNodeArrayParser {
         let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut witness);
 
         ChildNodeArrayParserTarget {
-            node_data: inner_proof_pis.node_data,
-            initial_read_offset: inner_proof_pis.initial_read_offset,
-            final_read_offset: inner_proof_pis.read_offset,
-            overall_children_amount: inner_proof_pis.overall_children_amount,
-            claimed_child_index_in_array: inner_proof_pis.claimed_child_index_in_array,
-            claimed_child_hash: inner_proof_pis.claimed_child_hash,
+            node_data: inner_proof_pis.inner.node_data,
+            initial_read_offset: inner_proof_pis.inner.initial_read_offset,
+            final_read_offset: inner_proof_pis.inner.read_offset,
+            overall_children_amount: inner_proof_pis.inner.overall_children_amount,
+            claimed_child_index_in_array: inner_proof_pis.inner.claimed_child_index_in_array,
+            claimed_child_hash: inner_proof_pis.inner.claimed_child_hash,
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 
-    fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTarget> {
-        log::info!("Proving child node array parser...");
+    fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
+        log::debug!("Proving child node array parser...");
         let claimed_child_hash = array_to_bits(&self.initial_data.claimed_child_hash)
             .try_into()
             .expect("Correct array length");
 
         let mut read_offset = self.initial_data.read_offset;
-        let mut cyclic_proof: Option<ProofWithCircuitData<CyclicRecursionTarget>> = None;
+        let mut cyclic_proof: Option<ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>> =
+            None;
         for (child_idx, child_length) in self.children_lengths.into_iter().enumerate() {
             let assert_child_hash = child_idx == self.initial_data.claimed_child_index_in_array;
 
@@ -108,9 +126,9 @@ impl ChildNodeArrayParser {
             read_offset += child_length;
         }
 
-        log::info!("Proven child node array parser");
+        log::debug!("Proven child node array parser");
 
-        cyclic_proof.expect("At least one child")
+        cyclic_proof.expect("Expected at least one child node in array")
     }
 }
 
@@ -149,8 +167,8 @@ impl Circuit {
     fn prove_initial(
         mut self,
         initial_data: InitialData,
-    ) -> ProofWithCircuitData<CyclicRecursionTarget> {
-        log::info!("    Proving child node parser recursion layer(initial)...");
+    ) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
+        log::debug!("    Proving child node parser recursion layer(initial)...");
 
         let public_inputs = initial_data
             .node_data
@@ -184,9 +202,9 @@ impl Circuit {
         );
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven child node parser recursion layer(initial)...");
+        log::debug!("    Proven child node parser recursion layer(initial)...");
 
         result
     }
@@ -194,28 +212,28 @@ impl Circuit {
     fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<CyclicRecursionTarget> {
-        log::info!("    Proving child node parser recursion layer...");
+    ) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
+        log::debug!("    Proving child node parser recursion layer...");
         self.witness.set_bool_target(self.condition, true);
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
         let result =
-            ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness);
+            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
 
-        log::info!("    Proven child node parser recursion layer");
+        log::debug!("    Proven child node parser recursion layer");
 
         result
     }
 
     fn build(inner_circuit: ChildNodeParser) -> Circuit {
-        log::info!("    Proving child node correctness...");
+        log::debug!("    Proving child node correctness...");
 
         let inner_proof = inner_circuit.prove();
 
-        log::info!("    Proven child node correctness");
+        log::debug!("    Proven child node correctness");
 
-        log::info!("    Building child node parser recursion layer...");
+        log::debug!("    Building child node parser recursion layer...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -304,7 +322,7 @@ impl Circuit {
 
         pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
 
-        log::info!("    Built child node parser recursion layer");
+        log::debug!("    Built child node parser recursion layer");
 
         Circuit {
             cyclic_circuit_data,

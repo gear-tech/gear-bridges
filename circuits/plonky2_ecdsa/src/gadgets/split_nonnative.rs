@@ -1,3 +1,4 @@
+#[cfg(not(test))]
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
@@ -104,7 +105,7 @@ mod tests {
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
     use super::*;
-    use crate::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+    use crate::gadgets::nonnative::CircuitBuilderNonNative;
 
     #[test]
     fn test_split_nonnative() -> Result<()> {

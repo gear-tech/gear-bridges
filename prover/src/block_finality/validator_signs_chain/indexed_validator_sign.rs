@@ -1,3 +1,6 @@
+//! ### Circuit that's used to prove that validator with particular index in validator set have
+//! ### signed GRANDPA message.
+
 use plonky2::{
     iop::{
         target::Target,
@@ -13,27 +16,34 @@ use crate::{
     block_finality::validator_set_hash::ValidatorSetHashTarget,
     common::{
         targets::{impl_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
-    ProofWithCircuitData,
 };
 
 impl_target_set! {
+    /// Public inputs for `IndexedValidatorSign`.
     pub struct IndexedValidatorSignTarget {
+        /// Blake2 hash of concatenated validator set public inputs.
         pub validator_set_hash: Blake2Target,
+        /// Overall validator count in validator set.
         pub validator_count: Target,
-
+        /// Validator index that have signed GRANDPA message.
         pub validator_idx: Target,
+        /// GRANDPA message.
         pub message: GrandpaVoteTarget,
     }
 }
 
 pub struct IndexedValidatorSign {
+    /// Public key corresponding to validator at specified index.
     pub public_key: [u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    /// Index of validator that've signed the message.
     pub index: usize,
+    /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
+    /// Signature corresponding to validator at specified index.
     pub signature: [u8; consts::ED25519_SIGNATURE_SIZE],
 }
 
@@ -42,7 +52,7 @@ impl IndexedValidatorSign {
         &self,
         valiadtor_set_hash_proof: &ProofWithCircuitData<ValidatorSetHashTarget>,
     ) -> ProofWithCircuitData<IndexedValidatorSignTarget> {
-        log::info!("    Proving indexed validator sign...");
+        log::debug!("    Proving indexed validator sign...");
 
         let sign_proof = SingleValidatorSign {
             public_key: self.public_key,
@@ -77,8 +87,6 @@ impl IndexedValidatorSign {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::from_builder(builder, witness)
+        ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }
-
-mod single_validator_sign {}

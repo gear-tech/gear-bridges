@@ -1,3 +1,5 @@
+//! Circuit that's used to prove correct parsing of branch node.
+
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -7,10 +9,9 @@ use crate::{
     common::{
         generic_blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
-        BuilderExt,
+        BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
-    ProofWithCircuitData,
 };
 
 use super::{
@@ -18,16 +19,22 @@ use super::{
 };
 
 impl_parsable_target_set! {
+    /// Public inputs for `HashedBranchParser`.
     pub struct HashedBranchParserTarget {
+        /// Blake2 hash of encoded node data.
         pub node_hash: Blake2Target,
+        /// Blake2 hash of the children node.
         pub child_node_hash: Blake2Target,
 
+        /// Address composed from all the nodes from root to this.
         pub partial_address: PartialStorageAddressTarget,
+        /// `partial_address` concatenated with this node address part.
         pub resulting_partial_address: PartialStorageAddressTarget,
     }
 }
 
 pub struct HashedBranchParser {
+    /// Inner non-hashed branch parser.
     pub branch_parser: BranchParser,
 }
 
@@ -39,7 +46,7 @@ impl HashedBranchParser {
         .prove();
         let branch_parser_proof = self.branch_parser.prove();
 
-        log::info!("Composing hasher proof and branch parser proof...");
+        log::debug!("Composing hasher proof and branch parser proof...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -78,9 +85,9 @@ impl HashedBranchParser {
         }
         .register_as_public_inputs(&mut builder);
 
-        let result = ProofWithCircuitData::from_builder(builder, witness);
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
 
-        log::info!("Composed hasher proof and branch parser proof");
+        log::debug!("Composed hasher proof and branch parser proof");
 
         result
     }

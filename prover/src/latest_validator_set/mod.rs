@@ -1,14 +1,15 @@
+//! ### Circuit that's used to prove correct transition from genesis to current validator set.
+
 use itertools::Itertools;
 use plonky2::{
     field::types::Field,
-    hash::{hash_types::HashOutTarget, merkle_tree::MerkleCap},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
@@ -17,75 +18,44 @@ use plonky2::{
 use crate::{
     common::{
         common_data_for_recursion,
-        targets::{
-            impl_target_set, Blake2TargetGoldilocks, ParsableTargetSet, TargetSet,
-            VerifierDataTarget,
-        },
-        BuilderExt,
+        targets::{impl_target_set, Blake2TargetGoldilocks, TargetSet, VerifierDataTarget},
+        BuilderExt, ProofWithCircuitData,
     },
-    prelude::{
-        consts::{GENESIS_AUTHORITY_SET_ID, GENESIS_VALIDATOR_SET_HASH},
-        *,
-    },
-    ProofWithCircuitData,
+    prelude::*,
+    proving::GenesisConfig,
 };
 
 pub mod next_validator_set;
 
 use next_validator_set::NextValidatorSet;
 
+// Depends on the `CircuitConfig` used to generate this proof.
+// `CircuitConfig::dtandard_recurion_config()` sets 16 merkle cap elements.
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
 impl_target_set! {
+    /// Public inputs for `LatestValidatorSet`.
     pub struct LatestValidatorSetTarget {
+        /// Genesis authority set id.
         pub genesis_set_id: Target,
+        /// Genesis validator set hash.
         pub genesis_hash: Blake2TargetGoldilocks,
+        /// Current authority set id.
         pub current_set_id: Target,
+        /// Current validator set hash.
         pub current_hash: Blake2TargetGoldilocks,
 
+        /// Common verifier data for all the `LatestValidatorSet` proofs.
         pub verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>,
     }
 }
 
-pub struct LatestValidatorSetPublicInputs {
-    pub genesis_set_id: u64,
-    pub genesis_hash: [u8; 32],
-    pub current_set_id: u64,
-    pub current_hash: [u8; 32],
-
-    pub verifier_only_data: VerifierOnlyCircuitData<C, D>,
-}
-
-impl ParsableTargetSet for LatestValidatorSetTarget {
-    type PublicInputsData = LatestValidatorSetPublicInputs;
-
-    fn parse_public_inputs(public_inputs: &mut impl Iterator<Item = F>) -> Self::PublicInputsData {
-        let pis = LatestValidatorSetPublicInputs {
-            genesis_set_id: Target::parse_public_inputs(public_inputs),
-            genesis_hash: Blake2TargetGoldilocks::parse_public_inputs(public_inputs),
-            current_set_id: Target::parse_public_inputs(public_inputs),
-            current_hash: Blake2TargetGoldilocks::parse_public_inputs(public_inputs),
-
-            verifier_only_data: VerifierOnlyCircuitData {
-                circuit_digest: HashOutTarget::parse_public_inputs(public_inputs),
-                constants_sigmas_cap: MerkleCap(
-                    (0..VERIFIER_DATA_NUM_CAP_ELEMENTS)
-                        .map(|_| HashOutTarget::parse_public_inputs(public_inputs))
-                        .collect(),
-                ),
-            },
-        };
-
-        assert_eq!(public_inputs.next(), None);
-
-        pis
-    }
-}
-
 pub struct LatestValidatorSet {
+    /// Proof of transition from `current_set_id - 1` to `current_set_id`.
     pub change_proof: NextValidatorSet,
 }
 
+/// Intermediate data that's used in the process of building circuit.
 struct Circuit {
     cyclic_circuit_data: CircuitData<F, C, D>,
 
@@ -98,10 +68,13 @@ struct Circuit {
 }
 
 impl Circuit {
-    pub fn prove_genesis(mut self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        let genesis_data_pis = vec![GENESIS_AUTHORITY_SET_ID]
+    fn prove_genesis(
+        mut self,
+        config: GenesisConfig,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        let genesis_data_pis = vec![config.validator_set_id]
             .into_iter()
-            .chain(GENESIS_VALIDATOR_SET_HASH)
+            .chain(config.validator_set_hash)
             .map(F::from_noncanonical_u64)
             .enumerate()
             .collect();
@@ -116,10 +89,10 @@ impl Circuit {
             ),
         );
 
-        ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness)
+        ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 
-    pub fn prove_recursive(
+    fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
@@ -127,16 +100,21 @@ impl Circuit {
         self.witness
             .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
 
-        ProofWithCircuitData::from_circuit_data(&self.cyclic_circuit_data, self.witness)
+        ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
 }
 
 impl LatestValidatorSet {
-    pub fn prove_genesis(self) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+    /// Create very first proof.
+    pub fn prove_genesis(
+        self,
+        config: GenesisConfig,
+    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let circuit = self.build_circuit();
-        circuit.prove_genesis()
+        circuit.prove_genesis(config)
     }
 
+    /// Add one more layer to laready existing proof.
     pub fn prove_recursive(
         self,
         composed_proof: ProofWithPublicInputs<F, C, D>,

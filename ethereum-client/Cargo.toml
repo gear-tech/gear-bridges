@@ -1,0 +1,36 @@
+[package]
+name = "ethereum-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+log.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+primitive-types.workspace = true
+reqwest.workspace = true
+binary-merkle-tree.workspace = true
+hash-db.workspace = true
+ahash.workspace = true
+sp-runtime.workspace = true
+
+alloy-contract.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-trace-types.workspace = true
+alloy-node-bindings.workspace = true
+alloy-rpc-client.workspace = true
+alloy-transport.workspace = true
+alloy-transport-ws.workspace = true
+alloy-transport-http.workspace = true
+alloy-network.workspace = true
+alloy-signer.workspace = true
+alloy-signer-wallet.workspace = true
+alloy-provider.workspace = true
+alloy-primitives.workspace = true
+alloy-core.workspace = true
+alloy-sol-macro.workspace = true
+alloy-sol-types.workspace = true
+alloy-dyn-abi.workspace = true
+alloy-json-abi.workspace = true
+alloy-sol-type-parser.workspace = true

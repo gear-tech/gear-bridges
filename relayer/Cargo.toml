@@ -18,6 +18,7 @@ libc.workspace = true
 anyhow.workspace = true
 num = { workspace = true, features = ["serde"] }
 hex.workspace = true
+thiserror.workspace = true
 
 [build-dependencies]
 cgo_oligami = "0.3"

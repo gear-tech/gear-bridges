@@ -130,7 +130,7 @@ pub async fn prove_final(
     previous_validator_set_id: u64,
 ) -> FinalProof {
     let block = gear_api
-        .search_for_validator_set_block(previous_validator_set_id)
+        .search_for_authority_set_block(previous_validator_set_id)
         .await
         .unwrap();
     let (block, block_finality) = gear_api.fetch_finality_proof(block).await.unwrap();

@@ -83,12 +83,30 @@ impl GearApi {
         Self::fetch_from_storage(&block, &set_id_address).await
     }
 
+    /// Find authority set id that have signed given `block`.
+    pub async fn signed_by_authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
+        let stored_set_id = self.authority_set_id(block).await?;
+        let previous_block = self.previous_block(block).await?;
+        let previous_block_stored_set_id = self.authority_set_id(previous_block).await?;
+
+        Ok(if previous_block_stored_set_id != stored_set_id {
+            previous_block_stored_set_id
+        } else {
+            stored_set_id
+        })
+    }
+
+    async fn previous_block(&self, block: H256) -> anyhow::Result<H256> {
+        let block = self.api.blocks().at(block).await?;
+        Ok(block.header().parent_hash)
+    }
+
     pub async fn fetch_finality_proof_for_session(
         &self,
         validator_set_id: u64,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
         let block = self
-            .search_for_validator_set_block(validator_set_id)
+            .search_for_authority_set_block(validator_set_id)
             .await?;
 
         self.fetch_finality_proof(block).await
@@ -136,7 +154,7 @@ impl GearApi {
             assert!(pc.signature.verify(&signed_data[..], &pc.id));
         }
 
-        let validator_set = self.fetch_validator_set(required_validator_set_id).await?;
+        let validator_set = self.fetch_authority_set(required_validator_set_id).await?;
 
         let pre_commits: Vec<_> = justification
             .commit
@@ -158,21 +176,21 @@ impl GearApi {
         ))
     }
 
-    async fn fetch_validator_set(&self, validator_set_id: u64) -> anyhow::Result<Vec<[u8; 32]>> {
+    async fn fetch_authority_set(&self, authority_set_id: u64) -> anyhow::Result<Vec<[u8; 32]>> {
         let block = self
-            .search_for_validator_set_block(validator_set_id)
+            .search_for_authority_set_block(authority_set_id)
             .await?;
-        self.fetch_validator_set_in_block(block).await
+        self.fetch_authority_set_in_block(block).await
     }
 
-    pub async fn search_for_validator_set_block(
+    pub async fn search_for_authority_set_block(
         &self,
-        validator_set_id: u64,
+        authority_set_id: u64,
     ) -> anyhow::Result<H256> {
         let latest_block = self.latest_finalized_block().await?;
         let latest_vs_id = self.authority_set_id(latest_block).await?;
 
-        if latest_vs_id == validator_set_id {
+        if latest_vs_id == authority_set_id {
             return Ok(latest_block);
         }
 
@@ -194,11 +212,11 @@ impl GearApi {
                     let next_block = self.block_number_to_hash(next_bn).await?;
                     let next_vs = self.authority_set_id(next_block).await?;
 
-                    if next_vs == validator_set_id {
+                    if next_vs == authority_set_id {
                         return Ok(next_block);
                     }
 
-                    if next_vs > validator_set_id {
+                    if next_vs > authority_set_id {
                         State::SearchBack {
                             latest_bn: next_bn,
                             step: step * 2,
@@ -218,11 +236,11 @@ impl GearApi {
                     let mid_block = self.block_number_to_hash(mid_bn).await?;
                     let mid_vs = self.authority_set_id(mid_block).await?;
 
-                    if mid_vs == validator_set_id {
+                    if mid_vs == authority_set_id {
                         return Ok(mid_block);
                     }
 
-                    if mid_vs > validator_set_id {
+                    if mid_vs > authority_set_id {
                         State::BinarySearch {
                             lower_bn,
                             higher_bn: mid_bn,
@@ -238,7 +256,7 @@ impl GearApi {
         }
     }
 
-    async fn fetch_validator_set_in_block(&self, block: H256) -> anyhow::Result<Vec<[u8; 32]>> {
+    async fn fetch_authority_set_in_block(&self, block: H256) -> anyhow::Result<Vec<[u8; 32]>> {
         let block = (*self.api).blocks().at(block).await?;
 
         let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);

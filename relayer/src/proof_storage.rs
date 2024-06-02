@@ -2,10 +2,14 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProofStorageError {
+    #[error("Proof storage already initialized")]
     AlreadyInitialized,
+    #[error("Proof storage not initialized")]
     NotInitialized,
+    #[error("Proof for authority set id #{0} not found")]
+    NotFound(u64),
 }
 
 pub trait ProofStorage {
@@ -19,7 +23,10 @@ pub trait ProofStorage {
 
     fn get_latest_proof(&self) -> Option<(ProofWithCircuitData, u64)>;
 
-    // TODO: Add fn to query any of the stored proofs
+    fn get_proof_for_authority_set_id(
+        &self,
+        authority_set_id: u64,
+    ) -> Result<ProofWithCircuitData, ProofStorageError>;
 
     fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError>;
 }
@@ -70,6 +77,24 @@ impl ProofStorage for MockProofStorage {
         })
     }
 
+    fn get_proof_for_authority_set_id(
+        &self,
+        authority_set_id: u64,
+    ) -> Result<ProofWithCircuitData, ProofStorageError> {
+        let circuit_data = self.get_circuit_data()?;
+
+        let proof = self
+            .proofs
+            .get(&authority_set_id)
+            .ok_or(ProofStorageError::NotFound(authority_set_id))?
+            .clone();
+
+        Ok(ProofWithCircuitData {
+            proof,
+            circuit_data,
+        })
+    }
+
     fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError> {
         let validator_set_id = self
             .proofs
@@ -111,6 +136,13 @@ impl ProofStorage for FileSystemProofStorage {
 
     fn get_latest_proof(&self) -> Option<(ProofWithCircuitData, u64)> {
         self.cache.get_latest_proof()
+    }
+
+    fn get_proof_for_authority_set_id(
+        &self,
+        authority_set_id: u64,
+    ) -> Result<ProofWithCircuitData, ProofStorageError> {
+        self.cache.get_proof_for_authority_set_id(authority_set_id)
     }
 
     fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError> {

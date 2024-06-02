@@ -6727,6 +6727,7 @@ dependencies = [
  "prover",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
 

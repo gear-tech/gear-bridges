@@ -1,6 +1,6 @@
 use crate::{
     proof_storage::{FileSystemProofStorage, ProofStorage},
-    prover_interface, EthereumArgs, ServeArgs, GENESIS_CONFIG,
+    prover_interface::{self, FinalProof}, EthereumArgs, ServeArgs, GENESIS_CONFIG,
 };
 
 use ethereum_client::Contracts as EthApi;
@@ -85,21 +85,20 @@ async fn sync_authority_set_id(
 async fn prove_message_sent(
     gear_api: &GearApi,
     proof_storage: &dyn ProofStorage,
-) -> anyhow::Result<ExportedProofWithCircuitData> {
+) -> anyhow::Result<FinalProof> {
     let finalized_head = gear_api.latest_finalized_block().await?;
-
-    // TODO: if we are in the new era force this block to be the first block of the current era
-
-    let prove_for_block = finalized_head;
     
-    // compute proof for message sent
+    // TODO: if we are at the start of era we must submit proof for the first block
+    // of this era(as it's the latest block in which all the messages from this era are available)
 
-    todo!()
+    let authority_set_id = gear_api.signed_by_authority_set_id(finalized_head).await?;
+    let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
+    Ok(prover_interface::prove_final(gear_api, inner_proof, authority_set_id).await)
 }
 
 async fn submit_proof_to_ethereum(
     eth_api: &EthApi,
-    proof: ExportedProofWithCircuitData,
+    proof: FinalProof,
 ) -> anyhow::Result<()> {
     todo!()
 }

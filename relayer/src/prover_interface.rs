@@ -7,24 +7,6 @@ use prover::proving::{
     self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
 
-// TODO: Return these addresses from rpc client.
-
-// 0xea31e171c2cd790a23350b5e593ed8827d9fe37370ac390779f35763d98106e8
-pub const NEXT_SESSION_KEYS_STORAGE_ADDRESS: [u8; 64] = [
-    0xe, 0xa, 0x3, 0x1, 0xe, 0x1, 0x7, 0x1, 0xc, 0x2, 0xc, 0xd, 0x7, 0x9, 0x0, 0xa, 0x2, 0x3, 0x3,
-    0x5, 0x0, 0xb, 0x5, 0xe, 0x5, 0x9, 0x3, 0xe, 0xd, 0x8, 0x8, 0x2, 0x7, 0xd, 0x9, 0xf, 0xe, 0x3,
-    0x7, 0x3, 0x7, 0x0, 0xa, 0xc, 0x3, 0x9, 0x0, 0x7, 0x7, 0x9, 0xf, 0x3, 0x5, 0x7, 0x6, 0x3, 0xd,
-    0x9, 0x8, 0x1, 0x0, 0x6, 0xe, 0x8,
-];
-
-// 0xea31e171c2cd790a23350b5e593ed882df509310bc655bbf75a5b563fc3c8eee
-pub const MESSAGE_STORAGE_ADDRESS: [u8; 64] = [
-    0xe, 0xa, 0x3, 0x1, 0xe, 0x1, 0x7, 0x1, 0xc, 0x2, 0xc, 0xd, 0x7, 0x9, 0x0, 0xa, 0x2, 0x3, 0x3,
-    0x5, 0x0, 0xb, 0x5, 0xe, 0x5, 0x9, 0x3, 0xe, 0xd, 0x8, 0x8, 0x2, 0xd, 0xf, 0x5, 0x0, 0x9, 0x3,
-    0x1, 0x0, 0xb, 0xc, 0x6, 0x5, 0x5, 0xb, 0xb, 0xf, 0x7, 0x5, 0xa, 0x5, 0xb, 0x5, 0x6, 0x3, 0xf,
-    0xc, 0x3, 0xc, 0x8, 0xe, 0xe, 0xe,
-];
-
 pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
     let (block, current_epoch_block_finality) = gear_api
         .fetch_finality_proof_for_session(GENESIS_CONFIG.authority_set_id)
@@ -36,10 +18,8 @@ pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
         .await
         .unwrap();
     let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
-    let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
-        next_validator_set_inclusion_proof,
-        NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
-    );
+    let next_validator_set_inclusion_proof =
+        parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
     let now = Instant::now();
 
@@ -70,10 +50,8 @@ pub async fn prove_validator_set_change(
         .await
         .unwrap();
     let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
-    let next_validator_set_inclusion_proof = parse_rpc_inclusion_proof(
-        next_validator_set_inclusion_proof,
-        NEXT_SESSION_KEYS_STORAGE_ADDRESS.to_vec(),
-    );
+    let next_validator_set_inclusion_proof =
+        parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
     let now = Instant::now();
 
@@ -141,10 +119,7 @@ pub async fn prove_final(
         .unwrap();
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
-    let sent_message_inclusion_proof = parse_rpc_inclusion_proof(
-        sent_message_inclusion_proof,
-        MESSAGE_STORAGE_ADDRESS.to_vec(),
-    );
+    let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
     let proof = proving::prove_message_sent(
         previous_proof,
@@ -167,10 +142,13 @@ pub async fn prove_final(
     )
 }
 
-fn parse_rpc_inclusion_proof(
-    proof: dto::StorageInclusionProof,
-    address_nibbles: Vec<u8>,
-) -> StorageInclusion {
+fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclusion {
+    let address_nibbles = proof
+        .address
+        .into_iter()
+        .flat_map(|byte| [byte & 0b11110000, byte & 0b00001111])
+        .collect();
+
     StorageInclusion {
         block_header_data: proof.block_header,
         branch_node_data: proof

@@ -313,6 +313,7 @@ impl GearApi {
         );
 
         Ok(StorageInclusionProof {
+            address: address.to_vec(),
             block_header: encoded_header,
             branch_nodes_data: storage_inclusion_proof.branch_nodes_data,
             leaf_node_data: storage_inclusion_proof.leaf_node_data,

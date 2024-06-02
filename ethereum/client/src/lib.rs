@@ -3,7 +3,6 @@ extern crate core;
 mod abi;
 mod convert;
 pub mod error;
-mod msg;
 mod proof;
 
 use crate::abi::IMessageQueue::IMessageQueueInstance;

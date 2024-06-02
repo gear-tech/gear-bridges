@@ -33,15 +33,23 @@ pub async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
 
     loop {
-        loop {
-            let sync_steps = sync_authority_set_id(&gear_api, &mut proof_storage).await?;
-            if sync_steps == 0 {
-                break;
+        let res: anyhow::Result<()> = {
+            loop {
+                let sync_steps = sync_authority_set_id(&gear_api, &mut proof_storage).await?;
+                if sync_steps == 0 {
+                    break;
+                }
             }
-        }
 
-        let proof = prove_message_sent(&gear_api, &proof_storage).await?;
-        submit_proof_to_ethereum(&eth_api, proof).await?;
+            let proof = prove_message_sent(&gear_api, &proof_storage).await?;
+            submit_proof_to_ethereum(&eth_api, proof).await?; 
+
+            Ok(())
+        };
+
+        if let Err(err) = res {
+            log::error!("{}", err);
+        }
     }
 }
 

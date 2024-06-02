@@ -5,7 +5,6 @@ use crate::{
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
-use prover::proving::ExportedProofWithCircuitData;
 
 pub async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     let ServeArgs {
@@ -100,5 +99,7 @@ async fn submit_proof_to_ethereum(
     eth_api: &EthApi,
     proof: FinalProof,
 ) -> anyhow::Result<()> {
-    todo!()
+    eth_api.provide_merkle_root(proof.block_number, proof.merkle_root, &proof.proof[..]).await?;
+
+    Ok(())
 }

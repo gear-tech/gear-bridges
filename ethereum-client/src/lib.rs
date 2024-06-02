@@ -114,7 +114,7 @@ impl Contracts {
         block_number: U,
         merkle_root: H,
         proof: B,
-    ) -> Result<bool, Error> {
+    ) -> Result<(), Error> {
         let block_number: U256 = block_number.convert();
         let merkle_root: B256 = merkle_root.convert();
         let proof = proof.convert();
@@ -136,7 +136,7 @@ impl Contracts {
                     .await
                 {
                     Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(receipt) => Ok(true),
+                        Ok(receipt) => Ok(()),
                         Err(e) => Err(Error::ErrorWaitingTransactionReceipt),
                     },
                     Err(e) => {
@@ -149,7 +149,7 @@ impl Contracts {
         }
     }
 
-    pub async fn provide_merkle_root_json(&self, json_string: &str) -> Result<bool, Error> {
+    pub async fn provide_merkle_root_json(&self, json_string: &str) -> Result<(), Error> {
         let proof: BlockMerkleRootProof = BlockMerkleRootProof::try_from_json_string(json_string)
             .map_err(|_| Error::WrongJsonFormation)?;
         self.provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
@@ -283,8 +283,8 @@ mod tests {
             .provide_merkle_root_json(build_merkle_proof_json().as_str())
             .await
         {
-            Ok(result) => {
-                println!("Successfully verified : {result}")
+            Ok(_) => {
+                println!("Successfully verified")
             }
             Err(e) => {
                 println!("Error verifying : {e:?}")
@@ -325,8 +325,8 @@ mod tests {
             .provide_merkle_root_json(build_merkle_proof_json().as_str())
             .await
         {
-            Ok(result) => {
-                println!("Successfully verified : {result}")
+            Ok(_) => {
+                println!("Successfully verified")
             }
             Err(e) => {
                 println!("Error verifying : {e:?}")

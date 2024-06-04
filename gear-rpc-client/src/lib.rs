@@ -455,4 +455,25 @@ impl GearApi {
 
         Ok(T::decode(&mut &data[..])?)
     }
+
+    pub async fn fetch_message_inclusion_merkle_proof(
+        &self,
+        block: H256,
+        message_hash: H256,
+    ) -> anyhow::Result<()> {
+        // use pallet_gear_bridge_runtime_rpc_api::Proof;
+
+        // let merkle_proof: Option<Proof> = self
+        //     .api
+        //     .rpc()
+        //     .request(
+        //         "gearBridge_merkleProof",
+        //         rpc_params![message_hash, Some(block)],
+        //     )
+        //     .await?;
+
+        // println!("MP: {:?}", merkle_proof.unwrap());
+
+        todo!()
+    }
 }

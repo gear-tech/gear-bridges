@@ -33,7 +33,7 @@ plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = 
 curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek" }
 
 ahash = "0.7.8"
-anyhow = "1.0.40"
+anyhow = "1.0.86"
 blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
@@ -63,30 +63,20 @@ thiserror = "1.0.61"
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gsdk = { git = "https://github.com/gear-tech/gear.git", tag = "v1.2.1" }
+gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
+pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
+    "std",
+] }
 subxt = "0.32.1"
-pallet-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false, features = [
-    "std",
-] }
-pallet-babe = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false, features = [
-    "std",
-] }
-sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0" }
-sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false }
-sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false, features = [
-    "std",
-] }
-sp-consensus-babe = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false, features = [
-    "std",
-] }
-sp-state-machine = { version = "0.28.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false }
+sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 parity-scale-codec = { version = "3.6.4", default-features = false }
-trie-db = { version = "0.27.0", default-features = false }
-sp-trie = { version = "22.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false }
-sp-core = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.1.0", default-features = false }
-primitive-types = { version = "0.12.2", default-features = false, features = [
-] }
-binary-merkle-tree = { version = "15.0.0" }
+trie-db = { version = "0.28.0", default-features = false }
+sp-trie = { version = "22.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+sp-core = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+primitive-types = { version = "0.12.2", default-features = false }
+binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 
 # Alloy deps
 alloy-contract = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-contract", rev = "34f5621" }

@@ -40,7 +40,7 @@ pub fn define(
 
     let mut hash_data_bits = hash_data.0.iter().flat_map(|byte_target| {
         byte_target
-            .to_bit_targets(builder)
+            .as_bit_targets(builder)
             .0
             .into_iter()
             .map(|target| target.target)

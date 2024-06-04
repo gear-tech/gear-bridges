@@ -37,12 +37,12 @@ pub mod single_byte {
     }
 
     pub fn define(input: InputTarget, builder: &mut CircuitBuilder<F, D>) -> OutputTarget {
-        let bits = input.first_byte.to_bit_targets(builder);
+        let bits = input.first_byte.as_bit_targets(builder);
 
         builder.assert_zero(bits.0[0].target);
         builder.assert_zero(bits.0[1].target);
 
-        let decoded = builder.le_sum(bits.0[2..8].into_iter());
+        let decoded = builder.le_sum(bits.0[2..8].iter());
 
         OutputTarget { decoded }
     }
@@ -118,13 +118,13 @@ pub mod full {
     }
 
     pub fn define(input: InputTarget, builder: &mut CircuitBuilder<F, D>) -> OutputTarget {
-        let first_byte_bits = input.padded_bytes.constant_read(0).to_bit_targets(builder);
+        let first_byte_bits = input.padded_bytes.constant_read(0).as_bit_targets(builder);
 
         let mode = builder.mul_const(F::TWO, first_byte_bits.constant_read(1).target);
         let mode = builder.add(mode, first_byte_bits.constant_read(0).target);
 
         let refined_first_byte =
-            ByteTarget::from_target_unsafe(builder.le_sum(first_byte_bits.0[2..8].into_iter()));
+            ByteTarget::from_target_unsafe(builder.le_sum(first_byte_bits.0[2..8].iter()));
 
         let big_int_mode = builder.constant(F::from_canonical_usize(4));
         let big_int_mode = builder.is_equal(mode, big_int_mode);
@@ -152,9 +152,7 @@ pub mod full {
         );
 
         let out = builder.select_target_set(is_single_byte_mode, &single_byte_out, &four_byte_out);
-        let out = builder.select_target_set(is_two_byte_mode, &two_byte_out, &out);
-
-        out
+        builder.select_target_set(is_two_byte_mode, &two_byte_out, &out)
     }
 
     fn try_parse_single_byte(
@@ -162,7 +160,7 @@ pub mod full {
         builder: &mut CircuitBuilder<F, D>,
     ) -> OutputTarget {
         OutputTarget {
-            decoded: refined_byte.to_target(),
+            decoded: refined_byte.as_target(),
             length: builder.one(),
         }
     }
@@ -173,9 +171,9 @@ pub mod full {
     ) -> OutputTarget {
         let decoded = builder.mul_const(
             F::from_canonical_usize(1 << 6),
-            refined_bytes[1].to_target(),
+            refined_bytes[1].as_target(),
         );
-        let decoded = builder.add(decoded, refined_bytes[0].to_target());
+        let decoded = builder.add(decoded, refined_bytes[0].as_target());
 
         OutputTarget {
             decoded,
@@ -187,23 +185,23 @@ pub mod full {
         refined_bytes: [ByteTarget; 4],
         builder: &mut CircuitBuilder<F, D>,
     ) -> OutputTarget {
-        let decoded = refined_bytes[0].to_target();
+        let decoded = refined_bytes[0].as_target();
 
         let val = builder.mul_const(
             F::from_canonical_usize(1 << 6),
-            refined_bytes[1].to_target(),
+            refined_bytes[1].as_target(),
         );
         let decoded = builder.add(decoded, val);
 
         let val = builder.mul_const(
             F::from_canonical_usize(1 << 14),
-            refined_bytes[2].to_target(),
+            refined_bytes[2].as_target(),
         );
         let decoded = builder.add(decoded, val);
 
         let val = builder.mul_const(
             F::from_canonical_usize(1 << 22),
-            refined_bytes[3].to_target(),
+            refined_bytes[3].as_target(),
         );
         let decoded = builder.add(decoded, val);
 

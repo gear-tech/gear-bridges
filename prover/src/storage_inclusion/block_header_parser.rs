@@ -76,7 +76,7 @@ impl BlockHeaderParser {
         let state_root_bytes: ArrayTarget<_, BLAKE2_DIGEST_SIZE> =
             useful_header_data.random_read_array(parsed_block_number.length, &mut builder);
         let mut state_root_bits = state_root_bytes.0.into_iter().flat_map(|byte| {
-            byte.to_bit_targets(&mut builder)
+            byte.as_bit_targets(&mut builder)
                 .0
                 .into_iter()
                 .map(|t| t.target)

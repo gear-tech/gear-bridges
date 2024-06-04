@@ -38,10 +38,11 @@ struct StorageTrieInclusionProof {
 
 const VOTE_LENGTH_IN_BITS: usize = 424;
 const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
+
 const MERKLE_ROOT_STORAGE_ADDRESS: &str =
-    "ea31e171c2cd790a23350b5e593ed882df509310bc655bbf75a5b563fc3c8eee";
+    "ea31e171c2cd790a23350b5e593ed882d04afeb2c94bf32a6200661ebc1342d0";
 const NEXT_VALIDATOR_SET_ADDRESS: &str =
-    "ea31e171c2cd790a23350b5e593ed8827d9fe37370ac390779f35763d98106e8";
+    "ea31e171c2cd790a23350b5e593ed8821ab780c1342a26e355e961e688a0bdcb";
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -77,10 +78,28 @@ impl GearApi {
         Ok(self.api.rpc().chain_get_finalized_head().await?)
     }
 
-    pub async fn validator_set_id(&self, block: H256) -> anyhow::Result<u64> {
+    pub async fn authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
         let block = (*self.api).blocks().at(block).await?;
         let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
         Self::fetch_from_storage(&block, &set_id_address).await
+    }
+
+    /// Find authority set id that have signed given `block`.
+    pub async fn signed_by_authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
+        let stored_set_id = self.authority_set_id(block).await?;
+        let previous_block = self.previous_block(block).await?;
+        let previous_block_stored_set_id = self.authority_set_id(previous_block).await?;
+
+        Ok(if previous_block_stored_set_id != stored_set_id {
+            previous_block_stored_set_id
+        } else {
+            stored_set_id
+        })
+    }
+
+    async fn previous_block(&self, block: H256) -> anyhow::Result<H256> {
+        let block = self.api.blocks().at(block).await?;
+        Ok(block.header().parent_hash)
     }
 
     pub async fn fetch_finality_proof_for_session(
@@ -88,7 +107,7 @@ impl GearApi {
         validator_set_id: u64,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
         let block = self
-            .search_for_validator_set_block(validator_set_id)
+            .search_for_authority_set_block(validator_set_id)
             .await?;
 
         self.fetch_finality_proof(block).await
@@ -100,7 +119,7 @@ impl GearApi {
         &self,
         after_block: H256,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
-        let required_validator_set_id = self.validator_set_id(after_block).await?;
+        let required_validator_set_id = self.authority_set_id(after_block).await?;
 
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
@@ -136,7 +155,7 @@ impl GearApi {
             assert!(pc.signature.verify(&signed_data[..], &pc.id));
         }
 
-        let validator_set = self.fetch_validator_set(required_validator_set_id).await?;
+        let validator_set = self.fetch_authority_set(required_validator_set_id).await?;
 
         let pre_commits: Vec<_> = justification
             .commit
@@ -158,21 +177,21 @@ impl GearApi {
         ))
     }
 
-    async fn fetch_validator_set(&self, validator_set_id: u64) -> anyhow::Result<Vec<[u8; 32]>> {
+    async fn fetch_authority_set(&self, authority_set_id: u64) -> anyhow::Result<Vec<[u8; 32]>> {
         let block = self
-            .search_for_validator_set_block(validator_set_id)
+            .search_for_authority_set_block(authority_set_id)
             .await?;
-        self.fetch_validator_set_in_block(block).await
+        self.fetch_authority_set_in_block(block).await
     }
 
-    pub async fn search_for_validator_set_block(
+    pub async fn search_for_authority_set_block(
         &self,
-        validator_set_id: u64,
+        authority_set_id: u64,
     ) -> anyhow::Result<H256> {
         let latest_block = self.latest_finalized_block().await?;
-        let latest_vs_id = self.validator_set_id(latest_block).await?;
+        let latest_vs_id = self.authority_set_id(latest_block).await?;
 
-        if latest_vs_id == validator_set_id {
+        if latest_vs_id == authority_set_id {
             return Ok(latest_block);
         }
 
@@ -192,13 +211,13 @@ impl GearApi {
                 State::SearchBack { latest_bn, step } => {
                     let next_bn = latest_bn.saturating_sub(step);
                     let next_block = self.block_number_to_hash(next_bn).await?;
-                    let next_vs = self.validator_set_id(next_block).await?;
+                    let next_vs = self.authority_set_id(next_block).await?;
 
-                    if next_vs == validator_set_id {
+                    if next_vs == authority_set_id {
                         return Ok(next_block);
                     }
 
-                    if next_vs > validator_set_id {
+                    if next_vs > authority_set_id {
                         State::SearchBack {
                             latest_bn: next_bn,
                             step: step * 2,
@@ -216,13 +235,13 @@ impl GearApi {
                 } => {
                     let mid_bn = (lower_bn + higher_bn) / 2;
                     let mid_block = self.block_number_to_hash(mid_bn).await?;
-                    let mid_vs = self.validator_set_id(mid_block).await?;
+                    let mid_vs = self.authority_set_id(mid_block).await?;
 
-                    if mid_vs == validator_set_id {
+                    if mid_vs == authority_set_id {
                         return Ok(mid_block);
                     }
 
-                    if mid_vs > validator_set_id {
+                    if mid_vs > authority_set_id {
                         State::BinarySearch {
                             lower_bn,
                             higher_bn: mid_bn,
@@ -238,7 +257,7 @@ impl GearApi {
         }
     }
 
-    async fn fetch_validator_set_in_block(&self, block: H256) -> anyhow::Result<Vec<[u8; 32]>> {
+    async fn fetch_authority_set_in_block(&self, block: H256) -> anyhow::Result<Vec<[u8; 32]>> {
         let block = (*self.api).blocks().at(block).await?;
 
         let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
@@ -295,6 +314,7 @@ impl GearApi {
         );
 
         Ok(StorageInclusionProof {
+            address: address.to_vec(),
             block_header: encoded_header,
             branch_nodes_data: storage_inclusion_proof.branch_nodes_data,
             leaf_node_data: storage_inclusion_proof.leaf_node_data,
@@ -434,5 +454,24 @@ impl GearApi {
             .into_encoded();
 
         Ok(T::decode(&mut &data[..])?)
+    }
+
+    pub async fn fetch_message_inclusion_merkle_proof(
+        &self,
+        block: H256,
+        message_hash: H256,
+    ) -> anyhow::Result<()> {
+        use pallet_gear_bridge_rpc_runtime_api::Proof;
+
+        let _merkle_proof: Option<Proof> = self
+            .api
+            .rpc()
+            .request(
+                "gearBridge_merkleProof",
+                rpc_params![message_hash, Some(block)],
+            )
+            .await?;
+
+        todo!()
     }
 }

@@ -97,7 +97,7 @@ impl ChildNodeParser {
             node_data.random_read_array(read_data_at, &mut builder);
         let mut potential_child_hash_data_bits =
             potential_child_hash_data.0.into_iter().flat_map(|byte| {
-                byte.to_bit_targets(&mut builder)
+                byte.as_bit_targets(&mut builder)
                     .0
                     .into_iter()
                     .map(|target| target.target)

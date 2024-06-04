@@ -90,7 +90,7 @@ impl FinalProof {
             .connect(&latest_validator_set_target.current_set_id, &mut builder);
 
         let desired_genesis_authority_set_id =
-            builder.constant(F::from_noncanonical_u64(genesis_config.validator_set_id));
+            builder.constant(F::from_noncanonical_u64(genesis_config.authority_set_id));
         builder.connect(
             desired_genesis_authority_set_id,
             latest_validator_set_target.genesis_set_id,

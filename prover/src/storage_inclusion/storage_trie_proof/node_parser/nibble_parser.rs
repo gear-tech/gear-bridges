@@ -48,7 +48,7 @@ pub fn define(
         .0
         .into_iter()
         .flat_map(|byte| {
-            let (l, m) = byte.to_half_byte_targets(builder);
+            let (l, m) = byte.as_half_byte_targets(builder);
             [m, l]
         })
         .chain(iter::once(zero))

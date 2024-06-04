@@ -78,7 +78,7 @@ impl NodeDataBlockTarget {
     pub fn add_virtual_safe(builder: &mut CircuitBuilder<F, D>) -> Self {
         let mut targets = (0..NODE_DATA_BLOCK_BYTES).map(|_| {
             let target = builder.add_virtual_target();
-            ByteTarget::from_target_safe(target, builder).to_target()
+            ByteTarget::from_target_safe(target, builder).as_target()
         });
         Self::parse_exact(&mut targets)
     }
@@ -90,7 +90,7 @@ impl NodeDataBlockTarget {
             .iter()
             .zip_eq(data.iter())
             .for_each(|(target, value)| {
-                witness.set_target(target.to_target(), F::from_canonical_u8(*value))
+                witness.set_target(target.as_target(), F::from_canonical_u8(*value))
             });
     }
 }
@@ -209,7 +209,7 @@ impl BranchNodeDataPaddedTarget {
             let read_data = block.random_read(read_from, builder);
 
             let masked_read_data =
-                builder.mul(read_data.to_target(), read_from_current_block.target);
+                builder.mul(read_data.as_target(), read_from_current_block.target);
             final_data = builder.add(final_data, masked_read_data);
 
             current_offset = builder.sub(current_offset, block_size);

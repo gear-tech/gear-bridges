@@ -18,6 +18,8 @@ pub struct BranchNodeData {
 }
 
 pub struct StorageInclusionProof {
+    pub address: Vec<u8>,
+
     pub block_header: Vec<u8>,
     /// Arranged from leaf to root.
     pub branch_nodes_data: Vec<BranchNodeData>,

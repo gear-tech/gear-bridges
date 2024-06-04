@@ -61,7 +61,7 @@ pub fn define(
     let inlined_data_bits = inlined_data
         .0
         .iter()
-        .flat_map(|byte_target| byte_target.to_bit_targets(builder).0.into_iter().rev())
+        .flat_map(|byte_target| byte_target.as_bit_targets(builder).0.into_iter().rev())
         .collect::<Vec<_>>();
 
     let mut inlined_data_hash =

@@ -127,8 +127,8 @@ func compile(circuitData *C.char) {
 }
 
 type ProofWithPublicInputs struct {
-	Proof        string     `json:"proof"`
-	PublicInputs []*big.Int `json:"public_inputs"`
+	Proof        string   `json:"proof"`
+	PublicInputs []string `json:"public_inputs"`
 }
 
 //export prove
@@ -168,9 +168,9 @@ func serializeProof(proof plonk.Proof, glPublicInputs []gl.Variable) string {
 	proofStr := hex.EncodeToString(proofBytes)
 
 	compressedPublicInputs := compressPublicInputs(glPublicInputs)
-	publicInputs := make([]*big.Int, len(compressedPublicInputs))
+	publicInputs := make([]string, len(compressedPublicInputs))
 	for i := 0; i < len(publicInputs); i++ {
-		publicInputs[i] = compressedPublicInputs[i].(*big.Int)
+		publicInputs[i] = compressedPublicInputs[i].(*big.Int).String()
 	}
 
 	jsonProof, err := json.MarshalIndent(ProofWithPublicInputs{

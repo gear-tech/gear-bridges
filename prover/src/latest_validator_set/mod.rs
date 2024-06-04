@@ -72,7 +72,7 @@ impl Circuit {
         mut self,
         config: GenesisConfig,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        let genesis_data_pis = vec![config.validator_set_id]
+        let genesis_data_pis = vec![config.authority_set_id]
             .into_iter()
             .chain(config.validator_set_hash)
             .map(F::from_noncanonical_u64)

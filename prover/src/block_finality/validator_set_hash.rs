@@ -79,7 +79,7 @@ impl ValidatorSetHash {
         builder.connect(desired_data_len, hasher_pis.length);
 
         let mut validator_set = hasher_pis.data.0.into_iter().flat_map(|byte| {
-            byte.to_bit_targets(&mut builder)
+            byte.as_bit_targets(&mut builder)
                 .0
                 .into_iter()
                 .rev()

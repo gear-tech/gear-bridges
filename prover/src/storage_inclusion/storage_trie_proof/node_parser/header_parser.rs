@@ -75,10 +75,10 @@ pub fn define(
     descriptor: HeaderDescriptor,
     builder: &mut CircuitBuilder<F, D>,
 ) -> HeaderParserOutputTarget {
-    let first_byte = input.first_bytes.0[0].clone();
-    let second_byte = input.first_bytes.0[1].clone();
+    let first_byte = input.first_bytes.0[0];
+    let second_byte = input.first_bytes.0[1];
 
-    let first_byte_bits = first_byte.to_bit_targets(builder);
+    let first_byte_bits = first_byte.as_bit_targets(builder);
 
     for bit_idx in 8 - descriptor.prefix_length..8 {
         let target = first_byte_bits.constant_read(bit_idx);
@@ -88,8 +88,8 @@ pub fn define(
     }
 
     let masked_prefix = builder.constant(F::from_canonical_u8(descriptor.masked_prefix));
-    let first_byte_value = builder.sub(first_byte.to_target(), masked_prefix);
-    let second_byte_value = second_byte.to_target();
+    let first_byte_value = builder.sub(first_byte.as_target(), masked_prefix);
+    let second_byte_value = second_byte.as_target();
 
     let max_first_byte_value = builder.constant(F::from_canonical_u8(
         0b11_11_11_11 >> descriptor.prefix_length,

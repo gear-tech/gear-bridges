@@ -165,7 +165,7 @@ pub mod proving {
     /// proofs invalid(they will NOT get verified on ethereum) as circuit digest will change.
     #[derive(Clone, Copy)]
     pub struct GenesisConfig {
-        pub validator_set_id: u64,
+        pub authority_set_id: u64,
         pub validator_set_hash: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
     }
 

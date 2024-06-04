@@ -116,7 +116,7 @@ impl<const N: usize> BitArrayTarget<N> {
             .map(|bits| {
                 let bits: [BoolTarget; PACK_BY] =
                     bits.try_into().expect("Chunks to be of correct length");
-                Target::from_bool_targets_le::<PACK_BY>(ArrayTarget(bits), builder)
+                Target::from_bool_targets_be::<PACK_BY>(ArrayTarget(bits), builder)
             })
             .collect::<Vec<_>>()
             .try_into()

@@ -31,19 +31,17 @@ pub trait TargetBitOperations {
         bits: ArrayTarget<BoolTarget, B>,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Target {
-        assert!(B <= 64);
-        assert!(B % 8 == 0);
+        bits_to_target(bits, builder, true)
+    }
 
-        let mut bits = bits.0.chunks(8).rev().flatten().rev().collect::<Vec<_>>();
-
-        if B == 64 {
-            let most_significant_bit = bits.pop().expect("bits mustn't be empty").target;
-            let partial_sum = builder.le_sum(bits.into_iter());
-            let most_significant_exp = builder.constant(F::from_canonical_u64(1 << (B - 1)));
-            builder.mul_add(most_significant_exp, most_significant_bit, partial_sum)
-        } else {
-            builder.le_sum(bits.into_iter())
-        }
+    /// Compute big-endian sum of provided bits.
+    ///
+    /// Note: If 64 bits are provided result may overflow. This case is not processed.
+    fn from_bool_targets_be<const B: usize>(
+        bits: ArrayTarget<BoolTarget, B>,
+        builder: &mut CircuitBuilder<F, D>,
+    ) -> Target {
+        bits_to_target(bits, builder, false)
     }
 
     /// Compute little-endian sum of provided bits.
@@ -54,6 +52,31 @@ pub trait TargetBitOperations {
         builder: &mut CircuitBuilder<F, D>,
     ) -> Target {
         Self::from_bool_targets_le(bits, builder)
+    }
+}
+
+fn bits_to_target<const B: usize>(
+    bits: ArrayTarget<BoolTarget, B>,
+    builder: &mut CircuitBuilder<F, D>,
+    little_endian: bool,
+) -> Target {
+    assert!(B <= 64);
+    assert!(B % 8 == 0);
+
+    let bits = bits.0.chunks(8);
+    let mut bits: Vec<_> = if little_endian {
+        bits.rev().flatten().rev().collect()
+    } else {
+        bits.flatten().rev().collect()
+    };
+
+    if B == 64 {
+        let most_significant_bit = bits.pop().expect("bits mustn't be empty").target;
+        let partial_sum = builder.le_sum(bits.into_iter());
+        let most_significant_exp = builder.constant(F::from_canonical_u64(1 << (B - 1)));
+        builder.mul_add(most_significant_exp, most_significant_bit, partial_sum)
+    } else {
+        builder.le_sum(bits.into_iter())
     }
 }
 

@@ -19,8 +19,8 @@ const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
     authority_set_id: 0,
     // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
     validator_set_hash: [
-        0xb23a85b9, 0x025758fb, 0x0e04d9df, 0x949fbce8, 0xbd0a5bdc, 0x9e800f8b, 0x02dc3fc2,
-        0x241eb265,
+        0xb9853ab2, 0xfb585702, 0xdfd9040e, 0xe8bc9f94, 0xdc5b0abd, 0x8b0f809e, 0xc23fdc02,
+        0x65b21e24,
     ],
 };
 

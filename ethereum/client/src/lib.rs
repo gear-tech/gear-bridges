@@ -226,15 +226,14 @@ impl Contracts {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use super::*;
     use alloy_node_bindings::{Anvil, AnvilInstance};
     use alloy_primitives::keccak256;
     use alloy_provider::HttpProvider;
     use alloy_transport_http::Http;
     use binary_merkle_tree::{merkle_proof, merkle_root, verify_proof, Leaf, MerkleProof};
-    use hash_db::Hasher;
     use primitive_types::H256;
-    use sp_runtime::traits::Keccak256;
+    use sp_core::KeccakHasher;
 
     #[allow(unused, unreachable_pub)]
     pub fn spawn_anvil() -> (HttpProvider<Ethereum>, AnvilInstance) {
@@ -305,7 +304,9 @@ mod tests {
             nonce: U256::from(3),
             data: Bytes::from(vec![3, 3]),
         };
-        let hash = Keccak256::hash(msg.to_bytes().as_slice());
+
+        let mut hash = msg.to_bytes();
+        keccak_hash::keccak256(&mut hash[..]);
 
         let expected_hash: H256 = H256::from_slice(
             U256::from_str_radix(
@@ -317,7 +318,7 @@ mod tests {
             .as_slice(),
         );
 
-        assert_eq!(hash, expected_hash)
+        assert_eq!(&hash, expected_hash.as_bytes())
     }
 
     #[tokio::test]
@@ -362,9 +363,9 @@ mod tests {
 
         let leaves = vec![hash0, hash1, hash2];
 
-        let _root = merkle_root::<Keccak256, _>(leaves.clone());
+        let _root = merkle_root::<KeccakHasher, _>(leaves.clone());
         let proof: MerkleProof<H256, H256> =
-            merkle_proof::<Keccak256, Vec<H256>, H256>(leaves.clone(), 2);
+            merkle_proof::<KeccakHasher, Vec<H256>, H256>(leaves.clone(), 2);
         println!("leaves : {:?}", leaves);
 
         println!("Proof : {:?}", proof);
@@ -402,16 +403,16 @@ mod tests {
 
         let leaves = vec![msg0.to_bytes(), msg1.to_bytes(), msg2.to_bytes()];
 
-        let _root = merkle_root::<Keccak256, _>(leaves.clone());
+        let _root = merkle_root::<KeccakHasher, _>(leaves.clone());
         let proof: MerkleProof<H256, Vec<u8>> =
-            merkle_proof::<Keccak256, _, Vec<u8>>(leaves.clone(), 2);
+            merkle_proof::<KeccakHasher, _, Vec<u8>>(leaves.clone(), 2);
 
         let hash = keccak256(msg2.to_bytes());
         println!("Proof : {:?}", proof);
         println!("leaves : {:?}", leaves);
         println!("leaf hash: {:?}", hash);
 
-        let is_ok = verify_proof::<Keccak256, _, _>(
+        let is_ok = verify_proof::<KeccakHasher, _, _>(
             &proof.root,
             proof.proof,
             proof.number_of_leaves,
@@ -452,16 +453,16 @@ mod tests {
         };
         leaves.push(msg.to_bytes());
 
-        let _root = merkle_root::<Keccak256, _>(leaves.clone());
+        let _root = merkle_root::<KeccakHasher, _>(leaves.clone());
         let proof: MerkleProof<H256, Vec<u8>> =
-            merkle_proof::<Keccak256, _, Vec<u8>>(leaves.clone(), 100);
+            merkle_proof::<KeccakHasher, _, Vec<u8>>(leaves.clone(), 100);
 
         let hash = keccak256(msg.to_bytes());
         println!("Proof : {:?}", proof);
         println!("leaves : {:?}", leaves);
         println!("leaf hash: {:?}", hash);
 
-        let is_ok = verify_proof::<Keccak256, _, _>(
+        let is_ok = verify_proof::<KeccakHasher, _, _>(
             &proof.root,
             proof.proof,
             proof.number_of_leaves,

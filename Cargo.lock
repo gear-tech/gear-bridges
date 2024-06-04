@@ -2679,13 +2679,13 @@ dependencies = [
  "alloy-transport-http",
  "alloy-transport-ws",
  "binary-merkle-tree",
- "hash-db",
+ "keccak-hash 0.10.0",
  "log",
  "primitive-types 0.12.2",
  "reqwest",
  "serde",
  "serde_json",
- "sp-runtime 24.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.1.0)",
+ "sp-core 21.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.1.0)",
  "thiserror",
  "tokio",
 ]
@@ -4299,6 +4299,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak-hash"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b286e6b663fb926e1eeb68528e69cb70ed46c6d65871a21b2215ae8154c6d3c"
+dependencies = [
+ "primitive-types 0.12.2",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "kvdb"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5907,7 +5917,7 @@ dependencies = [
  "getrandom 0.2.14",
  "hashbrown 0.14.3",
  "itertools 0.11.0",
- "keccak-hash",
+ "keccak-hash 0.8.0",
  "log",
  "num",
  "plonky2_field",
@@ -5958,7 +5968,7 @@ dependencies = [
  "curve25519-dalek 4.1.2 (git+https://github.com/gear-tech/curve25519-dalek)",
  "env_logger 0.9.3",
  "itertools 0.10.5",
- "keccak-hash",
+ "keccak-hash 0.10.0",
  "log",
  "num",
  "plonky2",
@@ -6005,7 +6015,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "itertools 0.10.5",
- "keccak-hash",
+ "keccak-hash 0.10.0",
  "log",
  "num",
  "plonky2",
@@ -6370,7 +6380,7 @@ dependencies = [
  "ff",
  "itertools 0.10.5",
  "jemallocator",
- "keccak-hash",
+ "keccak-hash 0.10.0",
  "lazy_static",
  "log",
  "num",

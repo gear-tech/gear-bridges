@@ -82,32 +82,33 @@ pub struct FinalProof {
 impl FinalProof {
     pub fn from_proof_and_public_inputs(proof: String, public_inputs: [BigUint; 2]) -> Self {
         // data layout:
-        // pad pad root[0] root[1] root[2] root[3] root[4] root[5]
-        // pad pad root[6] root[7] block_n   pad     pad     pad
+        // root[0] root[1] root[2] root[3] root[4] root[5]
+        // root[6] root[7] block_n   pad     pad     pad
 
         fn pad_pi(pi: &BigUint) -> Vec<u8> {
-            const TARGET_LEN: usize = 256 / 8;
+            const TARGET_LEN: usize = 24;
 
-            let mut pi = pi.to_bytes_le();
+            let mut pi = pi.to_bytes_be();
             assert!(pi.len() <= TARGET_LEN);
-            pi.append(&mut vec![0; TARGET_LEN - pi.len()]);
-            pi
+            let mut padding = vec![0; TARGET_LEN - pi.len()];
+            padding.append(&mut pi);
+            padding
         }
 
         let pi_0 = pad_pi(&public_inputs[0]);
-        let pi_1 = pad_pi(&public_inputs[0]);
+        let pi_1 = pad_pi(&public_inputs[1]);
 
-        let first_root_part = &pi_0[pi_0.len() - 24..];
-        let second_root_part = &pi_1[pi_1.len() - 24..pi_1.len() - 16];
+        let first_root_part = &pi_0[..];
+        let second_root_part = &pi_1[..8];
 
         let root_bytes = [first_root_part, second_root_part].concat();
-        let block_number = &pi_1[pi_1.len() - 16..pi_1.len() - 12];
+        let block_number = &pi_1[8..12];
 
         assert_eq!(&proof[..2], "0x");
 
         Self {
             proof: hex::decode(&proof[2..]).expect("Got invalid proof string from gnark prover"),
-            block_number: u32::from_le_bytes(
+            block_number: u32::from_be_bytes(
                 block_number
                     .try_into()
                     .expect("Wrong amount of bytes to build block number"),

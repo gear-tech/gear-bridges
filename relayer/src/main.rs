@@ -115,6 +115,7 @@ async fn main() {
         .format_target(false)
         .filter(Some("prover"), log::LevelFilter::Info)
         .filter(Some("relayer"), log::LevelFilter::Info)
+        .filter(Some("ethereum-client"), log::LevelFilter::Info)
         .format_timestamp(Some(TimestampPrecision::Seconds))
         .init();
 

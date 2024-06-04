@@ -35,33 +35,35 @@ pub async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
 
     loop {
-        let res: anyhow::Result<()> = {
-            log::info!("Syncing authority set id...");
-            loop {
-                let sync_steps = sync_authority_set_id(&gear_api, &mut proof_storage).await?;
-                if sync_steps == 0 {
-                    break;
-                } else {
-                    log::info!("Synced {} authority set ids", sync_steps);
-                }
-            }
-            log::info!("Authority set id is in sync");
-
-            log::info!("Proving...");
-            let proof = prove_message_sent(&gear_api, &proof_storage).await?;
-            log::info!("Proven");
-
-            log::info!("Submitting proof to ethereum...");
-            submit_proof_to_ethereum(&eth_api, proof).await?; 
-            log::info!("Proof submitted to ethereum");
-
-            Ok(())
-        };
+        let res = main_loop(&gear_api, &eth_api, &mut proof_storage).await;
 
         if let Err(err) = res {
             log::error!("{}", err);
         }
     }
+}
+
+async fn main_loop(gear_api: &GearApi, eth_api: &EthApi, proof_storage: &mut dyn ProofStorage) -> anyhow::Result<()> {
+    log::info!("Syncing authority set id...");
+    loop {
+        let sync_steps = sync_authority_set_id(&gear_api, proof_storage).await?;
+        if sync_steps == 0 {
+            break;
+        } else {
+            log::info!("Synced {} authority set ids", sync_steps);
+        }
+    }
+    log::info!("Authority set id is in sync");
+
+    log::info!("Proving...");
+    let proof = prove_message_sent(&gear_api, proof_storage).await?;
+    log::info!("Proven");
+
+    log::info!("Submitting proof to ethereum...");
+    submit_proof_to_ethereum(&eth_api, proof).await?; 
+    log::info!("Proof submitted to ethereum");
+
+    Ok(())
 }
 
 type SyncStepCount = usize;
@@ -119,6 +121,8 @@ async fn submit_proof_to_ethereum(
     eth_api: &EthApi,
     proof: FinalProof,
 ) -> anyhow::Result<()> {
+    log::info!("Submitting merkle root {} at gear block {} to ethereum", hex::encode(proof.merkle_root), proof.block_number);
+
     eth_api.provide_merkle_root(proof.block_number, proof.merkle_root, &proof.proof[..]).await?;
 
     Ok(())

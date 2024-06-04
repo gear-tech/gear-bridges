@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{str::FromStr, time::Instant};
 
 use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};
@@ -85,17 +85,28 @@ impl FinalProof {
         // pad pad root[0] root[1] root[2] root[3] root[4] root[5]
         // pad pad root[6] root[7] block_n   pad     pad     pad
 
-        let pi_0 = public_inputs[0].to_bytes_le();
-        let first_root_part = &pi_0[pi_0.len() - 24..];
+        fn pad_pi(pi: &BigUint) -> Vec<u8> {
+            const TARGET_LEN: usize = 256 / 8;
 
-        let pi_1 = public_inputs[1].to_bytes_le();
+            let mut pi = pi.to_bytes_le();
+            assert!(pi.len() <= TARGET_LEN);
+            pi.append(&mut vec![0; TARGET_LEN - pi.len()]);
+            pi
+        }
+
+        let pi_0 = pad_pi(&public_inputs[0]);
+        let pi_1 = pad_pi(&public_inputs[0]);
+
+        let first_root_part = &pi_0[pi_0.len() - 24..];
         let second_root_part = &pi_1[pi_1.len() - 24..pi_1.len() - 16];
 
         let root_bytes = [first_root_part, second_root_part].concat();
         let block_number = &pi_1[pi_1.len() - 16..pi_1.len() - 12];
 
+        assert_eq!(&proof[..2], "0x");
+
         Self {
-            proof: hex::decode(proof).expect("Got invalid proof string from gnark prover"),
+            proof: hex::decode(&proof[2..]).expect("Got invalid proof string from gnark prover"),
             block_number: u32::from_le_bytes(
                 block_number
                     .try_into()
@@ -139,13 +150,16 @@ pub async fn prove_final(
     //gnark::compile_circuit(&proof);
 
     let proof = gnark::prove_circuit(&proof);
-    FinalProof::from_proof_and_public_inputs(
-        proof.proof,
-        proof
-            .public_inputs
-            .try_into()
-            .expect("Got wrong public input count from gnark prover"),
-    )
+
+    let public_inputs: [_; 2] = proof
+        .public_inputs
+        .try_into()
+        .expect("Got wrong public input count from gnark prover");
+
+    let public_inputs = public_inputs
+        .map(|s| BigUint::from_str(&s).expect("Got wrong public input format from ganrk"));
+
+    FinalProof::from_proof_and_public_inputs(proof.proof, public_inputs)
 }
 
 fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclusion {
@@ -193,14 +207,13 @@ pub mod gnark {
     use core::ffi::c_char;
     use std::ffi::{CStr, CString};
 
-    use num::BigUint;
     use prover::proving::ExportedProofWithCircuitData;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct ProveResult {
         pub proof: String,
-        pub public_inputs: Vec<BigUint>,
+        pub public_inputs: Vec<String>,
     }
 
     extern "C" {

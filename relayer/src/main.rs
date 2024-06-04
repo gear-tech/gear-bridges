@@ -152,7 +152,7 @@ async fn main() {
                 proof_storage.update(proof.proof).unwrap();
             }
             ProveCommands::Wrapped { args } => {
-                let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
+                let proof_storage = FileSystemProofStorage::new("./proof_storage".into());
 
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await

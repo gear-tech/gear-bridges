@@ -43,16 +43,16 @@ impl ByteTarget {
     }
 
     /// Convert `HalfByteTarget` to `Target`.
-    pub fn to_target(&self) -> Target {
+    pub fn as_target(&self) -> Target {
         self.0
     }
 
     /// Split `ByteTarget` into `(least_significant, most_significant)` `HalfByteTarget`s.
-    pub fn to_half_byte_targets(
+    pub fn as_half_byte_targets(
         &self,
         builder: &mut CircuitBuilder<F, D>,
     ) -> (HalfByteTarget, HalfByteTarget) {
-        let bits = self.to_bit_targets(builder);
+        let bits = self.as_bit_targets(builder);
 
         let l_bits = &bits.0[..4];
         let h_bits = &bits.0[4..];
@@ -64,7 +64,7 @@ impl ByteTarget {
     }
 
     /// Convert `HalfByteTarget` to bits arranged from less to most significant bit.
-    pub fn to_bit_targets(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
+    pub fn as_bit_targets(&self, builder: &mut CircuitBuilder<F, D>) -> ArrayTarget<BoolTarget, 8> {
         ArrayTarget(
             builder
                 .low_bits(self.0, 8, 8)

@@ -1,5 +1,4 @@
-use alloy_sol_types::{sol, SolCall, SolInterface};
-use std::io::Read;
+use alloy_sol_types::sol;
 
 sol! {
     #[derive(Debug,PartialEq, Eq)]

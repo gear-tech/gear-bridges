@@ -170,7 +170,7 @@ impl VariativeBlake2 {
             let len_exceeded = builder.is_equal(current_idx, length_target);
             data_end = builder.or(len_exceeded, data_end);
 
-            let byte_is_zero = builder.is_equal(byte.to_target(), zero);
+            let byte_is_zero = builder.is_equal(byte.as_target(), zero);
             let byte_is_not_zero = builder.not(byte_is_zero);
 
             let byte_invalid = builder.and(data_end, byte_is_not_zero);
@@ -195,7 +195,7 @@ impl VariativeBlake2 {
         let data_target_bits = data_target
             .0
             .iter()
-            .flat_map(|t| t.to_bit_targets(&mut builder).0.into_iter().rev());
+            .flat_map(|t| t.as_bit_targets(&mut builder).0.into_iter().rev());
 
         let hasher_input = data_target_bits
             .take(BLOCK_BITS * block_count)

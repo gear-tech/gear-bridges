@@ -27,7 +27,7 @@ pub async fn serve(args: ServeArgs) -> anyhow::Result<()> {
             &eth_endpoint,
             &mq_address,
             &relayer_address,
-            fee_payer.as_ref().map(|s| s.as_str()),
+            fee_payer.as_deref(),
         )
         .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))
     };

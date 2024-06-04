@@ -61,8 +61,8 @@ pub fn define(
         .first_node_data_block
         .random_read(read_offset, builder);
 
-    let first_bits = first_byte.to_bit_targets(builder);
-    let second_bits = second_byte.to_bit_targets(builder);
+    let first_bits = first_byte.as_bit_targets(builder);
+    let second_bits = second_byte.as_bit_targets(builder);
     let bits = first_bits.0.into_iter().chain(second_bits.0);
 
     let mut child_amount_before_claimed_child = builder.zero();

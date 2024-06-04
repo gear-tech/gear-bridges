@@ -1,36 +1,38 @@
-extern crate core;
+use std::sync::Arc;
+
+use alloy_contract::Event;
+use alloy_network::{Ethereum, EthereumSigner};
+use alloy_primitives::{hex, Address, Bytes, TxHash, B256, U256};
+use alloy_provider::{
+    layers::{
+        GasEstimatorLayer, GasEstimatorProvider, ManagedNonceLayer, ManagedNonceProvider,
+        SignerProvider,
+    },
+    Provider, ProviderBuilder, RootProvider,
+};
+use alloy_rpc_client::RpcClient;
+use alloy_rpc_types::Filter;
+use alloy_signer::k256::ecdsa::SigningKey;
+use alloy_signer_wallet::{LocalWallet, Wallet};
+use alloy_sol_types::SolEvent;
+use alloy_transport::{BoxTransport, Transport};
+
+use error::Error;
+use reqwest::{Client, Url};
+
+use crate::{
+    abi::{
+        ContentMessage, IMessageQueue, IMessageQueue::IMessageQueueInstance, IRelayer,
+        IRelayer::IRelayerInstance,
+    },
+    convert::Convert,
+    proof::BlockMerkleRootProof,
+};
 
 mod abi;
 mod convert;
 pub mod error;
 mod proof;
-
-use crate::abi::IMessageQueue::IMessageQueueInstance;
-use crate::abi::IRelayer::IRelayerInstance;
-use crate::abi::{ContentMessage, IMessageQueue, IRelayer};
-use crate::convert::Convert;
-use crate::proof::BlockMerkleRootProof;
-use alloy_contract::Event;
-use alloy_network::{Ethereum, EthereumSigner, Network, TxSigner};
-use alloy_primitives::{hex, Address, Bytes, TxHash, B256, U256};
-use alloy_provider::layers::{
-    GasEstimatorLayer, GasEstimatorProvider, ManagedNonceLayer, ManagedNonceProvider,
-    SignerProvider,
-};
-use alloy_provider::{Provider, ProviderBuilder, ProviderLayer, RootProvider};
-use alloy_rpc_client::RpcClient;
-use alloy_rpc_types::{Filter, TransactionRequest};
-use alloy_signer::k256::ecdsa::SigningKey;
-use alloy_signer_wallet::{LocalWallet, Wallet};
-use alloy_sol_types::{sol, SolCall, SolEvent, SolInterface};
-use alloy_transport::{BoxTransport, Transport};
-use binary_merkle_tree::MerkleProof;
-use error::Error;
-use reqwest::{Client, Url};
-use serde::Deserialize;
-use sp_runtime::traits::Keccak256;
-use std::marker::PhantomData;
-use std::sync::Arc;
 
 type ProviderType = ManagedNonceProvider<
     Ethereum,
@@ -54,6 +56,7 @@ pub struct Contracts {
     relayer_instance: IRelayerInstance<Ethereum, BoxTransport, Arc<ProviderType>>,
 }
 
+#[allow(dead_code)]
 pub struct MerkleRootEntry {
     block_number: u64,
     merkle_root: B256,
@@ -135,8 +138,8 @@ impl Contracts {
                     .await
                 {
                     Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(receipt) => Ok(()),
-                        Err(e) => Err(Error::ErrorWaitingTransactionReceipt),
+                        Ok(_) => Ok(()),
+                        Err(_) => Err(Error::ErrorWaitingTransactionReceipt),
                     },
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
@@ -199,7 +202,7 @@ impl Contracts {
         );
 
         match call.estimate_gas().await {
-            Ok(gas_used) => {
+            Ok(_gas_used) => {
                 match call
                     .from(self.signer.address())
                     .gas_price(U256::from(2_000_000_000_000u128))
@@ -207,8 +210,8 @@ impl Contracts {
                     .await
                 {
                     Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(receipt) => Ok(true),
-                        Err(e) => Err(Error::ErrorWaitingTransactionReceipt),
+                        Ok(_) => Ok(true),
+                        Err(_) => Err(Error::ErrorWaitingTransactionReceipt),
                     },
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
@@ -231,6 +234,7 @@ mod tests {
     use binary_merkle_tree::{merkle_proof, merkle_root, verify_proof, Leaf, MerkleProof};
     use hash_db::Hasher;
     use primitive_types::H256;
+    use sp_runtime::traits::Keccak256;
 
     #[allow(unused, unreachable_pub)]
     pub fn spawn_anvil() -> (HttpProvider<Ethereum>, AnvilInstance) {
@@ -352,13 +356,13 @@ mod tests {
         let hash1 = H256::random();
         let hash2 = H256::random();
 
-        let leaf0 = Leaf::Hash(hash0);
-        let leaf1 = Leaf::Hash(hash1);
-        let leaf2 = Leaf::Hash(hash2);
+        let _leaf0 = Leaf::Hash(hash0);
+        let _leaf1 = Leaf::Hash(hash1);
+        let _leaf2 = Leaf::Hash(hash2);
 
         let leaves = vec![hash0, hash1, hash2];
 
-        let root = merkle_root::<Keccak256, _>(leaves.clone());
+        let _root = merkle_root::<Keccak256, _>(leaves.clone());
         let proof: MerkleProof<H256, H256> =
             merkle_proof::<Keccak256, Vec<H256>, H256>(leaves.clone(), 2);
         println!("leaves : {:?}", leaves);
@@ -398,7 +402,7 @@ mod tests {
 
         let leaves = vec![msg0.to_bytes(), msg1.to_bytes(), msg2.to_bytes()];
 
-        let root = merkle_root::<Keccak256, _>(leaves.clone());
+        let _root = merkle_root::<Keccak256, _>(leaves.clone());
         let proof: MerkleProof<H256, Vec<u8>> =
             merkle_proof::<Keccak256, _, Vec<u8>>(leaves.clone(), 2);
 
@@ -448,7 +452,7 @@ mod tests {
         };
         leaves.push(msg.to_bytes());
 
-        let root = merkle_root::<Keccak256, _>(leaves.clone());
+        let _root = merkle_root::<Keccak256, _>(leaves.clone());
         let proof: MerkleProof<H256, Vec<u8>> =
             merkle_proof::<Keccak256, _, Vec<u8>>(leaves.clone(), 100);
 

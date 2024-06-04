@@ -95,7 +95,7 @@ impl FinalProof {
         let block_number = &pi_1[pi_1.len() - 16..pi_1.len() - 12];
 
         Self {
-            proof: hex::decode(&proof).expect("Got invalid proof string from gnark prover"),
+            proof: hex::decode(proof).expect("Got invalid proof string from gnark prover"),
             block_number: u32::from_le_bytes(
                 block_number
                     .try_into()

@@ -12,11 +12,11 @@ mod proof_storage;
 mod prover_interface;
 mod serve;
 
-const DEFAULT_VARA_RPC: &str = "ws://localhost:9944";
+const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    authority_set_id: 1,
+    authority_set_id: 0,
     // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
     validator_set_hash: [
         0xb23a85b9, 0x025758fb, 0x0e04d9df, 0x949fbce8, 0xbd0a5bdc, 0x9e800f8b, 0x02dc3fc2,
@@ -113,17 +113,18 @@ async fn main() {
     pretty_env_logger::formatted_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
-        .filter(Some("prover"), log::LevelFilter::Debug)
+        .filter(Some("prover"), log::LevelFilter::Info)
+        .filter(Some("relayer"), log::LevelFilter::Info)
         .format_timestamp(Some(TimestampPrecision::Seconds))
         .init();
 
     let cli = Cli::parse();
 
-    let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
-
     match cli.command {
         CliCommands::Prove(prove_command) => match prove_command {
             ProveCommands::Genesis { args } => {
+                let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
+
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await
                     .unwrap();
@@ -134,6 +135,8 @@ async fn main() {
                     .unwrap();
             }
             ProveCommands::ValidatorSetChange { args } => {
+                let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
+
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await
                     .unwrap();
@@ -149,6 +152,8 @@ async fn main() {
                 proof_storage.update(proof.proof).unwrap();
             }
             ProveCommands::Wrapped { args } => {
+                let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
+
                 let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
                     .await
                     .unwrap();

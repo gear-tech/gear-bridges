@@ -38,10 +38,11 @@ struct StorageTrieInclusionProof {
 
 const VOTE_LENGTH_IN_BITS: usize = 424;
 const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
+
 const MERKLE_ROOT_STORAGE_ADDRESS: &str =
-    "ea31e171c2cd790a23350b5e593ed882df509310bc655bbf75a5b563fc3c8eee";
+    "ea31e171c2cd790a23350b5e593ed882d04afeb2c94bf32a6200661ebc1342d0";
 const NEXT_VALIDATOR_SET_ADDRESS: &str =
-    "ea31e171c2cd790a23350b5e593ed8827d9fe37370ac390779f35763d98106e8";
+    "ea31e171c2cd790a23350b5e593ed8821ab780c1342a26e355e961e688a0bdcb";
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 

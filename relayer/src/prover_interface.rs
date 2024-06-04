@@ -38,10 +38,16 @@ pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
 pub async fn prove_validator_set_change(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
-    previous_validator_set_id: u64,
+    previous_authority_set_id: u64,
 ) -> ProofWithCircuitData {
+    log::info!(
+        "Proving authority set change {} -> {}",
+        previous_authority_set_id,
+        previous_authority_set_id + 1
+    );
+
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(previous_validator_set_id)
+        .fetch_finality_proof_for_session(previous_authority_set_id)
         .await
         .unwrap();
 
@@ -129,8 +135,8 @@ pub async fn prove_final(
         message_contents,
     );
 
-    // TODO: Compile only when not initialized
-    gnark::compile_circuit(&proof);
+    // TODO: Compile only when not initialized #54
+    //gnark::compile_circuit(&proof);
 
     let proof = gnark::prove_circuit(&proof);
     FinalProof::from_proof_and_public_inputs(
@@ -146,7 +152,7 @@ fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclus
     let address_nibbles = proof
         .address
         .into_iter()
-        .flat_map(|byte| [byte & 0b11110000, byte & 0b00001111])
+        .flat_map(|byte| [(byte & 0b11110000) >> 4, byte & 0b00001111])
         .collect();
 
     StorageInclusion {

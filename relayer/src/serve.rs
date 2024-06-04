@@ -7,6 +7,8 @@ use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
 
 pub async fn serve(args: ServeArgs) -> anyhow::Result<()> {
+    log::info!("Starting relayer...");
+    
     let ServeArgs {
         vara_endpoint,
         ethereum_args,
@@ -34,15 +36,24 @@ pub async fn serve(args: ServeArgs) -> anyhow::Result<()> {
 
     loop {
         let res: anyhow::Result<()> = {
+            log::info!("Syncing authority set id...");
             loop {
                 let sync_steps = sync_authority_set_id(&gear_api, &mut proof_storage).await?;
                 if sync_steps == 0 {
                     break;
+                } else {
+                    log::info!("Synced {} authority set ids", sync_steps);
                 }
             }
+            log::info!("Authority set id is in sync");
 
+            log::info!("Proving...");
             let proof = prove_message_sent(&gear_api, &proof_storage).await?;
+            log::info!("Proven");
+
+            log::info!("Submitting proof to ethereum...");
             submit_proof_to_ethereum(&eth_api, proof).await?; 
+            log::info!("Proof submitted to ethereum");
 
             Ok(())
         };
@@ -75,6 +86,7 @@ async fn sync_authority_set_id(
         Some((mut proof, latest_proven)) if latest_proven < latest_authority_set_id => {
             for set_id in latest_proven..latest_authority_set_id {
                 proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await;
+                proof_storage.update(proof.proof.clone())?;
             }
 
             let step_count = latest_authority_set_id - latest_proven;

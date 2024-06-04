@@ -148,7 +148,7 @@ pub async fn prove_final(
     );
 
     // TODO: Compile only when not initialized #54
-    gnark::compile_circuit(&proof);
+    //gnark::compile_circuit(&proof);
 
     let proof = gnark::prove_circuit(&proof);
 

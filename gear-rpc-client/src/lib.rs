@@ -461,18 +461,16 @@ impl GearApi {
         block: H256,
         message_hash: H256,
     ) -> anyhow::Result<()> {
-        // use pallet_gear_bridge_runtime_rpc_api::Proof;
+        use pallet_gear_bridge_rpc_runtime_api::Proof;
 
-        // let merkle_proof: Option<Proof> = self
-        //     .api
-        //     .rpc()
-        //     .request(
-        //         "gearBridge_merkleProof",
-        //         rpc_params![message_hash, Some(block)],
-        //     )
-        //     .await?;
-
-        // println!("MP: {:?}", merkle_proof.unwrap());
+        let _merkle_proof: Option<Proof> = self
+            .api
+            .rpc()
+            .request(
+                "gearBridge_merkleProof",
+                rpc_params![message_hash, Some(block)],
+            )
+            .await?;
 
         todo!()
     }

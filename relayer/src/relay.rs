@@ -1,12 +1,17 @@
 use std::{
     collections::HashMap,
     sync::mpsc::{channel, Receiver},
+    thread,
+    time::Duration,
 };
 
 use crate::{EthereumArgs, RelayArgs};
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
+
+const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
+const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 struct MessagesInBlock {
     messages: Vec<Message>,
@@ -70,22 +75,22 @@ fn run_event_processor(gear_api: GearApi, from_block: u32) -> Receiver<MessagesI
         let mut current_block = from_block;
 
         loop {
-            let messages = get_messages_in_block(&gear_api, current_block).await;
+            let finalized_head = gear_api.latest_finalized_block().await.unwrap();
+            let finalized_head = gear_api.block_hash_to_number(finalized_head).await.unwrap();
 
-            // TODO: refactor
-            if messages.is_err() {
-                continue;
+            if finalized_head >= current_block {
+                for block in current_block..=finalized_head {
+                    let messages = get_messages_in_block(&gear_api, current_block)
+                        .await
+                        .unwrap();
+
+                    sender.send(MessagesInBlock { messages, block }).unwrap();
+                }
+
+                current_block = finalized_head + 1;
+            } else {
+                thread::sleep(GEAR_BLOCK_TIME_APPROX);
             }
-            let messages = messages.unwrap();
-
-            sender
-                .send(MessagesInBlock {
-                    messages,
-                    block: current_block,
-                })
-                .unwrap();
-
-            current_block += 1;
         }
     });
 
@@ -111,7 +116,7 @@ fn run_ethereum_listener(eth_api: EthApi, from_block: u64) -> Receiver<RelayedMe
 
         loop {
             let latest = eth_api.block_number().await.unwrap();
-            if latest != current_block {
+            if latest >= current_block {
                 let merkle_roots = eth_api
                     .fetch_merkle_roots_in_range(current_block, latest)
                     .await
@@ -125,7 +130,9 @@ fn run_ethereum_listener(eth_api: EthApi, from_block: u64) -> Receiver<RelayedMe
                         .unwrap();
                 }
 
-                current_block = latest;
+                current_block = latest + 1;
+            } else {
+                thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
             }
         }
     });

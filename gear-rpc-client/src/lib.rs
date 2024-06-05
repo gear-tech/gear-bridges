@@ -3,12 +3,13 @@
 
 use anyhow::anyhow;
 use dto::BranchNodeData;
+use gsdk::metadata::gear_bridge::Event as GearBridgeEvent;
 use gsdk::{
     metadata::{
         storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
-    GearConfig,
+    Event as RuntimeEvent, Events, GearConfig,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
@@ -486,5 +487,27 @@ impl GearApi {
             num_leaves: proof.number_of_leaves,
             leaf_index: proof.leaf_index,
         })
+    }
+
+    pub async fn message_queued_events(&self, block: H256) -> anyhow::Result<Vec<dto::Message>> {
+        let events = self.api.get_events_at(Some(block)).await?;
+
+        let events = events.into_iter().filter_map(|event| {
+            if let RuntimeEvent::GearBridge(GearBridgeEvent::MessageQueued { message }) = event {
+                let mut nonce_le = [0; 32];
+                primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
+
+                Some(dto::Message {
+                    nonce_le,
+                    source: message.source.0,
+                    destination: message.destination.0,
+                    payload: message.payload,
+                })
+            } else {
+                None
+            }
+        });
+
+        Ok(events.collect())
     }
 }

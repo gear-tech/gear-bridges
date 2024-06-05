@@ -75,6 +75,9 @@ struct RelayArgs {
     vara_endpoint: VaraEndpointArg,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
+    /// Block number to start relaying from. If not specified equals to the latest finalized block
+    #[arg(long = "from-block")]
+    from_block: Option<u32>,
 }
 
 #[derive(Args)]
@@ -183,7 +186,7 @@ async fn main() {
             }
         },
         CliCommands::Serve(args) => {
-            let _ = serve::serve(args).await;
+            serve::serve(args).await.unwrap();
         }
         CliCommands::Relay(args) => {
             relay::relay(args).await.unwrap();

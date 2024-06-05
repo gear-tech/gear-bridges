@@ -25,39 +25,46 @@ pub async fn relay(args: RelayArgs) -> anyhow::Result<()> {
         .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))
     };
 
-    // sender: ALICE
-    // receiver: 0x000...00011
-    // paylod: 0x11
-    // nonce: 1
-    // 0xbcf2aa76c36358f3913a1d701a2e9f9622d214348613f0059139b93e58edc6c2
-    let block = gear_api.block_number_to_hash(715).await.unwrap();
-    let message =
-        hex::decode("bcf2aa76c36358f3913a1d701a2e9f9622d214348613f0059139b93e58edc6c2").unwrap();
-    let message: [u8; 32] = message.try_into().unwrap();
-    let message_hash = primitive_types::H256::from(message);
+    let mut current_block = if let Some(block) = args.from_block {
+        block
+    } else {
+        let block = gear_api.latest_finalized_block().await?;
+        gear_api.block_hash_to_number(block).await?
+    };
 
-    let proof = gear_api
-        .fetch_message_inclusion_merkle_proof(block, message_hash)
-        .await
-        .unwrap();
+    loop {
+        log::info!("Processing block #{}", current_block);
+        let res = process_block(&gear_api, &eth_api, current_block).await;
 
-    // ALICE
-    let sender =
-        hex::decode("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d").unwrap();
-    let sender: [u8; 32] = sender.try_into().unwrap();
+        if let Err(res) = res {
+            log::error!("{}", res);
+            continue;
+        }
 
-    eth_api
-        .provide_content_message(
-            block.0,
-            proof.num_leaves as u32,
-            proof.leaf_index as u32,
-            1u128,
-            sender,
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-            &[0x11][..],
-            proof.proof,
-        )
-        .await?;
+        current_block += 1;
+    }
+}
+
+async fn process_block(gear_api: &GearApi, eth_api: &EthApi, block: u32) -> anyhow::Result<()> {
+    let block = gear_api.block_number_to_hash(block).await?;
+    let messages = gear_api.message_queued_events(block).await?;
+
+    if !messages.is_empty() {
+        log::info!("Found {} messages", messages.len());
+    }
+
+    // eth_api
+    //     .provide_content_message(
+    //         block.0,
+    //         proof.num_leaves as u32,
+    //         proof.leaf_index as u32,
+    //         1u128,
+    //         sender,
+    //         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+    //         &[0x11][..],
+    //         proof.proof,
+    //     )
+    //     .await?;
 
     Ok(())
 }

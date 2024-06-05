@@ -45,3 +45,10 @@ pub struct MerkleProof {
     pub num_leaves: u64,
     pub leaf_index: u64,
 }
+
+pub struct Message {
+    pub nonce_le: [u8; 32],
+    pub source: [u8; 32],
+    pub destination: [u8; 20],
+    pub payload: Vec<u8>,
+}

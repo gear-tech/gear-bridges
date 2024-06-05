@@ -1,0 +1,20 @@
+[package]
+name = "ethereum-common"
+version = "0.1.0"
+edition.workspace = true
+description = "Various entities used in Ethereum ecosystem"
+
+[dependencies]
+parity-scale-codec = { workspace = true, features = ["derive"] }
+serde.workspace = true
+tree_hash.workspace = true
+tree_hash_derive.workspace = true
+hex.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "parity-scale-codec/std",
+    "serde/std",
+    "tree_hash/std",
+]

@@ -2403,6 +2403,16 @@ dependencies = [
 
 [[package]]
 name = "darling"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a01d95850c592940db9b8194bc39f4bc0e89dee5c4265e4b1807c34a9aba453c"
+dependencies = [
+ "darling_core 0.13.4",
+ "darling_macro 0.13.4",
+]
+
+[[package]]
+name = "darling"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b750cb3417fd1b327431a470f388520309479ab0bf5e323505daf0290cd3850"
@@ -2419,6 +2429,20 @@ checksum = "83b2eb4d90d12bdda5ed17de686c2acb4c57914f8f921b8da7e112b5a36f3fe1"
 dependencies = [
  "darling_core 0.20.9",
  "darling_macro 0.20.9",
+]
+
+[[package]]
+name = "darling_core"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "859d65a907b6852c9361e3185c862aae7fafd2887876799fa55f5f99dc40d610"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim 0.10.0",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2447,6 +2471,17 @@ dependencies = [
  "quote",
  "strsim 0.11.1",
  "syn 2.0.66",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c972679f83bdf9c42bd905396b6c3588a843a17f0f16dfcfa3e2c5d57441835"
+dependencies = [
+ "darling_core 0.13.4",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3092,6 +3127,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethbloom"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c22d4b5885b6aa2fe5e8b9329fb8d232bf739e434e6b87347c63bdd00c120f60"
+dependencies = [
+ "crunchy",
+ "fixed-hash 0.8.0",
+ "impl-rlp",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "ethereum-client"
 version = "0.1.0"
 dependencies = [
@@ -3125,6 +3172,40 @@ dependencies = [
  "sp-core",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "ethereum-common"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "parity-scale-codec",
+ "serde",
+ "tree_hash",
+ "tree_hash_derive",
+]
+
+[[package]]
+name = "ethereum-types"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d215cbf040552efcbe99a38372fe80ab9d00268e20012b79fcd0f073edd8ee"
+dependencies = [
+ "ethbloom",
+ "fixed-hash 0.8.0",
+ "impl-rlp",
+ "primitive-types 0.12.2",
+ "uint",
+]
+
+[[package]]
+name = "ethereum_hashing"
+version = "0.6.0"
+source = "git+https://github.com/gear-tech/ethereum_hashing.git?branch=gear-v0.6.0#cf086a5e4b1cd85c7ca5c27999b0461d92144ea1"
+dependencies = [
+ "lazy_static",
+ "ring 0.17.8 (git+https://github.com/gear-tech/ring.git?branch=gear-v0.17.8)",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -4670,6 +4751,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba6a270039626615617f3f36d15fc827041df3b78c439da2cadfa47455a77f2f"
 dependencies = [
  "parity-scale-codec",
+]
+
+[[package]]
+name = "impl-rlp"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f28220f89297a075ddc7245cd538076ee98b01f2a9c23a53a4f1105d5a322808"
+dependencies = [
+ "rlp",
 ]
 
 [[package]]
@@ -7369,6 +7459,7 @@ checksum = "0b34d9fd68ae0b74a41b21c03c2f62847aa0ffea044eee893b4c140b37e244e2"
 dependencies = [
  "fixed-hash 0.8.0",
  "impl-codec",
+ "impl-rlp",
  "impl-serde",
  "scale-info",
  "uint",
@@ -8067,6 +8158,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ring"
+version = "0.17.8"
+source = "git+https://github.com/gear-tech/ring.git?branch=gear-v0.17.8#6071e95b036bbf7ac1893d5a0345ca154e1f4710"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "getrandom 0.2.15",
+ "libc",
+ "spin 0.9.8",
+ "untrusted 0.9.0",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "rkyv"
 version = "0.7.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8255,7 +8360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
 dependencies = [
  "log",
- "ring 0.17.8",
+ "ring 0.17.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustls-webpki",
  "sct",
 ]
@@ -8287,7 +8392,7 @@ version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
- "ring 0.17.8",
+ "ring 0.17.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "untrusted 0.9.0",
 ]
 
@@ -8868,7 +8973,7 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
 dependencies = [
- "ring 0.17.8",
+ "ring 0.17.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "untrusted 0.9.0",
 ]
 
@@ -9299,7 +9404,7 @@ dependencies = [
  "chacha20poly1305",
  "curve25519-dalek 4.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand_core 0.6.4",
- "ring 0.17.8",
+ "ring 0.17.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc_version 0.4.0",
  "sha2 0.10.8",
  "subtle",
@@ -10709,6 +10814,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree_hash"
+version = "0.6.0"
+source = "git+https://github.com/gear-tech/tree_hash.git?branch=gear-v0.6.0#0aafb384b1ae7f34c17decc3d9125c0e5e808c1e"
+dependencies = [
+ "ethereum-types",
+ "ethereum_hashing",
+ "smallvec",
+]
+
+[[package]]
+name = "tree_hash_derive"
+version = "0.6.0"
+source = "git+https://github.com/gear-tech/tree_hash.git?branch=gear-v0.6.0#0aafb384b1ae7f34c17decc3d9125c0e5e808c1e"
+dependencies = [
+ "darling 0.13.4",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "trie-db"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11782,7 +11907,7 @@ version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
 dependencies = [
- "ring 0.17.8",
+ "ring 0.17.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "untrusted 0.9.0",
 ]
 

@@ -6,6 +6,7 @@ members = [
     "prover",
     "relayer",
     "circuits/*",
+    "ethereum-common",
 ]
 
 resolver = "2"
@@ -23,6 +24,7 @@ plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
 plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
 plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
+ethereum-common = { path = "ethereum-common", default-features = false }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -40,7 +42,7 @@ clap = { version = "4.4.13", features = ["derive", "env"] }
 env_logger = "0.9.0"
 ff = { version = "0.13.0", features = ["derive"] }
 futures-util = "0.3.28"
-hex = "0.4.3"
+hex = { version = "0.4.3", default-features = false }
 itertools = "0.10.5"
 jemallocator = "0.5.0"
 keccak-hash = "0.10.0"
@@ -61,6 +63,8 @@ static_assertions = "1.1.0"
 tokio = { version = "1.23.0", features = ["full"] }
 thiserror = "1.0.61"
 unroll = "0.1.5"
+tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
+tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
 
 # Gear/Substrate deps
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }

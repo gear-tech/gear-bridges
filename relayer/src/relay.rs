@@ -20,6 +20,7 @@ struct MessagesInBlock {
     block: u32,
 }
 
+#[derive(Clone, Copy)]
 struct RelayedMerkleRoot {
     gear_block: u32,
 }
@@ -164,7 +165,7 @@ fn run_merkle_root_listener(
 }
 
 struct Era {
-    merkle_roots: Vec<RelayedMerkleRoot>,
+    latest_merkle_root: Option<RelayedMerkleRoot>,
     messages: Vec<MessagesInBlock>,
 }
 
@@ -183,25 +184,37 @@ fn run_message_relayer(
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(Era {
-                        merkle_roots: vec![],
+                        latest_merkle_root: None,
                         messages: vec![messages],
                     });
                 }
             }
         }
 
-        for (authority_set_id, merkle_root) in merkle_roots.try_iter() {
+        for (authority_set_id, new_merkle_root) in merkle_roots.try_iter() {
             match eras.entry(authority_set_id) {
                 Entry::Occupied(mut entry) => {
-                    entry.get_mut().merkle_roots.push(merkle_root);
+                    let era = entry.get_mut();
+
+                    if let Some(mr) = era.latest_merkle_root.as_ref() {
+                        if mr.gear_block < new_merkle_root.gear_block {
+                            era.latest_merkle_root = Some(new_merkle_root);
+                        }
+                    } else {
+                        era.latest_merkle_root = Some(new_merkle_root);
+                    }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(Era {
-                        merkle_roots: vec![merkle_root],
+                        latest_merkle_root: Some(new_merkle_root),
                         messages: vec![],
                     });
                 }
             }
+        }
+
+        for era in eras.iter() {
+            //
         }
 
         //for message in messages {

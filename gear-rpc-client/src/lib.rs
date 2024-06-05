@@ -47,6 +47,7 @@ const NEXT_VALIDATOR_SET_ADDRESS: &str =
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
+#[derive(Clone)]
 pub struct GearApi {
     api: gsdk::Api,
 }

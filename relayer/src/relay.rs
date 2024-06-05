@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{btree_map::Entry, BTreeMap, HashMap},
     sync::mpsc::{channel, Receiver},
     thread,
     time::Duration,
@@ -12,6 +12,8 @@ use gear_rpc_client::{dto::Message, GearApi};
 
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
+
+type AuthoritySetId = u64;
 
 struct MessagesInBlock {
     messages: Vec<Message>,
@@ -57,10 +59,10 @@ pub async fn relay(args: RelayArgs) -> anyhow::Result<()> {
         "Starting gear event processing from block #{}",
         from_gear_block
     );
-    let messages = run_event_processor(gear_api, from_gear_block);
+    let messages = run_event_processor(gear_api.clone(), from_gear_block);
 
     log::info!("Starting ethereum listener from block #{}", from_eth_block);
-    let merkle_roots = run_ethereum_listener(eth_api.clone(), from_eth_block);
+    let merkle_roots = run_merkle_root_listener(eth_api.clone(), gear_api, from_eth_block);
 
     log::info!("Starting message relayer");
     run_message_relayer(eth_api, messages, merkle_roots);
@@ -68,7 +70,10 @@ pub async fn relay(args: RelayArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_event_processor(gear_api: GearApi, from_block: u32) -> Receiver<MessagesInBlock> {
+fn run_event_processor(
+    gear_api: GearApi,
+    from_block: u32,
+) -> Receiver<(AuthoritySetId, MessagesInBlock)> {
     let (sender, receiver) = channel();
 
     tokio::spawn(async move {
@@ -80,11 +85,23 @@ fn run_event_processor(gear_api: GearApi, from_block: u32) -> Receiver<MessagesI
 
             if finalized_head >= current_block {
                 for block in current_block..=finalized_head {
-                    let messages = get_messages_in_block(&gear_api, current_block)
+                    let block_hash = gear_api.block_number_to_hash(current_block).await.unwrap();
+                    let messages = gear_api.message_queued_events(block_hash).await.unwrap();
+
+                    if !messages.is_empty() {
+                        log::info!("Found {} messages", messages.len());
+                    } else {
+                        continue;
+                    }
+
+                    let authority_set_id = gear_api
+                        .signed_by_authority_set_id(block_hash)
                         .await
                         .unwrap();
 
-                    sender.send(MessagesInBlock { messages, block }).unwrap();
+                    sender
+                        .send((authority_set_id, MessagesInBlock { messages, block }))
+                        .unwrap();
                 }
 
                 current_block = finalized_head + 1;
@@ -97,18 +114,11 @@ fn run_event_processor(gear_api: GearApi, from_block: u32) -> Receiver<MessagesI
     receiver
 }
 
-async fn get_messages_in_block(gear_api: &GearApi, block: u32) -> anyhow::Result<Vec<Message>> {
-    let block = gear_api.block_number_to_hash(block).await?;
-    let messages = gear_api.message_queued_events(block).await?;
-
-    if !messages.is_empty() {
-        log::info!("Found {} messages", messages.len());
-    }
-
-    Ok(messages)
-}
-
-fn run_ethereum_listener(eth_api: EthApi, from_block: u64) -> Receiver<RelayedMerkleRoot> {
+fn run_merkle_root_listener(
+    eth_api: EthApi,
+    gear_api: GearApi,
+    from_block: u64,
+) -> Receiver<(AuthoritySetId, RelayedMerkleRoot)> {
     let (sender, receiver) = channel();
 
     tokio::spawn(async move {
@@ -123,10 +133,23 @@ fn run_ethereum_listener(eth_api: EthApi, from_block: u64) -> Receiver<RelayedMe
                     .unwrap();
 
                 for merkle_root in merkle_roots {
+                    let block_hash = gear_api
+                        .block_number_to_hash(merkle_root.block_number as u32)
+                        .await
+                        .unwrap();
+
+                    let authority_set_id = gear_api
+                        .signed_by_authority_set_id(block_hash)
+                        .await
+                        .unwrap();
+
                     sender
-                        .send(RelayedMerkleRoot {
-                            gear_block: merkle_root.block_number as u32,
-                        })
+                        .send((
+                            authority_set_id,
+                            RelayedMerkleRoot {
+                                gear_block: merkle_root.block_number as u32,
+                            },
+                        ))
                         .unwrap();
                 }
 
@@ -140,34 +163,45 @@ fn run_ethereum_listener(eth_api: EthApi, from_block: u64) -> Receiver<RelayedMe
     receiver
 }
 
+struct Era {
+    merkle_roots: Vec<RelayedMerkleRoot>,
+    messages: Vec<MessagesInBlock>,
+}
+
 fn run_message_relayer(
     eth_api: EthApi,
-    messages: Receiver<MessagesInBlock>,
-    merkle_roots: Receiver<RelayedMerkleRoot>,
+    messages: Receiver<(AuthoritySetId, MessagesInBlock)>,
+    merkle_roots: Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
 ) {
-    let mut pending_messages: HashMap<u32, Vec<Message>> = HashMap::new();
+    let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
 
     loop {
-        for new_messages in messages.try_iter() {
-            log::info!(
-                "Seen {} messages in block #{}",
-                new_messages.messages.len(),
-                new_messages.block
-            );
-
-            if pending_messages
-                .insert(new_messages.block, new_messages.messages)
-                .is_some()
-            {
-                log::warn!(
-                    "Messages in block #{} are processed the second time",
-                    new_messages.block
-                );
+        for (authority_set_id, messages) in messages.try_iter() {
+            match eras.entry(authority_set_id) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().messages.push(messages);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(Era {
+                        merkle_roots: vec![],
+                        messages: vec![messages],
+                    });
+                }
             }
         }
 
-        for settle in merkle_roots.try_iter() {
-            log::info!("Seen merkle root at gear block #{}", settle.gear_block);
+        for (authority_set_id, merkle_root) in merkle_roots.try_iter() {
+            match eras.entry(authority_set_id) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().merkle_roots.push(merkle_root);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(Era {
+                        merkle_roots: vec![merkle_root],
+                        messages: vec![],
+                    });
+                }
+            }
         }
 
         //for message in messages {

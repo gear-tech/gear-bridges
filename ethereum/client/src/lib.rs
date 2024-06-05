@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_contract::Event;
 use alloy_network::{Ethereum, EthereumSigner};
-use alloy_primitives::{hex, Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{hex, Address, Bytes, TxHash, Uint, B256, U256};
 use alloy_provider::{
     layers::{
         GasEstimatorLayer, GasEstimatorProvider, ManagedNonceLayer, ManagedNonceProvider,
@@ -185,19 +185,36 @@ impl Contracts {
         }
     }
 
-    pub async fn provide_content_message<H: Convert<B256>, U: Convert<U256>>(
+    pub async fn provide_content_message<
+        H: Convert<B256>,
+        U1: Convert<U256>,
+        U2: Convert<U256>,
+        U3: Convert<U256>,
+        N: Convert<Uint<256, 4>>,
+        S: Convert<B256>,
+        R: Convert<Address>,
+        P: Convert<Bytes>,
+    >(
         &self,
-        block_number: U,
-        total_leaves: U,
-        leaf_index: U,
-        message: ContentMessage,
+        block_number: U1,
+        total_leaves: U2,
+        leaf_index: U3,
+        nonce: N,
+        sender: S,
+        receiver: R,
+        payload: P,
         proof: Vec<H>,
     ) -> Result<bool, Error> {
         let call = self.message_queue_instance.processMessage(
             block_number.convert(),
             total_leaves.convert(),
             leaf_index.convert(),
-            message,
+            ContentMessage {
+                nonce: nonce.convert(),
+                sender: sender.convert(),
+                receiver: receiver.convert(),
+                data: payload.convert(),
+            },
             proof.into_iter().map(|x| x.convert()).collect(),
         );
 

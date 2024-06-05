@@ -1,5 +1,6 @@
 const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 const ED25519_SIGNATURE_SIZE: usize = 64;
+const KECCAK_HASH_SIZE: usize = 32;
 
 pub struct PreCommit {
     pub public_key: [u8; ED25519_PUBLIC_KEY_SIZE],
@@ -36,4 +37,11 @@ pub struct ValidatorSetChangeProof {
 pub struct MessageSentProof {
     pub block_finality_proof: BlockFinalityProof,
     pub storage_inclusion_proof: StorageInclusionProof,
+}
+
+pub struct MerkleProof {
+    pub root: [u8; KECCAK_HASH_SIZE],
+    pub proof: Vec<[u8; KECCAK_HASH_SIZE]>,
+    pub num_leaves: u64,
+    pub leaf_index: u64,
 }

@@ -460,10 +460,10 @@ impl GearApi {
         &self,
         block: H256,
         message_hash: H256,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<dto::MerkleProof> {
         use pallet_gear_bridge_rpc_runtime_api::Proof;
 
-        let _merkle_proof: Option<Proof> = self
+        let proof: Option<Proof> = self
             .api
             .rpc()
             .request(
@@ -472,6 +472,19 @@ impl GearApi {
             )
             .await?;
 
-        todo!()
+        let proof = proof.ok_or_else(|| {
+            anyhow!(
+                "Message with hash {} not found in block {}",
+                message_hash,
+                block
+            )
+        })?;
+
+        Ok(dto::MerkleProof {
+            root: proof.root.0,
+            proof: proof.proof.into_iter().map(|h| h.0).collect(),
+            num_leaves: proof.number_of_leaves,
+            leaf_index: proof.leaf_index,
+        })
     }
 }

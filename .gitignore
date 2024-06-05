@@ -3,7 +3,6 @@ target/
 data/
 /proof_storage
 _obj
-node_modules
 
 cache/
 out/

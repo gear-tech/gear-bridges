@@ -9,7 +9,7 @@ use gsdk::{
         storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
-    Event as RuntimeEvent, Events, GearConfig,
+    Event as RuntimeEvent, GearConfig,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};

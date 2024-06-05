@@ -20,6 +20,7 @@ num = { workspace = true, features = ["serde"] }
 hex.workspace = true
 thiserror.workspace = true
 primitive-types = { workspace = true, features = ["std"] }
+keccak-hash.workspace = true
 
 [build-dependencies]
 cgo_oligami = "0.3"

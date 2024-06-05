@@ -7940,6 +7940,7 @@ dependencies = [
  "ethereum-client",
  "gear-rpc-client",
  "hex",
+ "keccak-hash 0.10.0",
  "libc",
  "log",
  "num",

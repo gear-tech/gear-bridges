@@ -49,6 +49,7 @@ type ProviderType = ManagedNonceProvider<
     >,
 >;
 
+#[derive(Clone)]
 pub struct Contracts {
     signer: Wallet<SigningKey>,
     provider: Arc<ProviderType>,
@@ -58,7 +59,7 @@ pub struct Contracts {
 
 #[allow(dead_code)]
 pub struct MerkleRootEntry {
-    block_number: u64,
+    pub block_number: u64,
     merkle_root: B256,
     tx_hash: TxHash,
 }
@@ -158,6 +159,13 @@ impl Contracts {
             .await
     }
 
+    pub async fn block_number(&self) -> Result<u64, Error> {
+        self.provider
+            .get_block_number()
+            .await
+            .map_err(|_| Error::ErrorInHTTPTransport)
+    }
+
     pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {
         let current_block: u64 = self
             .provider
@@ -165,10 +173,23 @@ impl Contracts {
             .await
             .map_err(|_| Error::ErrorInHTTPTransport)?;
 
+        self.fetch_merkle_roots_in_range(
+            current_block.checked_sub(depth).unwrap_or_default(),
+            current_block,
+        )
+        .await
+    }
+
+    pub async fn fetch_merkle_roots_in_range(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<MerkleRootEntry>, Error> {
         let filter = Filter::new()
             .address(*self.relayer_instance.address())
             .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH)
-            .from_block(current_block.checked_sub(depth).unwrap_or_default());
+            .from_block(from)
+            .to_block(to);
 
         let event: Event<_, _, _, IRelayer::MerkleRoot> = Event::new(self.provider.clone(), filter);
 

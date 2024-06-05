@@ -28,7 +28,7 @@ where
         false => bytes,
     };
 
-    hex::decode(bytes).map_err(|e| <D::Error as de::Error>::custom(e))
+    hex::decode(bytes).map_err(<D::Error as de::Error>::custom)
 }
 
 /// A helper function providing common functionality between the `TreeHash` implementations for

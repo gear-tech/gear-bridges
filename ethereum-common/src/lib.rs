@@ -30,6 +30,8 @@ use core::{
     any,
     fmt::{self, Debug},
     marker::PhantomData,
+    ops::{Deref, Index, IndexMut},
+    slice::{self, SliceIndex},
 };
 
 use parity_scale_codec::{Decode, Encode};

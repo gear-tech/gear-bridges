@@ -21,11 +21,13 @@
 
 use super::*;
 
+mod bits;
 mod byte_list;
 mod bytes_fixed;
 mod fixed_array;
 mod list;
 
+pub use bits::{List as Bitlist, Vector as Bitvector};
 pub use byte_list::ByteList;
 pub use bytes_fixed::BytesFixed;
 pub use fixed_array::FixedArray;

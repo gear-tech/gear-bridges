@@ -3181,6 +3181,8 @@ dependencies = [
 name = "ethereum-common"
 version = "0.1.0"
 dependencies = [
+ "bitvec",
+ "derive_more",
  "ethereum-types",
  "hex",
  "hex-literal",

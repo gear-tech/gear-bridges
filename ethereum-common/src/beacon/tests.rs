@@ -28,12 +28,14 @@ fn sepolia_beacon_block_header_5_151_035() {
     let beacon_header = beacon::BlockHeader {
         slot: 5_151_035,
         proposer_index: 1_959,
-        parent_root: hex!("64331200f34a330e14d5673ffa353f1348826d75830697f6b0750ba42bcabc5e").into(),
+        parent_root: hex!("64331200f34a330e14d5673ffa353f1348826d75830697f6b0750ba42bcabc5e")
+            .into(),
         state_root: hex!("a605d19e8b3e188fb6df208784d22ce820bbf2f91a32ac92e7d4f99d91ab04bb").into(),
         body_root: hex!("1d63bb6d5e875871045cfb7b4776b18bc4bd3c8372950ee92e3e5458c3a187f2").into(),
     };
 
-    let block_root: Hash256 = hex!("4017f0180aa9acb2601ab3ce066081a41661b7f85683901f1cadaec7b6198059").into();
+    let block_root: Hash256 =
+        hex!("4017f0180aa9acb2601ab3ce066081a41661b7f85683901f1cadaec7b6198059").into();
 
     assert_eq!(block_root, beacon_header.tree_hash_root());
 }
@@ -47,12 +49,14 @@ fn ethereum_beacon_block_header_9_230_177() {
     let beacon_header = beacon::BlockHeader {
         slot: 9_230_177,
         proposer_index: 404_728,
-        parent_root: hex!("c00156add0e86e806b98c9a6367942d451770febb9a3dfcc79f6364863b749fa").into(),
+        parent_root: hex!("c00156add0e86e806b98c9a6367942d451770febb9a3dfcc79f6364863b749fa")
+            .into(),
         state_root: hex!("01556da441fbe34b5c60c5192790358456228733f3ee874c32920a400771d1c1").into(),
         body_root: hex!("d0b99a73709763a46384de415ced4e806cb00ea0b54b61ddc69b5e8ac1bd8b4a").into(),
     };
 
-    let block_root: Hash256 = hex!("8a71cd9567f3ef85fc5e0dae0fcc6acd707f87b63e9a3174d4ec80395ab31763").into();
+    let block_root: Hash256 =
+        hex!("8a71cd9567f3ef85fc5e0dae0fcc6acd707f87b63e9a3174d4ec80395ab31763").into();
 
     assert_eq!(block_root, beacon_header.tree_hash_root());
 }

@@ -38,8 +38,7 @@ where
 {
     let value: &str = Deserialize::deserialize(deserializer)?;
 
-    Ok(u64::from_str(value)
-        .map_err(<D::Error as de::Error>::custom)?)
+    u64::from_str(value).map_err(<D::Error as de::Error>::custom)
 }
 
 /// A helper function providing common functionality between the `TreeHash` implementations for
@@ -81,4 +80,23 @@ where
                 .expect("ssz_types vec should not have a remaining buffer")
         }
     }
+}
+
+/// A helper function providing common functionality for finding the Merkle root of some bytes that
+/// represent a bitfield.
+pub fn bitfield_bytes_tree_hash_root<const N: usize>(bytes: &[u8]) -> Hash256 {
+    use tree_hash::{MerkleHasher, BYTES_PER_CHUNK};
+
+    let byte_size = (N + 7) / 8;
+    let leaf_count = (byte_size + BYTES_PER_CHUNK - 1) / BYTES_PER_CHUNK;
+
+    let mut hasher = MerkleHasher::with_leaves(leaf_count);
+
+    hasher
+        .write(bytes)
+        .expect("bitfield should not exceed tree hash leaf limit");
+
+    hasher
+        .finish()
+        .expect("bitfield tree hash buffer should not exceed leaf limit")
 }

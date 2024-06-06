@@ -67,6 +67,8 @@ unroll = "0.1.5"
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
 ethereum-types = { version = "0.14.1", default-features = false, features = ["serialize", "codec"] }
+derive_more = "0.99.17"
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 
 # Gear/Substrate deps
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }

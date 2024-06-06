@@ -11,6 +11,8 @@ tree_hash.workspace = true
 tree_hash_derive.workspace = true
 hex.workspace = true
 ethereum-types.workspace = true
+derive_more.workspace = true
+bitvec.workspace = true
 
 [dev-dependencies]
 hex-literal.workspace = true
@@ -22,4 +24,5 @@ std = [
     "serde/std",
     "tree_hash/std",
     "ethereum-types/std",
+    "bitvec/std",
 ]

@@ -58,7 +58,7 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
             token := shr(96, calldataload(0xD8))
             amount := shr(128, calldataload(0xEC))
         }
-        // IERC20(address(token)).safeTransfer(address(receiver), amount);
+        IERC20(address(token)).safeTransfer(address(receiver), amount);
         emit Withdraw(address(receiver), address(token), amount);
         return true;
     }

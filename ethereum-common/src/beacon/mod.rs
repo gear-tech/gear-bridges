@@ -19,8 +19,10 @@
 use super::*;
 
 mod block_header;
+mod common;
 
 pub use block_header::BlockHeader;
+pub use common::*;
 
 #[cfg(test)]
 mod tests;

@@ -254,7 +254,10 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
             break;
         }
 
-        let block_hash = gear_api.block_number_to_hash(block).await.unwrap();
+        let block_hash = gear_api
+            .block_number_to_hash(latest_merkle_root.gear_block)
+            .await
+            .unwrap();
 
         for message in messages {
             let message_hash = message_hash(message);
@@ -272,7 +275,7 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
 
             eth_api
                 .provide_content_message(
-                    block,
+                    latest_merkle_root.gear_block,
                     proof.num_leaves as u32,
                     proof.leaf_index as u32,
                     nonce,

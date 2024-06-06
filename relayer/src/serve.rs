@@ -78,7 +78,7 @@ async fn sync_authority_set_id(
     let latest_proven_authority_set_id = proof_storage.get_latest_proof();
     match latest_proven_authority_set_id {
         None => {
-            let proof = prover_interface::prove_genesis(gear_api).await;
+            let proof = prover_interface::prove_genesis(gear_api).await?;
             proof_storage
                 .init(proof, GENESIS_CONFIG.authority_set_id)
                 .unwrap();
@@ -87,7 +87,7 @@ async fn sync_authority_set_id(
         }
         Some((mut proof, latest_proven)) if latest_proven < latest_authority_set_id => {
             for set_id in latest_proven..latest_authority_set_id {
-                proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await;
+                proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
                 proof_storage.update(proof.proof.clone())?;
             }
 
@@ -114,7 +114,7 @@ async fn prove_message_sent(
 
     let authority_set_id = gear_api.signed_by_authority_set_id(finalized_head).await?;
     let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
-    Ok(prover_interface::prove_final(gear_api, inner_proof, authority_set_id).await)
+    prover_interface::prove_final(gear_api, inner_proof, authority_set_id).await
 }
 
 async fn submit_proof_to_ethereum(

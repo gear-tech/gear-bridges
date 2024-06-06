@@ -10,6 +10,7 @@ use prover::proving::GenesisConfig;
 
 mod proof_storage;
 mod prover_interface;
+mod relay;
 mod serve;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
@@ -72,6 +73,11 @@ enum ProveCommands {
 struct RelayArgs {
     #[clap(flatten)]
     vara_endpoint: VaraEndpointArg,
+    #[clap(flatten)]
+    ethereum_args: EthereumArgs,
+    /// Block number to start relaying from. If not specified equals to the latest finalized block
+    #[arg(long = "from-block")]
+    from_block: Option<u32>,
 }
 
 #[derive(Args)]
@@ -139,7 +145,7 @@ async fn main() {
                     .await
                     .unwrap();
 
-                let proof = prover_interface::prove_genesis(&gear_api).await;
+                let proof = prover_interface::prove_genesis(&gear_api).await.unwrap();
                 proof_storage
                     .init(proof, GENESIS_CONFIG.authority_set_id)
                     .unwrap();
@@ -158,7 +164,8 @@ async fn main() {
                     previous_proof,
                     previous_validator_set_id,
                 )
-                .await;
+                .await
+                .unwrap();
                 proof_storage.update(proof.proof).unwrap();
             }
             ProveCommands::Wrapped { args } => {
@@ -179,32 +186,10 @@ async fn main() {
             }
         },
         CliCommands::Serve(args) => {
-            let _ = serve::serve(args).await;
+            serve::serve(args).await.unwrap();
         }
         CliCommands::Relay(args) => {
-            let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
-                .await
-                .unwrap();
-
-            // sender: ALICE
-            // receiver: 0x000...00011
-            // paylod: 0x11
-            // nonce: 1
-            // 0xbcf2aa76c36358f3913a1d701a2e9f9622d214348613f0059139b93e58edc6c2
-
-            let block = gear_api.block_number_to_hash(715).await.unwrap();
-
-            let message =
-                hex::decode("bcf2aa76c36358f3913a1d701a2e9f9622d214348613f0059139b93e58edc6c2")
-                    .unwrap();
-            let message: [u8; 32] = message.try_into().unwrap();
-
-            let message_hash = primitive_types::H256::from(message);
-
-            gear_api
-                .fetch_message_inclusion_merkle_proof(block, message_hash)
-                .await
-                .unwrap();
+            relay::relay(args).await.unwrap();
         }
     };
 }

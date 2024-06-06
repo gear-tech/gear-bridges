@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_contract::Event;
 use alloy_network::{Ethereum, EthereumSigner};
-use alloy_primitives::{hex, Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{hex, Address, Bytes, TxHash, Uint, B256, U256};
 use alloy_provider::{
     layers::{
         GasEstimatorLayer, GasEstimatorProvider, ManagedNonceLayer, ManagedNonceProvider,
@@ -49,6 +49,7 @@ type ProviderType = ManagedNonceProvider<
     >,
 >;
 
+#[derive(Clone)]
 pub struct Contracts {
     signer: Wallet<SigningKey>,
     provider: Arc<ProviderType>,
@@ -58,7 +59,7 @@ pub struct Contracts {
 
 #[allow(dead_code)]
 pub struct MerkleRootEntry {
-    block_number: u64,
+    pub block_number: u64,
     merkle_root: B256,
     tx_hash: TxHash,
 }
@@ -158,6 +159,13 @@ impl Contracts {
             .await
     }
 
+    pub async fn block_number(&self) -> Result<u64, Error> {
+        self.provider
+            .get_block_number()
+            .await
+            .map_err(|_| Error::ErrorInHTTPTransport)
+    }
+
     pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {
         let current_block: u64 = self
             .provider
@@ -165,10 +173,23 @@ impl Contracts {
             .await
             .map_err(|_| Error::ErrorInHTTPTransport)?;
 
+        self.fetch_merkle_roots_in_range(
+            current_block.checked_sub(depth).unwrap_or_default(),
+            current_block,
+        )
+        .await
+    }
+
+    pub async fn fetch_merkle_roots_in_range(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<MerkleRootEntry>, Error> {
         let filter = Filter::new()
             .address(*self.relayer_instance.address())
             .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH)
-            .from_block(current_block.checked_sub(depth).unwrap_or_default());
+            .from_block(from)
+            .to_block(to);
 
         let event: Event<_, _, _, IRelayer::MerkleRoot> = Event::new(self.provider.clone(), filter);
 
@@ -185,19 +206,36 @@ impl Contracts {
         }
     }
 
-    pub async fn provide_content_message<H: Convert<B256>, U: Convert<U256>>(
+    pub async fn provide_content_message<
+        H: Convert<B256>,
+        U1: Convert<U256>,
+        U2: Convert<U256>,
+        U3: Convert<U256>,
+        N: Convert<Uint<256, 4>>,
+        S: Convert<B256>,
+        R: Convert<Address>,
+        P: Convert<Bytes>,
+    >(
         &self,
-        block_number: U,
-        total_leaves: U,
-        leaf_index: U,
-        message: ContentMessage,
+        block_number: U1,
+        total_leaves: U2,
+        leaf_index: U3,
+        nonce: N,
+        sender: S,
+        receiver: R,
+        payload: P,
         proof: Vec<H>,
     ) -> Result<bool, Error> {
         let call = self.message_queue_instance.processMessage(
             block_number.convert(),
             total_leaves.convert(),
             leaf_index.convert(),
-            message,
+            ContentMessage {
+                nonce: nonce.convert(),
+                sender: sender.convert(),
+                receiver: receiver.convert(),
+                data: payload.convert(),
+            },
             proof.into_iter().map(|x| x.convert()).collect(),
         );
 

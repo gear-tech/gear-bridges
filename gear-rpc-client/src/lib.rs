@@ -3,12 +3,13 @@
 
 use anyhow::anyhow;
 use dto::BranchNodeData;
+use gsdk::metadata::gear_bridge::Event as GearBridgeEvent;
 use gsdk::{
     metadata::{
         storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
-    GearConfig,
+    Event as RuntimeEvent, GearConfig,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
@@ -46,6 +47,7 @@ const NEXT_VALIDATOR_SET_ADDRESS: &str =
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
+#[derive(Clone)]
 pub struct GearApi {
     api: gsdk::Api,
 }
@@ -460,10 +462,10 @@ impl GearApi {
         &self,
         block: H256,
         message_hash: H256,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<dto::MerkleProof> {
         use pallet_gear_bridge_rpc_runtime_api::Proof;
 
-        let _merkle_proof: Option<Proof> = self
+        let proof: Option<Proof> = self
             .api
             .rpc()
             .request(
@@ -472,6 +474,41 @@ impl GearApi {
             )
             .await?;
 
-        todo!()
+        let proof = proof.ok_or_else(|| {
+            anyhow!(
+                "Message with hash {} not found in block {}",
+                message_hash,
+                block
+            )
+        })?;
+
+        Ok(dto::MerkleProof {
+            root: proof.root.0,
+            proof: proof.proof.into_iter().map(|h| h.0).collect(),
+            num_leaves: proof.number_of_leaves,
+            leaf_index: proof.leaf_index,
+        })
+    }
+
+    pub async fn message_queued_events(&self, block: H256) -> anyhow::Result<Vec<dto::Message>> {
+        let events = self.api.get_events_at(Some(block)).await?;
+
+        let events = events.into_iter().filter_map(|event| {
+            if let RuntimeEvent::GearBridge(GearBridgeEvent::MessageQueued { message }) = event {
+                let mut nonce_le = [0; 32];
+                primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
+
+                Some(dto::Message {
+                    nonce_le,
+                    source: message.source.0,
+                    destination: message.destination.0,
+                    payload: message.payload,
+                })
+            } else {
+                None
+            }
+        });
+
+        Ok(events.collect())
     }
 }

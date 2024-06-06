@@ -13,9 +13,6 @@ import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IM
 contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
 
-    
-
-
     /** @dev Deposit token to `Treasury` using `safeTransferFrom`. Allowance needs to allow treasury
      * contract transferring `amount` of tokens. Emits `Deposit` event.
      *

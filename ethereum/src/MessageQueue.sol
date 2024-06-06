@@ -38,14 +38,21 @@ contract MessageQueue is IMessageQueue {
             revert MessageAlreadyProcessed(message.nonce);
 
         bytes32 msg_hash = message.hash();
+        bytes32 merkle_trie_leaf_hash = keccak256(abi.encodePacked(msg_hash));
 
-        bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(block_number);
+        bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
+            block_number
+        );
 
         if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
         if (
-            _calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) !=
-            merkle_root
+            _calculateMerkleRoot(
+                proof,
+                merkle_trie_leaf_hash,
+                total_leaves,
+                leaf_index
+            ) != merkle_root
         ) revert BadProof();
 
         _processed_messages[message.nonce] = true;
@@ -82,7 +89,6 @@ contract MessageQueue is IMessageQueue {
      * @param message - Message it checks agaiunst.
      */
 
-
     function isProcessed(
         VaraMessage calldata message
     ) external view returns (bool) {
@@ -96,6 +102,8 @@ contract MessageQueue is IMessageQueue {
         uint256 index
     ) internal pure returns (bytes32) {
         bytes32 hash = leaf;
+
+        // TODO: Add check that index < width
 
         for (uint256 i = 0; i < proof.length; i++) {
             bytes32 proofElement = proof[i];

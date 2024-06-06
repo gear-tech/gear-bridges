@@ -7,16 +7,14 @@ use prover::proving::{
     self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
 
-pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
+pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircuitData> {
     let (block, current_epoch_block_finality) = gear_api
         .fetch_finality_proof_for_session(GENESIS_CONFIG.authority_set_id)
-        .await
-        .unwrap();
+        .await?;
 
     let next_validator_set_inclusion_proof = gear_api
         .fetch_next_session_keys_inclusion_proof(block)
-        .await
-        .unwrap();
+        .await?;
     let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
     let next_validator_set_inclusion_proof =
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
@@ -32,14 +30,14 @@ pub async fn prove_genesis(gear_api: &GearApi) -> ProofWithCircuitData {
 
     log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
 
-    proof
+    Ok(proof)
 }
 
 pub async fn prove_validator_set_change(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     previous_authority_set_id: u64,
-) -> ProofWithCircuitData {
+) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
         "Proving authority set change {} -> {}",
         previous_authority_set_id,
@@ -48,13 +46,11 @@ pub async fn prove_validator_set_change(
 
     let (block, current_epoch_block_finality) = gear_api
         .fetch_finality_proof_for_session(previous_authority_set_id)
-        .await
-        .unwrap();
+        .await?;
 
     let next_validator_set_inclusion_proof = gear_api
         .fetch_next_session_keys_inclusion_proof(block)
-        .await
-        .unwrap();
+        .await?;
     let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
     let next_validator_set_inclusion_proof =
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
@@ -70,7 +66,7 @@ pub async fn prove_validator_set_change(
 
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
 
-    proof
+    Ok(proof)
 }
 
 pub struct FinalProof {
@@ -124,17 +120,13 @@ pub async fn prove_final(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     previous_validator_set_id: u64,
-) -> FinalProof {
+) -> anyhow::Result<FinalProof> {
     let block = gear_api
         .search_for_authority_set_block(previous_validator_set_id)
-        .await
-        .unwrap();
-    let (block, block_finality) = gear_api.fetch_finality_proof(block).await.unwrap();
+        .await?;
+    let (block, block_finality) = gear_api.fetch_finality_proof(block).await?;
 
-    let sent_message_inclusion_proof = gear_api
-        .fetch_sent_message_inclusion_proof(block)
-        .await
-        .unwrap();
+    let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
@@ -160,7 +152,10 @@ pub async fn prove_final(
     let public_inputs = public_inputs
         .map(|s| BigUint::from_str(&s).expect("Got wrong public input format from ganrk"));
 
-    FinalProof::from_proof_and_public_inputs(proof.proof, public_inputs)
+    Ok(FinalProof::from_proof_and_public_inputs(
+        proof.proof,
+        public_inputs,
+    ))
 }
 
 fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclusion {

@@ -286,6 +286,8 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
                 )
                 .await
                 .unwrap();
+
+            log::info!("Message #{} successfully relayed", nonce);
         }
 
         processed_blocks.push(block);

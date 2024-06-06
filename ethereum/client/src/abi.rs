@@ -36,7 +36,7 @@ sol! {
 impl ContentMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut ret: Vec<u8> = Vec::with_capacity(32 + 32 + 20 + self.data.len());
-        ret.extend(self.nonce.to_be_bytes::<32>());
+        ret.extend(self.nonce.to_le_bytes::<32>());
         ret.extend(self.sender.to_vec());
         ret.extend(self.receiver.to_vec());
         ret.extend(self.data.to_vec());

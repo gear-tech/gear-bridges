@@ -13,9 +13,6 @@ import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IM
 contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
 
-    
-
-
     /** @dev Deposit token to `Treasury` using `safeTransferFrom`. Allowance needs to allow treasury
      * contract transferring `amount` of tokens. Emits `Deposit` event.
      *
@@ -61,7 +58,7 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
             token := shr(96, calldataload(0xD8))
             amount := shr(128, calldataload(0xEC))
         }
-        IERC20(address(token)).safeTransfer(address(receiver), amount);
+        // IERC20(address(token)).safeTransfer(address(receiver), amount);
         emit Withdraw(address(receiver), address(token), amount);
         return true;
     }

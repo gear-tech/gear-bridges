@@ -103,6 +103,8 @@ contract MessageQueue is IMessageQueue {
     ) internal pure returns (bytes32) {
         bytes32 hash = leaf;
 
+        // TODO: Add check that index < width
+
         for (uint256 i = 0; i < proof.length; i++) {
             bytes32 proofElement = proof[i];
 

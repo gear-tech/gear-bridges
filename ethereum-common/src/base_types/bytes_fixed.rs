@@ -27,6 +27,12 @@ impl<const N: usize> AsRef<[u8]> for BytesFixed<N> {
     }
 }
 
+impl<const N: usize> From<[u8; N]> for BytesFixed<N> {
+    fn from(value: [u8; N]) -> Self {
+        Self(FixedArray(value))
+    }
+}
+
 impl<const N: usize> TreeHash for BytesFixed<N> {
     fn tree_hash_type() -> tree_hash::TreeHashType {
         FixedArray::<u8, N>::tree_hash_type()

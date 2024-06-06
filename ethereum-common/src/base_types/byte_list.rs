@@ -21,6 +21,14 @@ use super::*;
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct ByteList<const N: usize>(pub List<u8, N>);
 
+impl<const N: usize> TryFrom<&[u8]> for ByteList<N> {
+    type Error = String;
+
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self(data.try_into()?))
+    }
+}
+
 impl<const N: usize> TreeHash for ByteList<N> {
     fn tree_hash_type() -> tree_hash::TreeHashType {
         List::<u8, N>::tree_hash_type()

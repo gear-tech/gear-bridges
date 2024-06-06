@@ -112,6 +112,23 @@ impl<T, const N: usize> TryFrom<Vec<T>> for List<T, N> {
     }
 }
 
+impl<T: Clone, const N: usize> TryFrom<&[T]> for List<T, N> {
+    type Error = String;
+
+    fn try_from(data: &[T]) -> Result<Self, Self::Error> {
+        if data.len() > N {
+            let len = data.len();
+            Err(format!(
+                "Unable to construct List<T, {N}> from &[T] (length = {len})"
+            ))
+        } else {
+            Ok(Self {
+                data: data.to_vec(),
+            })
+        }
+    }
+}
+
 impl<T: Clone, const N: usize> From<&[T; N]> for List<T, N> {
     fn from(value: &[T; N]) -> Self {
         Self {

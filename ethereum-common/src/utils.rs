@@ -41,6 +41,15 @@ where
     u64::from_str(value).map_err(<D::Error as de::Error>::custom)
 }
 
+pub fn deserialize_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val: &str = Deserialize::deserialize(deserializer)?;
+
+    U256::from_dec_str(val).map_err(<D::Error as de::Error>::custom)
+}
+
 /// A helper function providing common functionality between the `TreeHash` implementations for
 /// the fixed array and variable list types.
 pub fn vec_tree_hash_root<T, const N: usize>(vec: &[T]) -> Hash256

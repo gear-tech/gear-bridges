@@ -3188,6 +3188,7 @@ dependencies = [
  "hex-literal",
  "parity-scale-codec",
  "serde",
+ "serde_json",
  "tree_hash",
  "tree_hash_derive",
 ]

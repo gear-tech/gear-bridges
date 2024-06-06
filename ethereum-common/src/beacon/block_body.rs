@@ -16,27 +16,20 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+use super::*;
 
-pub mod base_types;
-pub mod beacon;
-pub mod utils;
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-
-#[cfg(not(feature = "std"))]
-use alloc::{format, string::String, vec, vec::Vec};
-use core::{
-    any,
-    fmt::{self, Debug},
-    marker::PhantomData,
-    ops::{Deref, Index, IndexMut},
-    slice::{self, SliceIndex},
-};
-
-pub use ethereum_types::U256;
-use parity_scale_codec::{Decode, Encode};
-use serde::{de, Deserialize};
-pub use tree_hash::{self, Hash256};
-use tree_hash::{TreeHash, TreeHashType};
+#[derive(Debug, Clone, Decode, Encode, tree_hash_derive::TreeHash, Deserialize)]
+pub struct BlockBody {
+    pub randao_reveal: SignatureBytes,
+    pub eth1_data: Eth1Data,
+    pub graffiti: Bytes32,
+    pub proposer_slashings: base_types::List<ProposerSlashing, 16>,
+    pub attester_slashings: base_types::List<AttesterSlashing, 2>,
+    pub attestations: base_types::List<Attestation, 128>,
+    pub deposits: base_types::List<Deposit, 16>,
+    pub voluntary_exits: base_types::List<SignedVoluntaryExit, 16>,
+    pub sync_aggregate: SyncAggregate,
+    pub execution_payload: ExecutionPayload,
+    pub bls_to_execution_changes: base_types::List<SignedBlsToExecutionChange, 16>,
+    pub blob_kzg_commitments: base_types::List<base_types::BytesFixed<48>, 4_096>,
+}

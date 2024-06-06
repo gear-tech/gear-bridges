@@ -19,13 +19,18 @@
 use super::*;
 use hex_literal::hex;
 
+const ETHEREUM_9_230_177: &[u8; 133_287] = include_bytes!("./ethereum-9_230_177.json");
+const SEPOLIA_5_151_035: &[u8; 10_722] = include_bytes!("./sepolia-5_151_035.json");
+
 #[test]
-fn sepolia_beacon_block_header_5_151_035() {
+fn sepolia_slot_5_151_035() {
     // curl -X 'GET' 'http://{Sepolia Beacon API URL}/eth/v1/beacon/headers/5151035' -H 'accept: application/json'
     // https://sepolia.beaconcha.in/slot/5151035
     // https://sepolia.etherscan.io/block/6040894
 
-    let beacon_header = beacon::BlockHeader {
+    let block_root: Hash256 =
+        hex!("4017f0180aa9acb2601ab3ce066081a41661b7f85683901f1cadaec7b6198059").into();
+    let beacon_header = BlockHeader {
         slot: 5_151_035,
         proposer_index: 1_959,
         parent_root: hex!("64331200f34a330e14d5673ffa353f1348826d75830697f6b0750ba42bcabc5e")
@@ -34,19 +39,22 @@ fn sepolia_beacon_block_header_5_151_035() {
         body_root: hex!("1d63bb6d5e875871045cfb7b4776b18bc4bd3c8372950ee92e3e5458c3a187f2").into(),
     };
 
-    let block_root: Hash256 =
-        hex!("4017f0180aa9acb2601ab3ce066081a41661b7f85683901f1cadaec7b6198059").into();
-
     assert_eq!(block_root, beacon_header.tree_hash_root());
+
+    let block_body: BlockBody = serde_json::from_slice(SEPOLIA_5_151_035.as_ref()).unwrap();
+
+    assert_eq!(beacon_header.body_root, block_body.tree_hash_root());
 }
 
 #[test]
-fn ethereum_beacon_block_header_9_230_177() {
+fn ethereum_slot_9_230_177() {
     // curl -X 'GET' 'https://www.lightclientdata.org/eth/v1/beacon/headers/9230177' -H 'accept: application/json'
     // https://beaconcha.in/slot/9230177
     // https://etherscan.io/block/20025266
 
-    let beacon_header = beacon::BlockHeader {
+    let block_root: Hash256 =
+        hex!("8a71cd9567f3ef85fc5e0dae0fcc6acd707f87b63e9a3174d4ec80395ab31763").into();
+    let beacon_header = BlockHeader {
         slot: 9_230_177,
         proposer_index: 404_728,
         parent_root: hex!("c00156add0e86e806b98c9a6367942d451770febb9a3dfcc79f6364863b749fa")
@@ -55,8 +63,9 @@ fn ethereum_beacon_block_header_9_230_177() {
         body_root: hex!("d0b99a73709763a46384de415ced4e806cb00ea0b54b61ddc69b5e8ac1bd8b4a").into(),
     };
 
-    let block_root: Hash256 =
-        hex!("8a71cd9567f3ef85fc5e0dae0fcc6acd707f87b63e9a3174d4ec80395ab31763").into();
-
     assert_eq!(block_root, beacon_header.tree_hash_root());
+
+    let block_body: BlockBody = serde_json::from_slice(ETHEREUM_9_230_177.as_ref()).unwrap();
+
+    assert_eq!(beacon_header.body_root, block_body.tree_hash_root());
 }

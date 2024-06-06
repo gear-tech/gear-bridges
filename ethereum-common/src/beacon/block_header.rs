@@ -16,26 +16,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+use super::*;
 
-pub mod base_types;
-pub mod beacon;
-pub mod utils;
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-
-#[cfg(not(feature = "std"))]
-use alloc::{format, string::String, vec, vec::Vec};
-use core::{
-    any,
-    fmt::{self, Debug},
-    marker::PhantomData,
-    ops::{Deref, Index, IndexMut},
-    slice::{self, SliceIndex},
-};
-
-use parity_scale_codec::{Decode, Encode};
-use serde::{de, Deserialize};
-pub use tree_hash::{self, Hash256};
-use tree_hash::{TreeHash, TreeHashType};
+#[derive(Debug, Clone, tree_hash_derive::TreeHash, Decode, Encode, Deserialize)]
+pub struct BlockHeader {
+    #[serde(deserialize_with = "utils::deserialize_u64")]
+    pub slot: u64,
+    #[serde(deserialize_with = "utils::deserialize_u64")]
+    pub proposer_index: u64,
+    pub parent_root: Hash256,
+    pub state_root: Hash256,
+    pub body_root: Hash256,
+}

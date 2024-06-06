@@ -10,6 +10,10 @@ serde.workspace = true
 tree_hash.workspace = true
 tree_hash_derive.workspace = true
 hex.workspace = true
+ethereum-types.workspace = true
+
+[dev-dependencies]
+hex-literal.workspace = true
 
 [features]
 default = ["std"]
@@ -17,4 +21,5 @@ std = [
     "parity-scale-codec/std",
     "serde/std",
     "tree_hash/std",
+    "ethereum-types/std",
 ]

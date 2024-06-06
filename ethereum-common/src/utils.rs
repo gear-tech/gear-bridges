@@ -17,6 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use super::*;
+use core::str::FromStr;
 
 pub fn decode_hex_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
@@ -29,6 +30,16 @@ where
     };
 
     hex::decode(bytes).map_err(<D::Error as de::Error>::custom)
+}
+
+pub fn deserialize_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: &str = Deserialize::deserialize(deserializer)?;
+
+    Ok(u64::from_str(value)
+        .map_err(<D::Error as de::Error>::custom)?)
 }
 
 /// A helper function providing common functionality between the `TreeHash` implementations for

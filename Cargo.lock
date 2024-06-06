@@ -3134,7 +3134,10 @@ checksum = "c22d4b5885b6aa2fe5e8b9329fb8d232bf739e434e6b87347c63bdd00c120f60"
 dependencies = [
  "crunchy",
  "fixed-hash 0.8.0",
+ "impl-codec",
  "impl-rlp",
+ "impl-serde",
+ "scale-info",
  "tiny-keccak",
 ]
 
@@ -3178,7 +3181,9 @@ dependencies = [
 name = "ethereum-common"
 version = "0.1.0"
 dependencies = [
+ "ethereum-types",
  "hex",
+ "hex-literal",
  "parity-scale-codec",
  "serde",
  "tree_hash",
@@ -3193,8 +3198,11 @@ checksum = "02d215cbf040552efcbe99a38372fe80ab9d00268e20012b79fcd0f073edd8ee"
 dependencies = [
  "ethbloom",
  "fixed-hash 0.8.0",
+ "impl-codec",
  "impl-rlp",
+ "impl-serde",
  "primitive-types 0.12.2",
+ "scale-info",
  "uint",
 ]
 

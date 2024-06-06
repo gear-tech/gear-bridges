@@ -43,6 +43,7 @@ env_logger = "0.9.0"
 ff = { version = "0.13.0", features = ["derive"] }
 futures-util = "0.3.28"
 hex = { version = "0.4.3", default-features = false }
+hex-literal = "0.4.1"
 itertools = "0.10.5"
 jemallocator = "0.5.0"
 keccak-hash = "0.10.0"
@@ -65,6 +66,7 @@ thiserror = "1.0.61"
 unroll = "0.1.5"
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
+ethereum-types = { version = "0.14.1", default-features = false, features = ["serialize", "codec"] }
 
 # Gear/Substrate deps
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }

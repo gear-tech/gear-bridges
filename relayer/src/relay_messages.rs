@@ -1,11 +1,9 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap},
-    sync::mpsc::{channel, Receiver},
+    sync::mpsc::{channel, Receiver, Sender},
     thread,
     time::Duration,
 };
-
-use crate::{EthereumArgs, RelayArgs};
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
@@ -27,29 +25,12 @@ struct RelayedMerkleRoot {
     gear_block: u32,
 }
 
-pub async fn relay(args: RelayArgs) -> anyhow::Result<()> {
-    let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
-        .await
-        .unwrap();
-
-    let eth_api = {
-        let EthereumArgs {
-            eth_endpoint,
-            fee_payer,
-            relayer_address,
-            mq_address,
-        } = args.ethereum_args;
-
-        EthApi::new(
-            &eth_endpoint,
-            &mq_address,
-            &relayer_address,
-            fee_payer.as_deref(),
-        )
-        .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))
-    };
-
-    let from_gear_block = if let Some(block) = args.from_block {
+pub async fn run(
+    gear_api: GearApi,
+    eth_api: EthApi,
+    from_block: Option<u32>,
+) -> anyhow::Result<()> {
+    let from_gear_block = if let Some(block) = from_block {
         block
     } else {
         let block = gear_api.latest_finalized_block().await?;
@@ -80,43 +61,51 @@ fn run_event_processor(
     let (sender, receiver) = channel();
 
     tokio::spawn(async move {
-        let mut current_block = from_block;
-
         loop {
-            let finalized_head = gear_api.latest_finalized_block().await.unwrap();
-            let finalized_head = gear_api.block_hash_to_number(finalized_head).await.unwrap();
-
-            if finalized_head >= current_block {
-                for block in current_block..=finalized_head {
-                    log::info!("Processing gear block #{}", block);
-
-                    let block_hash = gear_api.block_number_to_hash(block).await.unwrap();
-                    let messages = gear_api.message_queued_events(block_hash).await.unwrap();
-
-                    if !messages.is_empty() {
-                        log::info!("Found {} messages", messages.len());
-                    } else {
-                        continue;
-                    }
-
-                    let authority_set_id = gear_api
-                        .signed_by_authority_set_id(block_hash)
-                        .await
-                        .unwrap();
-
-                    sender
-                        .send((authority_set_id, MessagesInBlock { messages, block }))
-                        .unwrap();
-                }
-
-                current_block = finalized_head + 1;
-            } else {
-                thread::sleep(GEAR_BLOCK_TIME_APPROX);
+            let res = event_processor_inner(&gear_api, from_block, &sender).await;
+            if let Err(err) = res {
+                log::error!("Event processor failed: {}", err);
             }
         }
     });
 
     receiver
+}
+
+async fn event_processor_inner(
+    gear_api: &GearApi,
+    from_block: u32,
+    sender: &Sender<(AuthoritySetId, MessagesInBlock)>,
+) -> anyhow::Result<()> {
+    let mut current_block = from_block;
+
+    loop {
+        let finalized_head = gear_api.latest_finalized_block().await?;
+        let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;
+
+        if finalized_head >= current_block {
+            for block in current_block..=finalized_head {
+                log::info!("Processing gear block #{}", block);
+
+                let block_hash = gear_api.block_number_to_hash(block).await?;
+                let messages = gear_api.message_queued_events(block_hash).await?;
+
+                if !messages.is_empty() {
+                    log::info!("Found {} messages", messages.len());
+                } else {
+                    continue;
+                }
+
+                let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+
+                sender.send((authority_set_id, MessagesInBlock { messages, block }))?;
+            }
+
+            current_block = finalized_head + 1;
+        } else {
+            thread::sleep(GEAR_BLOCK_TIME_APPROX);
+        }
+    }
 }
 
 fn run_merkle_root_listener(
@@ -127,50 +116,57 @@ fn run_merkle_root_listener(
     let (sender, receiver) = channel();
 
     tokio::spawn(async move {
-        let mut current_block = from_block;
-
         loop {
-            let latest = eth_api.block_number().await.unwrap();
-            if latest >= current_block {
-                log::info!("Processing ethereum blocks #{}..#{}", current_block, latest);
-                let merkle_roots = eth_api
-                    .fetch_merkle_roots_in_range(current_block, latest)
-                    .await
-                    .unwrap();
-
-                if !merkle_roots.is_empty() {
-                    log::info!("Found {} merkle roots", merkle_roots.len());
-                }
-
-                for merkle_root in merkle_roots {
-                    let block_hash = gear_api
-                        .block_number_to_hash(merkle_root.block_number as u32)
-                        .await
-                        .unwrap();
-
-                    let authority_set_id = gear_api
-                        .signed_by_authority_set_id(block_hash)
-                        .await
-                        .unwrap();
-
-                    sender
-                        .send((
-                            authority_set_id,
-                            RelayedMerkleRoot {
-                                gear_block: merkle_root.block_number as u32,
-                            },
-                        ))
-                        .unwrap();
-                }
-
-                current_block = latest + 1;
-            } else {
-                thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
+            let res = merkle_root_listener_inner(&eth_api, &gear_api, from_block, &sender).await;
+            if let Err(err) = res {
+                log::error!("Merkle root listener failed: {}", err);
             }
         }
     });
 
     receiver
+}
+
+async fn merkle_root_listener_inner(
+    eth_api: &EthApi,
+    gear_api: &GearApi,
+    from_block: u64,
+    sender: &Sender<(AuthoritySetId, RelayedMerkleRoot)>,
+) -> anyhow::Result<()> {
+    let mut current_block = from_block;
+
+    loop {
+        let latest = eth_api.block_number().await?;
+        if latest >= current_block {
+            log::info!("Processing ethereum blocks #{}..#{}", current_block, latest);
+            let merkle_roots = eth_api
+                .fetch_merkle_roots_in_range(current_block, latest)
+                .await?;
+
+            if !merkle_roots.is_empty() {
+                log::info!("Found {} merkle roots", merkle_roots.len());
+            }
+
+            for merkle_root in merkle_roots {
+                let block_hash = gear_api
+                    .block_number_to_hash(merkle_root.block_number as u32)
+                    .await?;
+
+                let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+
+                sender.send((
+                    authority_set_id,
+                    RelayedMerkleRoot {
+                        gear_block: merkle_root.block_number as u32,
+                    },
+                ))?;
+            }
+
+            current_block = latest + 1;
+        } else {
+            thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
+        }
+    }
 }
 
 struct Era {
@@ -230,11 +226,15 @@ async fn run_message_relayer(
             }
         }
 
+        // TODO
         let latest_era = eras.last_key_value().map(|(k, _)| *k);
         match latest_era {
             Some(_) => {
-                for (_, era) in eras.iter_mut() {
-                    process_era(&gear_api, &eth_api, era).await;
+                for (era_id, era) in eras.iter_mut() {
+                    let res = process_era(&gear_api, &eth_api, era).await;
+                    if let Err(err) = res {
+                        log::error!("Failed to process era #{}: {}", era_id, err);
+                    }
                 }
             }
             None => {}
@@ -242,9 +242,9 @@ async fn run_message_relayer(
     }
 }
 
-async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
+async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) -> anyhow::Result<()> {
     let Some(latest_merkle_root) = era.latest_merkle_root else {
-        return;
+        return Ok(());
     };
 
     let mut processed_blocks = vec![];
@@ -256,8 +256,7 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
 
         let block_hash = gear_api
             .block_number_to_hash(latest_merkle_root.gear_block)
-            .await
-            .unwrap();
+            .await?;
 
         for message in messages {
             let message_hash = message_hash(message);
@@ -266,12 +265,11 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
 
             let proof = gear_api
                 .fetch_message_inclusion_merkle_proof(block_hash, message_hash.into())
-                .await
-                .unwrap();
+                .await?;
 
             // TODO: Fully decode
             let nonce_bytes = &message.nonce_le[..16];
-            let nonce = u128::from_le_bytes(nonce_bytes.try_into().unwrap());
+            let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
 
             eth_api
                 .provide_content_message(
@@ -284,8 +282,7 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
                     &message.payload[..],
                     proof.proof,
                 )
-                .await
-                .unwrap();
+                .await?;
 
             log::info!("Message #{} successfully relayed", nonce);
         }
@@ -297,6 +294,8 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) {
     for block in processed_blocks {
         era.messages.remove_entry(&block);
     }
+
+    Ok(())
 }
 
 fn message_hash(message: &Message) -> [u8; 32] {

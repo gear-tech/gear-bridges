@@ -3,6 +3,7 @@ use std::{str::FromStr, time::Instant};
 use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
+use primitive_types::H256;
 use prover::proving::{
     self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
@@ -119,12 +120,9 @@ impl FinalProof {
 pub async fn prove_final(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
-    previous_validator_set_id: u64,
+    at_block: H256,
 ) -> anyhow::Result<FinalProof> {
-    let block = gear_api
-        .search_for_authority_set_block(previous_validator_set_id)
-        .await?;
-    let (block, block_finality) = gear_api.fetch_finality_proof(block).await?;
+    let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
 
     let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
 

@@ -4,14 +4,14 @@ use clap::{Args, Parser, Subcommand};
 
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
+use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
-use proof_storage::{FileSystemProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 
 mod proof_storage;
 mod prover_interface;
-mod relay;
-mod serve;
+mod relay_merkle_roots;
+mod relay_messages;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
@@ -35,42 +35,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum CliCommands {
-    /// Generate zk-proofs
-    #[clap(visible_alias("p"))]
-    #[command(subcommand)]
-    Prove(ProveCommands),
     /// Start service constantly relaying messages to ethereum
-    #[clap(visible_alias("s"))]
-    Serve(ServeArgs),
+    #[clap(visible_alias("rr"))]
+    RelayMerkleRoots(RelayMerkleRootsArgs),
     /// Relay message to ethereum
-    #[clap(visible_alias("r"))]
-    Relay(RelayArgs),
-}
-
-#[derive(Subcommand)]
-enum ProveCommands {
-    /// Generate genesis proof
-    #[clap(visible_alias("g"))]
-    Genesis {
-        #[clap(flatten)]
-        args: ProveArgs,
-    },
-    /// Prove that validator set has changed
-    #[clap(visible_alias("v"))]
-    ValidatorSetChange {
-        #[clap(flatten)]
-        args: ProveArgs,
-    },
-    /// Generate final proof
-    #[clap(visible_alias("w"))]
-    Wrapped {
-        #[clap(flatten)]
-        args: ProveArgs,
-    },
+    #[clap(visible_alias("rm"))]
+    RelayMessages(RelayMessagesArgs),
 }
 
 #[derive(Args)]
-struct RelayArgs {
+struct RelayMessagesArgs {
     #[clap(flatten)]
     vara_endpoint: VaraEndpointArg,
     #[clap(flatten)]
@@ -81,17 +55,11 @@ struct RelayArgs {
 }
 
 #[derive(Args)]
-struct ServeArgs {
+struct RelayMerkleRootsArgs {
     #[clap(flatten)]
     vara_endpoint: VaraEndpointArg,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
-}
-
-#[derive(Args)]
-struct ProveArgs {
-    #[clap(flatten)]
-    vara_endpoint: VaraEndpointArg,
 }
 
 #[derive(Args)]
@@ -137,59 +105,42 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        CliCommands::Prove(prove_command) => match prove_command {
-            ProveCommands::Genesis { args } => {
-                let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
+        CliCommands::RelayMerkleRoots(args) => {
+            let gear_api = create_gear_client(&args.vara_endpoint).await;
+            let eth_api = create_eth_client(&args.ethereum_args);
 
-                let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
-                    .await
-                    .unwrap();
+            relay_merkle_roots::run(gear_api, eth_api).await.unwrap();
+        }
+        CliCommands::RelayMessages(args) => {
+            let gear_api = create_gear_client(&args.vara_endpoint).await;
+            let eth_api = create_eth_client(&args.ethereum_args);
 
-                let proof = prover_interface::prove_genesis(&gear_api).await.unwrap();
-                proof_storage
-                    .init(proof, GENESIS_CONFIG.authority_set_id)
-                    .unwrap();
-            }
-            ProveCommands::ValidatorSetChange { args } => {
-                let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
-
-                let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
-                    .await
-                    .unwrap();
-
-                let (previous_proof, previous_validator_set_id) =
-                    proof_storage.get_latest_proof().unwrap();
-                let proof = prover_interface::prove_validator_set_change(
-                    &gear_api,
-                    previous_proof,
-                    previous_validator_set_id,
-                )
+            relay_messages::run(gear_api, eth_api, args.from_block)
                 .await
                 .unwrap();
-                proof_storage.update(proof.proof).unwrap();
-            }
-            ProveCommands::Wrapped { args } => {
-                let proof_storage = FileSystemProofStorage::new("./proof_storage".into());
-
-                let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
-                    .await
-                    .unwrap();
-
-                let (previous_proof, previous_validator_set_id) =
-                    proof_storage.get_latest_proof().unwrap();
-                let _proof = prover_interface::prove_final(
-                    &gear_api,
-                    previous_proof,
-                    previous_validator_set_id,
-                )
-                .await;
-            }
-        },
-        CliCommands::Serve(args) => {
-            serve::serve(args).await.unwrap();
-        }
-        CliCommands::Relay(args) => {
-            relay::relay(args).await.unwrap();
         }
     };
+}
+
+async fn create_gear_client(args: &VaraEndpointArg) -> GearApi {
+    GearApi::new(&args.vara_endpoint)
+        .await
+        .unwrap_or_else(|err| panic!("Error while creating gear client: {}", err))
+}
+
+fn create_eth_client(args: &EthereumArgs) -> EthApi {
+    let EthereumArgs {
+        eth_endpoint,
+        fee_payer,
+        relayer_address,
+        mq_address,
+    } = args;
+
+    EthApi::new(
+        &eth_endpoint,
+        &mq_address,
+        &relayer_address,
+        fee_payer.as_deref(),
+    )
+    .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))
 }

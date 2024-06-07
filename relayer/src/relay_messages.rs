@@ -25,7 +25,7 @@ struct RelayedMerkleRoot {
     gear_block: u32,
 }
 
-pub async fn relay(
+pub async fn run(
     gear_api: GearApi,
     eth_api: EthApi,
     from_block: Option<u32>,

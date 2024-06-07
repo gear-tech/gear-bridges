@@ -6,11 +6,11 @@ use crate::{
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
 
-pub async fn serve(gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<()> {
+pub async fn run(gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<()> {
     log::info!("Starting relayer");
 
     let mut proof_storage = FileSystemProofStorage::new("./proof_storage".into());
-    let mut eras = Eras::new(None, gear_api.clone())
+    let mut eras = Eras::new(None, gear_api.clone(), eth_api.clone())
         .await
         .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
 
@@ -87,11 +87,12 @@ async fn sync_authority_set_id(
 
 struct Eras {
     last_sealed: u64,
-    gear_api: GearApi
+    gear_api: GearApi,
+    eth_api: EthApi
 }
 
 impl Eras {
-    pub async fn new(last_sealed: Option<u64>, gear_api: GearApi) -> anyhow::Result<Self> {
+    pub async fn new(last_sealed: Option<u64>, gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<Self> {
         let last_sealed = if let Some(l) = last_sealed {
             l
         } else {
@@ -100,7 +101,7 @@ impl Eras {
             set_id.max(2) - 1
         };
         
-        Ok(Self { last_sealed, gear_api })
+        Ok(Self { last_sealed, gear_api, eth_api })
     }
 
     pub async fn try_seal(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
@@ -109,7 +110,7 @@ impl Eras {
     
         while self.last_sealed + 2 <= current_era {
             log::info!("Sealing era #{}", self.last_sealed + 1);
-            seal_era(&self.gear_api, self.last_sealed + 1, proof_storage).await?;
+            self.seal_era(self.last_sealed + 1, proof_storage).await?;
             log::info!("Sealed era #{}", self.last_sealed + 1);
 
             self.last_sealed += 1;
@@ -117,14 +118,14 @@ impl Eras {
 
         Ok(())
     }
-}
 
-async fn seal_era(gear_api: &GearApi, authority_set_id: u64, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
-    let block = gear_api.find_era_first_block(authority_set_id + 1).await?;
-    let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
-    prover_interface::prove_final(gear_api, inner_proof, block).await?;
-
-    Ok(())
+    async fn seal_era(&self, authority_set_id: u64, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
+        let block = self.gear_api.find_era_first_block(authority_set_id + 1).await?;
+        let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
+        let proof = prover_interface::prove_final(&self.gear_api, inner_proof, block).await?;
+    
+        submit_proof_to_ethereum(&self.eth_api, proof).await
+    }
 }
 
 async fn prove_message_sent(
@@ -135,8 +136,7 @@ async fn prove_message_sent(
     
     let authority_set_id = gear_api.signed_by_authority_set_id(finalized_head).await?;
     let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
-    let block = gear_api.search_for_authority_set_block(authority_set_id).await?;
-    prover_interface::prove_final(gear_api, inner_proof, block).await
+    prover_interface::prove_final(gear_api, inner_proof, finalized_head).await
 }
 
 async fn submit_proof_to_ethereum(

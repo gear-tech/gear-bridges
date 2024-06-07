@@ -44,6 +44,16 @@ fn sepolia_slot_5_151_035() {
     let block_body: BlockBody = serde_json::from_slice(SEPOLIA_5_151_035.as_ref()).unwrap();
 
     assert_eq!(beacon_header.body_root, block_body.tree_hash_root());
+
+    let block = Block {
+        slot: beacon_header.slot,
+        proposer_index: beacon_header.proposer_index,
+        parent_root: beacon_header.parent_root,
+        state_root: beacon_header.state_root,
+        body: block_body,
+    };
+
+    assert_eq!(block_root, block.tree_hash_root());
 }
 
 #[test]
@@ -68,4 +78,14 @@ fn ethereum_slot_9_230_177() {
     let block_body: BlockBody = serde_json::from_slice(ETHEREUM_9_230_177.as_ref()).unwrap();
 
     assert_eq!(beacon_header.body_root, block_body.tree_hash_root());
+
+    let block = Block {
+        slot: beacon_header.slot,
+        proposer_index: beacon_header.proposer_index,
+        parent_root: beacon_header.parent_root,
+        state_root: beacon_header.state_root,
+        body: block_body,
+    };
+
+    assert_eq!(block_root, block.tree_hash_root());
 }

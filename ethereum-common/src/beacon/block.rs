@@ -18,17 +18,13 @@
 
 use super::*;
 
-mod block;
-mod block_body;
-mod block_header;
-mod common;
-mod execution_payload;
-
-pub use block::Block;
-pub use block_body::BlockBody;
-pub use block_header::BlockHeader;
-pub use common::*;
-pub use execution_payload::ExecutionPayload;
-
-#[cfg(test)]
-mod tests;
+#[derive(Debug, Clone, tree_hash_derive::TreeHash, Decode, Encode, Deserialize)]
+pub struct Block {
+    #[serde(deserialize_with = "utils::deserialize_u64")]
+    pub slot: u64,
+    #[serde(deserialize_with = "utils::deserialize_u64")]
+    pub proposer_index: u64,
+    pub parent_root: Hash256,
+    pub state_root: Hash256,
+    pub body: BlockBody,
+}

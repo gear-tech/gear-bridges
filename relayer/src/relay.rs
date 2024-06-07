@@ -5,8 +5,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{EthereumArgs, RelayArgs};
-
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
@@ -27,29 +25,12 @@ struct RelayedMerkleRoot {
     gear_block: u32,
 }
 
-pub async fn relay(args: RelayArgs) -> anyhow::Result<()> {
-    let gear_api = GearApi::new(&args.vara_endpoint.vara_endpoint)
-        .await
-        .unwrap();
-
-    let eth_api = {
-        let EthereumArgs {
-            eth_endpoint,
-            fee_payer,
-            relayer_address,
-            mq_address,
-        } = args.ethereum_args;
-
-        EthApi::new(
-            &eth_endpoint,
-            &mq_address,
-            &relayer_address,
-            fee_payer.as_deref(),
-        )
-        .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))
-    };
-
-    let from_gear_block = if let Some(block) = args.from_block {
+pub async fn relay(
+    gear_api: GearApi,
+    eth_api: EthApi,
+    from_block: Option<u32>,
+) -> anyhow::Result<()> {
+    let from_gear_block = if let Some(block) = from_block {
         block
     } else {
         let block = gear_api.latest_finalized_block().await?;

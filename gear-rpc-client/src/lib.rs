@@ -38,7 +38,7 @@ struct StorageTrieInclusionProof {
 }
 
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const EXPECTED_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
+const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
 const MERKLE_ROOT_STORAGE_ADDRESS: &str =
     "ea31e171c2cd790a23350b5e593ed882d04afeb2c94bf32a6200661ebc1342d0";
@@ -97,6 +97,45 @@ impl GearApi {
         } else {
             stored_set_id
         })
+    }
+
+    pub async fn find_era_first_block(&self, authority_set_id: u64) -> anyhow::Result<H256> {
+        let current_set_block = self
+            .search_for_authority_set_block(authority_set_id)
+            .await?;
+        let mut current_set_block = self.block_hash_to_number(current_set_block).await?;
+
+        let mut prev_set_block = current_set_block - APPROX_SESSION_DURATION_IN_BLOCKS;
+
+        loop {
+            let prev_set_block_hash = self.block_number_to_hash(prev_set_block).await?;
+            let prev_set_id = self.authority_set_id(prev_set_block_hash).await?;
+
+            if prev_set_id < authority_set_id {
+                break;
+            }
+
+            prev_set_block -= APPROX_SESSION_DURATION_IN_BLOCKS;
+        }
+
+        loop {
+            let mid_block = (current_set_block + prev_set_block) / 2;
+            let mid_block_hash = self.block_number_to_hash(mid_block).await?;
+            let mid_set_id = self.authority_set_id(mid_block_hash).await?;
+
+            if mid_set_id == authority_set_id {
+                current_set_block = mid_block;
+
+                let mid_prev = self.previous_block(mid_block_hash).await?;
+                let mid_prev_set_id = self.authority_set_id(mid_prev).await?;
+
+                if mid_prev_set_id + 1 == authority_set_id {
+                    return Ok(mid_block_hash);
+                }
+            } else {
+                prev_set_block = mid_block;
+            }
+        }
     }
 
     async fn previous_block(&self, block: H256) -> anyhow::Result<H256> {
@@ -205,7 +244,7 @@ impl GearApi {
 
         let mut state = State::SearchBack {
             latest_bn: self.block_hash_to_number(latest_block).await?,
-            step: EXPECTED_SESSION_DURATION_IN_BLOCKS,
+            step: APPROX_SESSION_DURATION_IN_BLOCKS,
         };
 
         loop {

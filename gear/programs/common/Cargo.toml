@@ -1,0 +1,7 @@
+[package]
+name = "gear-programs-common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+primitive-types.workspace = true

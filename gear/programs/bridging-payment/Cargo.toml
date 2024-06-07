@@ -1,0 +1,7 @@
+[package]
+name = "bridging-payment"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gear-programs-common.workspace = true

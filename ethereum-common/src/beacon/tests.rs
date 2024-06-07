@@ -1,8 +1,9 @@
 use super::*;
 use hex_literal::hex;
 
-const ETHEREUM_9_230_177: &[u8; 133_287] = include_bytes!("./ethereum-9_230_177.json");
-const SEPOLIA_5_151_035: &[u8; 10_722] = include_bytes!("./sepolia-5_151_035.json");
+const ETHEREUM_9_230_177: &[u8; 133_287] = include_bytes!("./chain-data/ethereum-9_230_177.json");
+const SEPOLIA_5_151_035: &[u8; 10_722] = include_bytes!("./chain-data/sepolia-5_151_035.json");
+const HOLESKY_1_820_966: &[u8; 130_166] = include_bytes!("./chain-data/holesky-1_820_966.json");
 
 #[test]
 fn sepolia_slot_5_151_035() {
@@ -58,6 +59,40 @@ fn ethereum_slot_9_230_177() {
     assert_eq!(block_root, beacon_header.tree_hash_root());
 
     let block_body: BlockBody = serde_json::from_slice(ETHEREUM_9_230_177.as_ref()).unwrap();
+
+    assert_eq!(beacon_header.body_root, block_body.tree_hash_root());
+
+    let block = Block {
+        slot: beacon_header.slot,
+        proposer_index: beacon_header.proposer_index,
+        parent_root: beacon_header.parent_root,
+        state_root: beacon_header.state_root,
+        body: block_body,
+    };
+
+    assert_eq!(block_root, block.tree_hash_root());
+}
+
+#[test]
+fn holesky_slot_1_820_966() {
+    // curl -X 'GET' 'http://{Holesky Beacon API URL}/eth/v1/beacon/headers/1820966' -H 'accept: application/json'
+    // https://holesky.beaconcha.in/slot/1820966
+    // https://holesky.etherscan.io/block/1688645
+
+    let block_root: Hash256 =
+        hex!("f26e90bf3731062e91354e205f2b4720ab5340b2925162e9233e9480ca09b8af").into();
+    let beacon_header = BlockHeader {
+        slot: 1_820_966,
+        proposer_index: 1_634_770,
+        parent_root: hex!("64da2bfc359d4559c319d0b48bbbdad2a4fcd4b83f384467e0b1f3575ed0a253")
+            .into(),
+        state_root: hex!("de17bcaecddcb0d688cace7741b0bb1aee83cb843d5f020d9b9050bfa7bc4c3f").into(),
+        body_root: hex!("347b3f6235c17a38859280d909a01b249ef206f2884eeeffb210ad54646a4dac").into(),
+    };
+
+    assert_eq!(block_root, beacon_header.tree_hash_root());
+
+    let block_body: BlockBody = serde_json::from_slice(HOLESKY_1_820_966.as_ref()).unwrap();
 
     assert_eq!(beacon_header.body_root, block_body.tree_hash_root());
 

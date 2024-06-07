@@ -160,7 +160,7 @@ impl GearApi {
         &self,
         after_block: H256,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
-        let required_validator_set_id = self.authority_set_id(after_block).await?;
+        let required_validator_set_id = self.signed_by_authority_set_id(after_block).await?;
 
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self

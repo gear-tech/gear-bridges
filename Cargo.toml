@@ -36,10 +36,13 @@ curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek" }
 
 ahash = "0.7.8"
 anyhow = "1.0.86"
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
+derive_more = "0.99.17"
 env_logger = "0.9.0"
+ethereum-types = { version = "0.14.1", default-features = false, features = ["serialize", "codec"] }
 ff = { version = "0.13.0", features = ["derive"] }
 futures-util = "0.3.28"
 hex = { version = "0.4.3", default-features = false }
@@ -61,14 +64,11 @@ serde = { version = "1.0", features = ["alloc", "derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 static_assertions = "1.1.0"
-tokio = { version = "1.23.0", features = ["full"] }
 thiserror = "1.0.61"
-unroll = "0.1.5"
+tokio = { version = "1.23.0", features = ["full"] }
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
-ethereum-types = { version = "0.14.1", default-features = false, features = ["serialize", "codec"] }
-derive_more = "0.99.17"
-bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
+unroll = "0.1.5"
 
 # Gear/Substrate deps
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }

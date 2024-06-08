@@ -1,0 +1,4 @@
+constructor {
+  New : (u: u32);
+};
+

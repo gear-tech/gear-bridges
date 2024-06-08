@@ -3,6 +3,7 @@ target/
 data/
 /proof_storage
 _obj
+binpath
 
 cache/
 out/

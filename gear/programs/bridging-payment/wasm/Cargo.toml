@@ -4,4 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-gear-programs-common.workspace = true
+bridging-payment-app = { path = "../app" }
+
+[build-dependencies]
+gear-wasm-builder.workspace = true

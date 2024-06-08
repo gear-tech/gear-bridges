@@ -1,0 +1,10 @@
+[package]
+name = "bridging-payment"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bridging-payment-app = { path = "../app" }
+
+[build-dependencies]
+gear-wasm-builder.workspace = true

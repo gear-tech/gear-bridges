@@ -1,0 +1,23 @@
+[workspace]
+
+members = ["bridging-payment/*", "common"]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+gear-programs-common = { path = "./common" }
+
+gstd = "1.4.1"
+gear-wasm-builder = "1.4.1"
+parity-scale-codec = { version = "3.6.4", default-features = false }
+scale-info = { version = "2.10", default-features = false }
+primitive-types = { version = "0.12.2", default-features = false }
+
+sails-macros = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
+sails-idl-meta = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
+sails-idl-gen = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
+sails-rtl = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }

@@ -4,4 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-gear-programs-common.workspace = true
+gstd.workspace = true
+
+[build-dependencies]
+gear-wasm-builder.workspace = true
+
+[features]
+std = []

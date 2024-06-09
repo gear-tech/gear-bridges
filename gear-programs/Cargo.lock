@@ -602,6 +602,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "grc20-gateway"
+version = "0.1.0"
+dependencies = [
+ "gear-wasm-builder",
+ "gstd",
+]
+
+[[package]]
 name = "gstd"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

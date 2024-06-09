@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["bridging-payment", "common"]
+members = ["bridging-payment", "grc20-gateway", "common"]
 
 resolver = "2"
 

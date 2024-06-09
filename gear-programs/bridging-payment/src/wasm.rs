@@ -20,22 +20,31 @@ extern "C" fn init() {
 #[gstd::async_main]
 async fn main() {
     if msg::source() == unsafe { ADMIN_ADDRESS } {
-        let admin_msg: AdminMessage = msg::load().expect("Failed to load admin message");
-
-        match admin_msg {
-            AdminMessage::SetFee(fee) => unsafe { FEE = fee },
-        }
+        admin_request();
     } else {
-        let payload = msg::load_bytes().expect("Failed to load payload");
-        msg::send_bytes_for_reply(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
-            .expect("Failed to send bytes")
-            .await
-            .expect("Error requesting bridging");
-
-        if msg::value() < unsafe { FEE } {
-            panic!("Insufficient fee paid");
-        }
+        user_request().await;
     }
+}
+
+fn admin_request() {
+    let msg: AdminMessage = msg::load().expect("Failed to load admin message");
+    match msg {
+        AdminMessage::SetFee(fee) => unsafe { FEE = fee },
+    }
+}
+
+async fn user_request() {
+    if msg::value() < unsafe { FEE } {
+        panic!("Insufficient fee paid");
+    }
+    
+    let payload = msg::load_bytes().expect("Failed to load payload");
+    msg::send_bytes_for_reply(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
+        .expect("Failed to send message to gateway")
+        .await
+        .expect("Error requesting bridging");
+
+    msg::send_bytes(unsafe { ADMIN_ADDRESS }, &[], 0).expect("Failed to send message to admin");
 }
 
 #[no_mangle]

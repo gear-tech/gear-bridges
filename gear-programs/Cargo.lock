@@ -110,8 +110,10 @@ name = "bridging-payment"
 version = "0.1.0"
 dependencies = [
  "gear-wasm-builder",
+ "grc20-gateway",
  "gstd",
  "parity-scale-codec",
+ "primitive-types",
  "scale-info",
 ]
 
@@ -490,14 +492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gear-programs-common"
-version = "0.1.0"
-dependencies = [
- "gstd",
- "primitive-types",
-]
-
-[[package]]
 name = "gear-pwasm-utils"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -607,6 +601,9 @@ version = "0.1.0"
 dependencies = [
  "gear-wasm-builder",
  "gstd",
+ "parity-scale-codec",
+ "primitive-types",
+ "scale-info",
 ]
 
 [[package]]

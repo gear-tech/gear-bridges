@@ -1,6 +1,8 @@
 use super::*;
 use gstd::{msg, prelude::*, ActorId};
 
+use grc20_gateway::vara2eth::Response as GatewayResponse;
+
 static mut ADMIN_ADDRESS: ActorId = ActorId::new([0u8; 32]);
 static mut GRC20_GATEWAY_ADDRESS: ActorId = ActorId::new([0u8; 32]);
 static mut FEE: u128 = 0;
@@ -39,12 +41,16 @@ async fn user_request() {
     }
     
     let payload = msg::load_bytes().expect("Failed to load payload");
-    msg::send_bytes_for_reply(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
+    let reply: GatewayResponse = msg::send_bytes_for_reply_as(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
         .expect("Failed to send message to gateway")
         .await
         .expect("Error requesting bridging");
 
-    msg::send_bytes(unsafe { ADMIN_ADDRESS }, &[], 0).expect("Failed to send message to admin");
+    let reply = AdminReply {
+        nonce: reply.nonce
+    };  
+
+    msg::send(unsafe { ADMIN_ADDRESS }, &reply, 0).expect("Failed to send message to admin");
 }
 
 #[no_mangle]

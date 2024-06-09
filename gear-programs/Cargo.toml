@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["bridging-payment", "grc20-gateway", "common"]
+members = ["bridging-payment", "grc20-gateway"]
 
 resolver = "2"
 
@@ -9,7 +9,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-gear-programs-common = { path = "./common" }
+grc20-gateway = { path = "./grc20-gateway" }
 
 gstd = "1.4.1"
 gear-wasm-builder = "1.4.1"

@@ -2,6 +2,7 @@
 
 use gstd::ActorId;
 use parity_scale_codec::{Decode, Encode};
+use primitive_types::U256;
 use scale_info::TypeInfo;
 
 #[cfg(feature = "std")]
@@ -24,6 +25,11 @@ pub struct InitMessage {
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub enum AdminMessage {
     SetFee(u128),
+}
+
+#[derive(Debug, Decode, Encode, TypeInfo)]
+pub struct AdminReply {
+    nonce: U256,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]

@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bridging-payment-app = { path = "../app" }
+gstd.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
 
 [build-dependencies]
 gear-wasm-builder.workspace = true
+
+[features]
+std = []

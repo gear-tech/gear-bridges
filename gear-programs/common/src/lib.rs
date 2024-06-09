@@ -1,11 +1,10 @@
 #![cfg_attr(feature = "wasm", no_std)]
 
 #[cfg(feature = "wasm")]
-use sails_rtl::prelude::*;
+use gstd::prelude::*;
 
 pub use primitive_types::{H160, U256};
 
-#[cfg_attr(feature = "wasm", derive(Decode, Encode, TypeInfo, Clone))]
 pub struct VARA2ETHRequest {
     pub receiver: H160,
     pub token_id: H160,

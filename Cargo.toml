@@ -7,8 +7,7 @@ members = [
     "relayer",
     "circuits/*",
     "ethereum-common",
-    "gear/programs/bridging-payment/app",
-    "gear/programs/bridging-payment/wasm",
+    "gear-programs/*",
 ]
 
 resolver = "2"
@@ -28,6 +27,9 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 gear-programs-common = { path = "gear/programs/common" }
+
+grc20_gateway = { path = "gear-programs/grc20-gateway" }
+bridging_payment = { path = "gear-programs/grc20-gateway" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -78,13 +80,8 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = "1.4.1"
-gear-wasm-builder = "1.4.1"
-sails-macros = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
-sails-idl-meta = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
-sails-idl-gen = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
-sails-rtl = { git = "https://github.com/gear-tech/sails", rev = "a339d61150f5909d9603fd740838197883c20177" }
-
+gstd = { version = "1.4.1", features = ["nightly"] }
+gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
     "std",

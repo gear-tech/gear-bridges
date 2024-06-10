@@ -1,5 +1,5 @@
 [package]
-name = "grc20-gateway"
+name = "grc20_gateway"
 version.workspace = true
 edition.workspace = true
 
@@ -12,5 +12,10 @@ scale-info.workspace = true
 [build-dependencies]
 gear-wasm-builder.workspace = true
 
+[lib]
+crate-type = ["rlib"]
+name = "grc20_gateway"
+
 [features]
 std = []
+default = ["std"]

@@ -45,14 +45,20 @@ async fn user_request() {
     }
 
     let payload = msg::load_bytes().expect("Failed to load payload");
-    let reply: GatewayResponse =
+    let gateway_reply: GatewayResponse =
         msg::send_bytes_for_reply_as(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
             .expect("Failed to send message to gateway")
             .await
             .expect("Error requesting bridging");
 
     let remaining = msg::value() - unsafe { FEE };
-    msg::reply_bytes(&[], remaining).expect("Failed to send reply");
+    msg::reply(
+        &UserReply {
+            nonce: gateway_reply.nonce,
+        },
+        remaining,
+    )
+    .expect("Failed to send reply");
 }
 
 #[no_mangle]

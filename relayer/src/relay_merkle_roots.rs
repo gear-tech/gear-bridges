@@ -57,7 +57,7 @@ async fn sync_authority_set_id(
     let finalized_head = gear_api.latest_finalized_block().await.unwrap();
     let latest_authority_set_id = gear_api.authority_set_id(finalized_head).await.unwrap();
 
-    let latest_proven_authority_set_id = proof_storage.get_latest_proof();
+    let latest_proven_authority_set_id = proof_storage.get_latest_authority_set_id();
     match latest_proven_authority_set_id {
         None => {
             let proof = prover_interface::prove_genesis(gear_api).await?;
@@ -67,17 +67,18 @@ async fn sync_authority_set_id(
 
             Ok(1)
         }
-        Some((mut proof, latest_proven)) if latest_proven < latest_authority_set_id => {
+        Some(latest_proven) if latest_proven < latest_authority_set_id => {
+            let mut proof = proof_storage.get_proof_for_authority_set_id(latest_proven)?;
             for set_id in latest_proven..latest_authority_set_id {
                 proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
-                proof_storage.update(proof.proof.clone())?;
+                proof_storage.update(proof.proof.clone(), set_id + 1)?;
             }
 
             let step_count = latest_authority_set_id - latest_proven;
             Ok(step_count as usize)
         }
-        Some((_, latest_proven)) if latest_proven == latest_authority_set_id => Ok(0),
-        Some((_, latest_proven)) => unreachable!(
+        Some(latest_proven) if latest_proven == latest_authority_set_id => Ok(0),
+        Some(latest_proven) => unreachable!(
             "Invalid state of proof storage detected: latest stored authority set id = {} but latest authority set id on VARA = {}", 
             latest_proven, 
             latest_authority_set_id

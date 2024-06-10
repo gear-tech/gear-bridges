@@ -7,6 +7,7 @@ members = [
     "relayer",
     "circuits/*",
     "ethereum-common",
+    "gear-programs/*",
 ]
 
 resolver = "2"
@@ -26,6 +27,9 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
+grc20_gateway = { path = "gear-programs/grc20-gateway" }
+bridging_payment = { path = "gear-programs/bridging-payment" }
+
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -42,7 +46,10 @@ bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
 env_logger = "0.9.0"
-ethereum-types = { version = "0.14.1", default-features = false, features = ["serialize", "codec"] }
+ethereum-types = { version = "0.14.1", default-features = false, features = [
+    "serialize",
+    "codec",
+] }
 ff = { version = "0.13.0", features = ["derive"] }
 futures-util = "0.3.28"
 hex = { version = "0.4.3", default-features = false }
@@ -60,6 +67,7 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 reqwest = "0.11.24"
+scale-info = { version = "2.10", default-features = false }
 serde = { version = "1.0", features = ["alloc", "derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -71,6 +79,8 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
+gstd = { version = "1.4.1", features = ["nightly"] }
+gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
     "std",

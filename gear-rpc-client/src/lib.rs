@@ -3,9 +3,14 @@
 
 use anyhow::anyhow;
 use dto::BranchNodeData;
-use gsdk::metadata::gear_bridge::Event as GearBridgeEvent;
 use gsdk::{
     metadata::{
+        gear::Event as GearEvent,
+        gear_bridge::Event as GearBridgeEvent,
+        runtime_types::{
+            gear_core::message::user::UserMessage, gear_core_errors::simple::ReplyCode,
+            gprimitives::ActorId,
+        },
         storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
@@ -543,6 +548,57 @@ impl GearApi {
                     destination: message.destination.0,
                     payload: message.payload,
                 })
+            } else {
+                None
+            }
+        });
+
+        Ok(events.collect())
+    }
+
+    pub async fn user_message_sent_events(
+        &self,
+        from_program: H256,
+        block: H256,
+    ) -> anyhow::Result<Vec<dto::UserMessageSent>> {
+        let events = self.api.get_events_at(Some(block)).await?;
+
+        let from = ActorId(from_program.0);
+
+        let events = events.into_iter().filter_map(|event| {
+            let (source, payload, details) =
+                if let RuntimeEvent::Gear(GearEvent::UserMessageSent {
+                    message:
+                        UserMessage {
+                            source,
+                            payload,
+                            details,
+                            ..
+                        },
+                    ..
+                }) = event
+                {
+                    (source, payload, details)
+                } else {
+                    return None;
+                };
+
+            if source != from {
+                return None;
+            }
+
+            if details.is_none() {
+                return None;
+            }
+
+            let details = if let Some(details) = details {
+                details
+            } else {
+                return None;
+            };
+
+            if let ReplyCode::Success(_) = details.code {
+                Some(dto::UserMessageSent { payload: payload.0 })
             } else {
                 None
             }

@@ -52,3 +52,7 @@ pub struct Message {
     pub destination: [u8; 20],
     pub payload: Vec<u8>,
 }
+
+pub struct UserMessageSent {
+    pub payload: Vec<u8>,
+}

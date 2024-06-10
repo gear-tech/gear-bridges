@@ -1,0 +1,21 @@
+[package]
+name = "checkpointeths"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gstd.workspace = true
+primitive-types.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+
+[build-dependencies]
+gear-wasm-builder.workspace = true
+
+[features]
+std = [
+    "primitive-types/std",
+    "parity-scale-codec/std",
+    "scale-info/std",
+]
+default = ["std"]

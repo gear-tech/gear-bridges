@@ -1814,6 +1814,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "checkpointeths"
+version = "0.1.0"
+dependencies = [
+ "gear-wasm-builder 1.4.1",
+ "gstd 1.4.1",
+ "parity-scale-codec",
+ "primitive-types 0.12.2",
+ "scale-info",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"

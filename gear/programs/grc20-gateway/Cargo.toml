@@ -1,7 +1,0 @@
-[package]
-name = "grc20-gateway"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-gear-programs-common.workspace = true

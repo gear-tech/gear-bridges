@@ -51,6 +51,9 @@ struct RelayMessagesArgs {
     /// Block number to start relaying from. If not specified equals to the latest finalized block
     #[arg(long = "from-block")]
     from_block: Option<u32>,
+    /// Address of bridging payment program (if not specified, relayer will relay all messages)
+    #[arg(long = "bridging-payment-address")]
+    bridging_payment_address: Option<String>,
 }
 
 #[derive(Args)]
@@ -114,7 +117,16 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            relay_messages::run(gear_api, eth_api, args.from_block, [0; 32].into())
+            let bridging_payment_address = args.bridging_payment_address.map(|addr| {
+                let arr: [u8; 32] = hex::decode(&addr)
+                    .expect("Wrong format of bridging-payment-address")
+                    .try_into()
+                    .expect("Wrong format of bridging-payment-address");
+
+                arr.into()
+            });
+
+            relay_messages::run(gear_api, eth_api, args.from_block, bridging_payment_address)
                 .await
                 .unwrap();
         }

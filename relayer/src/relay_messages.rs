@@ -33,7 +33,7 @@ pub async fn run(
     gear_api: GearApi,
     eth_api: EthApi,
     from_block: Option<u32>,
-    bridging_payment_address: H256,
+    bridging_payment_address: Option<H256>,
 ) -> anyhow::Result<()> {
     let from_gear_block = if let Some(block) = from_block {
         block
@@ -62,7 +62,7 @@ pub async fn run(
 fn run_event_processor(
     gear_api: GearApi,
     from_block: u32,
-    bridging_payment_address: H256,
+    bridging_payment_address: Option<H256>,
 ) -> Receiver<MessageInBlock> {
     let (sender, receiver) = channel();
 
@@ -83,7 +83,7 @@ fn run_event_processor(
 async fn event_processor_inner(
     gear_api: &GearApi,
     from_block: u32,
-    bridging_payment_address: H256,
+    bridging_payment_address: Option<H256>,
     sender: &Sender<MessageInBlock>,
 ) -> anyhow::Result<()> {
     let mut current_block = from_block;
@@ -118,7 +118,7 @@ async fn event_processor_inner(
 async fn process_block_events(
     gear_api: &GearApi,
     block: u32,
-    bridging_payment_address: H256,
+    bridging_payment_address: Option<H256>,
     sent_messages: &mut HashMap<U256, MessageInBlock>,
     paid_messages: &mut HashSet<U256>,
     sender: &Sender<MessageInBlock>,
@@ -147,37 +147,43 @@ async fn process_block_events(
         message_discovered = true;
     }
 
-    let messages = gear_api
-        .user_message_sent_events(bridging_payment_address, block_hash)
-        .await?;
-    if !messages.is_empty() {
-        log::info!("Found {} paid messages", messages.len());
+    if let Some(bridging_payment_address) = bridging_payment_address {
+        let messages = gear_api
+            .user_message_sent_events(bridging_payment_address, block_hash)
+            .await?;
+        if !messages.is_empty() {
+            log::info!("Found {} paid messages", messages.len());
 
-        for message in messages {
-            let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
-            paid_messages.insert(user_reply.nonce);
+            for message in messages {
+                let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
+                paid_messages.insert(user_reply.nonce);
+            }
+
+            message_discovered = true;
         }
 
-        message_discovered = true;
-    }
+        if !message_discovered {
+            return Ok(());
+        }
 
-    if !message_discovered {
-        return Ok(());
-    }
+        let mut processed = vec![];
+        for paid in &*paid_messages {
+            if let Some(message) = sent_messages.remove(paid) {
+                sender.send(message)?;
+                processed.push(*paid);
+            }
+        }
 
-    let mut processed = vec![];
-    for paid in &*paid_messages {
-        if let Some(message) = sent_messages.remove(paid) {
+        for processed in processed {
+            paid_messages.remove(&processed);
+        }
+
+        // TODO: Cleanup sent_messages
+    } else {
+        for (_, message) in sent_messages.drain() {
             sender.send(message)?;
-            processed.push(*paid);
         }
     }
-
-    for processed in processed {
-        paid_messages.remove(&processed);
-    }
-
-    // TODO: Cleanup sent_messages
 
     Ok(())
 }

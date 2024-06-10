@@ -3,7 +3,11 @@
 
 use anyhow::anyhow;
 use dto::BranchNodeData;
-use gsdk::metadata::gear_bridge::Event as GearBridgeEvent;
+use gsdk::metadata::runtime_types::gear_core::message::common::ReplyDetails;
+use gsdk::metadata::runtime_types::gear_core::message::user::UserMessage;
+use gsdk::metadata::runtime_types::gear_core_errors::simple::ReplyCode;
+use gsdk::metadata::runtime_types::gprimitives::ActorId;
+use gsdk::metadata::{gear::Event as GearEvent, gear_bridge::Event as GearBridgeEvent};
 use gsdk::{
     metadata::{
         storage::{GrandpaStorage, SessionStorage},
@@ -543,6 +547,54 @@ impl GearApi {
                     destination: message.destination.0,
                     payload: message.payload,
                 })
+            } else {
+                None
+            }
+        });
+
+        Ok(events.collect())
+    }
+
+    pub async fn user_message_sent_events(
+        &self,
+        from_program: H256,
+        block: H256,
+    ) -> anyhow::Result<Vec<dto::UserMessageSent>> {
+        let events = self.api.get_events_at(Some(block)).await?;
+
+        let from = ActorId(from_program.0);
+
+        let events = events.into_iter().filter_map(|event| {
+            if let RuntimeEvent::Gear(GearEvent::UserMessageSent {
+                message:
+                    UserMessage {
+                        source,
+                        payload,
+                        details,
+                        ..
+                    },
+                ..
+            }) = event
+            {
+                if source != from {
+                    return None;
+                }
+
+                if details.is_none() {
+                    return None;
+                }
+
+                let details = if let Some(details) = details {
+                    details
+                } else {
+                    return None;
+                };
+
+                if let ReplyCode::Success(_) = details.code {
+                    Some(dto::UserMessageSent { payload: payload.0 })
+                } else {
+                    None
+                }
             } else {
                 None
             }

@@ -21,6 +21,7 @@ pub trait ProofStorage {
 
     fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError>;
 
+    // TODO: can return only u64
     fn get_latest_proof(&self) -> Option<(ProofWithCircuitData, u64)>;
 
     fn get_proof_for_authority_set_id(
@@ -28,6 +29,7 @@ pub trait ProofStorage {
         authority_set_id: u64,
     ) -> Result<ProofWithCircuitData, ProofStorageError>;
 
+    // TODO: additional parameter - authority set id
     fn update(&mut self, proof: Proof) -> Result<(), ProofStorageError>;
 }
 

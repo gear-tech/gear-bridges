@@ -1,123 +1,10 @@
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
+use super::{AuthoritySetId, InMemoryProofStorage, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
 
-#[derive(Debug, thiserror::Error)]
-pub enum ProofStorageError {
-    #[error("Proof storage already initialized")]
-    AlreadyInitialized,
-    #[error("Proof storage not initialized")]
-    NotInitialized,
-    #[error("Proof for authority set id #{0} not found")]
-    NotFound(u64),
-    #[error("Authority set id is not as expected")]
-    AuthoritySetIdMismatch,
-}
-
-type AuthoritySetId = u64;
-
-pub trait ProofStorage {
-    fn init(
-        &mut self,
-        proof_with_circuit_data: ProofWithCircuitData,
-        genesis_validator_set_id: u64,
-    ) -> Result<(), ProofStorageError>;
-
-    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError>;
-
-    fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId>;
-
-    fn get_proof_for_authority_set_id(
-        &self,
-        authority_set_id: AuthoritySetId,
-    ) -> Result<ProofWithCircuitData, ProofStorageError>;
-
-    fn update(
-        &mut self,
-        proof: Proof,
-        new_authority_set_id: AuthoritySetId,
-    ) -> Result<(), ProofStorageError>;
-}
-
-#[derive(Default)]
-struct MockProofStorage {
-    proofs: BTreeMap<AuthoritySetId, Proof>,
-    circuit_data: Option<CircuitData>,
-}
-
-impl ProofStorage for MockProofStorage {
-    fn init(
-        &mut self,
-        proof_with_circuit_data: ProofWithCircuitData,
-        genesis_validator_set_id: u64,
-    ) -> Result<(), ProofStorageError> {
-        if !self.proofs.is_empty() {
-            return Err(ProofStorageError::AlreadyInitialized);
-        }
-
-        self.circuit_data = Some(proof_with_circuit_data.circuit_data);
-        self.proofs
-            .insert(genesis_validator_set_id + 1, proof_with_circuit_data.proof);
-
-        Ok(())
-    }
-
-    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
-        self.circuit_data
-            .clone()
-            .ok_or(ProofStorageError::NotInitialized)
-    }
-
-    fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId> {
-        self.proofs.last_key_value().map(|(k, _)| *k)
-    }
-
-    fn get_proof_for_authority_set_id(
-        &self,
-        authority_set_id: u64,
-    ) -> Result<ProofWithCircuitData, ProofStorageError> {
-        let circuit_data = self.get_circuit_data()?;
-
-        let proof = self
-            .proofs
-            .get(&authority_set_id)
-            .ok_or(ProofStorageError::NotFound(authority_set_id))?
-            .clone();
-
-        Ok(ProofWithCircuitData {
-            proof,
-            circuit_data,
-        })
-    }
-
-    fn update(
-        &mut self,
-        proof: Proof,
-        new_authority_set_id: AuthoritySetId,
-    ) -> Result<(), ProofStorageError> {
-        let authority_set_id = self
-            .proofs
-            .last_key_value()
-            .map(|(k, _)| *k)
-            .expect("Proof storage not initialized");
-
-        if new_authority_set_id != authority_set_id + 1 {
-            return Err(ProofStorageError::AuthoritySetIdMismatch);
-        }
-
-        if self.proofs.insert(authority_set_id + 1, proof).is_some() {
-            panic!(
-                "Proof for validator set id = {} already present",
-                authority_set_id + 1
-            )
-        }
-
-        Ok(())
-    }
-}
-
 pub struct FileSystemProofStorage {
-    cache: MockProofStorage,
+    cache: InMemoryProofStorage,
     save_to: PathBuf,
 }
 
@@ -167,7 +54,7 @@ impl FileSystemProofStorage {
         }
 
         let mut storage = FileSystemProofStorage {
-            cache: MockProofStorage::default(),
+            cache: InMemoryProofStorage::default(),
             save_to,
         };
 

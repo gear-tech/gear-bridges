@@ -89,7 +89,49 @@ func (c *Plonky2VerifierCircuit) Define(api frontend.API) error {
 	return nil
 }
 
-//export compile
+type ProofWithPublicInputs struct {
+	Proof        string   `json:"proof"`
+	PublicInputs []string `json:"public_inputs"`
+}
+
+//export prove
+func prove(circuitData *C.char) *C.char {
+	pk, err := loadProvingKey()
+	if err != nil {
+		compile(circuitData)
+		pk, _ = loadProvingKey()
+	}
+
+	r1cs := loadR1CS()
+
+	assignment, err := deserializeCircuit(C.GoString(circuitData))
+	if err != nil {
+		panic(err)
+	}
+	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+
+	proof, err := plonk.Prove(r1cs, pk, witness)
+	if err != nil {
+		errorString := fmt.Sprintf("Prover error: %s. Gnark circuit may be outdated or plonky2 proof is incorrect", err)
+		panic(errorString)
+	}
+
+	vk := loadVerifyingKey()
+	publicWitness, err := witness.Public()
+	if err != nil {
+		panic(err)
+	}
+	err = plonk.Verify(proof, vk, publicWitness)
+	if err != nil {
+		errorString := fmt.Sprintf("Verifier error: %s. Gnark circuit may be outdated, please recompile it", err)
+		panic(errorString)
+	}
+
+	rawProof := serializeProof(proof, assignment.PublicInputs)
+
+	return C.CString(rawProof)
+}
+
 func compile(circuitData *C.char) {
 	circuit, err := deserializeCircuit(C.GoString(circuitData))
 	if err != nil {
@@ -124,42 +166,6 @@ func compile(circuitData *C.char) {
 
 	fSolidity, _ := os.Create("data/verifier.sol")
 	_ = vk.ExportSolidity(fSolidity)
-}
-
-type ProofWithPublicInputs struct {
-	Proof        string   `json:"proof"`
-	PublicInputs []string `json:"public_inputs"`
-}
-
-//export prove
-func prove(circuitData *C.char) *C.char {
-	r1cs := loadR1CS()
-	pk := loadProvingKey()
-
-	assignment, err := deserializeCircuit(C.GoString(circuitData))
-	if err != nil {
-		panic(err)
-	}
-	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
-
-	proof, err := plonk.Prove(r1cs, pk, witness)
-	if err != nil {
-		panic(err)
-	}
-
-	vk := loadVerifyingKey()
-	publicWitness, err := witness.Public()
-	if err != nil {
-		panic(err)
-	}
-	err = plonk.Verify(proof, vk, publicWitness)
-	if err != nil {
-		panic(err)
-	}
-
-	rawProof := serializeProof(proof, assignment.PublicInputs)
-
-	return C.CString(rawProof)
 }
 
 func serializeProof(proof plonk.Proof, glPublicInputs []gl.Variable) string {
@@ -288,20 +294,20 @@ func loadVerifyingKey() plonk.VerifyingKey {
 	return vk
 }
 
-func loadProvingKey() plonk.ProvingKey {
+func loadProvingKey() (plonk.ProvingKey, error) {
 	pkFile, err := os.Open("data/proving.key")
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
 	pk := plonk.NewProvingKey(ecc.BN254)
 	pkReader := bufio.NewReader(pkFile)
 	_, err = pk.ReadFrom(pkReader)
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
 	pkFile.Close()
 
-	return pk
+	return pk, nil
 }
 
 func loadR1CS() constraint.ConstraintSystem {

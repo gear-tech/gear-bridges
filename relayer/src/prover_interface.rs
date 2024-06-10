@@ -137,9 +137,6 @@ pub async fn prove_final(
         message_contents,
     );
 
-    // TODO: Compile only when not initialized #54
-    //gnark::compile_circuit(&proof);
-
     let proof = gnark::prove_circuit(&proof);
 
     let public_inputs: [_; 2] = proof
@@ -211,16 +208,7 @@ pub mod gnark {
     }
 
     extern "C" {
-        fn compile(circuit_data: *const c_char);
         fn prove(circuit_data: *const c_char) -> *const c_char;
-    }
-
-    pub fn compile_circuit(s: &ExportedProofWithCircuitData) {
-        let serialized = serde_json::to_string(s).expect("Failed to serialize data");
-        let c_string = CString::new(serialized).expect("CString::new failed");
-        unsafe {
-            compile(c_string.as_ptr());
-        }
     }
 
     pub fn prove_circuit(s: &ExportedProofWithCircuitData) -> ProveResult {

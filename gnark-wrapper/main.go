@@ -98,7 +98,6 @@ type ProofWithPublicInputs struct {
 func prove(circuitData *C.char) *C.char {
 	pk, err := loadProvingKey()
 	if err != nil {
-		fmt.Println("Recompiling circuit")
 		compile(circuitData)
 		pk, _ = loadProvingKey()
 	}

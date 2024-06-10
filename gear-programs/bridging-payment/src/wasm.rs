@@ -1,5 +1,5 @@
 use super::*;
-use gstd::{msg, prelude::*, ActorId};
+use gstd::{exec, msg, prelude::*, ActorId};
 
 use grc20_gateway::vara2eth::Response as GatewayResponse;
 
@@ -32,6 +32,10 @@ fn admin_request() {
     let msg: AdminMessage = msg::load().expect("Failed to load admin message");
     match msg {
         AdminMessage::SetFee(fee) => unsafe { FEE = fee },
+        AdminMessage::ReclaimFees => {
+            let value = exec::value_available();
+            msg::reply_bytes(&[], value).expect("Failed to reclaim fees");
+        }
     }
 }
 
@@ -39,21 +43,25 @@ async fn user_request() {
     if msg::value() < unsafe { FEE } {
         panic!("Insufficient fee paid");
     }
-    
+
     let payload = msg::load_bytes().expect("Failed to load payload");
-    let reply: GatewayResponse = msg::send_bytes_for_reply_as(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
-        .expect("Failed to send message to gateway")
-        .await
-        .expect("Error requesting bridging");
+    let reply: GatewayResponse =
+        msg::send_bytes_for_reply_as(unsafe { GRC20_GATEWAY_ADDRESS }, payload, 0, 0)
+            .expect("Failed to send message to gateway")
+            .await
+            .expect("Error requesting bridging");
 
-    let reply = AdminReply {
-        nonce: reply.nonce
-    };  
-
-    msg::send(unsafe { ADMIN_ADDRESS }, &reply, 0).expect("Failed to send message to admin");
+    let remaining = msg::value() - unsafe { FEE };
+    msg::reply_bytes(&[], remaining).expect("Failed to send reply");
 }
 
 #[no_mangle]
 extern "C" fn state() {
-    msg::reply(State { fee: unsafe { FEE } }, 0).expect("Failed to read state");
+    msg::reply(
+        State {
+            fee: unsafe { FEE },
+        },
+        0,
+    )
+    .expect("Failed to read state");
 }

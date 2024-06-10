@@ -8233,6 +8233,7 @@ name = "relayer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bridging_payment",
  "cgo_oligami",
  "clap",
  "ethereum-client",
@@ -8242,6 +8243,7 @@ dependencies = [
  "libc",
  "log",
  "num",
+ "parity-scale-codec",
  "pretty_env_logger",
  "primitive-types 0.12.2",
  "prover",

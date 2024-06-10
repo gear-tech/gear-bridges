@@ -3,13 +3,14 @@
 
 use anyhow::anyhow;
 use dto::BranchNodeData;
-use gsdk::metadata::runtime_types::gear_core::message::common::ReplyDetails;
-use gsdk::metadata::runtime_types::gear_core::message::user::UserMessage;
-use gsdk::metadata::runtime_types::gear_core_errors::simple::ReplyCode;
-use gsdk::metadata::runtime_types::gprimitives::ActorId;
-use gsdk::metadata::{gear::Event as GearEvent, gear_bridge::Event as GearBridgeEvent};
 use gsdk::{
     metadata::{
+        gear::Event as GearEvent,
+        gear_bridge::Event as GearBridgeEvent,
+        runtime_types::{
+            gear_core::message::user::UserMessage, gear_core_errors::simple::ReplyCode,
+            gprimitives::ActorId,
+        },
         storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },

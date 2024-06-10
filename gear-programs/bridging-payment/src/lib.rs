@@ -22,7 +22,7 @@ pub enum AdminMessage {
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct UserReply {
-    nonce: U256,
+    pub nonce: U256,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]

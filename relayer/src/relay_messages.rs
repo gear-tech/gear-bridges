@@ -1,13 +1,16 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
     sync::mpsc::{channel, Receiver, Sender},
     thread,
     time::Duration,
 };
 
+use bridging_payment::UserReply as BridgingPaymentUserReply;
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
+use parity_scale_codec::Decode;
+use primitive_types::{H256, U256};
 
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
@@ -15,9 +18,10 @@ const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 type AuthoritySetId = u64;
 type BlockNumber = u32;
 
-struct MessagesInBlock {
-    messages: Vec<Message>,
+struct MessageInBlock {
+    message: Message,
     block: u32,
+    block_hash: H256,
 }
 
 #[derive(Clone, Copy)]
@@ -29,6 +33,7 @@ pub async fn run(
     gear_api: GearApi,
     eth_api: EthApi,
     from_block: Option<u32>,
+    bridging_payment_address: H256,
 ) -> anyhow::Result<()> {
     let from_gear_block = if let Some(block) = from_block {
         block
@@ -43,7 +48,7 @@ pub async fn run(
         "Starting gear event processing from block #{}",
         from_gear_block
     );
-    let messages = run_event_processor(gear_api.clone(), from_gear_block);
+    let messages = run_event_processor(gear_api.clone(), from_gear_block, bridging_payment_address);
 
     log::info!("Starting ethereum listener from block #{}", from_eth_block);
     let merkle_roots = run_merkle_root_listener(eth_api.clone(), gear_api.clone(), from_eth_block);
@@ -57,12 +62,15 @@ pub async fn run(
 fn run_event_processor(
     gear_api: GearApi,
     from_block: u32,
-) -> Receiver<(AuthoritySetId, MessagesInBlock)> {
+    bridging_payment_address: H256,
+) -> Receiver<MessageInBlock> {
     let (sender, receiver) = channel();
 
     tokio::spawn(async move {
         loop {
-            let res = event_processor_inner(&gear_api, from_block, &sender).await;
+            let res =
+                event_processor_inner(&gear_api, from_block, bridging_payment_address, &sender)
+                    .await;
             if let Err(err) = res {
                 log::error!("Event processor failed: {}", err);
             }
@@ -75,9 +83,13 @@ fn run_event_processor(
 async fn event_processor_inner(
     gear_api: &GearApi,
     from_block: u32,
-    sender: &Sender<(AuthoritySetId, MessagesInBlock)>,
+    bridging_payment_address: H256,
+    sender: &Sender<MessageInBlock>,
 ) -> anyhow::Result<()> {
     let mut current_block = from_block;
+
+    let mut sent_messages = HashMap::new();
+    let mut paid_messages = HashSet::new();
 
     loop {
         let finalized_head = gear_api.latest_finalized_block().await?;
@@ -85,20 +97,15 @@ async fn event_processor_inner(
 
         if finalized_head >= current_block {
             for block in current_block..=finalized_head {
-                log::info!("Processing gear block #{}", block);
-
-                let block_hash = gear_api.block_number_to_hash(block).await?;
-                let messages = gear_api.message_queued_events(block_hash).await?;
-
-                if !messages.is_empty() {
-                    log::info!("Found {} messages", messages.len());
-                } else {
-                    continue;
-                }
-
-                let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-                sender.send((authority_set_id, MessagesInBlock { messages, block }))?;
+                process_block_events(
+                    gear_api,
+                    block,
+                    bridging_payment_address,
+                    &mut sent_messages,
+                    &mut paid_messages,
+                    sender,
+                )
+                .await?;
             }
 
             current_block = finalized_head + 1;
@@ -106,6 +113,73 @@ async fn event_processor_inner(
             thread::sleep(GEAR_BLOCK_TIME_APPROX);
         }
     }
+}
+
+async fn process_block_events(
+    gear_api: &GearApi,
+    block: u32,
+    bridging_payment_address: H256,
+    sent_messages: &mut HashMap<U256, MessageInBlock>,
+    paid_messages: &mut HashSet<U256>,
+    sender: &Sender<MessageInBlock>,
+) -> anyhow::Result<()> {
+    log::info!("Processing gear block #{}", block);
+    let block_hash = gear_api.block_number_to_hash(block).await?;
+
+    let mut message_discovered = false;
+
+    let messages = gear_api.message_queued_events(block_hash).await?;
+    if !messages.is_empty() {
+        log::info!("Found {} sent messages", messages.len());
+
+        for message in messages {
+            let nonce = U256::from_little_endian(&message.nonce_le);
+            sent_messages.insert(
+                nonce,
+                MessageInBlock {
+                    message,
+                    block,
+                    block_hash,
+                },
+            );
+        }
+
+        message_discovered = true;
+    }
+
+    let messages = gear_api
+        .user_message_sent_events(bridging_payment_address, block_hash)
+        .await?;
+    if !messages.is_empty() {
+        log::info!("Found {} paid messages", messages.len());
+
+        for message in messages {
+            let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
+            paid_messages.insert(user_reply.nonce);
+        }
+
+        message_discovered = true;
+    }
+
+    if !message_discovered {
+        return Ok(());
+    }
+
+    let mut processed = vec![];
+    for paid in &*paid_messages {
+        if let Some(message) = sent_messages.remove(paid) {
+            sender.send(message)?;
+            processed.push(*paid);
+        }
+    }
+
+    for processed in processed {
+        paid_messages.remove(&processed);
+    }
+
+    // TODO: Cleanup sent_messages
+
+    Ok(())
 }
 
 fn run_merkle_root_listener(
@@ -177,24 +251,46 @@ struct Era {
 async fn run_message_relayer(
     eth_api: EthApi,
     gear_api: GearApi,
-    messages: Receiver<(AuthoritySetId, MessagesInBlock)>,
+    messages: Receiver<MessageInBlock>,
     merkle_roots: Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
 ) {
+    loop {
+        let res = run_message_relayer_inner(&eth_api, &gear_api, &messages, &merkle_roots).await;
+        if let Err(err) = res {
+            log::error!("Message relayer failed: {}", err);
+        }
+    }
+}
+
+async fn run_message_relayer_inner(
+    eth_api: &EthApi,
+    gear_api: &GearApi,
+    messages: &Receiver<MessageInBlock>,
+    merkle_roots: &Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
+) -> anyhow::Result<()> {
     let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
 
     loop {
-        for (authority_set_id, new_messages) in messages.try_iter() {
+        for MessageInBlock {
+            message,
+            block,
+            block_hash,
+        } in messages.try_iter()
+        {
+            let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+
             match eras.entry(authority_set_id) {
-                Entry::Occupied(mut entry) => {
-                    // TODO: Check that = None
-                    entry
-                        .get_mut()
-                        .messages
-                        .insert(new_messages.block, new_messages.messages);
-                }
+                Entry::Occupied(mut entry) => match entry.get_mut().messages.entry(block) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push(message);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![message]);
+                    }
+                },
                 Entry::Vacant(entry) => {
                     let mut messages = BTreeMap::new();
-                    messages.insert(new_messages.block, new_messages.messages);
+                    messages.insert(block, vec![message]);
 
                     entry.insert(Era {
                         latest_merkle_root: None,

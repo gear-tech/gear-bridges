@@ -1,7 +1,6 @@
 extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
-
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::Contracts as EthApi;
@@ -115,7 +114,7 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            relay_messages::run(gear_api, eth_api, args.from_block)
+            relay_messages::run(gear_api, eth_api, args.from_block, [0; 32].into())
                 .await
                 .unwrap();
         }

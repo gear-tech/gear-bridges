@@ -566,36 +566,39 @@ impl GearApi {
         let from = ActorId(from_program.0);
 
         let events = events.into_iter().filter_map(|event| {
-            if let RuntimeEvent::Gear(GearEvent::UserMessageSent {
-                message:
-                    UserMessage {
-                        source,
-                        payload,
-                        details,
-                        ..
-                    },
-                ..
-            }) = event
-            {
-                if source != from {
-                    return None;
-                }
-
-                if details.is_none() {
-                    return None;
-                }
-
-                let details = if let Some(details) = details {
-                    details
+            let (source, payload, details) =
+                if let RuntimeEvent::Gear(GearEvent::UserMessageSent {
+                    message:
+                        UserMessage {
+                            source,
+                            payload,
+                            details,
+                            ..
+                        },
+                    ..
+                }) = event
+                {
+                    (source, payload, details)
                 } else {
                     return None;
                 };
 
-                if let ReplyCode::Success(_) = details.code {
-                    Some(dto::UserMessageSent { payload: payload.0 })
-                } else {
-                    None
-                }
+            if source != from {
+                return None;
+            }
+
+            if details.is_none() {
+                return None;
+            }
+
+            let details = if let Some(details) = details {
+                details
+            } else {
+                return None;
+            };
+
+            if let ReplyCode::Success(_) = details.code {
+                Some(dto::UserMessageSent { payload: payload.0 })
             } else {
                 None
             }

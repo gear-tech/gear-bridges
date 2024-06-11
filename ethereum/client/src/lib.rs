@@ -66,6 +66,13 @@ pub struct MerkleRootEntry {
     tx_hash: TxHash,
 }
 
+#[derive(Debug)]
+pub enum TxStatus {
+    Finalized,
+    Pending,
+    Failed,
+}
+
 impl Contracts {
     pub fn new(
         url: &str,
@@ -257,40 +264,48 @@ impl Contracts {
         }
     }
 
-    pub async fn is_tx_finalized(&self, tx: TxHash) -> Result<bool, Error> {
+    pub async fn get_tx_status(&self, tx: TxHash) -> Result<TxStatus, Error> {
         let receipt = self
             .provider
             .get_transaction_receipt(tx)
             .await
             .map_err(|_| Error::ErrorFetchingTransactionReceipt)?;
 
-        if let Some(receipt) = receipt {
-            let status_code = receipt.status_code.unwrap_or_default();
-
-            if status_code.is_zero() {
-                return Ok(false);
-            }
-
-            let block = if let Some(block) = receipt.block_number {
-                block
-            } else {
-                return Ok(false);
-            };
-
-            let latest_finalized = self
-                .provider
-                .get_block_by_number(BlockNumberOrTag::Finalized, false)
-                .await
-                .map_err(|_| Error::ErrorFetchingBlock)?
-                .ok_or(Error::ErrorFetchingBlock)?
-                .header
-                .number
-                .ok_or(Error::ErrorFetchingBlock)?;
-
-            Ok(latest_finalized >= block)
+        let receipt = if let Some(receipt) = receipt {
+            receipt
         } else {
-            Ok(false)
+            return Ok(TxStatus::Failed);
+        };
+
+        let status_code = receipt.status_code.unwrap_or_default();
+
+        if status_code.is_zero() {
+            return Ok(TxStatus::Failed);
         }
+
+        let block = if let Some(block) = receipt.block_number {
+            block
+        } else {
+            return Ok(TxStatus::Pending);
+        };
+
+        let latest_finalized = self
+            .provider
+            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .await
+            .map_err(|_| Error::ErrorFetchingBlock)?
+            .ok_or(Error::ErrorFetchingBlock)?
+            .header
+            .number
+            .ok_or(Error::ErrorFetchingBlock)?;
+
+        let status = if latest_finalized >= block {
+            TxStatus::Finalized
+        } else {
+            TxStatus::Pending
+        };
+
+        Ok(status)
     }
 }
 

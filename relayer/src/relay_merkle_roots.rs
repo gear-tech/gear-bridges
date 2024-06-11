@@ -4,7 +4,7 @@ use crate::{
     GENESIS_CONFIG,
 };
 
-use ethereum_client::{Contracts as EthApi, TxHash};
+use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
 
 pub async fn run(gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<()> {
@@ -176,6 +176,8 @@ impl Eras {
             if self.sealed_not_finalized[i].try_finalize(&self.eth_api).await? {
                 log::info!("Era #{} finalized", self.sealed_not_finalized[i].era);
                 self.sealed_not_finalized.remove(i);  
+            } else {
+                log::info!("Cannot finalize era #{}", self.sealed_not_finalized[i].era);
             }
         }
 
@@ -185,15 +187,17 @@ impl Eras {
 
 impl SealedNotFinalizedEra {
     pub async fn try_finalize(&mut self, eth_api: &EthApi) -> anyhow::Result<bool> {
-        let tx_final = eth_api.is_tx_finalized(self.tx_hash).await?;
-        
-        if tx_final {
-            return Ok(true);
+        let tx_status = eth_api.get_tx_status(self.tx_hash).await?;
+
+        match tx_status {
+            TxStatus::Finalized => Ok(true),
+            TxStatus::Pending => Ok(false),
+            TxStatus::Failed => {
+                // TODO: Maybe it's already relayed by someone else?
+                self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
+                Ok(false)
+            }
         }
-
-        self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
-
-        Ok(false)
     }
 }
 

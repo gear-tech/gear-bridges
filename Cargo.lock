@@ -1817,11 +1817,31 @@ dependencies = [
 name = "checkpointeths"
 version = "0.1.0"
 dependencies = [
+ "ark-serialize 0.4.2",
+ "checkpointeths-io",
  "gear-wasm-builder 1.4.1",
+ "getrandom 0.2.15",
  "gstd 1.4.1",
+ "lazy_static",
  "parity-scale-codec",
  "primitive-types 0.12.2",
- "scale-info",
+ "ring 0.17.8 (git+https://github.com/gear-tech/ring.git?branch=gear-v0.17.8)",
+]
+
+[[package]]
+name = "checkpointeths-io"
+version = "0.1.0"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-scale 0.0.12",
+ "ark-serialize 0.4.2",
+ "ethereum-common",
+ "hex-literal",
+ "parity-scale-codec",
+ "serde",
+ "tree_hash_derive",
 ]
 
 [[package]]
@@ -5446,6 +5466,9 @@ name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+dependencies = [
+ "spin 0.5.2",
+]
 
 [[package]]
 name = "leb128"

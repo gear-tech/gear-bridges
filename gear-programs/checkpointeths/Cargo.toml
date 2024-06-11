@@ -7,15 +7,24 @@ edition.workspace = true
 gstd.workspace = true
 primitive-types.workspace = true
 parity-scale-codec.workspace = true
-scale-info.workspace = true
+checkpointeths-io.workspace = true
+ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = ["alloc"] }
+ark-serialize = { workspace = true }
 
 [build-dependencies]
 gear-wasm-builder.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
+lazy_static = { version = "1.1", features = ["spin_no_std"] }
 
 [features]
 std = [
     "primitive-types/std",
     "parity-scale-codec/std",
-    "scale-info/std",
+    "checkpointeths-io/std",
+    "ring/std",
+    "ark-serialize/std",
+    "getrandom/std",
 ]
 default = ["std"]

@@ -170,6 +170,10 @@ impl Eras {
             .is_some();
 
         if root_exists {
+            log::info!(
+                "Merkle root for era #{} is already submitted",
+                authority_set_id
+            );
             return Ok(());
         }
 

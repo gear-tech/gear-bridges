@@ -91,7 +91,7 @@ async fn sync_authority_set_id(
         Some((_, latest_proven)) if latest_proven == latest_authority_set_id => Ok(0),
         Some((_, latest_proven)) => unreachable!(
             "Invalid state of proof storage detected: latest stored authority set id = {} but latest authority set id on VARA = {}", 
-            latest_proven, 
+            latest_proven,
             latest_authority_set_id
         ),
     }
@@ -173,9 +173,12 @@ impl Eras {
 
     pub async fn try_finalize(&mut self) -> anyhow::Result<()> {
         for i in (0..self.sealed_not_finalized.len()).rev() {
-            if self.sealed_not_finalized[i].try_finalize(&self.eth_api).await? {
+            if self.sealed_not_finalized[i]
+                .try_finalize(&self.eth_api)
+                .await?
+            {
                 log::info!("Era #{} finalized", self.sealed_not_finalized[i].era);
-                self.sealed_not_finalized.remove(i);  
+                self.sealed_not_finalized.remove(i);
             } else {
                 log::info!("Cannot finalize era #{}", self.sealed_not_finalized[i].era);
             }

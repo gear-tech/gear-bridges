@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
+    collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::mpsc::{channel, Receiver, Sender},
     thread,
     time::Duration,
@@ -7,10 +7,7 @@ use std::{
 
 use bridging_payment::UserReply as BridgingPaymentUserReply;
 use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
-use gear_rpc_client::{
-    dto::{MerkleProof, Message},
-    GearApi,
-};
+use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
 use parity_scale_codec::Decode;
 use primitive_types::{H256, U256};
@@ -417,10 +414,18 @@ async fn try_finalize_era(
                     ))?
                     .gear_block;
 
+                let tx = &era.pending_txs[i];
+
+                if merkle_root_block < tx.message_block {
+                    anyhow::bail!(
+                        "Cannot relay message at block #{}: latest merkle root is at block #{}",
+                        tx.message_block,
+                        merkle_root_block
+                    );
+                }
+
                 let merkle_root_block_hash =
                     gear_api.block_number_to_hash(merkle_root_block).await?;
-
-                let tx = &era.pending_txs[i];
 
                 let tx_hash = submit_message(
                     &gear_api,

@@ -331,7 +331,7 @@ async fn run_message_relayer_inner(
                     }
 
                     log::info!("Trying to finalize era #{}", era_id);
-                    let finalized = try_finalize_era(&eth_api, era).await?;
+                    let finalized = try_finalize_era(&eth_api, &gear_api, era).await?;
                     log::info!("Era #{} finalized: {}", era_id, finalized);
 
                     if finalized {
@@ -360,43 +360,25 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) -> any
             break;
         }
 
-        let block_hash = gear_api
+        let merkle_root_block_hash = gear_api
             .block_number_to_hash(latest_merkle_root.gear_block)
             .await?;
 
         for message in messages {
-            let message_hash = message_hash(message);
-
-            log::info!("Relaying message with hash {}", hex::encode(&message_hash));
-
-            let proof = gear_api
-                .fetch_message_inclusion_merkle_proof(block_hash, message_hash.into())
-                .await?;
-
-            // TODO: Fully decode
-            let nonce_bytes = &message.nonce_le[..16];
-            let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
-
-            let tx_hash = eth_api
-                .provide_content_message(
-                    latest_merkle_root.gear_block,
-                    proof.num_leaves as u32,
-                    proof.leaf_index as u32,
-                    nonce,
-                    message.source,
-                    message.destination,
-                    &message.payload[..],
-                    proof.proof,
-                )
-                .await?;
+            let tx_hash = submit_message(
+                &gear_api,
+                &eth_api,
+                message,
+                latest_merkle_root.gear_block,
+                merkle_root_block_hash,
+            )
+            .await?;
 
             era.pending_txs.push(RelayMessagePendingTx {
                 hash: tx_hash,
                 message_block,
                 message: message.clone(),
             });
-
-            log::info!("Message #{} successfully relayed", nonce);
         }
 
         processed_blocks.push(message_block);
@@ -409,7 +391,11 @@ async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) -> any
     Ok(())
 }
 
-async fn try_finalize_era(eth_api: &EthApi, era: &mut Era) -> anyhow::Result<bool> {
+async fn try_finalize_era(
+    eth_api: &EthApi,
+    gear_api: &GearApi,
+    era: &mut Era,
+) -> anyhow::Result<bool> {
     for i in (0..era.pending_txs.len()).rev() {
         let status = eth_api.get_tx_status(era.pending_txs[i].hash).await?;
 
@@ -422,12 +408,83 @@ async fn try_finalize_era(eth_api: &EthApi, era: &mut Era) -> anyhow::Result<boo
                 continue;
             }
             TxStatus::Failed => {
-                // TODO: Re-send or maybe it was relayed by someone else.
+                // TODO: Check that it's not present on ETH
+                // because it may have been relayed by someone else.
+                let merkle_root_block = era
+                    .latest_merkle_root
+                    .ok_or(anyhow::anyhow!(
+                        "Cannot finalize era without any merkle roots"
+                    ))?
+                    .gear_block;
+
+                let merkle_root_block_hash =
+                    gear_api.block_number_to_hash(merkle_root_block).await?;
+
+                let tx = &era.pending_txs[i];
+
+                let tx_hash = submit_message(
+                    &gear_api,
+                    &eth_api,
+                    &tx.message,
+                    merkle_root_block,
+                    merkle_root_block_hash,
+                )
+                .await?;
+
+                // TODO: Fully decode
+                let nonce_bytes: &_ = &tx.message.nonce_le[..16];
+                let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
+
+                log::warn!(
+                    "Retrying to send failed tx {} for message #{}. New tx: {}",
+                    hex::encode(&era.pending_txs[i].hash.0),
+                    nonce,
+                    hex::encode(&tx_hash.0)
+                );
+
+                era.pending_txs[i].hash = tx_hash;
             }
         }
     }
 
     Ok(era.pending_txs.is_empty())
+}
+
+async fn submit_message(
+    gear_api: &GearApi,
+    eth_api: &EthApi,
+    message: &Message,
+    merkle_root_block: u32,
+    merkle_root_block_hash: H256,
+) -> anyhow::Result<TxHash> {
+    let message_hash = message_hash(message);
+
+    log::info!("Relaying message with hash {}", hex::encode(&message_hash));
+
+    let proof = gear_api
+        .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
+        .await?;
+
+    // TODO: Fully decode
+    let nonce_bytes = &message.nonce_le[..16];
+    let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
+
+    let tx_hash = eth_api
+        .provide_content_message(
+            merkle_root_block,
+            proof.num_leaves as u32,
+            proof.leaf_index as u32,
+            nonce,
+            message.source,
+            message.destination,
+            &message.payload[..],
+            proof.proof,
+        )
+        .await?;
+
+    log::info!("Message #{} relaying started", nonce);
+
+    Ok(tx_hash)
 }
 
 fn message_hash(message: &Message) -> [u8; 32] {

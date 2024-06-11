@@ -193,7 +193,9 @@ impl SealedNotFinalizedEra {
             TxStatus::Finalized => Ok(true),
             TxStatus::Pending => Ok(false),
             TxStatus::Failed => {
-                // TODO: Maybe it's already relayed by someone else?
+                // TODO: Check that it's not present on ETH
+                // because it may have been relayed by someone else.
+
                 self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
                 Ok(false)
             }

@@ -1,9 +1,10 @@
 use crate::{
     proof_storage::{FileSystemProofStorage, ProofStorage},
-    prover_interface::{self, FinalProof}, GENESIS_CONFIG,
+    prover_interface::{self, FinalProof},
+    GENESIS_CONFIG,
 };
 
-use ethereum_client::Contracts as EthApi;
+use ethereum_client::{Contracts as EthApi, TxHash};
 use gear_rpc_client::GearApi;
 
 pub async fn run(gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<()> {
@@ -23,7 +24,12 @@ pub async fn run(gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<()> {
     }
 }
 
-async fn main_loop(gear_api: &GearApi, eth_api: &EthApi, proof_storage: &mut dyn ProofStorage, eras: &mut Eras) -> anyhow::Result<()> {
+async fn main_loop(
+    gear_api: &GearApi,
+    eth_api: &EthApi,
+    proof_storage: &mut dyn ProofStorage,
+    eras: &mut Eras,
+) -> anyhow::Result<()> {
     log::info!("Syncing authority set id");
     loop {
         let sync_steps = sync_authority_set_id(&gear_api, proof_storage).await?;
@@ -35,14 +41,20 @@ async fn main_loop(gear_api: &GearApi, eth_api: &EthApi, proof_storage: &mut dyn
     }
     log::info!("Authority set id is in sync");
 
+    log::info!("Trying to seal eras");
     eras.try_seal(proof_storage).await?;
+    log::info!("Eras sealed");
+
+    log::info!("Trying to finalize eras");
+    eras.try_finalize().await?;
+    log::info!("Eras finalized");
 
     log::info!("Proving merkle root presense");
     let proof = prove_message_sent(&gear_api, proof_storage).await?;
     log::info!("Proven merkle root presense");
 
     log::info!("Submitting proof to ethereum");
-    submit_proof_to_ethereum(&eth_api, proof).await?; 
+    submit_proof_to_ethereum(&eth_api, proof).await?;
     log::info!("Proof submitted to ethereum");
 
     Ok(())
@@ -87,12 +99,24 @@ async fn sync_authority_set_id(
 
 struct Eras {
     last_sealed: u64,
+    sealed_not_finalized: Vec<SealedNotFinalizedEra>,
+
     gear_api: GearApi,
-    eth_api: EthApi
+    eth_api: EthApi,
+}
+
+struct SealedNotFinalizedEra {
+    era: u64,
+    tx_hash: TxHash,
+    proof: FinalProof,
 }
 
 impl Eras {
-    pub async fn new(last_sealed: Option<u64>, gear_api: GearApi, eth_api: EthApi) -> anyhow::Result<Self> {
+    pub async fn new(
+        last_sealed: Option<u64>,
+        gear_api: GearApi,
+        eth_api: EthApi,
+    ) -> anyhow::Result<Self> {
         let last_sealed = if let Some(l) = last_sealed {
             l
         } else {
@@ -100,14 +124,19 @@ impl Eras {
             let set_id = gear_api.authority_set_id(latest).await?;
             set_id.max(2) - 1
         };
-        
-        Ok(Self { last_sealed, gear_api, eth_api })
+
+        Ok(Self {
+            last_sealed,
+            sealed_not_finalized: vec![],
+            gear_api,
+            eth_api,
+        })
     }
 
     pub async fn try_seal(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
         let latest = self.gear_api.latest_finalized_block().await?;
         let current_era = self.gear_api.signed_by_authority_set_id(latest).await?;
-    
+
         while self.last_sealed + 2 <= current_era {
             log::info!("Sealing era #{}", self.last_sealed + 1);
             self.seal_era(self.last_sealed + 1, proof_storage).await?;
@@ -119,12 +148,52 @@ impl Eras {
         Ok(())
     }
 
-    async fn seal_era(&self, authority_set_id: u64, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
-        let block = self.gear_api.find_era_first_block(authority_set_id + 1).await?;
+    async fn seal_era(
+        &mut self,
+        authority_set_id: u64,
+        proof_storage: &dyn ProofStorage,
+    ) -> anyhow::Result<()> {
+        let block = self
+            .gear_api
+            .find_era_first_block(authority_set_id + 1)
+            .await?;
         let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
         let proof = prover_interface::prove_final(&self.gear_api, inner_proof, block).await?;
-    
-        submit_proof_to_ethereum(&self.eth_api, proof).await
+
+        let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
+
+        self.sealed_not_finalized.push(SealedNotFinalizedEra {
+            era: authority_set_id,
+            tx_hash,
+            proof,
+        });
+
+        Ok(())
+    }
+
+    pub async fn try_finalize(&mut self) -> anyhow::Result<()> {
+        for i in (0..self.sealed_not_finalized.len()).rev() {
+            if self.sealed_not_finalized[i].try_finalize(&self.eth_api).await? {
+                log::info!("Era #{} finalized", self.sealed_not_finalized[i].era);
+                self.sealed_not_finalized.remove(i);  
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl SealedNotFinalizedEra {
+    pub async fn try_finalize(&mut self, eth_api: &EthApi) -> anyhow::Result<bool> {
+        let tx_final = eth_api.is_tx_finalized(self.tx_hash).await?;
+        
+        if tx_final {
+            return Ok(true);
+        }
+
+        self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
+
+        Ok(false)
     }
 }
 
@@ -133,19 +202,22 @@ async fn prove_message_sent(
     proof_storage: &dyn ProofStorage,
 ) -> anyhow::Result<FinalProof> {
     let finalized_head = gear_api.latest_finalized_block().await?;
-    
+
     let authority_set_id = gear_api.signed_by_authority_set_id(finalized_head).await?;
     let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
     prover_interface::prove_final(gear_api, inner_proof, finalized_head).await
 }
 
-async fn submit_proof_to_ethereum(
-    eth_api: &EthApi,
-    proof: FinalProof,
-) -> anyhow::Result<()> {
-    log::info!("Submitting merkle root {} at gear block {} to ethereum", hex::encode(proof.merkle_root), proof.block_number);
+async fn submit_proof_to_ethereum(eth_api: &EthApi, proof: FinalProof) -> anyhow::Result<TxHash> {
+    log::info!(
+        "Submitting merkle root {} at gear block {} to ethereum",
+        hex::encode(proof.merkle_root),
+        proof.block_number
+    );
 
-    eth_api.provide_merkle_root(proof.block_number, proof.merkle_root, &proof.proof[..]).await?;
+    let tx_hash = eth_api
+        .provide_merkle_root(proof.block_number, proof.merkle_root, &proof.proof[..])
+        .await?;
 
-    Ok(())
+    Ok(tx_hash)
 }

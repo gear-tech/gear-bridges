@@ -70,6 +70,7 @@ pub async fn prove_validator_set_change(
     Ok(proof)
 }
 
+#[derive(Clone)]
 pub struct FinalProof {
     pub proof: Vec<u8>,
     pub block_number: u32,

@@ -16,6 +16,10 @@ pub enum Error {
     ErrorSendingTransaction,
     #[error("Error waiting transaction receipt")]
     ErrorWaitingTransactionReceipt,
+    #[error("Error fetching transaction receipt")]
+    ErrorFetchingTransactionReceipt,
+    #[error("Error fetching block")]
+    ErrorFetchingBlock,
     #[error("Wrong path to file")]
     WrongPathToFile,
     #[error("Wrong JSON format")]

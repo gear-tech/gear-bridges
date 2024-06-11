@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_contract::Event;
 use alloy_network::{Ethereum, EthereumSigner};
-use alloy_primitives::{hex, Address, Bytes, TxHash, Uint, B256, U256};
+use alloy_primitives::{hex, Address, Bytes, Uint, B256, U256};
 use alloy_provider::{
     layers::{
         GasEstimatorLayer, GasEstimatorProvider, ManagedNonceLayer, ManagedNonceProvider,
@@ -11,7 +11,7 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_client::RpcClient;
-use alloy_rpc_types::Filter;
+use alloy_rpc_types::{BlockNumberOrTag, Filter};
 use alloy_signer::k256::ecdsa::SigningKey;
 use alloy_signer_wallet::{LocalWallet, Wallet};
 use alloy_sol_types::SolEvent;
@@ -28,6 +28,8 @@ use crate::{
     convert::Convert,
     proof::BlockMerkleRootProof,
 };
+
+pub use alloy_primitives::TxHash;
 
 mod abi;
 mod convert;
@@ -117,7 +119,7 @@ impl Contracts {
         block_number: U,
         merkle_root: H,
         proof: B,
-    ) -> Result<(), Error> {
+    ) -> Result<TxHash, Error> {
         let block_number: U256 = block_number.convert();
         let merkle_root: B256 = merkle_root.convert();
         let proof = proof.convert();
@@ -138,10 +140,7 @@ impl Contracts {
                     .send()
                     .await
                 {
-                    Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(_) => Ok(()),
-                        Err(_) => Err(Error::ErrorWaitingTransactionReceipt),
-                    },
+                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
                         Err(Error::ErrorSendingTransaction)
@@ -152,7 +151,7 @@ impl Contracts {
         }
     }
 
-    pub async fn provide_merkle_root_json(&self, json_string: &str) -> Result<(), Error> {
+    pub async fn provide_merkle_root_json(&self, json_string: &str) -> Result<TxHash, Error> {
         let proof: BlockMerkleRootProof = BlockMerkleRootProof::try_from_json_string(json_string)
             .map_err(|_| Error::WrongJsonFormation)?;
         self.provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
@@ -225,7 +224,7 @@ impl Contracts {
         receiver: R,
         payload: P,
         proof: Vec<H>,
-    ) -> Result<bool, Error> {
+    ) -> Result<TxHash, Error> {
         let call = self.message_queue_instance.processMessage(
             block_number.convert(),
             total_leaves.convert(),
@@ -247,10 +246,7 @@ impl Contracts {
                     .send()
                     .await
                 {
-                    Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(_) => Ok(true),
-                        Err(_) => Err(Error::ErrorWaitingTransactionReceipt),
-                    },
+                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
                         Err(Error::ErrorSendingTransaction)
@@ -258,6 +254,42 @@ impl Contracts {
                 }
             }
             Err(e) => Err(Error::ErrorDuringContractExecution(e)),
+        }
+    }
+
+    pub async fn is_tx_finalized(&self, tx: TxHash) -> Result<bool, Error> {
+        let receipt = self
+            .provider
+            .get_transaction_receipt(tx)
+            .await
+            .map_err(|_| Error::ErrorFetchingTransactionReceipt)?;
+
+        if let Some(receipt) = receipt {
+            let status_code = receipt.status_code.unwrap_or_default();
+
+            if status_code.is_zero() {
+                return Ok(false);
+            }
+
+            let block = if let Some(block) = receipt.block_number {
+                block
+            } else {
+                return Ok(false);
+            };
+
+            let latest_finalized = self
+                .provider
+                .get_block_by_number(BlockNumberOrTag::Finalized, false)
+                .await
+                .map_err(|_| Error::ErrorFetchingBlock)?
+                .ok_or(Error::ErrorFetchingBlock)?
+                .header
+                .number
+                .ok_or(Error::ErrorFetchingBlock)?;
+
+            Ok(latest_finalized >= block)
+        } else {
+            Ok(false)
         }
     }
 }

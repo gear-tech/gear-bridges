@@ -107,6 +107,7 @@ struct Eras {
 
 struct SealedNotFinalizedEra {
     era: u64,
+    merkle_root_block: u32,
     tx_hash: TxHash,
     proof: FinalProof,
 }
@@ -162,8 +163,11 @@ impl Eras {
 
         let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
 
+        let block_number = self.gear_api.block_hash_to_number(block).await?;
+
         self.sealed_not_finalized.push(SealedNotFinalizedEra {
             era: authority_set_id,
+            merkle_root_block: block_number,
             tx_hash,
             proof,
         });
@@ -196,8 +200,14 @@ impl SealedNotFinalizedEra {
             TxStatus::Finalized => Ok(true),
             TxStatus::Pending => Ok(false),
             TxStatus::Failed => {
-                // TODO: Check that it's not present on ETH
-                // because it may have been relayed by someone else.
+                let existing_root = eth_api
+                    .read_finalized_merkle_root(self.merkle_root_block)
+                    .await?;
+
+                // Someone already relayed this merkle root.
+                if existing_root.is_some() {
+                    return Ok(true);
+                }
 
                 self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
                 Ok(false)

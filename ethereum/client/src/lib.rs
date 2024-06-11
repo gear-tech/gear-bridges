@@ -11,7 +11,7 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_client::RpcClient;
-use alloy_rpc_types::{BlockNumberOrTag, Filter};
+use alloy_rpc_types::{BlockId, BlockNumberOrTag, Filter};
 use alloy_signer::k256::ecdsa::SigningKey;
 use alloy_signer_wallet::{LocalWallet, Wallet};
 use alloy_sol_types::SolEvent;
@@ -262,6 +262,22 @@ impl Contracts {
             }
             Err(e) => Err(Error::ErrorDuringContractExecution(e)),
         }
+    }
+
+    pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
+        let block = U256::from(block);
+
+        let root = self
+            .relayer_instance
+            .getMerkleRoot(block)
+            .block(BlockId::Number(BlockNumberOrTag::Finalized))
+            .call()
+            .await
+            .map_err(|err| Error::ErrorDuringContractExecution(err))?
+            ._0
+            .0;
+
+        Ok((root != [0; 32]).then(|| root))
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {

@@ -161,9 +161,19 @@ impl Eras {
         let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
         let proof = prover_interface::prove_final(&self.gear_api, inner_proof, block).await?;
 
-        let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
-
         let block_number = self.gear_api.block_hash_to_number(block).await?;
+
+        let root_exists = self
+            .eth_api
+            .read_finalized_merkle_root(block_number)
+            .await?
+            .is_some();
+
+        if root_exists {
+            return Ok(());
+        }
+
+        let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
 
         self.sealed_not_finalized.push(SealedNotFinalizedEra {
             era: authority_set_id,
@@ -200,12 +210,13 @@ impl SealedNotFinalizedEra {
             TxStatus::Finalized => Ok(true),
             TxStatus::Pending => Ok(false),
             TxStatus::Failed => {
-                let existing_root = eth_api
+                let root_exists = eth_api
                     .read_finalized_merkle_root(self.merkle_root_block)
-                    .await?;
+                    .await?
+                    .is_some();
 
                 // Someone already relayed this merkle root.
-                if existing_root.is_some() {
+                if root_exists {
                     return Ok(true);
                 }
 

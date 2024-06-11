@@ -4318,6 +4318,8 @@ version = "0.1.0"
 dependencies = [
  "gear-wasm-builder 1.4.1",
  "gstd 1.4.1",
+ "parity-scale-codec",
+ "scale-info",
 ]
 
 [[package]]

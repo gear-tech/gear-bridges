@@ -1,7 +1,16 @@
-use gstd::{msg, prelude::*};
+use super::AuthoritySetId;
+use gstd::{msg, prelude::*, BlockNumber, collections::BTreeMap};
+
+static mut ADMIN_ADDRESS: ActorId = ActorId::new([0u8; 32]);
+static mut PROOF_BLOCKS: BTreeMap<AuthoritySetId, BlockNumber> = BTreeMap::new();
 
 #[no_mangle]
 extern "C" fn init() {
+    let admin = msg::source();
+    unsafe {
+        ADMIN_ADDRESS = admin;
+    }
+
     // proof + circuit data + genesis set id
 }
 

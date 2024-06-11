@@ -16,6 +16,8 @@ pub enum Error {
     ErrorSendingTransaction,
     #[error("Error waiting transaction receipt")]
     ErrorWaitingTransactionReceipt,
+    #[error("Error fetching transaction")]
+    ErrorFetchingTransaction,
     #[error("Error fetching transaction receipt")]
     ErrorFetchingTransactionReceipt,
     #[error("Error fetching block")]

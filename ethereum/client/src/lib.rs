@@ -264,10 +264,20 @@ impl Contracts {
         }
     }
 
-    pub async fn get_tx_status(&self, tx: TxHash) -> Result<TxStatus, Error> {
+    pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
+        let tx = self
+            .provider
+            .get_transaction_by_hash(tx_hash)
+            .await
+            .map_err(|_| Error::ErrorFetchingTransaction)?;
+
+        if tx.block_hash.is_none() {
+            return Ok(TxStatus::Pending);
+        }
+
         let receipt = self
             .provider
-            .get_transaction_receipt(tx)
+            .get_transaction_receipt(tx_hash)
             .await
             .map_err(|_| Error::ErrorFetchingTransactionReceipt)?;
 

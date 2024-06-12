@@ -394,7 +394,12 @@ async fn try_finalize_era(
     era: &mut Era,
 ) -> anyhow::Result<bool> {
     for i in (0..era.pending_txs.len()).rev() {
-        let status = eth_api.get_tx_status(era.pending_txs[i].hash).await?;
+        let tx = &era.pending_txs[i];
+        let status = eth_api.get_tx_status(tx.hash).await?;
+
+        // TODO: Fully decode
+        let nonce_bytes: &_ = &tx.message.nonce_le[..16];
+        let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
 
         match status {
             TxStatus::Finalized => {
@@ -402,19 +407,27 @@ async fn try_finalize_era(
                 continue;
             }
             TxStatus::Pending => {
+                log::info!(
+                    "Tx for message at block #{} with nonce {} is waiting for finalization",
+                    tx.message_block,
+                    nonce
+                );
                 continue;
             }
             TxStatus::Failed => {
-                // TODO: Check that it's not present on ETH
-                // because it may have been relayed by someone else.
+                let already_processed = eth_api.is_message_processed(tx.message.nonce_le).await?;
+
+                if already_processed {
+                    era.pending_txs.remove(i);
+                    continue;
+                }
+
                 let merkle_root_block = era
                     .latest_merkle_root
                     .ok_or(anyhow::anyhow!(
                         "Cannot finalize era without any merkle roots"
                     ))?
                     .gear_block;
-
-                let tx = &era.pending_txs[i];
 
                 if merkle_root_block < tx.message_block {
                     anyhow::bail!(
@@ -435,10 +448,6 @@ async fn try_finalize_era(
                     merkle_root_block_hash,
                 )
                 .await?;
-
-                // TODO: Fully decode
-                let nonce_bytes: &_ = &tx.message.nonce_le[..16];
-                let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
 
                 log::warn!(
                     "Retrying to send failed tx {} for message #{}. New tx: {}",

@@ -280,6 +280,27 @@ impl Contracts {
         Ok((root != [0; 32]).then(|| root))
     }
 
+    pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
+        let nonce = U256::from_le_bytes(nonce_le);
+
+        // TODO: Change isProcessed to accept only nonce.
+        let processed = self
+            .message_queue_instance
+            .isProcessed(ContentMessage {
+                nonce,
+                sender: Default::default(),
+                receiver: Default::default(),
+                data: Default::default(),
+            })
+            .block(BlockId::Number(BlockNumberOrTag::Finalized))
+            .call()
+            .await
+            .map_err(|err| Error::ErrorDuringContractExecution(err))?
+            ._0;
+
+        Ok(processed)
+    }
+
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
         let tx = self
             .provider

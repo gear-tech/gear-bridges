@@ -311,90 +311,97 @@ async fn run_message_relayer_inner(
         }
 
         let latest_era = eras.last_key_value().map(|(k, _)| *k);
-        match latest_era {
-            Some(latest_era) => {
-                let mut finalized_eras = vec![];
+        let Some(latest_era) = latest_era else {
+            continue;
+        };
 
-                for (&era_id, era) in eras.iter_mut() {
-                    let res = process_era(&gear_api, &eth_api, era).await;
-                    if let Err(err) = res {
-                        log::error!("Failed to process era #{}: {}", era_id, err);
-                        continue;
-                    }
+        let mut finalized_eras = vec![];
 
-                    if era_id == latest_era {
-                        // Latest era cannot be finalized.
-                        continue;
-                    }
-
-                    log::info!("Trying to finalize era #{}", era_id);
-                    let finalized = try_finalize_era(&eth_api, &gear_api, era).await?;
-                    log::info!("Era #{} finalized: {}", era_id, finalized);
-
-                    if finalized {
-                        finalized_eras.push(era_id);
-                    }
-                }
-
-                for finalized in finalized_eras {
-                    eras.remove(&finalized);
-                }
+        for (&era_id, era) in eras.iter_mut() {
+            let res = era.process(gear_api, eth_api).await;
+            if let Err(err) = res {
+                log::error!("Failed to process era #{}: {}", era_id, err);
+                continue;
             }
-            None => {}
+
+            let finalized = era.try_finalize(eth_api, gear_api).await?;
+
+            // Latest era cannot be finalized.
+            if finalized && era_id != latest_era {
+                log::info!("Era #{} finalized", era_id);
+                finalized_eras.push(era_id);
+            }
+        }
+
+        for finalized in finalized_eras {
+            eras.remove(&finalized);
         }
     }
 }
 
-async fn process_era(gear_api: &GearApi, eth_api: &EthApi, era: &mut Era) -> anyhow::Result<()> {
-    let Some(latest_merkle_root) = era.latest_merkle_root else {
-        return Ok(());
-    };
+impl Era {
+    pub async fn process(&mut self, gear_api: &GearApi, eth_api: &EthApi) -> anyhow::Result<()> {
+        let Some(latest_merkle_root) = self.latest_merkle_root else {
+            return Ok(());
+        };
 
-    let mut processed_blocks = vec![];
+        let mut processed_blocks = vec![];
 
-    for (&message_block, messages) in era.messages.iter() {
-        if message_block > latest_merkle_root.gear_block {
-            break;
+        for (&message_block, messages) in self.messages.iter() {
+            if message_block > latest_merkle_root.gear_block {
+                break;
+            }
+
+            let merkle_root_block_hash = gear_api
+                .block_number_to_hash(latest_merkle_root.gear_block)
+                .await?;
+
+            for message in messages {
+                let tx_hash = submit_message(
+                    &gear_api,
+                    &eth_api,
+                    message,
+                    latest_merkle_root.gear_block,
+                    merkle_root_block_hash,
+                )
+                .await?;
+
+                self.pending_txs.push(RelayMessagePendingTx {
+                    hash: tx_hash,
+                    message_block,
+                    message: message.clone(),
+                });
+            }
+
+            processed_blocks.push(message_block);
         }
 
-        let merkle_root_block_hash = gear_api
-            .block_number_to_hash(latest_merkle_root.gear_block)
-            .await?;
-
-        for message in messages {
-            let tx_hash = submit_message(
-                &gear_api,
-                &eth_api,
-                message,
-                latest_merkle_root.gear_block,
-                merkle_root_block_hash,
-            )
-            .await?;
-
-            era.pending_txs.push(RelayMessagePendingTx {
-                hash: tx_hash,
-                message_block,
-                message: message.clone(),
-            });
+        for block in processed_blocks {
+            self.messages.remove_entry(&block);
         }
 
-        processed_blocks.push(message_block);
+        Ok(())
     }
 
-    for block in processed_blocks {
-        era.messages.remove_entry(&block);
+    pub async fn try_finalize(
+        &mut self,
+        eth_api: &EthApi,
+        gear_api: &GearApi,
+    ) -> anyhow::Result<bool> {
+        for i in (0..self.pending_txs.len()).rev() {
+            self.try_finalize_tx(i, eth_api, gear_api).await?;
+        }
+
+        Ok(self.pending_txs.is_empty())
     }
 
-    Ok(())
-}
-
-async fn try_finalize_era(
-    eth_api: &EthApi,
-    gear_api: &GearApi,
-    era: &mut Era,
-) -> anyhow::Result<bool> {
-    for i in (0..era.pending_txs.len()).rev() {
-        let tx = &era.pending_txs[i];
+    async fn try_finalize_tx(
+        &mut self,
+        tx: usize,
+        eth_api: &EthApi,
+        gear_api: &GearApi,
+    ) -> anyhow::Result<bool> {
+        let tx = &mut self.pending_txs[tx];
         let status = eth_api.get_tx_status(tx.hash).await?;
 
         // TODO: Fully decode
@@ -402,27 +409,23 @@ async fn try_finalize_era(
         let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
 
         match status {
-            TxStatus::Finalized => {
-                era.pending_txs.remove(i);
-                continue;
-            }
+            TxStatus::Finalized => Ok(true),
             TxStatus::Pending => {
                 log::info!(
                     "Tx for message at block #{} with nonce {} is waiting for finalization",
                     tx.message_block,
                     nonce
                 );
-                continue;
+                Ok(false)
             }
             TxStatus::Failed => {
                 let already_processed = eth_api.is_message_processed(tx.message.nonce_le).await?;
 
                 if already_processed {
-                    era.pending_txs.remove(i);
-                    continue;
+                    return Ok(true);
                 }
 
-                let merkle_root_block = era
+                let merkle_root_block = self
                     .latest_merkle_root
                     .ok_or(anyhow::anyhow!(
                         "Cannot finalize era without any merkle roots"
@@ -451,17 +454,17 @@ async fn try_finalize_era(
 
                 log::warn!(
                     "Retrying to send failed tx {} for message #{}. New tx: {}",
-                    hex::encode(&era.pending_txs[i].hash.0),
+                    hex::encode(&tx.hash.0),
                     nonce,
                     hex::encode(&tx_hash.0)
                 );
 
-                era.pending_txs[i].hash = tx_hash;
+                tx.hash = tx_hash;
+
+                Ok(false)
             }
         }
     }
-
-    Ok(era.pending_txs.is_empty())
 }
 
 async fn submit_message(

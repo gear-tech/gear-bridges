@@ -58,6 +58,7 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
     "codec",
 ] }
 ff = { version = "0.13.0", features = ["derive"] }
+futures = "0.3"
 futures-util = "0.3.28"
 hex = { version = "0.4.3", default-features = false }
 hex-literal = "0.4.1"
@@ -89,6 +90,7 @@ unroll = "0.1.5"
 gstd = { version = "1.4.1", features = ["nightly"] }
 gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
+gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
     "std",
 ] }

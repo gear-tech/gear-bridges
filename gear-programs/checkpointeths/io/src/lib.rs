@@ -14,7 +14,7 @@ use ethereum_common::{
 pub use ethereum_common::{
     self,
     tree_hash,
-    beacon::BlockHeader as BeaconBlockHeader,
+    beacon::{BlockHeader as BeaconBlockHeader, Bytes32},
 };
 use hex_literal::hex;
 use parity_scale_codec::{Decode, Encode};

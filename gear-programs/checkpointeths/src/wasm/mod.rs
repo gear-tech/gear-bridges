@@ -1,8 +1,10 @@
-use io::{Init, G1, ethereum_common::{base_types::FixedArray, tree_hash::TreeHash}, Handle, HandleResult};
+use io::{Init, G1, ethereum_common::{base_types::FixedArray, tree_hash::TreeHash}, Handle, HandleResult, SyncUpdate};
 use gstd::{msg, vec};
 use ark_serialize::CanonicalSerialize;
 use super::*;
 use state::{State, Checkpoints};
+
+mod sync_update;
 
 const COUNT: usize = 150_000;
 static mut STATE: Option<State<COUNT>> = None;
@@ -24,7 +26,9 @@ extern "C" fn init() {
     }
 
     // check that provided public keys belong to the committee
-    let mut pub_keys = Vec::with_capacity(512);
+    let mut pub_keys = Vec::with_capacity(sync_committee_current
+        .pubkeys
+        .0.len());
     let mut buffer = Vec::with_capacity(100);
     for (pub_key_compressed, pub_key) in sync_committee_current
         .pubkeys
@@ -79,6 +83,8 @@ async fn main() {
             msg::reply(HandleResult::Checkpoint(result), 0)
                 .expect("Unable to reply with `HandleResult::Checkpoint`");
         }
+
+        Handle::SyncUpdate(sync_update) => sync_update::handle(state, sync_update).await,
     }
 }
 

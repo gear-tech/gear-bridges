@@ -122,7 +122,7 @@ pub struct BlsToExecutionChange {
     pub to_execution_address: Address,
 }
 
-#[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash)]
+#[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash, TypeInfo)]
 pub struct SyncAggregate {
     pub sync_committee_bits: base_types::Bitvector<512>,
     pub sync_committee_signature: SignatureBytes,

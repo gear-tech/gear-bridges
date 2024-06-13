@@ -118,7 +118,7 @@ async fn main() {
             let eth_api = create_eth_client(&args.ethereum_args);
 
             let bridging_payment_address = args.bridging_payment_address.map(|addr| {
-                let arr: [u8; 32] = hex::decode(&addr)
+                let arr: [u8; 32] = hex::decode(addr)
                     .expect("Wrong format of bridging-payment-address")
                     .try_into()
                     .expect("Wrong format of bridging-payment-address");
@@ -148,9 +148,9 @@ fn create_eth_client(args: &EthereumArgs) -> EthApi {
     } = args;
 
     EthApi::new(
-        &eth_endpoint,
-        &mq_address,
-        &relayer_address,
+        eth_endpoint,
+        mq_address,
+        relayer_address,
         fee_payer.as_deref(),
     )
     .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))

@@ -6,6 +6,8 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+pub mod meta;
+
 use ethereum_common::{
     base_types::FixedArray,
     beacon::BLSPubKey,
@@ -16,8 +18,8 @@ pub use ethereum_common::{
     tree_hash,
     beacon::{BlockHeader as BeaconBlockHeader, Bytes32},
 };
-use hex_literal::hex;
 use parity_scale_codec::{Decode, Encode};
+use hex_literal::hex;
 use serde::Deserialize;
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 
@@ -29,7 +31,7 @@ pub struct SyncCommittee {
     pub aggregate_pubkey: BLSPubKey,
 }
 
-#[derive(Debug, Clone, Decode, Encode)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub enum Genesis {
     Mainnet,
     Sepolia,
@@ -46,7 +48,7 @@ impl Genesis {
     }
 }
 
-#[derive(Debug, Clone, Decode, Encode)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct Init {
     pub genesis: Genesis,
     pub checkpoint: Hash256,

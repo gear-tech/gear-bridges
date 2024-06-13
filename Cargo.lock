@@ -1849,8 +1849,11 @@ dependencies = [
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
  "ethereum-common",
+ "gmeta 1.4.1",
+ "gstd 1.4.1",
  "hex-literal",
  "parity-scale-codec",
+ "scale-info",
  "serde",
  "tree_hash_derive",
 ]

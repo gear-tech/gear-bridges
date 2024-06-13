@@ -88,6 +88,7 @@ unroll = "0.1.5"
 
 # Gear/Substrate deps
 gstd = { version = "1.4.1", features = ["nightly"] }
+gmeta = "1.4.1"
 gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }

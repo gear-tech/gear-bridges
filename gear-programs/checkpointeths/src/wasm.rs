@@ -1,5 +1,5 @@
 use checkpointeths_io::{self as io, Init, G1, ethereum_common::tree_hash::TreeHash};
-use gstd::msg;
+use gstd::{msg, vec};
 use ark_serialize::CanonicalSerialize;
 use super::*;
 use state::{State, Checkpoints};
@@ -73,4 +73,15 @@ extern "C" fn init() {
 #[gstd::async_main]
 async fn main() {
     let mut state = unsafe { STATE.as_mut() }.expect("The program should be initialized");
+}
+
+#[no_mangle]
+extern fn state() {
+    let state = unsafe { STATE.as_ref() };
+    let checkpoints = state
+        .map(|state| state.checkpoints.checkpoints())
+        .unwrap_or(vec![]);
+
+    msg::reply(io::meta::State { checkpoints }, 0)
+        .expect("Failed to encode or reply with `<AppMetadata as Metadata>::State` from `state()`");
 }

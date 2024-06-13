@@ -1,5 +1,5 @@
 use super::*;
-use io::{ethereum_common::Hash256, BeaconBlockHeader, Genesis, G1};
+use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH}, BeaconBlockHeader, Genesis, G1};
 use parity_scale_codec::{Decode, Encode};
 use circular_buffer::CircularBuffer;
 
@@ -46,11 +46,11 @@ impl<const N: usize> Checkpoints<N> {
                         self.slots.remove(0);
                         self.slots[0].0 -= 1;
                     } else {
-                        *slot_first += 32;
+                        *slot_first += SLOTS_PER_EPOCH;
                     }
                 }
 
-                (Some((_index_first, slot_first)), None) => *slot_first += 32,
+                (Some((_index_first, slot_first)), None) => *slot_first += SLOTS_PER_EPOCH,
 
                 _ => unreachable!()
             }
@@ -63,7 +63,7 @@ impl<const N: usize> Checkpoints<N> {
 
         match self.slots.last() {
             None => (),
-            Some((_, slot_previous)) if slot % 32 != 0 || slot_previous % 32 != 0 => (),
+            Some((_, slot_previous)) if slot % SLOTS_PER_EPOCH != 0 || slot_previous % SLOTS_PER_EPOCH != 0 => (),
             _ => return,
         }
 
@@ -83,7 +83,7 @@ impl<const N: usize> Checkpoints<N> {
                     .skip(index_first)
                     .take(index_second - index_first)
                     .enumerate()
-                    .map(|(slot, checkpoint)| (slot_first + 32 * slot as u64, *checkpoint))
+                    .map(|(slot, checkpoint)| (slot_first + SLOTS_PER_EPOCH * slot as u64, *checkpoint))
                 );
             }
         }
@@ -93,13 +93,12 @@ impl<const N: usize> Checkpoints<N> {
                 .iter()
                 .skip(*index_first)
                 .enumerate()
-                .map(|(slot, checkpoint)| (*slot_first + 32 * slot as u64, *checkpoint))
+                .map(|(slot, checkpoint)| (*slot_first + SLOTS_PER_EPOCH * slot as u64, *checkpoint))
             );
         }
 
         result
     }
-
 
     pub fn checkpoint(&self, slot: u64) -> CheckpointResult {
         let Some((index_last, slot_last)) = self.slots.last() else {
@@ -108,15 +107,18 @@ impl<const N: usize> Checkpoints<N> {
 
         match self.slots.binary_search_by(|(_index, slot_checkpoint)| slot_checkpoint.cmp(&slot)) {
             Ok(index) => CheckpointResult::Ok(self.checkpoints[self.slots[index].0]),
+
             Err(index) if index == 0 => CheckpointResult::OutDated,
+
             Err(index) if index < self.slots.len() => {
                 let (index_start, slot_start) = self.slots[index - 1];
-                let offset = ((slot - slot_start) / 32) as usize;
+                let offset = ((slot - slot_start) / SLOTS_PER_EPOCH) as usize;
 
                 CheckpointResult::Ok(self.checkpoints[index_start + offset])
             }
+
             _ => {
-                let offset = ((slot - slot_last) / 32) as usize;
+                let offset = ((slot - slot_last) / SLOTS_PER_EPOCH) as usize;
                 let index = index_last + offset;
                 match self.checkpoints.get(index) {
                     Some(checkpoint) => CheckpointResult::Ok(*checkpoint),

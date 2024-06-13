@@ -150,7 +150,7 @@ impl Contracts {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
-                        Err(Error::ErrorSendingTransaction)
+                        Err(Error::ErrorSendingTransaction(e))
                     }
                 }
             }
@@ -256,7 +256,7 @@ impl Contracts {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
-                        Err(Error::ErrorSendingTransaction)
+                        Err(Error::ErrorSendingTransaction(e))
                     }
                 }
             }

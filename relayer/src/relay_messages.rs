@@ -358,8 +358,8 @@ impl Era {
 
             for message in messages {
                 let tx_hash = submit_message(
-                    &gear_api,
-                    &eth_api,
+                    gear_api,
+                    eth_api,
                     message,
                     latest_merkle_root.gear_block,
                     merkle_root_block_hash,
@@ -444,8 +444,8 @@ impl Era {
                     gear_api.block_number_to_hash(merkle_root_block).await?;
 
                 let tx_hash = submit_message(
-                    &gear_api,
-                    &eth_api,
+                    gear_api,
+                    eth_api,
                     &tx.message,
                     merkle_root_block,
                     merkle_root_block_hash,
@@ -454,9 +454,9 @@ impl Era {
 
                 log::warn!(
                     "Retrying to send failed tx {} for message #{}. New tx: {}",
-                    hex::encode(&tx.hash.0),
+                    hex::encode(tx.hash.0),
                     nonce,
-                    hex::encode(&tx_hash.0)
+                    hex::encode(tx_hash.0)
                 );
 
                 tx.hash = tx_hash;
@@ -476,7 +476,7 @@ async fn submit_message(
 ) -> anyhow::Result<TxHash> {
     let message_hash = message_hash(message);
 
-    log::info!("Relaying message with hash {}", hex::encode(&message_hash));
+    log::info!("Relaying message with hash {}", hex::encode(message_hash));
 
     let proof = gear_api
         .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())

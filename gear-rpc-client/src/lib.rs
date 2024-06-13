@@ -578,7 +578,7 @@ impl GearApi {
                     ..
                 }) = event
                 {
-                    (source, payload, details)
+                    (source, payload, details?)
                 } else {
                     return None;
                 };
@@ -586,16 +586,6 @@ impl GearApi {
             if source != from {
                 return None;
             }
-
-            if details.is_none() {
-                return None;
-            }
-
-            let details = if let Some(details) = details {
-                details
-            } else {
-                return None;
-            };
 
             if let ReplyCode::Success(_) = details.code {
                 Some(dto::UserMessageSent { payload: payload.0 })

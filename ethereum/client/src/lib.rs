@@ -273,11 +273,11 @@ impl Contracts {
             .block(BlockId::Number(BlockNumberOrTag::Finalized))
             .call()
             .await
-            .map_err(|err| Error::ErrorDuringContractExecution(err))?
+            .map_err(Error::ErrorDuringContractExecution)?
             ._0
             .0;
 
-        Ok((root != [0; 32]).then(|| root))
+        Ok((root != [0; 32]).then_some(root))
     }
 
     pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
@@ -295,7 +295,7 @@ impl Contracts {
             .block(BlockId::Number(BlockNumberOrTag::Finalized))
             .call()
             .await
-            .map_err(|err| Error::ErrorDuringContractExecution(err))?
+            .map_err(Error::ErrorDuringContractExecution)?
             ._0;
 
         Ok(processed)

@@ -32,7 +32,7 @@ async fn main_loop(
 ) -> anyhow::Result<()> {
     log::info!("Syncing authority set id");
     loop {
-        let sync_steps = sync_authority_set_id(&gear_api, proof_storage).await?;
+        let sync_steps = sync_authority_set_id(gear_api, proof_storage).await?;
         if sync_steps == 0 {
             break;
         } else {
@@ -50,11 +50,11 @@ async fn main_loop(
     log::info!("Eras finalized");
 
     log::info!("Proving merkle root presense");
-    let proof = prove_message_sent(&gear_api, proof_storage).await?;
+    let proof = prove_message_sent(gear_api, proof_storage).await?;
     log::info!("Proven merkle root presense");
 
     log::info!("Submitting proof to ethereum");
-    submit_proof_to_ethereum(&eth_api, proof).await?;
+    submit_proof_to_ethereum(eth_api, proof).await?;
     log::info!("Proof submitted to ethereum");
 
     Ok(())

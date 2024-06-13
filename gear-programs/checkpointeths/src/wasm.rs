@@ -1,14 +1,11 @@
-use checkpointeths_io::{self as io, Genesis, Init, G1, ethereum_common::tree_hash::TreeHash};
-use gstd::{Vec, msg};
-use io::BeaconBlockHeader;
+use checkpointeths_io::{self as io, Init, G1, ethereum_common::tree_hash::TreeHash};
+use gstd::msg;
 use ark_serialize::CanonicalSerialize;
+use super::*;
+use state::{State, Checkpoints};
 
-mod merkle;
-mod state;
-
-use state::State;
-
-static mut STATE: Option<State> = None;
+const COUNT: usize = 150_000;
+static mut STATE: Option<State<COUNT>> = None;
 
 #[no_mangle]
 extern "C" fn init() {
@@ -60,9 +57,15 @@ extern "C" fn init() {
     unsafe {
         STATE = Some(State {
             genesis,
-            finalized_header,
             sync_committee_current: sync_committee_current_pub_keys.0,
             sync_committee_next: None,
+            checkpoints: {
+                let mut checkpoints = Checkpoints::new();
+                checkpoints.push(finalized_header.slot, checkpoint);
+
+                checkpoints
+            },
+            finalized_header,
         })
     }
 }

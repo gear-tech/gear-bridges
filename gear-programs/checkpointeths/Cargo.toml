@@ -10,6 +10,7 @@ parity-scale-codec.workspace = true
 checkpointeths-io.workspace = true
 ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = ["alloc"] }
 ark-serialize = { workspace = true }
+circular-buffer = { version = "0.1.7", default-features = false }
 
 [build-dependencies]
 gear-wasm-builder.workspace = true
@@ -24,6 +25,7 @@ hex = { workspace = true, features = ["std"] }
 reqwest.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+hex-literal.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
@@ -36,6 +38,7 @@ std = [
     "checkpointeths-io/std",
     "ring/std",
     "ark-serialize/std",
+    "circular-buffer/use_std",
     "getrandom/std",
 ]
 default = ["std"]

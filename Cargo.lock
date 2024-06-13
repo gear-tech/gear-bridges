@@ -1821,12 +1821,14 @@ dependencies = [
  "ark-bls12-381",
  "ark-serialize 0.4.2",
  "checkpointeths-io",
+ "circular-buffer",
  "futures",
  "gclient",
  "gear-wasm-builder 1.4.1",
  "getrandom 0.2.15",
  "gstd 1.4.1",
  "hex",
+ "hex-literal",
  "lazy_static",
  "parity-scale-codec",
  "primitive-types 0.12.2",
@@ -1877,6 +1879,12 @@ dependencies = [
  "inout",
  "zeroize",
 ]
+
+[[package]]
+name = "circular-buffer"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da987586004ae7c43b7df5e3f7693775068522e1086f8d9b2d74c778a0f43313"
 
 [[package]]
 name = "clap"

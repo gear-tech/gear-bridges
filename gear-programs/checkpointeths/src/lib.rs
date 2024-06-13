@@ -8,6 +8,14 @@ mod code {
 #[cfg(feature = "std")]
 pub use code::WASM_BINARY_OPT as WASM_BINARY;
 
+pub use checkpointeths_io as io;
+
+#[cfg(not(feature = "std"))]
+use gstd::Vec;
+
+pub mod merkle;
+mod state;
+
 #[cfg(not(feature = "std"))]
 mod wasm;
 

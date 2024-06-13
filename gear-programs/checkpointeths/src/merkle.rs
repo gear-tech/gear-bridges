@@ -1,5 +1,5 @@
 use super::*;
-use io::SyncCommittee;
+use io::{SyncCommittee, tree_hash::TreeHash, BeaconBlockHeader};
 use ring::digest::{Context as RingContext, SHA256 as RingSHA256};
 
 pub fn is_valid_merkle_branch(

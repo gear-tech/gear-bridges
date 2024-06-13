@@ -1,13 +1,13 @@
 use super::*;
 
-use gmeta::{In, Out};
+use gmeta::{In, Out, InOut};
 use gstd::prelude::*;
 
 pub struct Metadata;
 
 impl gmeta::Metadata for Metadata {
     type Init = In<Init>;
-    type Handle = ();
+    type Handle = InOut<Handle, HandleResult>;
     type Others = ();
     type Reply = ();
     type Signal = ();

@@ -1,4 +1,4 @@
-use io::{Init, G1, ethereum_common::{base_types::FixedArray, tree_hash::TreeHash}};
+use io::{Init, G1, ethereum_common::{base_types::FixedArray, tree_hash::TreeHash}, Handle, HandleResult};
 use gstd::{msg, vec};
 use ark_serialize::CanonicalSerialize;
 use super::*;
@@ -72,6 +72,14 @@ extern "C" fn init() {
 #[gstd::async_main]
 async fn main() {
     let mut state = unsafe { STATE.as_mut() }.expect("The program should be initialized");
+    let message: Handle = msg::load().expect("Unable to decode `Handle` message");
+    match message {
+        Handle::Checkpoint { slot } => {
+            let result = state.checkpoints.checkpoint(slot);
+            msg::reply(HandleResult::Checkpoint(result), 0)
+                .expect("Unable to reply with `HandleResult::Checkpoint`");
+        }
+    }
 }
 
 #[no_mangle]

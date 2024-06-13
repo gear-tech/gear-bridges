@@ -71,3 +71,22 @@ pub struct Init {
     pub sync_committee_current: SyncCommittee,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
 }
+
+#[derive(Debug, Clone, Decode, Encode, TypeInfo)]
+pub enum CheckpointResult {
+    OutDated,
+    NotPresent,
+    Ok(Hash256),
+}
+
+#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+pub enum Handle {
+    Checkpoint {
+        slot: u64,
+    },
+}
+
+#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+pub enum HandleResult {
+    Checkpoint(CheckpointResult),
+}

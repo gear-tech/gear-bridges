@@ -1,5 +1,5 @@
 use super::*;
-use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH, base_types::FixedArray}, BeaconBlockHeader, Genesis, G1};
+use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH, base_types::FixedArray}, BeaconBlockHeader, Genesis, G1, CheckpointResult};
 use parity_scale_codec::{Decode, Encode};
 use circular_buffer::CircularBuffer;
 
@@ -15,13 +15,6 @@ pub struct State<const N: usize> {
 pub struct Checkpoints<const N: usize> {
     checkpoints: CircularBuffer<N, Hash256>,
     slots: Vec<(usize, u64)>,
-}
-
-#[derive(Debug, Clone, Decode, Encode)]
-pub enum CheckpointResult {
-    OutDated,
-    NotPresent,
-    Ok(Hash256),
 }
 
 impl<const N: usize> Checkpoints<N> {

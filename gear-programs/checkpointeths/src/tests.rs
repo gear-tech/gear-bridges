@@ -5,7 +5,7 @@ use gstd::prelude::*;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::cmp;
 use checkpointeths_io::{
-    ethereum_common::{base_types::BytesFixed, beacon::{Bytes32, SyncAggregate}, utils as eth_utils}, tree_hash::TreeHash, BeaconBlockHeader, Genesis, Init, SyncCommittee
+    ethereum_common::{base_types::BytesFixed, beacon::{Bytes32, SyncAggregate}, utils as eth_utils}, tree_hash::TreeHash, ArkScale, BeaconBlockHeader, G1TypeInfo, Genesis, Init, SyncCommittee
 };
 use crate::WASM_BINARY;
 use anyhow::Error as AnyError;
@@ -162,14 +162,16 @@ async fn ethereum_light_client() -> Result<()> {
         .0
         .iter()
         .map(|pub_key_compressed| {
-            <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(pub_key_compressed.as_ref()).unwrap()
+            let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(<G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(pub_key_compressed.as_ref()).unwrap()).into();
+
+            ark_scale
         })
         .collect::<Vec<_>>();
     let init = Init {
         genesis: Genesis::Sepolia,
         finalized_header: finality_update.finalized_header,
         checkpoint,
-        sync_committee_current_pub_keys: pub_keys.into(),
+        sync_committee_current_pub_keys: checkpointeths_io::ethereum_common::base_types::FixedArray(pub_keys.try_into().unwrap()),
         sync_committee_current: bootstrap.current_sync_committee,
         sync_committee_current_branch: bootstrap.current_sync_committee_branch.into_iter().map(|BytesFixed(bytes)| bytes.0).collect(),
     };

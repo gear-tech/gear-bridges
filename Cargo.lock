@@ -3259,6 +3259,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "parity-scale-codec",
+ "scale-info",
  "serde",
  "serde_json",
  "tree_hash",

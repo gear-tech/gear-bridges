@@ -1,12 +1,12 @@
 use super::*;
-use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH}, BeaconBlockHeader, Genesis, G1};
+use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH, base_types::FixedArray}, BeaconBlockHeader, Genesis, G1};
 use parity_scale_codec::{Decode, Encode};
 use circular_buffer::CircularBuffer;
 
 pub struct State<const N: usize> {
     pub genesis: Genesis,
     pub finalized_header: BeaconBlockHeader,
-    pub sync_committee_current: Vec<G1>,
+    pub sync_committee_current: FixedArray<G1, 512>,
     pub sync_committee_next: Option<Vec<G1>>,
     pub checkpoints: Checkpoints<N>,
 }

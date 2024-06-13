@@ -19,19 +19,24 @@ pub use ethereum_common::{
     beacon::{BlockHeader as BeaconBlockHeader, Bytes32},
 };
 use parity_scale_codec::{Decode, Encode};
+use scale_info::TypeInfo;
 use hex_literal::hex;
 use serde::Deserialize;
+use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
+
+// <G1 as SWCurveConfig>::serialized_size(Compress::No)
+pub const G1_UNCOMPRESSED_SIZE: usize = 96;
 
 pub type ArkScale<T> = ark_scale::ArkScale<T, { ark_scale::HOST_CALL }>;
 
-#[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash)]
+#[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash, TypeInfo)]
 pub struct SyncCommittee {
     pub pubkeys: FixedArray<BLSPubKey, 512>,
     pub aggregate_pubkey: BLSPubKey,
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum Genesis {
     Mainnet,
     Sepolia,
@@ -48,12 +53,21 @@ impl Genesis {
     }
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
+pub struct G1TypeInfo(pub G1);
+
+impl ark_scale::ArkScaleMaxEncodedLen for G1TypeInfo {
+    fn max_encoded_len(_compress: ark_serialize::Compress) -> usize {
+        G1_UNCOMPRESSED_SIZE
+    }
+}
+
+#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct Init {
     pub genesis: Genesis,
     pub checkpoint: Hash256,
     pub finalized_header: BeaconBlockHeader,
-    pub sync_committee_current_pub_keys: ArkScale<Vec<G1>>,
+    pub sync_committee_current_pub_keys: FixedArray<ArkScale<G1TypeInfo>, 512>,
     pub sync_committee_current: SyncCommittee,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
 }

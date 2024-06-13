@@ -198,7 +198,10 @@ impl Eras {
                 log::info!("Era #{} finalized", self.sealed_not_finalized[i].era);
                 self.sealed_not_finalized.remove(i);
             } else {
-                log::info!("Cannot finalize era #{}", self.sealed_not_finalized[i].era);
+                log::info!(
+                    "Cannot finalize era #{} yet",
+                    self.sealed_not_finalized[i].era
+                );
             }
         }
 
@@ -221,8 +224,11 @@ impl SealedNotFinalizedEra {
 
                 // Someone already relayed this merkle root.
                 if root_exists {
+                    log::info!("Era #{} is already finalized", self.era);
                     return Ok(true);
                 }
+
+                log::warn!("Re-trying era #{} finalization", self.era);
 
                 self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
                 Ok(false)

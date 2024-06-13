@@ -198,6 +198,12 @@ async fn merkle_root_listener_inner(
 
                 let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
+                log::info!(
+                    "Found merkle root for gear block #{} and era #{}",
+                    merkle_root.block_number,
+                    authority_set_id
+                );
+
                 sender.send((
                     authority_set_id,
                     RelayedMerkleRoot {
@@ -409,7 +415,14 @@ impl Era {
         let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
 
         match status {
-            TxStatus::Finalized => Ok(true),
+            TxStatus::Finalized => {
+                log::info!(
+                    "Message at block #{} with nonce {} finalized",
+                    tx.message_block,
+                    nonce
+                );
+                Ok(true)
+            }
             TxStatus::Pending => {
                 log::info!(
                     "Tx for message at block #{} with nonce {} is waiting for finalization",

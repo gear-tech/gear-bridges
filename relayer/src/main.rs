@@ -8,6 +8,7 @@ use gear_rpc_client::GearApi;
 use metrics::MetricsBuilder;
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
+use relay_messages::MessageRelayer;
 
 mod metrics;
 mod proof_storage;
@@ -134,7 +135,6 @@ async fn main() {
 
             MetricsBuilder::new()
                 .register_service(&relayer)
-                .register_service(&prover_interface::Metrics)
                 .build()
                 .run(args.prometheus_args.endpoint)
                 .await;
@@ -142,12 +142,6 @@ async fn main() {
             relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::RelayMessages(args) => {
-            MetricsBuilder::new()
-                .register_service(&prover_interface::Metrics)
-                .build()
-                .run(args.prometheus_args.endpoint)
-                .await;
-
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
@@ -160,7 +154,16 @@ async fn main() {
                 arr.into()
             });
 
-            relay_messages::run(gear_api, eth_api, args.from_block, bridging_payment_address)
+            let relayer = MessageRelayer::new(gear_api, eth_api);
+
+            MetricsBuilder::new()
+                .register_service(&relayer)
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
+
+            relayer
+                .run(args.from_block, bridging_payment_address)
                 .await
                 .unwrap();
         }

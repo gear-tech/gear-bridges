@@ -12,6 +12,8 @@ use keccak_hash::keccak_256;
 use parity_scale_codec::Decode;
 use primitive_types::{H256, U256};
 
+use crate::metrics::{impl_metered_service, MeteredService};
+
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
@@ -34,187 +36,254 @@ struct RelayedMerkleRoot {
     gear_block: u32,
 }
 
-pub async fn run(
+pub struct MessageRelayer {
     gear_api: GearApi,
     eth_api: EthApi,
-    from_block: Option<u32>,
-    bridging_payment_address: Option<H256>,
-) -> anyhow::Result<()> {
-    let from_gear_block = if let Some(block) = from_block {
-        block
-    } else {
-        let block = gear_api.latest_finalized_block().await?;
-        gear_api.block_hash_to_number(block).await?
-    };
 
-    let from_eth_block = eth_api.block_number().await?;
-
-    log::info!(
-        "Starting gear event processing from block #{}",
-        from_gear_block
-    );
-    let messages = run_event_processor(gear_api.clone(), from_gear_block, bridging_payment_address);
-
-    log::info!("Starting ethereum listener from block #{}", from_eth_block);
-    let merkle_roots = run_merkle_root_listener(eth_api.clone(), gear_api.clone(), from_eth_block);
-
-    log::info!("Starting message relayer");
-    run_message_relayer(eth_api, gear_api, messages, merkle_roots).await;
-
-    Ok(())
+    metrics: Metrics,
 }
 
-fn run_event_processor(
+impl_metered_service! {
+    struct Metrics {
+        //
+    }
+}
+
+impl Metrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {})
+    }
+}
+
+impl MeteredService for MessageRelayer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
+}
+
+impl MessageRelayer {
+    pub fn new(gear_api: GearApi, eth_api: EthApi) -> Self {
+        let metrics = Metrics::new();
+
+        Self {
+            gear_api,
+            eth_api,
+            metrics,
+        }
+    }
+
+    pub async fn run(
+        self,
+        from_block: Option<u32>,
+        bridging_payment_address: Option<H256>,
+    ) -> anyhow::Result<()> {
+        let from_gear_block = if let Some(block) = from_block {
+            block
+        } else {
+            let block = self.gear_api.latest_finalized_block().await?;
+            self.gear_api.block_hash_to_number(block).await?
+        };
+
+        let from_eth_block = self.eth_api.block_number().await?;
+
+        log::info!(
+            "Starting gear event processing from block #{}",
+            from_gear_block
+        );
+        let messages = EventProcessor::new(
+            self.gear_api.clone(),
+            from_gear_block,
+            bridging_payment_address,
+        )
+        .run();
+
+        log::info!("Starting ethereum listener from block #{}", from_eth_block);
+        let merkle_roots =
+            MerkleRootListener::new(self.eth_api.clone(), self.gear_api.clone(), from_eth_block)
+                .run();
+
+        log::info!("Starting message relayer");
+        MessageProcessor::new(self.eth_api, self.gear_api, messages, merkle_roots)
+            .run()
+            .await;
+
+        Ok(())
+    }
+}
+
+struct EventProcessor {
     gear_api: GearApi,
     from_block: u32,
     bridging_payment_address: Option<H256>,
-) -> Receiver<BlockEvent> {
-    let (sender, receiver) = channel();
+}
 
-    tokio::spawn(async move {
+impl EventProcessor {
+    fn new(gear_api: GearApi, from_block: u32, bridging_payment_address: Option<H256>) -> Self {
+        Self {
+            gear_api,
+            from_block,
+            bridging_payment_address,
+        }
+    }
+
+    fn run(self) -> Receiver<BlockEvent> {
+        let (sender, receiver) = channel();
+
+        tokio::spawn(async move {
+            loop {
+                let res = self.run_inner(&sender).await;
+                if let Err(err) = res {
+                    log::error!("Event processor failed: {}", err);
+                }
+            }
+        });
+
+        receiver
+    }
+
+    async fn run_inner(&self, sender: &Sender<BlockEvent>) -> anyhow::Result<()> {
+        let mut current_block = self.from_block;
+
         loop {
-            let res =
-                event_processor_inner(&gear_api, from_block, bridging_payment_address, &sender)
-                    .await;
-            if let Err(err) = res {
-                log::error!("Event processor failed: {}", err);
+            let finalized_head = self.gear_api.latest_finalized_block().await?;
+            let finalized_head = self.gear_api.block_hash_to_number(finalized_head).await?;
+
+            if finalized_head >= current_block {
+                for block in current_block..=finalized_head {
+                    self.process_block_events(block, sender).await?;
+                }
+
+                current_block = finalized_head + 1;
+            } else {
+                thread::sleep(GEAR_BLOCK_TIME_APPROX);
             }
-        }
-    });
-
-    receiver
-}
-
-async fn event_processor_inner(
-    gear_api: &GearApi,
-    from_block: u32,
-    bridging_payment_address: Option<H256>,
-    sender: &Sender<BlockEvent>,
-) -> anyhow::Result<()> {
-    let mut current_block = from_block;
-
-    loop {
-        let finalized_head = gear_api.latest_finalized_block().await?;
-        let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;
-
-        if finalized_head >= current_block {
-            for block in current_block..=finalized_head {
-                process_block_events(gear_api, block, bridging_payment_address, sender).await?;
-            }
-
-            current_block = finalized_head + 1;
-        } else {
-            thread::sleep(GEAR_BLOCK_TIME_APPROX);
-        }
-    }
-}
-
-async fn process_block_events(
-    gear_api: &GearApi,
-    block: u32,
-    bridging_payment_address: Option<H256>,
-    sender: &Sender<BlockEvent>,
-) -> anyhow::Result<()> {
-    log::info!("Processing gear block #{}", block);
-    let block_hash = gear_api.block_number_to_hash(block).await?;
-
-    let messages = gear_api.message_queued_events(block_hash).await?;
-    if !messages.is_empty() {
-        log::info!("Found {} sent messages", messages.len());
-
-        for message in messages {
-            sender.send(BlockEvent::MessageSent {
-                message: MessageInBlock {
-                    message,
-                    block,
-                    block_hash,
-                },
-            })?;
         }
     }
 
-    if let Some(bridging_payment_address) = bridging_payment_address {
-        let messages = gear_api
-            .user_message_sent_events(bridging_payment_address, block_hash)
-            .await?;
+    async fn process_block_events(
+        &self,
+        block: u32,
+        sender: &Sender<BlockEvent>,
+    ) -> anyhow::Result<()> {
+        log::info!("Processing gear block #{}", block);
+        let block_hash = self.gear_api.block_number_to_hash(block).await?;
+
+        let messages = self.gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {
-            log::info!("Found {} paid messages", messages.len());
+            log::info!("Found {} sent messages", messages.len());
 
             for message in messages {
-                let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
-                sender.send(BlockEvent::MessagePaid {
-                    nonce: user_reply.nonce,
+                sender.send(BlockEvent::MessageSent {
+                    message: MessageInBlock {
+                        message,
+                        block,
+                        block_hash,
+                    },
                 })?;
             }
         }
-    }
 
-    Ok(())
+        if let Some(bridging_payment_address) = self.bridging_payment_address {
+            let messages = self
+                .gear_api
+                .user_message_sent_events(bridging_payment_address, block_hash)
+                .await?;
+            if !messages.is_empty() {
+                log::info!("Found {} paid messages", messages.len());
+
+                for message in messages {
+                    let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
+                    sender.send(BlockEvent::MessagePaid {
+                        nonce: user_reply.nonce,
+                    })?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
-fn run_merkle_root_listener(
+struct MerkleRootListener {
     eth_api: EthApi,
     gear_api: GearApi,
     from_block: u64,
-) -> Receiver<(AuthoritySetId, RelayedMerkleRoot)> {
-    let (sender, receiver) = channel();
-
-    tokio::spawn(async move {
-        loop {
-            let res = merkle_root_listener_inner(&eth_api, &gear_api, from_block, &sender).await;
-            if let Err(err) = res {
-                log::error!("Merkle root listener failed: {}", err);
-            }
-        }
-    });
-
-    receiver
 }
 
-async fn merkle_root_listener_inner(
-    eth_api: &EthApi,
-    gear_api: &GearApi,
-    from_block: u64,
-    sender: &Sender<(AuthoritySetId, RelayedMerkleRoot)>,
-) -> anyhow::Result<()> {
-    let mut current_block = from_block;
+impl MerkleRootListener {
+    fn new(eth_api: EthApi, gear_api: GearApi, from_block: u64) -> Self {
+        Self {
+            eth_api,
+            gear_api,
+            from_block,
+        }
+    }
 
-    loop {
-        let latest = eth_api.block_number().await?;
-        if latest >= current_block {
-            log::info!("Processing ethereum blocks #{}..#{}", current_block, latest);
-            let merkle_roots = eth_api
-                .fetch_merkle_roots_in_range(current_block, latest)
-                .await?;
+    fn run(self) -> Receiver<(AuthoritySetId, RelayedMerkleRoot)> {
+        let (sender, receiver) = channel();
 
-            if !merkle_roots.is_empty() {
-                log::info!("Found {} merkle roots", merkle_roots.len());
+        tokio::spawn(async move {
+            loop {
+                let res = self.run_inner(&sender).await;
+                if let Err(err) = res {
+                    log::error!("Merkle root listener failed: {}", err);
+                }
             }
+        });
 
-            for merkle_root in merkle_roots {
-                let block_hash = gear_api
-                    .block_number_to_hash(merkle_root.block_number as u32)
+        receiver
+    }
+
+    async fn run_inner(
+        &self,
+        sender: &Sender<(AuthoritySetId, RelayedMerkleRoot)>,
+    ) -> anyhow::Result<()> {
+        let mut current_block = self.from_block;
+
+        loop {
+            let latest = self.eth_api.block_number().await?;
+            if latest >= current_block {
+                log::info!("Processing ethereum blocks #{}..#{}", current_block, latest);
+                let merkle_roots = self
+                    .eth_api
+                    .fetch_merkle_roots_in_range(current_block, latest)
                     .await?;
 
-                let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+                if !merkle_roots.is_empty() {
+                    log::info!("Found {} merkle roots", merkle_roots.len());
+                }
 
-                log::info!(
-                    "Found merkle root for gear block #{} and era #{}",
-                    merkle_root.block_number,
-                    authority_set_id
-                );
+                for merkle_root in merkle_roots {
+                    let block_hash = self
+                        .gear_api
+                        .block_number_to_hash(merkle_root.block_number as u32)
+                        .await?;
 
-                sender.send((
-                    authority_set_id,
-                    RelayedMerkleRoot {
-                        gear_block: merkle_root.block_number as u32,
-                    },
-                ))?;
+                    let authority_set_id =
+                        self.gear_api.signed_by_authority_set_id(block_hash).await?;
+
+                    log::info!(
+                        "Found merkle root for gear block #{} and era #{}",
+                        merkle_root.block_number,
+                        authority_set_id
+                    );
+
+                    sender.send((
+                        authority_set_id,
+                        RelayedMerkleRoot {
+                            gear_block: merkle_root.block_number as u32,
+                        },
+                    ))?;
+                }
+
+                current_block = latest + 1;
+            } else {
+                thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
             }
-
-            current_block = latest + 1;
-        } else {
-            thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
         }
     }
 }
@@ -231,116 +300,129 @@ struct RelayMessagePendingTx {
     message: Message,
 }
 
-async fn run_message_relayer(
+struct MessageProcessor {
     eth_api: EthApi,
     gear_api: GearApi,
     block_events: Receiver<BlockEvent>,
     merkle_roots: Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
-) {
-    loop {
-        let res =
-            run_message_relayer_inner(&eth_api, &gear_api, &block_events, &merkle_roots).await;
-        if let Err(err) = res {
-            log::error!("Message relayer failed: {}", err);
-        }
-    }
 }
 
-async fn run_message_relayer_inner(
-    eth_api: &EthApi,
-    gear_api: &GearApi,
-    block_events: &Receiver<BlockEvent>,
-    merkle_roots: &Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
-) -> anyhow::Result<()> {
-    let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
+impl MessageProcessor {
+    fn new(
+        eth_api: EthApi,
+        gear_api: GearApi,
+        block_events: Receiver<BlockEvent>,
+        merkle_roots: Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
+    ) -> Self {
+        Self {
+            eth_api,
+            gear_api,
+            block_events,
+            merkle_roots,
+        }
+    }
 
-    let mut paid_messages = HashSet::new();
+    async fn run(self) {
+        loop {
+            let res = self.run_inner().await;
+            if let Err(err) = res {
+                log::error!("Message relayer failed: {}", err);
+            }
+        }
+    }
 
-    loop {
-        for event in block_events.try_iter() {
-            match event {
-                BlockEvent::MessageSent { message } => {
-                    let authority_set_id = gear_api
-                        .signed_by_authority_set_id(message.block_hash)
-                        .await?;
+    async fn run_inner(&self) -> anyhow::Result<()> {
+        let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
 
-                    match eras.entry(authority_set_id) {
-                        Entry::Occupied(mut entry) => {
-                            match entry.get_mut().messages.entry(message.block) {
-                                Entry::Occupied(mut entry) => {
-                                    entry.get_mut().push(message.message);
-                                }
-                                Entry::Vacant(entry) => {
-                                    entry.insert(vec![message.message]);
+        let mut paid_messages = HashSet::new();
+
+        loop {
+            for event in self.block_events.try_iter() {
+                match event {
+                    BlockEvent::MessageSent { message } => {
+                        let authority_set_id = self
+                            .gear_api
+                            .signed_by_authority_set_id(message.block_hash)
+                            .await?;
+
+                        match eras.entry(authority_set_id) {
+                            Entry::Occupied(mut entry) => {
+                                match entry.get_mut().messages.entry(message.block) {
+                                    Entry::Occupied(mut entry) => {
+                                        entry.get_mut().push(message.message);
+                                    }
+                                    Entry::Vacant(entry) => {
+                                        entry.insert(vec![message.message]);
+                                    }
                                 }
                             }
-                        }
-                        Entry::Vacant(entry) => {
-                            let mut messages = BTreeMap::new();
-                            messages.insert(message.block, vec![message.message]);
+                            Entry::Vacant(entry) => {
+                                let mut messages = BTreeMap::new();
+                                messages.insert(message.block, vec![message.message]);
 
-                            entry.insert(Era {
-                                latest_merkle_root: None,
-                                messages,
-                                pending_txs: vec![],
-                            });
+                                entry.insert(Era {
+                                    latest_merkle_root: None,
+                                    messages,
+                                    pending_txs: vec![],
+                                });
+                            }
                         }
                     }
-                }
-                BlockEvent::MessagePaid { nonce } => {
-                    paid_messages.insert(nonce);
+                    BlockEvent::MessagePaid { nonce } => {
+                        paid_messages.insert(nonce);
+                    }
                 }
             }
-        }
 
-        for (authority_set_id, new_merkle_root) in merkle_roots.try_iter() {
-            match eras.entry(authority_set_id) {
-                Entry::Occupied(mut entry) => {
-                    let era = entry.get_mut();
+            for (authority_set_id, new_merkle_root) in self.merkle_roots.try_iter() {
+                match eras.entry(authority_set_id) {
+                    Entry::Occupied(mut entry) => {
+                        let era = entry.get_mut();
 
-                    if let Some(mr) = era.latest_merkle_root.as_ref() {
-                        if mr.gear_block < new_merkle_root.gear_block {
+                        if let Some(mr) = era.latest_merkle_root.as_ref() {
+                            if mr.gear_block < new_merkle_root.gear_block {
+                                era.latest_merkle_root = Some(new_merkle_root);
+                            }
+                        } else {
                             era.latest_merkle_root = Some(new_merkle_root);
                         }
-                    } else {
-                        era.latest_merkle_root = Some(new_merkle_root);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(Era {
+                            latest_merkle_root: Some(new_merkle_root),
+                            messages: BTreeMap::new(),
+                            pending_txs: vec![],
+                        });
                     }
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(Era {
-                        latest_merkle_root: Some(new_merkle_root),
-                        messages: BTreeMap::new(),
-                        pending_txs: vec![],
-                    });
+            }
+
+            let latest_era = eras.last_key_value().map(|(k, _)| *k);
+            let Some(latest_era) = latest_era else {
+                continue;
+            };
+
+            let mut finalized_eras = vec![];
+
+            for (&era_id, era) in eras.iter_mut() {
+                let res = era.process(&self.gear_api, &self.eth_api).await;
+                if let Err(err) = res {
+                    log::error!("Failed to process era #{}: {}", era_id, err);
+                    continue;
+                }
+
+                let finalized = era.try_finalize(&self.eth_api, &self.gear_api).await?;
+
+                // Latest era cannot be finalized.
+                if finalized && era_id != latest_era {
+                    log::info!("Era #{} finalized", era_id);
+                    finalized_eras.push(era_id);
                 }
             }
-        }
 
-        let latest_era = eras.last_key_value().map(|(k, _)| *k);
-        let Some(latest_era) = latest_era else {
-            continue;
-        };
-
-        let mut finalized_eras = vec![];
-
-        for (&era_id, era) in eras.iter_mut() {
-            let res = era.process(gear_api, eth_api).await;
-            if let Err(err) = res {
-                log::error!("Failed to process era #{}: {}", era_id, err);
-                continue;
+            for finalized in finalized_eras {
+                eras.remove(&finalized);
             }
-
-            let finalized = era.try_finalize(eth_api, gear_api).await?;
-
-            // Latest era cannot be finalized.
-            if finalized && era_id != latest_era {
-                log::info!("Era #{} finalized", era_id);
-                finalized_eras.push(era_id);
-            }
-        }
-
-        for finalized in finalized_eras {
-            eras.remove(&finalized);
         }
     }
 }

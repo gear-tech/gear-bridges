@@ -14,6 +14,8 @@ pub trait MeteredService {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn Collector>>;
 }
 
+pub use crate::impl_metered_service;
+
 #[macro_export]
 macro_rules! impl_metered_service {
     (

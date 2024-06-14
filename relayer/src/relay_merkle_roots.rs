@@ -1,8 +1,7 @@
 use prometheus::IntGauge;
 
 use crate::{
-    impl_metered_service,
-    metrics::MeteredService,
+    metrics::{impl_metered_service, MeteredService},
     proof_storage::{FileSystemProofStorage, ProofStorage},
     prover_interface::{self, FinalProof},
     GENESIS_CONFIG,
@@ -48,7 +47,8 @@ impl MeteredService for MerkleRootRelayer {
         self.metrics
             .get_sources()
             .into_iter()
-            .chain(self.eras.get_sources().into_iter())
+            .chain(self.eras.get_sources())
+            .chain(prover_interface::Metrics.get_sources())
     }
 }
 

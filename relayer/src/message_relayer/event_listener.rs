@@ -8,6 +8,7 @@ use bridging_payment::UserReply as BridgingPaymentUserReply;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
+use prometheus::{IntCounter, IntGauge};
 
 use crate::metrics::{impl_metered_service, MeteredService};
 
@@ -31,13 +32,32 @@ impl MeteredService for EventListener {
 
 impl_metered_service! {
     struct EventListenerMetrics {
-        //
+        processed_block: IntGauge,
+        total_messages_found: IntCounter,
+        total_paid_messages_found: IntCounter,
     }
 }
 
 impl EventListenerMetrics {
     fn new() -> Self {
-        Self {}
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            processed_block: IntGauge::new(
+                "event_listener_processed_block",
+                "Gear block processed by event listener",
+            )?,
+            total_messages_found: IntCounter::new(
+                "event_listener_total_messages_found",
+                "Total amount of messages found by event listener, including not paid",
+            )?,
+            total_paid_messages_found: IntCounter::new(
+                "event_listener_total_paid_messages_found",
+                "Total amount of paid messages found by event listener",
+            )?,
+        })
     }
 }
 
@@ -70,6 +90,8 @@ impl EventListener {
     async fn run_inner(&self, sender: &Sender<BlockEvent>) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
+        self.metrics.processed_block.set(current_block as i64);
+
         loop {
             let finalized_head = self.gear_api.latest_finalized_block().await?;
             let finalized_head = self.gear_api.block_hash_to_number(finalized_head).await?;
@@ -77,6 +99,8 @@ impl EventListener {
             if finalized_head >= current_block {
                 for block in current_block..=finalized_head {
                     self.process_block_events(block, sender).await?;
+
+                    self.metrics.processed_block.inc();
                 }
 
                 current_block = finalized_head + 1;
@@ -97,6 +121,9 @@ impl EventListener {
         let messages = self.gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {
             log::info!("Found {} sent messages", messages.len());
+            self.metrics
+                .total_messages_found
+                .inc_by(messages.len() as u64);
 
             for message in messages {
                 sender.send(BlockEvent::MessageSent {
@@ -116,6 +143,9 @@ impl EventListener {
                 .await?;
             if !messages.is_empty() {
                 log::info!("Found {} paid messages", messages.len());
+                self.metrics
+                    .total_paid_messages_found
+                    .inc_by(messages.len() as u64);
 
                 for message in messages {
                     let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;

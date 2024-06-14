@@ -6,6 +6,7 @@ use std::{
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
+use prometheus::IntGauge;
 
 use crate::metrics::{impl_metered_service, MeteredService};
 
@@ -29,13 +30,27 @@ impl MeteredService for MerkleRootListener {
 
 impl_metered_service! {
     struct Metrics {
-        //
+        latest_processed_block: IntGauge,
+        latest_merkle_root_for_block: IntGauge
     }
 }
 
 impl Metrics {
     fn new() -> Self {
-        Self {}
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            latest_processed_block: IntGauge::new(
+                "merkle_root_listener_latest_processed_block",
+                "Latest ethereum block processed by merkle root listener",
+            )?,
+            latest_merkle_root_for_block: IntGauge::new(
+                "merkle_root_listener_latest_merkle_root_for_block",
+                "Latest gear block present in found merkle roots",
+            )?,
+        })
     }
 }
 
@@ -68,6 +83,8 @@ impl MerkleRootListener {
     async fn run_inner(&self, sender: &Sender<RelayedMerkleRoot>) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
+        self.metrics.latest_processed_block.set(current_block as i64);
+
         loop {
             let latest = self.eth_api.block_number().await?;
             if latest >= current_block {
@@ -82,6 +99,10 @@ impl MerkleRootListener {
                 }
 
                 for merkle_root in merkle_roots {
+                    self.metrics
+                        .latest_merkle_root_for_block
+                        .set(merkle_root.block_number as i64);
+
                     let block_hash = self
                         .gear_api
                         .block_number_to_hash(merkle_root.block_number as u32)
@@ -103,6 +124,7 @@ impl MerkleRootListener {
                 }
 
                 current_block = latest + 1;
+                self.metrics.latest_processed_block.inc();
             } else {
                 thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
             }

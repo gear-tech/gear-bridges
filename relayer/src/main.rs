@@ -5,15 +5,20 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
+use message_relayer::MessageRelayer;
+use metrics::MetricsBuilder;
 use prover::proving::GenesisConfig;
+use relay_merkle_roots::MerkleRootRelayer;
 
+mod message_relayer;
+mod metrics;
 mod proof_storage;
 mod prover_interface;
 mod relay_merkle_roots;
-mod relay_messages;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
+const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
     authority_set_id: 0,
@@ -48,6 +53,8 @@ struct RelayMessagesArgs {
     vara_endpoint: VaraEndpointArg,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
+    #[clap(flatten)]
+    prometheus_args: PrometheusArgs,
     /// Block number to start relaying from. If not specified equals to the latest finalized block
     #[arg(long = "from-block")]
     from_block: Option<u32>,
@@ -62,6 +69,8 @@ struct RelayMerkleRootsArgs {
     vara_endpoint: VaraEndpointArg,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
+    #[clap(flatten)]
+    prometheus_args: PrometheusArgs,
 }
 
 #[derive(Args)]
@@ -93,6 +102,16 @@ struct EthereumArgs {
     mq_address: String,
 }
 
+#[derive(Args)]
+struct PrometheusArgs {
+    /// Address of the prometheus endpoint
+    #[arg(
+        long = "prometheus-endpoint",
+        default_value = DEFAULT_PROMETHEUS_ENDPOINT
+    )]
+    endpoint: String,
+}
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::formatted_builder()
@@ -101,6 +120,7 @@ async fn main() {
         .filter(Some("prover"), log::LevelFilter::Info)
         .filter(Some("relayer"), log::LevelFilter::Info)
         .filter(Some("ethereum-client"), log::LevelFilter::Info)
+        .filter(Some("metrics"), log::LevelFilter::Info)
         .format_timestamp(Some(TimestampPrecision::Seconds))
         .init();
 
@@ -111,7 +131,15 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            relay_merkle_roots::run(gear_api, eth_api).await.unwrap();
+            let relayer = MerkleRootRelayer::new(gear_api, eth_api).await;
+
+            MetricsBuilder::new()
+                .register_service(&relayer)
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
+
+            relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::RelayMessages(args) => {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
@@ -126,9 +154,18 @@ async fn main() {
                 arr.into()
             });
 
-            relay_messages::run(gear_api, eth_api, args.from_block, bridging_payment_address)
-                .await
-                .unwrap();
+            let relayer =
+                MessageRelayer::new(gear_api, eth_api, args.from_block, bridging_payment_address)
+                    .await
+                    .unwrap();
+
+            MetricsBuilder::new()
+                .register_service(&relayer)
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
+
+            relayer.run().await.unwrap();
         }
     };
 }

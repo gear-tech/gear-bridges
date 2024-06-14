@@ -10,15 +10,18 @@ gear-rpc-client.workspace = true
 prover.workspace = true
 
 anyhow.workspace = true
+axum.workspace = true
 clap.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true
+lazy_static.workspace = true
 libc.workspace = true
 log.workspace = true
 num = { workspace = true, features = ["serde"] }
 parity-scale-codec.workspace = true
 pretty_env_logger.workspace = true
 primitive-types = { workspace = true, features = ["std"] }
+prometheus.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -1,4 +1,9 @@
+use prometheus::{
+    HistogramOpts, HistogramVec, IntGauge,
+};
+
 use crate::{
+    impl_metered_service,
     metrics::MeteredService,
     proof_storage::{FileSystemProofStorage, ProofStorage},
     prover_interface::{self, FinalProof},
@@ -13,6 +18,42 @@ pub struct MerkleRootRelayer {
     eth_api: EthApi,
     proof_storage: Box<dyn ProofStorage>,
     eras: Eras,
+
+    metrics: Metrics,
+}
+
+impl_metered_service! {
+    struct Metrics {
+        latest_proven_era: IntGauge,
+        latest_observed_gear_era: IntGauge,
+        proving_time: HistogramVec
+    }
+}
+
+impl Metrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            latest_proven_era: IntGauge::new("latest_proven_era", "Latest proven era number")?,
+            latest_observed_gear_era: IntGauge::new(
+                "latest_observed_gear_era",
+                "Latest era number observed by relayer",
+            )?,
+            proving_time: HistogramVec::new(
+                HistogramOpts::new("proving_time", "ZK circuits proving time"),
+                &["circuit"],
+            )?,
+        })
+    }
+}
+
+impl MeteredService for MerkleRootRelayer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 type SyncStepCount = usize;
@@ -25,11 +66,14 @@ impl MerkleRootRelayer {
             .await
             .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
 
+        let metrics = Metrics::new();
+
         MerkleRootRelayer {
             gear_api,
             eth_api,
             proof_storage: Box::from(proof_storage),
             eras,
+            metrics,
         }
     }
 
@@ -84,7 +128,16 @@ impl MerkleRootRelayer {
             .await
             .unwrap();
 
+        self.metrics
+            .latest_observed_gear_era
+            .set(latest_authority_set_id as i64);
+
         let latest_proven_authority_set_id = self.proof_storage.get_latest_proof();
+
+        if let Some(&(_, latest_proven)) = latest_proven_authority_set_id.as_ref() {
+            self.metrics.latest_proven_era.set(latest_proven as i64);
+        }
+
         match latest_proven_authority_set_id {
             None => {
                 let proof = prover_interface::prove_genesis(&self.gear_api).await?;
@@ -96,7 +149,16 @@ impl MerkleRootRelayer {
             }
             Some((mut proof, latest_proven)) if latest_proven < latest_authority_set_id => {
                 for set_id in latest_proven..latest_authority_set_id {
+                    let timer = self
+                        .metrics
+                        .proving_time
+                        .with_label_values(&["validator_set_change"])
+                        .start_timer();
+                    
                     proof = prover_interface::prove_validator_set_change(&self.gear_api, proof, set_id).await?;
+
+                    timer.stop_and_record();
+
                     self.proof_storage.update(proof.proof.clone())?;
                 }
 
@@ -122,13 +184,23 @@ impl MerkleRootRelayer {
         let inner_proof = self
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
-        prover_interface::prove_final(&self.gear_api, inner_proof, finalized_head).await
-    }
-}
 
-impl MeteredService for MerkleRootRelayer {
-    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        vec![]
+        let timer = self
+            .metrics
+            .proving_time
+            .with_label_values(&["final"])
+            .start_timer();
+
+        let proof =
+            prover_interface::prove_final(&self.gear_api, inner_proof, finalized_head).await;
+
+        if proof.is_ok() {
+            timer.stop_and_record();
+        } else {
+            timer.stop_and_discard();
+        }
+
+        proof
     }
 }
 

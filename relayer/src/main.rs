@@ -5,16 +5,16 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
+use message_relayer::MessageRelayer;
 use metrics::MetricsBuilder;
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
-use relay_messages::MessageRelayer;
 
+mod message_relayer;
 mod metrics;
 mod proof_storage;
 mod prover_interface;
 mod relay_merkle_roots;
-mod relay_messages;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
@@ -154,7 +154,10 @@ async fn main() {
                 arr.into()
             });
 
-            let relayer = MessageRelayer::new(gear_api, eth_api);
+            let relayer =
+                MessageRelayer::new(gear_api, eth_api, args.from_block, bridging_payment_address)
+                    .await
+                    .unwrap();
 
             MetricsBuilder::new()
                 .register_service(&relayer)
@@ -162,10 +165,7 @@ async fn main() {
                 .run(args.prometheus_args.endpoint)
                 .await;
 
-            relayer
-                .run(args.from_block, bridging_payment_address)
-                .await
-                .unwrap();
+            relayer.run().await.unwrap();
         }
     };
 }

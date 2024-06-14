@@ -1,21 +1,19 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
-    sync::mpsc::{channel, Receiver, Sender},
-    thread,
-    time::Duration,
+    sync::mpsc::Receiver,
 };
 
-use bridging_payment::UserReply as BridgingPaymentUserReply;
 use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
-use parity_scale_codec::Decode;
 use primitive_types::{H256, U256};
 
 use crate::metrics::{impl_metered_service, MeteredService};
 
-const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
-const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
+mod event_listener;
+mod merkle_root_listener;
+use event_listener::EventListener;
+use merkle_root_listener::MerkleRootListener;
 
 type AuthoritySetId = u64;
 type BlockNumber = u32;
@@ -34,11 +32,13 @@ struct MessageInBlock {
 #[derive(Clone, Copy)]
 struct RelayedMerkleRoot {
     gear_block: u32,
+    authority_set_id: AuthoritySetId,
 }
 
 pub struct MessageRelayer {
-    gear_api: GearApi,
-    eth_api: EthApi,
+    event_processor: EventListener,
+    merkle_root_listener: MerkleRootListener,
+    message_processor: MessageProcessor,
 
     metrics: Metrics,
 }
@@ -61,230 +61,63 @@ impl Metrics {
 
 impl MeteredService for MessageRelayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics.get_sources()
+        self.metrics
+            .get_sources()
+            .into_iter()
+            .chain(self.event_processor.get_sources())
+            .chain(self.merkle_root_listener.get_sources())
     }
 }
 
 impl MessageRelayer {
-    pub fn new(gear_api: GearApi, eth_api: EthApi) -> Self {
-        let metrics = Metrics::new();
-
-        Self {
-            gear_api,
-            eth_api,
-            metrics,
-        }
-    }
-
-    pub async fn run(
-        self,
+    pub async fn new(
+        gear_api: GearApi,
+        eth_api: EthApi,
         from_block: Option<u32>,
         bridging_payment_address: Option<H256>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Self> {
+        let metrics = Metrics::new();
+
         let from_gear_block = if let Some(block) = from_block {
             block
         } else {
-            let block = self.gear_api.latest_finalized_block().await?;
-            self.gear_api.block_hash_to_number(block).await?
+            let block = gear_api.latest_finalized_block().await?;
+            gear_api.block_hash_to_number(block).await?
         };
 
-        let from_eth_block = self.eth_api.block_number().await?;
+        let from_eth_block = eth_api.block_number().await?;
 
         log::info!(
             "Starting gear event processing from block #{}",
             from_gear_block
         );
-        let messages = EventProcessor::new(
-            self.gear_api.clone(),
-            from_gear_block,
-            bridging_payment_address,
-        )
-        .run();
-
         log::info!("Starting ethereum listener from block #{}", from_eth_block);
-        let merkle_roots =
-            MerkleRootListener::new(self.eth_api.clone(), self.gear_api.clone(), from_eth_block)
-                .run();
+
+        let event_processor =
+            EventListener::new(gear_api.clone(), from_gear_block, bridging_payment_address);
+
+        let merkle_root_listener =
+            MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);
+
+        let message_processor = MessageProcessor::new(eth_api, gear_api);
+
+        Ok(Self {
+            event_processor,
+            merkle_root_listener,
+            message_processor,
+
+            metrics,
+        })
+    }
+
+    pub async fn run(self) -> anyhow::Result<()> {
+        let messages = self.event_processor.run();
+        let merkle_roots = self.merkle_root_listener.run();
 
         log::info!("Starting message relayer");
-        MessageProcessor::new(self.eth_api, self.gear_api, messages, merkle_roots)
-            .run()
-            .await;
+        self.message_processor.run(messages, merkle_roots).await;
 
         Ok(())
-    }
-}
-
-struct EventProcessor {
-    gear_api: GearApi,
-    from_block: u32,
-    bridging_payment_address: Option<H256>,
-}
-
-impl EventProcessor {
-    fn new(gear_api: GearApi, from_block: u32, bridging_payment_address: Option<H256>) -> Self {
-        Self {
-            gear_api,
-            from_block,
-            bridging_payment_address,
-        }
-    }
-
-    fn run(self) -> Receiver<BlockEvent> {
-        let (sender, receiver) = channel();
-
-        tokio::spawn(async move {
-            loop {
-                let res = self.run_inner(&sender).await;
-                if let Err(err) = res {
-                    log::error!("Event processor failed: {}", err);
-                }
-            }
-        });
-
-        receiver
-    }
-
-    async fn run_inner(&self, sender: &Sender<BlockEvent>) -> anyhow::Result<()> {
-        let mut current_block = self.from_block;
-
-        loop {
-            let finalized_head = self.gear_api.latest_finalized_block().await?;
-            let finalized_head = self.gear_api.block_hash_to_number(finalized_head).await?;
-
-            if finalized_head >= current_block {
-                for block in current_block..=finalized_head {
-                    self.process_block_events(block, sender).await?;
-                }
-
-                current_block = finalized_head + 1;
-            } else {
-                thread::sleep(GEAR_BLOCK_TIME_APPROX);
-            }
-        }
-    }
-
-    async fn process_block_events(
-        &self,
-        block: u32,
-        sender: &Sender<BlockEvent>,
-    ) -> anyhow::Result<()> {
-        log::info!("Processing gear block #{}", block);
-        let block_hash = self.gear_api.block_number_to_hash(block).await?;
-
-        let messages = self.gear_api.message_queued_events(block_hash).await?;
-        if !messages.is_empty() {
-            log::info!("Found {} sent messages", messages.len());
-
-            for message in messages {
-                sender.send(BlockEvent::MessageSent {
-                    message: MessageInBlock {
-                        message,
-                        block,
-                        block_hash,
-                    },
-                })?;
-            }
-        }
-
-        if let Some(bridging_payment_address) = self.bridging_payment_address {
-            let messages = self
-                .gear_api
-                .user_message_sent_events(bridging_payment_address, block_hash)
-                .await?;
-            if !messages.is_empty() {
-                log::info!("Found {} paid messages", messages.len());
-
-                for message in messages {
-                    let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
-                    sender.send(BlockEvent::MessagePaid {
-                        nonce: user_reply.nonce,
-                    })?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-struct MerkleRootListener {
-    eth_api: EthApi,
-    gear_api: GearApi,
-    from_block: u64,
-}
-
-impl MerkleRootListener {
-    fn new(eth_api: EthApi, gear_api: GearApi, from_block: u64) -> Self {
-        Self {
-            eth_api,
-            gear_api,
-            from_block,
-        }
-    }
-
-    fn run(self) -> Receiver<(AuthoritySetId, RelayedMerkleRoot)> {
-        let (sender, receiver) = channel();
-
-        tokio::spawn(async move {
-            loop {
-                let res = self.run_inner(&sender).await;
-                if let Err(err) = res {
-                    log::error!("Merkle root listener failed: {}", err);
-                }
-            }
-        });
-
-        receiver
-    }
-
-    async fn run_inner(
-        &self,
-        sender: &Sender<(AuthoritySetId, RelayedMerkleRoot)>,
-    ) -> anyhow::Result<()> {
-        let mut current_block = self.from_block;
-
-        loop {
-            let latest = self.eth_api.block_number().await?;
-            if latest >= current_block {
-                log::info!("Processing ethereum blocks #{}..#{}", current_block, latest);
-                let merkle_roots = self
-                    .eth_api
-                    .fetch_merkle_roots_in_range(current_block, latest)
-                    .await?;
-
-                if !merkle_roots.is_empty() {
-                    log::info!("Found {} merkle roots", merkle_roots.len());
-                }
-
-                for merkle_root in merkle_roots {
-                    let block_hash = self
-                        .gear_api
-                        .block_number_to_hash(merkle_root.block_number as u32)
-                        .await?;
-
-                    let authority_set_id =
-                        self.gear_api.signed_by_authority_set_id(block_hash).await?;
-
-                    log::info!(
-                        "Found merkle root for gear block #{} and era #{}",
-                        merkle_root.block_number,
-                        authority_set_id
-                    );
-
-                    sender.send((
-                        authority_set_id,
-                        RelayedMerkleRoot {
-                            gear_block: merkle_root.block_number as u32,
-                        },
-                    ))?;
-                }
-
-                current_block = latest + 1;
-            } else {
-                thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
-            }
-        }
     }
 }
 
@@ -303,41 +136,37 @@ struct RelayMessagePendingTx {
 struct MessageProcessor {
     eth_api: EthApi,
     gear_api: GearApi,
-    block_events: Receiver<BlockEvent>,
-    merkle_roots: Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
 }
 
 impl MessageProcessor {
-    fn new(
-        eth_api: EthApi,
-        gear_api: GearApi,
-        block_events: Receiver<BlockEvent>,
-        merkle_roots: Receiver<(AuthoritySetId, RelayedMerkleRoot)>,
-    ) -> Self {
-        Self {
-            eth_api,
-            gear_api,
-            block_events,
-            merkle_roots,
-        }
+    fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
+        Self { eth_api, gear_api }
     }
 
-    async fn run(self) {
+    async fn run(
+        self,
+        block_events: Receiver<BlockEvent>,
+        merkle_roots: Receiver<RelayedMerkleRoot>,
+    ) {
         loop {
-            let res = self.run_inner().await;
+            let res = self.run_inner(&block_events, &merkle_roots).await;
             if let Err(err) = res {
                 log::error!("Message relayer failed: {}", err);
             }
         }
     }
 
-    async fn run_inner(&self) -> anyhow::Result<()> {
+    async fn run_inner(
+        &self,
+        block_events: &Receiver<BlockEvent>,
+        merkle_roots: &Receiver<RelayedMerkleRoot>,
+    ) -> anyhow::Result<()> {
         let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
 
         let mut paid_messages = HashSet::new();
 
         loop {
-            for event in self.block_events.try_iter() {
+            for event in block_events.try_iter() {
                 match event {
                     BlockEvent::MessageSent { message } => {
                         let authority_set_id = self
@@ -374,8 +203,8 @@ impl MessageProcessor {
                 }
             }
 
-            for (authority_set_id, new_merkle_root) in self.merkle_roots.try_iter() {
-                match eras.entry(authority_set_id) {
+            for new_merkle_root in merkle_roots.try_iter() {
+                match eras.entry(new_merkle_root.authority_set_id) {
                     Entry::Occupied(mut entry) => {
                         let era = entry.get_mut();
 

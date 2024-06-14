@@ -5,6 +5,7 @@ use std::{
 
 use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
+use prometheus::{IntCounter, IntGauge};
 
 use crate::metrics::{impl_metered_service, MeteredService};
 
@@ -15,12 +16,46 @@ pub struct MessageProcessor {
     gear_api: GearApi,
 
     metrics: Metrics,
+    era_metrics: EraMetrics,
 }
 
 struct Era {
     latest_merkle_root: Option<RelayedMerkleRoot>,
     messages: BTreeMap<BlockNumber, Vec<Message>>,
     pending_txs: Vec<RelayMessagePendingTx>,
+
+    metrics: EraMetrics,
+}
+
+impl_metered_service! {
+    struct EraMetrics {
+        total_submitted_txs: IntCounter,
+        total_failed_txs: IntCounter,
+        total_failed_txs_because_processed: IntCounter,
+    }
+}
+
+impl EraMetrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            total_submitted_txs: IntCounter::new(
+                "message_relayer_message_processor_total_submitted_txs",
+                "Total amount of txs sent to ethereum",
+            )?,
+            total_failed_txs: IntCounter::new(
+                "message_relayer_message_processor_total_failed_txs",
+                "Total amount of txs sent to ethereum and failed",
+            )?,
+            total_failed_txs_because_processed: IntCounter::new(
+                "message_relayer_message_processor_total_failed_txs_because_processed",
+                "Amount of txs sent to ethereum and failed because they've already bee processed",
+            )?,
+        })
+    }
 }
 
 struct RelayMessagePendingTx {
@@ -31,13 +66,16 @@ struct RelayMessagePendingTx {
 
 impl_metered_service! {
     struct Metrics {
-        //
+        pending_tx_count: IntGauge
     }
 }
 
 impl MeteredService for MessageProcessor {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics.get_sources()
+        self.metrics
+            .get_sources()
+            .into_iter()
+            .chain(self.era_metrics.get_sources())
     }
 }
 
@@ -47,7 +85,12 @@ impl Metrics {
     }
 
     fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {})
+        Ok(Self {
+            pending_tx_count: IntGauge::new(
+                "message_relayer_message_processor_pending_tx_count",
+                "Amount of txs pending finalization on ethereum",
+            )?,
+        })
     }
 }
 
@@ -57,6 +100,7 @@ impl MessageProcessor {
             eth_api,
             gear_api,
             metrics: Metrics::new(),
+            era_metrics: EraMetrics::new(),
         }
     }
 
@@ -110,6 +154,7 @@ impl MessageProcessor {
                                     latest_merkle_root: None,
                                     messages,
                                     pending_txs: vec![],
+                                    metrics: self.era_metrics.clone(),
                                 });
                             }
                         }
@@ -138,6 +183,7 @@ impl MessageProcessor {
                             latest_merkle_root: Some(new_merkle_root),
                             messages: BTreeMap::new(),
                             pending_txs: vec![],
+                            metrics: self.era_metrics.clone(),
                         });
                     }
                 }
@@ -165,6 +211,9 @@ impl MessageProcessor {
                     finalized_eras.push(era_id);
                 }
             }
+
+            let pending_tx_count: usize = eras.iter().map(|era| era.1.pending_txs.len()).sum();
+            self.metrics.pending_tx_count.set(pending_tx_count as i64);
 
             for finalized in finalized_eras {
                 eras.remove(&finalized);
@@ -199,6 +248,8 @@ impl Era {
                     merkle_root_block_hash,
                 )
                 .await?;
+
+                self.metrics.total_submitted_txs.inc();
 
                 self.pending_txs.push(RelayMessagePendingTx {
                     hash: tx_hash,
@@ -260,9 +311,12 @@ impl Era {
                 Ok(false)
             }
             TxStatus::Failed => {
+                self.metrics.total_failed_txs.inc();
+
                 let already_processed = eth_api.is_message_processed(tx.message.nonce_le).await?;
 
                 if already_processed {
+                    self.metrics.total_failed_txs_because_processed.inc();
                     return Ok(true);
                 }
 
@@ -292,6 +346,8 @@ impl Era {
                     merkle_root_block_hash,
                 )
                 .await?;
+
+                self.metrics.total_submitted_txs.inc();
 
                 log::warn!(
                     "Retrying to send failed tx {} for message #{}. New tx: {}",

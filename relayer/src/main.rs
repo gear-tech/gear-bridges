@@ -17,7 +17,7 @@ mod relay_messages;
 
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
-const DEFAULT_PROMETHEUS_ENDPOINT: &str = "http://0.0.0.0:9090";
+const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
     authority_set_id: 0,
@@ -134,6 +134,7 @@ async fn main() {
 
             MetricsBuilder::new()
                 .register_service(&relayer)
+                .register_service(&prover_interface::Metrics)
                 .build()
                 .run(args.prometheus_args.endpoint)
                 .await;
@@ -142,6 +143,7 @@ async fn main() {
         }
         CliCommands::RelayMessages(args) => {
             MetricsBuilder::new()
+                .register_service(&prover_interface::Metrics)
                 .build()
                 .run(args.prometheus_args.endpoint)
                 .await;

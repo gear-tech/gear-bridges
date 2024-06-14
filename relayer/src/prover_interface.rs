@@ -1,12 +1,31 @@
 use std::{str::FromStr, time::Instant};
 
+use crate::metrics::MeteredService;
+
 use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
+use prometheus::{core::Collector, HistogramOpts, HistogramVec};
 use prover::proving::{
     self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
 };
+
+pub struct Metrics;
+
+impl MeteredService for Metrics {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        let proving_time: Box<dyn Collector> = Box::from(PROVING_TIME.clone());
+        [proving_time]
+    }
+}
+
+lazy_static::lazy_static!(
+    static ref PROVING_TIME: HistogramVec = HistogramVec::new(
+            HistogramOpts::new("proving_time", "ZK circuits proving time"),
+            &["circuit"],
+        ).unwrap();
+);
 
 pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircuitData> {
     let (block, current_epoch_block_finality) = gear_api
@@ -22,6 +41,8 @@ pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircui
 
     let now = Instant::now();
 
+    let timer = PROVING_TIME.with_label_values(&["genesis"]).start_timer();
+
     let proof = prover::proving::prove_genesis(
         parse_rpc_block_finality_proof(current_epoch_block_finality),
         GENESIS_CONFIG,
@@ -29,6 +50,7 @@ pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircui
         next_validator_set_storage_data,
     );
 
+    timer.stop_and_record();
     log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
 
     Ok(proof)
@@ -58,6 +80,10 @@ pub async fn prove_validator_set_change(
 
     let now = Instant::now();
 
+    let timer = PROVING_TIME
+        .with_label_values(&["validator_set_change"])
+        .start_timer();
+
     let proof = proving::prove_validator_set_change(
         previous_proof,
         parse_rpc_block_finality_proof(current_epoch_block_finality),
@@ -65,6 +91,7 @@ pub async fn prove_validator_set_change(
         next_validator_set_storage_data,
     );
 
+    timer.stop_and_record();
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
 
     Ok(proof)
@@ -130,6 +157,8 @@ pub async fn prove_final(
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
+    let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
+
     let proof = proving::prove_message_sent(
         previous_proof,
         parse_rpc_block_finality_proof(block_finality),
@@ -139,6 +168,8 @@ pub async fn prove_final(
     );
 
     let proof = gnark::prove_circuit(&proof);
+
+    timer.stop_and_record();
 
     let public_inputs: [_; 2] = proof
         .public_inputs

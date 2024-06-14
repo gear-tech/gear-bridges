@@ -1,6 +1,4 @@
-use prometheus::{
-    HistogramOpts, HistogramVec, IntGauge,
-};
+use prometheus::IntGauge;
 
 use crate::{
     impl_metered_service,
@@ -26,7 +24,6 @@ impl_metered_service! {
     struct Metrics {
         latest_proven_era: IntGauge,
         latest_observed_gear_era: IntGauge,
-        proving_time: HistogramVec
     }
 }
 
@@ -42,17 +39,16 @@ impl Metrics {
                 "latest_observed_gear_era",
                 "Latest era number observed by relayer",
             )?,
-            proving_time: HistogramVec::new(
-                HistogramOpts::new("proving_time", "ZK circuits proving time"),
-                &["circuit"],
-            )?,
         })
     }
 }
 
 impl MeteredService for MerkleRootRelayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics.get_sources()
+        self.metrics
+            .get_sources()
+            .into_iter()
+            .chain(self.eras.get_sources().into_iter())
     }
 }
 
@@ -149,16 +145,7 @@ impl MerkleRootRelayer {
             }
             Some((mut proof, latest_proven)) if latest_proven < latest_authority_set_id => {
                 for set_id in latest_proven..latest_authority_set_id {
-                    let timer = self
-                        .metrics
-                        .proving_time
-                        .with_label_values(&["validator_set_change"])
-                        .start_timer();
-                    
                     proof = prover_interface::prove_validator_set_change(&self.gear_api, proof, set_id).await?;
-
-                    timer.stop_and_record();
-
                     self.proof_storage.update(proof.proof.clone())?;
                 }
 
@@ -185,22 +172,7 @@ impl MerkleRootRelayer {
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
 
-        let timer = self
-            .metrics
-            .proving_time
-            .with_label_values(&["final"])
-            .start_timer();
-
-        let proof =
-            prover_interface::prove_final(&self.gear_api, inner_proof, finalized_head).await;
-
-        if proof.is_ok() {
-            timer.stop_and_record();
-        } else {
-            timer.stop_and_discard();
-        }
-
-        proof
+        prover_interface::prove_final(&self.gear_api, inner_proof, finalized_head).await
     }
 }
 
@@ -210,6 +182,8 @@ struct Eras {
 
     gear_api: GearApi,
     eth_api: EthApi,
+
+    metrics: EraMetrics,
 }
 
 struct SealedNotFinalizedEra {
@@ -217,6 +191,35 @@ struct SealedNotFinalizedEra {
     merkle_root_block: u32,
     tx_hash: TxHash,
     proof: FinalProof,
+}
+
+impl MeteredService for Eras {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
+}
+
+impl_metered_service! {
+    struct EraMetrics {
+        sealed_not_finalized_count: IntGauge,
+        last_sealed_era: IntGauge
+    }
+}
+
+impl EraMetrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            sealed_not_finalized_count: IntGauge::new(
+                "sealed_not_finalized_count",
+                "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
+            )?,
+            last_sealed_era: IntGauge::new("last_sealed_era", "Latest era that have been sealed")?,
+        })
+    }
 }
 
 impl Eras {
@@ -233,11 +236,17 @@ impl Eras {
             set_id.max(2) - 1
         };
 
+        let metrics = EraMetrics::new();
+        metrics.sealed_not_finalized_count.set(0);
+        metrics.last_sealed_era.set(last_sealed as i64);
+
         Ok(Self {
             last_sealed,
             sealed_not_finalized: vec![],
             gear_api,
             eth_api,
+
+            metrics,
         })
     }
 
@@ -251,6 +260,8 @@ impl Eras {
             log::info!("Sealed era #{}", self.last_sealed + 1);
 
             self.last_sealed += 1;
+
+            self.metrics.last_sealed_era.inc();
         }
 
         Ok(())
@@ -293,6 +304,8 @@ impl Eras {
             proof,
         });
 
+        self.metrics.sealed_not_finalized_count.inc();
+
         Ok(())
     }
 
@@ -304,6 +317,8 @@ impl Eras {
             {
                 log::info!("Era #{} finalized", self.sealed_not_finalized[i].era);
                 self.sealed_not_finalized.remove(i);
+
+                self.metrics.sealed_not_finalized_count.dec();
             } else {
                 log::info!(
                     "Cannot finalize era #{} yet",

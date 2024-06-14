@@ -274,7 +274,9 @@ impl Era {
         gear_api: &GearApi,
     ) -> anyhow::Result<bool> {
         for i in (0..self.pending_txs.len()).rev() {
-            self.try_finalize_tx(i, eth_api, gear_api).await?;
+            if self.try_finalize_tx(i, eth_api, gear_api).await? {
+                self.pending_txs.remove(i);
+            }
         }
 
         Ok(self.pending_txs.is_empty())

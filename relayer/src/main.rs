@@ -5,7 +5,9 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
+use metrics::MetricsBuilder;
 use prover::proving::GenesisConfig;
+use relay_merkle_roots::MerkleRootRelayer;
 
 mod metrics;
 mod proof_storage;
@@ -125,15 +127,24 @@ async fn main() {
 
     match cli.command {
         CliCommands::RelayMerkleRoots(args) => {
-            metrics::run(args.prometheus_args.endpoint).await;
-
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            relay_merkle_roots::run(gear_api, eth_api).await.unwrap();
+            let relayer = MerkleRootRelayer::new(gear_api, eth_api).await;
+
+            MetricsBuilder::new()
+                .register_service(&relayer)
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
+
+            relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::RelayMessages(args) => {
-            metrics::run(args.prometheus_args.endpoint).await;
+            MetricsBuilder::new()
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
 
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);

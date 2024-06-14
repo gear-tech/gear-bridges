@@ -43,11 +43,11 @@ impl Metrics {
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             latest_processed_block: IntGauge::new(
-                "merkle_root_listener_latest_processed_block",
+                "message_relayer_merkle_root_listener_latest_processed_block",
                 "Latest ethereum block processed by merkle root listener",
             )?,
             latest_merkle_root_for_block: IntGauge::new(
-                "merkle_root_listener_latest_merkle_root_for_block",
+                "message_relayer_merkle_root_listener_latest_merkle_root_for_block",
                 "Latest gear block present in found merkle roots",
             )?,
         })
@@ -83,7 +83,9 @@ impl MerkleRootListener {
     async fn run_inner(&self, sender: &Sender<RelayedMerkleRoot>) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
-        self.metrics.latest_processed_block.set(current_block as i64);
+        self.metrics
+            .latest_processed_block
+            .set(current_block as i64);
 
         loop {
             let latest = self.eth_api.block_number().await?;

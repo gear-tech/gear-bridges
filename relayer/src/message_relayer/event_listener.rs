@@ -46,15 +46,15 @@ impl EventListenerMetrics {
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             processed_block: IntGauge::new(
-                "event_listener_processed_block",
+                "message_relayer_event_listener_processed_block",
                 "Gear block processed by event listener",
             )?,
             total_messages_found: IntCounter::new(
-                "event_listener_total_messages_found",
+                "message_relayer_event_listener_total_messages_found",
                 "Total amount of messages found by event listener, including not paid",
             )?,
             total_paid_messages_found: IntCounter::new(
-                "event_listener_total_paid_messages_found",
+                "message_relayer_event_listener_total_paid_messages_found",
                 "Total amount of paid messages found by event listener",
             )?,
         })

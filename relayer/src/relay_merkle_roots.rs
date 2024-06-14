@@ -33,9 +33,12 @@ impl Metrics {
 
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
-            latest_proven_era: IntGauge::new("latest_proven_era", "Latest proven era number")?,
+            latest_proven_era: IntGauge::new(
+                "merkle_root_relayer_latest_proven_era",
+                "Latest proven era number",
+            )?,
             latest_observed_gear_era: IntGauge::new(
-                "latest_observed_gear_era",
+                "merkle_root_relayer_latest_observed_gear_era",
                 "Latest era number observed by relayer",
             )?,
         })

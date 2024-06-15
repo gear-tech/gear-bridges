@@ -59,7 +59,7 @@ struct RelayMessagesArgs {
     #[arg(long = "from-block")]
     from_block: Option<u32>,
     /// Address of bridging payment program (if not specified, relayer will relay all messages)
-    #[arg(long = "bridging-payment-address")]
+    #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
     bridging_payment_address: Option<String>,
 }
 
@@ -78,7 +78,8 @@ struct VaraEndpointArg {
     /// Address of the VARA RPC endpoint
     #[arg(
         long = "vara-endpoint",
-        default_value = DEFAULT_VARA_RPC
+        default_value = DEFAULT_VARA_RPC,
+        env = "VARA_RPC"
     )]
     vara_endpoint: String,
 }
@@ -88,17 +89,18 @@ struct EthereumArgs {
     /// Address of the ethereum endpoint
     #[arg(
         long = "ethereum-endpoint",
-        default_value = DEFAULT_ETH_RPC
+        default_value = DEFAULT_ETH_RPC,
+        env = "ETH_RPC"
     )]
     eth_endpoint: String,
     /// Private key for fee payer
-    #[arg(long = "fee-payer")]
+    #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
     fee_payer: Option<String>,
     /// Ethereum address of relayer contract
-    #[arg(long = "relayer-address")]
+    #[arg(long = "relayer-address", env = "ETH_RELAYER_ADDRESS")]
     relayer_address: String,
     /// Ethereum address of message queue contract
-    #[arg(long = "mq-address")]
+    #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     mq_address: String,
 }
 
@@ -107,13 +109,16 @@ struct PrometheusArgs {
     /// Address of the prometheus endpoint
     #[arg(
         long = "prometheus-endpoint",
-        default_value = DEFAULT_PROMETHEUS_ENDPOINT
+        default_value = DEFAULT_PROMETHEUS_ENDPOINT,
+        env = "PROMETHEUS_ENDPOINT"
     )]
     endpoint: String,
 }
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenv::dotenv();
+
     pretty_env_logger::formatted_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)

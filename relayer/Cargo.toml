@@ -12,6 +12,7 @@ prover.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+dotenv.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true
 lazy_static.workspace = true

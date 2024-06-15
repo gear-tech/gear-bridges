@@ -47,6 +47,7 @@ blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
+dotenv = "0.15.0"
 env_logger = "0.9.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",

@@ -7,7 +7,8 @@ use scale_info::TypeInfo;
 #[cfg(not(feature = "std"))]
 mod wasm;
 
-#[cfg_attr(feature = "std", derive(thiserror::Error, Debug))]
+#[cfg_attr(feature = "std", derive(thiserror::Error))]
+#[derive(Debug, Decode, Encode, TypeInfo)]
 pub enum Error {
     #[cfg_attr(feature = "std", error("Authority set id is not sequential"))]
     AuthoritySetIdNotSequential,

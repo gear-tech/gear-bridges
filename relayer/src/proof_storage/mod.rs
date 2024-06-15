@@ -18,6 +18,8 @@ pub enum ProofStorageError {
     NotFound(u64),
     #[error("Authority set id is not as expected")]
     AuthoritySetIdMismatch,
+    #[error(transparent)]
+    InnerError(#[from] anyhow::Error),
 }
 
 type AuthoritySetId = u64;

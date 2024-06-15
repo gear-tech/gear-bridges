@@ -58,7 +58,11 @@ impl MeteredService for MerkleRootRelayer {
 type SyncStepCount = usize;
 
 impl MerkleRootRelayer {
-    pub async fn new(gear_api: GearApi, eth_api: EthApi, proof_storage: Box<dyn ProofStorage>) -> MerkleRootRelayer {
+    pub async fn new(
+        gear_api: GearApi,
+        eth_api: EthApi,
+        proof_storage: Box<dyn ProofStorage>,
+    ) -> MerkleRootRelayer {
         let eras = Eras::new(None, gear_api.clone(), eth_api.clone())
             .await
             .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
@@ -146,7 +150,7 @@ impl MerkleRootRelayer {
             }
             Some(latest_proven) if latest_proven < latest_authority_set_id => {
                 let mut proof = self.proof_storage.get_proof_for_authority_set_id(latest_proven)?;
-                
+
                 for set_id in latest_proven..latest_authority_set_id {
                     proof = prover_interface::prove_validator_set_change(&self.gear_api, proof, set_id).await?;
                     self.proof_storage.update(proof.proof.clone(), set_id + 1)?;

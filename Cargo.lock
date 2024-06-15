@@ -8423,6 +8423,7 @@ dependencies = [
  "ethereum-client",
  "futures",
  "gclient",
+ "gear-core 1.4.2",
  "gear-rpc-client",
  "gear_proof_storage",
  "hex",

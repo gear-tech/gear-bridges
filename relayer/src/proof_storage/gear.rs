@@ -1,12 +1,23 @@
+use std::collections::HashMap;
+
 use futures::executor::block_on;
 use gclient::{GearApi, WSAddress};
+use gear_core::ids::ProgramId;
+use parity_scale_codec::Encode;
 
-use super::{in_memory::InMemoryProofStorage, AuthoritySetId, ProofStorage, ProofStorageError};
+use super::{AuthoritySetId, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
 
 pub struct GearProofStorage {
     gear_api: GearApi,
-    cache: InMemoryProofStorage,
+    program: Option<ProgramId>,
+    cache: Cache,
+}
+
+#[derive(Default)]
+struct Cache {
+    circuit_data: Option<CircuitData>,
+    proofs: HashMap<u64, Proof>,
 }
 
 impl ProofStorage for GearProofStorage {
@@ -54,6 +65,7 @@ impl GearProofStorage {
         Ok(GearProofStorage {
             gear_api,
             cache: Default::default(),
+            program: None,
         })
     }
 
@@ -66,7 +78,7 @@ impl GearProofStorage {
             .gear_api
             .upload_code(gear_proof_storage::WASM_BINARY)
             .await
-            .unwrap();
+            .map_err(Into::<anyhow::Error>::into)?;
 
         let payload = gear_proof_storage::InitMessage {
             genesis_proof: gear_proof_storage::Proof {
@@ -76,36 +88,57 @@ impl GearProofStorage {
             },
         };
 
-        //self.gear_api.create_program(code_id, &[], payload, 0, 0);
+        let gas = self
+            .gear_api
+            .calculate_create_gas(None, code_id, payload.encode(), 0, false)
+            .await
+            .map_err(Into::<anyhow::Error>::into)?
+            .min_limit;
 
-        todo!()
+        let (_, program, _) = self
+            .gear_api
+            .create_program(code_id, &[], payload, gas, 0)
+            .await
+            .map_err(Into::<anyhow::Error>::into)?;
+
+        self.program = Some(program);
+
+        Ok(())
     }
 
     async fn get_circuit_data_inner(&self) -> Result<CircuitData, ProofStorageError> {
-        let cached = self.cache.get_circuit_data();
-
-        if cached.is_err() {
-            // TODO: fetch from RPC.
+        if let Some(circuit_data) = self.cache.circuit_data.as_ref() {
+            return Ok(circuit_data.clone());
         }
 
-        cached
+        // TODO: Fetch from gear and add to cache
+
+        todo!()
     }
 
     async fn get_latest_authority_set_id_inner(&self) -> Option<AuthoritySetId> {
-        todo!()
+        self.read_state()
+            .await
+            .ok()
+            .map(|s| s.latest_proof.authority_set_id)
     }
 
     async fn get_proof_for_authority_set_id_inner(
         &self,
         authority_set_id: u64,
     ) -> Result<ProofWithCircuitData, ProofStorageError> {
-        let cached = self.cache.get_proof_for_authority_set_id(authority_set_id);
+        let circuit_data = self.get_circuit_data_inner().await?;
 
-        if cached.is_err() {
-            // TODO: fetch from RPC
+        if let Some(proof) = self.cache.proofs.get(&authority_set_id) {
+            return Ok(ProofWithCircuitData {
+                circuit_data,
+                proof: proof.clone(),
+            });
         }
 
-        cached
+        // TODO: Fetch from gear
+
+        todo!()
     }
 
     async fn update_inner(
@@ -113,6 +146,24 @@ impl GearProofStorage {
         proof: Proof,
         new_authority_set_id: AuthoritySetId,
     ) -> Result<(), ProofStorageError> {
+        let _ = self.cache.proofs.insert(new_authority_set_id, proof);
+
+        // TODO: Submit to gear.
+
         todo!()
+    }
+
+    async fn read_state(&self) -> Result<gear_proof_storage::State, ProofStorageError> {
+        let Some(program) = self.program else {
+            return Err(ProofStorageError::NotInitialized);
+        };
+
+        let state: gear_proof_storage::State = self
+            .gear_api
+            .read_state(program, vec![])
+            .await
+            .map_err(Into::<anyhow::Error>::into)?;
+
+        Ok(state)
     }
 }

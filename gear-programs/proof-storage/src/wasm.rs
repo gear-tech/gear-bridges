@@ -1,5 +1,5 @@
 use super::AuthoritySetId;
-use gstd::{msg, prelude::*, BlockNumber, collections::BTreeMap};
+use gstd::{collections::BTreeMap, msg, prelude::*, ActorId, BlockNumber};
 
 static mut ADMIN_ADDRESS: ActorId = ActorId::new([0u8; 32]);
 static mut PROOF_BLOCKS: BTreeMap<AuthoritySetId, BlockNumber> = BTreeMap::new();

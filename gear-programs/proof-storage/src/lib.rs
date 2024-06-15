@@ -1,6 +1,5 @@
 #![no_std]
 
-use collections::BTreeMap;
 use gstd::{collections::BTreeMap, prelude::*, BlockNumber};
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;

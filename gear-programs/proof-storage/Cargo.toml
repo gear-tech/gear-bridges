@@ -7,6 +7,7 @@ edition.workspace = true
 gstd.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
+thiserror.workspace = true
 
 [build-dependencies]
 gear-wasm-builder.workspace = true

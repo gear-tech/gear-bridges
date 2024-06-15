@@ -12,13 +12,13 @@ sol! {
     #[sol(rpc)]
     #[derive(Debug,PartialEq, Eq)]
     interface IMessageQueue {
-
         event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash);
 
         function calculateMerkleRoot(bytes32[] calldata proof, bytes32 hash, uint256 width, uint256 leaf_index) external view returns (bytes32);
 
         function processMessage(uint256 block_number, uint256 total_leaves, uint256 leaf_index, ContentMessage calldata message, bytes32[] calldata proof) external;
 
+        function isProcessed(ContentMessage calldata message) external view returns (bool);
     }
 
     #[sol(rpc)]

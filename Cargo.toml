@@ -41,6 +41,7 @@ curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek" }
 
 ahash = "0.7.8"
 anyhow = "1.0.86"
+axum = "0.7.5"
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
@@ -64,6 +65,7 @@ log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
 paste = "1.0.14"
 pretty_env_logger = "*"
+prometheus = { version = "0.13.0", default-features = false }
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"

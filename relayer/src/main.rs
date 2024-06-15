@@ -7,6 +7,7 @@ use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use metrics::MetricsBuilder;
+use proof_storage::FileSystemProofStorage;
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 
@@ -115,6 +116,13 @@ struct PrometheusArgs {
     endpoint: String,
 }
 
+#[derive(Args)]
+struct ProofStorageArgs {
+    /// Gear fee payer
+    #[arg(long = "gear-fee-payer", env = "GEAR_FEE_PAYER")]
+    fee_payer: String,
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
@@ -136,7 +144,9 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let relayer = MerkleRootRelayer::new(gear_api, eth_api).await;
+            let proof_storage = Box::from(FileSystemProofStorage::new("./proof_storage".into()));
+
+            let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
 
             MetricsBuilder::new()
                 .register_service(&relayer)

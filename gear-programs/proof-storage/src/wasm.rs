@@ -1,4 +1,4 @@
-use super::{HandleMessage, InitMessage, State};
+use super::{Error, HandleMessage, InitMessage, Reply, State};
 use gstd::{collections::BTreeMap, exec, msg, prelude::*, ActorId};
 
 static mut ADMIN_ADDRESS: ActorId = ActorId::new([0u8; 32]);
@@ -23,6 +23,8 @@ extern "C" fn init() {
             proof_blocks,
         });
     }
+
+    reply_ok();
 }
 
 #[no_mangle]
@@ -35,13 +37,15 @@ extern "C" fn handle() {
     let msg: HandleMessage = msg::load().unwrap();
 
     if msg.proof.authority_set_id != state.latest_proof.authority_set_id + 1 {
-        // Error::AuthoritySetIdNotSequential
+        reply_err(Error::AuthoritySetIdNotSequential);
+        return;
     }
 
     let block = exec::block_height();
 
     if matches!(state.proof_blocks.last_key_value(), Some((_, &lst_block)) if lst_block == block) {
-        // Error::ManyProofsSubmittedInSameBlock
+        reply_err(Error::ManyProofsSubmittedInSameBlock);
+        return;
     }
 
     if state
@@ -53,10 +57,20 @@ extern "C" fn handle() {
     }
 
     state.latest_proof = msg.proof;
+
+    reply_ok();
 }
 
 #[no_mangle]
 extern "C" fn state() {
     let state = unsafe { STATE.take().expect("State is not set") };
     msg::reply(state, 0).expect("Failed to read state");
+}
+
+fn reply_err(err: Error) {
+    msg::reply(Reply(Err(err)), 0).expect("Failed to send reply");
+}
+
+fn reply_ok() {
+    msg::reply(Reply(Ok(())), 0).expect("Failed to send reply");
 }

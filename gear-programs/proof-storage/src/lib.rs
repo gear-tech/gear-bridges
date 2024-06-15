@@ -42,3 +42,6 @@ pub struct State {
     pub latest_proof: Proof,
     pub proof_blocks: BTreeMap<AuthoritySetId, BlockNumber>,
 }
+
+#[derive(Debug, Decode, Encode, TypeInfo)]
+pub struct Reply(Result<(), Error>);

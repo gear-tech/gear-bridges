@@ -67,8 +67,14 @@ impl GearProofStorage {
     pub async fn new(endpoint: &str, fee_payer: &str) -> anyhow::Result<GearProofStorage> {
         let wrapped_gear_api = WrappedGearApi::new(endpoint).await?;
 
-        let endpoint: Vec<_> = endpoint.split(':').collect();
-        let domain = endpoint[0];
+        assert_eq!(
+            &endpoint[..5],
+            "ws://",
+            "Invalid endpoint format: expected ws://..."
+        );
+
+        let endpoint: Vec<_> = endpoint[5..].split(':').collect();
+        let domain = ["ws://", endpoint[0]].concat();
         let port = endpoint[1].parse::<u16>()?;
         let address = WSAddress::try_new(domain, port)?;
 
@@ -91,6 +97,8 @@ impl GearProofStorage {
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
+        // TODO: Read state from program if it already exists.
+
         let (code_id, _) = self
             .gear_api
             .upload_code(gear_proof_storage::WASM_BINARY)

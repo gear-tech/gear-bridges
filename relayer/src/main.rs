@@ -122,7 +122,7 @@ struct PrometheusArgs {
 struct ProofStorageArgs {
     /// Gear fee payer. If not set, proofs are saved to file system
     #[arg(long = "gear-fee-payer", env = "GEAR_FEE_PAYER")]
-    fee_payer: Option<String>,
+    gear_fee_payer: Option<String>,
 }
 
 #[tokio::main]
@@ -147,13 +147,14 @@ async fn main() {
             let eth_api = create_eth_client(&args.ethereum_args);
 
             let proof_storage: Box<dyn ProofStorage> =
-                if let Some(fee_payer) = args.proof_storage_args.fee_payer {
+                if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
                     Box::from(
                         GearProofStorage::new(&args.vara_endpoint.vara_endpoint, &fee_payer)
                             .await
                             .expect("Failed to initilize proof storage"),
                     )
                 } else {
+                    log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
                     Box::from(FileSystemProofStorage::new("./proof_storage".into()))
                 };
 

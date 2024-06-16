@@ -1,4 +1,4 @@
-use super::{Error, HandleMessage, InitMessage, Reply, State};
+use super::{Error, HandleMessage, InitMessage, Proof, Reply, State};
 use gstd::{collections::BTreeMap, exec, msg, prelude::*, ActorId};
 
 static mut ADMIN_ADDRESS: ActorId = ActorId::new([0u8; 32]);
@@ -36,7 +36,7 @@ extern "C" fn handle() {
     let state = unsafe { STATE.as_mut().unwrap() };
     let msg: HandleMessage = msg::load().unwrap();
 
-    if msg.proof.authority_set_id != state.latest_proof.authority_set_id + 1 {
+    if msg.authority_set_id != state.latest_proof.authority_set_id + 1 {
         reply_err(Error::AuthoritySetIdNotSequential);
         return;
     }
@@ -50,13 +50,14 @@ extern "C" fn handle() {
 
     if state
         .proof_blocks
-        .insert(msg.proof.authority_set_id, block)
+        .insert(msg.authority_set_id, block)
         .is_some()
     {
         unreachable!("Due to the check that new authority set id == previous + 1");
     }
 
-    state.latest_proof = msg.proof;
+    state.latest_proof.proof = msg.proof;
+    state.latest_proof.authority_set_id = msg.authority_set_id;
 
     reply_ok();
 }

@@ -43,7 +43,8 @@ pub struct InitMessage {
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct HandleMessage {
-    pub proof: Proof,
+    pub proof: Vec<u8>,
+    pub authority_set_id: AuthoritySetId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]

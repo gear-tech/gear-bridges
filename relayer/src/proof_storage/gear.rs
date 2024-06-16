@@ -1,8 +1,16 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::mpsc::{channel, Receiver, Sender},
+};
 
 use futures::executor::block_on;
-use gclient::{GearApi, WSAddress};
-use gear_core::ids::ProgramId;
+use gclient::{
+    metadata::runtime_types::gear_common::event::DispatchStatus, Event as RuntimeEvent, GearApi,
+    GearEvent, WSAddress,
+};
+use gear_core::ids::{MessageId, ProgramId};
+use gear_rpc_client::GearApi as WrappedGearApi;
 use parity_scale_codec::Encode;
 use primitive_types::H256;
 
@@ -13,6 +21,7 @@ pub struct GearProofStorage {
     gear_api: GearApi,
     program: Option<ProgramId>,
     cache: RefCell<Cache>,
+    message_channel: Sender<UpdateStateMessage>,
 }
 
 #[derive(Default)]
@@ -56,6 +65,8 @@ impl ProofStorage for GearProofStorage {
 
 impl GearProofStorage {
     pub async fn new(endpoint: &str, fee_payer: &str) -> anyhow::Result<GearProofStorage> {
+        let wrapped_gear_api = WrappedGearApi::new(endpoint).await?;
+
         let endpoint: Vec<_> = endpoint.split(':').collect();
         let domain = endpoint[0];
         let port = endpoint[1].parse::<u16>()?;
@@ -63,10 +74,15 @@ impl GearProofStorage {
 
         let gear_api = GearApi::init_with(address, fee_payer).await?;
 
+        let message_channel = run_message_sender(gear_api.clone(), wrapped_gear_api)
+            .await
+            .expect("Failed to run message sender");
+
         Ok(GearProofStorage {
             gear_api,
             cache: Default::default(),
             program: None,
+            message_channel,
         })
     }
 
@@ -177,11 +193,27 @@ impl GearProofStorage {
             .cache
             .borrow_mut()
             .proofs
-            .insert(new_authority_set_id, proof);
+            .insert(new_authority_set_id, proof.clone());
 
-        // TODO: Submit to gear.
+        let payload = gear_proof_storage::HandleMessage {
+            proof: proof.into_bytes(),
+            authority_set_id: new_authority_set_id,
+        };
 
-        todo!()
+        let Some(program) = self.program else {
+            return Err(ProofStorageError::NotInitialized);
+        };
+
+        let message = UpdateStateMessage {
+            payload,
+            destination: program,
+        };
+
+        self.message_channel
+            .send(message)
+            .expect("Failed to send message over channel");
+
+        Ok(())
     }
 
     async fn read_program_state(
@@ -200,4 +232,179 @@ impl GearProofStorage {
 
         Ok(state)
     }
+}
+
+struct UpdateStateMessage {
+    payload: gear_proof_storage::HandleMessage,
+    destination: ProgramId,
+}
+
+enum MessageState {
+    Pending {
+        message: UpdateStateMessage,
+    },
+    Submitted {
+        message: UpdateStateMessage,
+        msg_id: MessageId,
+        at_block: u32,
+    },
+    Failed {
+        message: UpdateStateMessage,
+        error: anyhow::Error,
+    },
+}
+
+async fn run_message_sender(
+    gear_api: GearApi,
+    wrapped_gear_api: WrappedGearApi,
+) -> anyhow::Result<Sender<UpdateStateMessage>> {
+    let (sender, receiver) = channel();
+
+    tokio::spawn(async move {
+        loop {
+            let res = message_sender_inner(&gear_api, &wrapped_gear_api, receiver).await;
+            if let Err(err) = res {
+                panic!("Message sender failed: {}", err);
+            }
+            unreachable!()
+        }
+    });
+
+    Ok(sender)
+}
+
+const MESSAGE_RESEND_TIMEOUT: u32 = 100;
+
+async fn message_sender_inner(
+    gear_api: &GearApi,
+    wrapped_gear_api: &WrappedGearApi,
+    receiver: Receiver<UpdateStateMessage>,
+) -> anyhow::Result<()> {
+    let mut states: Vec<MessageState> = vec![];
+
+    let latest_processed = wrapped_gear_api.latest_finalized_block().await?;
+    let mut latest_processed = wrapped_gear_api
+        .block_hash_to_number(latest_processed)
+        .await?;
+
+    loop {
+        for message in receiver.try_iter() {
+            states.push(MessageState::Pending { message });
+        }
+
+        let mut new_states = vec![];
+        for state in states.into_iter() {
+            let new_state = match state {
+                MessageState::Pending { message } => {
+                    let res = submit_message(&gear_api, &message).await;
+
+                    match res {
+                        Ok((msg_id, block)) => {
+                            let block = gear_api.block_number_at(block).await?;
+
+                            MessageState::Submitted {
+                                message,
+                                msg_id,
+                                at_block: block,
+                            }
+                        }
+                        Err(err) => MessageState::Failed {
+                            message,
+                            error: err,
+                        },
+                    }
+                }
+                MessageState::Failed { message, error } => {
+                    log::error!("Error sending proof to gear: {}", error);
+                    MessageState::Pending { message }
+                }
+                MessageState::Submitted { .. } => state,
+            };
+
+            new_states.push(new_state);
+        }
+        states = new_states;
+
+        let latest_finalized = wrapped_gear_api.latest_finalized_block().await?;
+        let latest_finalized = wrapped_gear_api
+            .block_hash_to_number(latest_finalized)
+            .await?;
+
+        let mut message_dispatched_events = HashMap::new();
+        for block in latest_processed + 1..=latest_finalized {
+            let block = wrapped_gear_api.block_number_to_hash(block).await?;
+            let events = gear_api.events_at(block).await?;
+
+            for event in events {
+                if let RuntimeEvent::Gear(GearEvent::MessagesDispatched { statuses, .. }) = event {
+                    for (msg_id, status) in statuses {
+                        let msg_id = MessageId::new(msg_id.0);
+                        message_dispatched_events.insert(msg_id, status);
+                    }
+                }
+            }
+        }
+        latest_processed = latest_finalized;
+
+        let mut new_states = vec![];
+        for state in states.into_iter() {
+            let new_state = match state {
+                MessageState::Submitted {
+                    message,
+                    msg_id,
+                    at_block,
+                } => match message_dispatched_events.get(&msg_id) {
+                    Some(DispatchStatus::Success) => None,
+                    Some(DispatchStatus::Failed) => Some(MessageState::Pending { message }),
+                    Some(DispatchStatus::NotExecuted) => {
+                        log::error!("Message {} at block #{} not executed", msg_id, at_block);
+                        None
+                    }
+                    None => {
+                        if at_block + MESSAGE_RESEND_TIMEOUT > latest_finalized {
+                            log::warn!(
+                                "Timeout for message {} at block #{} exceeded",
+                                msg_id,
+                                at_block
+                            );
+
+                            Some(MessageState::Pending { message })
+                        } else {
+                            Some(MessageState::Submitted {
+                                message,
+                                msg_id,
+                                at_block,
+                            })
+                        }
+                    }
+                },
+                _ => Some(state),
+            };
+
+            if let Some(new_state) = new_state {
+                new_states.push(new_state);
+            }
+        }
+        states = new_states;
+    }
+}
+
+async fn submit_message(
+    gear_api: &GearApi,
+    message: &UpdateStateMessage,
+) -> anyhow::Result<(MessageId, H256)> {
+    let gas = gear_api
+        .calculate_handle_gas(
+            None,
+            message.destination,
+            message.payload.encode(),
+            0,
+            false,
+        )
+        .await?
+        .min_limit;
+
+    Ok(gear_api
+        .send_message(message.destination, &message.payload, gas, 0)
+        .await?)
 }

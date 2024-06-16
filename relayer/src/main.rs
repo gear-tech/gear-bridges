@@ -7,7 +7,7 @@ use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use metrics::MetricsBuilder;
-use proof_storage::FileSystemProofStorage;
+use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 
@@ -72,6 +72,8 @@ struct RelayMerkleRootsArgs {
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
+    #[clap(flatten)]
+    proof_storage_args: ProofStorageArgs,
 }
 
 #[derive(Args)]
@@ -118,9 +120,9 @@ struct PrometheusArgs {
 
 #[derive(Args)]
 struct ProofStorageArgs {
-    /// Gear fee payer
+    /// Gear fee payer. If not set, proofs are saved to file system
     #[arg(long = "gear-fee-payer", env = "GEAR_FEE_PAYER")]
-    fee_payer: String,
+    fee_payer: Option<String>,
 }
 
 #[tokio::main]
@@ -144,7 +146,16 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let proof_storage = Box::from(FileSystemProofStorage::new("./proof_storage".into()));
+            let proof_storage: Box<dyn ProofStorage> =
+                if let Some(fee_payer) = args.proof_storage_args.fee_payer {
+                    Box::from(
+                        GearProofStorage::new(&args.vara_endpoint.vara_endpoint, &fee_payer)
+                            .await
+                            .expect("Failed to initilize proof storage"),
+                    )
+                } else {
+                    Box::from(FileSystemProofStorage::new("./proof_storage".into()))
+                };
 
             let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
 

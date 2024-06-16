@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::mpsc::{channel, Receiver, Sender},
 };
 
@@ -27,7 +27,7 @@ pub struct GearProofStorage {
 #[derive(Default)]
 struct Cache {
     circuit_data: Option<CircuitData>,
-    proofs: HashMap<u64, Proof>,
+    proofs: BTreeMap<u64, Proof>,
 }
 
 impl ProofStorage for GearProofStorage {
@@ -145,10 +145,20 @@ impl GearProofStorage {
     }
 
     async fn get_latest_authority_set_id_inner(&self) -> Option<AuthoritySetId> {
-        self.read_program_state(None)
+        let stored_latest = self
+            .read_program_state(None)
             .await
             .ok()
-            .map(|s| s.latest_proof.authority_set_id)
+            .map(|s| s.latest_proof.authority_set_id);
+
+        let cached = self.cache.borrow().proofs.last_key_value().map(|(&k, _)| k);
+
+        match (stored_latest, cached) {
+            (Some(stored), Some(cached)) => Some(stored.max(cached)),
+            (Some(stored), None) => Some(stored),
+            (None, Some(cached)) => Some(cached),
+            (None, None) => None,
+        }
     }
 
     async fn get_proof_for_authority_set_id_inner(

@@ -6,12 +6,17 @@ edition.workspace = true
 [dependencies]
 bridging_payment.workspace = true
 ethereum-client.workspace = true
+gear_proof_storage.workspace = true
 gear-rpc-client.workspace = true
 prover.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+dotenv.workspace = true
+futures.workspace = true
+gear-core.workspace = true
+gclient.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true
 lazy_static.workspace = true

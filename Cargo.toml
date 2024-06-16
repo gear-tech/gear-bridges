@@ -29,6 +29,7 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 
 grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
+gear_proof_storage = { path = "gear-programs/proof-storage" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -46,12 +47,14 @@ blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
+dotenv = "0.15.0"
 env_logger = "0.9.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",
     "codec",
 ] }
 ff = { version = "0.13.0", features = ["derive"] }
+futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
 hex = { version = "0.4.3", default-features = false }
 hex-literal = "0.4.1"
@@ -84,6 +87,8 @@ unroll = "0.1.5"
 gstd = { version = "1.4.1", features = ["nightly"] }
 gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
+gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
+gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
     "std",
 ] }

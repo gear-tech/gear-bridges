@@ -7,6 +7,7 @@ use ethereum_client::Contracts as EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use metrics::MetricsBuilder;
+use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 
@@ -59,7 +60,7 @@ struct RelayMessagesArgs {
     #[arg(long = "from-block")]
     from_block: Option<u32>,
     /// Address of bridging payment program (if not specified, relayer will relay all messages)
-    #[arg(long = "bridging-payment-address")]
+    #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
     bridging_payment_address: Option<String>,
 }
 
@@ -71,6 +72,8 @@ struct RelayMerkleRootsArgs {
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
+    #[clap(flatten)]
+    proof_storage_args: ProofStorageArgs,
 }
 
 #[derive(Args)]
@@ -78,7 +81,8 @@ struct VaraEndpointArg {
     /// Address of the VARA RPC endpoint
     #[arg(
         long = "vara-endpoint",
-        default_value = DEFAULT_VARA_RPC
+        default_value = DEFAULT_VARA_RPC,
+        env = "VARA_RPC"
     )]
     vara_endpoint: String,
 }
@@ -88,17 +92,18 @@ struct EthereumArgs {
     /// Address of the ethereum endpoint
     #[arg(
         long = "ethereum-endpoint",
-        default_value = DEFAULT_ETH_RPC
+        default_value = DEFAULT_ETH_RPC,
+        env = "ETH_RPC"
     )]
     eth_endpoint: String,
     /// Private key for fee payer
-    #[arg(long = "fee-payer")]
+    #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
     fee_payer: Option<String>,
     /// Ethereum address of relayer contract
-    #[arg(long = "relayer-address")]
+    #[arg(long = "relayer-address", env = "ETH_RELAYER_ADDRESS")]
     relayer_address: String,
     /// Ethereum address of message queue contract
-    #[arg(long = "mq-address")]
+    #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     mq_address: String,
 }
 
@@ -107,13 +112,23 @@ struct PrometheusArgs {
     /// Address of the prometheus endpoint
     #[arg(
         long = "prometheus-endpoint",
-        default_value = DEFAULT_PROMETHEUS_ENDPOINT
+        default_value = DEFAULT_PROMETHEUS_ENDPOINT,
+        env = "PROMETHEUS_ENDPOINT"
     )]
     endpoint: String,
 }
 
+#[derive(Args)]
+struct ProofStorageArgs {
+    /// Gear fee payer. If not set, proofs are saved to file system
+    #[arg(long = "gear-fee-payer", env = "GEAR_FEE_PAYER")]
+    gear_fee_payer: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
+    let _ = dotenv::dotenv();
+
     pretty_env_logger::formatted_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
@@ -131,7 +146,19 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let relayer = MerkleRootRelayer::new(gear_api, eth_api).await;
+            let proof_storage: Box<dyn ProofStorage> =
+                if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
+                    Box::from(
+                        GearProofStorage::new(&args.vara_endpoint.vara_endpoint, &fee_payer)
+                            .await
+                            .expect("Failed to initilize proof storage"),
+                    )
+                } else {
+                    log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
+                    Box::from(FileSystemProofStorage::new("./proof_storage".into()))
+                };
+
+            let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
 
             MetricsBuilder::new()
                 .register_service(&relayer)

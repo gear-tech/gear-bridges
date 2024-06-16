@@ -2,7 +2,7 @@ use prometheus::IntGauge;
 
 use crate::{
     metrics::{impl_metered_service, MeteredService},
-    proof_storage::{FileSystemProofStorage, ProofStorage},
+    proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
     GENESIS_CONFIG,
 };

@@ -261,13 +261,9 @@ async fn run_message_sender(
     let (sender, receiver) = channel();
 
     tokio::spawn(async move {
-        loop {
-            let res = message_sender_inner(&gear_api, &wrapped_gear_api, receiver).await;
-            if let Err(err) = res {
-                panic!("Message sender failed: {}", err);
-            }
-            unreachable!()
-        }
+        message_sender_inner(&gear_api, &wrapped_gear_api, receiver)
+            .await
+            .expect("Failed to run message sender");
     });
 
     Ok(sender)
@@ -296,7 +292,7 @@ async fn message_sender_inner(
         for state in states.into_iter() {
             let new_state = match state {
                 MessageState::Pending { message } => {
-                    let res = submit_message(&gear_api, &message).await;
+                    let res = submit_message(gear_api, &message).await;
 
                     match res {
                         Ok((msg_id, block)) => {

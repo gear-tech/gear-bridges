@@ -217,7 +217,7 @@ impl Contracts {
         U1: Convert<U256>,
         U2: Convert<U256>,
         U3: Convert<U256>,
-        N: Convert<Uint<256, 4>>,
+        N: Convert<B256>,
         S: Convert<B256>,
         R: Convert<Address>,
         P: Convert<Bytes>,
@@ -281,7 +281,7 @@ impl Contracts {
     }
 
     pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
-        let nonce = U256::from_le_bytes(nonce_le);
+        let nonce = B256::from(nonce_le);
 
         // TODO: Change isProcessed to accept only nonce.
         let processed = self

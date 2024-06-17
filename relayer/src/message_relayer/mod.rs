@@ -114,7 +114,7 @@ async fn submit_message(
 
     // TODO: Fully decode
     let nonce_bytes = &message.nonce_le[..16];
-    let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
+    let nonce = H256::from_slice(nonce_bytes);
 
     let tx_hash = eth_api
         .provide_content_message(

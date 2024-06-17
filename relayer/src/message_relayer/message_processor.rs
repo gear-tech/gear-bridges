@@ -5,6 +5,7 @@ use std::{
 
 use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
+use primitive_types::H256;
 use prometheus::{IntCounter, IntGauge};
 
 use crate::metrics::{impl_metered_service, MeteredService};
@@ -292,8 +293,7 @@ impl Era {
         let status = eth_api.get_tx_status(tx.hash).await?;
 
         // TODO: Fully decode
-        let nonce_bytes: &_ = &tx.message.nonce_le[..16];
-        let nonce = u128::from_le_bytes(nonce_bytes.try_into()?);
+        let nonce = H256::from(tx.message.nonce_le);
 
         match status {
             TxStatus::Finalized => {

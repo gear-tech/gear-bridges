@@ -11,7 +11,7 @@ pub use code::WASM_BINARY_OPT as WASM_BINARY;
 pub use checkpointeths_io as io;
 
 #[cfg(not(feature = "std"))]
-use gstd::Vec;
+use gstd::{Box, Vec};
 
 pub mod merkle;
 mod state;

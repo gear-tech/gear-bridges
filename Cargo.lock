@@ -1638,9 +1638,9 @@ dependencies = [
 name = "bridging_payment"
 version = "0.1.0"
 dependencies = [
- "gear-wasm-builder 1.4.1",
+ "gear-wasm-builder",
  "grc20_gateway",
- "gstd 1.4.1",
+ "gstd",
  "parity-scale-codec",
  "primitive-types 0.12.2",
  "scale-info",
@@ -1823,10 +1823,11 @@ dependencies = [
  "checkpointeths-io",
  "circular-buffer",
  "futures",
+ "gbuiltin-bls381",
  "gclient",
- "gear-wasm-builder 1.4.1",
+ "gear-wasm-builder",
  "getrandom 0.2.15",
- "gstd 1.4.1",
+ "gstd",
  "hex",
  "hex-literal",
  "lazy_static",
@@ -1837,6 +1838,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tree_hash_derive",
 ]
 
 [[package]]
@@ -1849,8 +1851,8 @@ dependencies = [
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
  "ethereum-common",
- "gmeta 1.4.1",
- "gstd 1.4.1",
+ "gmeta",
+ "gstd",
  "hex-literal",
  "parity-scale-codec",
  "scale-info",
@@ -2622,9 +2624,9 @@ name = "demo-constructor"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gcore 1.4.2",
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gcore",
+ "gear-wasm-builder",
+ "gstd",
  "hex",
  "parity-scale-codec",
 ]
@@ -2634,8 +2636,8 @@ name = "demo-delayed-sender"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gear-wasm-builder",
+ "gstd",
 ]
 
 [[package]]
@@ -2643,8 +2645,8 @@ name = "demo-init-wait"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gear-wasm-builder",
+ "gstd",
 ]
 
 [[package]]
@@ -2652,8 +2654,8 @@ name = "demo-proxy"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
  "scale-info",
 ]
@@ -2663,8 +2665,8 @@ name = "demo-read-big-state"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
 ]
 
@@ -2673,8 +2675,8 @@ name = "demo-reserve-gas"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
 ]
 
@@ -2683,10 +2685,10 @@ name = "demo-signal-entry"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gcore 1.4.2",
- "gear-core 1.4.2",
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gcore",
+ "gear-core",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
 ]
 
@@ -2696,9 +2698,9 @@ version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "futures",
- "gcore 1.4.2",
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gcore",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
 ]
 
@@ -3890,15 +3892,6 @@ dependencies = [
 
 [[package]]
 name = "galloc"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eec05cbaee718ae5fe97e62dacbec2807186c942ed24e72e6984e6bb2e81ab3f"
-dependencies = [
- "gear-dlmalloc",
-]
-
-[[package]]
-name = "galloc"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
@@ -3925,7 +3918,7 @@ version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
- "gear-core 1.4.2",
+ "gear-core",
  "gprimitives",
  "parity-scale-codec",
 ]
@@ -3938,8 +3931,8 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
- "gear-core 1.4.2",
- "gear-core-errors 1.4.2",
+ "gear-core",
+ "gear-core-errors",
  "gear-utils",
  "gnode",
  "gsdk",
@@ -3953,25 +3946,13 @@ dependencies = [
 
 [[package]]
 name = "gcore"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dcd57f0ef3eada83210201b59f0cff9fe2c3849563eccf03f5942943adb4ae8"
-dependencies = [
- "gear-core-errors 1.4.1",
- "gear-stack-buffer 1.4.1",
- "gsys 1.4.1",
- "parity-scale-codec",
-]
-
-[[package]]
-name = "gcore"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-core-errors 1.4.2",
- "gear-stack-buffer 1.4.2",
+ "gear-core-errors",
+ "gear-stack-buffer",
  "gprimitives",
- "gsys 1.4.2",
+ "gsys",
  "parity-scale-codec",
 ]
 
@@ -3985,9 +3966,9 @@ dependencies = [
  "frame-support",
  "frame-system",
  "gear-common-codegen",
- "gear-core 1.4.2",
- "gear-wasm-instrument 1.4.2",
- "gsys 1.4.2",
+ "gear-core",
+ "gear-wasm-instrument",
+ "gsys",
  "log",
  "primitive-types 0.12.2",
  "sp-arithmetic",
@@ -4008,30 +3989,6 @@ dependencies = [
 
 [[package]]
 name = "gear-core"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f6d6e9d3d4eee34166236bff1622b1ee22379097ccd03c2cd843ccd790fac5f"
-dependencies = [
- "blake2-rfc",
- "byteorder",
- "derive_more",
- "enum-iterator 1.5.0",
- "gear-core-errors 1.4.1",
- "gear-wasm-instrument 1.4.1",
- "gsys 1.4.1",
- "hashbrown 0.14.5",
- "hex",
- "log",
- "num-traits",
- "numerated 1.4.1",
- "parity-scale-codec",
- "paste",
- "scale-info",
- "wasmparser-nostd",
-]
-
-[[package]]
-name = "gear-core"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
@@ -4039,15 +3996,15 @@ dependencies = [
  "byteorder",
  "derive_more",
  "enum-iterator 1.5.0",
- "gear-core-errors 1.4.2",
- "gear-wasm-instrument 1.4.2",
+ "gear-core-errors",
+ "gear-wasm-instrument",
  "gprimitives",
- "gsys 1.4.2",
+ "gsys",
  "hashbrown 0.14.5",
  "hex",
  "log",
  "num-traits",
- "numerated 1.4.2",
+ "numerated",
  "parity-scale-codec",
  "paste",
  "primitive-types 0.12.2",
@@ -4064,26 +4021,15 @@ dependencies = [
  "actor-system-error",
  "blake2",
  "derive_more",
- "gear-core 1.4.2",
- "gear-core-errors 1.4.2",
+ "gear-core",
+ "gear-core-errors",
  "gear-lazy-pages-common",
  "gear-sandbox",
  "gear-sandbox-env",
- "gear-wasm-instrument 1.4.2",
- "gsys 1.4.2",
+ "gear-wasm-instrument",
+ "gsys",
  "log",
  "parity-scale-codec",
-]
-
-[[package]]
-name = "gear-core-errors"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee3baa8a387c829d5045015f788a31a35b6cd50df72f25420bb850d2bd432416"
-dependencies = [
- "derive_more",
- "enum-iterator 1.5.0",
- "scale-info",
 ]
 
 [[package]]
@@ -4104,12 +4050,12 @@ source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge
 dependencies = [
  "actor-system-error",
  "derive_more",
- "gear-core 1.4.2",
+ "gear-core",
  "gear-core-backend",
- "gear-core-errors 1.4.2",
+ "gear-core-errors",
  "gear-lazy-pages-common",
- "gear-wasm-instrument 1.4.2",
- "gsys 1.4.2",
+ "gear-wasm-instrument",
+ "gsys",
  "log",
  "scale-info",
 ]
@@ -4135,14 +4081,14 @@ dependencies = [
  "cfg-if",
  "derive_more",
  "errno",
- "gear-core 1.4.2",
+ "gear-core",
  "gear-lazy-pages-common",
  "gear-sandbox-host",
  "libc",
  "log",
  "mach",
  "nix 0.26.4",
- "numerated 1.4.2",
+ "numerated",
  "region",
  "sp-wasm-interface-common",
  "winapi",
@@ -4153,7 +4099,7 @@ name = "gear-lazy-pages-common"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-core 1.4.2",
+ "gear-core",
  "num_enum",
  "parity-scale-codec",
 ]
@@ -4165,7 +4111,7 @@ source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge
 dependencies = [
  "byteorder",
  "gear-common",
- "gear-core 1.4.2",
+ "gear-core",
  "gear-lazy-pages-common",
  "gear-runtime-interface",
  "log",
@@ -4213,7 +4159,7 @@ dependencies = [
  "ark-ff 0.4.2",
  "ark-scale 0.0.12",
  "byteorder",
- "gear-core 1.4.2",
+ "gear-core",
  "gear-lazy-pages",
  "gear-lazy-pages-common",
  "gear-sandbox-host",
@@ -4275,17 +4221,6 @@ dependencies = [
 
 [[package]]
 name = "gear-ss58"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae8a82173968491c367a0fd0a315337f942228d3663322a9c08b66e057903858"
-dependencies = [
- "anyhow",
- "blake2",
- "bs58 0.5.1",
-]
-
-[[package]]
-name = "gear-ss58"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
@@ -4293,12 +4228,6 @@ dependencies = [
  "bs58 0.5.1",
  "hex",
 ]
-
-[[package]]
-name = "gear-stack-buffer"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78c49ff4ab26f2949996266c3edce0cb3494931d546e4ee8ae928c65c3a50fce"
 
 [[package]]
 name = "gear-stack-buffer"
@@ -4311,7 +4240,7 @@ version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "env_logger 0.10.2",
- "gear-core 1.4.2",
+ "gear-core",
  "hex",
  "nonempty",
  "parity-scale-codec",
@@ -4328,32 +4257,6 @@ checksum = "bbfbfa701dc65e683fcd2fb24f046bcef22634acbdf47ad14724637dc39ad05b"
 
 [[package]]
 name = "gear-wasm-builder"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b048074283e5e81f039668709de25d69fb63d43adc9260a5dfb7a0fb7ba8b314"
-dependencies = [
- "anyhow",
- "cargo_metadata",
- "chrono",
- "colored",
- "dirs",
- "gear-core 1.4.1",
- "gear-pwasm-utils",
- "gear-wasm-instrument 1.4.1",
- "gmeta 1.4.1",
- "log",
- "once_cell",
- "pathdiff",
- "regex",
- "rustc_version 0.4.0",
- "thiserror",
- "toml 0.8.14",
- "wasmparser-nostd",
- "which",
-]
-
-[[package]]
-name = "gear-wasm-builder"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
@@ -4362,10 +4265,10 @@ dependencies = [
  "chrono",
  "colored",
  "dirs",
- "gear-core 1.4.2",
+ "gear-core",
  "gear-pwasm-utils",
- "gear-wasm-instrument 1.4.2",
- "gmeta 1.4.2",
+ "gear-wasm-instrument",
+ "gmeta",
  "log",
  "once_cell",
  "pathdiff",
@@ -4375,17 +4278,6 @@ dependencies = [
  "toml 0.8.14",
  "wasmparser-nostd",
  "which",
-]
-
-[[package]]
-name = "gear-wasm-instrument"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a30f5b93b1278ed6157924b60afae8d7b9d1697ba893b71be8f36f3527622cf"
-dependencies = [
- "derive_more",
- "enum-iterator 1.5.0",
- "gwasm-instrument",
 ]
 
 [[package]]
@@ -4497,18 +4389,6 @@ checksum = "8be18de09a56b60ed0edf84bc9df007e30040691af7acd1c41874faac5895bfb"
 
 [[package]]
 name = "gmeta"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ab99c1c5b31b55620dac12ba4bd042fac156a6f2842c9c4edcfd278caf8c6ae"
-dependencies = [
- "blake2-rfc",
- "derive_more",
- "hex",
- "scale-info",
-]
-
-[[package]]
-name = "gmeta"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
@@ -4535,7 +4415,7 @@ version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
- "gear-ss58 1.4.2",
+ "gear-ss58",
  "hex",
  "parity-scale-codec",
  "primitive-types 0.12.2",
@@ -4546,8 +4426,8 @@ dependencies = [
 name = "grc20_gateway"
 version = "0.1.0"
 dependencies = [
- "gear-wasm-builder 1.4.1",
- "gstd 1.4.1",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
  "primitive-types 0.12.2",
  "scale-info",
@@ -4574,8 +4454,8 @@ dependencies = [
  "colored",
  "futures",
  "futures-util",
- "gear-core 1.4.2",
- "gear-core-errors 1.4.2",
+ "gear-core",
+ "gear-core-errors",
  "gear-utils",
  "gsdk-codegen",
  "hex",
@@ -4607,53 +4487,20 @@ dependencies = [
 
 [[package]]
 name = "gstd"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "191118e6cdbc43811c17d96aaa4cf52a402e474f5f626936825bc0d1b330fc68"
-dependencies = [
- "arrayvec 0.7.4",
- "const_format",
- "futures",
- "galloc 1.4.1",
- "gcore 1.4.1",
- "gear-core-errors 1.4.1",
- "gstd-codegen 1.4.1",
- "hashbrown 0.14.5",
- "hex",
- "parity-scale-codec",
- "primitive-types 0.12.2",
- "scale-info",
-]
-
-[[package]]
-name = "gstd"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "arrayvec 0.7.4",
  "const_format",
  "futures",
- "galloc 1.4.2",
- "gcore 1.4.2",
- "gear-core-errors 1.4.2",
- "gstd-codegen 1.4.2",
+ "galloc",
+ "gcore",
+ "gear-core-errors",
+ "gstd-codegen",
  "hashbrown 0.14.5",
  "hex",
  "parity-scale-codec",
  "scale-info",
-]
-
-[[package]]
-name = "gstd-codegen"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0122a5b154e398c88b477644ca560e59296de2001f20bf4d16f21760923f3ce"
-dependencies = [
- "gear-ss58 1.4.1",
- "hex",
- "proc-macro2",
- "quote",
- "syn 2.0.66",
 ]
 
 [[package]]
@@ -4666,12 +4513,6 @@ dependencies = [
  "quote",
  "syn 2.0.66",
 ]
-
-[[package]]
-name = "gsys"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e26e485e593d193dbea49821a9f67f83ffaec4f82c289b860b56dd2fd092462"
 
 [[package]]
 name = "gsys"
@@ -6787,18 +6628,6 @@ dependencies = [
 
 [[package]]
 name = "numerated"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d916380bb26b78ca4f72aedba04025728a57339514cb14fa9c49e5fe95c1eee3"
-dependencies = [
- "derive_more",
- "num-traits",
- "parity-scale-codec",
- "scale-info",
-]
-
-[[package]]
-name = "numerated"
 version = "1.4.2"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
@@ -6994,14 +6823,14 @@ dependencies = [
  "frame-support",
  "frame-system",
  "gear-common",
- "gear-core 1.4.2",
+ "gear-core",
  "gear-core-backend",
- "gear-core-errors 1.4.2",
+ "gear-core-errors",
  "gear-core-processor",
  "gear-lazy-pages-common",
  "gear-lazy-pages-interface",
  "gear-runtime-interface",
- "gear-wasm-instrument 1.4.2",
+ "gear-wasm-instrument",
  "log",
  "pallet-authorship",
  "pallet-balances",
@@ -7050,7 +6879,7 @@ dependencies = [
  "frame-system",
  "gbuiltin-bridge",
  "gear-common",
- "gear-core 1.4.2",
+ "gear-core",
  "log",
  "pallet-babe",
  "pallet-gear-builtin",
@@ -7094,8 +6923,8 @@ dependencies = [
  "frame-support",
  "frame-system",
  "gbuiltin-bls381",
- "gear-core 1.4.2",
- "gear-core-errors 1.4.2",
+ "gear-core",
+ "gear-core-errors",
  "gear-core-processor",
  "gear-runtime-interface",
  "impl-trait-for-tuples",
@@ -7127,7 +6956,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "gear-common",
- "gear-core 1.4.2",
+ "gear-core",
  "hashbrown 0.14.5",
  "log",
  "parity-scale-codec",
@@ -7149,7 +6978,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "gear-common",
- "gear-core 1.4.2",
+ "gear-core",
  "hex",
  "log",
  "pallet-balances",
@@ -10755,8 +10584,8 @@ name = "test-syscalls"
 version = "0.1.0"
 source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
- "gear-wasm-builder 1.4.2",
- "gstd 1.4.2",
+ "gear-wasm-builder",
+ "gstd",
  "parity-scale-codec",
 ]
 

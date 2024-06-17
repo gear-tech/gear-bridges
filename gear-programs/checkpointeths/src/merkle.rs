@@ -58,3 +58,31 @@ pub fn is_current_committee_proof_valid(
         22,
     )
 }
+
+pub fn is_finality_proof_valid(
+    attested_header: &BeaconBlockHeader,
+    finality_header: &BeaconBlockHeader,
+    finality_branch: &[[u8; 32]],
+) -> bool {
+    let leaf_hash = finality_header.tree_hash_root();
+    let state_root = attested_header.state_root;
+
+    is_proof_valid(state_root.0, leaf_hash.0, finality_branch, 6, 41)
+}
+
+pub fn is_next_committee_proof_valid(
+    attested_header: &BeaconBlockHeader,
+    next_committee: &SyncCommittee,
+    next_committee_branch: &[[u8; 32]],
+) -> bool {
+    let leaf_hash = next_committee.tree_hash_root();
+    let state_root = attested_header.state_root;
+
+    is_proof_valid(
+        state_root.0,
+        leaf_hash.0,
+        next_committee_branch,
+        5,
+        23,
+    )
+}

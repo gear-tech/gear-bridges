@@ -4,7 +4,10 @@
 extern crate alloc;
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{
+    boxed::Box,
+    vec::Vec,
+};
 
 pub mod meta;
 
@@ -82,7 +85,7 @@ pub struct Init {
     pub genesis: Genesis,
     pub checkpoint: Hash256,
     pub finalized_header: BeaconBlockHeader,
-    pub sync_committee_current_pub_keys: SyncCommitteeKeys,
+    pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
     pub sync_committee_current: SyncCommittee,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
 }
@@ -115,7 +118,7 @@ pub struct SyncUpdate {
     pub sync_aggregate: SyncAggregate,
     pub sync_committee_signature: ArkScale<G2TypeInfo>,
     pub sync_committee_next: Option<SyncCommittee>,
-    pub sync_committee_next_pub_keys: Option<SyncCommitteeKeys>,
+    pub sync_committee_next_pub_keys: Option<Box<SyncCommitteeKeys>>,
     pub sync_committee_next_branch: Option<Vec<[u8; 32]>>,
     pub finality_branch: Vec<[u8; 32]>,
 }

@@ -1,26 +1,25 @@
 use super::*;
-use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH, base_types::FixedArray}, BeaconBlockHeader, Genesis, G1, CheckpointResult};
-use parity_scale_codec::{Decode, Encode};
+use io::{ethereum_common::{Hash256, SLOTS_PER_EPOCH, SYNC_COMMITTEE_SIZE, base_types::FixedArray}, BeaconBlockHeader, Genesis, G1, CheckpointResult, SyncCommitteeKeys};
 use circular_buffer::CircularBuffer;
 
 pub struct State<const N: usize> {
     pub genesis: Genesis,
     pub finalized_header: BeaconBlockHeader,
-    pub sync_committee_current: FixedArray<G1, 512>,
-    pub sync_committee_next: Option<Vec<G1>>,
+    pub sync_committee_current: Box<SyncCommitteeKeys>,
+    pub sync_committee_next: Option<Box<SyncCommitteeKeys>>,
     pub checkpoints: Checkpoints<N>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Checkpoints<const N: usize> {
-    checkpoints: CircularBuffer<N, Hash256>,
+    checkpoints: Box<CircularBuffer<N, Hash256>>,
     slots: Vec<(usize, u64)>,
 }
 
 impl<const N: usize> Checkpoints<N> {
     pub fn new() -> Self {
         Self {
-            checkpoints: Default::default(),
+            checkpoints: CircularBuffer::boxed(),
             slots: Vec::with_capacity(N / 2),
         }
     }

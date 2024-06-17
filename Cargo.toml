@@ -87,9 +87,9 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { version = "1.4.1", features = ["nightly"] }
-gmeta = "1.4.1"
-gear-wasm-builder = { version = "1.4.1", default-features = false }
+gstd = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", features = ["nightly"] }
+gmeta = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
+gear-wasm-builder = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
 gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }

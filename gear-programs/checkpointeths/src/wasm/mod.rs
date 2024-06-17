@@ -1,10 +1,13 @@
-use io::{Init, G1, ethereum_common::{base_types::FixedArray, tree_hash::TreeHash}, Handle, HandleResult, SyncUpdate};
+use io::{Init, G1, G2, BeaconBlockHeader, ethereum_common::{Hash256, base_types::FixedArray, tree_hash::TreeHash}, Handle, HandleResult, SyncUpdate, Genesis};
 use gstd::{msg, vec};
 use ark_serialize::CanonicalSerialize;
 use super::*;
 use state::{State, Checkpoints};
+use primitive_types::H256;
 
+mod crypto;
 mod sync_update;
+mod utils;
 
 const COUNT: usize = 150_000;
 static mut STATE: Option<State<COUNT>> = None;
@@ -25,29 +28,13 @@ extern "C" fn init() {
         panic!("Header hash is not valid. Expected = {checkpoint:?}, actual = {hash:?}");
     }
 
-    // check that provided public keys belong to the committee
-    let mut pub_keys = Vec::with_capacity(sync_committee_current
-        .pubkeys
-        .0.len());
-    let mut buffer = Vec::with_capacity(100);
-    for (pub_key_compressed, pub_key) in sync_committee_current
-        .pubkeys
-        .0
-        .as_ref()
-        .iter()
-        .zip(sync_committee_current_pub_keys.0.iter())
-    {
-        buffer.clear();
-
-        assert!(
-            matches!(
-                <G1 as CanonicalSerialize>::serialize_compressed(&pub_key.0.0, &mut buffer),
-                Ok(_) if pub_key_compressed.as_ref() == &buffer[..],
-            )
-        );
-
-        pub_keys.push(pub_key.0.0);
-    }
+    if !utils::check_public_keys(&sync_committee_current
+            .pubkeys
+            .0,
+            &sync_committee_current_pub_keys,
+        ) {
+            panic!("Wrong public committee keys");
+        }
 
     if !merkle::is_current_committee_proof_valid(
         &finalized_header,
@@ -60,7 +47,7 @@ extern "C" fn init() {
     unsafe {
         STATE = Some(State {
             genesis,
-            sync_committee_current: FixedArray(pub_keys.try_into().expect("array of public keys has the right size; qed")),
+            sync_committee_current: sync_committee_current_pub_keys,
             sync_committee_next: None,
             checkpoints: {
                 let mut checkpoints = Checkpoints::new();

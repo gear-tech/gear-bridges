@@ -90,9 +90,10 @@ unroll = "0.1.5"
 gstd = { version = "1.4.1", features = ["nightly"] }
 gmeta = "1.4.1"
 gear-wasm-builder = { version = "1.4.1", default-features = false }
-gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
-gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
-pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
+gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
+gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
+gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
+pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", default-features = false, features = [
     "std",
 ] }
 subxt = "0.32.1"

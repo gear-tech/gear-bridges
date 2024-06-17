@@ -15,7 +15,7 @@ dependencies = [
 [[package]]
 name = "actor-system-error"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
 ]
@@ -2620,7 +2620,7 @@ dependencies = [
 [[package]]
 name = "demo-constructor"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gcore 1.4.2",
  "gear-wasm-builder 1.4.2",
@@ -2632,7 +2632,7 @@ dependencies = [
 [[package]]
 name = "demo-delayed-sender"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-wasm-builder 1.4.2",
  "gstd 1.4.2",
@@ -2641,7 +2641,7 @@ dependencies = [
 [[package]]
 name = "demo-init-wait"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-wasm-builder 1.4.2",
  "gstd 1.4.2",
@@ -2650,7 +2650,7 @@ dependencies = [
 [[package]]
 name = "demo-proxy"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-wasm-builder 1.4.2",
  "gstd 1.4.2",
@@ -2661,7 +2661,7 @@ dependencies = [
 [[package]]
 name = "demo-read-big-state"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-wasm-builder 1.4.2",
  "gstd 1.4.2",
@@ -2671,7 +2671,7 @@ dependencies = [
 [[package]]
 name = "demo-reserve-gas"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-wasm-builder 1.4.2",
  "gstd 1.4.2",
@@ -2681,7 +2681,7 @@ dependencies = [
 [[package]]
 name = "demo-signal-entry"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gcore 1.4.2",
  "gear-core 1.4.2",
@@ -2693,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "demo-waiter"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "futures",
  "gcore 1.4.2",
@@ -3900,7 +3900,7 @@ dependencies = [
 [[package]]
 name = "galloc"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-dlmalloc",
 ]
@@ -3908,7 +3908,7 @@ dependencies = [
 [[package]]
 name = "gbuiltin-bls381"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -3922,7 +3922,7 @@ dependencies = [
 [[package]]
 name = "gbuiltin-bridge"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "gear-core 1.4.2",
@@ -3933,7 +3933,7 @@ dependencies = [
 [[package]]
 name = "gclient"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3941,6 +3941,7 @@ dependencies = [
  "gear-core 1.4.2",
  "gear-core-errors 1.4.2",
  "gear-utils",
+ "gnode",
  "gsdk",
  "hex",
  "parity-scale-codec",
@@ -3965,7 +3966,7 @@ dependencies = [
 [[package]]
 name = "gcore"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-core-errors 1.4.2",
  "gear-stack-buffer 1.4.2",
@@ -3977,7 +3978,7 @@ dependencies = [
 [[package]]
 name = "gear-common"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "enum-iterator 1.5.0",
@@ -3999,7 +4000,7 @@ dependencies = [
 [[package]]
 name = "gear-common-codegen"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "quote",
  "syn 2.0.66",
@@ -4032,7 +4033,7 @@ dependencies = [
 [[package]]
 name = "gear-core"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "blake2",
  "byteorder",
@@ -4058,7 +4059,7 @@ dependencies = [
 [[package]]
 name = "gear-core-backend"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "actor-system-error",
  "blake2",
@@ -4088,7 +4089,7 @@ dependencies = [
 [[package]]
 name = "gear-core-errors"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "enum-iterator 1.5.0",
@@ -4099,7 +4100,7 @@ dependencies = [
 [[package]]
 name = "gear-core-processor"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "actor-system-error",
  "derive_more",
@@ -4107,7 +4108,6 @@ dependencies = [
  "gear-core-backend",
  "gear-core-errors 1.4.2",
  "gear-lazy-pages-common",
- "gear-lazy-pages-interface",
  "gear-wasm-instrument 1.4.2",
  "gsys 1.4.2",
  "log",
@@ -4130,7 +4130,7 @@ dependencies = [
 [[package]]
 name = "gear-lazy-pages"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "cfg-if",
  "derive_more",
@@ -4151,7 +4151,7 @@ dependencies = [
 [[package]]
 name = "gear-lazy-pages-common"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-core 1.4.2",
  "num_enum",
@@ -4161,7 +4161,7 @@ dependencies = [
 [[package]]
 name = "gear-lazy-pages-interface"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "byteorder",
  "gear-common",
@@ -4206,8 +4206,12 @@ dependencies = [
 [[package]]
 name = "gear-runtime-interface"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-scale 0.0.12",
  "byteorder",
  "gear-core 1.4.2",
  "gear-lazy-pages",
@@ -4215,6 +4219,7 @@ dependencies = [
  "gear-sandbox-host",
  "log",
  "parity-scale-codec",
+ "sha2 0.10.8",
  "sp-io",
  "sp-runtime-interface",
  "sp-std 8.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.3.0)",
@@ -4225,7 +4230,7 @@ dependencies = [
 [[package]]
 name = "gear-sandbox"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-runtime-interface",
  "gear-sandbox-env",
@@ -4240,7 +4245,7 @@ dependencies = [
 [[package]]
 name = "gear-sandbox-env"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "parity-scale-codec",
  "sp-debug-derive",
@@ -4251,7 +4256,7 @@ dependencies = [
 [[package]]
 name = "gear-sandbox-host"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "environmental",
  "gear-sandbox-env",
@@ -4282,7 +4287,7 @@ dependencies = [
 [[package]]
 name = "gear-ss58"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "blake2",
  "bs58 0.5.1",
@@ -4298,12 +4303,12 @@ checksum = "78c49ff4ab26f2949996266c3edce0cb3494931d546e4ee8ae928c65c3a50fce"
 [[package]]
 name = "gear-stack-buffer"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 
 [[package]]
 name = "gear-utils"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "env_logger 0.10.2",
  "gear-core 1.4.2",
@@ -4350,7 +4355,7 @@ dependencies = [
 [[package]]
 name = "gear-wasm-builder"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -4386,7 +4391,7 @@ dependencies = [
 [[package]]
 name = "gear-wasm-instrument"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "enum-iterator 1.5.0",
@@ -4505,7 +4510,7 @@ dependencies = [
 [[package]]
 name = "gmeta"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "blake2",
  "derive_more",
@@ -4514,9 +4519,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gnode"
+version = "1.4.2"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
+dependencies = [
+ "anyhow",
+ "rand 0.8.5",
+ "smallvec",
+ "which",
+]
+
+[[package]]
 name = "gprimitives"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "gear-ss58 1.4.2",
@@ -4551,7 +4567,7 @@ dependencies = [
 [[package]]
 name = "gsdk"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -4582,7 +4598,7 @@ dependencies = [
 [[package]]
 name = "gsdk-codegen"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4612,7 +4628,7 @@ dependencies = [
 [[package]]
 name = "gstd"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "arrayvec 0.7.4",
  "const_format",
@@ -4643,7 +4659,7 @@ dependencies = [
 [[package]]
 name = "gstd-codegen"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gprimitives",
  "proc-macro2",
@@ -4660,7 +4676,7 @@ checksum = "7e26e485e593d193dbea49821a9f67f83ffaec4f82c289b860b56dd2fd092462"
 [[package]]
 name = "gsys"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 
 [[package]]
 name = "gwasm-instrument"
@@ -6784,7 +6800,7 @@ dependencies = [
 [[package]]
 name = "numerated"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "num-traits",
@@ -6962,7 +6978,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "demo-constructor",
  "demo-delayed-sender",
@@ -7011,7 +7027,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-bank"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -7026,7 +7042,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-bridge"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "binary-merkle-tree",
  "frame-benchmarking",
@@ -7055,7 +7071,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-bridge-rpc-runtime-api"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "pallet-gear-bridge",
  "sp-api",
@@ -7065,7 +7081,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-builtin"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -7081,6 +7097,7 @@ dependencies = [
  "gear-core 1.4.2",
  "gear-core-errors 1.4.2",
  "gear-core-processor",
+ "gear-runtime-interface",
  "impl-trait-for-tuples",
  "log",
  "pallet-gear",
@@ -7095,7 +7112,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-proc-macro"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7105,7 +7122,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-program"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -7125,7 +7142,7 @@ dependencies = [
 [[package]]
 name = "pallet-gear-voucher"
 version = "1.4.2"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "derive_more",
  "frame-benchmarking",
@@ -10736,7 +10753,7 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 [[package]]
 name = "test-syscalls"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge#fa0adf9dbbab3882b78f601366f07f179cb24435"
+source = "git+https://github.com/gear-tech/gear.git?branch=dn-pallet-gear-bridge_with_bls381ext#7c65980054ee0b4038edbe59e103fa382500d8ac"
 dependencies = [
  "gear-wasm-builder 1.4.2",
  "gstd 1.4.2",

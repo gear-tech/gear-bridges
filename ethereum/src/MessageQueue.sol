@@ -38,7 +38,7 @@ contract MessageQueue is IMessageQueue {
             revert MessageAlreadyProcessed(message.nonce);
 
         bytes32 msg_hash = message.hash();
-
+        
         bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
             block_number
         );

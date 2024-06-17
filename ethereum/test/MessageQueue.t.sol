@@ -152,10 +152,10 @@ contract MessageQueueTest is TestHelper {
         bytes memory ms = abi.encodePacked(content_message.nonce, content_message.sender, content_message.receiver, content_message.data);
 
 
-        bytes32 expectedMessageHash = keccak256(ms);
+        bytes32 expectedMessageHash = keccak256(abi.encodePacked(keccak256(ms)));
         
         bytes32 msg_hash = content_message.hash();
-        assertEq(msg_hash, bytes32(0xa366f34b585366d69a71c36c6831ec5d4588ff1fe04e8fb146865d86a9acead2));
+        assertEq(msg_hash, bytes32(0xe846804ca285c03c8923a0ed51340c4c29bcc7b005c5eeb7fb5b4b54a3f8bca5));
 
         assertEq(expectedMessageHash, msg_hash);
 
@@ -164,7 +164,7 @@ contract MessageQueueTest is TestHelper {
 
         bytes32 root = message_queue.calculateMerkleRoot(proof, expectedMessageHash, 3, 2);
 
-        assertEq(root, bytes32(0xf7ac03b7b0c8d3fecf2c7b3a9ce64d064ed0dff9912886ad2f1e51d2fc487367));
+        assertEq(root, bytes32(0xc739e5c26b49b1a0753fc66f21703ef508ecb53549290219fba0df2819d95aa0));
     }
 
     function test_calculate_root_buffer_leaf_2() public {
@@ -271,7 +271,7 @@ contract MessageQueueTest is TestHelper {
         });
 
         bytes32 msg_hash = vara_message.hash();
-        assertEq(msg_hash, bytes32(0xcee4066594d61f8ee79549adb64974cbd6f828a6ddabbce33d69c999a2a2c34e));
+        assertEq(msg_hash, bytes32(0x0b391b6a39429a86fb9bac38e1c8b440e8aafb2cf12a3db4283d2fe652319a3f));
 
 
         bytes32[] memory proof = new bytes32[](3);
@@ -284,7 +284,7 @@ contract MessageQueueTest is TestHelper {
 
         bytes32 calculatedRoot = message_queue.calculateMerkleRoot(proof, msg_hash, 101, 100);
 
-        assertEq(calculatedRoot, bytes32(0x94668cd3bc95e36ea65cd81a79ca146af7f6d3110cf7ba51e6e7d93d139e9fc2));
+        assertEq(calculatedRoot, bytes32(0x5019b3be4a6a941f6698e74d5fc211ef381db0440d02b6669436e2aabf55b0b4));
 
         bytes memory block_proof = bytes(hex"00");
 

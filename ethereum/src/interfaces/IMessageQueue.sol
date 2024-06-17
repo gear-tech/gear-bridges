@@ -55,6 +55,6 @@ library Hasher {
             message.receiver,
             message.data
         );
-        return keccak256(data);
+        return keccak256(abi.encodePacked(keccak256(data)));
     }
 }

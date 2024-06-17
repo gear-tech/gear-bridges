@@ -14,7 +14,7 @@ contract MessageQueue is IMessageQueue {
     using Address for address;
     using Hasher for VaraMessage;
 
-    mapping(uint256 => bool) private _processed_messages;
+    mapping(bytes32 => bool) private _processed_messages;
 
     /**
      * @dev Unpack message from merkle tree and relay it to the receiver.
@@ -38,7 +38,6 @@ contract MessageQueue is IMessageQueue {
             revert MessageAlreadyProcessed(message.nonce);
 
         bytes32 msg_hash = message.hash();
-        bytes32 merkle_trie_leaf_hash = keccak256(abi.encodePacked(msg_hash));
 
         bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
             block_number
@@ -49,7 +48,7 @@ contract MessageQueue is IMessageQueue {
         if (
             _calculateMerkleRoot(
                 proof,
-                merkle_trie_leaf_hash,
+                msg_hash,
                 total_leaves,
                 leaf_index
             ) != merkle_root

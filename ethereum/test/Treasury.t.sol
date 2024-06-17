@@ -16,7 +16,7 @@ import {ProxyContract} from "../src/ProxyContract.sol";
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 import {TestHelper, VARA_ADDRESS_3, VARA_ADDRESS_7, USER, OWNER} from "./TestHelper.t.sol";
-
+import {GRC_20_GATEWAY_ADDRESS} from "../src/libraries/Environment.sol";
 
 contract TreasuryTest is TestHelper {
         using Address for address;
@@ -51,9 +51,9 @@ contract TreasuryTest is TestHelper {
         vm.expectRevert();
 
         VaraMessage memory vara_msg = VaraMessage({
-            sender: VARA_ADDRESS_7,
+            sender: GRC_20_GATEWAY_ADDRESS,
             receiver: address(treasury),
-            nonce: 10,
+            nonce: bytes32(uint256(10)),
             data: call_data
         });
 

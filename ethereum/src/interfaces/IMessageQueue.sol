@@ -1,7 +1,7 @@
 pragma solidity ^0.8.24;
 
 struct VaraMessage {
-    uint256 nonce;
+    bytes32 nonce;
     bytes32 sender;
     address receiver;
     bytes data;
@@ -9,7 +9,7 @@ struct VaraMessage {
 
 interface IMessageQueue {
     error AlreadyInitialized();
-    error MessageAlreadyProcessed(uint256 messageNonce);
+    error MessageAlreadyProcessed(bytes32 messageNonce);
     error MessageNotProcessed();
     error MerkleRootNotSet(uint256 blockNumber);
     error BadProof();
@@ -20,7 +20,7 @@ interface IMessageQueue {
     event MessageProcessed(
         uint256 indexed blockNumber,
         bytes32 indexed messageHash,
-        uint256 indexed messageNonce
+        bytes32 indexed messageNonce
     );
 
     function calculateMerkleRoot(
@@ -50,45 +50,11 @@ library Hasher {
         VaraMessage calldata message
     ) external pure returns (bytes32) {
         bytes memory data = abi.encodePacked(
-            be_to_le(message.nonce),
+            message.nonce,
             message.sender,
             message.receiver,
             message.data
         );
         return keccak256(data);
-    }
-
-    function be_to_le(uint256 input) internal pure returns (uint256 v) {
-        v = input;
-        v =
-            ((v &
-                0xFF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00) >>
-                8) |
-            ((v &
-                0x00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF) <<
-                8);
-        v =
-            ((v &
-                0xFFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000) >>
-                16) |
-            ((v &
-                0x0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF) <<
-                16);
-        v =
-            ((v &
-                0xFFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000) >>
-                32) |
-            ((v &
-                0x00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF) <<
-                32);
-        v =
-            ((v &
-                0xFFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF0000000000000000) >>
-                64) |
-            ((v &
-                0x0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF) <<
-                64);
-
-        v = (v >> 128) | (v << 128);
     }
 }

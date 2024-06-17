@@ -292,7 +292,6 @@ impl Era {
         let tx = &mut self.pending_txs[tx];
         let status = eth_api.get_tx_status(tx.hash).await?;
 
-        // TODO: Fully decode
         let nonce = H256::from(tx.message.nonce_le);
 
         match status {

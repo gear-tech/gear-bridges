@@ -283,7 +283,6 @@ impl Contracts {
     pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
         let nonce = B256::from(nonce_le);
 
-        // TODO: Change isProcessed to accept only nonce.
         let processed = self
             .message_queue_instance
             .isProcessed(ContentMessage {

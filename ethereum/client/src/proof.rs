@@ -1,4 +1,4 @@
-use alloy_primitives::{Bytes, B256, U256};
+use alloy::primitives::{Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

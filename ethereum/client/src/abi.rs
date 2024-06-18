@@ -1,4 +1,4 @@
-use alloy_sol_types::sol;
+use alloy::sol;
 
 sol! {
     #[derive(Debug,PartialEq, Eq)]
@@ -12,11 +12,7 @@ sol! {
     #[sol(rpc)]
     #[derive(Debug,PartialEq, Eq)]
     interface IMessageQueue {
-        event MessageProcessed(
-            uint256 indexed blockNumber,
-            bytes32 indexed messageHash,
-            bytes32 indexed messageNonce
-        );
+        event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash);
 
         function calculateMerkleRoot(bytes32[] calldata proof, bytes32 hash, uint256 width, uint256 leaf_index) external view returns (bytes32);
 
@@ -35,7 +31,60 @@ sol! {
 
         function getBlockNumber(bytes32 merkle_root) external view returns (uint256);
     }
+
+
+
+
 }
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    ProxyContract,
+    "../out/ProxyContract.sol/ProxyContract.json"
+);
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    ERC20Mock,
+    "../out/ERC20Mock.sol/ERC20Mock.json"
+);
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    Relayer,
+    "../out/Relayer.sol/Relayer.json"
+);
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    MessageQueue,
+    "../out/MessageQueue.sol/MessageQueue.json"
+);
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    Verifier,
+    "../out/Verifier.sol/Verifier.json"
+);
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    VerifierMock,
+    "../out/VerifierMock.sol/Verifier.json"
+);
+
+#[cfg(test)]
+sol!(
+    #[sol(rpc)]
+    ERC20Treasury,
+    "../out/ERC20Treasury.sol/ERC20Treasury.json"
+);
 
 impl ContentMessage {
     pub fn to_bytes(&self) -> Vec<u8> {

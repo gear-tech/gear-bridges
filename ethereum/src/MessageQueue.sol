@@ -10,9 +10,23 @@ import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} 
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 import {RELAYER_ADDRESS} from "./libraries/Environment.sol";
 
+
+
 contract MessageQueue is IMessageQueue {
     using Address for address;
-    using Hasher for VaraMessage;
+    //using Hasher for VaraMessage;
+
+    function hash_vara_msg(
+        VaraMessage calldata message
+    ) internal pure returns (bytes32) {
+        bytes memory data = abi.encodePacked(
+            message.nonce,
+            message.sender,
+            message.receiver,
+            message.data
+        );
+        return keccak256(abi.encodePacked(keccak256(data)));
+    }
 
     mapping(bytes32 => bool) private _processed_messages;
 
@@ -37,7 +51,8 @@ contract MessageQueue is IMessageQueue {
         if (_processed_messages[message.nonce])
             revert MessageAlreadyProcessed(message.nonce);
 
-        bytes32 msg_hash = message.hash();
+        //bytes32 msg_hash = message.hash();
+        bytes32 msg_hash = hash_vara_msg(message);
         
         bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
             block_number

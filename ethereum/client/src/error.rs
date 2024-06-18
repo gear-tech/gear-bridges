@@ -11,9 +11,9 @@ pub enum Error {
     #[error("Wrong private key")]
     WrongPrivateKey,
     #[error("Error during contract execution: {0}")]
-    ErrorDuringContractExecution(alloy_contract::Error),
+    ErrorDuringContractExecution(alloy::contract::Error),
     #[error("Error sending transaction: {0}")]
-    ErrorSendingTransaction(alloy_contract::Error),
+    ErrorSendingTransaction(alloy::contract::Error),
     #[error("Error waiting transaction receipt")]
     ErrorWaitingTransactionReceipt,
     #[error("Error fetching transaction")]

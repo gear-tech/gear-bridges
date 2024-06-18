@@ -1,9 +1,12 @@
-use io::{Init, G1, G2, BeaconBlockHeader, ethereum_common::{Hash256, base_types::FixedArray, tree_hash::TreeHash}, Handle, HandleResult, SyncUpdate, Genesis};
-use gstd::{msg, vec};
-use ark_serialize::CanonicalSerialize;
 use super::*;
-use state::{State, Checkpoints};
+use ark_serialize::CanonicalSerialize;
+use gstd::{msg, vec};
+use io::{
+    ethereum_common::{base_types::FixedArray, tree_hash::TreeHash, Hash256},
+    BeaconBlockHeader, Genesis, Handle, HandleResult, Init, SyncUpdate, G1, G2,
+};
 use primitive_types::H256;
+use state::{Checkpoints, State};
 
 mod crypto;
 mod sync_update;
@@ -28,13 +31,12 @@ extern "C" fn init() {
         panic!("Header hash is not valid. Expected = {checkpoint:?}, actual = {hash:?}");
     }
 
-    if !utils::check_public_keys(&sync_committee_current
-            .pubkeys
-            .0,
-            &sync_committee_current_pub_keys,
-        ) {
-            panic!("Wrong public committee keys");
-        }
+    if !utils::check_public_keys(
+        &sync_committee_current.pubkeys.0,
+        &sync_committee_current_pub_keys,
+    ) {
+        panic!("Wrong public committee keys");
+    }
 
     if !merkle::is_current_committee_proof_valid(
         &finalized_header,
@@ -76,7 +78,7 @@ async fn main() {
 }
 
 #[no_mangle]
-extern fn state() {
+extern "C" fn state() {
     let state = unsafe { STATE.as_ref() };
     let checkpoints = state
         .map(|state| state.checkpoints.checkpoints())

@@ -1,15 +1,22 @@
-use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
-use ark_serialize::CanonicalDeserialize;
-use gclient::{EventListener, EventProcessor, GearApi, Result};
-use gstd::prelude::*;
-use serde::{Deserialize, de::DeserializeOwned};
-use std::cmp;
-use checkpointeths_io::{
-    ethereum_common::{base_types::{BytesFixed, FixedArray}, beacon::{Bytes32, SyncAggregate}, utils as eth_utils}, tree_hash::TreeHash, ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, Init, SyncCommittee, SyncUpdate
-};
 use crate::WASM_BINARY;
 use anyhow::Error as AnyError;
+use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
+use ark_serialize::CanonicalDeserialize;
+use checkpointeths_io::{
+    ethereum_common::{
+        base_types::{BytesFixed, FixedArray},
+        beacon::{Bytes32, SyncAggregate},
+        utils as eth_utils,
+    },
+    tree_hash::TreeHash,
+    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, Init, SyncCommittee,
+    SyncUpdate,
+};
+use gclient::{EventListener, EventProcessor, GearApi, Result};
+use gstd::prelude::*;
 use reqwest::{Client, RequestBuilder};
+use serde::{de::DeserializeOwned, Deserialize};
+use std::cmp;
 use tokio::time::{self, Duration};
 
 // https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/p2p-interface.md#configuration
@@ -100,9 +107,7 @@ async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> Result<R> 
         .await
         .map_err(AnyError::from)?;
 
-    Ok(serde_json::from_slice::<R>(&bytes)
-        .map_err(AnyError::from)?
-    )
+    Ok(serde_json::from_slice::<R>(&bytes).map_err(AnyError::from)?)
 }
 
 async fn get_bootstrap(client: &mut Client, checkpoint: &str) -> Result<Bootstrap> {
@@ -111,18 +116,18 @@ async fn get_bootstrap(client: &mut Client, checkpoint: &str) -> Result<Bootstra
         false => checkpoint,
     };
 
-    let url = format!(
-        "{RPC_URL}/eth/v1/beacon/light_client/bootstrap/0x{checkpoint_no_prefix}",
-    );
+    let url = format!("{RPC_URL}/eth/v1/beacon/light_client/bootstrap/0x{checkpoint_no_prefix}",);
 
-    get::<BootstrapResponse>(client.get(&url)).await
+    get::<BootstrapResponse>(client.get(&url))
+        .await
         .map(|response| response.data)
 }
 
 async fn get_finality_update(client: &mut Client) -> Result<FinalityUpdate> {
     let url = format!("{RPC_URL}/eth/v1/beacon/light_client/finality_update");
 
-    get::<FinalityUpdateResponse>(client.get(&url)).await
+    get::<FinalityUpdateResponse>(client.get(&url))
+        .await
         .map(|response| response.data)
 }
 
@@ -136,7 +141,10 @@ async fn get_updates(client: &mut Client, period: u64, count: u8) -> Result<Upda
 }
 
 fn create_payload(update: Update) -> Handle {
-    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(&update.sync_aggregate.sync_committee_signature.0.0[..]).unwrap();
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &update.sync_aggregate.sync_committee_signature.0 .0[..],
+    )
+    .unwrap();
 
     let next_sync_committee_keys = {
         let pub_keys = update
@@ -145,7 +153,10 @@ fn create_payload(update: Update) -> Handle {
             .0
             .iter()
             .map(|BytesFixed(pub_key_compressed)| {
-                let pub_key = <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(&pub_key_compressed.0[..]).unwrap();
+                let pub_key = <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
+                    &pub_key_compressed.0[..],
+                )
+                .unwrap();
                 let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(pub_key).into();
 
                 ark_scale
@@ -162,12 +173,16 @@ fn create_payload(update: Update) -> Handle {
         sync_aggregate: update.sync_aggregate,
         sync_committee_next: Some(update.next_sync_committee),
         sync_committee_signature: G2TypeInfo(signature).into(),
-        sync_committee_next_pub_keys: Some(Box::new(FixedArray(next_sync_committee_keys.try_into().unwrap()))),
-        sync_committee_next_branch: Some(update
-            .next_sync_committee_branch
-            .into_iter()
-            .map(|BytesFixed(array)| array.0)
-            .collect::<_>()),
+        sync_committee_next_pub_keys: Some(Box::new(FixedArray(
+            next_sync_committee_keys.try_into().unwrap(),
+        ))),
+        sync_committee_next_branch: Some(
+            update
+                .next_sync_committee_branch
+                .into_iter()
+                .map(|BytesFixed(array)| array.0)
+                .collect::<_>(),
+        ),
         finality_branch: update
             .finality_branch
             .into_iter()
@@ -221,8 +236,7 @@ async fn ethereum_light_client() -> Result<()> {
     let mut client_http = Client::new();
 
     // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update = get_finality_update(&mut client_http)
-        .await?;
+    let finality_update = get_finality_update(&mut client_http).await?;
     let checkpoint = finality_update.finalized_header.tree_hash_root();
     let checkpoint_hex = hex::encode(checkpoint);
 
@@ -234,7 +248,13 @@ async fn ethereum_light_client() -> Result<()> {
         .0
         .iter()
         .map(|pub_key_compressed| {
-            let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(<G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(pub_key_compressed.as_ref()).unwrap()).into();
+            let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(
+                <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
+                    pub_key_compressed.as_ref(),
+                )
+                .unwrap(),
+            )
+            .into();
 
             ark_scale
         })
@@ -245,25 +265,28 @@ async fn ethereum_light_client() -> Result<()> {
         checkpoint,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
         sync_committee_current: bootstrap.current_sync_committee,
-        sync_committee_current_branch: bootstrap.current_sync_committee_branch.into_iter().map(|BytesFixed(bytes)| bytes.0).collect(),
+        sync_committee_current_branch: bootstrap
+            .current_sync_committee_branch
+            .into_iter()
+            .map(|BytesFixed(bytes)| bytes.0)
+            .collect(),
     };
 
     // let client = GearApi::dev_from_path("../target/release/gear").await?;
     let client = GearApi::dev().await?;
     let mut listener = client.subscribe().await?;
 
-    let program_id = upload_program(
-        &client,
-        &mut listener,
-        init,
-    )
-    .await?;
+    let program_id = upload_program(&client, &mut listener, init).await?;
 
     println!("program_id = {:?}", hex::encode(&program_id));
 
     let current_period = eth_utils::calculate_period(bootstrap.header.slot);
-    let updates = get_updates(&mut client_http, current_period, MAX_REQUEST_LIGHT_CLIENT_UPDATES)
-        .await?;
+    let updates = get_updates(
+        &mut client_http,
+        current_period,
+        MAX_REQUEST_LIGHT_CLIENT_UPDATES,
+    )
+    .await?;
 
     for update in updates {
         let payload = create_payload(update.data);
@@ -285,13 +308,11 @@ async fn ethereum_light_client() -> Result<()> {
     println!();
 
     for _ in 0..30 {
-        let update = get_finality_update(&mut client_http)
-            .await?;
+        let update = get_finality_update(&mut client_http).await?;
 
         let slot: u64 = update.finalized_header.slot;
         let current_period = eth_utils::calculate_period(slot);
-        let mut updates = get_updates(&mut client_http, current_period, 1)
-            .await?;
+        let mut updates = get_updates(&mut client_http, current_period, 1).await?;
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");
@@ -310,8 +331,13 @@ async fn ethereum_light_client() -> Result<()> {
             }
 
             _ => {
-                println!("slot = {slot:?}, attested slot = {:?}, signature slot = {:?}", update.attested_header.slot, update.signature_slot);
-                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(&update.sync_aggregate.sync_committee_signature.0.0[..]);
+                println!(
+                    "slot = {slot:?}, attested slot = {:?}, signature slot = {:?}",
+                    update.attested_header.slot, update.signature_slot
+                );
+                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+                    &update.sync_aggregate.sync_committee_signature.0 .0[..],
+                );
 
                 let Ok(signature) = signature else {
                     println!("failed to deserialize point on G2");

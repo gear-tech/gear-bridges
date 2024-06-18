@@ -1,6 +1,6 @@
 use super::*;
 
-use gmeta::{In, Out, InOut};
+use gmeta::{In, InOut, Out};
 use gstd::prelude::*;
 
 pub struct Metadata;

@@ -1,5 +1,5 @@
 use super::*;
-use io::{SyncCommittee, tree_hash::TreeHash, BeaconBlockHeader};
+use io::{tree_hash::TreeHash, BeaconBlockHeader, SyncCommittee};
 use ring::digest::{Context as RingContext, SHA256 as RingSHA256};
 
 pub fn is_valid_merkle_branch(
@@ -78,11 +78,5 @@ pub fn is_next_committee_proof_valid(
     let leaf_hash = next_committee.tree_hash_root();
     let state_root = attested_header.state_root;
 
-    is_proof_valid(
-        state_root.0,
-        leaf_hash.0,
-        next_committee_branch,
-        5,
-        23,
-    )
+    is_proof_valid(state_root.0, leaf_hash.0, next_committee_branch, 5, 23)
 }

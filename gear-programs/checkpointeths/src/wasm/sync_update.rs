@@ -1,8 +1,8 @@
 use super::*;
 use gstd::debug;
 use io::{
+    ethereum_common::{base_types::Bitvector, utils as eth_utils, SYNC_COMMITTEE_SIZE},
     SyncCommitteeKeys,
-    ethereum_common::{utils as eth_utils, SYNC_COMMITTEE_SIZE, base_types::Bitvector},
 };
 
 pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
@@ -18,10 +18,9 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         finality_branch,
     } = sync_update;
 
-    let update_finalized_slot = finalized_header
-        .slot;
-    let valid_time = signature_slot > attested_header.slot
-        && attested_header.slot >= update_finalized_slot;
+    let update_finalized_slot = finalized_header.slot;
+    let valid_time =
+        signature_slot > attested_header.slot && attested_header.slot >= update_finalized_slot;
     if !valid_time {
         debug!("ConsensusError::InvalidTimestamp.into()");
         return;
@@ -40,8 +39,7 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         }
     };
 
-    let pub_keys =
-        get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
+    let pub_keys = get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
     let committee_count = pub_keys.len();
 
     // committee_count < 512 * 2 / 3
@@ -60,15 +58,18 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
 
     debug!("store_period = {store_period}, update_sig_period = {update_sig_period}, update_finalized_period = {update_finalized_period}, update_attested_period = {update_attested_period}");
 
-    if update_is_newer || (update_has_finalized_next_committee && state.sync_committee_next.is_none()) {
+    if update_is_newer
+        || (update_has_finalized_next_committee && state.sync_committee_next.is_none())
+    {
         let is_valid_sig = crypto::verify_sync_committee_signature(
             &state.genesis,
             pub_keys,
             &attested_header,
-            &sync_committee_signature.0.0,
+            &sync_committee_signature.0 .0,
             signature_slot,
-        ).await;
-    
+        )
+        .await;
+
         debug!("is_valid_sig = {is_valid_sig}");
         if !is_valid_sig {
             return;
@@ -77,12 +78,10 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
 
     if update_is_newer {
         debug!("update is newer");
-        if merkle::is_finality_proof_valid(
-            &attested_header,
-            &finalized_header,
-            &finality_branch,
-        ) {
-            state.checkpoints.push(finalized_header.slot, finalized_header.tree_hash_root());
+        if merkle::is_finality_proof_valid(&attested_header, &finalized_header, &finality_branch) {
+            state
+                .checkpoints
+                .push(finalized_header.slot, finalized_header.tree_hash_root());
             state.finalized_header = finalized_header;
         } else {
             debug!("ConsensusError::InvalidFinalityProof.into()");
@@ -113,11 +112,11 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         }
     }
 
-    if !utils::check_public_keys(&sync_committee_next
-        .expect("checked above")
-        .pubkeys
-        .0,
-        sync_committee_next_pub_keys.as_ref().expect("checked above"),
+    if !utils::check_public_keys(
+        &sync_committee_next.expect("checked above").pubkeys.0,
+        sync_committee_next_pub_keys
+            .as_ref()
+            .expect("checked above"),
     ) {
         debug!("Wrong public committee keys");
         return;
@@ -144,9 +143,9 @@ fn get_participating_keys(
     committee: &SyncCommitteeKeys,
     bitfield: &Bitvector<SYNC_COMMITTEE_SIZE>,
 ) -> Vec<G1> {
-    bitfield.iter().zip(committee.0.iter())
-        .filter_map(|(bit, pub_key)| {
-            bit.then_some(pub_key.clone().0.0)
-        })
+    bitfield
+        .iter()
+        .zip(committee.0.iter())
+        .filter_map(|(bit, pub_key)| bit.then_some(pub_key.clone().0 .0))
         .collect::<Vec<_>>()
 }

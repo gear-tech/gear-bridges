@@ -4,30 +4,22 @@
 extern crate alloc;
 
 #[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    vec::Vec,
-};
+use alloc::{boxed::Box, vec::Vec};
 
 pub mod meta;
 
-use ethereum_common::{
-    base_types::FixedArray,
-    beacon::BLSPubKey,
-    Hash256,
-};
+pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
     self,
-    tree_hash,
     beacon::{BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate},
-    SYNC_COMMITTEE_SIZE,
+    tree_hash, SYNC_COMMITTEE_SIZE,
 };
+use ethereum_common::{base_types::FixedArray, beacon::BLSPubKey, Hash256};
+use hex_literal::hex;
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
-use hex_literal::hex;
 use serde::Deserialize;
-use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
-pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 
 // <G1 as SWCurveConfig>::serialized_size(Compress::No)
 pub const G1_UNCOMPRESSED_SIZE: usize = 96;
@@ -54,7 +46,9 @@ impl Genesis {
     pub fn hash(&self) -> Hash256 {
         match self {
             Genesis::Mainnet => todo!(),
-            Genesis::Sepolia => hex!("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078").into(),
+            Genesis::Sepolia => {
+                hex!("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078").into()
+            }
             Genesis::Holesky => todo!(),
         }
     }
@@ -99,9 +93,7 @@ pub enum CheckpointResult {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum Handle {
-    Checkpoint {
-        slot: u64,
-    },
+    Checkpoint { slot: u64 },
     SyncUpdate(SyncUpdate),
 }
 

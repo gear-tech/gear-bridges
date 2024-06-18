@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, Bytes as aBytes, Uint, B256 as aB256, U256 as aU256};
-use primitive_types::U256 as eU256;
+use primitive_types::{H256 as eH256, U256 as eU256};
 
 pub trait Convert<T> {
     fn convert(self) -> T;
@@ -54,5 +54,11 @@ impl Convert<aBytes> for &[u8] {
 impl Convert<aB256> for [u8; 32] {
     fn convert(self) -> aB256 {
         aB256::new(self)
+    }
+}
+
+impl Convert<aB256> for eH256 {
+    fn convert(self) -> aB256 {
+        aB256::from_slice(self.as_fixed_bytes())
     }
 }

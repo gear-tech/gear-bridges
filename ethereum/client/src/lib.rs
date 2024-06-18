@@ -1,11 +1,11 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, str::FromStr};
 
 use abi::IRelayer::MerkleRoot;
 
 use alloy::{
     contract::Event,
     network::{Ethereum, Network},
-    primitives::{Address, Bytes, TxHash, B256, U256},
+    primitives::{Address, Bytes, B256, U256},
     providers::{
         fillers::{GasFiller, NonceFiller, WalletFiller},
         Provider, ProviderBuilder, RootProvider,
@@ -13,7 +13,10 @@ use alloy::{
     rpc::types::{BlockId, BlockNumberOrTag, Filter},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
-    transports::Transport,
+    transports::{
+        http::{Client, Http},
+        BoxTransport, Transport,
+    },
 };
 
 use reqwest::Url;
@@ -37,15 +40,20 @@ mod proof;
 type ProviderType = alloy::providers::fillers::FillProvider<
     alloy::providers::fillers::JoinFill<
         alloy::providers::fillers::JoinFill<
-            alloy::providers::fillers::JoinFill<alloy::providers::Identity, GasFiller>,
-            NonceFiller,
+            alloy::providers::fillers::JoinFill<
+                alloy::providers::fillers::JoinFill<alloy::providers::Identity, GasFiller>,
+                NonceFiller,
+            >,
+            alloy::providers::fillers::ChainIdFiller,
         >,
-        alloy::providers::fillers::ChainIdFiller,
+        WalletFiller<alloy::network::EthereumWallet>,
     >,
     RootProvider<alloy::transports::http::Http<alloy::transports::http::Client>>,
     alloy::transports::http::Http<alloy::transports::http::Client>,
     Ethereum,
 >;
+
+pub use alloy::primitives::TxHash;
 
 #[derive(Clone)]
 pub struct Contracts<P, T, N> {
@@ -71,14 +79,96 @@ pub enum TxStatus {
     Failed,
 }
 
-pub fn create_provider(url: &str) -> Result<ProviderType, Error> {
-    let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
+#[derive(Clone)]
+pub struct EthApi {
+    contracts: Contracts<ProviderType, Http<Client>, Ethereum>,
+}
 
-    let provider: ProviderType = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .on_http(url);
+impl EthApi {
+    pub fn new(
+        url: &String,
+        message_queue_address: &String,
+        relayer_address: &String,
+        private_key: Option<&str>,
+    ) -> Result<EthApi, Error> {
+        let signer = match private_key {
+            Some(private_key) => {
+                let pk: B256 =
+                    B256::from(U256::from_str(private_key).map_err(|_| Error::WrongPrivateKey)?);
+                PrivateKeySigner::from_bytes(&pk).map_err(|_| Error::WrongPrivateKey)?
+            }
+            None => PrivateKeySigner::random(),
+        };
 
-    Ok(provider)
+        let wallet = alloy::network::EthereumWallet::from(signer);
+
+        let message_queue_address: Address = message_queue_address
+            .parse()
+            .map_err(|_| Error::WrongAddress)?;
+        let relayer_address: Address = relayer_address.parse().map_err(|_| Error::WrongAddress)?;
+
+        let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
+
+        let provider: ProviderType = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(wallet)
+            .on_http(url);
+
+        let contracts = Contracts::new(
+            provider,
+            message_queue_address.into_array(),
+            relayer_address.into_array(),
+        )?;
+
+        Ok(EthApi { contracts })
+    }
+
+    pub async fn provide_merkle_root<U: Convert<U256>, H: Convert<B256>, B: Convert<Bytes>>(
+        &self,
+        block_number: U,
+        merkle_root: H,
+        proof: B,
+    ) -> Result<TxHash, Error> {
+        Err(Error::NotImplemented)
+    }
+
+    pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
+        Err(Error::NotImplemented)
+    }
+
+    pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
+        Err(Error::NotImplemented)
+    }
+
+    pub async fn fetch_merkle_roots_in_range(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> Result<Vec<MerkleRootEntry>, Error> {
+        Err(Error::NotImplemented)
+    }
+
+    pub async fn block_number(&self) -> Result<u64, Error> {
+        Err(Error::NotImplemented)
+    }
+
+    pub async fn provide_content_message(
+        &self,
+        block_number: u32,
+        total_leaves: u32,
+        leaf_index: u32,
+        nonce: [u8; 32],
+        sender: [u8; 32],
+        receiver: [u8; 20],
+        payload: Vec<u8>,
+        proof: Vec<[u8; 32]>,
+    ) -> Result<TxHash, Error> {
+        Err(Error::NotImplemented)
+    }
+
+    pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
+        Err(Error::NotImplemented)
+    }
 }
 
 impl<P, T> Contracts<P, T, Ethereum>

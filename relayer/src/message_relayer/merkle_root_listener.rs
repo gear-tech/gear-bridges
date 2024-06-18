@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use ethereum_client::Contracts as EthApi;
+use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 

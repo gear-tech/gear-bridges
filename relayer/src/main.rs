@@ -3,7 +3,7 @@ extern crate pretty_env_logger;
 use clap::{Args, Parser, Subcommand};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
-use ethereum_client::Contracts as EthApi;
+use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use metrics::MetricsBuilder;

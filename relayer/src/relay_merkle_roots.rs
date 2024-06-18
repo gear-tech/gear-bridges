@@ -7,7 +7,7 @@ use crate::{
     GENESIS_CONFIG,
 };
 
-use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
+use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
 
 pub struct MerkleRootRelayer {

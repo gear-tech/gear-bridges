@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Not implemented")]
+    NotImplemented,
     #[error("Error in HTTP transport")]
     ErrorInHTTPTransport,
     #[error("Wrong address")]

@@ -108,7 +108,7 @@ alloy = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy", rev 
     "sol-types", "contract", "pubsub",
     "providers",
     "signers", "signer-local",
-    "transports", "transport-http",
+    "transports", "transport-http", 
     "network", "node-bindings",
     "rpc", "rpc-client", "json-rpc", "rpc-types"] }
 

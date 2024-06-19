@@ -59,14 +59,14 @@ impl<const N: usize> Checkpoints<N> {
         match self.slots.last() {
             None => (),
             Some((_, slot_previous))
-                if slot % SLOTS_PER_EPOCH != 0 || slot_previous % SLOTS_PER_EPOCH != 0 =>
+                if slot % SLOTS_PER_EPOCH != 0 || slot > slot_previous + SLOTS_PER_EPOCH || slot_previous % SLOTS_PER_EPOCH != 0 =>
             {
                 ()
             }
             _ => return,
         }
 
-        self.slots.push((len, slot));
+        self.slots.push((if overwrite { len - 1 } else { len }, slot));
     }
 
     pub fn checkpoints(&self) -> Vec<(u64, Hash256)> {
@@ -213,7 +213,7 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_187_936, 1)
+    // after overwrite data[0] slot = 5_187_936
     data.remove(0);
     data.push((
         5_188_096,
@@ -232,7 +232,7 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_187_967, 2)
+    // after overwrite data[0] slot = 5_187_967
     data.remove(0);
     data.push((
         5_188_128,
@@ -251,7 +251,7 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_187_967, 2)
+    // after overwrite data[0] slot = 5_187_967
     data.remove(0);
     data.push((
         5_188_160,
@@ -270,7 +270,7 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_187_999, 3)
+    // after overwrite data[0] slot = 5_187_999
     data.remove(0);
     data.push((
         5_188_192,
@@ -289,7 +289,7 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_188_032, 4)
+    // after overwrite data[0] slot = 5_188_032
     data.remove(0);
     data.push((
         5_188_224,
@@ -308,7 +308,7 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_188_064, 5)
+    // after overwrite data[0] slot = 5_188_064
     data.remove(0);
     data.push((
         5_188_256,
@@ -327,11 +327,80 @@ fn checkpoints() {
         assert_eq!(&checkpoints, &data,);
     }
 
-    // after overwrite data[0] = (5_188_096, 6)
+    // after overwrite data[0] slot = 5_188_096
     data.remove(0);
     data.push((
         5_188_288,
         hex!("10c57533bfcf7343b2003a2ce912958c60805f342455b68c611666fdee1205a5").into(),
+    ));
+    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+
+    {
+        for (slot, checkpoint_expected) in &data {
+            assert!(
+                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
+            );
+        }
+
+        let checkpoints = checkpoints.checkpoints();
+        assert_eq!(&checkpoints, &data,);
+    }
+}
+
+#[test]
+fn checkpoints_with_gaps() {
+    use hex_literal::hex;
+
+    const COUNT: usize = 3;
+
+    // Sepolia
+    let mut data = vec![
+        (
+            5_187_904,
+            hex!("d902d1b20ad9cc01c963fff6587eb0931729b01ffa2ef93bea152b964186a792").into(),
+        ),
+        (
+            5_187_936,
+            hex!("24191bce7807531373065eb296ee15f4658f777ffa887558148ea888efa0feaf").into(),
+        ),
+        // missing block
+        (
+            5_187_967,
+            hex!("be485bf2d926a79d8354ec003dce82da26b2712e0d25acb888790d0339cc9d58").into(),
+        ),
+    ];
+    assert_eq!(data.len(), COUNT);
+
+    let mut checkpoints = Checkpoints::<COUNT>::new();
+
+    for (slot, checkpoint) in &data {
+        checkpoints.push(*slot, *checkpoint);
+    }
+
+    // after overwrite data[0] slot = 5_187_936
+    data.remove(0);
+    data.push((
+            5_188_032,
+            hex!("4401b2d3939a1aa28129400aa5ac4250e1cdec18f1836eb2c2c8c3fc7d49df88").into(),
+        ));
+    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+
+    {
+        for (slot, checkpoint_expected) in &data {
+            assert!(
+                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
+            );
+        }
+
+        let checkpoints = checkpoints.checkpoints();
+        assert_eq!(&checkpoints, &data,);
+    }
+
+    // after overwrite data[0] slot = 5_187_936
+    data.remove(0);
+    data.push((
+        5_188_096,
+        hex!("5d90dad12f5cebadbc16db005500a19a53618257ceca748d7183cbff45507ca2").into(),
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 

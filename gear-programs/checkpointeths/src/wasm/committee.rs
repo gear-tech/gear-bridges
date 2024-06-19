@@ -16,6 +16,12 @@ enum Status<'a> {
     NotActual,
 }
 
+#[derive(Debug, Clone)]
+pub enum Error {
+    InvalidNextSyncCommitteeProof,
+    InvalidPublicKeys,
+}
+
 pub struct Update<'a>(Status<'a>);
 
 impl<'a> Update<'a> {
@@ -50,11 +56,7 @@ impl<'a> Update<'a> {
         }
     }
 
-    pub fn actual(&self) -> bool {
-        matches!(self.0, Status::Actual { .. })
-    }
-
-    pub fn apply(self, state: &mut State<COUNT>) {
+    pub fn verify(self, store_period: u64) -> Result<Option<Box<SyncCommitteeKeys>>, Error> {
         let Status::Actual {
             update_period_finalized,
             attested_header,
@@ -62,43 +64,28 @@ impl<'a> Update<'a> {
             sync_committee_next_pub_keys,
             sync_committee_next_branch,
         } = self.0 else {
-            return;
+            return Ok(None);
         };
 
-        let is_valid = merkle::is_next_committee_proof_valid(
+        if !merkle::is_next_committee_proof_valid(
             &attested_header,
             &sync_committee_next,
             &sync_committee_next_branch,
-        );
-
-        if !is_valid {
-            debug!("ConsensusError::InvalidNextSyncCommitteeProof.into()");
-            return;
+        ) {
+            return Err(Error::InvalidNextSyncCommitteeProof);
         }
 
         if !utils::check_public_keys(
             &sync_committee_next.pubkeys.0,
             &sync_committee_next_pub_keys,
         ) {
-            debug!("Wrong public committee keys");
-            return;
+            return Err(Error::InvalidPublicKeys);
         }
 
-        let store_period = eth_utils::calculate_period(state.finalized_header.slot);
-        match state.sync_committee_next.take() {
-            Some(stored_next_sync_committee) => {
-                if update_period_finalized == store_period + 1 {
-                    debug!("sync committee updated");
-                    state.sync_committee_current = stored_next_sync_committee;
-                    state.sync_committee_next = Some(sync_committee_next_pub_keys);
-                } else {
-                    state.sync_committee_next = Some(stored_next_sync_committee);
-                }
-            }
-    
-            None => {
-                state.sync_committee_next = Some(sync_committee_next_pub_keys);
-            }
+        if update_period_finalized == store_period + 1 {
+            return Ok(Some(sync_committee_next_pub_keys));
         }
+
+        Ok(None)
     }
 }

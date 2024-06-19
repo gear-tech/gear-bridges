@@ -77,11 +77,10 @@ pub type SyncCommitteeKeys = FixedArray<ArkScale<G1TypeInfo>, SYNC_COMMITTEE_SIZ
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct Init {
     pub genesis: Genesis,
-    pub checkpoint: Hash256,
-    pub finalized_header: BeaconBlockHeader,
     pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
     pub sync_committee_current: SyncCommittee,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
+    pub update: SyncUpdate,
 }
 
 #[derive(Debug, Clone, Decode, Encode, TypeInfo)]
@@ -109,7 +108,7 @@ pub struct SyncUpdate {
     pub finalized_header: BeaconBlockHeader,
     pub sync_aggregate: SyncAggregate,
     pub sync_committee_signature: ArkScale<G2TypeInfo>,
-    pub sync_committee_next: Option<SyncCommittee>,
+    pub sync_committee_next: Option<Box<SyncCommittee>>,
     pub sync_committee_next_pub_keys: Option<Box<SyncCommitteeKeys>>,
     pub sync_committee_next_branch: Option<Vec<[u8; 32]>>,
     pub finality_branch: Vec<[u8; 32]>,

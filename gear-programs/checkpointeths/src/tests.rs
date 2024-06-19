@@ -5,7 +5,7 @@ use ark_serialize::CanonicalDeserialize;
 use checkpointeths_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{Bytes32, SyncAggregate},
+        beacon::{BLSPubKey, Bytes32, SyncAggregate},
         utils as eth_utils,
     },
     tree_hash::TreeHash,
@@ -140,18 +140,8 @@ async fn get_updates(client: &mut Client, period: u64, count: u8) -> Result<Upda
     get::<UpdateResponse>(client.get(&url)).await
 }
 
-fn create_payload(update: Update) -> Handle {
-    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-        &update.sync_aggregate.sync_committee_signature.0 .0[..],
-    )
-    .unwrap();
-
-    let next_sync_committee_keys = {
-        let pub_keys = update
-            .next_sync_committee
-            .pubkeys
-            .0
-            .iter()
+fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeInfo>> {
+    compressed_public_keys.iter()
             .map(|BytesFixed(pub_key_compressed)| {
                 let pub_key = <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
                     &pub_key_compressed.0[..],
@@ -161,17 +151,26 @@ fn create_payload(update: Update) -> Handle {
 
                 ark_scale
             })
-            .collect::<Vec<_>>();
+            .collect()
+}
 
-        pub_keys
-    };
+fn create_sync_update(update: Update) -> SyncUpdate {
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &update.sync_aggregate.sync_committee_signature.0 .0[..],
+    )
+    .unwrap();
 
-    Handle::SyncUpdate(SyncUpdate {
+    let next_sync_committee_keys = map_public_keys(&update
+        .next_sync_committee
+        .pubkeys
+        .0);
+
+    SyncUpdate {
         signature_slot: update.signature_slot,
         attested_header: update.attested_header,
         finalized_header: update.finalized_header,
         sync_aggregate: update.sync_aggregate,
-        sync_committee_next: Some(update.next_sync_committee),
+        sync_committee_next: Some(Box::new(update.next_sync_committee)),
         sync_committee_signature: G2TypeInfo(signature).into(),
         sync_committee_next_pub_keys: Some(Box::new(FixedArray(
             next_sync_committee_keys.try_into().unwrap(),
@@ -188,7 +187,7 @@ fn create_payload(update: Update) -> Handle {
             .into_iter()
             .map(|BytesFixed(array)| array.0)
             .collect::<_>(),
-    })
+    }
 }
 
 async fn common_upload_program(
@@ -237,32 +236,31 @@ async fn ethereum_light_client() -> Result<()> {
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = get_finality_update(&mut client_http).await?;
-    let checkpoint = finality_update.finalized_header.tree_hash_root();
+    let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
+    let mut updates = get_updates(
+        &mut client_http,
+        current_period,
+        1,
+    )
+    .await?;
+
+    let update = match updates.pop() {
+        Some(update) if updates.is_empty() => update.data,
+        _ => unreachable!("Requested single update"),
+    };
+
+    let checkpoint = update.finalized_header.tree_hash_root();
     let checkpoint_hex = hex::encode(checkpoint);
 
     let bootstrap = get_bootstrap(&mut client_http, &checkpoint_hex).await?;
+    let sync_update = create_sync_update(update);
 
-    let pub_keys = bootstrap
+    let pub_keys = map_public_keys(&bootstrap
         .current_sync_committee
         .pubkeys
-        .0
-        .iter()
-        .map(|pub_key_compressed| {
-            let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(
-                <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
-                    pub_key_compressed.as_ref(),
-                )
-                .unwrap(),
-            )
-            .into();
-
-            ark_scale
-        })
-        .collect::<Vec<_>>();
+        .0);
     let init = Init {
         genesis: Genesis::Sepolia,
-        finalized_header: finality_update.finalized_header,
-        checkpoint,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
         sync_committee_current: bootstrap.current_sync_committee,
         sync_committee_current_branch: bootstrap
@@ -270,6 +268,7 @@ async fn ethereum_light_client() -> Result<()> {
             .into_iter()
             .map(|BytesFixed(bytes)| bytes.0)
             .collect(),
+        update: sync_update,
     };
 
     // let client = GearApi::dev_from_path("../target/release/gear").await?;
@@ -279,30 +278,6 @@ async fn ethereum_light_client() -> Result<()> {
     let program_id = upload_program(&client, &mut listener, init).await?;
 
     println!("program_id = {:?}", hex::encode(&program_id));
-
-    let current_period = eth_utils::calculate_period(bootstrap.header.slot);
-    let updates = get_updates(
-        &mut client_http,
-        current_period,
-        MAX_REQUEST_LIGHT_CLIENT_UPDATES,
-    )
-    .await?;
-
-    for update in updates {
-        let payload = create_payload(update.data);
-
-        let gas_limit = client
-            .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
-            .await?
-            .min_limit;
-        println!("update gas_limit {gas_limit:?}");
-
-        let (message_id, _) = client
-            .send_message(program_id.into(), payload, gas_limit, 0)
-            .await?;
-
-        assert!(listener.message_processed(message_id).await?.succeed());
-    }
 
     println!();
     println!();
@@ -316,7 +291,7 @@ async fn ethereum_light_client() -> Result<()> {
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");
-                let payload = create_payload(update.data);
+                let payload = Handle::SyncUpdate(create_sync_update(update.data));
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
                     .await?

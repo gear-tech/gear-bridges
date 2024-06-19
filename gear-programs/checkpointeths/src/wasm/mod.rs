@@ -16,21 +16,15 @@ mod utils;
 const COUNT: usize = 150_000;
 static mut STATE: Option<State<COUNT>> = None;
 
-#[no_mangle]
-extern "C" fn init() {
+#[gstd::async_init]
+async fn init() {
     let Init {
         genesis,
-        checkpoint,
-        finalized_header,
         sync_committee_current_pub_keys,
         sync_committee_current,
         sync_committee_current_branch,
+        update,
     } = msg::load().expect("Unable to decode `Init` message");
-
-    let hash = finalized_header.tree_hash_root();
-    if checkpoint != hash {
-        panic!("Header hash is not valid. Expected = {checkpoint:?}, actual = {hash:?}");
-    }
 
     if !utils::check_public_keys(
         &sync_committee_current.pubkeys.0,
@@ -39,6 +33,7 @@ extern "C" fn init() {
         panic!("Wrong public committee keys");
     }
 
+    let mut finalized_header = update.finalized_header.clone();
     if !merkle::is_current_committee_proof_valid(
         &finalized_header,
         &sync_committee_current,
@@ -47,19 +42,34 @@ extern "C" fn init() {
         panic!("Current sync committee proof is not valid");
     }
 
-    unsafe {
-        STATE = Some(State {
-            genesis,
-            sync_committee_current: sync_committee_current_pub_keys,
-            sync_committee_next: None,
-            checkpoints: {
-                let mut checkpoints = Checkpoints::new();
-                checkpoints.push(finalized_header.slot, checkpoint);
+    finalized_header.slot -= 1;
+    match sync_update::verify(
+        &genesis,
+        &finalized_header,
+        &sync_committee_current_pub_keys,
+        &sync_committee_current_pub_keys,
+        update,
+    ).await {
+        Err(e) => panic!("Failed to verify sync committee update: {e:?}"),
 
-                checkpoints
-            },
-            finalized_header,
-        })
+        Ok((Some(finalized_header),
+            Some(sync_committee_next),
+        )) => unsafe {
+                STATE = Some(State {
+                    genesis,
+                    sync_committee_current: sync_committee_current_pub_keys,
+                    sync_committee_next,
+                    checkpoints: {
+                        let mut checkpoints = Checkpoints::new();
+                        checkpoints.push(finalized_header.slot, finalized_header.tree_hash_root());
+        
+                        checkpoints
+                    },
+                    finalized_header,
+                })
+            }
+
+        _ => panic!("Incorrect initial sync committee update"),
     }
 }
 

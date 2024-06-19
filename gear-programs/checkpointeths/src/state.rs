@@ -9,7 +9,7 @@ pub struct State<const N: usize> {
     pub genesis: Genesis,
     pub finalized_header: BeaconBlockHeader,
     pub sync_committee_current: Box<SyncCommitteeKeys>,
-    pub sync_committee_next: Option<Box<SyncCommitteeKeys>>,
+    pub sync_committee_next: Box<SyncCommitteeKeys>,
     pub checkpoints: Checkpoints<N>,
 }
 

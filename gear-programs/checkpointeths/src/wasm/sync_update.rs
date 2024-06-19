@@ -1,9 +1,10 @@
 use super::*;
 use gstd::debug;
 use io::{
-    ethereum_common::{base_types::Bitvector, utils as eth_utils, SYNC_COMMITTEE_SIZE},
+    ethereum_common::{utils as eth_utils, SYNC_COMMITTEE_SIZE},
     SyncCommitteeKeys,
 };
+use committee::Update as CommitteeUpdate;
 
 pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
     let SyncUpdate {
@@ -18,9 +19,9 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         finality_branch,
     } = sync_update;
 
-    let update_finalized_slot = finalized_header.slot;
+    let update_slot_finalized = finalized_header.slot;
     let valid_time =
-        signature_slot > attested_header.slot && attested_header.slot >= update_finalized_slot;
+        signature_slot > attested_header.slot && attested_header.slot >= update_slot_finalized;
     if !valid_time {
         debug!("ConsensusError::InvalidTimestamp.into()");
         return;
@@ -39,7 +40,7 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         }
     };
 
-    let pub_keys = get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
+    let pub_keys = utils::get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
     let committee_count = pub_keys.len();
 
     // committee_count < 512 * 2 / 3
@@ -48,32 +49,32 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         return;
     }
 
-    let update_finalized_period = eth_utils::calculate_period(update_finalized_slot);
-    let update_is_newer = update_finalized_slot > state.finalized_header.slot;
-    let update_attested_period = eth_utils::calculate_period(attested_header.slot);
-    let update_has_finalized_next_committee =
-        // has sync update
-        sync_committee_next_pub_keys.is_some() && sync_committee_next_branch.is_some()
-        && update_finalized_period == update_attested_period;
+    let committee_update = CommitteeUpdate::new(
+        &attested_header,
+        update_slot_finalized,
+        sync_committee_next.as_ref(),
+        sync_committee_next_pub_keys,
+        sync_committee_next_branch,
+    );
 
-    debug!("store_period = {store_period}, update_sig_period = {update_sig_period}, update_finalized_period = {update_finalized_period}, update_attested_period = {update_attested_period}");
+    let update_is_newer = update_slot_finalized > state.finalized_header.slot;
+    if !(update_is_newer || committee_update.actual()) {
+        debug!("Update is neither newer nor containing next sync committee update");
+        return;
+    }
 
-    if update_is_newer
-        || (update_has_finalized_next_committee && state.sync_committee_next.is_none())
-    {
-        let is_valid_sig = crypto::verify_sync_committee_signature(
-            &state.genesis,
-            pub_keys,
-            &attested_header,
-            &sync_committee_signature.0 .0,
-            signature_slot,
-        )
-        .await;
+    let is_valid_sig = crypto::verify_sync_committee_signature(
+        &state.genesis,
+        pub_keys,
+        &attested_header,
+        &sync_committee_signature.0 .0,
+        signature_slot,
+    )
+    .await;
 
-        debug!("is_valid_sig = {is_valid_sig}");
-        if !is_valid_sig {
-            return;
-        }
+    debug!("is_valid_sig = {is_valid_sig}");
+    if !is_valid_sig {
+        return;
     }
 
     if update_is_newer {
@@ -88,64 +89,5 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         }
     }
 
-    if !update_has_finalized_next_committee {
-        debug!("update doesn't have next committee");
-        return;
-    }
-
-    // this check is only for the init-case when there is no next committee.
-    if !update_is_newer && state.sync_committee_next.is_some() {
-        debug!("update has next committee but store has it too");
-        return;
-    }
-
-    if sync_committee_next.is_some() && sync_committee_next_branch.is_some() {
-        let is_valid = merkle::is_next_committee_proof_valid(
-            &attested_header,
-            &sync_committee_next.as_ref().unwrap(),
-            &sync_committee_next_branch.as_ref().unwrap(),
-        );
-
-        if !is_valid {
-            debug!("ConsensusError::InvalidNextSyncCommitteeProof.into()");
-            return;
-        }
-    }
-
-    if !utils::check_public_keys(
-        &sync_committee_next.expect("checked above").pubkeys.0,
-        sync_committee_next_pub_keys
-            .as_ref()
-            .expect("checked above"),
-    ) {
-        debug!("Wrong public committee keys");
-        return;
-    }
-
-    match state.sync_committee_next.take() {
-        Some(stored_next_sync_committee) => {
-            if update_finalized_period == store_period + 1 {
-                debug!("sync committee updated");
-                state.sync_committee_current = stored_next_sync_committee;
-                state.sync_committee_next = sync_committee_next_pub_keys;
-            } else {
-                state.sync_committee_next = Some(stored_next_sync_committee);
-            }
-        }
-
-        None => {
-            state.sync_committee_next = sync_committee_next_pub_keys;
-        }
-    }
-}
-
-fn get_participating_keys(
-    committee: &SyncCommitteeKeys,
-    bitfield: &Bitvector<SYNC_COMMITTEE_SIZE>,
-) -> Vec<G1> {
-    bitfield
-        .iter()
-        .zip(committee.0.iter())
-        .filter_map(|(bit, pub_key)| bit.then_some(pub_key.clone().0 .0))
-        .collect::<Vec<_>>()
+    committee_update.apply(state);
 }

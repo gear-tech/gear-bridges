@@ -23,3 +23,14 @@ pub fn check_public_keys(
 
     true
 }
+
+pub fn get_participating_keys(
+    committee: &SyncCommitteeKeys,
+    bitfield: &Bitvector<SYNC_COMMITTEE_SIZE>,
+) -> Vec<G1> {
+    bitfield
+        .iter()
+        .zip(committee.0.iter())
+        .filter_map(|(bit, pub_key)| bit.then_some(pub_key.clone().0 .0))
+        .collect::<Vec<_>>()
+}

@@ -1,6 +1,6 @@
 use super::*;
 use ark_bls12_381::{Bls12_381, G1Affine, G2Affine};
-use ark_ec::{bls12::Bls12Config, pairing::Pairing, AffineRepr, CurveGroup, Group};
+use ark_ec::{bls12::Bls12Config, pairing::Pairing, AffineRepr, CurveGroup};
 use ark_ff::{fields::field_hashers::DefaultFieldHasher, Field, Zero};
 use ark_serialize::CanonicalSerialize;
 use core::ops::Neg;
@@ -135,7 +135,7 @@ pub fn compute_domain(
 }
 
 fn compute_fork_data_root(current_version: [u8; 4], genesis_validator_root: [u8; 32]) -> Hash256 {
-    let mut fork_data = ForkData {
+    let fork_data = ForkData {
         current_version,
         genesis_validator_root,
     };

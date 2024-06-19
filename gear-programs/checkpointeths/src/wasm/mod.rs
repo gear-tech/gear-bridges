@@ -2,12 +2,13 @@ use super::*;
 use ark_serialize::CanonicalSerialize;
 use gstd::{msg, vec};
 use io::{
-    ethereum_common::{base_types::FixedArray, tree_hash::TreeHash, Hash256},
+    ethereum_common::{base_types::{Bitvector, FixedArray}, tree_hash::TreeHash, Hash256},
     BeaconBlockHeader, Genesis, Handle, HandleResult, Init, SyncUpdate, G1, G2,
 };
 use primitive_types::H256;
 use state::{Checkpoints, State};
 
+mod committee;
 mod crypto;
 mod sync_update;
 mod utils;
@@ -64,7 +65,7 @@ extern "C" fn init() {
 
 #[gstd::async_main]
 async fn main() {
-    let mut state = unsafe { STATE.as_mut() }.expect("The program should be initialized");
+    let state = unsafe { STATE.as_mut() }.expect("The program should be initialized");
     let message: Handle = msg::load().expect("Unable to decode `Handle` message");
     match message {
         Handle::Checkpoint { slot } => {

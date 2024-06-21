@@ -2,14 +2,16 @@ use super::*;
 use ark_serialize::CanonicalSerialize;
 use gstd::{msg, vec};
 use io::{
-    ethereum_common::{base_types::{Bitvector, FixedArray}, tree_hash::TreeHash, Hash256},
+    ethereum_common::{base_types::{Bitvector, FixedArray}, tree_hash::TreeHash, Hash256, utils as eth_utils, SYNC_COMMITTEE_SIZE},
     BeaconBlockHeader, Genesis, Handle, HandleResult, Init, SyncUpdate, G1, G2,
+    SyncCommitteeKeys, SyncCommittee,
 };
 use primitive_types::H256;
-use state::{Checkpoints, State};
+use state::{Checkpoints, State, ReplayBack};
 
 mod committee;
 mod crypto;
+mod replay_back;
 mod sync_update;
 mod utils;
 
@@ -66,6 +68,7 @@ async fn init() {
                         checkpoints
                     },
                     finalized_header,
+                    replay_back: None,
                 })
             }
 
@@ -85,6 +88,13 @@ async fn main() {
         }
 
         Handle::SyncUpdate(sync_update) => sync_update::handle(state, sync_update).await,
+
+        Handle::ReplayBackStart {
+            sync_update,
+            headers,
+        } => replay_back::handle_start(state, sync_update, headers,).await,
+
+        Handle::ReplayBack(headers) => replay_back::handle(state, headers,),
     }
 }
 

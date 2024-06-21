@@ -11,6 +11,14 @@ pub struct State<const N: usize> {
     pub sync_committee_current: Box<SyncCommitteeKeys>,
     pub sync_committee_next: Box<SyncCommitteeKeys>,
     pub checkpoints: Checkpoints<N>,
+    pub replay_back: Option<ReplayBack>,
+}
+
+pub struct ReplayBack {
+    pub finalized_header: BeaconBlockHeader,
+    pub sync_committee_next: Option<Box<SyncCommitteeKeys>>,
+    pub checkpoints: Vec<(u64, Hash256)>,
+    pub last_header: BeaconBlockHeader,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +137,40 @@ impl<const N: usize> Checkpoints<N> {
             }
         }
     }
+
+    pub fn checkpoint_by_index(&self, index: usize) -> Option<(u64, Hash256)> {
+        match self
+            .slots
+            .binary_search_by(|(index_data, _slot)| index_data.cmp(&index))
+        {
+            Ok(index) => {
+                let (index_checkpoint, slot) = self.slots[index];
+
+                Some((slot, self.checkpoints[index_checkpoint]))
+            },
+
+            Err(0) => None,
+
+            Err(index_data) => {
+                let Some(checkpoint) = self.checkpoints.get(index) else {
+                    return None;
+                };
+
+                let (index_start, slot_start) = self.slots[index_data - 1];
+                let slot = slot_start + (index - index_start) as u64 * SLOTS_PER_EPOCH;
+
+                Some((slot, *checkpoint))
+            }
+        }
+    }
+
+    pub fn last(&self) -> Option<(u64, Hash256)> {
+        if self.checkpoints.is_empty() {
+            return None;
+        }
+
+        self.checkpoint_by_index(self.checkpoints.len() - 1)
+    }
 }
 
 #[test]
@@ -147,6 +189,15 @@ fn empty_checkpoints() {
     assert!(matches!(
         checkpoints.checkpoint(u64::MAX),
         CheckpointResult::NotPresent
+    ));
+
+    assert!(matches!(
+        checkpoints.checkpoint_by_index(0),
+        None,
+    ));
+    assert!(matches!(
+        checkpoints.last(),
+        None,
     ));
 }
 

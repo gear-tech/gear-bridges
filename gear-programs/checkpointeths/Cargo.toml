@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-gstd.workspace = true
+gstd = { workspace = true, features = ["debug"] }
 primitive-types.workspace = true
 parity-scale-codec.workspace = true
 checkpointeths-io.workspace = true

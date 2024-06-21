@@ -5,8 +5,8 @@ use ark_serialize::CanonicalDeserialize;
 use checkpointeths_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{BLSPubKey, Bytes32, SyncAggregate},
-        utils as eth_utils,
+        beacon::{BLSPubKey, Bytes32, SyncAggregate, SignedBeaconBlockHeader},
+        utils as eth_utils, SLOTS_PER_EPOCH,
     },
     tree_hash::TreeHash,
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, Init, SyncCommittee,
@@ -23,6 +23,8 @@ use tokio::time::{self, Duration};
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const RPC_URL: &str = "http://127.0.0.1:5052";
 
+const FINALITY_UPDATE_5_254_112: &[u8; 4_940] = include_bytes!("./data/sepolia-finality-update-5_254_112.json");
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum LightClientHeader {
@@ -33,6 +35,16 @@ enum LightClientHeader {
 #[derive(Deserialize)]
 struct Beacon {
     beacon: BeaconBlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+struct BeaconBlockHeaderResponse {
+    data: BeaconBlockHeaderData,
+}
+
+#[derive(Deserialize, Debug)]
+struct BeaconBlockHeaderData {
+    header: SignedBeaconBlockHeader,
 }
 
 pub fn header_deserialize<'de, D>(deserializer: D) -> Result<BeaconBlockHeader, D::Error>
@@ -77,7 +89,7 @@ pub struct FinalityUpdate {
     pub signature_slot: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Update {
     #[serde(deserialize_with = "header_deserialize")]
     pub attested_header: BeaconBlockHeader,
@@ -91,7 +103,7 @@ pub struct Update {
     pub signature_slot: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct UpdateData {
     data: Update,
 }
@@ -138,6 +150,14 @@ async fn get_updates(client: &mut Client, period: u64, count: u8) -> Result<Upda
     );
 
     get::<UpdateResponse>(client.get(&url)).await
+}
+
+async fn get_block_header(client: &Client, slot: u64) -> Result<BeaconBlockHeader> {
+    let url = format!("{RPC_URL}/eth/v1/beacon/headers/{slot}");
+
+    get::<BeaconBlockHeaderResponse>(client.get(&url))
+        .await
+        .map(|response| response.data.header.message)
 }
 
 fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeInfo>> {
@@ -354,6 +374,179 @@ async fn ethereum_light_client() -> Result<()> {
 
         time::sleep(Duration::from_secs(6 * 60)).await;
     }
+
+    Ok(())
+}
+
+
+#[tokio::test]
+async fn replaying_back() -> Result<()> {
+    let mut client_http = Client::new();
+
+    let finality_update: FinalityUpdateResponse = serde_json::from_slice(FINALITY_UPDATE_5_254_112).unwrap();
+    let finality_update = finality_update.data;
+    println!("finality_update slot = {}", finality_update.finalized_header.slot);
+
+    // This SyncCommittee operated for about 13K slots, so we make adjustments
+    let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
+    let mut updates = get_updates(
+        &mut client_http,
+        current_period - 1,
+        1,
+    )
+    .await?;
+
+    let update = match updates.pop() {
+        Some(update) if updates.is_empty() => update.data,
+        _ => unreachable!("Requested single update"),
+    };
+    let checkpoint = update.finalized_header.tree_hash_root();
+    let checkpoint_hex = hex::encode(checkpoint);
+
+    let bootstrap = get_bootstrap(&mut client_http, &checkpoint_hex).await?;
+    println!("bootstrap slot = {}", bootstrap.header.slot);
+
+    println!("update slot = {}", update.finalized_header.slot);
+    let sync_update = create_sync_update(update);
+    let slot_start = sync_update.finalized_header.slot;
+    let slot_end = finality_update.finalized_header.slot;
+    println!("Replaying back from {slot_start} to {slot_end} ({} headers)", slot_end - slot_start);
+
+    let pub_keys = map_public_keys(&bootstrap
+        .current_sync_committee
+        .pubkeys
+        .0);
+    let init = Init {
+        genesis: Genesis::Sepolia,
+        sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
+        sync_committee_current: bootstrap.current_sync_committee,
+        sync_committee_current_branch: bootstrap
+            .current_sync_committee_branch
+            .into_iter()
+            .map(|BytesFixed(bytes)| bytes.0)
+            .collect(),
+        update: sync_update,
+    };
+
+    // let client = GearApi::dev_from_path("../target/release/gear").await?;
+    let client = GearApi::dev().await?;
+    let mut listener = client.subscribe().await?;
+
+    let program_id = upload_program(&client, &mut listener, init).await?;
+
+    println!("program_id = {:?}", hex::encode(&program_id));
+
+    println!();
+    println!();
+
+    // start to replay back
+    let count_headers = 26 * SLOTS_PER_EPOCH;
+    let mut requests_headers = Vec::with_capacity(count_headers as usize);
+    for i in 1 .. count_headers {
+        requests_headers.push(get_block_header(&client_http, slot_end - i));
+    }
+
+    let headers = futures::future::join_all(requests_headers)
+        .await
+        .into_iter()
+        .filter_map(|maybe_header| maybe_header.ok())
+        .collect::<Vec<_>>();
+
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
+    ).unwrap();
+
+    let payload = Handle::ReplayBackStart {
+        sync_update: SyncUpdate {
+            signature_slot: finality_update.signature_slot,
+            attested_header: finality_update.attested_header,
+            finalized_header: finality_update.finalized_header,
+            sync_aggregate: finality_update.sync_aggregate,
+            sync_committee_next: None,
+            sync_committee_signature: G2TypeInfo(signature).into(),
+            sync_committee_next_pub_keys: None,
+            sync_committee_next_branch: None,
+            finality_branch: finality_update
+                .finality_branch
+                .into_iter()
+                .map(|BytesFixed(array)| array.0)
+                .collect::<_>(),
+        },
+        headers,
+    };
+
+    let gas_limit = client
+        .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
+        .await?
+        .min_limit;
+    println!("ReplayBackStart gas_limit {gas_limit:?}");
+
+    let (message_id, _) = client
+        .send_message(program_id.into(), payload, gas_limit, 0)
+        .await?;
+
+    assert!(listener.message_processed(message_id).await?.succeed());
+
+    // continue to replay back
+    let mut slot_end = slot_end - count_headers;
+    let count_headers = 29 * SLOTS_PER_EPOCH;
+    let count_batch = (slot_end - slot_start) / count_headers;
+    let count_remaining = (slot_end - slot_start) % count_headers;
+
+    for _batch in 0 .. count_batch {
+        let mut requests_headers = Vec::with_capacity(count_headers as usize);
+        for i in 0 .. count_headers {
+            requests_headers.push(get_block_header(&client_http, slot_end - i));
+        }
+    
+        let headers = futures::future::join_all(requests_headers)
+            .await
+            .into_iter()
+            .filter_map(|maybe_header| maybe_header.ok())
+            .collect::<Vec<_>>();
+    
+        let payload = Handle::ReplayBack(headers);
+    
+        let gas_limit = client
+            .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
+            .await?
+            .min_limit;
+        println!("ReplayBack gas_limit {gas_limit:?}");
+    
+        let (message_id, _) = client
+            .send_message(program_id.into(), payload, gas_limit, 0)
+            .await?;
+    
+        assert!(listener.message_processed(message_id).await?.succeed());
+
+        slot_end -= count_headers;
+    }
+
+    // remaining headers
+    let mut requests_headers = Vec::with_capacity(count_headers as usize);
+    for i in slot_start ..= slot_end {
+        requests_headers.push(get_block_header(&client_http, i));
+    }
+
+    let headers = futures::future::join_all(requests_headers)
+        .await
+        .into_iter()
+        .filter_map(|maybe_header| maybe_header.ok())
+        .collect::<Vec<_>>();
+
+    let payload = Handle::ReplayBack(headers);
+
+    let gas_limit = client
+        .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
+        .await?
+        .min_limit;
+    println!("ReplayBack gas_limit {gas_limit:?}");
+
+    let (message_id, _) = client
+        .send_message(program_id.into(), payload, gas_limit, 0)
+        .await?;
+
+    assert!(listener.message_processed(message_id).await?.succeed());
 
     Ok(())
 }

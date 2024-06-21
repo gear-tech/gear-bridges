@@ -1,9 +1,5 @@
 use super::*;
 use gstd::debug;
-use io::{
-    ethereum_common::{utils as eth_utils, SYNC_COMMITTEE_SIZE},
-    SyncCommitteeKeys,
-};
 use committee::{Update as CommitteeUpdate, Error as CommitteeError};
 
 pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {

@@ -94,6 +94,11 @@ pub enum CheckpointResult {
 pub enum Handle {
     Checkpoint { slot: u64 },
     SyncUpdate(SyncUpdate),
+    ReplayBackStart {
+        sync_update: SyncUpdate,
+        headers: Vec<BeaconBlockHeader>,
+    },
+    ReplayBack(Vec<BeaconBlockHeader>),
 }
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]

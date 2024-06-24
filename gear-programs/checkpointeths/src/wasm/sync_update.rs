@@ -1,6 +1,6 @@
 use super::*;
+use committee::{Error as CommitteeError, Update as CommitteeUpdate};
 use gstd::debug;
-use committee::{Update as CommitteeUpdate, Error as CommitteeError};
 
 pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
     let (finalized_header_update, committee_update) = match verify(
@@ -9,45 +9,33 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
         &state.sync_committee_current,
         &state.sync_committee_next,
         sync_update,
-    ).await {
+    )
+    .await
+    {
+        Ok(result) => result,
+
         Err(e) => {
-            debug!("sync update verify failed: {e:?}");
+            let result = HandleResult::SyncUpdate(Err(e));
+            msg::reply(result, 0).expect("Unable to reply with `HandleResult::SyncUpdate::Error`");
 
             return;
         }
-
-        Ok(result) => result,
     };
 
     if let Some(finalized_header) = finalized_header_update {
-        state.checkpoints.push(finalized_header.slot, finalized_header.tree_hash_root());
+        state
+            .checkpoints
+            .push(finalized_header.slot, finalized_header.tree_hash_root());
         state.finalized_header = finalized_header;
     }
 
     if let Some(sync_committee_next) = committee_update {
-        state.sync_committee_current = core::mem::replace(&mut state.sync_committee_next, sync_committee_next);
+        state.sync_committee_current =
+            core::mem::replace(&mut state.sync_committee_next, sync_committee_next);
     }
-}
 
-#[derive(Debug, Clone)]
-pub enum Error {
-    InvalidTimestamp,
-    InvalidPeriod,
-    LowVoteCount,
-    NotActual,
-    InvalidSignature,
-    InvalidFinalityProof,
-    InvalidNextSyncCommitteeProof,
-    InvalidPublicKeys,
-}
-
-impl From<CommitteeError> for Error {
-    fn from(value: CommitteeError) -> Self {
-        match value {
-            CommitteeError::InvalidNextSyncCommitteeProof => Error::InvalidNextSyncCommitteeProof,
-            CommitteeError::InvalidPublicKeys => Error::InvalidPublicKeys,
-        }
-    }
+    msg::reply(HandleResult::SyncUpdate(Ok(())), 0)
+        .expect("Unable to reply with `HandleResult::SyncUpdate::Ok`");
 }
 
 pub async fn verify(
@@ -56,7 +44,7 @@ pub async fn verify(
     stored_sync_committee_current: &SyncCommitteeKeys,
     stored_sync_committee_next: &SyncCommitteeKeys,
     sync_update: SyncUpdate,
-) -> Result<(Option<BeaconBlockHeader>, Option<Box<SyncCommitteeKeys>>), Error> {
+) -> Result<(Option<BeaconBlockHeader>, Option<Box<SyncCommitteeKeys>>), SyncUpdateError> {
     let SyncUpdate {
         signature_slot,
         attested_header,
@@ -71,7 +59,7 @@ pub async fn verify(
 
     let update_slot_finalized = finalized_header.slot;
     if !(signature_slot > attested_header.slot && attested_header.slot >= update_slot_finalized) {
-        return Err(Error::InvalidTimestamp);
+        return Err(SyncUpdateError::InvalidTimestamp);
     }
 
     let store_period = eth_utils::calculate_period(stored_finalized_header.slot);
@@ -81,15 +69,16 @@ pub async fn verify(
     } else if update_sig_period == store_period {
         stored_sync_committee_current
     } else {
-        return Err(Error::InvalidPeriod);
+        return Err(SyncUpdateError::InvalidPeriod);
     };
 
-    let pub_keys = utils::get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
+    let pub_keys =
+        utils::get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
     let committee_count = pub_keys.len();
 
     // committee_count < 512 * 2 / 3
     if committee_count * 3 < SYNC_COMMITTEE_SIZE * 2 {
-        return Err(Error::LowVoteCount);
+        return Err(SyncUpdateError::LowVoteCount);
     }
 
     let committee_update = CommitteeUpdate::new(
@@ -107,8 +96,9 @@ pub async fn verify(
         &sync_committee_signature.0 .0,
         signature_slot,
     )
-    .await {
-        return Err(Error::InvalidSignature);
+    .await
+    {
+        return Err(SyncUpdateError::InvalidSignature);
     }
 
     let mut finalized_header_update = None;
@@ -116,13 +106,20 @@ pub async fn verify(
         if merkle::is_finality_proof_valid(&attested_header, &finalized_header, &finality_branch) {
             finalized_header_update = Some(finalized_header);
         } else {
-            return Err(Error::InvalidFinalityProof);
+            return Err(SyncUpdateError::InvalidFinalityProof);
         }
     }
 
-    let committee_update = committee_update.verify(store_period)?;
+    let committee_update = match committee_update.verify(store_period) {
+        Ok(committee_update) => committee_update,
+        Err(CommitteeError::InvalidNextSyncCommitteeProof) => {
+            return Err(SyncUpdateError::InvalidNextSyncCommitteeProof)
+        }
+        Err(CommitteeError::InvalidPublicKeys) => return Err(SyncUpdateError::InvalidPublicKeys),
+    };
+
     if finalized_header_update.is_none() && committee_update.is_none() {
-        return Err(Error::NotActual);
+        return Err(SyncUpdateError::NotActual);
     }
 
     Ok((finalized_header_update, committee_update))

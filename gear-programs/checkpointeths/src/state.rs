@@ -67,14 +67,17 @@ impl<const N: usize> Checkpoints<N> {
         match self.slots.last() {
             None => (),
             Some((_, slot_previous))
-                if slot % SLOTS_PER_EPOCH != 0 || slot > slot_previous + SLOTS_PER_EPOCH || slot_previous % SLOTS_PER_EPOCH != 0 =>
+                if slot % SLOTS_PER_EPOCH != 0
+                    || slot > slot_previous + SLOTS_PER_EPOCH
+                    || slot_previous % SLOTS_PER_EPOCH != 0 =>
             {
                 ()
             }
             _ => return,
         }
 
-        self.slots.push((if overwrite { len - 1 } else { len }, slot));
+        self.slots
+            .push((if overwrite { len - 1 } else { len }, slot));
     }
 
     pub fn checkpoints(&self) -> Vec<(u64, Hash256)> {
@@ -147,7 +150,7 @@ impl<const N: usize> Checkpoints<N> {
                 let (index_checkpoint, slot) = self.slots[index];
 
                 Some((slot, self.checkpoints[index_checkpoint]))
-            },
+            }
 
             Err(0) => None,
 
@@ -191,14 +194,8 @@ fn empty_checkpoints() {
         CheckpointResult::NotPresent
     ));
 
-    assert!(matches!(
-        checkpoints.checkpoint_by_index(0),
-        None,
-    ));
-    assert!(matches!(
-        checkpoints.last(),
-        None,
-    ));
+    assert!(matches!(checkpoints.checkpoint_by_index(0), None,));
+    assert!(matches!(checkpoints.last(), None,));
 }
 
 #[test]
@@ -431,9 +428,9 @@ fn checkpoints_with_gaps() {
     // after overwrite data[0] slot = 5_187_936
     data.remove(0);
     data.push((
-            5_188_032,
-            hex!("4401b2d3939a1aa28129400aa5ac4250e1cdec18f1836eb2c2c8c3fc7d49df88").into(),
-        ));
+        5_188_032,
+        hex!("4401b2d3939a1aa28129400aa5ac4250e1cdec18f1836eb2c2c8c3fc7d49df88").into(),
+    ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
     {

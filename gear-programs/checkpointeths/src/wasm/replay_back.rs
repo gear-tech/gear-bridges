@@ -1,7 +1,7 @@
 use super::*;
 use core::cmp::Ordering;
-use io::ethereum_common::{EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH};
 use gstd::debug;
+use io::ethereum_common::{EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH};
 
 pub async fn handle_start(
     state: &mut State<COUNT>,
@@ -19,7 +19,9 @@ pub async fn handle_start(
         &state.sync_committee_current,
         &state.sync_committee_next,
         sync_update,
-    ).await {
+    )
+    .await
+    {
         Err(e) => {
             debug!("sync update verify failed: {e:?}");
 
@@ -34,7 +36,7 @@ pub async fn handle_start(
         return;
     };
 
-    let mut replay_back = ReplayBack {
+    let replay_back = ReplayBack {
         finalized_header: finalized_header.clone(),
         sync_committee_next: committee_update,
         checkpoints: {
@@ -54,10 +56,7 @@ pub async fn handle_start(
     }
 }
 
-pub fn handle(
-    state: &mut State<COUNT>,
-    headers: Vec<BeaconBlockHeader>,
-) {
+pub fn handle(state: &mut State<COUNT>, headers: Vec<BeaconBlockHeader>) {
     if state.replay_back.is_none() {
         debug!("Replaying back wasn't started");
         return;
@@ -70,10 +69,7 @@ pub fn handle(
     }
 }
 
-fn process_headers(
-    state: &mut State<COUNT>,
-    mut headers: Vec<BeaconBlockHeader>,
-) -> bool {
+fn process_headers(state: &mut State<COUNT>, mut headers: Vec<BeaconBlockHeader>) -> bool {
     headers.sort_unstable_by(|a, b| {
         if a.slot < b.slot {
             Ordering::Less
@@ -85,7 +81,10 @@ fn process_headers(
     });
 
     let replay_back = state.replay_back.as_mut().expect("Checked by the caller");
-    let (slot_last, checkpoint_last) = state.checkpoints.last().expect("The program initialized so not empty; qed");
+    let (slot_last, checkpoint_last) = state
+        .checkpoints
+        .last()
+        .expect("The program initialized so not empty; qed");
     // check blocks hashes
     while let Some(header) = headers.pop() {
         let hash = header.tree_hash_root();
@@ -100,7 +99,10 @@ fn process_headers(
 
         replay_back.last_header = header;
 
-        let (slot_next, _) = replay_back.checkpoints.last().expect("At least contains finalized header; qed");
+        let (slot_next, _) = replay_back
+            .checkpoints
+            .last()
+            .expect("At least contains finalized header; qed");
         if slot % SLOTS_PER_EPOCH == 0 || slot + SLOTS_PER_EPOCH < *slot_next {
             replay_back.checkpoints.push((slot, hash));
         }
@@ -116,7 +118,8 @@ fn process_headers(
     }
 
     if let Some(sync_committee_next) = replay_back.sync_committee_next.take() {
-        state.sync_committee_current = core::mem::replace(&mut state.sync_committee_next, sync_committee_next);
+        state.sync_committee_current =
+            core::mem::replace(&mut state.sync_committee_next, sync_committee_next);
     }
 
     state.finalized_header = replay_back.finalized_header.clone();

@@ -7,6 +7,9 @@ extern crate alloc;
 use alloc::{boxed::Box, vec::Vec};
 
 pub mod meta;
+pub mod sync_update;
+
+pub use sync_update::SyncUpdate;
 
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -92,7 +95,9 @@ pub enum CheckpointResult {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum Handle {
-    Checkpoint { slot: u64 },
+    Checkpoint {
+        slot: u64,
+    },
     SyncUpdate(SyncUpdate),
     ReplayBackStart {
         sync_update: SyncUpdate,
@@ -104,17 +109,5 @@ pub enum Handle {
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum HandleResult {
     Checkpoint(CheckpointResult),
-}
-
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub struct SyncUpdate {
-    pub signature_slot: u64,
-    pub attested_header: BeaconBlockHeader,
-    pub finalized_header: BeaconBlockHeader,
-    pub sync_aggregate: SyncAggregate,
-    pub sync_committee_signature: ArkScale<G2TypeInfo>,
-    pub sync_committee_next: Option<Box<SyncCommittee>>,
-    pub sync_committee_next_pub_keys: Option<Box<SyncCommitteeKeys>>,
-    pub sync_committee_next_branch: Option<Vec<[u8; 32]>>,
-    pub finality_branch: Vec<[u8; 32]>,
+    SyncUpdate(Result<(), sync_update::Error>),
 }

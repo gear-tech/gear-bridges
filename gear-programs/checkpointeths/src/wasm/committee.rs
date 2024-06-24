@@ -1,9 +1,9 @@
 use super::*;
+use gstd::debug;
 use io::{
     ethereum_common::{base_types::Bitvector, utils as eth_utils, SYNC_COMMITTEE_SIZE},
-    SyncCommitteeKeys, SyncCommittee,
+    SyncCommittee, SyncCommitteeKeys,
 };
-use gstd::debug;
 
 enum Status<'a> {
     Actual {
@@ -45,12 +45,12 @@ impl<'a> Update<'a> {
                 Some(sync_committee_next_pub_keys),
                 Some(sync_committee_next_branch),
             ) => Self(Status::Actual {
-                    update_period_finalized,
-                    attested_header,
-                    sync_committee_next,
-                    sync_committee_next_pub_keys,
-                    sync_committee_next_branch,
-                }),
+                update_period_finalized,
+                attested_header,
+                sync_committee_next,
+                sync_committee_next_pub_keys,
+                sync_committee_next_branch,
+            }),
 
             _ => Self(Status::NotActual),
         }
@@ -63,7 +63,8 @@ impl<'a> Update<'a> {
             sync_committee_next,
             sync_committee_next_pub_keys,
             sync_committee_next_branch,
-        } = self.0 else {
+        } = self.0
+        else {
             return Ok(None);
         };
 

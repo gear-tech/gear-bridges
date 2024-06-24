@@ -5,12 +5,12 @@ use ark_serialize::CanonicalDeserialize;
 use checkpointeths_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{BLSPubKey, Bytes32, SyncAggregate, SignedBeaconBlockHeader},
+        beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate},
         utils as eth_utils, SLOTS_PER_EPOCH,
     },
     tree_hash::TreeHash,
-    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, Init, SyncCommittee,
-    SyncUpdate,
+    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, HandleResult, Init,
+    SyncCommittee, SyncUpdate,
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use gstd::prelude::*;
@@ -23,7 +23,8 @@ use tokio::time::{self, Duration};
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const RPC_URL: &str = "http://127.0.0.1:5052";
 
-const FINALITY_UPDATE_5_254_112: &[u8; 4_940] = include_bytes!("./data/sepolia-finality-update-5_254_112.json");
+const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
+    include_bytes!("./data/sepolia-finality-update-5_254_112.json");
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -161,17 +162,18 @@ async fn get_block_header(client: &Client, slot: u64) -> Result<BeaconBlockHeade
 }
 
 fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeInfo>> {
-    compressed_public_keys.iter()
-            .map(|BytesFixed(pub_key_compressed)| {
-                let pub_key = <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
-                    &pub_key_compressed.0[..],
-                )
-                .unwrap();
-                let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(pub_key).into();
+    compressed_public_keys
+        .iter()
+        .map(|BytesFixed(pub_key_compressed)| {
+            let pub_key = <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
+                &pub_key_compressed.0[..],
+            )
+            .unwrap();
+            let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(pub_key).into();
 
-                ark_scale
-            })
-            .collect()
+            ark_scale
+        })
+        .collect()
 }
 
 fn create_sync_update(update: Update) -> SyncUpdate {
@@ -180,10 +182,7 @@ fn create_sync_update(update: Update) -> SyncUpdate {
     )
     .unwrap();
 
-    let next_sync_committee_keys = map_public_keys(&update
-        .next_sync_committee
-        .pubkeys
-        .0);
+    let next_sync_committee_keys = map_public_keys(&update.next_sync_committee.pubkeys.0);
 
     SyncUpdate {
         signature_slot: update.signature_slot,
@@ -251,18 +250,13 @@ async fn upload_program(
 }
 
 #[tokio::test]
-async fn ethereum_light_client() -> Result<()> {
+async fn init_and_updating() -> Result<()> {
     let mut client_http = Client::new();
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = get_finality_update(&mut client_http).await?;
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = get_updates(
-        &mut client_http,
-        current_period,
-        1,
-    )
-    .await?;
+    let mut updates = get_updates(&mut client_http, current_period, 1).await?;
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
@@ -275,10 +269,7 @@ async fn ethereum_light_client() -> Result<()> {
     let bootstrap = get_bootstrap(&mut client_http, &checkpoint_hex).await?;
     let sync_update = create_sync_update(update);
 
-    let pub_keys = map_public_keys(&bootstrap
-        .current_sync_committee
-        .pubkeys
-        .0);
+    let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
     let init = Init {
         genesis: Genesis::Sepolia,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
@@ -322,7 +313,11 @@ async fn ethereum_light_client() -> Result<()> {
                     .send_message(program_id.into(), payload, gas_limit, 0)
                     .await?;
 
-                assert!(listener.message_processed(message_id).await?.succeed());
+                let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+                let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+                assert!(
+                    matches!(result_decoded, HandleResult::SyncUpdate(result) if result.is_ok())
+                );
             }
 
             _ => {
@@ -365,7 +360,11 @@ async fn ethereum_light_client() -> Result<()> {
                     .send_message(program_id.into(), payload, gas_limit, 0)
                     .await?;
 
-                assert!(listener.message_processed(message_id).await?.succeed());
+                let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+                let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+                assert!(
+                    matches!(result_decoded, HandleResult::SyncUpdate(result) if result.is_ok())
+                );
             }
         }
 
@@ -378,23 +377,21 @@ async fn ethereum_light_client() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn replaying_back() -> Result<()> {
     let mut client_http = Client::new();
 
-    let finality_update: FinalityUpdateResponse = serde_json::from_slice(FINALITY_UPDATE_5_254_112).unwrap();
+    let finality_update: FinalityUpdateResponse =
+        serde_json::from_slice(FINALITY_UPDATE_5_254_112).unwrap();
     let finality_update = finality_update.data;
-    println!("finality_update slot = {}", finality_update.finalized_header.slot);
+    println!(
+        "finality_update slot = {}",
+        finality_update.finalized_header.slot
+    );
 
     // This SyncCommittee operated for about 13K slots, so we make adjustments
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = get_updates(
-        &mut client_http,
-        current_period - 1,
-        1,
-    )
-    .await?;
+    let mut updates = get_updates(&mut client_http, current_period - 1, 1).await?;
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
@@ -410,12 +407,12 @@ async fn replaying_back() -> Result<()> {
     let sync_update = create_sync_update(update);
     let slot_start = sync_update.finalized_header.slot;
     let slot_end = finality_update.finalized_header.slot;
-    println!("Replaying back from {slot_start} to {slot_end} ({} headers)", slot_end - slot_start);
+    println!(
+        "Replaying back from {slot_start} to {slot_end} ({} headers)",
+        slot_end - slot_start
+    );
 
-    let pub_keys = map_public_keys(&bootstrap
-        .current_sync_committee
-        .pubkeys
-        .0);
+    let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
     let init = Init {
         genesis: Genesis::Sepolia,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
@@ -442,7 +439,7 @@ async fn replaying_back() -> Result<()> {
     // start to replay back
     let count_headers = 26 * SLOTS_PER_EPOCH;
     let mut requests_headers = Vec::with_capacity(count_headers as usize);
-    for i in 1 .. count_headers {
+    for i in 1..count_headers {
         requests_headers.push(get_block_header(&client_http, slot_end - i));
     }
 
@@ -454,7 +451,8 @@ async fn replaying_back() -> Result<()> {
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-    ).unwrap();
+    )
+    .unwrap();
 
     let payload = Handle::ReplayBackStart {
         sync_update: SyncUpdate {
@@ -493,30 +491,30 @@ async fn replaying_back() -> Result<()> {
     let count_batch = (slot_end - slot_start) / count_headers;
     let count_remaining = (slot_end - slot_start) % count_headers;
 
-    for _batch in 0 .. count_batch {
+    for _batch in 0..count_batch {
         let mut requests_headers = Vec::with_capacity(count_headers as usize);
-        for i in 0 .. count_headers {
+        for i in 0..count_headers {
             requests_headers.push(get_block_header(&client_http, slot_end - i));
         }
-    
+
         let headers = futures::future::join_all(requests_headers)
             .await
             .into_iter()
             .filter_map(|maybe_header| maybe_header.ok())
             .collect::<Vec<_>>();
-    
+
         let payload = Handle::ReplayBack(headers);
-    
+
         let gas_limit = client
             .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
             .await?
             .min_limit;
         println!("ReplayBack gas_limit {gas_limit:?}");
-    
+
         let (message_id, _) = client
             .send_message(program_id.into(), payload, gas_limit, 0)
             .await?;
-    
+
         assert!(listener.message_processed(message_id).await?.succeed());
 
         slot_end -= count_headers;
@@ -524,7 +522,7 @@ async fn replaying_back() -> Result<()> {
 
     // remaining headers
     let mut requests_headers = Vec::with_capacity(count_headers as usize);
-    for i in slot_start ..= slot_end {
+    for i in slot_start..=slot_end {
         requests_headers.push(get_block_header(&client_http, i));
     }
 

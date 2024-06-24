@@ -1,0 +1,38 @@
+type InitConfig = struct {
+  token_id: actor_id,
+  gear_bridge_builtin: actor_id,
+  config: Config,
+};
+
+type Config = struct {
+  gas_to_burn_tokens: u64,
+  gas_for_reply_deposit: u64,
+  gas_to_mint_tokens: u64,
+  gas_to_send_request_to_builtin: u64,
+  reply_timeout: u32,
+};
+
+type Error = enum {
+  BurnTokensSendError,
+  BurnTokensReplyError,
+  BurnTokensDecodeError,
+  ErrorDuringTokensBurn,
+  RequestToBuiltinSendError,
+  RequestToBuiltinReplyError,
+  PayloadSizeError,
+  MintTokensSendError,
+  MintTokensReplyError,
+  MintTokensDecodeError,
+  ReplyTimeoutError,
+  TokensRefundedError,
+  ErrorDuringTokensMint,
+};
+
+constructor {
+  New : (init_config: InitConfig);
+};
+
+service Grc20Gateway {
+  TeleportVaraToEth : (sender: actor_id, amount: u256, receiver: [u8, 20], eth_token_id: [u8, 20]) -> result (u256, Error);
+};
+

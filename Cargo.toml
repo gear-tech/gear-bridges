@@ -4,10 +4,13 @@ members = [
     "ethereum/client",
     "gear-rpc-client",
     "prover",
-    "relayer",
+  #  "relayer",
     "circuits/*",
     "ethereum-common",
-    "gear-programs/*",
+    "gear-programs/grc20-gateway/app",
+    "gear-programs/grc20-gateway/wasm",
+    "gear-programs/bridging-payment/app",
+    "gear-programs/bridging-payment/wasm",
 ]
 
 resolver = "2"
@@ -27,7 +30,6 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
-grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -80,7 +82,10 @@ unroll = "0.1.5"
 
 # Gear/Substrate deps
 gstd = { version = "1.4.1", features = ["nightly"] }
+gear-core = "1.4.1"
+gclient = "1.4.1"
 gear-wasm-builder = { version = "1.4.1", default-features = false }
+gwasm-builder = { package = "gear-wasm-builder", version = "1.1.1" }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
     "std",
@@ -130,6 +135,13 @@ alloy-json-abi = { git = "https://github.com/alloy-rs/core.git", package = "allo
 alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-type-parser", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = [
     "std",
 ] }
+
+sails-idl-gen = { git = "https://github.com/gear-tech/sails" }
+sails-client-gen = { git = "https://github.com/gear-tech/sails" }
+sails-rtl = { git = "https://github.com/gear-tech/sails" }
+
+gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-bridge" }
+git-download = "0.1"
 
 [patch.crates-io]
 alloy-primitives = { git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }

@@ -1,0 +1,30 @@
+type InitConfig = struct {
+  admin_address: actor_id,
+  grc20_gateway_address: actor_id,
+  config: Config,
+};
+
+type Config = struct {
+  fee: u128,
+  gas_for_reply_deposit: u64,
+  gas_to_send_request_to_gateway: u64,
+};
+
+type H160 = struct {
+  [u8, 20],
+};
+
+constructor {
+  New : (init_config: InitConfig);
+};
+
+service BridgePayment {
+  ReclaimFee : () -> null;
+  RequestToGateway : (sender: actor_id, amount: u256, receiver: [u8, 20], eth_token_id: [u8, 20]) -> null;
+  SetFee : (fee: u128) -> null;
+
+  events {
+    TeleportVaraToEth: struct { nonce: u256, sender: actor_id, amount: u256, receiver: H160, eth_token_id: H160 };
+  }
+};
+

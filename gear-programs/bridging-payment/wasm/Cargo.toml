@@ -1,0 +1,17 @@
+[package]
+name = "bridge_payment_wasm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bridge-payment-app = { path = "../app" }
+sails-rtl.workspace = true
+
+[build-dependencies]
+gwasm-builder.workspace = true
+bridge-payment-app = { path = "../app" }
+sails-idl-gen.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+name = "bridge_payment_wasm"

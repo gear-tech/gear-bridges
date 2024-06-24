@@ -1,0 +1,17 @@
+[package]
+name = "grc20_gateway_wasm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+grc20-gateway-app = { path = "../app" }
+sails-rtl.workspace = true
+
+[build-dependencies]
+gwasm-builder.workspace = true
+grc20-gateway-app = { path = "../app" }
+sails-idl-gen.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+name = "grc20_gateway_wasm"

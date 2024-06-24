@@ -1,0 +1,22 @@
+[package]
+name = "grc20-gateway-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sails-rtl.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+gstd.workspace = true
+gbuiltin-bridge.workspace = true
+
+[build-dependencies]
+git-download.workspace = true
+sails-client-gen.workspace = true
+
+[dev-dependencies]
+gclient.workspace = true
+tokio.workspace = true
+blake2.workspace = true
+gear-core.workspace = true
+primitive-types.workspace = true

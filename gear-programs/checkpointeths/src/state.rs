@@ -1,8 +1,8 @@
 use super::*;
 use circular_buffer::CircularBuffer;
 use io::{
-    ethereum_common::{base_types::FixedArray, Hash256, SLOTS_PER_EPOCH, SYNC_COMMITTEE_SIZE},
-    BeaconBlockHeader, CheckpointResult, Genesis, SyncCommitteeKeys, G1,
+    ethereum_common::{Hash256, SLOTS_PER_EPOCH},
+    BeaconBlockHeader, CheckpointResult, Genesis, SyncCommitteeKeys,
 };
 
 pub struct State<const N: usize> {
@@ -66,13 +66,12 @@ impl<const N: usize> Checkpoints<N> {
 
         match self.slots.last() {
             None => (),
+
             Some((_, slot_previous))
                 if slot % SLOTS_PER_EPOCH != 0
                     || slot > slot_previous + SLOTS_PER_EPOCH
-                    || slot_previous % SLOTS_PER_EPOCH != 0 =>
-            {
-                ()
-            }
+                    || slot_previous % SLOTS_PER_EPOCH != 0 => {}
+
             _ => return,
         }
 
@@ -155,9 +154,7 @@ impl<const N: usize> Checkpoints<N> {
             Err(0) => None,
 
             Err(index_data) => {
-                let Some(checkpoint) = self.checkpoints.get(index) else {
-                    return None;
-                };
+                let checkpoint = self.checkpoints.get(index)?;
 
                 let (index_start, slot_start) = self.slots[index_data - 1];
                 let slot = slot_start + (index - index_start) as u64 * SLOTS_PER_EPOCH;

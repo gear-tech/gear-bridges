@@ -7,6 +7,7 @@ extern crate alloc;
 use alloc::{boxed::Box, vec::Vec};
 
 pub mod meta;
+pub mod replay_back;
 pub mod sync_update;
 
 pub use sync_update::SyncUpdate;
@@ -110,4 +111,6 @@ pub enum Handle {
 pub enum HandleResult {
     Checkpoint(CheckpointResult),
     SyncUpdate(Result<(), sync_update::Error>),
+    ReplayBackStart(Result<replay_back::StatusStart, replay_back::Error>),
+    ReplayBack(Option<replay_back::Status>),
 }

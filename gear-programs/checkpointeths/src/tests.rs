@@ -8,6 +8,7 @@ use checkpointeths_io::{
         beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate},
         utils as eth_utils, SLOTS_PER_EPOCH,
     },
+    replay_back,
     tree_hash::TreeHash,
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, HandleResult, Init,
     SyncCommittee, SyncUpdate,
@@ -483,7 +484,12 @@ async fn replaying_back() -> Result<()> {
         .send_message(program_id.into(), payload, gas_limit, 0)
         .await?;
 
-    assert!(listener.message_processed(message_id).await?.succeed());
+    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+    assert!(matches!(
+        result_decoded,
+        HandleResult::ReplayBackStart(Ok(replay_back::StatusStart::Started))
+    ));
 
     // continue to replay back
     let mut slot_end = slot_end - count_headers;
@@ -515,7 +521,12 @@ async fn replaying_back() -> Result<()> {
             .send_message(program_id.into(), payload, gas_limit, 0)
             .await?;
 
-        assert!(listener.message_processed(message_id).await?.succeed());
+        let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+        let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+        assert!(matches!(
+            result_decoded,
+            HandleResult::ReplayBack(Some(replay_back::Status::InProcess))
+        ));
 
         slot_end -= count_headers;
     }
@@ -544,7 +555,12 @@ async fn replaying_back() -> Result<()> {
         .send_message(program_id.into(), payload, gas_limit, 0)
         .await?;
 
-    assert!(listener.message_processed(message_id).await?.succeed());
+    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+    assert!(matches!(
+        result_decoded,
+        HandleResult::ReplayBack(Some(replay_back::Status::Finished))
+    ));
 
     Ok(())
 }

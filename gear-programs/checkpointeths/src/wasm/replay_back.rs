@@ -1,7 +1,9 @@
 use super::*;
 use core::cmp::Ordering;
-use gstd::debug;
-use io::ethereum_common::{EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH};
+use io::{
+    ethereum_common::{EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH},
+    replay_back::{Error, Status, StatusStart},
+};
 
 pub async fn handle_start(
     state: &mut State<COUNT>,
@@ -9,7 +11,8 @@ pub async fn handle_start(
     mut headers: Vec<BeaconBlockHeader>,
 ) {
     if state.replay_back.is_some() {
-        debug!("Already replaying back");
+        msg::reply(HandleResult::ReplayBackStart(Err(Error::AlreadyStarted)), 0)
+            .expect("Unable to reply with `HandleResult::ReplayBackStart::AlreadyStarted`");
         return;
     }
 
@@ -22,21 +25,26 @@ pub async fn handle_start(
     )
     .await
     {
+        Ok(result) => result,
+
         Err(e) => {
-            debug!("sync update verify failed: {e:?}");
+            msg::reply(HandleResult::ReplayBackStart(Err(Error::Verify(e))), 0)
+                .expect("Unable to reply with `HandleResult::ReplayBackStart::Verify`");
 
             return;
         }
-
-        Ok(result) => result,
     };
 
     let Some(finalized_header) = finalized_header_update else {
-        debug!("Sync update for replay-back should update finalized header");
+        msg::reply(
+            HandleResult::ReplayBackStart(Err(Error::NoFinalityUpdate)),
+            0,
+        )
+        .expect("Unable to reply with `HandleResult::ReplayBackStart::NoFinalityUpdate`");
         return;
     };
 
-    let replay_back = ReplayBack {
+    state.replay_back = Some(ReplayBack {
         finalized_header: finalized_header.clone(),
         sync_committee_next: committee_update,
         checkpoints: {
@@ -46,26 +54,29 @@ pub async fn handle_start(
             checkpoints
         },
         last_header: finalized_header,
-    };
-
-    state.replay_back = Some(replay_back);
+    });
     if process_headers(state, headers) {
-        debug!("Replayd back");
+        msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::Finished)), 0)
+            .expect("Unable to reply with `HandleResult::ReplayBackStart::Finished`");
     } else {
-        debug!("Started to replay back");
+        msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::Started)), 0)
+            .expect("Unable to reply with `HandleResult::ReplayBackStart::Started`");
     }
 }
 
 pub fn handle(state: &mut State<COUNT>, headers: Vec<BeaconBlockHeader>) {
     if state.replay_back.is_none() {
-        debug!("Replaying back wasn't started");
+        msg::reply(HandleResult::ReplayBack(None), 0)
+            .expect("Unable to reply with `HandleResult::ReplayBack::None`");
         return;
     }
 
     if process_headers(state, headers) {
-        debug!("Replayed back");
+        msg::reply(HandleResult::ReplayBack(Some(Status::Finished)), 0)
+            .expect("Unable to reply with `HandleResult::ReplayBack::Finished`");
     } else {
-        debug!("Continue to replay back");
+        msg::reply(HandleResult::ReplayBack(Some(Status::InProcess)), 0)
+            .expect("Unable to reply with `HandleResult::ReplayBack::InProcess`");
     }
 }
 
@@ -85,6 +96,7 @@ fn process_headers(state: &mut State<COUNT>, mut headers: Vec<BeaconBlockHeader>
         .checkpoints
         .last()
         .expect("The program initialized so not empty; qed");
+
     // check blocks hashes
     while let Some(header) = headers.pop() {
         let hash = header.tree_hash_root();

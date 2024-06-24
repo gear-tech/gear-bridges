@@ -109,7 +109,19 @@ extern "C" fn state() {
     let checkpoints = state
         .map(|state| state.checkpoints.checkpoints())
         .unwrap_or(vec![]);
+    let replay_back = state.and_then(|state| {
+        state
+            .replay_back
+            .as_ref()
+            .map(|replay_back| replay_back.last_header.clone())
+    });
 
-    msg::reply(io::meta::State { checkpoints }, 0)
-        .expect("Failed to encode or reply with `<AppMetadata as Metadata>::State` from `state()`");
+    msg::reply(
+        io::meta::State {
+            checkpoints,
+            replay_back,
+        },
+        0,
+    )
+    .expect("Failed to encode or reply with `<AppMetadata as Metadata>::State` from `state()`");
 }

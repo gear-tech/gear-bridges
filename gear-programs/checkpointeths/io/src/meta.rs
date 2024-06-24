@@ -17,4 +17,7 @@ impl gmeta::Metadata for Metadata {
 #[derive(Debug, Clone, Default, Encode, Decode, TypeInfo)]
 pub struct State {
     pub checkpoints: Vec<(u64, Hash256)>,
+    /// The field contains the last processed header if the program is
+    /// replaying checkpoints back.
+    pub replay_back: Option<BeaconBlockHeader>,
 }

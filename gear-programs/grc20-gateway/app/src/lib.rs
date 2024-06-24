@@ -18,6 +18,8 @@ impl Program {
     }
 }
 
+// TO DO:
+// implement `my_handle_reply` & `my_handle_signal`
 fn my_handle_reply() {
     GRC20Gateway::<GStdExecContext>::handle_reply();
 }

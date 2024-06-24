@@ -135,6 +135,8 @@ pub async fn mint_tokens(
     Ok(())
 }
 
+// TO DO:
+// add implementation for msg tracking between contracts
 struct MessageTracker {
     msg_id_to_payload: HashMap<MessageId, MessageStatus>,
     waiting_reply_to_msg_id: HashMap<MessageId, MessageId>,
@@ -147,16 +149,4 @@ pub enum MessageStatus {
     SendingMessageToBridgeBuiltin,
     BridgeResponseReceived(bool),
 }
-// #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
-// pub enum ActionToComplete {
-//     CompleteEthToVaraBatch {
-//         teleports: Vec<EthToVaraTransfer>,
-//         eth_to_vara_nonce: U256,
-//         last_executed_eth_nonce_id: U256,
-//     },
-//     CompleteVaraToEth {
-//         sender: ActorId,
-//         recipient: String,
-//         amount: U256,
-//     },
-// }
+

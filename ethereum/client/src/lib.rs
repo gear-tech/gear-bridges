@@ -133,11 +133,11 @@ impl EthApi {
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
-        Err(Error::NotImplemented)
+        self.contracts.get_tx_status(tx_hash).await
     }
 
     pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
-        Err(Error::NotImplemented)
+        self.contracts.read_finalized_merkle_root(block).await
     }
 
     pub async fn fetch_merkle_roots_in_range(
@@ -145,11 +145,11 @@ impl EthApi {
         from: u64,
         to: u64,
     ) -> Result<Vec<MerkleRootEntry>, Error> {
-        Err(Error::NotImplemented)
+        self.contracts.fetch_merkle_roots_in_range(from, to).await
     }
 
     pub async fn block_number(&self) -> Result<u64, Error> {
-        Err(Error::NotImplemented)
+        self.contracts.block_number().await
     }
 
     pub async fn provide_content_message(
@@ -163,11 +163,22 @@ impl EthApi {
         payload: Vec<u8>,
         proof: Vec<[u8; 32]>,
     ) -> Result<TxHash, Error> {
-        Err(Error::NotImplemented)
+        self.contracts
+            .provide_content_message(
+                block_number as u64,
+                total_leaves as u64,
+                leaf_index as u64,
+                nonce,
+                sender,
+                receiver,
+                payload,
+                proof,
+            )
+            .await
     }
 
     pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
-        Err(Error::NotImplemented)
+        self.contracts.is_message_processed(nonce_le).await
     }
 }
 
@@ -294,8 +305,8 @@ where
         nonce: [u8; 32],
         sender: [u8; 32],
         receiver: [u8; 20],
-        payload: &'static [u8],
-        proof: &'static [[u8; 32]],
+        payload: Vec<u8>,
+        proof: Vec<[u8; 32]>,
     ) -> Result<TxHash, Error> {
         let call = self.message_queue_instance.processMessage(
             U256::from(block_number),

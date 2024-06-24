@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_contract::Event;
 use alloy_network::{Ethereum, EthereumSigner};
-use alloy_primitives::{hex, Address, Bytes, TxHash, Uint, B256, U256};
+use alloy_primitives::{hex, Address, Bytes, Uint, B256, U256};
 use alloy_provider::{
     layers::{
         GasEstimatorLayer, GasEstimatorProvider, ManagedNonceLayer, ManagedNonceProvider,
@@ -11,7 +11,7 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_client::RpcClient;
-use alloy_rpc_types::Filter;
+use alloy_rpc_types::{BlockId, BlockNumberOrTag, Filter};
 use alloy_signer::k256::ecdsa::SigningKey;
 use alloy_signer_wallet::{LocalWallet, Wallet};
 use alloy_sol_types::SolEvent;
@@ -28,6 +28,8 @@ use crate::{
     convert::Convert,
     proof::BlockMerkleRootProof,
 };
+
+pub use alloy_primitives::TxHash;
 
 mod abi;
 mod convert;
@@ -62,6 +64,13 @@ pub struct MerkleRootEntry {
     pub block_number: u64,
     merkle_root: B256,
     tx_hash: TxHash,
+}
+
+#[derive(Debug)]
+pub enum TxStatus {
+    Finalized,
+    Pending,
+    Failed,
 }
 
 impl Contracts {
@@ -117,7 +126,7 @@ impl Contracts {
         block_number: U,
         merkle_root: H,
         proof: B,
-    ) -> Result<(), Error> {
+    ) -> Result<TxHash, Error> {
         let block_number: U256 = block_number.convert();
         let merkle_root: B256 = merkle_root.convert();
         let proof = proof.convert();
@@ -138,13 +147,10 @@ impl Contracts {
                     .send()
                     .await
                 {
-                    Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(_) => Ok(()),
-                        Err(_) => Err(Error::ErrorWaitingTransactionReceipt),
-                    },
+                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
-                        Err(Error::ErrorSendingTransaction)
+                        Err(Error::ErrorSendingTransaction(e))
                     }
                 }
             }
@@ -152,7 +158,7 @@ impl Contracts {
         }
     }
 
-    pub async fn provide_merkle_root_json(&self, json_string: &str) -> Result<(), Error> {
+    pub async fn provide_merkle_root_json(&self, json_string: &str) -> Result<TxHash, Error> {
         let proof: BlockMerkleRootProof = BlockMerkleRootProof::try_from_json_string(json_string)
             .map_err(|_| Error::WrongJsonFormation)?;
         self.provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
@@ -211,7 +217,7 @@ impl Contracts {
         U1: Convert<U256>,
         U2: Convert<U256>,
         U3: Convert<U256>,
-        N: Convert<Uint<256, 4>>,
+        N: Convert<B256>,
         S: Convert<B256>,
         R: Convert<Address>,
         P: Convert<Bytes>,
@@ -225,7 +231,7 @@ impl Contracts {
         receiver: R,
         payload: P,
         proof: Vec<H>,
-    ) -> Result<bool, Error> {
+    ) -> Result<TxHash, Error> {
         let call = self.message_queue_instance.processMessage(
             block_number.convert(),
             total_leaves.convert(),
@@ -247,18 +253,105 @@ impl Contracts {
                     .send()
                     .await
                 {
-                    Ok(pending_tx) => match pending_tx.get_receipt().await {
-                        Ok(_) => Ok(true),
-                        Err(_) => Err(Error::ErrorWaitingTransactionReceipt),
-                    },
+                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
-                        Err(Error::ErrorSendingTransaction)
+                        Err(Error::ErrorSendingTransaction(e))
                     }
                 }
             }
             Err(e) => Err(Error::ErrorDuringContractExecution(e)),
         }
+    }
+
+    pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
+        let block = U256::from(block);
+
+        let root = self
+            .relayer_instance
+            .getMerkleRoot(block)
+            .block(BlockId::Number(BlockNumberOrTag::Finalized))
+            .call()
+            .await
+            .map_err(Error::ErrorDuringContractExecution)?
+            ._0
+            .0;
+
+        Ok((root != [0; 32]).then_some(root))
+    }
+
+    pub async fn is_message_processed(&self, nonce_le: [u8; 32]) -> Result<bool, Error> {
+        let nonce = B256::from(nonce_le);
+
+        let processed = self
+            .message_queue_instance
+            .isProcessed(ContentMessage {
+                nonce,
+                sender: Default::default(),
+                receiver: Default::default(),
+                data: Default::default(),
+            })
+            .block(BlockId::Number(BlockNumberOrTag::Finalized))
+            .call()
+            .await
+            .map_err(Error::ErrorDuringContractExecution)?
+            ._0;
+
+        Ok(processed)
+    }
+
+    pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
+        let tx = self
+            .provider
+            .get_transaction_by_hash(tx_hash)
+            .await
+            .map_err(|_| Error::ErrorFetchingTransaction)?;
+
+        if tx.block_hash.is_none() {
+            return Ok(TxStatus::Pending);
+        }
+
+        let receipt = self
+            .provider
+            .get_transaction_receipt(tx_hash)
+            .await
+            .map_err(|_| Error::ErrorFetchingTransactionReceipt)?;
+
+        let receipt = if let Some(receipt) = receipt {
+            receipt
+        } else {
+            return Ok(TxStatus::Failed);
+        };
+
+        let status_code = receipt.status_code.unwrap_or_default();
+
+        if status_code.is_zero() {
+            return Ok(TxStatus::Failed);
+        }
+
+        let block = if let Some(block) = receipt.block_number {
+            block
+        } else {
+            return Ok(TxStatus::Pending);
+        };
+
+        let latest_finalized = self
+            .provider
+            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .await
+            .map_err(|_| Error::ErrorFetchingBlock)?
+            .ok_or(Error::ErrorFetchingBlock)?
+            .header
+            .number
+            .ok_or(Error::ErrorFetchingBlock)?;
+
+        let status = if latest_finalized >= block {
+            TxStatus::Finalized
+        } else {
+            TxStatus::Pending
+        };
+
+        Ok(status)
     }
 }
 

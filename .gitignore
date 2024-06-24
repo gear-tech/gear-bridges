@@ -1,5 +1,6 @@
 target/
 .vscode
+.idea
 data/
 /proof_storage
 _obj

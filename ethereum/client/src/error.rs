@@ -12,10 +12,16 @@ pub enum Error {
     WrongPrivateKey,
     #[error("Error during contract execution: {0}")]
     ErrorDuringContractExecution(alloy_contract::Error),
-    #[error("Error sending transaction")]
-    ErrorSendingTransaction,
+    #[error("Error sending transaction: {0}")]
+    ErrorSendingTransaction(alloy_contract::Error),
     #[error("Error waiting transaction receipt")]
     ErrorWaitingTransactionReceipt,
+    #[error("Error fetching transaction")]
+    ErrorFetchingTransaction,
+    #[error("Error fetching transaction receipt")]
+    ErrorFetchingTransactionReceipt,
+    #[error("Error fetching block")]
+    ErrorFetchingBlock,
     #[error("Wrong path to file")]
     WrongPathToFile,
     #[error("Wrong JSON format")]

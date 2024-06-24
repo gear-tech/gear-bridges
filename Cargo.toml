@@ -30,6 +30,7 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 
 grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
+gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpointeths-io = { path = "gear-programs/checkpointeths/io", default-features = false }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -47,18 +48,20 @@ ark-serialize = { version = "0.4", default-features = false }
 ark-ec = { version = "0.4.2", default-features = false }
 ark-ff = { version = "0.4.2", default-features = false }
 ark-scale = { version = "0.0.12", default-features = false }
+axum = "0.7.5"
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
+dotenv = "0.15.0"
 env_logger = "0.9.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",
     "codec",
 ] }
 ff = { version = "0.13.0", features = ["derive"] }
-futures = "0.3"
+futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
 hex = { version = "0.4.3", default-features = false }
 hex-literal = "0.4.1"
@@ -71,6 +74,7 @@ log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
 paste = "1.0.14"
 pretty_env_logger = "*"
+prometheus = { version = "0.13.0", default-features = false }
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
@@ -92,6 +96,7 @@ gmeta = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gea
 gear-wasm-builder = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
 gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
+gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", default-features = false, features = [
     "std",

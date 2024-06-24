@@ -123,13 +123,15 @@ impl EthApi {
         Ok(EthApi { contracts })
     }
 
-    pub async fn provide_merkle_root<U: Convert<U256>, H: Convert<B256>, B: Convert<Bytes>>(
+    pub async fn provide_merkle_root(
         &self,
-        block_number: U,
-        merkle_root: H,
-        proof: B,
+        block_number: u32,
+        merkle_root: [u8; 32],
+        proof: Vec<u8>,
     ) -> Result<TxHash, Error> {
-        Err(Error::NotImplemented)
+        self.contracts
+            .provide_merkle_root(block_number, merkle_root, proof.as_ref())
+            .await
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {

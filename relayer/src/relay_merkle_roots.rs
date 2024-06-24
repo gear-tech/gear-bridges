@@ -374,7 +374,7 @@ async fn submit_proof_to_ethereum(eth_api: &EthApi, proof: FinalProof) -> anyhow
     );
 
     let tx_hash = eth_api
-        .provide_merkle_root(proof.block_number, proof.merkle_root, &proof.proof[..])
+        .provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
         .await?;
 
     Ok(tx_hash)

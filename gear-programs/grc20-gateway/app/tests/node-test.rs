@@ -1,7 +1,7 @@
 use blake2::{digest::typenum::U32, Blake2b, Digest};
 use gclient::{EventProcessor, GearApi, Result, WSAddress};
 use gear_core::ids::{MessageId, ProgramId};
-use grc20_gateway_app::services::utils::Error;
+use grc20_gateway_app::services::error::Error;
 use grc20_gateway_app::services::Config;
 use grc20_gateway_app::services::InitConfig;
 use gstd::ActorId;

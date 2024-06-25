@@ -1,12 +1,17 @@
 use gstd::MessageId;
 use sails_rtl::{
-    gstd::{gservice, ExecContext},
+    gstd::{gservice, msg, ExecContext},
     prelude::*,
 };
 
 mod erc20;
-pub mod utils;
-use utils::Error;
+mod security_handlers;
+pub mod error;
+mod bridge_builtin_operations;
+mod message_tracker;
+use error::Error;
+use message_tracker::{MessageStatus, MessageTracker, MsgData};
+mod token_operations;
 pub struct GRC20Gateway<ExecContext> {
     exec_context: ExecContext,
 }
@@ -23,6 +28,7 @@ pub struct Request {
 
 static mut DATA: Option<GRC20GatewayData> = None;
 static mut CONFIG: Option<Config> = None;
+static mut MSG_TRACKER: Option<MessageTracker> = None;
 
 #[derive(Debug)]
 pub struct GRC20GatewayData {
@@ -86,6 +92,7 @@ where
                 admin: exec_context.actor_id(),
             });
             CONFIG = Some(config.config);
+            MSG_TRACKER = Some(MessageTracker::default());
         }
     }
     pub fn new(exec_context: T) -> Self {
@@ -114,15 +121,13 @@ where
         }
     }
 
-    fn config_mut(&self) -> &Config {
+    fn config_mut(&self) -> &mut Config {
         unsafe {
             CONFIG
                 .as_mut()
                 .expect("GRC20Gateway::seed() should be called")
         }
     }
-
-    pub fn handle_reply() {}
 }
 
 #[gservice(events = GrcProviderEvents)]
@@ -139,27 +144,121 @@ where
     ) -> Result<U256, Error> {
         let data = self.data();
         let config = self.config();
+        let msg_id = msg::id();
+        let msg_tracker = msg_tracker_mut();
 
-        utils::burn_tokens(data.token_id, sender, amount, config).await?;
+        gstd::critical::set_hook(move || {
+            security_handlers::panic_handler(
+                msg_tracker_mut(),
+                MsgData::new(sender, amount, receiver, eth_token_id),
+            );
+        });
 
-        let nonce = match utils::send_message_to_bridge_builtin(
+        token_operations::burn_tokens(data.token_id, sender, amount, config, msg_id, msg_tracker).await?;
+
+        let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
             data.gear_bridge_builtin,
             receiver.into(),
             eth_token_id.into(),
             amount,
             config,
+            msg_id,
+            msg_tracker,
         )
         .await
         {
             Ok(nonce) => nonce,
             Err(_) => {
                 // In case of failure, mint tokens back to the sender
-                utils::mint_tokens(data.token_id, sender, amount, config).await?;
+                token_operations::mint_tokens(data.token_id, sender, amount, config).await?;
                 // Return an error indicating the tokens were refunded
+                msg_tracker.remove_message_status(&msg_id);
                 return Err(Error::TokensRefundedError);
             }
         };
 
+        msg_tracker.remove_message_status(&msg_id);
+
         Ok(nonce)
+    }
+
+    pub async fn handle_interrupted_teleport(
+        &mut self,
+        interrupted_msg_id: MessageId,
+    ) -> Result<U256, Error> {
+        let data = self.data();
+        let config = self.config();
+        let msg_id = msg::id();
+        let msg_tracker = msg_tracker_mut();
+
+        let (msg_status, msg_data) = msg_tracker
+            .remove_pending_message(&interrupted_msg_id)
+            .expect("Pending message doesn't exist");
+        let (sender, amount, receiver, eth_token_id) = msg_data.data();
+        gstd::critical::set_hook(move || {
+            security_handlers::panic_handler(
+                msg_tracker_mut(),
+                MsgData::new(sender, amount, receiver, eth_token_id),
+            );
+        });
+
+        let nonce = match msg_status {
+            MessageStatus::TokenBurnCompleted(true)
+            | MessageStatus::SendingMessageToBridgeBuiltin(_) => {
+                let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
+                    data.gear_bridge_builtin,
+                    receiver.into(),
+                    eth_token_id.into(),
+                    amount,
+                    config,
+                    msg_id,
+                    msg_tracker,
+                )
+                .await
+                {
+                    Ok(nonce) => nonce,
+                    Err(_) => {
+                        // In case of failure, mint tokens back to the sender
+                        token_operations::mint_tokens(data.token_id, sender, amount, config).await?;
+                        // Return an error indicating the tokens were refunded
+                        return Err(Error::TokensRefundedError);
+                    }
+                };
+
+                nonce
+            }
+            MessageStatus::BridgeResponseReceived(true, nonce) => nonce,
+            MessageStatus::BridgeResponseReceived(false, _)
+            | MessageStatus::SendingMessageToMintTokens(_)
+            | MessageStatus::TokenMintCompleted(false) => {
+                // In case of failure, mint tokens back to the sender
+                token_operations::mint_tokens(data.token_id, sender, amount, config).await?;
+                // Return an error indicating the tokens were refunded
+                msg_tracker.remove_message_status(&msg_id);
+                return Err(Error::TokensRefundedError);
+            }
+            MessageStatus::TokenMintCompleted(true) => {
+                return Err(Error::TokensRefundedError);
+            }
+            _ => unreachable!(),
+        };
+        msg_tracker.remove_message_status(&msg_id);
+        Ok(nonce)
+    }
+}
+
+fn msg_tracker() -> &'static MessageTracker {
+    unsafe {
+        MSG_TRACKER
+            .as_ref()
+            .expect("GRC20Gateway::seed() should be called")
+    }
+}
+
+fn msg_tracker_mut() -> &'static mut MessageTracker {
+    unsafe {
+        MSG_TRACKER
+            .as_mut()
+            .expect("GRC20Gateway::seed() should be called")
     }
 }

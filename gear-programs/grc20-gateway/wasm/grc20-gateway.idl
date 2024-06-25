@@ -12,6 +12,10 @@ type Config = struct {
   reply_timeout: u32,
 };
 
+type MessageId = struct {
+  [u8, 32],
+};
+
 type Error = enum {
   BurnTokensSendError,
   BurnTokensReplyError,
@@ -33,6 +37,7 @@ constructor {
 };
 
 service Grc20Gateway {
+  HandleInterruptedTeleport : (interrupted_msg_id: MessageId) -> result (u256, Error);
   TeleportVaraToEth : (sender: actor_id, amount: u256, receiver: [u8, 20], eth_token_id: [u8, 20]) -> result (u256, Error);
 };
 

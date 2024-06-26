@@ -91,14 +91,14 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", features = ["nightly"] }
-gmeta = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
-gear-wasm-builder = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", default-features = false }
-gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
-gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
-gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
-gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext" }
-pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge_with_bls381ext", default-features = false, features = [
+gstd = { version = "1.4.1", features = ["nightly"] }
+gmeta = "1.4.1"
+gear-wasm-builder = { version = "1.4.1", default-features = false }
+gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge", default-features = false, features = [
     "std",
 ] }
 subxt = "0.32.1"

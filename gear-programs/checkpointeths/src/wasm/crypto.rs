@@ -144,7 +144,7 @@ fn compute_fork_data_root(current_version: [u8; 4], genesis_validator_root: [u8;
 }
 
 fn compute_committee_sign_root(genesis: &Genesis, header: [u8; 32], _slot: u64) -> Hash256 {
-    let H256(genesis_root) = genesis.hash();
+    let H256(genesis_root) = genesis.validators_root();
 
     let domain_type = [0x07, 0x00, 0x00, 0x00];
 

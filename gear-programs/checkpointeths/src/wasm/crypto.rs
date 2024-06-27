@@ -15,14 +15,14 @@ const BUILTIN_BLS381: ActorId = ActorId::new(hex_literal::hex!(
 ));
 
 pub async fn verify_sync_committee_signature(
-    genesis: &Genesis,
+    network: &Network,
     pub_keys: Vec<G1>,
     attested_header: &BeaconBlockHeader,
     signature: &G2,
     signature_slot: u64,
 ) -> bool {
     let H256(header_root) = attested_header.tree_hash_root();
-    let signing_root = compute_committee_sign_root(genesis, header_root, signature_slot);
+    let signing_root = compute_committee_sign_root(network, header_root, signature_slot);
 
     let points: ArkScale<Vec<G1>> = pub_keys.into();
     let request = Request::AggregateG1 {
@@ -143,8 +143,8 @@ fn compute_fork_data_root(current_version: [u8; 4], genesis_validator_root: [u8;
     fork_data.tree_hash_root()
 }
 
-fn compute_committee_sign_root(genesis: &Genesis, header: [u8; 32], _slot: u64) -> Hash256 {
-    let H256(genesis_root) = genesis.validators_root();
+fn compute_committee_sign_root(network: &Network, header: [u8; 32], _slot: u64) -> Hash256 {
+    let H256(genesis_root) = network.genesis_validators_root();
 
     let domain_type = [0x07, 0x00, 0x00, 0x00];
 

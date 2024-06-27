@@ -17,7 +17,7 @@ pub async fn handle_start(
     }
 
     let (finalized_header_update, committee_update) = match sync_update::verify(
-        &state.genesis,
+        &state.network,
         &state.finalized_header,
         &state.sync_committee_current,
         &state.sync_committee_next,

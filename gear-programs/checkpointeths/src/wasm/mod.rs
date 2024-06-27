@@ -5,10 +5,11 @@ use io::{
     ethereum_common::{
         base_types::{Bitvector, FixedArray},
         tree_hash::TreeHash,
+        network::Network,
         utils as eth_utils, Hash256, SYNC_COMMITTEE_SIZE,
     },
     sync_update::Error as SyncUpdateError,
-    BeaconBlockHeader, Genesis, Handle, HandleResult, Init, SyncCommittee, SyncCommitteeKeys,
+    BeaconBlockHeader, Handle, HandleResult, Init, SyncCommittee, SyncCommitteeKeys,
     SyncUpdate, G1, G2,
 };
 use primitive_types::H256;
@@ -26,7 +27,7 @@ static mut STATE: Option<State<COUNT>> = None;
 #[gstd::async_init]
 async fn init() {
     let Init {
-        genesis,
+        network,
         sync_committee_current_pub_keys,
         sync_committee_current,
         sync_committee_current_branch,
@@ -51,7 +52,7 @@ async fn init() {
 
     finalized_header.slot -= 1;
     match sync_update::verify(
-        &genesis,
+        &network,
         &finalized_header,
         &sync_committee_current_pub_keys,
         &sync_committee_current_pub_keys,
@@ -63,7 +64,7 @@ async fn init() {
 
         Ok((Some(finalized_header), Some(sync_committee_next))) => unsafe {
             STATE = Some(State {
-                genesis,
+                network,
                 sync_committee_current: sync_committee_current_pub_keys,
                 sync_committee_next,
                 checkpoints: {

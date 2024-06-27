@@ -13,7 +13,6 @@ ark-bls12-381 = { workspace = true, features = ["curve"] }
 ark-scale.workspace = true
 ark-ec.workspace = true
 ark-ff.workspace = true
-hex-literal.workspace = true
 tree_hash_derive.workspace = true
 gstd.workspace = true
 gmeta.workspace = true

@@ -4,7 +4,7 @@ use gstd::debug;
 
 pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
     let (finalized_header_update, committee_update) = match verify(
-        &state.genesis,
+        &state.network,
         &state.finalized_header,
         &state.sync_committee_current,
         &state.sync_committee_next,
@@ -39,7 +39,7 @@ pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
 }
 
 pub async fn verify(
-    genesis: &Genesis,
+    network: &Network,
     stored_finalized_header: &BeaconBlockHeader,
     stored_sync_committee_current: &SyncCommitteeKeys,
     stored_sync_committee_next: &SyncCommitteeKeys,
@@ -90,7 +90,7 @@ pub async fn verify(
     );
 
     if !crypto::verify_sync_committee_signature(
-        genesis,
+        network,
         pub_keys,
         &attested_header,
         &sync_committee_signature.0 .0,

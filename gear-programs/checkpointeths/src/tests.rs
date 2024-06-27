@@ -7,17 +7,17 @@ use checkpointeths_io::{
         base_types::{BytesFixed, FixedArray},
         beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate},
         utils as eth_utils, SLOTS_PER_EPOCH,
+        network::Network,
     },
     replay_back,
     tree_hash::TreeHash,
-    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Genesis, Handle, HandleResult, Init,
+    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Handle, HandleResult, Init,
     SyncCommittee, SyncUpdate,
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use gstd::prelude::*;
 use reqwest::{Client, RequestBuilder};
 use serde::{de::DeserializeOwned, Deserialize};
-use std::cmp;
 use tokio::time::{self, Duration};
 
 // https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/p2p-interface.md#configuration
@@ -272,7 +272,7 @@ async fn init_and_updating() -> Result<()> {
 
     let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
     let init = Init {
-        genesis: Genesis::Sepolia,
+        network: Network::Sepolia,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
         sync_committee_current: bootstrap.current_sync_committee,
         sync_committee_current_branch: bootstrap
@@ -415,7 +415,7 @@ async fn replaying_back() -> Result<()> {
 
     let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
     let init = Init {
-        genesis: Genesis::Sepolia,
+        network: Network::Sepolia,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
         sync_committee_current: bootstrap.current_sync_committee,
         sync_committee_current_branch: bootstrap
@@ -495,7 +495,6 @@ async fn replaying_back() -> Result<()> {
     let mut slot_end = slot_end - count_headers;
     let count_headers = 29 * SLOTS_PER_EPOCH;
     let count_batch = (slot_end - slot_start) / count_headers;
-    let count_remaining = (slot_end - slot_start) % count_headers;
 
     for _batch in 0..count_batch {
         let mut requests_headers = Vec::with_capacity(count_headers as usize);

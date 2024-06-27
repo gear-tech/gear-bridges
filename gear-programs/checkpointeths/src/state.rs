@@ -1,12 +1,12 @@
 use super::*;
 use circular_buffer::CircularBuffer;
 use io::{
-    ethereum_common::{Hash256, SLOTS_PER_EPOCH},
-    BeaconBlockHeader, CheckpointResult, Genesis, SyncCommitteeKeys,
+    ethereum_common::{Hash256, SLOTS_PER_EPOCH, network::Network},
+    BeaconBlockHeader, CheckpointResult, SyncCommitteeKeys,
 };
 
 pub struct State<const N: usize> {
-    pub genesis: Genesis,
+    pub network: Network,
     pub finalized_header: BeaconBlockHeader,
     pub sync_committee_current: Box<SyncCommitteeKeys>,
     pub sync_committee_next: Box<SyncCommitteeKeys>,

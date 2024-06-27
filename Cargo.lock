@@ -1908,7 +1908,6 @@ dependencies = [
  "ethereum-common",
  "gmeta 1.4.1",
  "gstd 1.4.1",
- "hex-literal",
  "parity-scale-codec",
  "scale-info",
  "serde",

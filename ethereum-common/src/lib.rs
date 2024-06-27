@@ -3,6 +3,7 @@
 pub mod base_types;
 pub mod beacon;
 pub mod utils;
+pub mod network;
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;

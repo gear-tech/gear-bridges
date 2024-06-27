@@ -8,9 +8,9 @@ gstd = { workspace = true, features = ["debug"] }
 primitive-types.workspace = true
 parity-scale-codec.workspace = true
 checkpointeths-io.workspace = true
-ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = ["alloc"] }
-ark-serialize = { workspace = true }
-circular-buffer = { version = "0.1.7", default-features = false, features = ["alloc"] }
+ring.workspace = true
+ark-serialize.workspace = true
+circular-buffer.workspace = true
 gbuiltin-bls381.workspace = true
 hex-literal.workspace = true
 tree_hash_derive.workspace = true

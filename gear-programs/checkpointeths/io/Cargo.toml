@@ -8,7 +8,7 @@ ethereum-common.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 serde.workspace = true
-ark-serialize = { workspace = true }
+ark-serialize.workspace = true
 ark-bls12-381 = { workspace = true, features = ["curve"] }
 ark-scale.workspace = true
 ark-ec.workspace = true

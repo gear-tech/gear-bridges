@@ -8,9 +8,9 @@ use io::{
         network::Network,
         utils as eth_utils, Hash256, SYNC_COMMITTEE_SIZE,
     },
-    sync_update::Error as SyncUpdateError,
+    sync_update::Error as SyncCommitteeUpdateError,
     BeaconBlockHeader, Handle, HandleResult, Init, SyncCommittee, SyncCommitteeKeys,
-    SyncUpdate, G1, G2,
+    SyncCommitteeUpdate, G1, G2,
 };
 use primitive_types::H256;
 use state::{Checkpoints, ReplayBack, State};

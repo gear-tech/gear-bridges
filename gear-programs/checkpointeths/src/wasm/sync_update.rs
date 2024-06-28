@@ -2,7 +2,7 @@ use super::*;
 use committee::{Error as CommitteeError, Update as CommitteeUpdate};
 use gstd::debug;
 
-pub async fn handle(state: &mut State<COUNT>, sync_update: SyncUpdate) {
+pub async fn handle(state: &mut State<COUNT>, sync_update: SyncCommitteeUpdate) {
     let (finalized_header_update, committee_update) = match verify(
         &state.network,
         &state.finalized_header,
@@ -43,9 +43,9 @@ pub async fn verify(
     stored_finalized_header: &BeaconBlockHeader,
     stored_sync_committee_current: &SyncCommitteeKeys,
     stored_sync_committee_next: &SyncCommitteeKeys,
-    sync_update: SyncUpdate,
-) -> Result<(Option<BeaconBlockHeader>, Option<Box<SyncCommitteeKeys>>), SyncUpdateError> {
-    let SyncUpdate {
+    sync_update: SyncCommitteeUpdate,
+) -> Result<(Option<BeaconBlockHeader>, Option<Box<SyncCommitteeKeys>>), SyncCommitteeUpdateError> {
+    let SyncCommitteeUpdate {
         signature_slot,
         attested_header,
         finalized_header,
@@ -59,7 +59,7 @@ pub async fn verify(
 
     let update_slot_finalized = finalized_header.slot;
     if !(signature_slot > attested_header.slot && attested_header.slot >= update_slot_finalized) {
-        return Err(SyncUpdateError::InvalidTimestamp);
+        return Err(SyncCommitteeUpdateError::InvalidTimestamp);
     }
 
     let store_period = eth_utils::calculate_period(stored_finalized_header.slot);
@@ -69,7 +69,7 @@ pub async fn verify(
     } else if update_sig_period == store_period {
         stored_sync_committee_current
     } else {
-        return Err(SyncUpdateError::InvalidPeriod);
+        return Err(SyncCommitteeUpdateError::InvalidPeriod);
     };
 
     let pub_keys =
@@ -78,7 +78,7 @@ pub async fn verify(
 
     // committee_count < 512 * 2 / 3
     if committee_count * 3 < SYNC_COMMITTEE_SIZE * 2 {
-        return Err(SyncUpdateError::LowVoteCount);
+        return Err(SyncCommitteeUpdateError::LowVoteCount);
     }
 
     let committee_update = CommitteeUpdate::new(
@@ -98,7 +98,7 @@ pub async fn verify(
     )
     .await
     {
-        return Err(SyncUpdateError::InvalidSignature);
+        return Err(SyncCommitteeUpdateError::InvalidSignature);
     }
 
     let mut finalized_header_update = None;
@@ -106,20 +106,20 @@ pub async fn verify(
         if merkle::is_finality_proof_valid(&attested_header, &finalized_header, &finality_branch) {
             finalized_header_update = Some(finalized_header);
         } else {
-            return Err(SyncUpdateError::InvalidFinalityProof);
+            return Err(SyncCommitteeUpdateError::InvalidFinalityProof);
         }
     }
 
     let committee_update = match committee_update.verify(store_period) {
         Ok(committee_update) => committee_update,
         Err(CommitteeError::InvalidNextSyncCommitteeProof) => {
-            return Err(SyncUpdateError::InvalidNextSyncCommitteeProof)
+            return Err(SyncCommitteeUpdateError::InvalidNextSyncCommitteeProof)
         }
-        Err(CommitteeError::InvalidPublicKeys) => return Err(SyncUpdateError::InvalidPublicKeys),
+        Err(CommitteeError::InvalidPublicKeys) => return Err(SyncCommitteeUpdateError::InvalidPublicKeys),
     };
 
     if finalized_header_update.is_none() && committee_update.is_none() {
-        return Err(SyncUpdateError::NotActual);
+        return Err(SyncCommitteeUpdateError::NotActual);
     }
 
     Ok((finalized_header_update, committee_update))

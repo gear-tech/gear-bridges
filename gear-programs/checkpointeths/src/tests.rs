@@ -12,7 +12,7 @@ use checkpointeths_io::{
     replay_back,
     tree_hash::TreeHash,
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Handle, HandleResult, Init,
-    SyncCommittee, SyncUpdate,
+    SyncCommittee, SyncCommitteeUpdate,
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use gstd::prelude::*;
@@ -177,7 +177,7 @@ fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeI
         .collect()
 }
 
-fn create_sync_update(update: Update) -> SyncUpdate {
+fn create_sync_update(update: Update) -> SyncCommitteeUpdate {
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
@@ -185,7 +185,7 @@ fn create_sync_update(update: Update) -> SyncUpdate {
 
     let next_sync_committee_keys = map_public_keys(&update.next_sync_committee.pubkeys.0);
 
-    SyncUpdate {
+    SyncCommitteeUpdate {
         signature_slot: update.signature_slot,
         attested_header: update.attested_header,
         finalized_header: update.finalized_header,
@@ -335,7 +335,7 @@ async fn init_and_updating() -> Result<()> {
                     continue;
                 };
 
-                let payload = Handle::SyncUpdate(SyncUpdate {
+                let payload = Handle::SyncUpdate(SyncCommitteeUpdate {
                     signature_slot: update.signature_slot,
                     attested_header: update.attested_header,
                     finalized_header: update.finalized_header,
@@ -456,7 +456,7 @@ async fn replaying_back() -> Result<()> {
     .unwrap();
 
     let payload = Handle::ReplayBackStart {
-        sync_update: SyncUpdate {
+        sync_update: SyncCommitteeUpdate {
             signature_slot: finality_update.signature_slot,
             attested_header: finality_update.attested_header,
             finalized_header: finality_update.finalized_header,
@@ -488,7 +488,7 @@ async fn replaying_back() -> Result<()> {
     let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
     assert!(matches!(
         result_decoded,
-        HandleResult::ReplayBackStart(Ok(replay_back::StatusStart::Started))
+        HandleResult::ReplayBackStart(Ok(replay_back::StatusStart::InProgress))
     ));
 
     // continue to replay back

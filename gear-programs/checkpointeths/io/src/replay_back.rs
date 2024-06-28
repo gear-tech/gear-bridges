@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum StatusStart {
-    Started,
+    InProgress,
     Finished,
 }
 

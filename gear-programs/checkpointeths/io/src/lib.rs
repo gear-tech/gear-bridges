@@ -10,7 +10,7 @@ pub mod meta;
 pub mod replay_back;
 pub mod sync_update;
 
-pub use sync_update::SyncUpdate;
+pub use sync_update::SyncCommitteeUpdate;
 
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -32,6 +32,8 @@ pub const G1_UNCOMPRESSED_SIZE: usize = 96;
 pub const G2_UNCOMPRESSED_SIZE: usize = 192;
 
 pub type ArkScale<T> = ark_scale::ArkScale<T, { ark_scale::HOST_CALL }>;
+
+pub type Slot = u64;
 
 #[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash, TypeInfo)]
 pub struct SyncCommittee {
@@ -65,7 +67,7 @@ pub struct Init {
     pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
     pub sync_committee_current: SyncCommittee,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
-    pub update: SyncUpdate,
+    pub update: SyncCommitteeUpdate,
 }
 
 #[derive(Debug, Clone, Decode, Encode, TypeInfo)]
@@ -77,11 +79,11 @@ pub enum CheckpointError {
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum Handle {
     GetCheckpointFor {
-        slot: u64,
+        slot: Slot,
     },
-    SyncUpdate(SyncUpdate),
+    SyncUpdate(SyncCommitteeUpdate),
     ReplayBackStart {
-        sync_update: SyncUpdate,
+        sync_update: SyncCommitteeUpdate,
         headers: Vec<BeaconBlockHeader>,
     },
     ReplayBack(Vec<BeaconBlockHeader>),
@@ -89,7 +91,7 @@ pub enum Handle {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum HandleResult {
-    Checkpoint(Result<(u64, Hash256), CheckpointError>),
+    Checkpoint(Result<(Slot, Hash256), CheckpointError>),
     SyncUpdate(Result<(), sync_update::Error>),
     ReplayBackStart(Result<replay_back::StatusStart, replay_back::Error>),
     ReplayBack(Option<replay_back::Status>),

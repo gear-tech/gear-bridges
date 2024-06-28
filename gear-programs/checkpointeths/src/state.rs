@@ -2,7 +2,7 @@ use super::*;
 use circular_buffer::CircularBuffer;
 use io::{
     ethereum_common::{Hash256, SLOTS_PER_EPOCH, network::Network},
-    BeaconBlockHeader, CheckpointError, SyncCommitteeKeys,
+    BeaconBlockHeader, CheckpointError, SyncCommitteeKeys, Slot,
 };
 
 pub struct State<const N: usize> {
@@ -17,14 +17,14 @@ pub struct State<const N: usize> {
 pub struct ReplayBack {
     pub finalized_header: BeaconBlockHeader,
     pub sync_committee_next: Option<Box<SyncCommitteeKeys>>,
-    pub checkpoints: Vec<(u64, Hash256)>,
+    pub checkpoints: Vec<(Slot, Hash256)>,
     pub last_header: BeaconBlockHeader,
 }
 
 #[derive(Debug, Clone)]
 pub struct Checkpoints<const N: usize> {
     checkpoints: Box<CircularBuffer<N, Hash256>>,
-    slots: Vec<(usize, u64)>,
+    slots: Vec<(usize, Slot)>,
 }
 
 impl<const N: usize> Checkpoints<N> {
@@ -35,7 +35,7 @@ impl<const N: usize> Checkpoints<N> {
         }
     }
 
-    pub fn push(&mut self, slot: u64, checkpoint: Hash256) {
+    pub fn push(&mut self, slot: Slot, checkpoint: Hash256) {
         let len = self.checkpoints.len();
         let overwrite = len >= self.checkpoints.capacity();
         let slot_last = self.last().map(|(slot, _checkpoint)| slot);
@@ -80,7 +80,7 @@ impl<const N: usize> Checkpoints<N> {
             .push((if overwrite { len - 1 } else { len }, slot));
     }
 
-    pub fn checkpoints(&self) -> Vec<(u64, Hash256)> {
+    pub fn checkpoints(&self) -> Vec<(Slot, Hash256)> {
         let mut result = Vec::with_capacity(self.checkpoints.len());
         for indexes in self.slots.windows(2) {
             let (index_first, slot_first) = indexes[0];
@@ -110,7 +110,7 @@ impl<const N: usize> Checkpoints<N> {
         result
     }
 
-    pub fn checkpoint(&self, slot: u64) -> Result<(u64, Hash256), CheckpointError> {
+    pub fn checkpoint(&self, slot: Slot) -> Result<(Slot, Hash256), CheckpointError> {
         let Some((index_last, slot_last)) = self.slots.last() else {
             return Err(CheckpointError::NotPresent);
         };
@@ -159,7 +159,7 @@ impl<const N: usize> Checkpoints<N> {
         }
     }
 
-    pub fn checkpoint_by_index(&self, index: usize) -> Option<(u64, Hash256)> {
+    pub fn checkpoint_by_index(&self, index: usize) -> Option<(Slot, Hash256)> {
         match self
             .slots
             .binary_search_by(|(index_data, _slot)| index_data.cmp(&index))
@@ -183,7 +183,7 @@ impl<const N: usize> Checkpoints<N> {
         }
     }
 
-    pub fn last(&self) -> Option<(u64, Hash256)> {
+    pub fn last(&self) -> Option<(Slot, Hash256)> {
         match self.checkpoints.len() {
             0 => None,
             len => self.checkpoint_by_index(len - 1),
@@ -214,7 +214,7 @@ fn empty_checkpoints() {
 }
 
 #[track_caller]
-fn compare_checkpoints<const COUNT: usize>(data: &[(u64, Hash256)], checkpoints: &Checkpoints<COUNT>) {
+fn compare_checkpoints<const COUNT: usize>(data: &[(Slot, Hash256)], checkpoints: &Checkpoints<COUNT>) {
     for items in data.windows(2) {
         let (slot_start, checkpoint_start) = items[0];
         let (slot_end, checkpoint_end) = items[1];

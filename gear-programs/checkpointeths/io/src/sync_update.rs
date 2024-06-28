@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub struct SyncUpdate {
+pub struct SyncCommitteeUpdate {
     pub signature_slot: u64,
     pub attested_header: BeaconBlockHeader,
     pub finalized_header: BeaconBlockHeader,

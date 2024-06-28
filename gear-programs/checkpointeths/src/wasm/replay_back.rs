@@ -7,7 +7,7 @@ use io::{
 
 pub async fn handle_start(
     state: &mut State<COUNT>,
-    sync_update: SyncUpdate,
+    sync_update: SyncCommitteeUpdate,
     mut headers: Vec<BeaconBlockHeader>,
 ) {
     if state.replay_back.is_some() {
@@ -59,7 +59,7 @@ pub async fn handle_start(
         msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::Finished)), 0)
             .expect("Unable to reply with `HandleResult::ReplayBackStart::Finished`");
     } else {
-        msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::Started)), 0)
+        msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::InProgress)), 0)
             .expect("Unable to reply with `HandleResult::ReplayBackStart::Started`");
     }
 }

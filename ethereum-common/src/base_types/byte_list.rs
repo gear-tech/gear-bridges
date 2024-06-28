@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Decode, Encode)]
+#[derive(Debug, Clone, Decode, Encode, TypeInfo)]
 pub struct ByteList<const N: usize>(pub List<u8, N>);
 
 impl<const N: usize> TryFrom<&[u8]> for ByteList<N> {

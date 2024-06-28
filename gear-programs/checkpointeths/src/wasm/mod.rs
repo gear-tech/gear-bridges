@@ -7,6 +7,7 @@ use io::{
         tree_hash::TreeHash,
         network::Network,
         utils as eth_utils, Hash256, SYNC_COMMITTEE_SIZE,
+        merkle,
     },
     sync_update::Error as SyncCommitteeUpdateError,
     BeaconBlockHeader, Handle, HandleResult, Init, SyncCommittee, SyncCommitteeKeys,

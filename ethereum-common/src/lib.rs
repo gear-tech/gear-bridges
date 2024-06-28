@@ -2,6 +2,7 @@
 
 pub mod base_types;
 pub mod beacon;
+pub mod merkle;
 pub mod utils;
 pub mod network;
 

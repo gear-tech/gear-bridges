@@ -15,6 +15,7 @@ derive_more.workspace = true
 bitvec.workspace = true
 scale-info = { workspace = true, features = ["bit-vec"] }
 hex-literal.workspace = true
+ring.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -29,4 +30,5 @@ std = [
     "ethereum-types/std",
     "bitvec/std",
     "scale-info/std",
+    "ring/std",
 ]

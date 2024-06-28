@@ -13,7 +13,6 @@ pub use checkpointeths_io as io;
 #[cfg(not(feature = "std"))]
 use gstd::{Box, Vec};
 
-pub mod merkle;
 mod state;
 
 #[cfg(not(feature = "std"))]

@@ -8,7 +8,6 @@ gstd = { workspace = true, features = ["debug"] }
 primitive-types.workspace = true
 parity-scale-codec.workspace = true
 checkpointeths-io.workspace = true
-ring.workspace = true
 ark-serialize.workspace = true
 circular-buffer.workspace = true
 gbuiltin-bls381.workspace = true
@@ -39,7 +38,6 @@ std = [
     "primitive-types/std",
     "parity-scale-codec/std",
     "checkpointeths-io/std",
-    "ring/std",
     "ark-serialize/std",
     "circular-buffer/use_std",
     "getrandom/std",

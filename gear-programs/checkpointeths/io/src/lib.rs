@@ -16,14 +16,13 @@ pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
     self,
-    beacon::{BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate},
+    beacon::{BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate, SyncCommittee},
     network::Network,
     tree_hash, SYNC_COMMITTEE_SIZE,
 };
-use ethereum_common::{base_types::FixedArray, beacon::BLSPubKey, Hash256};
+use ethereum_common::{base_types::FixedArray, Hash256};
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
-use serde::Deserialize;
 
 // <G1 as SWCurveConfig>::serialized_size(Compress::No)
 pub const G1_UNCOMPRESSED_SIZE: usize = 96;
@@ -34,12 +33,6 @@ pub const G2_UNCOMPRESSED_SIZE: usize = 192;
 pub type ArkScale<T> = ark_scale::ArkScale<T, { ark_scale::HOST_CALL }>;
 
 pub type Slot = u64;
-
-#[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash, TypeInfo)]
-pub struct SyncCommittee {
-    pub pubkeys: FixedArray<BLSPubKey, SYNC_COMMITTEE_SIZE>,
-    pub aggregate_pubkey: BLSPubKey,
-}
 
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct G1TypeInfo(pub G1);

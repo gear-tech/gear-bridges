@@ -44,7 +44,7 @@ pub async fn handle_start(
         return;
     };
 
-    state.replay_back = Some(ReplayBack {
+    state.replay_back = Some(ReplayBackState {
         finalized_header: finalized_header.clone(),
         sync_committee_next: committee_update,
         checkpoints: {
@@ -81,15 +81,7 @@ pub fn handle(state: &mut State<COUNT>, headers: Vec<BeaconBlockHeader>) {
 }
 
 fn process_headers(state: &mut State<COUNT>, mut headers: Vec<BeaconBlockHeader>) -> bool {
-    headers.sort_unstable_by(|a, b| {
-        if a.slot < b.slot {
-            Ordering::Less
-        } else if a.slot == b.slot {
-            Ordering::Equal
-        } else {
-            Ordering::Greater
-        }
-    });
+    headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
 
     let replay_back = state.replay_back.as_mut().expect("Checked by the caller");
     let (slot_last, checkpoint_last) = state

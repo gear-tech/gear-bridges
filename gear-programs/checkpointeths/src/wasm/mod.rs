@@ -13,7 +13,7 @@ use io::{
     SyncCommitteeUpdate, G1, G2,
 };
 use primitive_types::H256;
-use state::{Checkpoints, ReplayBack, State};
+use state::{Checkpoints, ReplayBackState, State};
 
 mod committee;
 mod crypto;

@@ -11,10 +11,10 @@ pub struct State<const N: usize> {
     pub sync_committee_current: Box<SyncCommitteeKeys>,
     pub sync_committee_next: Box<SyncCommitteeKeys>,
     pub checkpoints: Checkpoints<N>,
-    pub replay_back: Option<ReplayBack>,
+    pub replay_back: Option<ReplayBackState>,
 }
 
-pub struct ReplayBack {
+pub struct ReplayBackState {
     pub finalized_header: BeaconBlockHeader,
     pub sync_committee_next: Option<Box<SyncCommitteeKeys>>,
     pub checkpoints: Vec<(Slot, Hash256)>,

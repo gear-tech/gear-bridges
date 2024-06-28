@@ -18,4 +18,14 @@ impl Network {
             Holesky => hex!("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
         }.into()
     }
+
+    pub fn fork_version(&self) -> [u8; 4] {
+        use Network::*;
+
+        match self {
+            Mainnet => hex!("04000000"),
+            Sepolia => hex!("90000073"),
+            Holesky => hex!("05017000"),
+        }
+    }
 }

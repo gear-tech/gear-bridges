@@ -25,7 +25,7 @@ pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const RPC_URL: &str = "http://127.0.0.1:5052";
 
 const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
-    include_bytes!("./chain-data/sepolia-finality-update-5_254_112.json");
+    include_bytes!("./sepolia-finality-update-5_254_112.json");
 
 #[derive(Deserialize)]
 #[serde(untagged)]

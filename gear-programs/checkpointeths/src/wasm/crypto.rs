@@ -10,6 +10,10 @@ use io::{tree_hash, ArkScale};
 use parity_scale_codec::{Decode, Encode};
 use tree_hash::TreeHash;
 
+// Domain type for sync committee signatures.
+// https://eth2book.info/capella/part3/config/constants/#domain-types
+const DOMAIN_TYPE: [u8; 4] = [0x07, 0x00, 0x00, 0x00];
+
 const BUILTIN_BLS381: ActorId = ActorId::new(hex_literal::hex!(
     "6b6e292c382945e80bf51af2ba7fe9f458dcff81ae6075c46f9095e1bbecdc37"
 ));
@@ -145,12 +149,7 @@ fn compute_fork_data_root(current_version: [u8; 4], genesis_validator_root: [u8;
 
 fn compute_committee_sign_root(network: &Network, header: [u8; 32], _slot: u64) -> Hash256 {
     let H256(genesis_root) = network.genesis_validators_root();
-
-    let domain_type = [0x07, 0x00, 0x00, 0x00];
-
-    // Deneb
-    let fork_version = hex_literal::hex!("90000073");
-    let domain = compute_domain(&domain_type, fork_version, genesis_root);
+    let domain = compute_domain(&DOMAIN_TYPE, network.fork_version(), genesis_root);
 
     compute_signing_root(header, domain)
 }

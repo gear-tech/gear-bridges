@@ -69,15 +69,14 @@ pub struct Init {
 }
 
 #[derive(Debug, Clone, Decode, Encode, TypeInfo)]
-pub enum CheckpointResult {
+pub enum CheckpointError {
     OutDated,
     NotPresent,
-    Ok(Hash256),
 }
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum Handle {
-    Checkpoint {
+    GetCheckpointFor {
         slot: u64,
     },
     SyncUpdate(SyncUpdate),
@@ -90,7 +89,7 @@ pub enum Handle {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum HandleResult {
-    Checkpoint(CheckpointResult),
+    Checkpoint(Result<(u64, Hash256), CheckpointError>),
     SyncUpdate(Result<(), sync_update::Error>),
     ReplayBackStart(Result<replay_back::StatusStart, replay_back::Error>),
     ReplayBack(Option<replay_back::Status>),

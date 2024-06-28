@@ -87,7 +87,7 @@ async fn main() {
     let state = unsafe { STATE.as_mut() }.expect("The program should be initialized");
     let message: Handle = msg::load().expect("Unable to decode `Handle` message");
     match message {
-        Handle::Checkpoint { slot } => {
+        Handle::GetCheckpointFor { slot } => {
             let result = state.checkpoints.checkpoint(slot);
             msg::reply(HandleResult::Checkpoint(result), 0)
                 .expect("Unable to reply with `HandleResult::Checkpoint`");

@@ -2,7 +2,7 @@ use super::*;
 use circular_buffer::CircularBuffer;
 use io::{
     ethereum_common::{Hash256, SLOTS_PER_EPOCH, network::Network},
-    BeaconBlockHeader, CheckpointResult, SyncCommitteeKeys,
+    BeaconBlockHeader, CheckpointError, SyncCommitteeKeys,
 };
 
 pub struct State<const N: usize> {
@@ -38,6 +38,7 @@ impl<const N: usize> Checkpoints<N> {
     pub fn push(&mut self, slot: u64, checkpoint: Hash256) {
         let len = self.checkpoints.len();
         let overwrite = len >= self.checkpoints.capacity();
+        let slot_last = self.last().map(|(slot, _checkpoint)| slot);
 
         self.checkpoints.push_back(checkpoint);
 
@@ -69,7 +70,7 @@ impl<const N: usize> Checkpoints<N> {
 
             Some((_, slot_previous))
                 if slot % SLOTS_PER_EPOCH != 0
-                    || slot > slot_previous + SLOTS_PER_EPOCH
+                    || slot_last.map(|slot_last| slot_last + SLOTS_PER_EPOCH < slot ).unwrap_or(false)
                     || slot_previous % SLOTS_PER_EPOCH != 0 => {}
 
             _ => return,
@@ -109,32 +110,50 @@ impl<const N: usize> Checkpoints<N> {
         result
     }
 
-    pub fn checkpoint(&self, slot: u64) -> CheckpointResult {
+    pub fn checkpoint(&self, slot: u64) -> Result<(u64, Hash256), CheckpointError> {
         let Some((index_last, slot_last)) = self.slots.last() else {
-            return CheckpointResult::NotPresent;
+            return Err(CheckpointError::NotPresent);
         };
 
         match self
             .slots
             .binary_search_by(|(_index, slot_checkpoint)| slot_checkpoint.cmp(&slot))
         {
-            Ok(index) => CheckpointResult::Ok(self.checkpoints[self.slots[index].0]),
+            Ok(index) => Ok((slot, self.checkpoints[self.slots[index].0])),
 
-            Err(0) => CheckpointResult::OutDated,
+            Err(0) => Err(CheckpointError::OutDated),
 
             Err(index) if index < self.slots.len() => {
-                let (index_start, slot_start) = self.slots[index - 1];
-                let offset = ((slot - slot_start) / SLOTS_PER_EPOCH) as usize;
+                let (index_previous, slot_previous) = self.slots[index - 1];
+                let (index_next, slot_next) = self.slots[index];
 
-                CheckpointResult::Ok(self.checkpoints[index_start + offset])
+                let gap = match (slot_next - slot_previous) % SLOTS_PER_EPOCH {
+                    // both slots are divisable by SLOTS_PER_EPOCH and the distance
+                    // between them is greater than SLOTS_PER_EPOCH
+                    0 if slot_previous + SLOTS_PER_EPOCH < slot_next => true,
+                    _ => false,
+                };
+
+                let offset = ((slot - 1 - slot_previous) / SLOTS_PER_EPOCH + 1) as usize;
+                let slot_checkpoint = slot_previous + offset as u64 * SLOTS_PER_EPOCH;
+                if slot_previous % SLOTS_PER_EPOCH != 0
+                    || slot_next < slot_checkpoint
+                    || slot_next > slot_checkpoint + SLOTS_PER_EPOCH
+                    || gap
+                {
+                    Ok((slot_next, self.checkpoints[index_next]))
+                } else {
+                    Ok((slot_checkpoint, self.checkpoints[index_previous + offset]))
+                }
             }
 
             _ => {
-                let offset = ((slot - slot_last) / SLOTS_PER_EPOCH) as usize;
+                let offset = ((slot - 1 - slot_last) / SLOTS_PER_EPOCH + 1) as usize;
+                let slot_checkpoint = slot_last + offset as u64 * SLOTS_PER_EPOCH;
                 let index = index_last + offset;
                 match self.checkpoints.get(index) {
-                    Some(checkpoint) => CheckpointResult::Ok(*checkpoint),
-                    None => CheckpointResult::NotPresent,
+                    Some(checkpoint) => Ok((slot_checkpoint, *checkpoint)),
+                    None => Err(CheckpointError::NotPresent),
                 }
             }
         }
@@ -165,11 +184,10 @@ impl<const N: usize> Checkpoints<N> {
     }
 
     pub fn last(&self) -> Option<(u64, Hash256)> {
-        if self.checkpoints.is_empty() {
-            return None;
+        match self.checkpoints.len() {
+            0 => None,
+            len => self.checkpoint_by_index(len - 1),
         }
-
-        self.checkpoint_by_index(self.checkpoints.len() - 1)
     }
 }
 
@@ -180,19 +198,41 @@ fn empty_checkpoints() {
     assert!(checkpoints.checkpoints().is_empty());
     assert!(matches!(
         checkpoints.checkpoint(0),
-        CheckpointResult::NotPresent
+        Err(CheckpointError::NotPresent),
     ));
     assert!(matches!(
         checkpoints.checkpoint(1),
-        CheckpointResult::NotPresent
+        Err(CheckpointError::NotPresent),
     ));
     assert!(matches!(
         checkpoints.checkpoint(u64::MAX),
-        CheckpointResult::NotPresent
+        Err(CheckpointError::NotPresent),
     ));
 
     assert!(matches!(checkpoints.checkpoint_by_index(0), None,));
     assert!(matches!(checkpoints.last(), None,));
+}
+
+#[track_caller]
+fn compare_checkpoints<const COUNT: usize>(data: &[(u64, Hash256)], checkpoints: &Checkpoints<COUNT>) {
+    for items in data.windows(2) {
+        let (slot_start, checkpoint_start) = items[0];
+        let (slot_end, checkpoint_end) = items[1];
+
+        let (slot, checkpoint) = checkpoints.checkpoint(slot_start).unwrap();
+        assert_eq!(slot, slot_start, "start; slot = {slot}, {:?}, {:?}, {data:?}", checkpoints.slots, checkpoints.checkpoints);
+        assert_eq!(checkpoint, checkpoint_start);
+
+        let slot_start = slot_start + 1;
+        for slot_requested in slot_start..=slot_end {
+            let (slot, checkpoint) = checkpoints.checkpoint(slot_requested).unwrap();
+            assert_eq!(slot, slot_end, "slot = {slot}, slot_requested = {slot_requested}, {:?}, {:?}, {data:?}", checkpoints.slots, checkpoints.checkpoints);
+            assert_eq!(checkpoint, checkpoint_end);
+        }
+    }
+
+    let checkpoints = checkpoints.checkpoints();
+    assert_eq!(&checkpoints, data);
 }
 
 #[test]
@@ -240,23 +280,14 @@ fn checkpoints() {
 
     assert!(matches!(
         checkpoints.checkpoint(0),
-        CheckpointResult::OutDated
+        Err(CheckpointError::OutDated),
     ));
     assert!(matches!(
         checkpoints.checkpoint(u64::MAX),
-        CheckpointResult::NotPresent
+        Err(CheckpointError::NotPresent),
     ));
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_187_936
     data.remove(0);
@@ -266,16 +297,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_187_967
     data.remove(0);
@@ -285,16 +307,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_187_967
     data.remove(0);
@@ -304,16 +317,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_187_999
     data.remove(0);
@@ -323,16 +327,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_188_032
     data.remove(0);
@@ -342,16 +337,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_188_064
     data.remove(0);
@@ -361,16 +347,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 
     // after overwrite data[0] slot = 5_188_096
     data.remove(0);
@@ -380,16 +357,7 @@ fn checkpoints() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 }
 
 #[test]
@@ -430,18 +398,9 @@ fn checkpoints_with_gaps() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
+    compare_checkpoints(&data, &checkpoints);
 
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
-
-    // after overwrite data[0] slot = 5_187_936
+    // after overwrite data[0] slot = 5_187_967
     data.remove(0);
     data.push((
         5_188_096,
@@ -449,14 +408,5 @@ fn checkpoints_with_gaps() {
     ));
     checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
 
-    {
-        for (slot, checkpoint_expected) in &data {
-            assert!(
-                matches!(checkpoints.checkpoint(*slot), CheckpointResult::Ok(checkpoint) if checkpoint == *checkpoint_expected)
-            );
-        }
-
-        let checkpoints = checkpoints.checkpoints();
-        assert_eq!(&checkpoints, &data,);
-    }
+    compare_checkpoints(&data, &checkpoints);
 }

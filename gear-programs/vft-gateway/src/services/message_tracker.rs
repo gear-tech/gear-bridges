@@ -1,4 +1,4 @@
-use super::{erc20, Config};
+use super::Config;
 use gstd::{msg, prelude::collections::HashMap, MessageId};
 use sails_rtl::prelude::*;
 
@@ -77,21 +77,21 @@ pub enum MessageStatus {
 pub struct MsgData {
     sender: ActorId,
     amount: U256,
-    receiver: [u8; 20],
-    eth_token_id: [u8; 20],
+    receiver: H160,
+    vara_token_id: ActorId,
 }
 
 impl MsgData {
-    pub fn new(sender: ActorId, amount: U256, receiver: [u8; 20], eth_token_id: [u8; 20]) -> Self {
+    pub fn new(sender: ActorId, amount: U256, receiver: H160, vara_token_id: ActorId) -> Self {
         Self {
             sender,
             amount,
             receiver,
-            eth_token_id,
+            vara_token_id,
         }
     }
 
-    pub fn data(&self) -> (ActorId, U256, [u8; 20], [u8; 20]) {
-        (self.sender, self.amount, self.receiver, self.eth_token_id)
+    pub fn data(&self) -> (ActorId, U256, H160, ActorId) {
+        (self.sender, self.amount, self.receiver, self.vara_token_id)
     }
 }

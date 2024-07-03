@@ -1,8 +1,8 @@
-use super::{erc20, msg_tracker_mut, GRC20Gateway, MessageStatus, MessageTracker, MsgData};
+use super::{msg_tracker_mut, vft_master, MessageStatus, MessageTracker, MsgData, VftGateway};
 use gstd::{msg, MessageId};
 use sails_rtl::{gstd::ExecContext, prelude::*};
 
-impl<T> GRC20Gateway<T>
+impl<T> VftGateway<T>
 where
     T: ExecContext,
 {
@@ -40,7 +40,7 @@ fn process_message_status(
 }
 
 fn handle_burn_tokens(reply_bytes: Vec<u8>, msg_id: MessageId, msg_tracker: &mut MessageTracker) {
-    match erc20::admin_io::Burn::decode_reply(&reply_bytes) {
+    match vft_master::vft_master_io::Burn::decode_reply(&reply_bytes) {
         Ok(true) => {
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenBurnCompleted(true))
         }
@@ -68,7 +68,7 @@ fn handle_bridge_builtin(
 }
 
 fn handle_mint_tokens(reply_bytes: Vec<u8>, msg_id: MessageId, msg_tracker: &mut MessageTracker) {
-    match erc20::admin_io::Mint::decode_reply(&reply_bytes) {
+    match vft_master::vft_master_io::Mint::decode_reply(&reply_bytes) {
         Ok(true) => {
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenMintCompleted(true))
         }
@@ -85,9 +85,7 @@ pub fn panic_handler(msg_tracker: &mut MessageTracker, msg_data: MsgData) {
         MessageStatus::SendingMessageToBurnTokens(msg_id) => {
             msg_tracker.remove_waiting_reply(&msg_id);
         }
-        MessageStatus::TokenBurnCompleted(false) => {
-            // For these case, we just removed the status above, nothing more to do
-        }
+        MessageStatus::TokenBurnCompleted(false) => {}
         MessageStatus::TokenBurnCompleted(true)
         | MessageStatus::BridgeResponseReceived(_, _)
         | MessageStatus::TokenMintCompleted(_) => {
@@ -96,8 +94,10 @@ pub fn panic_handler(msg_tracker: &mut MessageTracker, msg_data: MsgData) {
         MessageStatus::SendingMessageToBridgeBuiltin(msg_id)
         | MessageStatus::SendingMessageToMintTokens(msg_id) => {
             // For these statuses, track the message as pending to be resumed later
+
             msg_tracker.remove_waiting_reply(&msg_id);
             msg_tracker.track_pending_message(erroneous_message_id, msg_status, msg_data);
         }
     }
+    msg_tracker.remove_message_status(&erroneous_message_id);
 }

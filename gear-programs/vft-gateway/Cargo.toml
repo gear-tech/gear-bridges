@@ -1,5 +1,5 @@
 [package]
-name = "grc20-gateway-app"
+name = "vft-gateway"
 version = "0.1.0"
 edition = "2021"
 

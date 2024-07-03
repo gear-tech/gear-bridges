@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use bridging_payment::UserReply as BridgingPaymentUserReply;
+use bridging_payment::services::BridgePaymentEvents;
 use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
@@ -141,10 +141,10 @@ async fn process_block_events(
             log::info!("Found {} paid messages", messages.len());
 
             for message in messages {
-                let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
-                sender.send(BlockEvent::MessagePaid {
-                    nonce: user_reply.nonce,
-                })?;
+                let user_reply = BridgePaymentEvents::decode(&mut &message.payload[..])?;
+                if let BridgePaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply {
+                    sender.send(BlockEvent::MessagePaid { nonce })?;
+                };
             }
         }
     }

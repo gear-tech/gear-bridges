@@ -5,8 +5,8 @@ use sails_rtl::{
 };
 
 use gstd::exec;
-mod grc20_gateway;
 mod utils;
+mod vft_gateway;
 pub struct BridgePayment<ExecContext> {
     exec_context: ExecContext,
 }
@@ -140,10 +140,9 @@ where
 
     pub async fn request_to_gateway(
         &mut self,
-        sender: ActorId,
         amount: U256,
-        receiver: [u8; 20],
-        eth_token_id: [u8; 20],
+        receiver: H160,
+        vara_token_id: ActorId,
     ) {
         let data = self.data();
         let config = self.config();
@@ -153,28 +152,29 @@ where
         if attached_value < config.fee {
             panic!("Not enough fee");
         }
+        let sender = self.exec_context.actor_id();
         match utils::send_message_to_gateway(
             data.grc20_gateway_address,
             sender,
+            vara_token_id,
             amount,
             receiver,
-            eth_token_id,
             config,
         )
         .await
         {
-            Ok(Ok(nonce)) => {
+            Ok(Ok((nonce, eth_token_id))) => {
                 self.notify_on(BridgePaymentEvents::TeleportVaraToEth {
                     nonce,
                     sender,
                     amount,
                     receiver: receiver.into(),
-                    eth_token_id: eth_token_id.into(),
+                    eth_token_id,
                 })
                 .expect("Error in depositing event");
 
                 // return remainder
-                let refund = self.config().fee - attached_value;
+                let refund = attached_value - self.config().fee;
                 if refund >= exec::env_vars().existential_deposit {
                     handle_refund(self.exec_context.actor_id(), refund);
                 }

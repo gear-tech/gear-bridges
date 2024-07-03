@@ -1,13 +1,13 @@
-use grc20_gateway_app::Program;
 use sails_idl_gen::program;
 use std::{env, fs::File, path::PathBuf};
+use vft_gateway::Program;
 
 fn main() {
     gwasm_builder::build();
 
     let manifest_dir_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    let idl_file_path = manifest_dir_path.join("grc20-gateway.idl");
+    let idl_file_path = manifest_dir_path.join("vft-gateway.idl");
 
     let idl_file = File::create(idl_file_path).unwrap();
 

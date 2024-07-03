@@ -1,4 +1,4 @@
-use super::{grc20_gateway, Config};
+use super::{vft_gateway, Config};
 use gstd::{msg, prelude::collections::HashMap, MessageId};
 use sails_rtl::prelude::*;
 
@@ -19,16 +19,16 @@ pub enum Error {
 pub async fn send_message_to_gateway(
     gateway_address: ActorId,
     sender: ActorId,
+    vara_token_id: ActorId,
     amount: U256,
-    receiver: [u8; 20],
-    eth_token_id: [u8; 20],
+    receiver: H160,
     config: &Config,
-) -> Result<Result<U256, grc20_gateway::Error>, Error> {
-    let bytes: Vec<u8> = grc20_gateway::grc_20_gateway_io::TeleportVaraToEth::encode_call(
+) -> Result<Result<(U256, H160), vft_gateway::Error>, Error> {
+    let bytes: Vec<u8> = vft_gateway::vft_gateway_io::TransferVaraToEth::encode_call(
         sender,
+        vara_token_id,
         amount,
         receiver,
-        eth_token_id,
     );
 
     let reply_bytes = msg::send_bytes_with_gas_for_reply(
@@ -42,8 +42,8 @@ pub async fn send_message_to_gateway(
     .await
     .map_err(|_| Error::RequestToGateWayReplyError)?;
 
-    let reply: Result<U256, grc20_gateway::Error> =
-        grc20_gateway::grc_20_gateway_io::TeleportVaraToEth::decode_reply(&reply_bytes)
+    let reply: Result<(U256, H160), vft_gateway::Error> =
+        vft_gateway::vft_gateway_io::TransferVaraToEth::decode_reply(&reply_bytes)
             .map_err(|_| Error::RequestToGateWayDecodeError)?;
 
     Ok(reply)

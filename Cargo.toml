@@ -4,13 +4,12 @@ members = [
     "ethereum/client",
     "gear-rpc-client",
     "prover",
-  #  "relayer",
+    "relayer",
     "circuits/*",
     "ethereum-common",
-    "gear-programs/grc20-gateway/app",
-    "gear-programs/grc20-gateway/wasm",
-    "gear-programs/bridging-payment/app",
-    "gear-programs/bridging-payment/wasm",
+    "gear-programs/vft-gateway",
+    "gear-programs/vft-gateway/src/wasm",
+    "gear-programs/bridging-payment",
 ]
 
 resolver = "2"
@@ -31,7 +30,8 @@ ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
 bridging_payment = { path = "gear-programs/bridging-payment" }
-
+vft-gateway = { path = "gear-programs/vft-gateway" }
+vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -81,11 +81,11 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { version = "1.4.1", features = ["nightly"] }
-gear-core = "1.4.1"
-gclient = "1.4.1"
+gstd = { version = "1.4.2", features = ["nightly"] }
+gear-core = "1.4.2"
+gclient = "1.4.2"
 gear-wasm-builder = { version = "1.4.1", default-features = false }
-gwasm-builder = { package = "gear-wasm-builder", version = "1.1.1" }
+gwasm-builder = { package = "gear-wasm-builder", version = "1.4.2" }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
 pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
     "std",

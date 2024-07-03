@@ -1,4 +1,4 @@
-use super::{Config, MessageTracker, MessageStatus, Error};
+use super::{Config, Error, MessageStatus, MessageTracker};
 use gstd::{msg, MessageId};
 use sails_rtl::prelude::*;
 

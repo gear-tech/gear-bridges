@@ -1,5 +1,3 @@
-use super::{erc20, Config};
-use gstd::{msg, prelude::collections::HashMap, MessageId};
 use sails_rtl::prelude::*;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]

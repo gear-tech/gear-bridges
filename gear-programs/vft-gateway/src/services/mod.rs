@@ -1,23 +1,21 @@
+use collections::HashMap;
 use gstd::MessageId;
 use sails_rtl::{
     gstd::{gservice, msg, ExecContext},
     prelude::*,
 };
 
-mod erc20;
-mod security_handlers;
-pub mod error;
 mod bridge_builtin_operations;
+pub mod error;
 mod message_tracker;
+mod security_handlers;
+mod vft_master;
 use error::Error;
 use message_tracker::{MessageStatus, MessageTracker, MsgData};
 mod token_operations;
-pub struct GRC20Gateway<ExecContext> {
+pub struct VftGateway<ExecContext> {
     exec_context: ExecContext,
 }
-
-#[derive(Encode, Decode, TypeInfo)]
-pub enum GrcProviderEvents {}
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct Request {
@@ -26,29 +24,38 @@ pub struct Request {
     pub amount: U256,
 }
 
-static mut DATA: Option<GRC20GatewayData> = None;
+static mut DATA: Option<VftGatewayData> = None;
 static mut CONFIG: Option<Config> = None;
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
-#[derive(Debug)]
-pub struct GRC20GatewayData {
+#[derive(Debug, Default)]
+pub struct VftGatewayData {
     gear_bridge_builtin: ActorId,
     admin: ActorId,
-    token_id: ActorId,
+    receiver_contract_id: H160,
+    vara_to_eth_token_id: HashMap<ActorId, H160>,
+    bridge_payment_id: ActorId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
-    token_id: ActorId,
+    receiver_contract_id: H160,
     gear_bridge_builtin: ActorId,
+    bridge_payment_id: ActorId,
     config: Config,
 }
 
 impl InitConfig {
-    pub fn new(token_id: ActorId, gear_bridge_builtin: ActorId, config: Config) -> Self {
+    pub fn new(
+        receiver_contract_id: H160,
+        gear_bridge_builtin: ActorId,
+        bridge_payment_id: ActorId,
+        config: Config,
+    ) -> Self {
         Self {
-            token_id,
+            receiver_contract_id,
             gear_bridge_builtin,
+            bridge_payment_id,
             config,
         }
     }
@@ -80,16 +87,18 @@ impl Config {
     }
 }
 
-impl<T> GRC20Gateway<T>
+impl<T> VftGateway<T>
 where
     T: ExecContext,
 {
     pub fn seed(config: InitConfig, exec_context: T) {
         unsafe {
-            DATA = Some(GRC20GatewayData {
+            DATA = Some(VftGatewayData {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                token_id: config.token_id,
+                receiver_contract_id: config.receiver_contract_id,
                 admin: exec_context.actor_id(),
+                bridge_payment_id: config.bridge_payment_id,
+                ..Default::default()
             });
             CONFIG = Some(config.config);
             MSG_TRACKER = Some(MessageTracker::default());
@@ -99,25 +108,19 @@ where
         Self { exec_context }
     }
 
-    fn data(&self) -> &GRC20GatewayData {
-        unsafe {
-            DATA.as_ref()
-                .expect("GRC20Gateway::seed() should be called")
-        }
+    fn data(&self) -> &VftGatewayData {
+        unsafe { DATA.as_ref().expect("VftGateway::seed() should be called") }
     }
 
-    fn data_mut(&mut self) -> &mut GRC20GatewayData {
-        unsafe {
-            DATA.as_mut()
-                .expect("GRC20Gateway::seed() should be called")
-        }
+    fn data_mut(&mut self) -> &mut VftGatewayData {
+        unsafe { DATA.as_mut().expect("VftGateway::seed() should be called") }
     }
 
     fn config(&self) -> &Config {
         unsafe {
             CONFIG
                 .as_ref()
-                .expect("GRC20Gateway::seed() should be called")
+                .expect("VftGateway::seed() should be called")
         }
     }
 
@@ -125,24 +128,46 @@ where
         unsafe {
             CONFIG
                 .as_mut()
-                .expect("GRC20Gateway::seed() should be called")
+                .expect("VftGatewayData::seed() should be called")
         }
     }
 }
 
-#[gservice(events = GrcProviderEvents)]
-impl<T> GRC20Gateway<T>
+#[gservice]
+impl<T> VftGateway<T>
 where
     T: ExecContext,
 {
-    pub async fn teleport_vara_to_eth(
+    pub fn update_receiver_contract_id(&mut self, new_receiver_contract_id: H160) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+        self.data_mut().receiver_contract_id = new_receiver_contract_id;
+    }
+
+    pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+        self.data_mut()
+            .vara_to_eth_token_id
+            .insert(vara_token_id, eth_token_id);
+    }
+    pub async fn transfer_vara_to_eth(
         &mut self,
+        vara_token_id: ActorId,
         sender: ActorId,
         amount: U256,
-        receiver: [u8; 20],
-        eth_token_id: [u8; 20],
-    ) -> Result<U256, Error> {
+        receiver: H160,
+    ) -> Result<(U256, H160), Error> {
         let data = self.data();
+        if data.bridge_payment_id != self.exec_context.actor_id() {
+            panic!("Only bridge payment contract can send reuests to transfer tokens")
+        }
+        let eth_token_id = data
+            .vara_to_eth_token_id
+            .get(&vara_token_id)
+            .expect("No corresponding Ethereum address for the specified Vara token address");
         let config = self.config();
         let msg_id = msg::id();
         let msg_tracker = msg_tracker_mut();
@@ -150,16 +175,17 @@ where
         gstd::critical::set_hook(move || {
             security_handlers::panic_handler(
                 msg_tracker_mut(),
-                MsgData::new(sender, amount, receiver, eth_token_id),
+                MsgData::new(sender, amount, receiver, vara_token_id),
             );
         });
 
-        token_operations::burn_tokens(data.token_id, sender, amount, config, msg_id, msg_tracker).await?;
+        token_operations::burn_tokens(vara_token_id, sender, amount, config, msg_id, msg_tracker)
+            .await?;
 
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
             data.gear_bridge_builtin,
             receiver.into(),
-            eth_token_id.into(),
+            *eth_token_id,
             amount,
             config,
             msg_id,
@@ -170,7 +196,7 @@ where
             Ok(nonce) => nonce,
             Err(_) => {
                 // In case of failure, mint tokens back to the sender
-                token_operations::mint_tokens(data.token_id, sender, amount, config).await?;
+                token_operations::mint_tokens(vara_token_id, sender, amount, config).await?;
                 // Return an error indicating the tokens were refunded
                 msg_tracker.remove_message_status(&msg_id);
                 return Err(Error::TokensRefundedError);
@@ -179,14 +205,15 @@ where
 
         msg_tracker.remove_message_status(&msg_id);
 
-        Ok(nonce)
+        Ok((nonce, *eth_token_id))
     }
 
-    pub async fn handle_interrupted_teleport(
+    pub async fn handle_interrupted_transfer(
         &mut self,
         interrupted_msg_id: MessageId,
     ) -> Result<U256, Error> {
         let data = self.data();
+
         let config = self.config();
         let msg_id = msg::id();
         let msg_tracker = msg_tracker_mut();
@@ -194,11 +221,15 @@ where
         let (msg_status, msg_data) = msg_tracker
             .remove_pending_message(&interrupted_msg_id)
             .expect("Pending message doesn't exist");
-        let (sender, amount, receiver, eth_token_id) = msg_data.data();
+        let (sender, amount, receiver, vara_token_id) = msg_data.data();
+        let eth_token_id = data
+            .vara_to_eth_token_id
+            .get(&vara_token_id)
+            .expect("No corresponding Ethereum address for the specified Vara token address");
         gstd::critical::set_hook(move || {
             security_handlers::panic_handler(
                 msg_tracker_mut(),
-                MsgData::new(sender, amount, receiver, eth_token_id),
+                MsgData::new(sender, amount, receiver, vara_token_id),
             );
         });
 
@@ -208,7 +239,7 @@ where
                 let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
                     data.gear_bridge_builtin,
                     receiver.into(),
-                    eth_token_id.into(),
+                    *eth_token_id,
                     amount,
                     config,
                     msg_id,
@@ -219,7 +250,8 @@ where
                     Ok(nonce) => nonce,
                     Err(_) => {
                         // In case of failure, mint tokens back to the sender
-                        token_operations::mint_tokens(data.token_id, sender, amount, config).await?;
+                        token_operations::mint_tokens(vara_token_id, sender, amount, config)
+                            .await?;
                         // Return an error indicating the tokens were refunded
                         return Err(Error::TokensRefundedError);
                     }
@@ -232,7 +264,7 @@ where
             | MessageStatus::SendingMessageToMintTokens(_)
             | MessageStatus::TokenMintCompleted(false) => {
                 // In case of failure, mint tokens back to the sender
-                token_operations::mint_tokens(data.token_id, sender, amount, config).await?;
+                token_operations::mint_tokens(vara_token_id, sender, amount, config).await?;
                 // Return an error indicating the tokens were refunded
                 msg_tracker.remove_message_status(&msg_id);
                 return Err(Error::TokensRefundedError);
@@ -251,7 +283,7 @@ fn msg_tracker() -> &'static MessageTracker {
     unsafe {
         MSG_TRACKER
             .as_ref()
-            .expect("GRC20Gateway::seed() should be called")
+            .expect("VftGateway::seed() should be called")
     }
 }
 
@@ -259,6 +291,6 @@ fn msg_tracker_mut() -> &'static mut MessageTracker {
     unsafe {
         MSG_TRACKER
             .as_mut()
-            .expect("GRC20Gateway::seed() should be called")
+            .expect("VftGateway::seed() should be called")
     }
 }

@@ -46,9 +46,9 @@ const VOTE_LENGTH_IN_BITS: usize = 424;
 const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
 const MERKLE_ROOT_STORAGE_ADDRESS: &str =
-    "ea31e171c2cd790a23350b5e593ed882d04afeb2c94bf32a6200661ebc1342d0";
+    "fd6e027f7a1bd8baa6406cea4d80d932df509310bc655bbf75a5b563fc3c8eee";
 const NEXT_VALIDATOR_SET_ADDRESS: &str =
-    "ea31e171c2cd790a23350b5e593ed8821ab780c1342a26e355e961e688a0bdcb";
+    "fd6e027f7a1bd8baa6406cea4d80d9327120fd2add6d1249bf1b6bfc3bdf510f";
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -538,7 +538,9 @@ impl GearApi {
         let events = self.api.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
-            if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) = event {
+            if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) =
+                event
+            {
                 let mut nonce_le = [0; 32];
                 primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
 

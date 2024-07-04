@@ -22,7 +22,7 @@ const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    authority_set_id: 0,
+    authority_set_id: 1,
     // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
     validator_set_hash: [
         0xb9853ab2, 0xfb585702, 0xdfd9040e, 0xe8bc9f94, 0xdc5b0abd, 0x8b0f809e, 0xc23fdc02,

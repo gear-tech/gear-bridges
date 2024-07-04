@@ -6,7 +6,7 @@ use dto::BranchNodeData;
 use gsdk::{
     metadata::{
         gear::Event as GearEvent,
-        gear_bridge::Event as GearBridgeEvent,
+        gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{
             gear_core::message::user::UserMessage, gear_core_errors::simple::ReplyCode,
             gprimitives::ActorId,
@@ -507,7 +507,7 @@ impl GearApi {
         block: H256,
         message_hash: H256,
     ) -> anyhow::Result<dto::MerkleProof> {
-        use pallet_gear_bridge_rpc_runtime_api::Proof;
+        use pallet_gear_eth_bridge_rpc_runtime_api::Proof;
 
         let proof: Option<Proof> = self
             .api
@@ -538,7 +538,7 @@ impl GearApi {
         let events = self.api.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
-            if let RuntimeEvent::GearBridge(GearBridgeEvent::MessageQueued { message }) = event {
+            if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) = event {
                 let mut nonce_le = [0; 32];
                 primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
 

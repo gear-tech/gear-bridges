@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use alloy::sol;
 
 sol! {
@@ -36,55 +37,6 @@ sol! {
 
 
 }
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    ProxyContract,
-    "../out/ProxyContract.sol/ProxyContract.json"
-);
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    ERC20Mock,
-    "../out/ERC20Mock.sol/ERC20Mock.json"
-);
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    Relayer,
-    "../out/Relayer.sol/Relayer.json"
-);
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    MessageQueue,
-    "../out/MessageQueue.sol/MessageQueue.json"
-);
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    Verifier,
-    "../out/Verifier.sol/Verifier.json"
-);
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    VerifierMock,
-    "../out/VerifierMock.sol/Verifier.json"
-);
-
-#[cfg(test)]
-sol!(
-    #[sol(rpc)]
-    ERC20Treasury,
-    "../out/ERC20Treasury.sol/ERC20Treasury.json"
-);
 
 impl ContentMessage {
     pub fn to_bytes(&self) -> Vec<u8> {

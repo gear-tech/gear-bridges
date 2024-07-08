@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use alloy::sol;
 
 sol! {
@@ -27,6 +26,7 @@ sol! {
     }
 
     #[sol(rpc)]
+    #[derive(Debug,PartialEq, Eq)]
     interface IRelayer {
         event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
 
@@ -36,10 +36,6 @@ sol! {
 
         function getBlockNumber(bytes32 merkle_root) external view returns (uint256);
     }
-
-
-
-
 }
 
 impl ContentMessage {

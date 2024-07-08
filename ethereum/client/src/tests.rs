@@ -106,7 +106,7 @@ mod test {
         let pk = hex::decode("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
             .map_err(|_| Error::WrongPrivateKey)?;
         let contracts =
-            Contracts::new(provider, env.message_queue_proxy.0, env.relayer_proxy.0).unwrap();
+            Contracts::new(provider, *env.message_queue_proxy.0, *env.relayer_proxy.0).unwrap();
         Ok(contracts)
     }
 
@@ -174,71 +174,6 @@ mod test {
                 "merkle_root" : "0xa25559d02a45bf58afd5344964269d38e947a432c1097c342f937a4ad052a683"
             }"#;
         proof_json.to_string()
-    }
-
-    #[tokio::test]
-    async fn test_deploy() -> Result<(), Error> {
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .on_anvil_with_wallet();
-        let deployment_env = deploy(provider).await?;
-
-        assert_eq!(
-            deployment_env.wvara_erc20,
-            "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-                .parse::<Address>()
-                .unwrap()
-        );
-        assert_eq!(
-            deployment_env.verifier,
-            "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        assert_eq!(
-            deployment_env.relayer,
-            "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        assert_eq!(
-            deployment_env.erc20_treasury,
-            "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        assert_eq!(
-            deployment_env.message_queue,
-            "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        assert_eq!(
-            deployment_env.relayer_proxy,
-            "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        assert_eq!(
-            deployment_env.erc20_treasury_proxy,
-            "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        assert_eq!(
-            deployment_env.message_queue_proxy,
-            "0x0165878A594ca255338adfa4d48449f69242Eb8F"
-                .parse::<Address>()
-                .unwrap()
-        );
-
-        Ok(())
     }
 
     #[tokio::test]

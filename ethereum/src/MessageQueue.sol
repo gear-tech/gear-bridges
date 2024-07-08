@@ -51,7 +51,6 @@ contract MessageQueue is IMessageQueue {
         if (_processed_messages[message.nonce])
             revert MessageAlreadyProcessed(message.nonce);
 
-        //bytes32 msg_hash = message.hash();
         bytes32 msg_hash = hash_vara_msg(message);
 
         bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(

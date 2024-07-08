@@ -84,32 +84,30 @@ mod test {
         }
     }
 
-    fn build_contracts<P, T>(provider: P) -> Result<Contracts<P, T, Ethereum>, Error>
+    struct DeploymentEnv {
+        pub wvara_erc20: Address,
+        pub verifier: Address,
+        pub message_queue: Address,
+        pub relayer: Address,
+        pub erc20_treasury: Address,
+        pub message_queue_proxy: Address,
+        pub relayer_proxy: Address,
+        pub erc20_treasury_proxy: Address,
+    }
+
+    fn build_contracts<P, T>(
+        provider: P,
+        env: &DeploymentEnv,
+    ) -> Result<Contracts<P, T, Ethereum>, Error>
     where
         T: Transport + Clone,
         P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
     {
-        let message_queue: Address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-            .parse()
-            .map_err(|_| Error::WrongAddress)?;
-        let replayer: Address = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
-            .parse()
-            .map_err(|_| Error::WrongAddress)?;
         let pk = hex::decode("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
             .map_err(|_| Error::WrongPrivateKey)?;
-        let contracts = Contracts::new(provider, message_queue.0 .0, replayer.0 .0).unwrap();
+        let contracts =
+            Contracts::new(provider, env.message_queue_proxy.0, env.relayer_proxy.0).unwrap();
         Ok(contracts)
-    }
-
-    struct DeploymentEnv {
-        wvara_erc20: Address,
-        verifier: Address,
-        message_queue: Address,
-        relayer: Address,
-        erc20_treasury: Address,
-        message_queue_proxy: Address,
-        relayer_proxy: Address,
-        erc20_treasury_proxy: Address,
     }
 
     pub fn deserialize_merkle_root_json(json_string: &str) -> Result<BlockMerkleRootProof, Error> {
@@ -248,9 +246,9 @@ mod test {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .on_anvil_with_wallet();
-        deploy(provider.clone()).await.unwrap();
+        let deployment_env = deploy(provider.clone()).await.unwrap();
 
-        let contracts = build_contracts(provider).unwrap();
+        let contracts = build_contracts(provider, &deployment_env).unwrap();
 
         let block_proof = deserialize_merkle_root_json(build_merkle_proof_json().as_str()).unwrap();
 
@@ -298,7 +296,7 @@ mod test {
             .on_anvil_with_wallet();
         let deployment_env = deploy(provider.clone()).await.unwrap();
 
-        let contracts = build_contracts(provider).unwrap();
+        let contracts = build_contracts(provider, &deployment_env).unwrap();
 
         let block_proof = deserialize_merkle_root_json(build_merkle_proof_json().as_str()).unwrap();
 

@@ -57,11 +57,9 @@ pub struct Contracts<P, T, N> {
     _phantom: PhantomData<(T, N)>,
 }
 
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct MerkleRootEntry {
     pub block_number: u64,
-    merkle_root: B256,
-    tx_hash: TxHash,
 }
 
 #[derive(Debug)]
@@ -271,10 +269,8 @@ where
         match event.query().await {
             Ok(logs) => Ok(logs
                 .iter()
-                .map(|(event, log)| MerkleRootEntry {
+                .map(|(event, _)| MerkleRootEntry {
                     block_number: event.blockNumber.to(),
-                    merkle_root: event.merkleRoot,
-                    tx_hash: log.transaction_hash.unwrap_or_default(),
                 })
                 .collect()),
             Err(_) => Err(Error::ErrorInHTTPTransport),

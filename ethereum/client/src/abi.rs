@@ -13,7 +13,11 @@ sol! {
     #[sol(rpc)]
     #[derive(Debug,PartialEq, Eq)]
     interface IMessageQueue {
-        event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash);
+        event MessageProcessed(
+            uint256 indexed blockNumber,
+            bytes32 indexed messageHash,
+            bytes32 indexed messageNonce
+        );
 
         function calculateMerkleRoot(bytes32[] calldata proof, bytes32 hash, uint256 width, uint256 leaf_index) external view returns (bytes32);
 

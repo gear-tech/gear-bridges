@@ -56,3 +56,9 @@ impl Convert<aB256> for [u8; 32] {
         aB256::new(self)
     }
 }
+
+impl Convert<aB256> for eH256 {
+    fn convert(self) -> aB256 {
+        aB256::from_slice(self.as_fixed_bytes())
+    }
+}

@@ -1,4 +1,19 @@
-use alloy::{hex::FromHex, sol};
+use alloy::{
+    hex::FromHex,
+    network::Ethereum,
+    primitives::{Address, Bytes, B256, U256},
+    providers::{Provider, ProviderBuilder},
+    sol,
+    transports::Transport,
+};
+
+use binary_merkle_tree::{merkle_proof, merkle_root, Leaf, MerkleProof};
+use primitive_types::H256;
+use sp_core::KeccakHasher;
+
+use crate::{abi::ContentMessage, Contracts, Error};
+
+use serde::{Deserialize, Serialize};
 
 sol!(
     #[sol(rpc)]
@@ -30,34 +45,17 @@ sol!(
     "../out/Verifier.sol/Verifier.json"
 );
 
-#[cfg(test)]
 sol!(
     #[sol(rpc)]
     VerifierMock,
     "../out/VerifierMock.sol/Verifier.json"
 );
 
-#[cfg(test)]
 sol!(
     #[sol(rpc)]
     ERC20Treasury,
     "../out/ERC20Treasury.sol/ERC20Treasury.json"
 );
-#[cfg(test)]
-use alloy::{
-    network::Ethereum,
-    primitives::{Address, Bytes, B256, U256},
-    providers::{Provider, ProviderBuilder},
-    transports::Transport,
-};
-
-use binary_merkle_tree::{merkle_proof, merkle_root, Leaf, MerkleProof};
-use primitive_types::H256;
-use sp_core::KeccakHasher;
-
-use crate::{abi::ContentMessage, Contracts, Error};
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockMerkleRootProof {

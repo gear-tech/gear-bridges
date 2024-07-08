@@ -23,12 +23,9 @@ use reqwest::Url;
 
 pub use error::Error;
 
-use crate::{
-    abi::{
-        ContentMessage, IMessageQueue, IMessageQueue::IMessageQueueInstance, IRelayer,
-        IRelayer::IRelayerInstance,
-    },
-    convert::Convert,
+use crate::abi::{
+    ContentMessage, IMessageQueue, IMessageQueue::IMessageQueueInstance, IRelayer,
+    IRelayer::IRelayerInstance,
 };
 pub use alloy::primitives::TxHash;
 
@@ -36,7 +33,6 @@ pub use alloy::primitives::TxHash;
 mod tests;
 
 mod abi;
-mod convert;
 pub mod error;
 
 type ProviderType = FillProvider<
@@ -118,7 +114,11 @@ impl EthApi {
         proof: Vec<u8>,
     ) -> Result<TxHash, Error> {
         self.0
-            .provide_merkle_root(block_number, merkle_root, proof.as_ref())
+            .provide_merkle_root(
+                U256::from(block_number),
+                B256::from(merkle_root),
+                Bytes::from(proof),
+            )
             .await
     }
 
@@ -127,7 +127,7 @@ impl EthApi {
     }
 
     pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
-        self.0.read_finalized_merkle_root(block).await
+        self.0.read_finalized_merkle_root(U256::from(block)).await
     }
 
     pub async fn fetch_merkle_roots_in_range(
@@ -156,20 +156,20 @@ impl EthApi {
     ) -> Result<TxHash, Error> {
         self.0
             .provide_content_message(
-                block_number,
-                total_leaves,
-                leaf_index,
-                nonce,
-                sender,
-                receiver,
-                payload,
-                proof,
+                U256::from(block_number),
+                U256::from(total_leaves),
+                U256::from(leaf_index),
+                B256::from(nonce),
+                B256::from(sender),
+                Address::from(receiver),
+                Bytes::from(payload),
+                proof.into_iter().map(B256::from).collect(),
             )
             .await
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
-        self.0.is_message_processed(nonce).await
+        self.0.is_message_processed(B256::from(nonce)).await
     }
 }
 
@@ -197,16 +197,12 @@ where
         })
     }
 
-    pub async fn provide_merkle_root<U: Convert<U256>, H: Convert<B256>, B: Convert<Bytes>>(
+    pub async fn provide_merkle_root(
         &self,
-        block_number: U,
-        merkle_root: H,
-        proof: B,
+        block_number: U256,
+        merkle_root: B256,
+        proof: Bytes,
     ) -> Result<TxHash, Error> {
-        let block_number: U256 = block_number.convert();
-        let merkle_root: B256 = merkle_root.convert();
-        let proof = proof.convert();
-
         match self
             .relayer_instance
             .submitMerkleRoot(block_number, merkle_root, proof.clone())
@@ -280,26 +276,26 @@ where
     #[allow(clippy::too_many_arguments)]
     pub async fn provide_content_message(
         &self,
-        block_number: u32,
-        total_leaves: u32,
-        leaf_index: u32,
-        nonce: [u8; 32],
-        sender: [u8; 32],
-        receiver: [u8; 20],
-        payload: Vec<u8>,
-        proof: Vec<[u8; 32]>,
+        block_number: U256,
+        total_leaves: U256,
+        leaf_index: U256,
+        nonce: B256,
+        sender: B256,
+        receiver: Address,
+        data: Bytes,
+        proof: Vec<B256>,
     ) -> Result<TxHash, Error> {
         let call = self.message_queue_instance.processMessage(
-            U256::from(block_number),
-            U256::from(total_leaves),
-            U256::from(leaf_index),
+            block_number,
+            total_leaves,
+            leaf_index,
             ContentMessage {
-                nonce: B256::from(nonce),
-                sender: B256::from(sender),
-                receiver: Address::from(receiver),
-                data: Bytes::from(payload),
+                nonce,
+                sender,
+                receiver,
+                data,
             },
-            proof.into_iter().map(B256::from).collect(),
+            proof,
         );
 
         match call.estimate_gas().await {
@@ -314,9 +310,7 @@ where
         }
     }
 
-    pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
-        let block = U256::from(block);
-
+    pub async fn read_finalized_merkle_root(&self, block: U256) -> Result<Option<[u8; 32]>, Error> {
         let root = self
             .relayer_instance
             .getMerkleRoot(block)
@@ -330,9 +324,7 @@ where
         Ok((root != [0; 32]).then_some(root))
     }
 
-    pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
-        let nonce = B256::from(nonce);
-
+    pub async fn is_message_processed(&self, nonce: B256) -> Result<bool, Error> {
         // TODO: Change isProcessed to accept only nonce.
         let processed = self
             .message_queue_instance

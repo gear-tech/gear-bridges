@@ -100,3 +100,33 @@ The Message Inclusion circuit is used to prove that a specific message Merkle ro
 The Final Proof circuit is the proof submitted to Ethereum. It proves that a message Merkle root was present in the storage of `pallet-gear-bridge` at a specific finalized block. This final proof ensures the validity of the cross-chain message.
 
 ![final proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/final_proof_circuit.png)
+
+## Build and run
+
+### Prerequisites
+
+Install rust:
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Install golang: [golang installation](https://go.dev/doc/install)
+
+Install forge:
+```sh
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+### Run relayer
+
+Build workspace:
+```sh
+cargo build --release
+```
+
+And then run
+```sh
+cargo run --release -- --help
+```
+to see required parameters to start relayer.

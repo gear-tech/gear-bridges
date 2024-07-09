@@ -3,7 +3,7 @@ use std::{
     sync::mpsc::Receiver,
 };
 
-use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
+use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
 use primitive_types::H256;
 use prometheus::{IntCounter, IntGauge};

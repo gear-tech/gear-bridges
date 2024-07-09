@@ -1,4 +1,4 @@
-use alloy_sol_types::sol;
+use alloy::sol;
 
 sol! {
     #[derive(Debug,PartialEq, Eq)]
@@ -26,6 +26,7 @@ sol! {
     }
 
     #[sol(rpc)]
+    #[derive(Debug,PartialEq, Eq)]
     interface IRelayer {
         event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
 

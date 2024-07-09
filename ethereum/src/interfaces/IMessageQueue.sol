@@ -48,7 +48,7 @@ interface IMessageQueueReceiver {
 library Hasher {
     function hash(
         VaraMessage calldata message
-    ) external pure returns (bytes32) {
+    ) public pure returns (bytes32) {
         bytes memory data = abi.encodePacked(
             message.nonce,
             message.sender,

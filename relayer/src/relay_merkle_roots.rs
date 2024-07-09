@@ -7,7 +7,7 @@ use crate::{
     GENESIS_CONFIG,
 };
 
-use ethereum_client::{Contracts as EthApi, TxHash, TxStatus};
+use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
 
 pub struct MerkleRootRelayer {
@@ -374,7 +374,7 @@ async fn submit_proof_to_ethereum(eth_api: &EthApi, proof: FinalProof) -> anyhow
     );
 
     let tx_hash = eth_api
-        .provide_merkle_root(proof.block_number, proof.merkle_root, &proof.proof[..])
+        .provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
         .await?;
 
     Ok(tx_hash)

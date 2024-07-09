@@ -27,6 +27,7 @@ parity-scale-codec.workspace = true
 pretty_env_logger.workspace = true
 primitive-types = { workspace = true, features = ["std"] }
 prometheus.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

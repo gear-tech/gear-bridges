@@ -100,6 +100,8 @@ impl GearProofStorage {
             .await
             .expect("Failed to run message sender");
 
+        std::fs::create_dir_all(&config_folder_path)
+            .expect("Failed to create directory for gear proof storage config");
         if !config_folder_path.is_dir() {
             panic!("Please provide directory as a path");
         }
@@ -126,7 +128,6 @@ impl GearProofStorage {
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
         if self.program.is_some() {
-            // TODO: Restore state.
             return Ok(());
         }
 

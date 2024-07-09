@@ -146,7 +146,7 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let mut proof_storage: Box<dyn ProofStorage> =
+            let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
                     Box::from(
                         GearProofStorage::new(

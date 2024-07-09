@@ -105,10 +105,18 @@ binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tec
 
 # Alloy deps
 alloy = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy", rev = "899b8b9", features = [
-    "sol-types", "contract", "pubsub",
+    "sol-types",
+    "contract",
+    "pubsub",
     "providers",
-    "signers", "signer-local",
-    "transports", "transport-http", 
-    "network", "node-bindings",
-    "rpc", "rpc-client", "json-rpc", "rpc-types"] }
-
+    "signers",
+    "signer-local",
+    "transports",
+    "transport-http",
+    "network",
+    "node-bindings",
+    "rpc",
+    "rpc-client",
+    "json-rpc",
+    "rpc-types",
+] }

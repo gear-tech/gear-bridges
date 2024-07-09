@@ -15,5 +15,4 @@ ahash.workspace = true
 thiserror.workspace = true
 keccak-hash.workspace = true
 sp-core = { workspace = true, features = ["std"] }
-
 alloy.workspace = true

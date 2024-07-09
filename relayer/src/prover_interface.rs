@@ -28,6 +28,12 @@ lazy_static::lazy_static!(
 );
 
 pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircuitData> {
+    log::info!(
+        "Proving genesis authority set change {} -> {}",
+        GENESIS_CONFIG.authority_set_id,
+        GENESIS_CONFIG.authority_set_id + 1
+    );
+
     let (block, current_epoch_block_finality) = gear_api
         .fetch_finality_proof_for_session(GENESIS_CONFIG.authority_set_id)
         .await?;

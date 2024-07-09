@@ -149,9 +149,13 @@ async fn main() {
             let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
                     Box::from(
-                        GearProofStorage::new(&args.vara_endpoint.vara_endpoint, &fee_payer)
-                            .await
-                            .expect("Failed to initilize proof storage"),
+                        GearProofStorage::new(
+                            &args.vara_endpoint.vara_endpoint,
+                            &fee_payer,
+                            "./onchain_proof_storage_data".into(),
+                        )
+                        .await
+                        .expect("Failed to initilize proof storage"),
                     )
                 } else {
                     log::warn!("Fee payer not present, falling back to FileSystemProofStorage");

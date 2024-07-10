@@ -66,7 +66,10 @@ pub enum TxStatus {
 }
 
 #[derive(Clone)]
-pub struct EthApi(Contracts<ProviderType, Http<Client>, Ethereum>);
+pub struct EthApi {
+    contracts: Contracts<ProviderType, Http<Client>, Ethereum>,
+    public_key: Address,
+}
 
 impl EthApi {
     pub fn new(
@@ -83,6 +86,8 @@ impl EthApi {
             }
             None => PrivateKeySigner::random(),
         };
+
+        let public_key = signer.address();
 
         let wallet = alloy::network::EthereumWallet::from(signer);
 
@@ -104,7 +109,14 @@ impl EthApi {
             relayer_address.into_array(),
         )?;
 
-        Ok(EthApi(contracts))
+        Ok(EthApi {
+            contracts,
+            public_key,
+        })
+    }
+
+    pub async fn get_approx_balance(&self) -> Result<f64, Error> {
+        self.contracts.get_approx_balance(self.public_key).await
     }
 
     pub async fn provide_merkle_root(
@@ -113,7 +125,7 @@ impl EthApi {
         merkle_root: [u8; 32],
         proof: Vec<u8>,
     ) -> Result<TxHash, Error> {
-        self.0
+        self.contracts
             .provide_merkle_root(
                 U256::from(block_number),
                 B256::from(merkle_root),
@@ -123,11 +135,13 @@ impl EthApi {
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
-        self.0.get_tx_status(tx_hash).await
+        self.contracts.get_tx_status(tx_hash).await
     }
 
     pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
-        self.0.read_finalized_merkle_root(U256::from(block)).await
+        self.contracts
+            .read_finalized_merkle_root(U256::from(block))
+            .await
     }
 
     pub async fn fetch_merkle_roots_in_range(
@@ -135,11 +149,11 @@ impl EthApi {
         from: u64,
         to: u64,
     ) -> Result<Vec<MerkleRootEntry>, Error> {
-        self.0.fetch_merkle_roots_in_range(from, to).await
+        self.contracts.fetch_merkle_roots_in_range(from, to).await
     }
 
     pub async fn block_number(&self) -> Result<u64, Error> {
-        self.0.block_number().await
+        self.contracts.block_number().await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -154,7 +168,7 @@ impl EthApi {
         payload: Vec<u8>,
         proof: Vec<[u8; 32]>,
     ) -> Result<TxHash, Error> {
-        self.0
+        self.contracts
             .provide_content_message(
                 U256::from(block_number),
                 U256::from(total_leaves),
@@ -169,7 +183,7 @@ impl EthApi {
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
-        self.0.is_message_processed(B256::from(nonce)).await
+        self.contracts.is_message_processed(B256::from(nonce)).await
     }
 }
 
@@ -195,6 +209,17 @@ where
             message_queue_instance,
             _phantom: PhantomData,
         })
+    }
+
+    pub async fn get_approx_balance(&self, address: Address) -> Result<f64, Error> {
+        let balance = self.provider.get_balance(address).latest().await;
+
+        if let Ok(balance) = balance {
+            let balance: f64 = balance.into();
+            Ok(balance / 1_000_000_000_000_000_000.0)
+        } else {
+            Err(Error::ErrorInHTTPTransport)
+        }
     }
 
     pub async fn provide_merkle_root(

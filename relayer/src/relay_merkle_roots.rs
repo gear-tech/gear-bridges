@@ -1,4 +1,4 @@
-use prometheus::IntGauge;
+use prometheus::{Gauge, IntGauge};
 
 use crate::{
     metrics::{impl_metered_service, MeteredService},
@@ -23,6 +23,7 @@ impl_metered_service! {
     struct Metrics {
         latest_proven_era: IntGauge,
         latest_observed_gear_era: IntGauge,
+        fee_payer_balance: Gauge
     }
 }
 
@@ -40,6 +41,10 @@ impl Metrics {
             latest_observed_gear_era: IntGauge::new(
                 "merkle_root_relayer_latest_observed_gear_era",
                 "Latest era number observed by relayer",
+            )?,
+            fee_payer_balance: Gauge::new(
+                "merkle_root_relayer_fee_payer_balance",
+                "Transaction fee payer balance",
             )?,
         })
     }
@@ -91,6 +96,9 @@ impl MerkleRootRelayer {
     }
 
     async fn main_loop(&mut self) -> anyhow::Result<()> {
+        let balance = self.eth_api.get_approx_balance().await?;
+        self.metrics.fee_payer_balance.set(balance);
+
         log::info!("Syncing authority set id");
         loop {
             let sync_steps = self.sync_authority_set_id().await?;

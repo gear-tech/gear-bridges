@@ -1,4 +1,4 @@
-use bridge_payment::Program;
+use bridging_payment::Program;
 use sails_idl_gen::program;
 use std::{env, fs::File, path::PathBuf};
 

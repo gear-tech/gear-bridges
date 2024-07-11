@@ -142,9 +142,9 @@ async fn process_block_events(
 
             for message in messages {
                 let user_reply = BridgePaymentEvents::decode(&mut &message.payload[..])?;
-                if let BridgePaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply {
-                    sender.send(BlockEvent::MessagePaid { nonce })?;
-                };
+                let BridgePaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+
+                sender.send(BlockEvent::MessagePaid { nonce })?;
             }
         }
     }

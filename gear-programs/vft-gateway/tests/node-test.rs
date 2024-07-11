@@ -1,13 +1,13 @@
 use blake2::{digest::typenum::U32, Blake2b, Digest};
 use gclient::{EventProcessor, GearApi, Result, WSAddress};
 use gear_core::ids::{MessageId, ProgramId};
-use grc20_gateway_app::services::error::Error;
-use grc20_gateway_app::services::Config;
-use grc20_gateway_app::services::InitConfig;
 use gstd::ActorId;
 use gstd::{Decode, Encode};
 use primitive_types::U256;
 use sails_rtl::H160;
+use vft_gateway::services::error::Error;
+use vft_gateway::services::Config;
+use vft_gateway::services::InitConfig;
 
 pub async fn upload_ft(api: &GearApi, listener: &mut gclient::EventListener) -> Result<ProgramId> {
     let init = ("USDC".to_owned(), "USDC".to_owned(), 6_u8);

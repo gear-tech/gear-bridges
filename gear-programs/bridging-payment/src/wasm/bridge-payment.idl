@@ -10,21 +10,17 @@ type Config = struct {
   gas_to_send_request_to_gateway: u64,
 };
 
-type H160 = struct {
-  [u8, 20],
-};
-
 constructor {
   New : (init_config: InitConfig);
 };
 
 service BridgePayment {
   ReclaimFee : () -> null;
-  RequestToGateway : (sender: actor_id, amount: u256, receiver: [u8, 20], eth_token_id: [u8, 20]) -> null;
+  RequestToGateway : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
   SetFee : (fee: u128) -> null;
 
   events {
-    TeleportVaraToEth: struct { nonce: u256, sender: actor_id, amount: u256, receiver: H160, eth_token_id: H160 };
+    TeleportVaraToEth: struct { nonce: u256, sender: actor_id, amount: u256, receiver: h160, eth_token_id: h160 };
   }
 };
 

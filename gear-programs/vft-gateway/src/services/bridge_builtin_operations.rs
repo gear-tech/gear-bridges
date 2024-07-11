@@ -1,5 +1,5 @@
 use super::{Config, Error, MessageStatus, MessageTracker};
-use gstd::{msg, MessageId};
+use gstd::{msg};
 use sails_rtl::prelude::*;
 
 pub async fn send_message_to_bridge_builtin(

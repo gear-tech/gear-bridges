@@ -1,4 +1,4 @@
-use super::{vft_gateway, Config};
+use super::{vft_gateway::vft_gateway::io as vft_gateway_io, vft_gateway, Config};
 use gstd::{msg, prelude::collections::HashMap, MessageId};
 use sails_rtl::prelude::*;
 
@@ -24,7 +24,7 @@ pub async fn send_message_to_gateway(
     receiver: H160,
     config: &Config,
 ) -> Result<Result<(U256, H160), vft_gateway::Error>, Error> {
-    let bytes: Vec<u8> = vft_gateway::vft_gateway_io::TransferVaraToEth::encode_call(
+    let bytes: Vec<u8> = vft_gateway::vft_gateway::io::TransferVaraToEth::encode_call(
         sender,
         vara_token_id,
         amount,
@@ -43,7 +43,7 @@ pub async fn send_message_to_gateway(
     .map_err(|_| Error::RequestToGateWayReplyError)?;
 
     let reply: Result<(U256, H160), vft_gateway::Error> =
-        vft_gateway::vft_gateway_io::TransferVaraToEth::decode_reply(&reply_bytes)
+        vft_gateway_io::TransferVaraToEth::decode_reply(&reply_bytes)
             .map_err(|_| Error::RequestToGateWayDecodeError)?;
 
     Ok(reply)

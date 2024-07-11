@@ -1,5 +1,4 @@
-use super::Config;
-use gstd::{msg, prelude::collections::HashMap, MessageId};
+use gstd::{prelude::collections::HashMap};
 use sails_rtl::prelude::*;
 
 #[derive(Default)]

@@ -1,5 +1,5 @@
-use super::{msg_tracker_mut, vft_master, MessageStatus, MessageTracker, MsgData, VftGateway};
-use gstd::{msg, MessageId};
+use super::{msg_tracker_mut, vft_master::vft_master::io as vft_master_io, MessageStatus, MessageTracker, MsgData, VftGateway};
+use gstd::{msg};
 use sails_rtl::{gstd::ExecContext, prelude::*};
 
 impl<T> VftGateway<T>
@@ -40,7 +40,7 @@ fn process_message_status(
 }
 
 fn handle_burn_tokens(reply_bytes: Vec<u8>, msg_id: MessageId, msg_tracker: &mut MessageTracker) {
-    match vft_master::vft_master_io::Burn::decode_reply(&reply_bytes) {
+    match vft_master_io::Burn::decode_reply(&reply_bytes) {
         Ok(true) => {
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenBurnCompleted(true))
         }
@@ -68,7 +68,7 @@ fn handle_bridge_builtin(
 }
 
 fn handle_mint_tokens(reply_bytes: Vec<u8>, msg_id: MessageId, msg_tracker: &mut MessageTracker) {
-    match vft_master::vft_master_io::Mint::decode_reply(&reply_bytes) {
+    match vft_master_io::Mint::decode_reply(&reply_bytes) {
         Ok(true) => {
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenMintCompleted(true))
         }

@@ -1,12 +1,13 @@
 [package]
-name = "vft_gateway_wasm"
+name = "bridge_payment_wasm"
 version.workspace = true
 edition.workspace = true 
 
 [dependencies]
-vft-gateway.workspace = true
+bridging_payment.workspace = true
 
 [build-dependencies]
 gwasm-builder.workspace = true
 sails-idl-gen.workspace = true
-vft-gateway.workspace = true
+bridging_payment.workspace = true
+

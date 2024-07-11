@@ -1,5 +1,5 @@
-use super::{vft_master, Config, Error, MessageStatus, MessageTracker};
-use gstd::{msg, MessageId};
+use super::{vft_master::vft_master::io as vft_master_io, Config, Error, MessageStatus, MessageTracker};
+use gstd::{msg};
 use sails_rtl::prelude::*;
 
 pub async fn burn_tokens(
@@ -10,7 +10,7 @@ pub async fn burn_tokens(
     msg_id: MessageId,
     msg_tracker: &mut MessageTracker,
 ) -> Result<(), Error> {
-    let bytes: Vec<u8> = vft_master::vft_master_io::Burn::encode_call(sender, amount);
+    let bytes: Vec<u8> = vft_master_io::Burn::encode_call(sender, amount);
 
     let msg_future = msg::send_bytes_with_gas_for_reply(
         token_id.into(),
@@ -32,7 +32,7 @@ pub async fn burn_tokens(
     // At this moment, the message execution pauses and it enters the waitlist.
     let reply_bytes = msg_future.await.map_err(|_| Error::BurnTokensReplyError)?;
 
-    let reply: bool = vft_master::vft_master_io::Burn::decode_reply(&reply_bytes)
+    let reply: bool = vft_master_io::Burn::decode_reply(&reply_bytes)
         .map_err(|_| Error::BurnTokensDecodeError)?;
     if !reply {
         return Err(Error::ErrorDuringTokensBurn);
@@ -46,7 +46,7 @@ pub async fn mint_tokens(
     amount: U256,
     config: &Config,
 ) -> Result<(), Error> {
-    let bytes: Vec<u8> = vft_master::vft_master_io::Mint::encode_call(sender, amount);
+    let bytes: Vec<u8> = vft_master_io::Mint::encode_call(sender, amount);
 
     let reply_bytes = msg::send_bytes_with_gas_for_reply(
         token_id.into(),
@@ -59,7 +59,7 @@ pub async fn mint_tokens(
     .await
     .map_err(|_| Error::MintTokensReplyError)?;
 
-    let reply: bool = vft_master::vft_master_io::Mint::decode_reply(&reply_bytes)
+    let reply: bool = vft_master_io::Mint::decode_reply(&reply_bytes)
         .map_err(|_| Error::MintTokensDecodeError)?;
     if !reply {
         return Err(Error::ErrorDuringTokensMint);

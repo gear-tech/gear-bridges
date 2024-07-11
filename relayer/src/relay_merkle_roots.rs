@@ -149,6 +149,15 @@ impl MerkleRootRelayer {
 
         match latest_proven_authority_set_id {
             None => {
+                if latest_authority_set_id <= GENESIS_CONFIG.authority_set_id {
+                    log::warn!(
+                        "Network haven't reached genesis authority set id yet. Current authority set id: {}, expected genesis: {}", 
+                        latest_authority_set_id, 
+                        GENESIS_CONFIG.authority_set_id,
+                    );
+                    return Ok(0);
+                }
+
                 let proof = prover_interface::prove_genesis(&self.gear_api).await?;
                 self.proof_storage
                     .init(proof, GENESIS_CONFIG.authority_set_id)
@@ -168,7 +177,7 @@ impl MerkleRootRelayer {
                 Ok(step_count as usize)
             }
             Some(latest_proven) if latest_proven == latest_authority_set_id => Ok(0),
-            Some(latest_proven) => unreachable!(
+            Some(latest_proven) => panic!(
                 "Invalid state of proof storage detected: latest stored authority set id = {} but latest authority set id on VARA = {}", 
                 latest_proven,
                 latest_authority_set_id
@@ -178,6 +187,8 @@ impl MerkleRootRelayer {
 
     async fn prove_message_sent(&self) -> anyhow::Result<FinalProof> {
         let finalized_head = self.gear_api.latest_finalized_block().await?;
+
+        log::info!("Proving merkle root presense in block #{}", finalized_head);
 
         let authority_set_id = self
             .gear_api

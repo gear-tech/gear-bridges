@@ -1,4 +1,5 @@
 use prometheus::{Gauge, IntGauge};
+use std::{thread, time::{Instant, Duration}};
 
 use crate::{
     metrics::{impl_metered_service, MeteredService},
@@ -9,6 +10,8 @@ use crate::{
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
+
+const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 
 pub struct MerkleRootRelayer {
     gear_api: GearApi,
@@ -87,10 +90,16 @@ impl MerkleRootRelayer {
         log::info!("Starting relayer");
 
         loop {
+            let now = Instant::now();
             let res = self.main_loop().await;
 
             if let Err(err) = res {
                 log::error!("{}", err);
+            }
+
+            let main_loop_duration = now.elapsed();
+            if main_loop_duration < MIN_MAIN_LOOP_DURATION {
+                thread::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration);
             }
         }
     }

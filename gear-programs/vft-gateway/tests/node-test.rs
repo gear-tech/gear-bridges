@@ -8,6 +8,7 @@ use sails_rtl::H160;
 use vft_gateway::services::error::Error;
 use vft_gateway::services::Config;
 use vft_gateway::services::InitConfig;
+use vft_master_wasm::WASM_BINARY;
 
 pub async fn upload_ft(api: &GearApi, listener: &mut gclient::EventListener) -> Result<ProgramId> {
     let init = ("USDC".to_owned(), "USDC".to_owned(), 6_u8);
@@ -90,15 +91,18 @@ pub async fn check_balance(
     let balance = balance_of(client, program_id, listener, account).await;
     assert_eq!(balance, expected_balance);
 }
-async fn upload_grc20_gateway(
+async fn upload_vft_gateway(
     api: &GearApi,
     listener: &mut gclient::EventListener,
     ft_id: ProgramId,
+    receiver_contract_id: H160,
     gear_bridge_builtin: ActorId,
+    bridge_payment_id: ActorId,
 ) -> Result<ProgramId> {
     let init = InitConfig::new(
-        (<[u8; 32]>::from(ft_id)).into(),
+        receiver_contract_id,
         gear_bridge_builtin.into(),
+        bridge_payment_id.into(),
         Config::new(
             10_000_000_000,
             10_000_000_000,
@@ -168,23 +172,13 @@ async fn upload_grc20_gateway(
 }
 
 #[tokio::test]
-async fn grc20_gateway_test() -> Result<()> {
+async fn vft_gateway_test() -> Result<()> {
     //let client = GearApi::init(WSAddress::new("ws://65.21.117.24", Some(8989))).await?;
     let client = GearApi::dev().await?;
     let mut listener = client.subscribe().await?;
     let gear_bridge_builtin = gear_bridge_builtin_actor_id();
 
-    println!(
-        "Gear-bridge-builtin id {:?}",
-        ProgramId::from(<[u8; 32]>::from(gear_bridge_builtin))
-    );
-    let ft_id = upload_ft(&client, &mut listener).await?;
-
-    let grc20_gateway_id =
-        upload_grc20_gateway(&client, &mut listener, ft_id, gear_bridge_builtin).await?;
-
-    println!("Sending message to grant MINT role to Alice");
-    let sender = ActorId::new(
+    let account = ActorId::new(
         client
             .account_id()
             .encode()
@@ -192,10 +186,30 @@ async fn grc20_gateway_test() -> Result<()> {
             .expect("Unexpected invalid account id length."),
     );
 
+    println!(
+        "Gear-bridge-builtin id {:?}",
+        ProgramId::from(<[u8; 32]>::from(gear_bridge_builtin))
+    );
+    let ft_id = upload_ft(&client, &mut listener).await?;
+
+    let receiver_contract_id = H160::from([10; 20]);
+
+    let grc20_gateway_id = upload_vft_gateway(
+        &client,
+        &mut listener,
+        ft_id,
+        receiver_contract_id,
+        gear_bridge_builtin,
+        account,
+    )
+    .await?;
+
+    println!("Sending message to grant MINT role to Alice");
+
     let payload = [
         "Admin".to_string().encode(),
         "GrantRole".to_string().encode(),
-        (sender, Role::Minter).encode(),
+        (account, Role::Minter).encode(),
     ]
     .concat();
 
@@ -209,7 +223,7 @@ async fn grc20_gateway_test() -> Result<()> {
     let payload = [
         "Admin".to_string().encode(),
         "Mint".to_string().encode(),
-        (sender, U256::from(10_000_000_000 as u64)).encode(),
+        (account, U256::from(10_000_000_000 as u64)).encode(),
     ]
     .concat();
 
@@ -226,7 +240,7 @@ async fn grc20_gateway_test() -> Result<()> {
         "Grc20Gateway".to_string().encode(),
         "TeleportVaraToEth".to_string().encode(),
         (
-            sender,
+            account,
             U256::from(10_000_000_000 as u64),
             receiver,
             eth_token_id,
@@ -245,14 +259,11 @@ async fn grc20_gateway_test() -> Result<()> {
         .expect("Error listen reply");
 
     let decoded_reply: (String, String, Result<(), Error>) = match raw_reply {
-        Ok(raw_reply) => decode(raw_reply).expect("Erroe decode reply"),
+        Ok(raw_reply) => decode(raw_reply).expect("Error decode reply"),
         Err(_error) => gstd::panic!("Error in getting reply"),
     };
 
-    println!("Reply from grc20-gateway {:?}", decoded_reply.2);
-
-    let alice_balance = balance_of(&client, ft_id, &mut listener, sender).await;
-    println!("Alice balance: {:?}", alice_balance);
+    println!("Reply from vft-gateway {:?}", decoded_reply.2);
 
     Ok(())
 }

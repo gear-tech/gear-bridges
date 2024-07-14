@@ -1,6 +1,6 @@
 use super::{Config, Error, MessageStatus, MessageTracker};
-use gstd::{msg};
-use sails_rtl::prelude::*;
+use gstd::msg;
+use sails::prelude::*;
 
 pub async fn send_message_to_bridge_builtin(
     gear_bridge_builtin: ActorId,

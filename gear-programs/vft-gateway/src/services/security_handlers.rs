@@ -1,6 +1,9 @@
-use super::{msg_tracker_mut, vft_master::vft_master::io as vft_master_io, MessageStatus, MessageTracker, MsgData, VftGateway};
-use gstd::{msg};
-use sails_rtl::{gstd::ExecContext, prelude::*};
+use super::{
+    msg_tracker_mut, vft_master::vft::io as vft_master_io, MessageStatus, MessageTracker, MsgData,
+    VftGateway,
+};
+use gstd::msg;
+use sails::{gstd::ExecContext, prelude::*};
 
 impl<T> VftGateway<T>
 where

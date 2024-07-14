@@ -1,6 +1,6 @@
-use super::{vft_master::vft_master::io as vft_master_io, Config, Error, MessageStatus, MessageTracker};
-use gstd::{msg};
-use sails_rtl::prelude::*;
+use super::{vft_master::vft::io as vft_master_io, Config, Error, MessageStatus, MessageTracker};
+use gstd::msg;
+use sails::prelude::*;
 
 pub async fn burn_tokens(
     token_id: ActorId,

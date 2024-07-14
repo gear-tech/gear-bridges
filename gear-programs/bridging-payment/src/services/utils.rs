@@ -1,6 +1,6 @@
-use super::{vft_gateway::vft_gateway::io as vft_gateway_io, vft_gateway, Config};
+use super::{vft_gateway, vft_gateway::vft_gateway::io as vft_gateway_io, Config};
 use gstd::{msg, prelude::collections::HashMap, MessageId};
-use sails_rtl::prelude::*;
+use sails::prelude::*;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {

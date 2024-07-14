@@ -1,5 +1,5 @@
-use gstd::{prelude::collections::HashMap};
-use sails_rtl::prelude::*;
+use gstd::prelude::collections::HashMap;
+use sails::prelude::*;
 
 #[derive(Default)]
 pub struct MessageTracker {

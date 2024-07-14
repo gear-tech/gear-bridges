@@ -1,4 +1,4 @@
-use sails_rtl::prelude::*;
+use sails::prelude::*;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {

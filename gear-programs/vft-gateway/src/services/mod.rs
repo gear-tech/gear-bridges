@@ -1,5 +1,5 @@
 use collections::HashMap;
-use sails_rtl::{
+use sails::{
     gstd::{gservice, msg, ExecContext},
     prelude::*,
 };

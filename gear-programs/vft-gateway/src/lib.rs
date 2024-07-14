@@ -1,6 +1,6 @@
 #![no_std]
 
-use sails_rtl::gstd::{gprogram, GStdExecContext};
+use sails::gstd::{gprogram, GStdExecContext};
 pub mod services;
 use services::{InitConfig, VftGateway};
 #[derive(Default)]

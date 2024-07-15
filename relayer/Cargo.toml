@@ -6,19 +6,28 @@ edition.workspace = true
 [dependencies]
 bridging_payment.workspace = true
 ethereum-client.workspace = true
+gear_proof_storage.workspace = true
 gear-rpc-client.workspace = true
 prover.workspace = true
 
 anyhow.workspace = true
+axum.workspace = true
 clap.workspace = true
+dotenv.workspace = true
+futures.workspace = true
+gear-core.workspace = true
+gclient.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true
+lazy_static.workspace = true
 libc.workspace = true
 log.workspace = true
 num = { workspace = true, features = ["serde"] }
 parity-scale-codec.workspace = true
 pretty_env_logger.workspace = true
 primitive-types = { workspace = true, features = ["std"] }
+prometheus.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

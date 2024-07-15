@@ -5,7 +5,7 @@ import {ProxyContract} from "../src/ProxyContract.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ERC20Treasury} from "../src/ERC20Treasury.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {Verifier} from "../src/mocks/VerifierMock.sol";
 import {Relayer} from "../src/Relayer.sol";
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
@@ -13,7 +13,7 @@ import {IVerifier} from "../src/interfaces/IVerifier.sol";
 
 
 address constant OWNER = address(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266);
-address constant USER = address(0x34A1D3fff3958843C43aD80F30b94c510645C316);
+address constant USER = address(0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496);
 
 address constant ETH_ADDRESS_3 = address(0x0303030303030303030303030303030303030303);
 

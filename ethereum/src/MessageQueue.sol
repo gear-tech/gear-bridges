@@ -10,11 +10,25 @@ import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} 
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 import {RELAYER_ADDRESS} from "./libraries/Environment.sol";
 
+
+
 contract MessageQueue is IMessageQueue {
     using Address for address;
     using Hasher for VaraMessage;
 
-    mapping(uint256 => bool) private _processed_messages;
+    function hash_vara_msg(
+        VaraMessage calldata message
+    ) internal pure returns (bytes32) {
+        bytes memory data = abi.encodePacked(
+            message.nonce,
+            message.sender,
+            message.receiver,
+            message.data
+        );
+        return keccak256(abi.encodePacked(keccak256(data)));
+    }
+
+    mapping(bytes32 => bool) private _processed_messages;
 
     /**
      * @dev Unpack message from merkle tree and relay it to the receiver.
@@ -37,8 +51,7 @@ contract MessageQueue is IMessageQueue {
         if (_processed_messages[message.nonce])
             revert MessageAlreadyProcessed(message.nonce);
 
-        bytes32 msg_hash = message.hash();
-        bytes32 merkle_trie_leaf_hash = keccak256(abi.encodePacked(msg_hash));
+        bytes32 msg_hash = hash_vara_msg(message);
 
         bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
             block_number
@@ -49,7 +62,7 @@ contract MessageQueue is IMessageQueue {
         if (
             _calculateMerkleRoot(
                 proof,
-                merkle_trie_leaf_hash,
+                msg_hash,
                 total_leaves,
                 leaf_index
             ) != merkle_root
@@ -103,7 +116,7 @@ contract MessageQueue is IMessageQueue {
     ) internal pure returns (bytes32) {
         bytes32 hash = leaf;
 
-        // TODO: Add check that index < width
+        assert(index < width);
 
         for (uint256 i = 0; i < proof.length; i++) {
             bytes32 proofElement = proof[i];

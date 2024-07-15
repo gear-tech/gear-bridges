@@ -34,6 +34,8 @@ bridging_payment = { path = "gear-programs/bridging-payment" }
 bridge_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
 vft-gateway = { path = "gear-programs/vft-gateway" }
 vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
+gear_proof_storage = { path = "gear-programs/proof-storage" }
+
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -44,17 +46,20 @@ curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek" }
 
 ahash = "0.7.8"
 anyhow = "1.0.86"
+axum = "0.7.5"
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
+dotenv = "0.15.0"
 env_logger = "0.9.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",
     "codec",
 ] }
 ff = { version = "0.13.0", features = ["derive"] }
+futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
 git-download = "0.1"
 hex = { version = "0.4.3", default-features = false }
@@ -68,6 +73,7 @@ log = "0.4.14"
 num = { version = "0.4", features = ["rand"] }
 paste = "1.0.14"
 pretty_env_logger = "*"
+prometheus = { version = "0.13.0", default-features = false }
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
@@ -89,12 +95,13 @@ unroll = "0.1.5"
 # Gear/Substrate deps
 gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-bridge" }
 gstd = { version = "1.4.2", features = ["nightly"] }
-gear-core = "1.4.2"
-gclient = "1.4.2"
-gear-wasm-builder = { version = "1.4.1", default-features = false }
 gwasm-builder = { package = "gear-wasm-builder", version = "1.4.2" }
-gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge" }
-pallet-gear-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-bridge", default-features = false, features = [
+
+gear-wasm-builder = { version = "1.4.1", default-features = false }
+gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge", default-features = false, features = [
     "std",
 ] }
 subxt = "0.32.1"
@@ -109,40 +116,19 @@ primitive-types = { version = "0.12.2", default-features = false }
 binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 
 # Alloy deps
-alloy-contract = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-contract", rev = "34f5621" }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-types", rev = "34f5621" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-trace-types", rev = "34f5621" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-node-bindings", rev = "34f5621" }
-alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-rpc-client", features = [
-    "ws",
-    "reqwest",
+alloy = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy", rev = "899b8b9", features = [
+    "sol-types",
+    "contract",
     "pubsub",
-], rev = "34f5621" }
-alloy-transport = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-transport", rev = "34f5621" }
-alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-transport-ws", rev = "34f5621" }
-alloy-transport-http = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-transport-http", rev = "34f5621" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-network", rev = "34f5621" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-signer", rev = "34f5621" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-signer-wallet", rev = "34f5621" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy-provider", rev = "34f5621" }
-alloy-primitives = { git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-core = { git = "https://github.com/alloy-rs/core.git", package = "alloy-core", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-sol-macro = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-macro", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = [
-    "json",
+    "providers",
+    "signers",
+    "signer-local",
+    "transports",
+    "transport-http",
+    "network",
+    "node-bindings",
+    "rpc",
+    "rpc-client",
+    "json-rpc",
+    "rpc-types",
 ] }
-alloy-sol-types = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-types", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = [
-    "json",
-] }
-alloy-dyn-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-dyn-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = [
-    "std",
-] }
-alloy-json-abi = { git = "https://github.com/alloy-rs/core.git", package = "alloy-json-abi", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = [
-    "std",
-] }
-alloy-sol-type-parser = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-type-parser", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1", features = [
-    "std",
-] }
-
-[patch.crates-io]
-alloy-primitives = { git = "https://github.com/alloy-rs/core.git", package = "alloy-primitives", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }
-alloy-sol-types = { git = "https://github.com/alloy-rs/core.git", package = "alloy-sol-types", rev = "1bac7678797fcd1bee2f2580825724b4165b12c1" }

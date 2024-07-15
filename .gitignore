@@ -1,7 +1,9 @@
 target/
 .vscode
+.idea
 data/
 /proof_storage
+/onchain_proof_storage_data
 _obj
 .binpath
 

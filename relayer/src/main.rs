@@ -3,7 +3,7 @@ extern crate pretty_env_logger;
 use clap::{Args, Parser, Subcommand};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
-use ethereum_client::Contracts as EthApi;
+use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use metrics::MetricsBuilder;
@@ -22,7 +22,7 @@ const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
 
 const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    authority_set_id: 0,
+    authority_set_id: 1,
     // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
     validator_set_hash: [
         0xb9853ab2, 0xfb585702, 0xdfd9040e, 0xe8bc9f94, 0xdc5b0abd, 0x8b0f809e, 0xc23fdc02,
@@ -149,9 +149,13 @@ async fn main() {
             let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
                     Box::from(
-                        GearProofStorage::new(&args.vara_endpoint.vara_endpoint, &fee_payer)
-                            .await
-                            .expect("Failed to initilize proof storage"),
+                        GearProofStorage::new(
+                            &args.vara_endpoint.vara_endpoint,
+                            &fee_payer,
+                            "./onchain_proof_storage_data".into(),
+                        )
+                        .await
+                        .expect("Failed to initilize proof storage"),
                     )
                 } else {
                     log::warn!("Fee payer not present, falling back to FileSystemProofStorage");

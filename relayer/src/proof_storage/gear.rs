@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap},
+    path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
 };
 
@@ -9,19 +10,25 @@ use gclient::{
     metadata::runtime_types::gear_common::event::DispatchStatus, Event as RuntimeEvent, GearApi,
     GearEvent, WSAddress,
 };
-use gear_core::ids::{MessageId, ProgramId};
+use gear_core::ids::{ActorId, MessageId, ProgramId};
 use gear_rpc_client::GearApi as WrappedGearApi;
 use parity_scale_codec::Encode;
 use primitive_types::H256;
+use rand::RngCore;
+use serde::{Deserialize, Serialize};
 
 use super::{AuthoritySetId, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
+
+const CONFIG_FILE_NAME: &str = "config.json";
+const UPLOAD_PROGRAM_RETRIES: usize = 16;
 
 pub struct GearProofStorage {
     gear_api: GearApi,
     program: Option<ProgramId>,
     cache: RefCell<Cache>,
     message_channel: Sender<UpdateStateMessage>,
+    config_file_path: PathBuf,
 }
 
 #[derive(Default)]
@@ -63,8 +70,17 @@ impl ProofStorage for GearProofStorage {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct UploadedProgramInfo {
+    address: H256,
+}
+
 impl GearProofStorage {
-    pub async fn new(endpoint: &str, fee_payer: &str) -> anyhow::Result<GearProofStorage> {
+    pub async fn new(
+        endpoint: &str,
+        fee_payer: &str,
+        config_folder_path: PathBuf,
+    ) -> anyhow::Result<GearProofStorage> {
         let wrapped_gear_api = WrappedGearApi::new(endpoint).await?;
 
         assert_eq!(
@@ -84,11 +100,25 @@ impl GearProofStorage {
             .await
             .expect("Failed to run message sender");
 
+        std::fs::create_dir_all(&config_folder_path)
+            .expect("Failed to create directory for gear proof storage config");
+        if !config_folder_path.is_dir() {
+            panic!("Please provide directory as a path");
+        }
+
+        let config_file_path = config_folder_path.join(CONFIG_FILE_NAME);
+
+        let config: Option<UploadedProgramInfo> = std::fs::read_to_string(&config_file_path)
+            .ok()
+            .map(|ser| serde_json::from_str(&ser).expect("Wrong config file format"));
+        let program = config.map(|conf| ActorId::new(conf.address.0));
+
         Ok(GearProofStorage {
             gear_api,
             cache: Default::default(),
-            program: None,
+            program,
             message_channel,
+            config_file_path,
         })
     }
 
@@ -97,13 +127,9 @@ impl GearProofStorage {
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
-        // TODO: Read state from program if it already exists.
-
-        let (code_id, _) = self
-            .gear_api
-            .upload_code(gear_proof_storage::WASM_BINARY)
-            .await
-            .map_err(Into::<anyhow::Error>::into)?;
+        if self.program.is_some() {
+            return Ok(());
+        }
 
         let payload = gear_proof_storage::InitMessage {
             genesis_proof: gear_proof_storage::Proof {
@@ -113,22 +139,66 @@ impl GearProofStorage {
             },
         };
 
+        for _ in 0..UPLOAD_PROGRAM_RETRIES {
+            log::info!("Uploading proof storage program");
+
+            let res = self.try_upload_program(&payload).await;
+            match res {
+                Err(err) => {
+                    log::error!("Failed to upload proof storage program: {}", err);
+                }
+                Ok(Some(program)) => {
+                    let config = UploadedProgramInfo {
+                        address: H256(program.into_bytes()),
+                    };
+                    let config =
+                        serde_json::to_string(&config).expect("Failed to serialize config");
+
+                    std::fs::write(&self.config_file_path, config)
+                        .expect("Failed to write config to file");
+
+                    self.program = Some(program);
+                    break;
+                }
+                Ok(None) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn try_upload_program(
+        &self,
+        payload: &gear_proof_storage::InitMessage,
+    ) -> Result<Option<ActorId>, ProofStorageError> {
         let gas = self
             .gear_api
-            .calculate_create_gas(None, code_id, payload.encode(), 0, false)
+            .calculate_upload_gas(
+                None,
+                gear_proof_storage::WASM_BINARY.to_vec(),
+                payload.encode(),
+                0,
+                false,
+            )
             .await
             .map_err(Into::<anyhow::Error>::into)?
             .min_limit;
 
-        let (_, program, _) = self
+        let mut salt = [0; 32];
+        rand::thread_rng().fill_bytes(&mut salt);
+
+        let res = self
             .gear_api
-            .create_program(code_id, &[], payload, gas, 0)
-            .await
-            .map_err(Into::<anyhow::Error>::into)?;
+            .upload_program(gear_proof_storage::WASM_BINARY, &salt, &payload, gas, 0)
+            .await;
 
-        self.program = Some(program);
-
-        Ok(())
+        match res {
+            Ok((_, program, _)) => Ok(Some(program)),
+            Err(gclient::Error::Module(gclient::errors::ModuleError::Gear(
+                gclient::errors::Gear::ProgramAlreadyExists,
+            ))) => Ok(None),
+            Err(err) => Err(ProofStorageError::InnerError(err.into())),
+        }
     }
 
     async fn get_circuit_data_inner(&self) -> Result<CircuitData, ProofStorageError> {

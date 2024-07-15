@@ -1,4 +1,4 @@
-use ethereum_client::{Contracts as EthApi, TxHash};
+use ethereum_client::{EthApi, TxHash};
 use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
 use primitive_types::{H256, U256};
@@ -120,10 +120,10 @@ async fn submit_message(
             merkle_root_block,
             proof.num_leaves as u32,
             proof.leaf_index as u32,
-            nonce,
+            nonce.to_fixed_bytes(),
             message.source,
             message.destination,
-            &message.payload[..],
+            message.payload.to_vec(),
             proof.proof,
         )
         .await?;

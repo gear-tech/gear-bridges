@@ -93,7 +93,7 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-bridge" }
+gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-eth-bridge" }
 gstd = { version = "1.4.2", features = ["nightly"] }
 gwasm-builder = { package = "gear-wasm-builder", version = "1.4.2" }
 

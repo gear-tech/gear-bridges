@@ -18,6 +18,7 @@ use state::{Checkpoints, ReplayBackState, State};
 mod committee;
 mod crypto;
 mod replay_back;
+mod state;
 mod sync_update;
 mod utils;
 

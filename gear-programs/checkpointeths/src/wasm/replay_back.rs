@@ -83,7 +83,10 @@ pub fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, headers: Vec<BeaconBl
     }
 }
 
-fn process_headers(state: &mut State<STORED_CHECKPOINTS_COUNT>, mut headers: Vec<BeaconBlockHeader>) -> bool {
+fn process_headers(
+    state: &mut State<STORED_CHECKPOINTS_COUNT>,
+    mut headers: Vec<BeaconBlockHeader>,
+) -> bool {
     headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
 
     let replay_back = state.replay_back.as_mut().expect("Checked by the caller");

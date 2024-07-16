@@ -13,8 +13,6 @@ pub use checkpointeths_io as io;
 #[cfg(not(feature = "std"))]
 use gstd::{Box, Vec};
 
-mod state;
-
 #[cfg(not(feature = "std"))]
 mod wasm;
 

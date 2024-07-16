@@ -234,25 +234,6 @@ impl<const N: usize> List<N> {
             old
         })
     }
-
-    fn serialize_with_length(&self, buffer: &mut Vec<u8>, with_length_bit: bool) -> usize {
-        let start_len = buffer.len();
-        buffer.extend_from_slice(self.as_raw_slice());
-
-        if with_length_bit {
-            let element_count = self.len();
-            let marker_index = element_count % BITS_PER_BYTE;
-            if marker_index == 0 {
-                buffer.push(1u8);
-            } else {
-                let last = buffer.last_mut().expect("bitlist cannot be empty");
-                *last |= 1u8 << marker_index;
-            }
-        }
-
-        // SAFETY: checked subtraction is unnecessary, as buffer.len() > start_len; qed
-        buffer.len() - start_len
-    }
 }
 
 impl<const N: usize> Deref for List<N> {

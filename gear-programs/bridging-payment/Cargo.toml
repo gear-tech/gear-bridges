@@ -4,20 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-grc20_gateway = { workspace = true, features = ["std"] }
-
-gstd.workspace = true
+sails.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
-primitive-types.workspace = true
+gstd.workspace = true
+gbuiltin-bridge.workspace = true
 
 [build-dependencies]
-gear-wasm-builder.workspace = true
-
-[lib]
-crate-type = ["rlib"]
-name = "bridging_payment"
-
-[features]
-std = []
-default = ["std"]
+git-download.workspace = true
+sails-client-gen.workspace = true

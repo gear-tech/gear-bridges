@@ -1,0 +1,15 @@
+[package]
+name = "bridging_payment_wasm"
+version.workspace = true
+edition.workspace = true 
+
+[dependencies]
+bridging_payment.workspace = true
+
+[build-dependencies]
+gwasm-builder.workspace = true
+sails-idl-gen.workspace = true
+bridging_payment.workspace = true
+
+[lib]
+crate-type = ["rlib"]

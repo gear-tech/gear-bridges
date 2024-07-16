@@ -7,7 +7,10 @@ members = [
     "relayer",
     "circuits/*",
     "ethereum-common",
-    "gear-programs/*",
+    "gear-programs/bridging-payment",
+    "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/vft-gateway",
+    "gear-programs/vft-gateway/src/wasm",
 ]
 
 resolver = "2"
@@ -27,8 +30,10 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
-grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
+bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
+vft-gateway = { path = "gear-programs/vft-gateway" }
+vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -56,6 +61,7 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
+git-download = "0.1"
 hex = { version = "0.4.3", default-features = false }
 hex-literal = "0.4.1"
 itertools = "0.10.5"
@@ -72,6 +78,9 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 reqwest = "0.11.24"
+sails-idl-gen = { git = "https://github.com/gear-tech/sails" }
+sails-client-gen = { git = "https://github.com/gear-tech/sails" }
+sails = { git = "https://github.com/gear-tech/sails" }
 scale-info = { version = "2.10", default-features = false }
 serde = { version = "1.0", features = ["alloc", "derive"] }
 serde_json = "1.0"
@@ -84,7 +93,10 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { version = "1.4.1", features = ["nightly"] }
+gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-eth-bridge" }
+gstd = { version = "1.4.2", features = ["nightly"] }
+gwasm-builder = { package = "gear-wasm-builder", version = "1.4.2" }
+
 gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
 gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }

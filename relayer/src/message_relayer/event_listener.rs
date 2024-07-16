@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use bridging_payment::UserReply as BridgingPaymentUserReply;
+use bridging_payment::services::BridgePaymentEvents;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
@@ -148,9 +148,11 @@ impl EventListener {
                     .inc_by(messages.len() as u64);
 
                 for message in messages {
-                    let user_reply = BridgingPaymentUserReply::decode(&mut &message.payload[..])?;
+                    let user_reply = BridgePaymentEvents::decode(&mut &message.payload[..])?;
+                     let BridgePaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+
                     sender.send(BlockEvent::MessagePaid {
-                        nonce: user_reply.nonce,
+                        nonce,
                     })?;
                 }
             }

@@ -31,7 +31,7 @@ ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
 bridging_payment = { path = "gear-programs/bridging-payment" }
-bridge_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
+bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
 vft-gateway = { path = "gear-programs/vft-gateway" }
 vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }

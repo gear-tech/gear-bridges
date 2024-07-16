@@ -137,7 +137,7 @@ impl<T> VftGateway<T>
 where
     T: ExecContext,
 {
-    pub fn update_receiver_contract_id(&mut self, new_receiver_contract_id: H160) {
+    pub fn update_receiver_contract_address(&mut self, new_receiver_contract_address: H160) {
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
         }

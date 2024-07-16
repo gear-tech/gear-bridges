@@ -1,0 +1,45 @@
+[package]
+name = "checkpoint_light_client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gstd = { workspace = true, features = ["debug"] }
+primitive-types.workspace = true
+parity-scale-codec.workspace = true
+checkpoint_light_client-io.workspace = true
+ark-serialize.workspace = true
+circular-buffer.workspace = true
+gbuiltin-bls381.workspace = true
+hex-literal.workspace = true
+tree_hash_derive.workspace = true
+
+[build-dependencies]
+gear-wasm-builder.workspace = true
+checkpoint_light_client-io.workspace = true
+
+[dev-dependencies]
+gclient.workspace = true
+ark-bls12-381 = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"] }
+futures.workspace = true
+tokio.workspace = true
+hex = { workspace = true, features = ["std"] }
+reqwest.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
+lazy_static = { version = "1.1", features = ["spin_no_std"] }
+
+[features]
+std = [
+    "primitive-types/std",
+    "parity-scale-codec/std",
+    "checkpoint_light_client-io/std",
+    "ark-serialize/std",
+    "circular-buffer/use_std",
+    "getrandom/std",
+]
+default = ["std"]

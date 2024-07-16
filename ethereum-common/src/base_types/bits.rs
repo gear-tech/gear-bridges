@@ -18,7 +18,7 @@ type Inner = BitVec<u8, Lsb0>;
 /// A homogenous collection of a fixed number of boolean values.
 ///
 /// NOTE: a `Vector` of length `0` is illegal.
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Decode, Encode, TypeInfo)]
 pub struct Vector<const N: usize>(Inner);
 
 impl<'de, const N: usize> Deserialize<'de> for Vector<N> {
@@ -174,49 +174,13 @@ impl<const N: usize> TreeHash for Vector<N> {
     }
 }
 
-impl<const N: usize> Decode for Vector<N> {
-    fn decode<I: parity_scale_codec::Input>(
-        input: &mut I,
-    ) -> Result<Self, parity_scale_codec::Error> {
-        let bytes = <Vec<u8> as Decode>::decode(input)?;
-
-        Ok(Self(BitVec::try_from_vec(bytes).map_err(|_| {
-            parity_scale_codec::Error::from(
-                "Failed to construct Vector<N>: source Vec<u8> is too long",
-            )
-        })?))
-    }
-}
-
-impl<const N: usize> Encode for Vector<N> {
-    fn encode(&self) -> Vec<u8> {
-        self.as_raw_slice().encode()
-    }
-
-    fn encode_to<W: parity_scale_codec::Output + ?Sized>(&self, dest: &mut W) {
-        self.as_raw_slice().encode_to(dest)
-    }
-
-    fn encoded_size(&self) -> usize {
-        self.as_raw_slice().encoded_size()
-    }
-
-    fn size_hint(&self) -> usize {
-        self.as_raw_slice().size_hint()
-    }
-
-    fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
-        self.as_raw_slice().using_encoded(f)
-    }
-}
-
 // +1 for length bit
 fn bitlist_byte_length(bound: usize) -> usize {
     (bound + BITS_PER_BYTE - 1 + 1) / BITS_PER_BYTE
 }
 
 /// A homogenous collection of a variable number of boolean values.
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Decode, Encode, TypeInfo)]
 pub struct List<const N: usize>(Inner);
 
 impl<'de, const N: usize> Deserialize<'de> for List<N> {
@@ -269,25 +233,6 @@ impl<const N: usize> List<N> {
             *slot = value;
             old
         })
-    }
-
-    fn serialize_with_length(&self, buffer: &mut Vec<u8>, with_length_bit: bool) -> usize {
-        let start_len = buffer.len();
-        buffer.extend_from_slice(self.as_raw_slice());
-
-        if with_length_bit {
-            let element_count = self.len();
-            let marker_index = element_count % BITS_PER_BYTE;
-            if marker_index == 0 {
-                buffer.push(1u8);
-            } else {
-                let last = buffer.last_mut().expect("bitlist cannot be empty");
-                *last |= 1u8 << marker_index;
-            }
-        }
-
-        // SAFETY: checked subtraction is unnecessary, as buffer.len() > start_len; qed
-        buffer.len() - start_len
     }
 }
 
@@ -384,56 +329,5 @@ impl<const N: usize> TreeHash for List<N> {
     fn tree_hash_root(&self) -> Hash256 {
         let root = utils::bitfield_bytes_tree_hash_root::<N>(self.as_raw_slice());
         tree_hash::mix_in_length(&root, self.len())
-    }
-}
-
-impl<const N: usize> Decode for List<N> {
-    fn decode<I: parity_scale_codec::Input>(
-        input: &mut I,
-    ) -> Result<Self, parity_scale_codec::Error> {
-        let bytes = <Vec<u8> as Decode>::decode(input)?;
-
-        Self::try_from(&bytes[..]).map_err(|_| {
-            parity_scale_codec::Error::from(
-                "Failed to construct Vector<N>: source Vec<u8> is too long",
-            )
-        })
-    }
-}
-
-impl<const N: usize> Encode for List<N> {
-    fn encode(&self) -> Vec<u8> {
-        let mut buffer = vec![];
-        self.serialize_with_length(&mut buffer, true);
-
-        buffer.encode()
-    }
-
-    fn encode_to<W: parity_scale_codec::Output + ?Sized>(&self, dest: &mut W) {
-        let mut buffer = vec![];
-        self.serialize_with_length(&mut buffer, true);
-
-        buffer.encode_to(dest)
-    }
-
-    fn encoded_size(&self) -> usize {
-        let mut buffer = vec![];
-        self.serialize_with_length(&mut buffer, true);
-
-        buffer.encoded_size()
-    }
-
-    fn size_hint(&self) -> usize {
-        let mut buffer = vec![];
-        self.serialize_with_length(&mut buffer, true);
-
-        buffer.size_hint()
-    }
-
-    fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
-        let mut buffer = vec![];
-        self.serialize_with_length(&mut buffer, true);
-
-        buffer.using_encoded(f)
     }
 }

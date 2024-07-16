@@ -8,6 +8,7 @@ members = [
     "circuits/*",
     "ethereum-common",
     "gear-programs/*",
+    "gear-programs/checkpoint-light-client/io",
 ]
 
 resolver = "2"
@@ -30,6 +31,7 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
+checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -41,11 +43,17 @@ curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek" }
 
 ahash = "0.7.8"
 anyhow = "1.0.86"
+ark-bls12-381 = { version = "0.4.0", default-features = false }
+ark-serialize = { version = "0.4", default-features = false }
+ark-ec = { version = "0.4.2", default-features = false }
+ark-ff = { version = "0.4.2", default-features = false }
+ark-scale = { version = "0.0.12", default-features = false }
 axum = "0.7.5"
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
+circular-buffer = { version = "0.1.7", default-features = false, features = ["alloc"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.9.0"
@@ -72,8 +80,9 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 reqwest = "0.11.24"
-scale-info = { version = "2.10", default-features = false }
-serde = { version = "1.0", features = ["alloc", "derive"] }
+ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = ["alloc"] }
+scale-info = { version = "2.10", default-features = false, features = ["derive"] }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 static_assertions = "1.1.0"
@@ -85,10 +94,12 @@ unroll = "0.1.5"
 
 # Gear/Substrate deps
 gstd = { version = "1.4.1", features = ["nightly"] }
+gmeta = "1.4.1"
 gear-wasm-builder = { version = "1.4.1", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
 gclient = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
 gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
+gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge", default-features = false, features = [
     "std",
 ] }
@@ -96,7 +107,7 @@ subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
-parity-scale-codec = { version = "3.6.4", default-features = false }
+parity-scale-codec = { version = "3.6.4", default-features = false, features = ["derive"] }
 trie-db = { version = "0.28.0", default-features = false }
 sp-trie = { version = "22.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 sp-core = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }

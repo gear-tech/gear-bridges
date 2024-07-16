@@ -5,17 +5,19 @@ edition.workspace = true
 description = "Various entities used in Ethereum ecosystem"
 
 [dependencies]
-parity-scale-codec = { workspace = true, features = ["derive"] }
+parity-scale-codec = { workspace = true, features = ["bit-vec"] }
 serde.workspace = true
 tree_hash.workspace = true
 tree_hash_derive.workspace = true
-hex.workspace = true
+hex = { workspace = true, features = ["alloc"] }
 ethereum-types.workspace = true
 derive_more.workspace = true
 bitvec.workspace = true
+scale-info = { workspace = true, features = ["bit-vec"] }
+hex-literal.workspace = true
+ring.workspace = true
 
 [dev-dependencies]
-hex-literal.workspace = true
 serde_json.workspace = true
 
 [features]
@@ -24,6 +26,9 @@ std = [
     "parity-scale-codec/std",
     "serde/std",
     "tree_hash/std",
+    "hex/std",
     "ethereum-types/std",
     "bitvec/std",
+    "scale-info/std",
+    "ring/std",
 ]

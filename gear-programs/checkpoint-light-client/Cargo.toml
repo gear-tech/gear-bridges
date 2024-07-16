@@ -1,5 +1,5 @@
 [package]
-name = "checkpointeths"
+name = "checkpoint_light_client"
 version.workspace = true
 edition.workspace = true
 
@@ -7,7 +7,7 @@ edition.workspace = true
 gstd = { workspace = true, features = ["debug"] }
 primitive-types.workspace = true
 parity-scale-codec.workspace = true
-checkpointeths-io.workspace = true
+checkpoint_light_client-io.workspace = true
 ark-serialize.workspace = true
 circular-buffer.workspace = true
 gbuiltin-bls381.workspace = true
@@ -16,7 +16,7 @@ tree_hash_derive.workspace = true
 
 [build-dependencies]
 gear-wasm-builder.workspace = true
-checkpointeths-io.workspace = true
+checkpoint_light_client-io.workspace = true
 
 [dev-dependencies]
 gclient.workspace = true
@@ -37,7 +37,7 @@ lazy_static = { version = "1.1", features = ["spin_no_std"] }
 std = [
     "primitive-types/std",
     "parity-scale-codec/std",
-    "checkpointeths-io/std",
+    "checkpoint_light_client-io/std",
     "ark-serialize/std",
     "circular-buffer/use_std",
     "getrandom/std",

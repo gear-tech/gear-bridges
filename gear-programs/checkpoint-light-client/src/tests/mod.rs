@@ -2,7 +2,7 @@ use crate::WASM_BINARY;
 use anyhow::Error as AnyError;
 use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::CanonicalDeserialize;
-use checkpointeths_io::{
+use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
         beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},

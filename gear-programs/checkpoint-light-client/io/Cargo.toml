@@ -1,5 +1,5 @@
 [package]
-name = "checkpointeths-io"
+name = "checkpoint_light_client-io"
 version.workspace = true
 edition.workspace = true
 

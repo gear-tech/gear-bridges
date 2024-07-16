@@ -1919,13 +1919,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "checkpointeths"
+name = "checkpoint_light_client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-bls12-381",
  "ark-serialize 0.4.2",
- "checkpointeths-io",
+ "checkpoint_light_client-io",
  "circular-buffer",
  "futures",
  "gbuiltin-bls381",
@@ -1946,7 +1946,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "checkpointeths-io"
+name = "checkpoint_light_client-io"
 version = "0.1.0"
 dependencies = [
  "ark-bls12-381",

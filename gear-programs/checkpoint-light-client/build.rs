@@ -1,4 +1,4 @@
-use checkpointeths_io::meta::Metadata;
+use checkpoint_light_client_io::meta::Metadata;
 
 fn main() {
     gear_wasm_builder::build_with_metadata::<Metadata>()

@@ -1,4 +1,7 @@
-use super::{TreeHash, beacon::{BlockHeader as BeaconBlockHeader, SyncCommittee}};
+use super::{
+    beacon::{BlockHeader as BeaconBlockHeader, SyncCommittee},
+    TreeHash,
+};
 use ring::digest::{Context as RingContext, SHA256 as RingSHA256};
 
 pub const MERKLE_PROOF_DEPTH_CURRENT_SYNC_COMMITTEE: u32 = 5;
@@ -47,7 +50,13 @@ pub fn is_current_committee_proof_valid(
     let leaf_hash = current_committee.tree_hash_root();
     let state_root = attested_header.state_root;
 
-    is_valid_merkle_branch(leaf_hash.0, current_committee_branch, MERKLE_PROOF_DEPTH_CURRENT_SYNC_COMMITTEE, MERKLE_PROOF_INDEX_CURRENT_SYNC_COMMITTEE, &state_root.0)
+    is_valid_merkle_branch(
+        leaf_hash.0,
+        current_committee_branch,
+        MERKLE_PROOF_DEPTH_CURRENT_SYNC_COMMITTEE,
+        MERKLE_PROOF_INDEX_CURRENT_SYNC_COMMITTEE,
+        &state_root.0,
+    )
 }
 
 pub fn is_finality_proof_valid(
@@ -58,7 +67,13 @@ pub fn is_finality_proof_valid(
     let leaf_hash = finality_header.tree_hash_root();
     let state_root = attested_header.state_root;
 
-    is_valid_merkle_branch(leaf_hash.0, finality_branch, MERKLE_PROOF_DEPTH_FINALITY, MERKLE_PROOF_INDEX_FINALITY, &state_root.0)
+    is_valid_merkle_branch(
+        leaf_hash.0,
+        finality_branch,
+        MERKLE_PROOF_DEPTH_FINALITY,
+        MERKLE_PROOF_INDEX_FINALITY,
+        &state_root.0,
+    )
 }
 
 pub fn is_next_committee_proof_valid(
@@ -69,5 +84,11 @@ pub fn is_next_committee_proof_valid(
     let leaf_hash = next_committee.tree_hash_root();
     let state_root = attested_header.state_root;
 
-    is_valid_merkle_branch(leaf_hash.0, next_committee_branch, MERKLE_PROOF_DEPTH_NEXT_SYNC_COMMITTEE, MERKLE_PROOF_INDEX_NEXT_SYNC_COMMITTEE, &state_root.0)
+    is_valid_merkle_branch(
+        leaf_hash.0,
+        next_committee_branch,
+        MERKLE_PROOF_DEPTH_NEXT_SYNC_COMMITTEE,
+        MERKLE_PROOF_INDEX_NEXT_SYNC_COMMITTEE,
+        &state_root.0,
+    )
 }

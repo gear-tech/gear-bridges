@@ -4,14 +4,13 @@ use gstd::{msg, vec};
 use io::{
     ethereum_common::{
         base_types::{Bitvector, FixedArray},
-        tree_hash::TreeHash,
-        network::Network,
-        utils as eth_utils, Hash256, SYNC_COMMITTEE_SIZE,
         merkle,
+        network::Network,
+        tree_hash::TreeHash,
+        utils as eth_utils, Hash256, SYNC_COMMITTEE_SIZE,
     },
     sync_update::Error as SyncCommitteeUpdateError,
-    BeaconBlockHeader, Handle, HandleResult, Init, SyncCommittee, SyncCommitteeKeys,
-    SyncCommitteeUpdate, G1, G2,
+    BeaconBlockHeader, Handle, HandleResult, Init, SyncCommitteeKeys, SyncCommitteeUpdate, G1, G2,
 };
 use primitive_types::H256;
 use state::{Checkpoints, ReplayBackState, State};
@@ -22,25 +21,25 @@ mod replay_back;
 mod sync_update;
 mod utils;
 
-const COUNT: usize = 150_000;
-static mut STATE: Option<State<COUNT>> = None;
+const STORED_CHECKPOINTS_COUNT: usize = 150_000;
+static mut STATE: Option<State<STORED_CHECKPOINTS_COUNT>> = None;
 
 #[gstd::async_init]
 async fn init() {
     let Init {
         network,
         sync_committee_current_pub_keys,
-        sync_committee_current,
+        sync_committee_current_aggregate_pubkey,
         sync_committee_current_branch,
         update,
     } = msg::load().expect("Unable to decode `Init` message");
 
-    if !utils::check_public_keys(
-        &sync_committee_current.pubkeys.0,
+    let Some(sync_committee_current) = utils::construct_sync_committee(
+        sync_committee_current_aggregate_pubkey,
         &sync_committee_current_pub_keys,
-    ) {
+    ) else {
         panic!("Wrong public committee keys");
-    }
+    };
 
     let mut finalized_header = update.finalized_header.clone();
     if !merkle::is_current_committee_proof_valid(

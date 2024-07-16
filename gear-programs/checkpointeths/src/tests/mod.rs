@@ -5,14 +5,14 @@ use ark_serialize::CanonicalDeserialize;
 use checkpointeths_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate},
-        utils as eth_utils, SLOTS_PER_EPOCH,
+        beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
         network::Network,
+        utils as eth_utils, SLOTS_PER_EPOCH,
     },
     replay_back,
     tree_hash::TreeHash,
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Handle, HandleResult, Init,
-    SyncCommittee, SyncCommitteeUpdate,
+    SyncCommitteeUpdate,
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use gstd::prelude::*;
@@ -190,7 +190,7 @@ fn create_sync_update(update: Update) -> SyncCommitteeUpdate {
         attested_header: update.attested_header,
         finalized_header: update.finalized_header,
         sync_aggregate: update.sync_aggregate,
-        sync_committee_next: Some(Box::new(update.next_sync_committee)),
+        sync_committee_next_aggregate_pubkey: Some(update.next_sync_committee.aggregate_pubkey),
         sync_committee_signature: G2TypeInfo(signature).into(),
         sync_committee_next_pub_keys: Some(Box::new(FixedArray(
             next_sync_committee_keys.try_into().unwrap(),
@@ -274,7 +274,7 @@ async fn init_and_updating() -> Result<()> {
     let init = Init {
         network: Network::Sepolia,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
-        sync_committee_current: bootstrap.current_sync_committee,
+        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
             .current_sync_committee_branch
             .into_iter()
@@ -340,7 +340,7 @@ async fn init_and_updating() -> Result<()> {
                     attested_header: update.attested_header,
                     finalized_header: update.finalized_header,
                     sync_aggregate: update.sync_aggregate,
-                    sync_committee_next: None,
+                    sync_committee_next_aggregate_pubkey: None,
                     sync_committee_signature: G2TypeInfo(signature).into(),
                     sync_committee_next_pub_keys: None,
                     sync_committee_next_branch: None,
@@ -417,7 +417,7 @@ async fn replaying_back() -> Result<()> {
     let init = Init {
         network: Network::Sepolia,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
-        sync_committee_current: bootstrap.current_sync_committee,
+        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
             .current_sync_committee_branch
             .into_iter()
@@ -461,7 +461,7 @@ async fn replaying_back() -> Result<()> {
             attested_header: finality_update.attested_header,
             finalized_header: finality_update.finalized_header,
             sync_aggregate: finality_update.sync_aggregate,
-            sync_committee_next: None,
+            sync_committee_next_aggregate_pubkey: None,
             sync_committee_signature: G2TypeInfo(signature).into(),
             sync_committee_next_pub_keys: None,
             sync_committee_next_branch: None,

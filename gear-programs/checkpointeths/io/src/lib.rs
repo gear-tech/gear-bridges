@@ -16,7 +16,7 @@ pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
     self,
-    beacon::{BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate, SyncCommittee},
+    beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate},
     network::Network,
     tree_hash, SYNC_COMMITTEE_SIZE,
 };
@@ -58,7 +58,7 @@ pub type SyncCommitteeKeys = FixedArray<ArkScale<G1TypeInfo>, SYNC_COMMITTEE_SIZ
 pub struct Init {
     pub network: Network,
     pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
-    pub sync_committee_current: SyncCommittee,
+    pub sync_committee_current_aggregate_pubkey: BLSPubKey,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
     pub update: SyncCommitteeUpdate,
 }

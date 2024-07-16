@@ -2,7 +2,7 @@ use super::*;
 use committee::{Error as CommitteeError, Update as CommitteeUpdate};
 use gstd::debug;
 
-pub async fn handle(state: &mut State<COUNT>, sync_update: SyncCommitteeUpdate) {
+pub async fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, sync_update: SyncCommitteeUpdate) {
     let (finalized_header_update, committee_update) = match verify(
         &state.network,
         &state.finalized_header,
@@ -51,7 +51,7 @@ pub async fn verify(
         finalized_header,
         sync_aggregate,
         sync_committee_signature,
-        sync_committee_next,
+        sync_committee_next_aggregate_pubkey,
         sync_committee_next_pub_keys,
         sync_committee_next_branch,
         finality_branch,
@@ -84,7 +84,7 @@ pub async fn verify(
     let committee_update = CommitteeUpdate::new(
         &attested_header,
         update_slot_finalized,
-        sync_committee_next.as_deref(),
+        sync_committee_next_aggregate_pubkey,
         sync_committee_next_pub_keys,
         sync_committee_next_branch,
     );
@@ -115,7 +115,9 @@ pub async fn verify(
         Err(CommitteeError::InvalidNextSyncCommitteeProof) => {
             return Err(SyncCommitteeUpdateError::InvalidNextSyncCommitteeProof)
         }
-        Err(CommitteeError::InvalidPublicKeys) => return Err(SyncCommitteeUpdateError::InvalidPublicKeys),
+        Err(CommitteeError::InvalidPublicKeys) => {
+            return Err(SyncCommitteeUpdateError::InvalidPublicKeys)
+        }
     };
 
     if finalized_header_update.is_none() && committee_update.is_none() {

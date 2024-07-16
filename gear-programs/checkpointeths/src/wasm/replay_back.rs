@@ -6,7 +6,7 @@ use io::{
 };
 
 pub async fn handle_start(
-    state: &mut State<COUNT>,
+    state: &mut State<STORED_CHECKPOINTS_COUNT>,
     sync_update: SyncCommitteeUpdate,
     mut headers: Vec<BeaconBlockHeader>,
 ) {
@@ -59,12 +59,15 @@ pub async fn handle_start(
         msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::Finished)), 0)
             .expect("Unable to reply with `HandleResult::ReplayBackStart::Finished`");
     } else {
-        msg::reply(HandleResult::ReplayBackStart(Ok(StatusStart::InProgress)), 0)
-            .expect("Unable to reply with `HandleResult::ReplayBackStart::Started`");
+        msg::reply(
+            HandleResult::ReplayBackStart(Ok(StatusStart::InProgress)),
+            0,
+        )
+        .expect("Unable to reply with `HandleResult::ReplayBackStart::Started`");
     }
 }
 
-pub fn handle(state: &mut State<COUNT>, headers: Vec<BeaconBlockHeader>) {
+pub fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, headers: Vec<BeaconBlockHeader>) {
     if state.replay_back.is_none() {
         msg::reply(HandleResult::ReplayBack(None), 0)
             .expect("Unable to reply with `HandleResult::ReplayBack::None`");
@@ -80,7 +83,7 @@ pub fn handle(state: &mut State<COUNT>, headers: Vec<BeaconBlockHeader>) {
     }
 }
 
-fn process_headers(state: &mut State<COUNT>, mut headers: Vec<BeaconBlockHeader>) -> bool {
+fn process_headers(state: &mut State<STORED_CHECKPOINTS_COUNT>, mut headers: Vec<BeaconBlockHeader>) -> bool {
     headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
 
     let replay_back = state.replay_back.as_mut().expect("Checked by the caller");

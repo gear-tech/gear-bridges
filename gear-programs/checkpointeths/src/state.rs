@@ -1,8 +1,8 @@
 use super::*;
 use circular_buffer::CircularBuffer;
 use io::{
-    ethereum_common::{Hash256, SLOTS_PER_EPOCH, network::Network},
-    BeaconBlockHeader, CheckpointError, SyncCommitteeKeys, Slot,
+    ethereum_common::{network::Network, Hash256, SLOTS_PER_EPOCH},
+    BeaconBlockHeader, CheckpointError, Slot, SyncCommitteeKeys,
 };
 
 pub struct State<const N: usize> {
@@ -70,7 +70,9 @@ impl<const N: usize> Checkpoints<N> {
 
             Some((_, slot_previous))
                 if slot % SLOTS_PER_EPOCH != 0
-                    || slot_last.map(|slot_last| slot_last + SLOTS_PER_EPOCH < slot ).unwrap_or(false)
+                    || slot_last
+                        .map(|slot_last| slot_last + SLOTS_PER_EPOCH < slot)
+                        .unwrap_or(false)
                     || slot_previous % SLOTS_PER_EPOCH != 0 => {}
 
             _ => return,
@@ -214,19 +216,30 @@ fn empty_checkpoints() {
 }
 
 #[track_caller]
-fn compare_checkpoints<const COUNT: usize>(data: &[(Slot, Hash256)], checkpoints: &Checkpoints<COUNT>) {
+fn compare_checkpoints<const COUNT: usize>(
+    data: &[(Slot, Hash256)],
+    checkpoints: &Checkpoints<COUNT>,
+) {
     for items in data.windows(2) {
         let (slot_start, checkpoint_start) = items[0];
         let (slot_end, checkpoint_end) = items[1];
 
         let (slot, checkpoint) = checkpoints.checkpoint(slot_start).unwrap();
-        assert_eq!(slot, slot_start, "start; slot = {slot}, {:?}, {:?}, {data:?}", checkpoints.slots, checkpoints.checkpoints);
+        assert_eq!(
+            slot, slot_start,
+            "start; slot = {slot}, {:?}, {:?}, {data:?}",
+            checkpoints.slots, checkpoints.checkpoints
+        );
         assert_eq!(checkpoint, checkpoint_start);
 
         let slot_start = slot_start + 1;
         for slot_requested in slot_start..=slot_end {
             let (slot, checkpoint) = checkpoints.checkpoint(slot_requested).unwrap();
-            assert_eq!(slot, slot_end, "slot = {slot}, slot_requested = {slot_requested}, {:?}, {:?}, {data:?}", checkpoints.slots, checkpoints.checkpoints);
+            assert_eq!(
+                slot, slot_end,
+                "slot = {slot}, slot_requested = {slot_requested}, {:?}, {:?}, {data:?}",
+                checkpoints.slots, checkpoints.checkpoints
+            );
             assert_eq!(checkpoint, checkpoint_end);
         }
     }

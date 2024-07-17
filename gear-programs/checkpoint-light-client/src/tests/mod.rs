@@ -10,6 +10,7 @@ use checkpoint_light_client_io::{
         utils as eth_utils, SLOTS_PER_EPOCH,
     },
     replay_back,
+    sync_update,
     tree_hash::TreeHash,
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Handle, HandleResult, Init,
     SyncCommitteeUpdate,
@@ -26,6 +27,8 @@ const RPC_URL: &str = "http://127.0.0.1:5052";
 
 const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
     include_bytes!("./sepolia-finality-update-5_254_112.json");
+const FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
+    include_bytes!("./sepolia-finality-update-5_263_072.json");
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -560,6 +563,99 @@ async fn replaying_back() -> Result<()> {
         result_decoded,
         HandleResult::ReplayBack(Some(replay_back::Status::Finished))
     ));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn sync_update_requires_replaying_back() -> Result<()> {
+    let mut client_http = Client::new();
+
+    let finality_update: FinalityUpdateResponse =
+        serde_json::from_slice(FINALITY_UPDATE_5_263_072).unwrap();
+    let finality_update = finality_update.data;
+    println!(
+        "finality_update slot = {}",
+        finality_update.finalized_header.slot
+    );
+
+    let slot = finality_update.finalized_header.slot;
+    let current_period = eth_utils::calculate_period(slot);
+    let mut updates = get_updates(&mut client_http, current_period, 1).await?;
+
+    let update = match updates.pop() {
+        Some(update) if updates.is_empty() => update.data,
+        _ => unreachable!("Requested single update"),
+    };
+
+    let checkpoint = update.finalized_header.tree_hash_root();
+    let checkpoint_hex = hex::encode(checkpoint);
+
+    let bootstrap = get_bootstrap(&mut client_http, &checkpoint_hex).await?;
+    let sync_update = create_sync_update(update);
+
+    let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
+    let init = Init {
+        network: Network::Sepolia,
+        sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
+        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
+        sync_committee_current_branch: bootstrap
+            .current_sync_committee_branch
+            .into_iter()
+            .map(|BytesFixed(bytes)| bytes.0)
+            .collect(),
+        update: sync_update,
+    };
+
+    let client = GearApi::dev().await?;
+    let mut listener = client.subscribe().await?;
+
+    let program_id = upload_program(&client, &mut listener, init).await?;
+
+    println!("program_id = {:?}", hex::encode(&program_id));
+
+    println!();
+    println!();
+
+    println!(
+        "slot = {slot:?}, attested slot = {:?}, signature slot = {:?}",
+        finality_update.attested_header.slot, finality_update.signature_slot
+    );
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
+    ).unwrap();
+
+    let payload = Handle::SyncUpdate(SyncCommitteeUpdate {
+        signature_slot: finality_update.signature_slot,
+        attested_header: finality_update.attested_header,
+        finalized_header: finality_update.finalized_header,
+        sync_aggregate: finality_update.sync_aggregate,
+        sync_committee_next_aggregate_pubkey: None,
+        sync_committee_signature: G2TypeInfo(signature).into(),
+        sync_committee_next_pub_keys: None,
+        sync_committee_next_branch: None,
+        finality_branch: finality_update
+            .finality_branch
+            .into_iter()
+            .map(|BytesFixed(array)| array.0)
+            .collect::<_>(),
+    });
+
+    let gas_limit = client
+        .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
+        .await?
+        .min_limit;
+    println!("finality_update gas_limit {gas_limit:?}");
+
+    let (message_id, _) = client
+        .send_message(program_id.into(), payload, gas_limit, 0)
+        .await?;
+
+    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+    assert!(
+        matches!(result_decoded, HandleResult::SyncUpdate(Err(sync_update::Error::ReplayBackRequired { .. })))
+    );
 
     Ok(())
 }

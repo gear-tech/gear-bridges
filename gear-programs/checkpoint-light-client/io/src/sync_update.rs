@@ -1,5 +1,8 @@
 use super::*;
 
+// The constant defines how many epochs may be skipped.
+pub const EPOCHS_GAP: u64 = 3;
+
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct SyncCommitteeUpdate {
     pub signature_slot: u64,
@@ -23,4 +26,8 @@ pub enum Error {
     InvalidFinalityProof,
     InvalidNextSyncCommitteeProof,
     InvalidPublicKeys,
+    ReplayBackRequired {
+        replayed_slot: Option<Slot>,
+        checkpoint: (Slot, Hash256),
+    },
 }

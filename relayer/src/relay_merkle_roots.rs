@@ -1,5 +1,8 @@
 use prometheus::{Gauge, IntGauge};
-use std::{thread, time::{Instant, Duration}};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::{
     metrics::{impl_metered_service, MeteredService},
@@ -161,7 +164,7 @@ impl MerkleRootRelayer {
                 if latest_authority_set_id <= GENESIS_CONFIG.authority_set_id {
                     log::warn!(
                         "Network haven't reached genesis authority set id yet. Current authority set id: {}, expected genesis: {}", 
-                        latest_authority_set_id, 
+                        latest_authority_set_id,
                         GENESIS_CONFIG.authority_set_id,
                     );
                     return Ok(0);

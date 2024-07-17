@@ -289,7 +289,7 @@ async fn init_and_updating() -> Result<()> {
 
     let program_id = upload_program(&client, &mut listener, init).await?;
 
-    println!("program_id = {:?}", hex::encode(&program_id));
+    println!("program_id = {:?}", hex::encode(program_id));
 
     println!();
     println!();
@@ -432,7 +432,7 @@ async fn replaying_back() -> Result<()> {
 
     let program_id = upload_program(&client, &mut listener, init).await?;
 
-    println!("program_id = {:?}", hex::encode(&program_id));
+    println!("program_id = {:?}", hex::encode(program_id));
 
     println!();
     println!();

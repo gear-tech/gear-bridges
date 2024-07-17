@@ -277,12 +277,11 @@ mod tests {
         let mut pw = PartialWitness::new();
         let data_bits = data
             .iter()
-            .map(|byte| (0..8).rev().map(move |bit_idx| (byte >> bit_idx) % 2 == 1))
-            .flatten()
+            .flat_map(|byte| (0..8).rev().map(move |bit_idx| (byte >> bit_idx) % 2 == 1))
             .collect::<Vec<_>>();
 
-        for i in 0..data_bits.len() {
-            pw.set_bool_target(targets.message[i], data_bits[i]);
+        for (i, bit) in data_bits.into_iter().enumerate() {
+            pw.set_bool_target(targets.message[i], bit);
         }
 
         let circuit = builder.build::<C>();

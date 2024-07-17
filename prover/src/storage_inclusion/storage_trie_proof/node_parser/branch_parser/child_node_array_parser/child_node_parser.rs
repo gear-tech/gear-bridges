@@ -157,7 +157,7 @@ mod tests {
 
         let child_hash = vec![120, 200, 3, 10]
             .into_iter()
-            .chain([0; 27].into_iter())
+            .chain([0; 27])
             .chain(std::iter::once(99))
             .collect::<Vec<_>>()
             .try_into()
@@ -261,12 +261,11 @@ pub mod tests_common {
         types: &[MockChildType],
     ) -> [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS] {
         let data = types
-            .into_iter()
-            .map(|ty| match ty {
+            .iter()
+            .flat_map(|ty| match ty {
                 MockChildType::Claimed(hash) => encode_claimed_node(hash).collect(),
                 MockChildType::NotClaimed(len) => encode_not_claimed_node(*len).collect::<Vec<_>>(),
             })
-            .flatten()
             .collect();
 
         compose_padded_node_data(data)

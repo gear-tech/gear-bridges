@@ -178,9 +178,7 @@ async fn verify_block() {
 #[test]
 fn verify_message_hash() {
     let msg = ContentMessage {
-        sender: U256::from_be_bytes(H256::repeat_byte(3).to_fixed_bytes())
-            .try_into()
-            .unwrap(),
+        sender: U256::from_be_bytes(H256::repeat_byte(3).to_fixed_bytes()).into(),
         receiver: Address::repeat_byte(3),
         nonce: B256::from(U256::from(3)),
         data: Bytes::from(vec![3, 3]),

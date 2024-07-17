@@ -367,7 +367,9 @@ impl GearProofStorage {
             .free_balance(self.gear_api.account_id())
             .await?;
 
-        self.metrics.fee_payer_balance.set(balance as f64);
+        self.metrics
+            .fee_payer_balance
+            .set((balance / 1_000_000_000_000) as f64);
 
         Ok(())
     }

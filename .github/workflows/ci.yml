@@ -11,14 +11,15 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-test:
-    runs-on: kuberunner
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-      - name: Build
-        run: cargo build --all-targets
-      - name: Test
-        run: cargo test
+jobs:
+  test:
+      runs-on: kuberunner
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+        - name: Install Rust toolchain
+          uses: actions-rs/toolchain@v1
+        - name: Build
+          run: cargo build --all-targets
+        - name: Test
+          run: cargo test

@@ -292,7 +292,7 @@ mod tests {
         let at_target = builder.add_virtual_target();
         pw.set_target(at_target, F::from_canonical_usize(at));
 
-        let data = node_data.random_read(at_target.into(), &mut builder);
+        let data = node_data.random_read(at_target, &mut builder);
         let expected = ByteTarget::constant(expected_data, &mut builder);
 
         data.connect(&expected, &mut builder);

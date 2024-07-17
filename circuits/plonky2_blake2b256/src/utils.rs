@@ -209,8 +209,8 @@ mod tests {
         }
 
         let a_rotate_targets = rright_word(a_targets, shift);
-        for i in 0..WORD_BITS {
-            builder.register_public_input(a_rotate_targets[i].target);
+        for target in a_rotate_targets {
+            builder.register_public_input(target.target);
         }
 
         let data = builder.build::<C>();
@@ -256,8 +256,8 @@ mod tests {
         }
 
         let c_targets = builder.add_words_wrapping(a_targets, b_targets);
-        for i in 0..WORD_BITS {
-            builder.register_public_input(c_targets[i].target);
+        for target in c_targets {
+            builder.register_public_input(target.target);
         }
 
         let data = builder.build::<C>();

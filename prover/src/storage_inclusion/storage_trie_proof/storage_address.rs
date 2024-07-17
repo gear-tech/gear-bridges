@@ -207,9 +207,9 @@ mod tests {
         address_append_test_case(&[0x1, 0x2, 0x3, 0x4], &[], Some(&[0x1, 0x2, 0x3, 0x4]));
 
         address_append_test_case(
-            &vec![0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2],
             &[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2],
-            Some(&vec![0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES]),
+            &[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2],
+            Some(&[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES]),
         );
     }
 
@@ -218,20 +218,16 @@ mod tests {
         expected = "assertion `left == right` failed: Partition containing Wire(Wire { row: 130, column: 33 }) was set twice with different values: 0 != 1"
     )]
     fn test_address_append_overflow_fails() {
-        address_append_test_case(
-            &vec![0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES],
-            &[0x1],
-            None,
-        );
+        address_append_test_case(&[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES], &[0x1], None);
     }
 
     #[test]
     fn test_address_append_have_constant_verifier_data() {
         let (first_cd, _) = build_test_case_circuit(&[0xA], &[0x3], Some(&[0xA, 0x3]));
         let (second_cd, _) = build_test_case_circuit(
-            &vec![0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2],
             &[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2],
-            Some(&vec![0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES]),
+            &[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2],
+            Some(&[0xA; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES]),
         );
 
         assert_eq!(first_cd.verifier_only, second_cd.verifier_only);
@@ -274,18 +270,18 @@ mod tests {
 
     #[test]
     fn test_address_from_half_byte_targets_safe() {
-        address_from_half_byte_targets_safe_test_case(&pad_byte_vec(vec![]), 0, &vec![]);
+        address_from_half_byte_targets_safe_test_case(&pad_byte_vec(vec![]), 0, &[]);
 
         address_from_half_byte_targets_safe_test_case(
             &pad_byte_vec(vec![1, 2, 3, 4]),
             4,
-            &vec![1, 2, 3, 4],
+            &[1, 2, 3, 4],
         );
 
         address_from_half_byte_targets_safe_test_case(
             &pad_byte_vec(vec![1, 2, 3, 4, 5]),
             3,
-            &vec![1, 2, 3],
+            &[1, 2, 3],
         );
     }
 
@@ -299,7 +295,7 @@ mod tests {
         let mut pw = PartialWitness::new();
 
         let targets = data
-            .into_iter()
+            .iter()
             .map(|byte| HalfByteTarget::constant(*byte, &mut builder))
             .collect::<Vec<_>>()
             .try_into()
@@ -307,11 +303,8 @@ mod tests {
 
         let length = builder.constant(F::from_canonical_usize(length));
 
-        let address = PartialStorageAddressTarget::from_half_byte_targets_safe(
-            targets,
-            length.into(),
-            &mut builder,
-        );
+        let address =
+            PartialStorageAddressTarget::from_half_byte_targets_safe(targets, length, &mut builder);
 
         let expected_address = create_address_target(expected_data, &mut builder, &mut pw);
 
@@ -350,7 +343,7 @@ pub mod tests_common {
             });
 
         PartialStorageAddressTarget {
-            length: length.into(),
+            length,
             padded_address: ArrayTarget::parse_exact(&mut nibble_targets),
         }
     }

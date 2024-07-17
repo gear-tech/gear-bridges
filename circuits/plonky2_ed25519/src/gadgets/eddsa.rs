@@ -162,7 +162,7 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let rnd_idx = rng.gen_range(0..64);
-        let mut sig = SAMPLE_SIG1.clone();
+        let mut sig = SAMPLE_SIG1;
         let rnd_value = rng.gen_range(1..=255);
         sig[rnd_idx] += rnd_value;
         fill_circuits::<F, D>(

@@ -14,8 +14,11 @@ use gear_core::ids::{ActorId, MessageId, ProgramId};
 use gear_rpc_client::GearApi as WrappedGearApi;
 use parity_scale_codec::Encode;
 use primitive_types::H256;
+use prometheus::Gauge;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+
+use crate::{impl_metered_service, metrics::MeteredService};
 
 use super::{AuthoritySetId, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
@@ -29,12 +32,41 @@ pub struct GearProofStorage {
     cache: RefCell<Cache>,
     message_channel: Sender<UpdateStateMessage>,
     config_file_path: PathBuf,
+
+    metrics: Metrics,
 }
 
 #[derive(Default)]
 struct Cache {
     circuit_data: Option<CircuitData>,
     proofs: BTreeMap<u64, Proof>,
+}
+
+impl_metered_service! {
+    struct Metrics {
+        fee_payer_balance: Gauge
+    }
+}
+
+impl Metrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            fee_payer_balance: Gauge::new(
+                "gear_proof_storage_fee_payer_balance",
+                "Gear proof storage fee payer balance",
+            )?,
+        })
+    }
+}
+
+impl MeteredService for GearProofStorage {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl ProofStorage for GearProofStorage {
@@ -113,13 +145,19 @@ impl GearProofStorage {
             .map(|ser| serde_json::from_str(&ser).expect("Wrong config file format"));
         let program = config.map(|conf| ActorId::new(conf.address.0));
 
-        Ok(GearProofStorage {
+        let proof_storage = GearProofStorage {
             gear_api,
             cache: Default::default(),
             program,
             message_channel,
             config_file_path,
-        })
+
+            metrics: Metrics::new(),
+        };
+
+        proof_storage.report_balance_metric().await?;
+
+        Ok(proof_storage)
     }
 
     async fn init_inner(
@@ -277,6 +315,8 @@ impl GearProofStorage {
         proof: Proof,
         new_authority_set_id: AuthoritySetId,
     ) -> Result<(), ProofStorageError> {
+        self.report_balance_metric().await?;
+
         let _ = self
             .cache
             .borrow_mut()
@@ -319,6 +359,19 @@ impl GearProofStorage {
             .map_err(Into::<anyhow::Error>::into)?;
 
         Ok(state)
+    }
+
+    async fn report_balance_metric(&self) -> anyhow::Result<()> {
+        let balance = self
+            .gear_api
+            .free_balance(self.gear_api.account_id())
+            .await?;
+
+        self.metrics
+            .fee_payer_balance
+            .set((balance / 1_000_000_000_000) as f64);
+
+        Ok(())
     }
 }
 

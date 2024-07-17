@@ -1,3 +1,4 @@
+use keccak_hash::keccak_256;
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::mpsc::Receiver,
@@ -6,11 +7,11 @@ use std::{
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
 use primitive_types::H256;
-use prometheus::{IntCounter, IntGauge};
+use prometheus::{Gauge, IntCounter, IntGauge};
 
 use crate::metrics::{impl_metered_service, MeteredService};
 
-use super::{submit_message, AuthoritySetId, BlockEvent, BlockNumber, RelayedMerkleRoot};
+use super::{AuthoritySetId, BlockEvent, BlockNumber, RelayedMerkleRoot};
 
 pub struct MessageProcessor {
     eth_api: EthApi,
@@ -67,7 +68,8 @@ struct RelayMessagePendingTx {
 
 impl_metered_service! {
     struct Metrics {
-        pending_tx_count: IntGauge
+        pending_tx_count: IntGauge,
+        fee_payer_balance: Gauge
     }
 }
 
@@ -90,6 +92,10 @@ impl Metrics {
             pending_tx_count: IntGauge::new(
                 "message_relayer_message_processor_pending_tx_count",
                 "Amount of txs pending finalization on ethereum",
+            )?,
+            fee_payer_balance: Gauge::new(
+                "message_relayer_message_processor_fee_payer_balance",
+                "Transaction fee payer balance",
             )?,
         })
     }
@@ -128,6 +134,9 @@ impl MessageProcessor {
         let mut paid_messages = HashSet::new();
 
         loop {
+            let fee_payer_balance = self.eth_api.get_approx_balance().await?;
+            self.metrics.fee_payer_balance.set(fee_payer_balance);
+
             for event in block_events.try_iter() {
                 match event {
                     BlockEvent::MessageSent { message } => {
@@ -363,4 +372,52 @@ impl Era {
             }
         }
     }
+}
+
+async fn submit_message(
+    gear_api: &GearApi,
+    eth_api: &EthApi,
+    message: &Message,
+    merkle_root_block: u32,
+    merkle_root_block_hash: H256,
+) -> anyhow::Result<TxHash> {
+    let message_hash = message_hash(message);
+
+    log::info!("Relaying message with hash {}", hex::encode(message_hash));
+
+    let proof = gear_api
+        .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
+        .await?;
+
+    let tx_hash = eth_api
+        .provide_content_message(
+            merkle_root_block,
+            proof.num_leaves as u32,
+            proof.leaf_index as u32,
+            message.nonce_le,
+            message.source,
+            message.destination,
+            message.payload.to_vec(),
+            proof.proof,
+        )
+        .await?;
+
+    log::info!("Message #{:?} relaying started", message.nonce_le);
+
+    Ok(tx_hash)
+}
+
+fn message_hash(message: &Message) -> [u8; 32] {
+    let data = [
+        message.nonce_le.as_ref(),
+        message.source.as_ref(),
+        message.destination.as_ref(),
+        message.payload.as_ref(),
+    ]
+    .concat();
+
+    let mut hash = [0; 32];
+    keccak_256(&data, &mut hash);
+
+    hash
 }

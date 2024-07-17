@@ -146,17 +146,21 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
+            let mut metrics = MetricsBuilder::new();
+
             let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
-                    Box::from(
-                        GearProofStorage::new(
-                            &args.vara_endpoint.vara_endpoint,
-                            &fee_payer,
-                            "./onchain_proof_storage_data".into(),
-                        )
-                        .await
-                        .expect("Failed to initilize proof storage"),
+                    let proof_storage = GearProofStorage::new(
+                        &args.vara_endpoint.vara_endpoint,
+                        &fee_payer,
+                        "./onchain_proof_storage_data".into(),
                     )
+                    .await
+                    .expect("Failed to initilize proof storage");
+
+                    metrics = metrics.register_service(&proof_storage);
+
+                    Box::from(proof_storage)
                 } else {
                     log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
                     Box::from(FileSystemProofStorage::new("./proof_storage".into()))
@@ -164,7 +168,7 @@ async fn main() {
 
             let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
 
-            MetricsBuilder::new()
+            metrics
                 .register_service(&relayer)
                 .build()
                 .run(args.prometheus_args.endpoint)

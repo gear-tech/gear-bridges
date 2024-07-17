@@ -110,7 +110,8 @@ impl GearApi {
             .await?;
         let mut current_set_block = self.block_hash_to_number(current_set_block).await?;
 
-        let mut prev_set_block = current_set_block - APPROX_SESSION_DURATION_IN_BLOCKS;
+        let mut prev_set_block =
+            current_set_block.saturating_sub(APPROX_SESSION_DURATION_IN_BLOCKS);
 
         loop {
             let prev_set_block_hash = self.block_number_to_hash(prev_set_block).await?;
@@ -120,7 +121,7 @@ impl GearApi {
                 break;
             }
 
-            prev_set_block -= APPROX_SESSION_DURATION_IN_BLOCKS;
+            prev_set_block = prev_set_block.saturating_sub(APPROX_SESSION_DURATION_IN_BLOCKS);
         }
 
         loop {

@@ -1,4 +1,8 @@
-use prometheus::IntGauge;
+use prometheus::{Gauge, IntGauge};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::{
     metrics::{impl_metered_service, MeteredService},
@@ -9,6 +13,8 @@ use crate::{
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
+
+const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 
 pub struct MerkleRootRelayer {
     gear_api: GearApi,
@@ -23,6 +29,7 @@ impl_metered_service! {
     struct Metrics {
         latest_proven_era: IntGauge,
         latest_observed_gear_era: IntGauge,
+        fee_payer_balance: Gauge
     }
 }
 
@@ -40,6 +47,10 @@ impl Metrics {
             latest_observed_gear_era: IntGauge::new(
                 "merkle_root_relayer_latest_observed_gear_era",
                 "Latest era number observed by relayer",
+            )?,
+            fee_payer_balance: Gauge::new(
+                "merkle_root_relayer_fee_payer_balance",
+                "Transaction fee payer balance",
             )?,
         })
     }
@@ -82,15 +93,24 @@ impl MerkleRootRelayer {
         log::info!("Starting relayer");
 
         loop {
+            let now = Instant::now();
             let res = self.main_loop().await;
 
             if let Err(err) = res {
                 log::error!("{}", err);
             }
+
+            let main_loop_duration = now.elapsed();
+            if main_loop_duration < MIN_MAIN_LOOP_DURATION {
+                thread::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration);
+            }
         }
     }
 
     async fn main_loop(&mut self) -> anyhow::Result<()> {
+        let balance = self.eth_api.get_approx_balance().await?;
+        self.metrics.fee_payer_balance.set(balance);
+
         log::info!("Syncing authority set id");
         loop {
             let sync_steps = self.sync_authority_set_id().await?;
@@ -141,6 +161,15 @@ impl MerkleRootRelayer {
 
         match latest_proven_authority_set_id {
             None => {
+                if latest_authority_set_id <= GENESIS_CONFIG.authority_set_id {
+                    log::warn!(
+                        "Network haven't reached genesis authority set id yet. Current authority set id: {}, expected genesis: {}", 
+                        latest_authority_set_id,
+                        GENESIS_CONFIG.authority_set_id,
+                    );
+                    return Ok(0);
+                }
+
                 let proof = prover_interface::prove_genesis(&self.gear_api).await?;
                 self.proof_storage
                     .init(proof, GENESIS_CONFIG.authority_set_id)
@@ -160,7 +189,7 @@ impl MerkleRootRelayer {
                 Ok(step_count as usize)
             }
             Some(latest_proven) if latest_proven == latest_authority_set_id => Ok(0),
-            Some(latest_proven) => unreachable!(
+            Some(latest_proven) => panic!(
                 "Invalid state of proof storage detected: latest stored authority set id = {} but latest authority set id on VARA = {}", 
                 latest_proven,
                 latest_authority_set_id
@@ -170,6 +199,8 @@ impl MerkleRootRelayer {
 
     async fn prove_message_sent(&self) -> anyhow::Result<FinalProof> {
         let finalized_head = self.gear_api.latest_finalized_block().await?;
+
+        log::info!("Proving merkle root presense in block #{}", finalized_head);
 
         let authority_set_id = self
             .gear_api

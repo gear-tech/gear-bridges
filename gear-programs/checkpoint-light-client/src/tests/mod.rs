@@ -180,7 +180,25 @@ fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeI
         .collect()
 }
 
-fn create_sync_update(update: Update) -> SyncCommitteeUpdate {
+fn sync_update_from_finality(signature: G2, finality_update: FinalityUpdate) -> SyncCommitteeUpdate {
+    SyncCommitteeUpdate {
+        signature_slot: finality_update.signature_slot,
+        attested_header: finality_update.attested_header,
+        finalized_header: finality_update.finalized_header,
+        sync_aggregate: finality_update.sync_aggregate,
+        sync_committee_next_aggregate_pubkey: None,
+        sync_committee_signature: G2TypeInfo(signature).into(),
+        sync_committee_next_pub_keys: None,
+        sync_committee_next_branch: None,
+        finality_branch: finality_update
+            .finality_branch
+            .into_iter()
+            .map(|BytesFixed(array)| array.0)
+            .collect::<_>(),
+    }
+}
+
+fn sync_update_from_update(update: Update) -> SyncCommitteeUpdate {
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
@@ -271,7 +289,7 @@ async fn init_and_updating() -> Result<()> {
     let checkpoint_hex = hex::encode(checkpoint);
 
     let bootstrap = get_bootstrap(&mut client_http, &checkpoint_hex).await?;
-    let sync_update = create_sync_update(update);
+    let sync_update = sync_update_from_update(update);
 
     let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
     let init = Init {
@@ -306,7 +324,7 @@ async fn init_and_updating() -> Result<()> {
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");
-                let payload = Handle::SyncUpdate(create_sync_update(update.data));
+                let payload = Handle::SyncUpdate(sync_update_from_update(update.data));
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
                     .await?
@@ -338,21 +356,7 @@ async fn init_and_updating() -> Result<()> {
                     continue;
                 };
 
-                let payload = Handle::SyncUpdate(SyncCommitteeUpdate {
-                    signature_slot: update.signature_slot,
-                    attested_header: update.attested_header,
-                    finalized_header: update.finalized_header,
-                    sync_aggregate: update.sync_aggregate,
-                    sync_committee_next_aggregate_pubkey: None,
-                    sync_committee_signature: G2TypeInfo(signature).into(),
-                    sync_committee_next_pub_keys: None,
-                    sync_committee_next_branch: None,
-                    finality_branch: update
-                        .finality_branch
-                        .into_iter()
-                        .map(|BytesFixed(array)| array.0)
-                        .collect::<_>(),
-                });
+                let payload = Handle::SyncUpdate(sync_update_from_finality(signature, update));
 
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
@@ -408,7 +412,7 @@ async fn replaying_back() -> Result<()> {
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     println!("update slot = {}", update.finalized_header.slot);
-    let sync_update = create_sync_update(update);
+    let sync_update = sync_update_from_update(update);
     let slot_start = sync_update.finalized_header.slot;
     let slot_end = finality_update.finalized_header.slot;
     println!(
@@ -459,21 +463,7 @@ async fn replaying_back() -> Result<()> {
     .unwrap();
 
     let payload = Handle::ReplayBackStart {
-        sync_update: SyncCommitteeUpdate {
-            signature_slot: finality_update.signature_slot,
-            attested_header: finality_update.attested_header,
-            finalized_header: finality_update.finalized_header,
-            sync_aggregate: finality_update.sync_aggregate,
-            sync_committee_next_aggregate_pubkey: None,
-            sync_committee_signature: G2TypeInfo(signature).into(),
-            sync_committee_next_pub_keys: None,
-            sync_committee_next_branch: None,
-            finality_branch: finality_update
-                .finality_branch
-                .into_iter()
-                .map(|BytesFixed(array)| array.0)
-                .collect::<_>(),
-        },
+        sync_update: sync_update_from_finality(signature, finality_update),
         headers,
     };
 
@@ -592,7 +582,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     let checkpoint_hex = hex::encode(checkpoint);
 
     let bootstrap = get_bootstrap(&mut client_http, &checkpoint_hex).await?;
-    let sync_update = create_sync_update(update);
+    let sync_update = sync_update_from_update(update);
 
     let pub_keys = map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
     let init = Init {
@@ -625,21 +615,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
     ).unwrap();
 
-    let payload = Handle::SyncUpdate(SyncCommitteeUpdate {
-        signature_slot: finality_update.signature_slot,
-        attested_header: finality_update.attested_header,
-        finalized_header: finality_update.finalized_header,
-        sync_aggregate: finality_update.sync_aggregate,
-        sync_committee_next_aggregate_pubkey: None,
-        sync_committee_signature: G2TypeInfo(signature).into(),
-        sync_committee_next_pub_keys: None,
-        sync_committee_next_branch: None,
-        finality_branch: finality_update
-            .finality_branch
-            .into_iter()
-            .map(|BytesFixed(array)| array.0)
-            .collect::<_>(),
-    });
+    let payload = Handle::SyncUpdate(sync_update_from_finality(signature, finality_update));
 
     let gas_limit = client
         .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)

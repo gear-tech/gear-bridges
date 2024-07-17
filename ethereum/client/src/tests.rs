@@ -64,6 +64,7 @@ pub struct BlockMerkleRootProof {
     pub merkle_root: B256,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct DeploymentEnv {
     pub wvara_erc20: Address,

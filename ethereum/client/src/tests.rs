@@ -95,6 +95,18 @@ where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
 {
+    let relayer_proxy = ProxyContract::deploy(provider.clone())
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    let message_queue_proxy = ProxyContract::deploy(provider.clone())
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    let erc20_treasury_proxy = ProxyContract::deploy(provider.clone())
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
     let vwara_erc20_mock = ERC20Mock::deploy(provider.clone(), "wVARA".to_string())
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
@@ -102,31 +114,50 @@ where
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let relayer = Relayer::deploy(provider.clone())
+    let relayer = Relayer::deploy(provider.clone(), *verifier_mock.address())
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let erc20_treasury = ERC20Treasury::deploy(provider.clone())
+    let erc20_treasury = ERC20Treasury::deploy(provider.clone(), *message_queue_proxy.address())
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let message_queue = MessageQueue::deploy(provider.clone())
+    let message_queue = MessageQueue::deploy(provider.clone(), *relayer_proxy.address())
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let relayer_proxy = ProxyContract::deploy(provider.clone(), *relayer.address(), Bytes::new())
+    let pending_tx = relayer_proxy
+        .upgradeToAndCall(relayer.address().clone(), Bytes::new())
+        .send()
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let message_queue_proxy =
-        ProxyContract::deploy(provider.clone(), *message_queue.address(), Bytes::new())
-            .await
-            .map_err(Error::ErrorDuringContractExecution)?;
+    let tx = pending_tx
+        .get_receipt()
+        .await
+        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
 
-    let erc20_treasury_proxy =
-        ProxyContract::deploy(provider.clone(), *message_queue.address(), Bytes::new())
-            .await
-            .map_err(Error::ErrorDuringContractExecution)?;
+    let pending_tx = message_queue_proxy
+        .upgradeToAndCall(message_queue.address().clone(), Bytes::new())
+        .send()
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    let tx = pending_tx
+        .get_receipt()
+        .await
+        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
+
+    let pending_tx = erc20_treasury_proxy
+        .upgradeToAndCall(erc20_treasury.address().clone(), Bytes::new())
+        .send()
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    let tx = pending_tx
+        .get_receipt()
+        .await
+        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
 
     Ok(DeploymentEnv {
         wvara_erc20: *vwara_erc20_mock.address(),

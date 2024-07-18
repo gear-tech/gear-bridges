@@ -1,7 +1,7 @@
 use super::*;
 
 // The constant defines how many epochs may be skipped.
-pub const EPOCHS_GAP: u64 = 3;
+pub const MAX_EPOCHS_GAP: u64 = 3;
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct SyncCommitteeUpdate {

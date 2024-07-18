@@ -23,7 +23,7 @@ pub async fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, sync_update: Sy
     };
 
     if let Some(finalized_header) = finalized_header_update {
-        if eth_utils::calculate_epoch(state.finalized_header.slot) + io::sync_update::EPOCHS_GAP
+        if eth_utils::calculate_epoch(state.finalized_header.slot) + io::sync_update::MAX_EPOCHS_GAP
             <= eth_utils::calculate_epoch(finalized_header.slot)
         {
             let result =

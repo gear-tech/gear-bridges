@@ -115,7 +115,7 @@ primitive-types = { version = "0.12.2", default-features = false }
 binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 
 # Alloy deps
-alloy = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy", rev = "899b8b9", features = [
+alloy = { version = "0.2.0", package = "alloy", features = [
     "sol-types",
     "contract",
     "pubsub",

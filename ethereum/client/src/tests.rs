@@ -1,8 +1,8 @@
 use alloy::{
     hex::FromHex,
-    network::Ethereum,
+    network::{Ethereum, EthereumWallet, NetworkWallet},
     primitives::{Address, Bytes, B256, U256},
-    providers::{Provider, ProviderBuilder},
+    providers::{Provider, ProviderBuilder, WalletProvider},
     sol,
     transports::Transport,
 };
@@ -90,7 +90,7 @@ where
     Ok(contracts)
 }
 
-async fn deploy<P, T>(provider: P) -> Result<DeploymentEnv, Error>
+async fn deploy<P, T>(provider: P, signer_address: Address) -> Result<DeploymentEnv, Error>
 where
     T: Transport + Clone,
     P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
@@ -126,40 +126,7 @@ where
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let pending_tx = relayer_proxy
-        .upgradeToAndCall(relayer.address().clone(), Bytes::new())
-        .send()
-        .await
-        .map_err(Error::ErrorDuringContractExecution)?;
-
-    let tx = pending_tx
-        .get_receipt()
-        .await
-        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
-
-    let pending_tx = message_queue_proxy
-        .upgradeToAndCall(message_queue.address().clone(), Bytes::new())
-        .send()
-        .await
-        .map_err(Error::ErrorDuringContractExecution)?;
-
-    let tx = pending_tx
-        .get_receipt()
-        .await
-        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
-
-    let pending_tx = erc20_treasury_proxy
-        .upgradeToAndCall(erc20_treasury.address().clone(), Bytes::new())
-        .send()
-        .await
-        .map_err(Error::ErrorDuringContractExecution)?;
-
-    let tx = pending_tx
-        .get_receipt()
-        .await
-        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
-
-    Ok(DeploymentEnv {
+    let deployment = DeploymentEnv {
         wvara_erc20: *vwara_erc20_mock.address(),
         verifier: *verifier_mock.address(),
         message_queue: *message_queue.address(),
@@ -168,7 +135,68 @@ where
         message_queue_proxy: *message_queue_proxy.address(),
         relayer_proxy: *relayer_proxy.address(),
         erc20_treasury_proxy: *erc20_treasury_proxy.address(),
-    })
+    };
+
+    let nonce = provider
+        .get_transaction_count(signer_address)
+        .await
+        .map_err(|_| Error::ErrorInHTTPTransport)?;
+
+    let relayer_proxy = ProxyContract::new(deployment.relayer_proxy, provider.clone());
+
+    let pending_tx = relayer_proxy
+        .upgradeToAndCall(deployment.relayer, Bytes::new())
+        .nonce(nonce);
+
+    let pending_tx = pending_tx
+        .send()
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    pending_tx
+        .get_receipt()
+        .await
+        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
+
+    let nonce = provider
+        .get_transaction_count(signer_address)
+        .await
+        .map_err(|_| Error::ErrorInHTTPTransport)?;
+
+    let pending_tx = message_queue_proxy
+        .upgradeToAndCall(deployment.message_queue, Bytes::new())
+        .nonce(nonce);
+
+    let pending_tx = pending_tx
+        .send()
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    pending_tx
+        .get_receipt()
+        .await
+        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
+
+    let nonce = provider
+        .get_transaction_count(signer_address)
+        .await
+        .map_err(|_| Error::ErrorInHTTPTransport)?;
+
+    let pending_tx = erc20_treasury_proxy
+        .upgradeToAndCall(deployment.erc20_treasury, Bytes::new())
+        .nonce(nonce);
+
+    let pending_tx = pending_tx
+        .send()
+        .await
+        .map_err(Error::ErrorDuringContractExecution)?;
+
+    pending_tx
+        .get_receipt()
+        .await
+        .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
+
+    Ok(deployment.clone())
 }
 
 fn get_test_block_merkle_proof() -> BlockMerkleRootProof {
@@ -189,7 +217,12 @@ async fn verify_block() {
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
         .on_anvil_with_wallet();
-    let deployment_env = deploy(provider.clone()).await.unwrap();
+
+    let signer_address = provider.wallet();
+    let signer_address =
+        <EthereumWallet as NetworkWallet<Ethereum>>::default_signer_address(signer_address);
+
+    let deployment_env = deploy(provider.clone(), signer_address).await.unwrap();
 
     let contracts = build_contracts(provider, &deployment_env).unwrap();
 
@@ -235,7 +268,12 @@ async fn verify_block_with_events() {
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
         .on_anvil_with_wallet();
-    let deployment_env = deploy(provider.clone()).await.unwrap();
+
+    let signer_address = provider.wallet();
+    let signer_address =
+        <EthereumWallet as NetworkWallet<Ethereum>>::default_signer_address(signer_address);
+
+    let deployment_env = deploy(provider.clone(), signer_address).await.unwrap();
 
     let contracts = build_contracts(provider, &deployment_env).unwrap();
 

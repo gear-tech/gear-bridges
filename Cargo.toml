@@ -10,6 +10,7 @@ members = [
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "utils-prometheus",
+    "checkpoints-relayer",
 ]
 
 resolver = "2"

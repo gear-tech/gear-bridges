@@ -23,14 +23,20 @@ pub async fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, sync_update: Sy
     };
 
     if let Some(finalized_header) = finalized_header_update {
-        if eth_utils::calculate_epoch(state.finalized_header.slot) + io::sync_update::EPOCHS_GAP <= eth_utils::calculate_epoch(finalized_header.slot) {
-            let result = HandleResult::SyncUpdate(Err(io::sync_update::Error::ReplayBackRequired {
-                replayed_slot: state
-                    .replay_back
-                    .as_ref()
-                    .map(|replay_back| replay_back.last_header.slot),
-                checkpoint: state.checkpoints.last().expect("The program should be initialized so there is a checkpoint"),
-            }));
+        if eth_utils::calculate_epoch(state.finalized_header.slot) + io::sync_update::EPOCHS_GAP
+            <= eth_utils::calculate_epoch(finalized_header.slot)
+        {
+            let result =
+                HandleResult::SyncUpdate(Err(io::sync_update::Error::ReplayBackRequired {
+                    replayed_slot: state
+                        .replay_back
+                        .as_ref()
+                        .map(|replay_back| replay_back.last_header.slot),
+                    checkpoint: state
+                        .checkpoints
+                        .last()
+                        .expect("The program should be initialized so there is a checkpoint"),
+                }));
             msg::reply(result, 0).expect("Unable to reply with `HandleResult::SyncUpdate::Error`");
 
             return;

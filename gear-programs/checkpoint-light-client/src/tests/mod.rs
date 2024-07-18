@@ -9,8 +9,7 @@ use checkpoint_light_client_io::{
         network::Network,
         utils as eth_utils, SLOTS_PER_EPOCH,
     },
-    replay_back,
-    sync_update,
+    replay_back, sync_update,
     tree_hash::TreeHash,
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Handle, HandleResult, Init,
     SyncCommitteeUpdate,
@@ -180,7 +179,10 @@ fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeI
         .collect()
 }
 
-fn sync_update_from_finality(signature: G2, finality_update: FinalityUpdate) -> SyncCommitteeUpdate {
+fn sync_update_from_finality(
+    signature: G2,
+    finality_update: FinalityUpdate,
+) -> SyncCommitteeUpdate {
     SyncCommitteeUpdate {
         signature_slot: finality_update.signature_slot,
         attested_header: finality_update.attested_header,
@@ -613,7 +615,8 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     );
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-    ).unwrap();
+    )
+    .unwrap();
 
     let payload = Handle::SyncUpdate(sync_update_from_finality(signature, finality_update));
 
@@ -629,9 +632,10 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
 
     let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
     let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
-    assert!(
-        matches!(result_decoded, HandleResult::SyncUpdate(Err(sync_update::Error::ReplayBackRequired { .. })))
-    );
+    assert!(matches!(
+        result_decoded,
+        HandleResult::SyncUpdate(Err(sync_update::Error::ReplayBackRequired { .. }))
+    ));
 
     Ok(())
 }

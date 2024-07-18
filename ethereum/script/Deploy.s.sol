@@ -29,23 +29,31 @@ contract DeployScript is Script {
 
     function run() public {
         vm.broadcast();
+        ProxyContract _relayer_proxy = new ProxyContract();
+
+        vm.broadcast();
+        ProxyContract _message_queue_proxy = new ProxyContract();
+
+        vm.broadcast();
+        ProxyContract _treasury_proxy = new ProxyContract();
+
+        vm.broadcast();
         Verifier _verifier = new Verifier();
         vm.broadcast();
-        Relayer _relayer = new Relayer();
+        Relayer _relayer = new Relayer(address(_verifier));
         vm.broadcast();
-        ERC20Treasury _treasury = new ERC20Treasury();
+        ERC20Treasury _treasury = new ERC20Treasury(address(_message_queue_proxy));
 
         vm.broadcast();
-        MessageQueue _message_queue = new MessageQueue();
+        MessageQueue _message_queue = new MessageQueue(address(_relayer_proxy));
 
         vm.broadcast();
-        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), bytes(""));
-
+        _relayer_proxy.upgradeToAndCall(address(_relayer), "");
         vm.broadcast();
-        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), bytes(""));
-
+        _treasury_proxy.upgradeToAndCall(address(_treasury), "");
         vm.broadcast();
-        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), bytes(""));
+        _message_queue_proxy.upgradeToAndCall(address(_message_queue), "");
+
 
         relayer = Relayer(address(_relayer_proxy));
         treasury = ERC20Treasury(address(_treasury_proxy));

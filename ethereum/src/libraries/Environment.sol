@@ -1,5 +1,6 @@
 pragma solidity ^0.8.24;
 
+/*
 address constant TREASURY_ADDRESS = address(
     0x0165878A594ca255338adfa4d48449f69242Eb8F
 );
@@ -12,6 +13,7 @@ address constant RELAYER_ADDRESS = address(
 address constant VERIFIER_ADDRESS = address(
     0x5FbDB2315678afecb367f032d93F642f64180aa3
 );
+*/
 
 // ALICE
 bytes32 constant GRC_20_GATEWAY_ADDRESS = bytes32(

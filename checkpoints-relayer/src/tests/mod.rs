@@ -1,4 +1,4 @@
-use crate::WASM_BINARY;
+use checkpoint_light_client::WASM_BINARY;
 use anyhow::Error as AnyError;
 use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::CanonicalDeserialize;
@@ -15,10 +15,11 @@ use checkpoint_light_client_io::{
     SyncCommitteeUpdate,
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
-use gstd::prelude::*;
 use reqwest::{Client, RequestBuilder};
 use serde::{de::DeserializeOwned, Deserialize};
 use tokio::time::{self, Duration};
+use std::cmp;
+use parity_scale_codec::{Decode, Encode};
 
 // https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/p2p-interface.md#configuration
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;

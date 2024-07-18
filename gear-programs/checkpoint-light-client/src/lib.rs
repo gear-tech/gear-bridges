@@ -15,6 +15,3 @@ use gstd::{Box, Vec};
 
 #[cfg(not(feature = "std"))]
 mod wasm;
-
-#[cfg(test)]
-mod tests;

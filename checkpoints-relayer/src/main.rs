@@ -1,6 +1,9 @@
 use clap::Parser;
 use tokio::sync::mpsc;
 
+#[cfg(test)]
+mod tests;
+
 const SIZE_CHANNEL: usize = 100_000;
 
 #[derive(Debug, Parser)]

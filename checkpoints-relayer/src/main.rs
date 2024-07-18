@@ -4,6 +4,8 @@ use tokio::sync::mpsc;
 #[cfg(test)]
 mod tests;
 
+mod utils;
+
 const SIZE_CHANNEL: usize = 100_000;
 
 #[derive(Debug, Parser)]

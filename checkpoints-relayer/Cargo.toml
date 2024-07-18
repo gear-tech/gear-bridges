@@ -9,14 +9,14 @@ tokio.workspace = true
 checkpoint_light_client-io = { workspace = true, features = ["std"] }
 checkpoint_light_client = { workspace = true, features = ["std"] }
 parity-scale-codec.workspace = true
+serde_json.workspace = true
+serde = { workspace = true, features = ["std"] }
+reqwest.workspace = true
+anyhow.workspace = true
+ark-serialize = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 gclient.workspace = true
 ark-bls12-381 = { workspace = true, features = ["std"] }
-ark-serialize = { workspace = true, features = ["std"] }
-serde = { workspace = true, features = ["std"] }
 futures.workspace = true
 hex = { workspace = true, features = ["std"] }
-reqwest.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true

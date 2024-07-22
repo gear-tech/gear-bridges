@@ -13,7 +13,7 @@ use gclient::{EventListener, EventProcessor, GearApi, Result};
 use reqwest::Client;
 use tokio::time::{self, Duration};
 use parity_scale_codec::{Decode, Encode};
-use crate::utils::{self, FinalityUpdateResponse};
+use crate::utils::{self, FinalityUpdateResponse, slots_batch};
 
 const RPC_URL: &str = "http://127.0.0.1:5052";
 
@@ -235,55 +235,54 @@ async fn replaying_back() -> Result<()> {
     println!();
     println!();
 
+    let batch_size = 26 * SLOTS_PER_EPOCH;
+    let mut slots_batch_iter = slots_batch::Iter::new(slot_start, slot_end, batch_size).unwrap();
     // start to replay back
-    let count_headers = 26 * SLOTS_PER_EPOCH;
-    let mut requests_headers = Vec::with_capacity(count_headers as usize);
-    for i in 1..count_headers {
-        requests_headers.push(utils::get_block_header(&client_http, RPC_URL, slot_end - i));
+    if let Some((slot_start, slot_end)) = slots_batch_iter.next() {
+        let mut requests_headers = Vec::with_capacity(batch_size as usize);
+        for i in slot_start..slot_end {
+            requests_headers.push(utils::get_block_header(&client_http, RPC_URL, i));
+        }
+
+        let headers = futures::future::join_all(requests_headers)
+            .await
+            .into_iter()
+            .filter_map(|maybe_header| maybe_header.ok())
+            .collect::<Vec<_>>();
+    
+        let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+            &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
+        )
+        .unwrap();
+    
+        let payload = Handle::ReplayBackStart {
+            sync_update: utils::sync_update_from_finality(signature, finality_update),
+            headers,
+        };
+    
+        let gas_limit = client
+            .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
+            .await?
+            .min_limit;
+        println!("ReplayBackStart gas_limit {gas_limit:?}");
+    
+        let (message_id, _) = client
+            .send_message(program_id.into(), payload, gas_limit, 0)
+            .await?;
+    
+        let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+        let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+        assert!(matches!(
+            result_decoded,
+            HandleResult::ReplayBackStart(Ok(replay_back::StatusStart::InProgress))
+        ));
     }
 
-    let headers = futures::future::join_all(requests_headers)
-        .await
-        .into_iter()
-        .filter_map(|maybe_header| maybe_header.ok())
-        .collect::<Vec<_>>();
-
-    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-        &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-    )
-    .unwrap();
-
-    let payload = Handle::ReplayBackStart {
-        sync_update: utils::sync_update_from_finality(signature, finality_update),
-        headers,
-    };
-
-    let gas_limit = client
-        .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
-        .await?
-        .min_limit;
-    println!("ReplayBackStart gas_limit {gas_limit:?}");
-
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
-        .await?;
-
-    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
-    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
-    assert!(matches!(
-        result_decoded,
-        HandleResult::ReplayBackStart(Ok(replay_back::StatusStart::InProgress))
-    ));
-
-    // continue to replay back
-    let mut slot_end = slot_end - count_headers;
-    let count_headers = 29 * SLOTS_PER_EPOCH;
-    let count_batch = (slot_end - slot_start) / count_headers;
-
-    for _batch in 0..count_batch {
-        let mut requests_headers = Vec::with_capacity(count_headers as usize);
-        for i in 0..count_headers {
-            requests_headers.push(utils::get_block_header(&client_http, RPC_URL, slot_end - i));
+    // replaying the blocks back
+    for (slot_start, slot_end) in slots_batch_iter {
+        let mut requests_headers = Vec::with_capacity(batch_size as usize);
+        for i in slot_start..slot_end {
+            requests_headers.push(utils::get_block_header(&client_http, RPC_URL, i));
         }
 
         let headers = futures::future::join_all(requests_headers)
@@ -308,42 +307,9 @@ async fn replaying_back() -> Result<()> {
         let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
         assert!(matches!(
             result_decoded,
-            HandleResult::ReplayBack(Some(replay_back::Status::InProcess))
+            HandleResult::ReplayBack(Some(replay_back::Status::InProcess | replay_back::Status::Finished))
         ));
-
-        slot_end -= count_headers;
     }
-
-    // remaining headers
-    let mut requests_headers = Vec::with_capacity(count_headers as usize);
-    for i in slot_start..=slot_end {
-        requests_headers.push(utils::get_block_header(&client_http, RPC_URL, i));
-    }
-
-    let headers = futures::future::join_all(requests_headers)
-        .await
-        .into_iter()
-        .filter_map(|maybe_header| maybe_header.ok())
-        .collect::<Vec<_>>();
-
-    let payload = Handle::ReplayBack(headers);
-
-    let gas_limit = client
-        .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
-        .await?
-        .min_limit;
-    println!("ReplayBack gas_limit {gas_limit:?}");
-
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
-        .await?;
-
-    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
-    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
-    assert!(matches!(
-        result_decoded,
-        HandleResult::ReplayBack(Some(replay_back::Status::Finished))
-    ));
 
     Ok(())
 }

@@ -6,6 +6,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {Test, console} from "forge-std/Test.sol";
 import {Verifier} from "../src/Verifier.sol";
+import {Verifier as VerifierMock} from "../src/mocks/VerifierMock.sol";
 import {Relayer} from "../src/Relayer.sol";
 
 import {ERC20Treasury} from "../src/ERC20Treasury.sol";
@@ -13,6 +14,9 @@ import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
+
+import {IVerifier} from "../src/interfaces/IVerifier.sol";
+
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
@@ -37,8 +41,23 @@ contract DeployScript is Script {
         vm.broadcast();
         ProxyContract _treasury_proxy = new ProxyContract();
 
+        IVerifier _verifier;
+
         vm.broadcast();
-        Verifier _verifier = new Verifier();
+        try vm.envBool("MOCK") {
+            if (vm.envBool("MOCK")) {
+                console.log("Deploying MockVerifier");
+                _verifier = IVerifier(address(new VerifierMock()));
+            }else{
+                console.log("Deploying Verifier");
+                _verifier = IVerifier(address(new Verifier()));
+            }
+
+        } catch {
+                console.log("Deploying Verifier");
+                _verifier = IVerifier(address(new Verifier()));
+        }
+        
         vm.broadcast();
         Relayer _relayer = new Relayer(address(_verifier));
         vm.broadcast();

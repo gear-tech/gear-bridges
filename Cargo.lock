@@ -1968,7 +1968,6 @@ name = "checkpoints-relayer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-bls12-381",
  "ark-serialize 0.4.2",
  "checkpoint_light_client",
  "checkpoint_light_client-io",
@@ -1976,7 +1975,9 @@ dependencies = [
  "futures",
  "gclient",
  "hex",
+ "log",
  "parity-scale-codec",
+ "pretty_env_logger",
  "reqwest 0.11.27",
  "serde",
  "serde_json",

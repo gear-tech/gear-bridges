@@ -14,9 +14,8 @@ serde = { workspace = true, features = ["std"] }
 reqwest.workspace = true
 anyhow.workspace = true
 ark-serialize = { workspace = true, features = ["std"] }
-
-[dev-dependencies]
+log.workspace = true
+pretty_env_logger.workspace = true
 gclient.workspace = true
-ark-bls12-381 = { workspace = true, features = ["std"] }
 futures.workspace = true
 hex = { workspace = true, features = ["std"] }

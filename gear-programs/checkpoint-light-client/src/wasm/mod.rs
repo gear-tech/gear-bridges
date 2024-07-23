@@ -51,7 +51,8 @@ async fn init() {
         panic!("Current sync committee proof is not valid");
     }
 
-    finalized_header.slot -= 1;
+    let period = eth_utils::calculate_period(finalized_header.slot) - 1;
+    finalized_header.slot = eth_utils::calculate_slot(period);
     match sync_update::verify(
         &network,
         &finalized_header,
@@ -79,7 +80,7 @@ async fn init() {
             })
         },
 
-        _ => panic!("Incorrect initial sync committee update"),
+        Ok((finalized_header, sync_committee_next)) => panic!("Incorrect initial sync committee update ({}, {})", finalized_header.is_some(), sync_committee_next.is_some()),
     }
 }
 

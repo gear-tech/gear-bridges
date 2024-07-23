@@ -70,7 +70,7 @@ pub struct FinalityUpdateResponse {
     pub data: FinalityUpdate,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct FinalityUpdate {
     #[serde(deserialize_with = "deserialize_header")]
     pub attested_header: BeaconBlockHeader,

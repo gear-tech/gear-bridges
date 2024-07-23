@@ -53,16 +53,22 @@ fn test_slots_batch_iterator() {
 
     let mut iter = Iter::new(3, 10, 2).unwrap();
 
+    // [9; 10), [8; 9), etc
     assert!(matches!(iter.next(), Some((start, end)) if start == 9 && end == 10));
+    assert!(matches!(iter.next(), Some((start, end)) if start == 8 && end == 9));
     assert!(matches!(iter.next(), Some((start, end)) if start == 7 && end == 8));
+    assert!(matches!(iter.next(), Some((start, end)) if start == 6 && end == 7));
     assert!(matches!(iter.next(), Some((start, end)) if start == 5 && end == 6));
+    assert!(matches!(iter.next(), Some((start, end)) if start == 4 && end == 5));
     assert!(matches!(iter.next(), Some((start, end)) if start == 3 && end == 4));
     assert!(iter.next().is_none());
 
     let mut iter = Iter::new(3, 10, 3).unwrap();
 
+    // [8; 10), [6; 8), [4; 6), [3; 4)
     assert!(matches!(iter.next(), Some((start, end)) if start == 8 && end == 10));
-    assert!(matches!(iter.next(), Some((start, end)) if start == 5 && end == 7));
+    assert!(matches!(iter.next(), Some((start, end)) if start == 6 && end == 8));
+    assert!(matches!(iter.next(), Some((start, end)) if start == 4 && end == 6));
     assert!(matches!(iter.next(), Some((start, end)) if start == 3 && end == 4));
     assert!(iter.next().is_none());
 }

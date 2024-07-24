@@ -8,13 +8,14 @@ use reqwest::Client;
 use utils::{slots_batch::Iter as SlotsBatchIter, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
-use checkpoint_light_client_io::{ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH}, replay_back, sync_update, tree_hash::Hash256, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
+use checkpoint_light_client_io::{ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH}, replay_back, tree_hash::Hash256, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
 use parity_scale_codec::Decode;
 use futures::{pin_mut, future::{self, Either}};
 
 #[cfg(test)]
 mod tests;
 
+mod sync_update;
 mod utils;
 
 const SIZE_CHANNEL: usize = 100_000;
@@ -104,7 +105,7 @@ async fn main() {
     let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
     let client_http = Client::new();
 
-    spawn_sync_update_receiver(client_http.clone(), beacon_endpoint.clone(), sender, Duration::from_secs(DELAY_SECS_FINALITY_REQUEST));
+    sync_update::spawn_receiver(client_http.clone(), beacon_endpoint.clone(), sender, Duration::from_secs(DELAY_SECS_FINALITY_REQUEST));
 
     let client = match GearApi::init_with(WSAddress::new(vara_domain, vara_port), suri).await {
         Ok(client) => client,
@@ -135,7 +136,7 @@ async fn main() {
 
     let mut slot_last = finality_update.finalized_header.slot;
 
-    match try_to_apply_sync_update(&client, &mut listener, program_id, finality_update.clone()).await {
+    match sync_update::try_to_apply(&client, &mut listener, program_id, finality_update.clone()).await {
         Status::Ok | Status::NotActual => (),
         Status::Error => return,
         Status::ReplayBackRequired { replayed_slot, checkpoint } => replay_back(&client_http, &beacon_endpoint, &client, &mut listener, program_id, replayed_slot, checkpoint, finality_update).await,
@@ -166,146 +167,13 @@ async fn main() {
             continue;
         }
 
-        match try_to_apply_sync_update(&client, &mut listener, program_id, sync_update).await {
+        match sync_update::try_to_apply(&client, &mut listener, program_id, sync_update).await {
             Status::Ok => { slot_last = slot; }
             Status::NotActual => (),
             _ => continue,
         }
     }
 }
-
-fn spawn_sync_update_receiver(
-    client_http: Client,
-    beacon_endpoint: String,
-    sender: Sender<SyncCommitteeUpdate>,
-    delay: Duration,
-) {
-    tokio::spawn(async move {
-        log::info!("Update receiver spawned");
-
-        let mut failures = 0;
-
-        loop {
-            let finality_update = match utils::get_finality_update(&client_http, &beacon_endpoint).await {
-                Ok(finality_update) => finality_update,
-
-                Err(e) => {
-                    log::error!("Unable to fetch FinalityUpdate: {e:?}");
-
-                    failures += 1;
-                    if failures >= COUNT_FAILURE {
-                        return;
-                    }
-
-                    time::sleep(delay).await;
-                    continue;
-                }
-            };
-
-            let period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-            let mut updates = match utils::get_updates(&client_http, &beacon_endpoint, period, 1).await {
-                Ok(updates) => updates,
-                Err(e) => {
-                    log::error!("Unable to fetch Updates: {e:?}");
-
-                    failures += 1;
-                    if failures >= COUNT_FAILURE {
-                        return;
-                    }
-
-                    time::sleep(delay).await;
-                    continue;
-                }
-            };
-
-            let update = match updates.pop() {
-                Some(update) if updates.is_empty() => update.data,
-                _ => {
-                    log::error!("Requested single update");
-
-                    failures += 1;
-                    if failures >= COUNT_FAILURE {
-                        return;
-                    }
-
-                    time::sleep(delay).await;
-                    continue;
-                }
-            };
-
-            let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
-                utils::sync_update_from_update(update)
-            } else {
-                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-                    &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-                );
-            
-                let Ok(signature) = signature else {
-                    log::error!("Failed to deserialize point on G2");
-
-                    failures += 1;
-                    if failures >= COUNT_FAILURE {
-                        return;
-                    }
-
-                    time::sleep(delay).await;
-                    continue;
-                };
-            
-                utils::sync_update_from_finality(signature, finality_update)
-            };
-
-            if sender.send(sync_update).await.is_err() {
-                return;
-            }
-
-            time::sleep(delay).await;
-        }
-    });
- }
-
- async fn try_to_apply_sync_update(
-    client: &GearApi,
-    listener: &mut EventListener,
-    program_id: [u8; 32],
-    sync_update: SyncCommitteeUpdate,
-) -> Status {
-    let payload = Handle::SyncUpdate(sync_update);
-    let (message_id, _) = match client
-        .send_message(program_id.into(), payload, 700_000_000_000, 0)
-        .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                log::error!("Failed to send message: {e:?}");
-
-                return Status::Error;
-            }
-        };
-
-    let (_message_id, payload, _value) = match listener
-        .reply_bytes_on(message_id)
-        .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                log::error!("Failed to get reply: {e:?}");
-
-                return Status::Error;
-            }
-        };
-    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
-    log::debug!("Handle result = {result_decoded:?}");
-    match result_decoded {
-        HandleResult::SyncUpdate(Ok(())) => Status::Ok,
-        HandleResult::SyncUpdate(Err(sync_update::Error::NotActual)) => Status::NotActual,
-        HandleResult::SyncUpdate(Err(sync_update::Error::ReplayBackRequired {
-            replayed_slot,
-            checkpoint
-        })) => Status::ReplayBackRequired { replayed_slot, checkpoint },
-        _ => Status::Error,
-    }
- }
 
  async fn replay_back(
     client_http: &Client,

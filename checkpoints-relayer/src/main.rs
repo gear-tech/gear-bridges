@@ -5,10 +5,10 @@ use tokio::{
     signal::unix::{self, SignalKind},
 };
 use reqwest::Client;
-use utils::{slots_batch::Iter as SlotsBatchIter, FinalityUpdate, Update, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
+use utils::{slots_batch::Iter as SlotsBatchIter, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
-use gclient::{EventListener, EventProcessor, GearApi};
-use checkpoint_light_client_io::{ethereum_common::{base_types::BytesFixed, utils as eth_utils, EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH}, meta::State, replay_back, sync_update, tree_hash::Hash256, G2TypeInfo, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
+use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
+use checkpoint_light_client_io::{ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH}, replay_back, sync_update, tree_hash::Hash256, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
 use parity_scale_codec::Decode;
 use futures::{pin_mut, future::{self, Either}};
 
@@ -32,12 +32,29 @@ struct Args {
     #[arg(long)]
     beacon_endpoint: String,
 
-    /// Address of the VARA RPC endpoint
+    /// Domain of the VARA RPC endpoint
     #[arg(
         long,
-        env = "VARA_RPC"
+        default_value = "ws://127.0.0.1"
     )]
-    vara_endpoint: String,
+    vara_domain: String,
+
+    /// Port of the VARA RPC endpoint
+    #[arg(
+        long,
+        default_value = "9944"
+    )]
+    vara_port: u16,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char.
+    #[arg(
+        long,
+        default_value = "//Alice"
+    )]
+    suri: String,
 }
 
 enum Status {
@@ -67,7 +84,9 @@ async fn main() {
     let Args {
         program_id,
         beacon_endpoint,
-        vara_endpoint,
+        vara_domain,
+        vara_port,
+        suri,
     } = Args::parse();
 
     let program_id_no_prefix = match program_id.starts_with("0x") {
@@ -87,7 +106,7 @@ async fn main() {
 
     spawn_sync_update_receiver(client_http.clone(), beacon_endpoint.clone(), sender, Duration::from_secs(DELAY_SECS_FINALITY_REQUEST));
 
-    let client = match GearApi::dev().await {
+    let client = match GearApi::init_with(WSAddress::new(vara_domain, vara_port), suri).await {
         Ok(client) => client,
         Err(e) => {
             log::error!("Unable to create GearApi client: {e:?}");
@@ -108,7 +127,7 @@ async fn main() {
     let finality_update = match receiver.recv().await {
         Some(finality_update) => finality_update,
         None => {
-            log::info!("Receiver of FinalityUpdates has been closed. Exiting.");
+            log::info!("Updates receiver has been closed before the loop. Exiting");
 
             return;
         }
@@ -131,12 +150,15 @@ async fn main() {
 
         let sync_update = match future::select(future_interrupt, future_update).await {
             Either::Left((_interrupted, _)) => {
-                log::info!("Caught SIGINT. Exit");
+                log::info!("Caught SIGINT. Exiting");
                 return;
             }
 
             Either::Right((Some(sync_update), _)) => sync_update,
-            Either::Right((None, _)) => return,
+            Either::Right((None, _)) => {
+                log::info!("Updates receiver has been closed. Exiting");
+                return;
+            }
         };
 
         let slot = sync_update.finalized_header.slot;

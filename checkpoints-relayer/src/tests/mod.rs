@@ -14,6 +14,7 @@ use reqwest::Client;
 use tokio::time::{self, Duration};
 use parity_scale_codec::{Decode, Encode};
 use crate::utils::{self, FinalityUpdateResponse, slots_batch};
+use std::env;
 
 const RPC_URL: &str = "http://127.0.0.1:5052";
 
@@ -66,10 +67,15 @@ async fn upload_program(
 async fn init_and_updating() -> Result<()> {
     let client_http = Client::new();
 
+    let rpc_url = env::var("RPC_URL")
+        .unwrap_or(RPC_URL.into());
+
     // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update = utils::get_finality_update(&client_http, RPC_URL).await?;
+    let finality_update = utils::get_finality_update(&client_http, &rpc_url).await?;
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
+    let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
+
+    println!("finality_update slot = {}, period = {}", finality_update.finalized_header.slot, current_period);
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
@@ -79,12 +85,21 @@ async fn init_and_updating() -> Result<()> {
     let checkpoint = update.finalized_header.tree_hash_root();
     let checkpoint_hex = hex::encode(checkpoint);
 
-    let bootstrap = utils::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
+    println!("checkpoint slot = {}, hash = {}", update.finalized_header.slot, checkpoint_hex);
+
+    let bootstrap = utils::get_bootstrap(&client_http, &rpc_url, &checkpoint_hex).await?;
     let sync_update = utils::sync_update_from_update(update);
 
+    println!("bootstrap slot = {}", bootstrap.header.slot);
+
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
+    let network = match env::var("NETWORK") {
+        Ok(network) if network == "Holesky" => Network::Holesky,
+        Ok(network) if network == "Mainnet" => Network::Mainnet,
+        _ => Network::Sepolia,
+    };
     let init = Init {
-        network: Network::Sepolia,
+        network,
         sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
@@ -106,12 +121,16 @@ async fn init_and_updating() -> Result<()> {
     println!();
     println!();
 
+    if env::var("UPDATING").is_err() {
+        return Ok(());
+    }
+
     for _ in 0..30 {
-        let update = utils::get_finality_update(&client_http, RPC_URL).await?;
+        let update = utils::get_finality_update(&client_http, &rpc_url).await?;
 
         let slot: u64 = update.finalized_header.slot;
         let current_period = eth_utils::calculate_period(slot);
-        let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
+        let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");

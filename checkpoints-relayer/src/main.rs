@@ -79,7 +79,7 @@ async fn main() {
     let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
     let client_http = Client::new();
 
-    spawn_finality_update_receiver(client_http.clone(), beacon_endpoint.clone(), sender, Duration::from_secs(DELAY_SECS_FINALITY_REQUEST));
+    spawn_sync_update_receiver(client_http.clone(), beacon_endpoint.clone(), sender, Duration::from_secs(DELAY_SECS_FINALITY_REQUEST));
 
     let client = match GearApi::dev().await {
         Ok(client) => client,
@@ -130,10 +130,10 @@ async fn main() {
     }
 }
 
-fn spawn_finality_update_receiver(
+fn spawn_sync_update_receiver(
     client_http: Client,
     beacon_endpoint: String,
-    sender: Sender<FinalityUpdate>,
+    sender: Sender<SyncCommitteeUpdate>,
     delay: Duration,
 ) {
     tokio::spawn(async move {
@@ -142,12 +142,8 @@ fn spawn_finality_update_receiver(
         let mut failures = 0;
 
         loop {
-            match utils::get_finality_update(&client_http, &beacon_endpoint).await {
-                Ok(value) => {
-                    if sender.send(value).await.is_err() {
-                        return;
-                    }
-                }
+            let finality_update = match utils::get_finality_update(&client_http, &beacon_endpoint).await {
+                Ok(finality_update) => finality_update,
 
                 Err(e) => {
                     log::error!("Unable to fetch FinalityUpdate: {e:?}");
@@ -157,9 +153,67 @@ fn spawn_finality_update_receiver(
                         return;
                     }
 
+                    time::sleep(delay).await;
                     continue;
                 }
             };
+
+            let period = eth_utils::calculate_period(finality_update.finalized_header.slot);
+            let mut updates = match utils::get_updates(&client_http, &beacon_endpoint, period, 1).await {
+                Ok(updates) => updates,
+                Err(e) => {
+                    log::error!("Unable to fetch Updates: {e:?}");
+
+                    failures += 1;
+                    if failures >= COUNT_FAILURE {
+                        return;
+                    }
+
+                    time::sleep(delay).await;
+                    continue;
+                }
+            };
+
+            let update = match updates.pop() {
+                Some(update) if updates.is_empty() => update.data,
+                _ => {
+                    log::error!("Requested single update");
+
+                    failures += 1;
+                    if failures >= COUNT_FAILURE {
+                        return;
+                    }
+
+                    time::sleep(delay).await;
+                    continue;
+                }
+            };
+
+            let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
+                utils::sync_update_from_update(update)
+            } else {
+                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+                    &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
+                );
+            
+                let Ok(signature) = signature else {
+                    log::error!("Failed to deserialize point on G2");
+
+                    failures += 1;
+                    if failures >= COUNT_FAILURE {
+                        return;
+                    }
+
+                    time::sleep(delay).await;
+                    continue;
+                };
+            
+                utils::sync_update_from_finality(signature, finality_update)
+            };
+
+            if sender.send(sync_update).await.is_err() {
+                return;
+            }
 
             time::sleep(delay).await;
         }
@@ -170,19 +224,9 @@ fn spawn_finality_update_receiver(
     client: &GearApi,
     listener: &mut EventListener,
     program_id: [u8; 32],
-    finality_update: FinalityUpdate,
+    sync_update: SyncCommitteeUpdate,
 ) -> Status {
-    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-        &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-    );
-
-    let Ok(signature) = signature else {
-        log::error!("Failed to deserialize point on G2");
-        return Status::Error;
-    };
-
-    let payload = Handle::SyncUpdate(utils::sync_update_from_finality(signature, finality_update));
-
+    let payload = Handle::SyncUpdate(sync_update);
     let (message_id, _) = match client
         .send_message(program_id.into(), payload, 700_000_000_000, 0)
         .await
@@ -227,7 +271,7 @@ fn spawn_finality_update_receiver(
     program_id: [u8; 32],
     replayed_slot: Option<Slot>,
     checkpoint: (Slot, Hash256),
-    finality_update: FinalityUpdate,
+    sync_update: SyncCommitteeUpdate,
 ) {
     log::info!("Replaying back started");
 
@@ -242,6 +286,8 @@ fn spawn_finality_update_receiver(
         replay_back_slots(client_http, beacon_endpoint, client, listener, program_id, slots_batch_iter)
             .await;
 
+        log::info!("The ongoing replaying back finished");
+
         return;
     }
 
@@ -255,7 +301,8 @@ fn spawn_finality_update_receiver(
             return;
         }
     };
-    
+
+    let slot_last = sync_update.finalized_header.slot;
     for update in updates {
         let slot_end = update.data.finalized_header.slot;
         let Some(mut slots_batch_iter) = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH) else {
@@ -274,25 +321,19 @@ fn spawn_finality_update_receiver(
         if replay_back_slots(client_http, beacon_endpoint, client, listener, program_id, slots_batch_iter).await.is_none() {
             return;
         }
+
+        if slot_end == slot_last {
+            // the provided sync_update is a sync committee update
+            return;
+        }
     }
 
-    let slot_last = finality_update.finalized_header.slot;
     let Some(mut slots_batch_iter) = SlotsBatchIter::new(slot_start, slot_last, SIZE_BATCH) else {
         log::error!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_last = {slot_last}.");
 
         return;
     };
 
-    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-        &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-    );
-
-    let Ok(signature) = signature else {
-        log::error!("replay_back; Failed to deserialize point on G2");
-        return;
-    };
-
-    let sync_update = utils::sync_update_from_finality(signature, finality_update);
     if replay_back_slots_start(client_http, beacon_endpoint, client, listener, program_id, slots_batch_iter.next(), sync_update).await.is_none() {
         return;
     }

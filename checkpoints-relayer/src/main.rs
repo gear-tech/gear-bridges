@@ -2,14 +2,15 @@ use clap::Parser;
 use tokio::{
     sync::mpsc::{self, Sender},
     time::{self, Duration},
+    signal::unix::{self, SignalKind},
 };
 use reqwest::Client;
-use utils::{slots_batch, FinalityUpdate, Update, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
+use utils::{slots_batch::Iter as SlotsBatchIter, FinalityUpdate, Update, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use gclient::{EventListener, EventProcessor, GearApi};
 use checkpoint_light_client_io::{ethereum_common::{base_types::BytesFixed, utils as eth_utils, EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH}, meta::State, replay_back, sync_update, tree_hash::Hash256, G2TypeInfo, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
 use parity_scale_codec::Decode;
-use utils::slots_batch::Iter as SlotsBatchIter;
+use futures::{pin_mut, future::{self, Either}};
 
 #[cfg(test)]
 mod tests;
@@ -57,6 +58,11 @@ async fn main() {
         .init();
 
     log::info!("Started");
+
+    let Ok(mut signal_interrupt) = unix::signal(SignalKind::interrupt()) else {
+        log::error!("Failed to set SIGINT handler");
+        return;
+    };
 
     let Args {
         program_id,
@@ -116,13 +122,29 @@ async fn main() {
         Status::ReplayBackRequired { replayed_slot, checkpoint } => replay_back(&client_http, &beacon_endpoint, &client, &mut listener, program_id, replayed_slot, checkpoint, finality_update).await,
     }
 
-    while let Some(finality_update) = receiver.recv().await {
-        let slot = finality_update.finalized_header.slot;
+    loop {
+        let future_interrupt = signal_interrupt.recv();
+        pin_mut!(future_interrupt);
+
+        let future_update = receiver.recv();
+        pin_mut!(future_update);
+
+        let sync_update = match future::select(future_interrupt, future_update).await {
+            Either::Left((_interrupted, _)) => {
+                log::info!("Caught SIGINT. Exit");
+                return;
+            }
+
+            Either::Right((Some(sync_update), _)) => sync_update,
+            Either::Right((None, _)) => return,
+        };
+
+        let slot = sync_update.finalized_header.slot;
         if slot == slot_last {
             continue;
         }
 
-        match try_to_apply_sync_update(&client, &mut listener, program_id, finality_update).await {
+        match try_to_apply_sync_update(&client, &mut listener, program_id, sync_update).await {
             Status::Ok => { slot_last = slot; }
             Status::NotActual => (),
             _ => continue,

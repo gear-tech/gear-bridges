@@ -11,10 +11,12 @@ use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
 use checkpoint_light_client_io::{ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH}, tree_hash::Hash256, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
 use parity_scale_codec::Decode;
 use futures::{pin_mut, future::{self, Either}};
+use metrics::Message as MetricMessage;
 
 #[cfg(test)]
 mod tests;
 
+mod metrics;
 mod sync_update;
 mod replay_back;
 mod utils;
@@ -51,12 +53,19 @@ struct Args {
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
     /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char.
+    /// separated by the ':' char
     #[arg(
         long,
         default_value = "//Alice"
     )]
     suri: String,
+
+    /// Address of the prometheus endpoint
+    #[arg(
+        long = "prometheus-endpoint",
+        default_value = "http://127.0.0.1:9090"
+    )]
+    endpoint_prometheus: String,
 }
 
 enum Status {
@@ -89,7 +98,10 @@ async fn main() {
         vara_domain,
         vara_port,
         suri,
+        endpoint_prometheus,
     } = Args::parse();
+
+    let sender_metrics = metrics::spawn(endpoint_prometheus);
 
     let program_id_no_prefix = match program_id.starts_with("0x") {
         true => &program_id[2..],
@@ -140,7 +152,11 @@ async fn main() {
     match sync_update::try_to_apply(&client, &mut listener, program_id, sync_update.clone()).await {
         Status::Ok | Status::NotActual => (),
         Status::Error => return,
-        Status::ReplayBackRequired { replayed_slot, checkpoint } => replay_back::execute(&client_http, &beacon_endpoint, &client, &mut listener, program_id, replayed_slot, checkpoint, sync_update).await,
+        Status::ReplayBackRequired { replayed_slot, checkpoint } => {
+            replay_back::execute(&client_http, &beacon_endpoint, &client, &mut listener, program_id, replayed_slot, checkpoint, sync_update).await;
+            log::info!("Exiting");
+            return;
+        }
     }
 
     loop {
@@ -163,14 +179,43 @@ async fn main() {
             }
         };
 
+        let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
         let slot = sync_update.finalized_header.slot;
         if slot == slot_last {
+            let metric_message = MetricMessage {
+                slot,
+                committee_update,
+                processed: false,
+            };
+
+            if sender_metrics.send(metric_message).await.is_err() {
+                log::error!("Failed to update metrics. Exiting");
+                return;
+            }
+
             continue;
         }
 
         match sync_update::try_to_apply(&client, &mut listener, program_id, sync_update).await {
-            Status::Ok => { slot_last = slot; }
+            Status::Ok => {
+                slot_last = slot;
+
+                let metric_message = MetricMessage {
+                    slot,
+                    committee_update,
+                    processed: true,
+                };
+
+                if sender_metrics.send(metric_message).await.is_err() {
+                    log::error!("Failed to update metrics. Exiting");
+                    return;
+                }
+            }
             Status::NotActual => (),
+            Status::ReplayBackRequired { .. } => {
+                log::info!("Exiting");
+                return;
+            }
             _ => continue,
         }
     }

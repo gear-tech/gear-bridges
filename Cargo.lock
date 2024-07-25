@@ -1978,10 +1978,12 @@ dependencies = [
  "log",
  "parity-scale-codec",
  "pretty_env_logger",
+ "prometheus",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
  "tokio",
+ "utils-prometheus",
 ]
 
 [[package]]

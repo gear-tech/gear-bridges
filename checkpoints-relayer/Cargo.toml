@@ -19,3 +19,5 @@ pretty_env_logger.workspace = true
 gclient.workspace = true
 futures.workspace = true
 hex = { workspace = true, features = ["std"] }
+prometheus.workspace = true
+utils-prometheus.workspace = true

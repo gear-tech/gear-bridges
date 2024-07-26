@@ -18,7 +18,7 @@ use prometheus::Gauge;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
-use crate::{impl_metered_service, metrics::MeteredService};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{AuthoritySetId, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};

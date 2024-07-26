@@ -2,7 +2,7 @@ use ethereum_client::EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
 use primitive_types::{H256, U256};
 
-use crate::metrics::MeteredService;
+use utils_prometheus::MeteredService;
 
 mod event_listener;
 mod merkle_root_listener;

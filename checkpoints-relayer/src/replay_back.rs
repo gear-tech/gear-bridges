@@ -1,5 +1,6 @@
 use super::*;
-use checkpoint_light_client_io::replay_back::{Status, StatusStart};
+use checkpoint_light_client_io::{replay_back::{Status, StatusStart}, BeaconBlockHeader};
+use utils::ErrorNotFound;
 
 pub async fn execute(
    client_http: &Client,
@@ -106,19 +107,7 @@ async fn replay_back_slots_inner(
    slot_start: Slot,
    slot_end: Slot,
 ) -> Option<()> {
-   let batch_size = (slot_end - slot_start) as usize;
-   let mut requests_headers = Vec::with_capacity(batch_size);
-   for i in slot_start..slot_end {
-       requests_headers.push(utils::get_block_header(&client_http, &beacon_endpoint, i));
-   }
-
-   let headers = futures::future::join_all(requests_headers)
-       .await
-       .into_iter()
-       .filter_map(|maybe_header| maybe_header.ok())
-       .collect::<Vec<_>>();
-
-   let payload = Handle::ReplayBack(headers);
+   let payload = Handle::ReplayBack(request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?);
 
    let (message_id, _) = client
        .send_message(program_id.into(), payload, 700_000_000_000, 0)
@@ -155,20 +144,9 @@ async fn replay_back_slots_start(
        return Some(());
    };
 
-   let mut requests_headers = Vec::with_capacity(SIZE_BATCH as usize);
-   for i in slot_start..slot_end {
-       requests_headers.push(utils::get_block_header(&client_http, beacon_endpoint, i));
-   }
-
-   let headers = futures::future::join_all(requests_headers)
-       .await
-       .into_iter()
-       .filter_map(|maybe_header| maybe_header.ok())
-       .collect::<Vec<_>>();
-
    let payload = Handle::ReplayBackStart {
        sync_update,
-       headers,
+       headers: request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
    };
 
    let (message_id, _) = client
@@ -191,4 +169,30 @@ async fn replay_back_slots_start(
        result_decoded,
        HandleResult::ReplayBackStart(Ok(StatusStart::InProgress | StatusStart::Finished))
    ).then_some(())
+}
+
+pub async fn request_headers(
+    client_http: &Client,
+    beacon_endpoint: &str,
+    slot_start: Slot,
+    slot_end: Slot,
+) -> Option<Vec<BeaconBlockHeader>> {
+    let batch_size = (slot_end - slot_start) as usize;
+    let mut requests_headers = Vec::with_capacity(batch_size);
+    for i in slot_start..slot_end {
+        requests_headers.push(utils::get_block_header(&client_http, &beacon_endpoint, i));
+    }
+
+    futures::future::join_all(requests_headers)
+        .await
+        .into_iter()
+        .filter(|maybe_header| {
+            match maybe_header {
+                Err(e) if e.downcast_ref::<ErrorNotFound>().is_some() => false,
+                _ => true,
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| log::error!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}"))
+        .ok()
 }

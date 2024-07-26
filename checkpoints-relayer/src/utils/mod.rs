@@ -11,7 +11,7 @@ use checkpoint_light_client_io::{
 use anyhow::{Result as AnyResult, Error as AnyError};
 use reqwest::{Client, RequestBuilder};
 use ark_serialize::CanonicalDeserialize;
-use std::cmp;
+use std::{cmp, error::Error, fmt};
 
 pub mod slots_batch;
 
@@ -103,6 +103,23 @@ pub struct UpdateData {
 
 pub type UpdateResponse = Vec<UpdateData>;
 
+#[derive(Clone, Debug)]
+pub struct ErrorNotFound;
+
+impl fmt::Display for ErrorNotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt("Not found (404)", f)
+    }
+}
+
+impl Error for ErrorNotFound {}
+
+#[derive(Deserialize)]
+struct CodeResponse {
+    code: u64,
+    message: String,
+}
+
 pub async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyResult<R> {
     let bytes = request_builder
         .send()
@@ -112,7 +129,10 @@ pub async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyRes
         .await
         .map_err(AnyError::from)?;
 
-    Ok(serde_json::from_slice::<R>(&bytes).map_err(AnyError::from)?)
+    match serde_json::from_slice::<CodeResponse>(&bytes) {
+        Ok(code_response) if code_response.code == 404 => Err(ErrorNotFound.into()),
+        _ => Ok(serde_json::from_slice::<R>(&bytes).map_err(AnyError::from)?),
+    }
 }
 
 pub async fn get_bootstrap(client: &Client, rpc_url: &str, checkpoint: &str) -> AnyResult<Bootstrap> {

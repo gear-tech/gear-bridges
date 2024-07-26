@@ -9,7 +9,7 @@ use gear_rpc_client::{dto::Message, GearApi};
 use primitive_types::H256;
 use prometheus::{Gauge, IntCounter, IntGauge};
 
-use crate::metrics::{impl_metered_service, MeteredService};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{AuthoritySetId, BlockEvent, BlockNumber, RelayedMerkleRoot};
 

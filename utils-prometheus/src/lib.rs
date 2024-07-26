@@ -14,8 +14,6 @@ pub trait MeteredService {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn Collector>>;
 }
 
-pub use crate::impl_metered_service;
-
 #[macro_export]
 macro_rules! impl_metered_service {
     (
@@ -37,7 +35,7 @@ macro_rules! impl_metered_service {
             ),*
         }
 
-        impl $crate::metrics::MeteredService for $struct_name {
+        impl $crate::MeteredService for $struct_name {
             fn get_sources(&self) -> impl ::core::iter::IntoIterator<
                 Item = ::std::boxed::Box<dyn prometheus::core::Collector>
             > {

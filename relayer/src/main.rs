@@ -6,10 +6,10 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
-use utils_prometheus::MetricsBuilder;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
+use utils_prometheus::MetricsBuilder;
 
 mod message_relayer;
 mod proof_storage;

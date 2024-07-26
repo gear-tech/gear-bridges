@@ -77,6 +77,12 @@ impl MetricsBuilder {
     }
 }
 
+impl Default for MetricsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Metrics {
     pub async fn run(self, endpoint: String) {
         let reg = self.registry.clone();

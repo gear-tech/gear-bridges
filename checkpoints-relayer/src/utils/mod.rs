@@ -40,6 +40,7 @@ pub struct BeaconBlockHeaderData {
     pub header: SignedBeaconBlockHeader,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct Bootstrap {
     #[serde(deserialize_with = "deserialize_header")]
@@ -48,6 +49,7 @@ pub struct Bootstrap {
     pub current_sync_committee_branch: Vec<Bytes32>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct BootstrapResponse {
     pub data: Bootstrap,
@@ -114,6 +116,7 @@ impl fmt::Display for ErrorNotFound {
 
 impl Error for ErrorNotFound {}
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct CodeResponse {
     code: u64,
@@ -135,6 +138,7 @@ pub async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyRes
     }
 }
 
+#[allow(dead_code)]
 pub async fn get_bootstrap(
     client: &Client,
     rpc_url: &str,

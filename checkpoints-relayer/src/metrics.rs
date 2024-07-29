@@ -1,5 +1,5 @@
 use super::*;
-use prometheus::{IntGauge, IntCounter};
+use prometheus::{IntCounter, IntGauge};
 use utils_prometheus::{impl_metered_service, MetricsBuilder};
 
 pub struct Message {
@@ -65,7 +65,9 @@ pub fn spawn(endpoint_prometheus: String) -> Sender<Message> {
                 return;
             };
 
-            service.fetched_sync_update_slot.set(i64::from_le_bytes(metric_message.slot.to_le_bytes()));
+            service
+                .fetched_sync_update_slot
+                .set(i64::from_le_bytes(metric_message.slot.to_le_bytes()));
             if metric_message.committee_update {
                 service.total_fetched_committee_updates.inc();
                 if metric_message.processed {

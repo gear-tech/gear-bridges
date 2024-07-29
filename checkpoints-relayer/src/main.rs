@@ -1,24 +1,31 @@
+use checkpoint_light_client_io::{
+    ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH},
+    tree_hash::Hash256,
+    Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
+};
 use clap::Parser;
+use futures::{
+    future::{self, Either},
+    pin_mut,
+};
+use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
+use metrics::Message as MetricMessage;
+use parity_scale_codec::Decode;
+use pretty_env_logger::env_logger::fmt::TimestampPrecision;
+use reqwest::Client;
 use tokio::{
+    signal::unix::{self, SignalKind},
     sync::mpsc::{self, Sender},
     time::{self, Duration},
-    signal::unix::{self, SignalKind},
 };
-use reqwest::Client;
 use utils::{slots_batch::Iter as SlotsBatchIter, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
-use pretty_env_logger::env_logger::fmt::TimestampPrecision;
-use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
-use checkpoint_light_client_io::{ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH}, tree_hash::Hash256, Handle, HandleResult, Slot, SyncCommitteeUpdate, G2};
-use parity_scale_codec::Decode;
-use futures::{pin_mut, future::{self, Either}};
-use metrics::Message as MetricMessage;
 
 #[cfg(test)]
 mod tests;
 
 mod metrics;
-mod sync_update;
 mod replay_back;
+mod sync_update;
 mod utils;
 
 const SIZE_CHANNEL: usize = 100_000;
@@ -37,34 +44,22 @@ struct Args {
     beacon_endpoint: String,
 
     /// Domain of the VARA RPC endpoint
-    #[arg(
-        long,
-        default_value = "ws://127.0.0.1"
-    )]
+    #[arg(long, default_value = "ws://127.0.0.1")]
     vara_domain: String,
 
     /// Port of the VARA RPC endpoint
-    #[arg(
-        long,
-        default_value = "9944"
-    )]
+    #[arg(long, default_value = "9944")]
     vara_port: u16,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
     /// etc.). The password for URI should be specified in the same `suri`,
     /// separated by the ':' char
-    #[arg(
-        long,
-        default_value = "//Alice"
-    )]
+    #[arg(long, default_value = "//Alice")]
     suri: String,
 
     /// Address of the prometheus endpoint
-    #[arg(
-        long = "prometheus-endpoint",
-        default_value = "http://127.0.0.1:9090"
-    )]
+    #[arg(long = "prometheus-endpoint", default_value = "http://127.0.0.1:9090")]
     endpoint_prometheus: String,
 }
 
@@ -110,15 +105,21 @@ async fn main() {
 
     let Some(program_id) = hex::decode(program_id_no_prefix)
         .ok()
-        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok()) else {
-            log::error!("Incorrect ProgramId");
-            return;
+        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+    else {
+        log::error!("Incorrect ProgramId");
+        return;
     };
 
     let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
     let client_http = Client::new();
 
-    sync_update::spawn_receiver(client_http.clone(), beacon_endpoint.clone(), sender, Duration::from_secs(DELAY_SECS_FINALITY_REQUEST));
+    sync_update::spawn_receiver(
+        client_http.clone(),
+        beacon_endpoint.clone(),
+        sender,
+        Duration::from_secs(DELAY_SECS_FINALITY_REQUEST),
+    );
 
     let client = match GearApi::init_with(WSAddress::new(vara_domain, vara_port), suri).await {
         Ok(client) => client,
@@ -152,8 +153,21 @@ async fn main() {
     match sync_update::try_to_apply(&client, &mut listener, program_id, sync_update.clone()).await {
         Status::Ok | Status::NotActual => (),
         Status::Error => return,
-        Status::ReplayBackRequired { replayed_slot, checkpoint } => {
-            replay_back::execute(&client_http, &beacon_endpoint, &client, &mut listener, program_id, replayed_slot, checkpoint, sync_update).await;
+        Status::ReplayBackRequired {
+            replayed_slot,
+            checkpoint,
+        } => {
+            replay_back::execute(
+                &client_http,
+                &beacon_endpoint,
+                &client,
+                &mut listener,
+                program_id,
+                replayed_slot,
+                checkpoint,
+                sync_update,
+            )
+            .await;
             log::info!("Exiting");
             return;
         }

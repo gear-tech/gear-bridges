@@ -2,7 +2,9 @@ use checkpoint_light_client_io::Slot;
 
 /// Iterator produces right open intervals of the specific size in backward direction.
 pub struct Iter {
-    slot_start: Slot, slot_end: Slot, batch_size: Slot,
+    slot_start: Slot,
+    slot_end: Slot,
+    batch_size: Slot,
 }
 
 impl Iter {
@@ -12,7 +14,9 @@ impl Iter {
         }
 
         Some(Self {
-            slot_start, slot_end, batch_size,
+            slot_start,
+            slot_end,
+            batch_size,
         })
     }
 }

@@ -1,20 +1,18 @@
+use crate::utils::{self, slots_batch, FinalityUpdateResponse};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
-        base_types::BytesFixed,
-        network::Network,
-        utils as eth_utils, SLOTS_PER_EPOCH,
+        base_types::BytesFixed, network::Network, utils as eth_utils, SLOTS_PER_EPOCH,
     },
     replay_back, sync_update,
     tree_hash::TreeHash,
     Handle, HandleResult, Init, G2,
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
-use reqwest::Client;
-use tokio::time::{self, Duration};
 use parity_scale_codec::{Decode, Encode};
-use crate::utils::{self, FinalityUpdateResponse, slots_batch};
+use reqwest::Client;
 use std::env;
+use tokio::time::{self, Duration};
 
 const RPC_URL: &str = "http://127.0.0.1:5052";
 
@@ -67,15 +65,17 @@ async fn upload_program(
 async fn init_and_updating() -> Result<()> {
     let client_http = Client::new();
 
-    let rpc_url = env::var("RPC_URL")
-        .unwrap_or(RPC_URL.into());
+    let rpc_url = env::var("RPC_URL").unwrap_or(RPC_URL.into());
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = utils::get_finality_update(&client_http, &rpc_url).await?;
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
     let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
 
-    println!("finality_update slot = {}, period = {}", finality_update.finalized_header.slot, current_period);
+    println!(
+        "finality_update slot = {}, period = {}",
+        finality_update.finalized_header.slot, current_period
+    );
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
@@ -85,13 +85,17 @@ async fn init_and_updating() -> Result<()> {
     let checkpoint = update.finalized_header.tree_hash_root();
     let checkpoint_hex = hex::encode(checkpoint);
 
-    println!("checkpoint slot = {}, hash = {}", update.finalized_header.slot, checkpoint_hex);
+    println!(
+        "checkpoint slot = {}, hash = {}",
+        update.finalized_header.slot, checkpoint_hex
+    );
 
     let bootstrap = utils::get_bootstrap(&client_http, &rpc_url, &checkpoint_hex).await?;
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
-    ).unwrap();
+    )
+    .unwrap();
     let sync_update = utils::sync_update_from_update(signature, update);
 
     println!("bootstrap slot = {}", bootstrap.header.slot);
@@ -138,10 +142,13 @@ async fn init_and_updating() -> Result<()> {
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");
-                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-                    &update.data.sync_aggregate.sync_committee_signature.0 .0[..],
-                ).unwrap();
-                let payload = Handle::SyncUpdate(utils::sync_update_from_update(signature, update.data));
+                let signature =
+                    <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+                        &update.data.sync_aggregate.sync_committee_signature.0 .0[..],
+                    )
+                    .unwrap();
+                let payload =
+                    Handle::SyncUpdate(utils::sync_update_from_update(signature, update.data));
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
                     .await?
@@ -173,7 +180,8 @@ async fn init_and_updating() -> Result<()> {
                     continue;
                 };
 
-                let payload = Handle::SyncUpdate(utils::sync_update_from_finality(signature, update));
+                let payload =
+                    Handle::SyncUpdate(utils::sync_update_from_finality(signature, update));
 
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
@@ -231,7 +239,8 @@ async fn replaying_back() -> Result<()> {
     println!("update slot = {}", update.finalized_header.slot);
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
-    ).unwrap();
+    )
+    .unwrap();
     let sync_update = utils::sync_update_from_update(signature, update);
     let slot_start = sync_update.finalized_header.slot;
     let slot_end = finality_update.finalized_header.slot;
@@ -278,27 +287,27 @@ async fn replaying_back() -> Result<()> {
             .into_iter()
             .filter_map(|maybe_header| maybe_header.ok())
             .collect::<Vec<_>>();
-    
+
         let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
             &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
         )
         .unwrap();
-    
+
         let payload = Handle::ReplayBackStart {
             sync_update: utils::sync_update_from_finality(signature, finality_update),
             headers,
         };
-    
+
         let gas_limit = client
             .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
             .await?
             .min_limit;
         println!("ReplayBackStart gas_limit {gas_limit:?}");
-    
+
         let (message_id, _) = client
             .send_message(program_id.into(), payload, gas_limit, 0)
             .await?;
-    
+
         let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
         let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
         assert!(matches!(
@@ -336,7 +345,9 @@ async fn replaying_back() -> Result<()> {
         let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
         assert!(matches!(
             result_decoded,
-            HandleResult::ReplayBack(Some(replay_back::Status::InProcess | replay_back::Status::Finished))
+            HandleResult::ReplayBack(Some(
+                replay_back::Status::InProcess | replay_back::Status::Finished
+            ))
         ));
     }
 
@@ -370,7 +381,8 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     let bootstrap = utils::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
-    ).unwrap();
+    )
+    .unwrap();
     let sync_update = utils::sync_update_from_update(signature, update);
 
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);

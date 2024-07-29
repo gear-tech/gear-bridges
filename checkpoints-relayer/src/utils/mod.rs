@@ -1,14 +1,16 @@
-use serde::{de::DeserializeOwned, Deserialize};
+use anyhow::{Error as AnyError, Result as AnyResult};
+use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
         beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
         utils as eth_utils,
-    }, ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, SyncCommitteeKeys, SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE
+    },
+    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, SyncCommitteeKeys, SyncCommitteeUpdate,
+    G1, G2, SYNC_COMMITTEE_SIZE,
 };
-use anyhow::{Result as AnyResult, Error as AnyError};
 use reqwest::{Client, RequestBuilder};
-use ark_serialize::CanonicalDeserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use std::{cmp, error::Error, fmt};
 
 pub mod slots_batch;
@@ -133,7 +135,11 @@ pub async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyRes
     }
 }
 
-pub async fn get_bootstrap(client: &Client, rpc_url: &str, checkpoint: &str) -> AnyResult<Bootstrap> {
+pub async fn get_bootstrap(
+    client: &Client,
+    rpc_url: &str,
+    checkpoint: &str,
+) -> AnyResult<Bootstrap> {
     let checkpoint_no_prefix = match checkpoint.starts_with("0x") {
         true => &checkpoint[2..],
         false => checkpoint,
@@ -146,7 +152,12 @@ pub async fn get_bootstrap(client: &Client, rpc_url: &str, checkpoint: &str) -> 
         .map(|response| response.data)
 }
 
-pub async fn get_updates(client: &Client, rpc_url: &str, period: u64, count: u8) -> AnyResult<UpdateResponse> {
+pub async fn get_updates(
+    client: &Client,
+    rpc_url: &str,
+    period: u64,
+    count: u8,
+) -> AnyResult<UpdateResponse> {
     let count = cmp::min(count, MAX_REQUEST_LIGHT_CLIENT_UPDATES);
     let url = format!(
         "{rpc_url}/eth/v1/beacon/light_client/updates?start_period={period}&count={count}",
@@ -155,7 +166,11 @@ pub async fn get_updates(client: &Client, rpc_url: &str, period: u64, count: u8)
     get::<UpdateResponse>(client.get(&url)).await
 }
 
-pub async fn get_block_header(client: &Client, rpc_url: &str, slot: u64) -> AnyResult<BeaconBlockHeader> {
+pub async fn get_block_header(
+    client: &Client,
+    rpc_url: &str,
+    slot: u64,
+) -> AnyResult<BeaconBlockHeader> {
     let url = format!("{rpc_url}/eth/v1/beacon/headers/{slot}");
 
     get::<BeaconBlockHeaderResponse>(client.get(&url))
@@ -189,7 +204,9 @@ pub fn map_public_keys(
         })
         .collect::<Vec<_>>();
 
-    Box::new(FixedArray(keys.try_into().expect("The size of keys array is guaranteed on the type level")))
+    Box::new(FixedArray(keys.try_into().expect(
+        "The size of keys array is guaranteed on the type level",
+    )))
 }
 
 pub fn sync_update_from_finality(

@@ -60,25 +60,29 @@ pub fn spawn_receiver(
                 }
             };
 
-            let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
-                utils::sync_update_from_update(update)
+            let reader_signature = if update.finalized_header.slot >= finality_update.finalized_header.slot {
+                &update.sync_aggregate.sync_committee_signature.0 .0[..]
             } else {
-                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-                    &finality_update.sync_aggregate.sync_committee_signature.0 .0[..],
-                );
-            
-                let Ok(signature) = signature else {
-                    log::error!("Failed to deserialize point on G2");
+                &finality_update.sync_aggregate.sync_committee_signature.0 .0[..]
+            };
 
-                    failures += 1;
-                    if failures >= COUNT_FAILURE {
-                        return;
-                    }
+            let Ok(signature) = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+                reader_signature,
+            ) else {
+                log::error!("Failed to deserialize point on G2");
 
-                    time::sleep(delay).await;
-                    continue;
-                };
-            
+                failures += 1;
+                if failures >= COUNT_FAILURE {
+                    return;
+                }
+
+                time::sleep(delay).await;
+                continue;
+            };
+
+            let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
+                utils::sync_update_from_update(signature, update)
+            } else {
                 utils::sync_update_from_finality(signature, finality_update)
             };
 
@@ -121,9 +125,22 @@ pub async fn try_to_apply(
                 return Status::Error;
             }
         };
-    let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
+    let payload = match payload {
+        Ok(payload) => payload,
+        Err(e) => {
+            log::error!("Failed to get replay payload to SyncUpdate: {e:?}");
+            return Status::Error;
+        }
+    };
+    let result_decoded = match HandleResult::decode(&mut &payload[..]) {
+        Ok(result_decoded) => result_decoded,
+        Err(e) => {
+            log::error!("Failed to decode HandleResult of SyncUpdate: {e:?}");
+            return Status::Error;
+        }
+    };
 
-    log::debug!("Handle result = {result_decoded:?}");
+    log::debug!("try_to_apply; result_decoded = {result_decoded:?}");
 
     match result_decoded {
         HandleResult::SyncUpdate(Ok(())) => Status::Ok,

@@ -52,7 +52,14 @@ pub async fn execute(
 
        slot_start = slot_end;
 
-       let sync_update = utils::sync_update_from_update(update.data);
+       let Ok(signature) = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+            &update.data.sync_aggregate.sync_committee_signature.0.0[..],
+        ) else {
+            log::error!("Failed to deserialize point on G2 (replay back)");
+            return;
+        };
+
+       let sync_update = utils::sync_update_from_update(signature, update.data);
        if replay_back_slots_start(client_http, beacon_endpoint, client, listener, program_id, slots_batch_iter.next(), sync_update).await.is_none() {
            return;
        }

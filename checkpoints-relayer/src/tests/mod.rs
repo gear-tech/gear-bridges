@@ -1,7 +1,7 @@
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
-        base_types::{BytesFixed, FixedArray},
+        base_types::BytesFixed,
         network::Network,
         utils as eth_utils, SLOTS_PER_EPOCH,
     },
@@ -88,11 +88,15 @@ async fn init_and_updating() -> Result<()> {
     println!("checkpoint slot = {}, hash = {}", update.finalized_header.slot, checkpoint_hex);
 
     let bootstrap = utils::get_bootstrap(&client_http, &rpc_url, &checkpoint_hex).await?;
-    let sync_update = utils::sync_update_from_update(update);
+
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &update.sync_aggregate.sync_committee_signature.0 .0[..],
+    ).unwrap();
+    let sync_update = utils::sync_update_from_update(signature, update);
 
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
-    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
+    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let network = match env::var("NETWORK") {
         Ok(network) if network == "Holesky" => Network::Holesky,
         Ok(network) if network == "Mainnet" => Network::Mainnet,
@@ -100,7 +104,7 @@ async fn init_and_updating() -> Result<()> {
     };
     let init = Init {
         network,
-        sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
+        sync_committee_current_pub_keys: pub_keys,
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
             .current_sync_committee_branch
@@ -134,7 +138,10 @@ async fn init_and_updating() -> Result<()> {
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");
-                let payload = Handle::SyncUpdate(utils::sync_update_from_update(update.data));
+                let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+                    &update.data.sync_aggregate.sync_committee_signature.0 .0[..],
+                ).unwrap();
+                let payload = Handle::SyncUpdate(utils::sync_update_from_update(signature, update.data));
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
                     .await?
@@ -222,7 +229,10 @@ async fn replaying_back() -> Result<()> {
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     println!("update slot = {}", update.finalized_header.slot);
-    let sync_update = utils::sync_update_from_update(update);
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &update.sync_aggregate.sync_committee_signature.0 .0[..],
+    ).unwrap();
+    let sync_update = utils::sync_update_from_update(signature, update);
     let slot_start = sync_update.finalized_header.slot;
     let slot_end = finality_update.finalized_header.slot;
     println!(
@@ -230,10 +240,10 @@ async fn replaying_back() -> Result<()> {
         slot_end - slot_start
     );
 
-    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
+    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let init = Init {
         network: Network::Sepolia,
-        sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
+        sync_committee_current_pub_keys: pub_keys,
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
             .current_sync_committee_branch
@@ -254,7 +264,7 @@ async fn replaying_back() -> Result<()> {
     println!();
     println!();
 
-    let batch_size = 26 * SLOTS_PER_EPOCH;
+    let batch_size = 44 * SLOTS_PER_EPOCH;
     let mut slots_batch_iter = slots_batch::Iter::new(slot_start, slot_end, batch_size).unwrap();
     // start to replay back
     if let Some((slot_start, slot_end)) = slots_batch_iter.next() {
@@ -358,12 +368,15 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     let checkpoint_hex = hex::encode(checkpoint);
 
     let bootstrap = utils::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
-    let sync_update = utils::sync_update_from_update(update);
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &update.sync_aggregate.sync_committee_signature.0 .0[..],
+    ).unwrap();
+    let sync_update = utils::sync_update_from_update(signature, update);
 
-    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys.0);
+    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let init = Init {
         network: Network::Sepolia,
-        sync_committee_current_pub_keys: Box::new(FixedArray(pub_keys.try_into().unwrap())),
+        sync_committee_current_pub_keys: pub_keys,
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
             .current_sync_committee_branch

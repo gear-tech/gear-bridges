@@ -1,12 +1,10 @@
 use serde::{de::DeserializeOwned, Deserialize};
 use checkpoint_light_client_io::{
     ethereum_common::{
-        base_types::{FixedArray, BytesFixed},
+        base_types::{BytesFixed, FixedArray},
         beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
         utils as eth_utils,
-    },
-    BeaconBlockHeader, G2TypeInfo, G2, G1TypeInfo, ArkScale, G1,
-    SyncCommitteeUpdate,
+    }, ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, SyncCommitteeKeys, SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE
 };
 use anyhow::{Result as AnyResult, Error as AnyError};
 use reqwest::{Client, RequestBuilder};
@@ -173,19 +171,25 @@ pub async fn get_finality_update(client: &Client, rpc_url: &str) -> AnyResult<Fi
         .map(|response| response.data)
 }
 
-pub fn map_public_keys(compressed_public_keys: &[BLSPubKey]) -> Vec<ArkScale<G1TypeInfo>> {
-    compressed_public_keys
+pub fn map_public_keys(
+    compressed_public_keys: &FixedArray<BLSPubKey, SYNC_COMMITTEE_SIZE>,
+) -> Box<SyncCommitteeKeys> {
+    let keys = compressed_public_keys
+        .0
         .iter()
         .map(|BytesFixed(pub_key_compressed)| {
             let pub_key = <G1 as CanonicalDeserialize>::deserialize_compressed_unchecked(
                 &pub_key_compressed.0[..],
             )
-            .unwrap();
+            .expect("Public keys have the required size");
+
             let ark_scale: ArkScale<G1TypeInfo> = G1TypeInfo(pub_key).into();
 
             ark_scale
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    Box::new(FixedArray(keys.try_into().expect("The size of keys array is guaranteed on the type level")))
 }
 
 pub fn sync_update_from_finality(
@@ -209,13 +213,8 @@ pub fn sync_update_from_finality(
     }
 }
 
-pub fn sync_update_from_update(update: Update) -> SyncCommitteeUpdate {
-    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
-        &update.sync_aggregate.sync_committee_signature.0 .0[..],
-    )
-    .unwrap();
-
-    let next_sync_committee_keys = map_public_keys(&update.next_sync_committee.pubkeys.0);
+pub fn sync_update_from_update(signature: G2, update: Update) -> SyncCommitteeUpdate {
+    let next_sync_committee_keys = map_public_keys(&update.next_sync_committee.pubkeys);
 
     SyncCommitteeUpdate {
         signature_slot: update.signature_slot,
@@ -224,9 +223,7 @@ pub fn sync_update_from_update(update: Update) -> SyncCommitteeUpdate {
         sync_aggregate: update.sync_aggregate,
         sync_committee_next_aggregate_pubkey: Some(update.next_sync_committee.aggregate_pubkey),
         sync_committee_signature: G2TypeInfo(signature).into(),
-        sync_committee_next_pub_keys: Some(Box::new(FixedArray(
-            next_sync_committee_keys.try_into().unwrap(),
-        ))),
+        sync_committee_next_pub_keys: Some(next_sync_committee_keys),
         sync_committee_next_branch: Some(
             update
                 .next_sync_committee_branch

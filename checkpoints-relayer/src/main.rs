@@ -22,7 +22,7 @@ mod replay_back;
 mod utils;
 
 const SIZE_CHANNEL: usize = 100_000;
-const SIZE_BATCH: u64 = 26 * SLOTS_PER_EPOCH;
+const SIZE_BATCH: u64 = 44 * SLOTS_PER_EPOCH;
 const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_FINALITY_REQUEST: u64 = 30;
 

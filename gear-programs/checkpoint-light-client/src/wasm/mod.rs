@@ -80,7 +80,11 @@ async fn init() {
             })
         },
 
-        Ok((finalized_header, sync_committee_next)) => panic!("Incorrect initial sync committee update ({}, {})", finalized_header.is_some(), sync_committee_next.is_some()),
+        Ok((finalized_header, sync_committee_next)) => panic!(
+            "Incorrect initial sync committee update ({}, {})",
+            finalized_header.is_some(),
+            sync_committee_next.is_some()
+        ),
     }
 }
 

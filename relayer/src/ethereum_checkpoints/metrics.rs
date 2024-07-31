@@ -1,6 +1,6 @@
 use super::*;
 use prometheus::{IntCounter, IntGauge};
-use utils_prometheus::{impl_metered_service, MetricsBuilder};
+use utils_prometheus::impl_metered_service;
 
 pub struct Message {
     pub slot: Slot,

@@ -1,4 +1,4 @@
-use crate::utils::{self, slots_batch, FinalityUpdateResponse};
+use super::utils::{self, slots_batch, FinalityUpdateResponse};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{

@@ -1964,29 +1964,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "checkpoints-relayer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-serialize 0.4.2",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
- "clap",
- "futures",
- "gclient",
- "hex",
- "log",
- "parity-scale-codec",
- "pretty_env_logger",
- "prometheus",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "tokio",
- "utils-prometheus",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8550,9 +8527,12 @@ name = "relayer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-serialize 0.4.2",
  "axum",
  "bridging_payment",
  "cgo_oligami",
+ "checkpoint_light_client",
+ "checkpoint_light_client-io",
  "clap",
  "dotenv",
  "ethereum-client",
@@ -8573,6 +8553,7 @@ dependencies = [
  "prometheus",
  "prover",
  "rand 0.8.5",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "thiserror",

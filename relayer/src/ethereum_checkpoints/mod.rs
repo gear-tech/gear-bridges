@@ -1,9 +1,9 @@
+use super::*;
 use checkpoint_light_client_io::{
     ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH},
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
 };
-use clap::Parser;
 use futures::{
     future::{self, Either},
     pin_mut,
@@ -11,7 +11,6 @@ use futures::{
 use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
 use metrics::Message as MetricMessage;
 use parity_scale_codec::Decode;
-use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use reqwest::Client;
 use tokio::{
     signal::unix::{self, SignalKind},
@@ -33,36 +32,6 @@ const SIZE_BATCH: u64 = 44 * SLOTS_PER_EPOCH;
 const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_FINALITY_REQUEST: u64 = 30;
 
-#[derive(Debug, Parser)]
-struct Args {
-    /// Specify ProgramId of the Checkpoint-light-client program
-    #[arg(long)]
-    program_id: String,
-
-    /// Specify an endpoint providing Beacon API
-    #[arg(long)]
-    beacon_endpoint: String,
-
-    /// Domain of the VARA RPC endpoint
-    #[arg(long, default_value = "ws://127.0.0.1")]
-    vara_domain: String,
-
-    /// Port of the VARA RPC endpoint
-    #[arg(long, default_value = "9944")]
-    vara_port: u16,
-
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, default_value = "//Alice")]
-    suri: String,
-
-    /// Address of the prometheus endpoint
-    #[arg(long = "prometheus-endpoint", default_value = "http://127.0.0.1:9090")]
-    endpoint_prometheus: String,
-}
-
 enum Status {
     Ok,
     NotActual,
@@ -73,13 +42,9 @@ enum Status {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    pretty_env_logger::formatted_builder()
-        .format_timestamp(Some(TimestampPrecision::Micros))
-        .parse_default_env()
-        .init();
-
+pub async fn relay(
+    args: RelayCheckpointsArgs,
+) {
     log::info!("Started");
 
     let Ok(mut signal_interrupt) = unix::signal(SignalKind::interrupt()) else {
@@ -87,14 +52,16 @@ async fn main() {
         return;
     };
 
-    let Args {
+    let RelayCheckpointsArgs {
         program_id,
         beacon_endpoint,
         vara_domain,
         vara_port,
         suri,
-        endpoint_prometheus,
-    } = Args::parse();
+        prometheus_args: PrometheusArgs {
+            endpoint: endpoint_prometheus,
+        },
+    } = args;
 
     let sender_metrics = metrics::spawn(endpoint_prometheus);
 

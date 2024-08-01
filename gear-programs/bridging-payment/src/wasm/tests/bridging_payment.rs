@@ -3,7 +3,7 @@ use sails_rs::{collections::HashMap, prelude::*};
 
 mod utils;
 use utils::{
-    BridgePayment, FTMockError, FTMockReturnsFalse, FTMockReturnsTrue, FTMockWrongReply,
+    BridgingPayment, FTMockError, FTMockReturnsFalse, FTMockReturnsTrue, FTMockWrongReply,
     GearBridgeBuiltinMock, Token, VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, FEE, TOKEN_ID,
 };
 

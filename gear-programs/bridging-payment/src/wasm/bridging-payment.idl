@@ -15,7 +15,7 @@ constructor {
   New : (init_config: InitConfig);
 };
 
-service BridgePayment {
+service BridgingPayment {
   ContinueTransaction : (msg_id: message_id) -> null;
   ReclaimFee : () -> null;
   RequestToGateway : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;

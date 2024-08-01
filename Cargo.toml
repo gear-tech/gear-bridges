@@ -91,7 +91,7 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-eth-bridge" }
+gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-bridge" }
 gstd = { version = "1.4.2", features = ["nightly"] }
 gtest = "1.4.2"
 gwasm-builder = { package = "gear-wasm-builder", version = "1.4.2" }
@@ -107,15 +107,15 @@ sails-idl-gen = "0.2.0"
 sails-client-gen = "0.2.0"
 sails-rs = "0.2.0"
 subxt = "0.32.1"
-sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
-sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
-sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
+sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
+sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 parity-scale-codec = { version = "3.6.4", default-features = false }
 trie-db = { version = "0.28.0", default-features = false }
-sp-trie = { version = "22.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
-sp-core = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+sp-trie = { version = "22.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
+sp-core = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 primitive-types = { version = "0.12.2", default-features = false }
-binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
+binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 
 # Alloy deps
 alloy = { git = "https://github.com/alloy-rs/alloy.git", package = "alloy", rev = "899b8b9", features = [

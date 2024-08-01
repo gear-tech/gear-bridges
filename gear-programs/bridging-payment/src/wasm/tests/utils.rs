@@ -186,12 +186,12 @@ create_ft_mock!(
 );
 
 // Smart contract functionality for Program
-pub trait BridgePayment {
+pub trait BridgingPayment {
     fn bridge_payment(system: &System) -> Program<'_>;
     create_function!(request_to_gateway, "RequestToGateway", amount: U256, receiver: H160, vara_token_id: ActorId);
 }
 
-impl BridgePayment for Program<'_> {
+impl BridgingPayment for Program<'_> {
     fn bridge_payment(system: &System) -> Program<'_> {
         let program = Program::current(&system);
         let init_config = InitConfig::new(
@@ -204,7 +204,7 @@ impl BridgePayment for Program<'_> {
         assert!(!result.main_failed());
         program
     }
-    implement_function!(request_to_gateway, "BridgePayment", "RequestToGateway", amount: U256, receiver: H160, vara_token_id: ActorId; true);
+    implement_function!(request_to_gateway, "BridgingPayment", "RequestToGateway", amount: U256, receiver: H160, vara_token_id: ActorId; true);
 }
 
 pub trait Token {

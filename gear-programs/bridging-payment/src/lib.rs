@@ -2,18 +2,18 @@
 
 use sails_rs::{gstd::GStdExecContext, program};
 pub mod services;
-use services::{BridgePayment, InitConfig};
+use services::{BridgingPayment, InitConfig};
 #[derive(Default)]
 pub struct Program;
 
 #[program]
 impl Program {
     pub fn new(init_config: InitConfig) -> Self {
-        BridgePayment::<GStdExecContext>::seed(init_config, GStdExecContext::new());
+        BridgingPayment::<GStdExecContext>::seed(init_config, GStdExecContext::new());
         Self
     }
 
-    pub fn bridge_payment(&self) -> BridgePayment<GStdExecContext> {
-        BridgePayment::new(GStdExecContext::new())
+    pub fn bridging_payment(&self) -> BridgingPayment<GStdExecContext> {
+        BridgingPayment::new(GStdExecContext::new())
     }
 }

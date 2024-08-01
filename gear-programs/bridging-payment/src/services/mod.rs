@@ -17,12 +17,12 @@ mod vft_gateway;
 mod vft_gateway_msg;
 use crate::event_or_panic_async;
 use vft_gateway_msg::send_message_to_gateway;
-pub struct BridgePayment<ExecContext> {
+pub struct BridgingPayment<ExecContext> {
     exec_context: ExecContext,
 }
 
 #[derive(Encode, Decode, TypeInfo)]
-pub enum BridgePaymentEvents {
+pub enum BridgingPaymentEvents {
     TeleportVaraToEth {
         nonce: U256,
         sender: ActorId,
@@ -32,12 +32,12 @@ pub enum BridgePaymentEvents {
     },
 }
 
-static mut DATA: Option<BridgePaymentData> = None;
+static mut DATA: Option<BridgingPaymentData> = None;
 static mut CONFIG: Option<Config> = None;
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
 #[derive(Debug)]
-pub struct BridgePaymentData {
+pub struct BridgingPaymentData {
     admin_address: ActorId,
     vft_gateway_address: ActorId,
 }
@@ -82,13 +82,13 @@ impl Config {
         }
     }
 }
-impl<T> BridgePayment<T>
+impl<T> BridgingPayment<T>
 where
     T: ExecContext,
 {
     pub fn seed(config: InitConfig, exec_context: T) {
         unsafe {
-            DATA = Some(BridgePaymentData {
+            DATA = Some(BridgingPaymentData {
                 admin_address: exec_context.actor_id(),
                 vft_gateway_address: config.vft_gateway_address,
             });
@@ -100,17 +100,17 @@ where
         Self { exec_context }
     }
 
-    fn data(&self) -> &BridgePaymentData {
+    fn data(&self) -> &BridgingPaymentData {
         unsafe {
             DATA.as_ref()
-                .expect("BridgePaymentData::seed() should be called")
+                .expect("BridgingPaymentData::seed() should be called")
         }
     }
 
-    fn data_mut(&mut self) -> &mut BridgePaymentData {
+    fn data_mut(&mut self) -> &mut BridgingPaymentData {
         unsafe {
             DATA.as_mut()
-                .expect("BridgePaymentData::seed() should be called")
+                .expect("BridgingPaymentData::seed() should be called")
         }
     }
 
@@ -118,7 +118,7 @@ where
         unsafe {
             CONFIG
                 .as_ref()
-                .expect("BridgePaymentData::seed() should be called")
+                .expect("BridgingPaymentData::seed() should be called")
         }
     }
 
@@ -126,13 +126,13 @@ where
         unsafe {
             CONFIG
                 .as_mut()
-                .expect("BridgePaymentData::seed() should be called")
+                .expect("BridgingPaymentData::seed() should be called")
         }
     }
 }
 
-#[service(events = BridgePaymentEvents)]
-impl<T> BridgePayment<T>
+#[service(events = BridgingPaymentEvents)]
+impl<T> BridgingPayment<T>
 where
     T: ExecContext,
 {
@@ -235,7 +235,7 @@ where
                     {
                         process_refund(sender, attached_value, config);
 
-                        Ok(BridgePaymentEvents::TeleportVaraToEth {
+                        Ok(BridgingPaymentEvents::TeleportVaraToEth {
                             nonce,
                             sender,
                             amount,
@@ -263,7 +263,7 @@ async fn handle_gateway_transaction(
     attached_value: u128,
     vft_gateway_address: ActorId,
     config: &Config,
-) -> Result<BridgePaymentEvents, Error> {
+) -> Result<BridgingPaymentEvents, Error> {
     let (nonce, eth_token_id) = send_message_to_gateway(
         vft_gateway_address,
         sender,
@@ -277,7 +277,7 @@ async fn handle_gateway_transaction(
 
     process_refund(sender, attached_value, config);
 
-    Ok(BridgePaymentEvents::TeleportVaraToEth {
+    Ok(BridgingPaymentEvents::TeleportVaraToEth {
         nonce,
         sender,
         amount,

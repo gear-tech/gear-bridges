@@ -1,5 +1,5 @@
 type InitConfig = struct {
-  receiver_contract_id: h160,
+  receiver_contract_address: h160,
   gear_bridge_builtin: actor_id,
   config: Config,
 };
@@ -35,6 +35,6 @@ service VftGateway {
   HandleInterruptedTransfer : (msg_id: message_id) -> result (u256, Error);
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
   TransferVaraToEth : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
-  UpdateReceiverContractId : (new_receiver_contract_id: h160) -> null;
+  UpdateReceiverContractAddress : (new_receiver_contract_address: h160) -> null;
 };
 

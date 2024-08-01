@@ -8,7 +8,7 @@ use sails_rs::prelude::*;
 #[macro_export]
 macro_rules! event_or_panic_async {
     ($self:expr, $expr:expr) => {{
-        let result: Result<BridgePaymentEvents, Error> = $expr().await;
+        let result: Result<BridgingPaymentEvents, Error> = $expr().await;
         match result {
             Ok(value) => {
                 if let Err(e) = $self.notify_on(value) {

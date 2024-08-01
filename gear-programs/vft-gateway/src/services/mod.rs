@@ -31,21 +31,21 @@ static mut MSG_TRACKER: Option<MessageTracker> = None;
 pub struct VftGatewayData {
     gear_bridge_builtin: ActorId,
     admin: ActorId,
-    receiver_contract_id: H160,
+    receiver_contract_address: H160,
     vara_to_eth_token_id: HashMap<ActorId, H160>,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
-    receiver_contract_id: H160,
+    receiver_contract_address: H160,
     gear_bridge_builtin: ActorId,
     config: Config,
 }
 
 impl InitConfig {
-    pub fn new(receiver_contract_id: H160, gear_bridge_builtin: ActorId, config: Config) -> Self {
+    pub fn new(receiver_contract_address: H160, gear_bridge_builtin: ActorId, config: Config) -> Self {
         Self {
-            receiver_contract_id,
+            receiver_contract_address,
             gear_bridge_builtin,
             config,
         }
@@ -86,7 +86,7 @@ where
         unsafe {
             DATA = Some(VftGatewayData {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                receiver_contract_id: config.receiver_contract_id,
+                receiver_contract_address: config.receiver_contract_address,
                 admin: exec_context.actor_id(),
                 ..Default::default()
             });
@@ -132,7 +132,7 @@ where
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
         }
-        self.data_mut().receiver_contract_id = new_receiver_contract_id;
+        self.data_mut().receiver_contract_address = new_receiver_contract_address;
     }
 
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {

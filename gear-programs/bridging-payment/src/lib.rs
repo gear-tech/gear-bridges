@@ -1,12 +1,12 @@
 #![no_std]
 
-use sails::gstd::{gprogram, GStdExecContext};
+use sails_rs::{gstd::GStdExecContext, program};
 pub mod services;
 use services::{BridgePayment, InitConfig};
 #[derive(Default)]
 pub struct Program;
 
-#[gprogram]
+#[program]
 impl Program {
     pub fn new(init_config: InitConfig) -> Self {
         BridgePayment::<GStdExecContext>::seed(init_config, GStdExecContext::new());

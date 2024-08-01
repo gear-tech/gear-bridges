@@ -1,16 +1,16 @@
 use collections::HashMap;
-use sails::{
-    gstd::{gservice, msg, ExecContext},
+use sails_rs::{
+    gstd::{msg, ExecContext},
     prelude::*,
 };
 
 mod bridge_builtin_operations;
 pub mod error;
-mod message_tracker;
-mod security_handlers;
-mod vft_master;
+mod msg_tracker;
+mod utils;
+mod vft;
 use error::Error;
-use message_tracker::{MessageStatus, MessageTracker, MsgData};
+use msg_tracker::{MessageStatus, MessageTracker};
 mod token_operations;
 pub struct VftGateway<ExecContext> {
     exec_context: ExecContext,
@@ -33,28 +33,20 @@ pub struct VftGatewayData {
     admin: ActorId,
     receiver_contract_id: H160,
     vara_to_eth_token_id: HashMap<ActorId, H160>,
-    bridge_payment_id: ActorId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
     receiver_contract_id: H160,
     gear_bridge_builtin: ActorId,
-    bridge_payment_id: ActorId,
     config: Config,
 }
 
 impl InitConfig {
-    pub fn new(
-        receiver_contract_id: H160,
-        gear_bridge_builtin: ActorId,
-        bridge_payment_id: ActorId,
-        config: Config,
-    ) -> Self {
+    pub fn new(receiver_contract_id: H160, gear_bridge_builtin: ActorId, config: Config) -> Self {
         Self {
             receiver_contract_id,
             gear_bridge_builtin,
-            bridge_payment_id,
             config,
         }
     }
@@ -96,7 +88,6 @@ where
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 receiver_contract_id: config.receiver_contract_id,
                 admin: exec_context.actor_id(),
-                bridge_payment_id: config.bridge_payment_id,
                 ..Default::default()
             });
             CONFIG = Some(config.config);
@@ -132,7 +123,7 @@ where
     }
 }
 
-#[gservice]
+#[service]
 impl<T> VftGateway<T>
 where
     T: ExecContext,
@@ -155,32 +146,21 @@ where
     pub async fn transfer_vara_to_eth(
         &mut self,
         vara_token_id: ActorId,
-        sender: ActorId,
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
         let data = self.data();
-        if data.bridge_payment_id != self.exec_context.actor_id() {
-            panic!("Only bridge payment contract can send reuests to transfer tokens")
-        }
+        let sender = self.exec_context.actor_id();
+        let msg_id = gstd::msg::id();
+
         let eth_token_id = data
             .vara_to_eth_token_id
             .get(&vara_token_id)
             .expect("No corresponding Ethereum address for the specified Vara token address");
         let config = self.config();
-        let msg_id = msg::id();
-        let msg_tracker = msg_tracker_mut();
 
-        gstd::critical::set_hook(move || {
-            security_handlers::panic_handler(
-                msg_tracker_mut(),
-                MsgData::new(sender, amount, receiver, vara_token_id),
-            );
-        });
-
-        token_operations::burn_tokens(vara_token_id, sender, amount, config, msg_id, msg_tracker)
+        token_operations::burn_tokens(vara_token_id, sender, receiver, amount, config, msg_id)
             .await?;
-
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
             data.gear_bridge_builtin,
             receiver.into(),
@@ -188,93 +168,74 @@ where
             amount,
             config,
             msg_id,
-            msg_tracker,
         )
         .await
         {
             Ok(nonce) => nonce,
             Err(_) => {
                 // In case of failure, mint tokens back to the sender
-                token_operations::mint_tokens(vara_token_id, sender, amount, config).await?;
-                // Return an error indicating the tokens were refunded
-                msg_tracker.remove_message_status(&msg_id);
+                token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
+                    .await?;
                 return Err(Error::TokensRefundedError);
             }
         };
 
-        msg_tracker.remove_message_status(&msg_id);
-
         Ok((nonce, *eth_token_id))
     }
 
-    pub async fn handle_interrupted_transfer(
-        &mut self,
-        interrupted_msg_id: MessageId,
-    ) -> Result<U256, Error> {
+    pub async fn handle_interrupted_transfer(&mut self, msg_id: MessageId) -> Result<U256, Error> {
         let data = self.data();
 
         let config = self.config();
-        let msg_id = msg::id();
         let msg_tracker = msg_tracker_mut();
 
-        let (msg_status, msg_data) = msg_tracker
-            .remove_pending_message(&interrupted_msg_id)
-            .expect("Pending message doesn't exist");
-        let (sender, amount, receiver, vara_token_id) = msg_data.data();
+        let msg_info = msg_tracker
+            .get_message_info(&msg_id)
+            .expect("Unexpected: msg status does not exist");
+
+        let (sender, amount, receiver, vara_token_id) = msg_info.details.data();
         let eth_token_id = data
             .vara_to_eth_token_id
             .get(&vara_token_id)
             .expect("No corresponding Ethereum address for the specified Vara token address");
-        gstd::critical::set_hook(move || {
-            security_handlers::panic_handler(
-                msg_tracker_mut(),
-                MsgData::new(sender, amount, receiver, vara_token_id),
-            );
-        });
 
-        let nonce = match msg_status {
-            MessageStatus::TokenBurnCompleted(true)
-            | MessageStatus::SendingMessageToBridgeBuiltin(_) => {
-                let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
+        match msg_info.status {
+            MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
+                match bridge_builtin_operations::send_message_to_bridge_builtin(
                     data.gear_bridge_builtin,
                     receiver.into(),
                     *eth_token_id,
                     amount,
                     config,
                     msg_id,
-                    msg_tracker,
                 )
                 .await
                 {
-                    Ok(nonce) => nonce,
+                    Ok(nonce) => Ok(nonce),
                     Err(_) => {
                         // In case of failure, mint tokens back to the sender
-                        token_operations::mint_tokens(vara_token_id, sender, amount, config)
-                            .await?;
-                        // Return an error indicating the tokens were refunded
-                        return Err(Error::TokensRefundedError);
+                        token_operations::mint_tokens(
+                            vara_token_id,
+                            sender,
+                            amount,
+                            config,
+                            msg_id,
+                        )
+                        .await?;
+                        Err(Error::TokensRefundedError)
                     }
-                };
-
-                nonce
+                }
             }
-            MessageStatus::BridgeResponseReceived(true, nonce) => nonce,
-            MessageStatus::BridgeResponseReceived(false, _)
-            | MessageStatus::SendingMessageToMintTokens(_)
-            | MessageStatus::TokenMintCompleted(false) => {
-                // In case of failure, mint tokens back to the sender
-                token_operations::mint_tokens(vara_token_id, sender, amount, config).await?;
-                // Return an error indicating the tokens were refunded
-                msg_tracker.remove_message_status(&msg_id);
+            MessageStatus::BridgeResponseReceived(Some(nonce)) => Ok(nonce),
+            MessageStatus::MintTokensStep => {
+                token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
+                    .await?;
                 return Err(Error::TokensRefundedError);
             }
-            MessageStatus::TokenMintCompleted(true) => {
-                return Err(Error::TokensRefundedError);
+            _ => {
+                panic!("Unexpected status or transaction completed.")
             }
-            _ => unreachable!(),
-        };
-        msg_tracker.remove_message_status(&msg_id);
-        Ok(nonce)
+        }
     }
 }
 

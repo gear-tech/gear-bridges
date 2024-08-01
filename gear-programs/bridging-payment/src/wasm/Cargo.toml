@@ -11,5 +11,14 @@ gwasm-builder.workspace = true
 sails-idl-gen.workspace = true
 bridging_payment.workspace = true
 
+[dev-dependencies]
+gtest.workspace = true
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/"}
+vft_gateway_wasm.workspace = true
+vft-gateway.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+sails-rs.workspace = true
+
 [lib]
 crate-type = ["rlib"]

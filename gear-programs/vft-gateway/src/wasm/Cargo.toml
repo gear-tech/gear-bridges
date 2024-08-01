@@ -10,3 +10,11 @@ vft-gateway.workspace = true
 gwasm-builder.workspace = true
 sails-idl-gen.workspace = true
 vft-gateway.workspace = true
+
+[dev-dependencies]
+gtest.workspace = true
+vft-gateway.workspace = true
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/"}
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+sails-rs.workspace = true

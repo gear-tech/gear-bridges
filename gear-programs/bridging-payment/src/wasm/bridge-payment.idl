@@ -1,6 +1,6 @@
 type InitConfig = struct {
   admin_address: actor_id,
-  grc20_gateway_address: actor_id,
+  vft_gateway_address: actor_id,
   config: Config,
 };
 
@@ -8,6 +8,7 @@ type Config = struct {
   fee: u128,
   gas_for_reply_deposit: u64,
   gas_to_send_request_to_gateway: u64,
+  gas_to_transfer_tokens: u64,
 };
 
 constructor {
@@ -15,6 +16,7 @@ constructor {
 };
 
 service BridgePayment {
+  ContinueTransaction : (msg_id: message_id) -> null;
   ReclaimFee : () -> null;
   RequestToGateway : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
   SetFee : (fee: u128) -> null;

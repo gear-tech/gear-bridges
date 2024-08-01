@@ -1,7 +1,6 @@
 type InitConfig = struct {
   receiver_contract_id: h160,
   gear_bridge_builtin: actor_id,
-  bridge_payment_id: actor_id,
   config: Config,
 };
 
@@ -14,15 +13,14 @@ type Config = struct {
 };
 
 type Error = enum {
-  BurnTokensSendError,
-  BurnTokensReplyError,
+  SendError,
+  ReplyError,
   BurnTokensDecodeError,
   ErrorDuringTokensBurn,
   RequestToBuiltinSendError,
   RequestToBuiltinReplyError,
+  BuiltinDecodeError,
   PayloadSizeError,
-  MintTokensSendError,
-  MintTokensReplyError,
   MintTokensDecodeError,
   ReplyTimeoutError,
   TokensRefundedError,
@@ -34,9 +32,9 @@ constructor {
 };
 
 service VftGateway {
-  HandleInterruptedTransfer : (interrupted_msg_id: message_id) -> result (u256, Error);
+  HandleInterruptedTransfer : (msg_id: message_id) -> result (u256, Error);
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
-  TransferVaraToEth : (vara_token_id: actor_id, sender: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  TransferVaraToEth : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   UpdateReceiverContractId : (new_receiver_contract_id: h160) -> null;
 };
 

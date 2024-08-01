@@ -1,6 +1,6 @@
-use super::{Config, Error, MessageStatus, MessageTracker};
+use super::{msg_tracker_mut, utils, Config, Error, MessageStatus, MessageTracker};
 use gstd::msg;
-use sails::prelude::*;
+use sails_rs::prelude::*;
 
 pub async fn send_message_to_bridge_builtin(
     gear_bridge_builtin: ActorId,
@@ -9,8 +9,9 @@ pub async fn send_message_to_bridge_builtin(
     amount: U256,
     config: &Config,
     msg_id: MessageId,
-    msg_tracker: &mut MessageTracker,
 ) -> Result<U256, Error> {
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
+
     let payload_bytes = Payload {
         receiver,
         token_id,
@@ -18,37 +19,31 @@ pub async fn send_message_to_bridge_builtin(
     }
     .pack();
 
-    let request = gbuiltin_bridge::Request::SendMessage {
+    let bytes = gbuiltin_bridge::Request::SendMessage {
         dest: token_id,
         payload: payload_bytes
             .try_into()
             .map_err(|_| Error::PayloadSizeError)?,
-    };
+    }
+    .encode();
 
-    let msg_future = msg::send_with_gas_for_reply_as(
+    utils::set_critical_hook(msg_id);
+    let reply_bytes = utils::send_message_with_gas_for_reply(
         gear_bridge_builtin.into(),
-        request,
+        bytes,
         config.gas_to_send_request_to_builtin,
-        0,
         config.gas_for_reply_deposit,
+        config.reply_timeout,
     )
-    .map_err(|_| Error::RequestToBuiltinSendError)?
-    .up_to(Some(config.reply_timeout))
-    .map_err(|_| Error::ReplyTimeoutError)?;
+    .await?;
 
-    let waiting_reply_to = msg_future.waiting_reply_to;
-    msg_tracker.track_waiting_reply(waiting_reply_to, msg_id);
-    msg_tracker.update_message_status(
-        msg_id,
-        MessageStatus::SendingMessageToBridgeBuiltin(waiting_reply_to),
-    );
-
-    let reply: gbuiltin_bridge::Response = msg_future
-        .await
-        .map_err(|_| Error::RequestToBuiltinReplyError)?;
-
+    let reply = gbuiltin_bridge::Response::decode(&mut reply_bytes.as_slice())
+        .map_err(|_| Error::BuiltinDecodeError)?;
     match reply {
-        gbuiltin_bridge::Response::MessageSent { nonce, hash: _ } => Ok(nonce),
+        gbuiltin_bridge::Response::MessageSent { nonce, hash: _ } => {
+            msg_tracker_mut().remove_message_info(&msg_id);
+            Ok(nonce)
+        }
         _ => Err(Error::RequestToBuiltinReplyError),
     }
 }

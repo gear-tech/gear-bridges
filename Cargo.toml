@@ -78,9 +78,7 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
 reqwest = "0.11.24"
-sails-idl-gen = { git = "https://github.com/gear-tech/sails" }
-sails-client-gen = { git = "https://github.com/gear-tech/sails" }
-sails = { git = "https://github.com/gear-tech/sails" }
+
 scale-info = { version = "2.10", default-features = false }
 serde = { version = "1.0", features = ["alloc", "derive"] }
 serde_json = "1.0"
@@ -95,6 +93,7 @@ unroll = "0.1.5"
 # Gear/Substrate deps
 gbuiltin-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-pallet-gear-eth-bridge" }
 gstd = { version = "1.4.2", features = ["nightly"] }
+gtest = "1.4.2"
 gwasm-builder = { package = "gear-wasm-builder", version = "1.4.2" }
 
 gear-wasm-builder = { version = "1.4.1", default-features = false }
@@ -104,6 +103,9 @@ gear-core = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", branch = "dn-pallet-gear-eth-bridge", default-features = false, features = [
     "std",
 ] }
+sails-idl-gen = "0.2.0"
+sails-client-gen = "0.2.0"
+sails-rs = "0.2.0"
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }
 sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.3.0", default-features = false }

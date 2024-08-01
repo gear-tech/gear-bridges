@@ -149,11 +149,9 @@ impl EventListener {
 
                 for message in messages {
                     let user_reply = BridgePaymentEvents::decode(&mut &message.payload[..])?;
-                     let BridgePaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+                    let BridgePaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
 
-                    sender.send(BlockEvent::MessagePaid {
-                        nonce,
-                    })?;
+                    sender.send(BlockEvent::MessagePaid { nonce })?;
                 }
             }
         }

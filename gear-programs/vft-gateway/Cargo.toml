@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-sails.workspace = true
+sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 gstd.workspace = true
@@ -20,4 +20,4 @@ tokio.workspace = true
 blake2.workspace = true
 gear-core.workspace = true
 primitive-types.workspace = true
-vft_master_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "lm-vft-master"}
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/" }

@@ -38,6 +38,7 @@ struct Cli {
     command: CliCommands,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Subcommand)]
 enum CliCommands {
     /// Start service constantly relaying messages to ethereum

@@ -138,7 +138,7 @@ pub async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyRes
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn get_bootstrap(
     client: &Client,
     rpc_url: &str,

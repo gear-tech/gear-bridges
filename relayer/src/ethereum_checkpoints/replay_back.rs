@@ -12,6 +12,7 @@ pub async fn execute(
     client: &GearApi,
     listener: &mut EventListener,
     program_id: [u8; 32],
+    gas_limit: u64,
     replayed_slot: Option<Slot>,
     checkpoint: (Slot, Hash256),
     sync_update: SyncCommitteeUpdate,
@@ -32,6 +33,7 @@ pub async fn execute(
             client,
             listener,
             program_id,
+            gas_limit,
             slots_batch_iter,
         )
         .await;
@@ -84,6 +86,7 @@ pub async fn execute(
             client,
             listener,
             program_id,
+            gas_limit,
             slots_batch_iter.next(),
             sync_update,
         )
@@ -99,6 +102,7 @@ pub async fn execute(
             client,
             listener,
             program_id,
+            gas_limit,
             slots_batch_iter,
         )
         .await
@@ -125,6 +129,7 @@ pub async fn execute(
         client,
         listener,
         program_id,
+        gas_limit,
         slots_batch_iter.next(),
         sync_update,
     )
@@ -140,6 +145,7 @@ pub async fn execute(
         client,
         listener,
         program_id,
+        gas_limit,
         slots_batch_iter,
     )
     .await;
@@ -153,6 +159,7 @@ async fn replay_back_slots(
     client: &GearApi,
     listener: &mut EventListener,
     program_id: [u8; 32],
+    gas_limit: u64,
     slots_batch_iter: SlotsBatchIter,
 ) -> Option<()> {
     for (slot_start, slot_end) in slots_batch_iter {
@@ -164,6 +171,7 @@ async fn replay_back_slots(
             program_id,
             slot_start,
             slot_end,
+            gas_limit,
         )
         .await?;
     }
@@ -171,6 +179,7 @@ async fn replay_back_slots(
     Some(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_inner(
     client_http: &Client,
     beacon_endpoint: &str,
@@ -179,13 +188,14 @@ async fn replay_back_slots_inner(
     program_id: [u8; 32],
     slot_start: Slot,
     slot_end: Slot,
+    gas_limit: u64,
 ) -> Option<()> {
     let payload = Handle::ReplayBack(
         request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
     );
 
     let (message_id, _) = client
-        .send_message(program_id.into(), payload, 700_000_000_000, 0)
+        .send_message(program_id.into(), payload, gas_limit, 0)
         .await
         .map_err(|e| log::error!("Failed to send ReplayBack message: {e:?}"))
         .ok()?;
@@ -211,12 +221,14 @@ async fn replay_back_slots_inner(
     .then_some(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_start(
     client_http: &Client,
     beacon_endpoint: &str,
     client: &GearApi,
     listener: &mut EventListener,
     program_id: [u8; 32],
+    gas_limit: u64,
     slots: Option<(Slot, Slot)>,
     sync_update: SyncCommitteeUpdate,
 ) -> Option<()> {
@@ -230,7 +242,7 @@ async fn replay_back_slots_start(
     };
 
     let (message_id, _) = client
-        .send_message(program_id.into(), payload, 700_000_000_000, 0)
+        .send_message(program_id.into(), payload, gas_limit, 0)
         .await
         .map_err(|e| log::error!("Failed to send ReplayBackStart message: {e:?}"))
         .ok()?;

@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::{
     ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH},
     tree_hash::Hash256,
@@ -29,7 +30,7 @@ mod utils;
 const SIZE_CHANNEL: usize = 100_000;
 const SIZE_BATCH: u64 = 40 * SLOTS_PER_EPOCH;
 const COUNT_FAILURE: usize = 3;
-const DELAY_SECS_FINALITY_REQUEST: u64 = 30;
+const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 
 pub async fn relay(args: RelayCheckpointsArgs) {
     log::info!("Started");
@@ -60,40 +61,24 @@ pub async fn relay(args: RelayCheckpointsArgs) {
     let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
     let client_http = Client::new();
 
-    sync_update::spawn_receiver(
-        client_http.clone(),
-        beacon_endpoint.clone(),
-        sender,
-        Duration::from_secs(DELAY_SECS_FINALITY_REQUEST),
-    );
+    sync_update::spawn_receiver(client_http.clone(), beacon_endpoint.clone(), sender);
 
-    let client = match GearApi::init_with(WSAddress::new(vara_domain, vara_port), suri).await {
-        Ok(client) => client,
-        Err(e) => {
-            log::error!("Unable to create GearApi client: {e:?}");
-            return;
-        }
-    };
+    let client = GearApi::init_with(WSAddress::new(vara_domain, vara_port), suri)
+        .await
+        .expect("GearApi client should be created");
 
-    let gas_limit_block = match client.block_gas_limit() {
-        Ok(gas_limit_block) => gas_limit_block,
-        Err(e) => {
-            log::error!("Unable to determine block gas limit: {e:?}");
-            return;
-        }
-    };
+    let gas_limit_block = client
+        .block_gas_limit()
+        .expect("Block gas limit should be determined");
 
     // use 95% of block gas limit for all extrinsics
     let gas_limit = gas_limit_block / 100 * 95;
     log::info!("Gas limit for extrinsics: {gas_limit}");
 
-    let mut listener = match client.subscribe().await {
-        Ok(listener) => listener,
-        Err(e) => {
-            log::error!("Unable to create events listener: {e:?}");
-            return;
-        }
-    };
+    let mut listener = client
+        .subscribe()
+        .await
+        .expect("Events listener should be created");
 
     let sync_update = receiver
         .recv()
@@ -119,7 +104,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
             replayed_slot,
             checkpoint,
         })) => {
-            replay_back::execute(
+            if let Err(e) = replay_back::execute(
                 &client_http,
                 &beacon_endpoint,
                 &client,
@@ -130,8 +115,13 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 checkpoint,
                 sync_update,
             )
-            .await;
+            .await
+            {
+                log::error!("{e:?}");
+            }
+
             log::info!("Exiting");
+
             return;
         }
         Ok(Ok(_) | Err(sync_update::Error::NotActual)) => (),

@@ -1,8 +1,5 @@
 use super::*;
-use checkpoint_light_client_io::{
-    replay_back::{Status, StatusStart},
-    BeaconBlockHeader,
-};
+use checkpoint_light_client_io::BeaconBlockHeader;
 use utils::ErrorNotFound;
 
 #[allow(clippy::too_many_arguments)]
@@ -16,16 +13,13 @@ pub async fn execute(
     replayed_slot: Option<Slot>,
     checkpoint: (Slot, Hash256),
     sync_update: SyncCommitteeUpdate,
-) {
+) -> AnyResult<()> {
     log::info!("Replaying back started");
 
     let (mut slot_start, _) = checkpoint;
     if let Some(slot_end) = replayed_slot {
-        let Some(slots_batch_iter) = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH) else {
-            log::error!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}.");
-
-            return;
-        };
+        let slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH)
+            .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}."))?;
 
         replay_back_slots(
             client_http,
@@ -36,51 +30,38 @@ pub async fn execute(
             gas_limit,
             slots_batch_iter,
         )
-        .await;
+        .await?;
 
         log::info!("The ongoing replaying back finished");
 
-        return;
+        return Ok(());
     }
 
     let period_start = 1 + eth_utils::calculate_period(slot_start);
-    let updates = match utils::get_updates(
+    let updates = utils::get_updates(
         client_http,
         beacon_endpoint,
         period_start,
         MAX_REQUEST_LIGHT_CLIENT_UPDATES,
     )
     .await
-    {
-        Ok(updates) => updates,
-        Err(e) => {
-            log::error!("Failed to get updates for period {period_start}: {e:?}");
-
-            return;
-        }
-    };
+    .map_err(|e| anyhow!("Failed to get updates for period {period_start}: {e:?}"))?;
 
     let slot_last = sync_update.finalized_header.slot;
     for update in updates {
         let slot_end = update.data.finalized_header.slot;
-        let Some(mut slots_batch_iter) = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH)
-        else {
-            log::error!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end (update) = {slot_end}.");
-
-            return;
-        };
+        let mut slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH)
+            .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}."))?;
 
         slot_start = slot_end;
 
-        let Ok(signature) = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
             &update.data.sync_aggregate.sync_committee_signature.0 .0[..],
-        ) else {
-            log::error!("Failed to deserialize point on G2 (replay back)");
-            return;
-        };
+        )
+        .map_err(|e| anyhow!("Failed to deserialize point on G2 (replay back): {e:?}"))?;
 
         let sync_update = utils::sync_update_from_update(signature, update.data);
-        if replay_back_slots_start(
+        replay_back_slots_start(
             client_http,
             beacon_endpoint,
             client,
@@ -90,13 +71,9 @@ pub async fn execute(
             slots_batch_iter.next(),
             sync_update,
         )
-        .await
-        .is_none()
-        {
-            return;
-        }
+        .await?;
 
-        if replay_back_slots(
+        replay_back_slots(
             client_http,
             beacon_endpoint,
             client,
@@ -105,25 +82,18 @@ pub async fn execute(
             gas_limit,
             slots_batch_iter,
         )
-        .await
-        .is_none()
-        {
-            return;
-        }
+        .await?;
 
         if slot_end == slot_last {
             // the provided sync_update is a sync committee update
-            return;
+            return Ok(());
         }
     }
 
-    let Some(mut slots_batch_iter) = SlotsBatchIter::new(slot_start, slot_last, SIZE_BATCH) else {
-        log::error!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_last = {slot_last}.");
+    let mut slots_batch_iter = SlotsBatchIter::new(slot_start, slot_last, SIZE_BATCH)
+        .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_last = {slot_last}."))?;
 
-        return;
-    };
-
-    if replay_back_slots_start(
+    replay_back_slots_start(
         client_http,
         beacon_endpoint,
         client,
@@ -133,11 +103,7 @@ pub async fn execute(
         slots_batch_iter.next(),
         sync_update,
     )
-    .await
-    .is_none()
-    {
-        return;
-    }
+    .await?;
 
     replay_back_slots(
         client_http,
@@ -148,9 +114,11 @@ pub async fn execute(
         gas_limit,
         slots_batch_iter,
     )
-    .await;
+    .await?;
 
     log::info!("Replaying back finished");
+
+    Ok(())
 }
 
 async fn replay_back_slots(
@@ -161,7 +129,7 @@ async fn replay_back_slots(
     program_id: [u8; 32],
     gas_limit: u64,
     slots_batch_iter: SlotsBatchIter,
-) -> Option<()> {
+) -> AnyResult<()> {
     for (slot_start, slot_end) in slots_batch_iter {
         replay_back_slots_inner(
             client_http,
@@ -176,7 +144,7 @@ async fn replay_back_slots(
         .await?;
     }
 
-    Some(())
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -189,7 +157,7 @@ async fn replay_back_slots_inner(
     slot_start: Slot,
     slot_end: Slot,
     gas_limit: u64,
-) -> Option<()> {
+) -> AnyResult<()> {
     let payload = Handle::ReplayBack(
         request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
     );
@@ -197,28 +165,24 @@ async fn replay_back_slots_inner(
     let (message_id, _) = client
         .send_message(program_id.into(), payload, gas_limit, 0)
         .await
-        .map_err(|e| log::error!("Failed to send ReplayBack message: {e:?}"))
-        .ok()?;
+        .map_err(|e| anyhow!("Failed to send ReplayBack message: {e:?}"))?;
 
     let (_message_id, payload, _value) = listener
         .reply_bytes_on(message_id)
         .await
-        .map_err(|e| log::error!("Failed to get reply to ReplayBack message: {e:?}"))
-        .ok()?;
-    let payload = payload
-        .map_err(|e| log::error!("Failed to get replay payload to ReplayBack: {e:?}"))
-        .ok()?;
+        .map_err(|e| anyhow!("Failed to get reply to ReplayBack message: {e:?}"))?;
+    let payload =
+        payload.map_err(|e| anyhow!("Failed to get replay payload to ReplayBack: {e:?}"))?;
     let result_decoded = HandleResult::decode(&mut &payload[..])
-        .map_err(|e| log::error!("Failed to decode HandleResult of ReplayBack: {e:?}"))
-        .ok()?;
+        .map_err(|e| anyhow!("Failed to decode HandleResult of ReplayBack: {e:?}"))?;
 
     log::debug!("replay_back_slots_inner; result_decoded = {result_decoded:?}");
 
-    matches!(
-        result_decoded,
-        HandleResult::ReplayBack(Some(Status::InProcess | Status::Finished))
-    )
-    .then_some(())
+    match result_decoded {
+        HandleResult::ReplayBack(Some(_)) => Ok(()),
+        HandleResult::ReplayBack(None) => Err(anyhow!("Replaying back wasn't started")),
+        _ => Err(anyhow!("Wrong handle result to ReplayBack")),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -231,9 +195,9 @@ async fn replay_back_slots_start(
     gas_limit: u64,
     slots: Option<(Slot, Slot)>,
     sync_update: SyncCommitteeUpdate,
-) -> Option<()> {
+) -> AnyResult<()> {
     let Some((slot_start, slot_end)) = slots else {
-        return Some(());
+        return Ok(());
     };
 
     let payload = Handle::ReplayBackStart {
@@ -244,36 +208,32 @@ async fn replay_back_slots_start(
     let (message_id, _) = client
         .send_message(program_id.into(), payload, gas_limit, 0)
         .await
-        .map_err(|e| log::error!("Failed to send ReplayBackStart message: {e:?}"))
-        .ok()?;
+        .map_err(|e| anyhow!("Failed to send ReplayBackStart message: {e:?}"))?;
 
     let (_message_id, payload, _value) = listener
         .reply_bytes_on(message_id)
         .await
-        .map_err(|e| log::error!("Failed to get reply to ReplayBackStart message: {e:?}"))
-        .ok()?;
-    let payload = payload
-        .map_err(|e| log::error!("Failed to get replay payload to ReplayBackStart: {e:?}"))
-        .ok()?;
+        .map_err(|e| anyhow!("Failed to get reply to ReplayBackStart message: {e:?}"))?;
+    let payload =
+        payload.map_err(|e| anyhow!("Failed to get replay payload to ReplayBackStart: {e:?}"))?;
     let result_decoded = HandleResult::decode(&mut &payload[..])
-        .map_err(|e| log::error!("Failed to decode HandleResult of ReplayBackStart: {e:?}"))
-        .ok()?;
+        .map_err(|e| anyhow!("Failed to decode HandleResult of ReplayBackStart: {e:?}"))?;
 
     log::debug!("replay_back_slots_start; result_decoded = {result_decoded:?}");
 
-    matches!(
-        result_decoded,
-        HandleResult::ReplayBackStart(Ok(StatusStart::InProgress | StatusStart::Finished))
-    )
-    .then_some(())
+    match result_decoded {
+        HandleResult::ReplayBackStart(Ok(_)) => Ok(()),
+        HandleResult::ReplayBackStart(Err(e)) => Err(anyhow!("ReplayBackStart failed: {e:?}")),
+        _ => Err(anyhow!("Wrong handle result to ReplayBackStart")),
+    }
 }
 
-pub async fn request_headers(
+async fn request_headers(
     client_http: &Client,
     beacon_endpoint: &str,
     slot_start: Slot,
     slot_end: Slot,
-) -> Option<Vec<BeaconBlockHeader>> {
+) -> AnyResult<Vec<BeaconBlockHeader>> {
     let batch_size = (slot_end - slot_start) as usize;
     let mut requests_headers = Vec::with_capacity(batch_size);
     for i in slot_start..slot_end {
@@ -286,7 +246,6 @@ pub async fn request_headers(
         .filter(|maybe_header| !matches!(maybe_header, Err(e) if e.downcast_ref::<ErrorNotFound>().is_some()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
-            log::error!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}")
+            anyhow!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}")
         })
-        .ok()
 }

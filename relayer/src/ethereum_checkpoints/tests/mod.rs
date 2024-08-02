@@ -15,6 +15,9 @@ use std::env;
 use tokio::time::{self, Duration};
 
 const RPC_URL: &str = "http://127.0.0.1:5052";
+const NETWORK_MAINNET: &str = "Mainnet";
+const NETWORK_HOLESKY: &str = "Holesky";
+const NETWORK_SEPOLIA: &str = "";
 
 const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
     include_bytes!("./sepolia-finality-update-5_254_112.json");
@@ -61,6 +64,77 @@ async fn upload_program(
     Ok(program_id)
 }
 
+#[ignore]
+#[tokio::test]
+async fn init() -> Result<()> {
+    let client_http = Client::new();
+
+    let rpc_url = env::var("RPC_URL").unwrap_or(RPC_URL.into());
+
+    // use the latest finality header as a checkpoint for bootstrapping
+    let finality_update = utils::get_finality_update(&client_http, &rpc_url).await?;
+    let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
+    let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
+
+    println!(
+        "finality_update slot = {}, period = {}",
+        finality_update.finalized_header.slot, current_period
+    );
+
+    let update = match updates.pop() {
+        Some(update) if updates.is_empty() => update.data,
+        _ => unreachable!("Requested single update"),
+    };
+
+    let checkpoint = update.finalized_header.tree_hash_root();
+    let checkpoint_hex = hex::encode(checkpoint);
+
+    println!(
+        "checkpoint slot = {}, hash = {}",
+        update.finalized_header.slot, checkpoint_hex
+    );
+
+    let bootstrap = utils::get_bootstrap(&client_http, &rpc_url, &checkpoint_hex).await?;
+
+    let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
+        &update.sync_aggregate.sync_committee_signature.0 .0[..],
+    )
+    .unwrap();
+    let sync_update = utils::sync_update_from_update(signature, update);
+
+    println!("bootstrap slot = {}", bootstrap.header.slot);
+
+    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
+    let network = match env::var("NETWORK") {
+        Ok(network) if network == NETWORK_HOLESKY => Network::Holesky,
+        Ok(network) if network == NETWORK_MAINNET => Network::Mainnet,
+        Ok(network) if network == NETWORK_SEPOLIA => Network::Sepolia,
+        Ok(network) => panic!("Unknown network: {network}"),
+        Err(e) => panic!("Failed to read environment variable: {e:?}"),
+    };
+    let init = Init {
+        network,
+        sync_committee_current_pub_keys: pub_keys,
+        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
+        sync_committee_current_branch: bootstrap
+            .current_sync_committee_branch
+            .into_iter()
+            .map(|BytesFixed(bytes)| bytes.0)
+            .collect(),
+        update: sync_update,
+    };
+
+    let client = GearApi::dev().await?;
+    let mut listener = client.subscribe().await?;
+
+    let program_id = upload_program(&client, &mut listener, init).await?;
+
+    println!("program_id = {:?}", hex::encode(program_id));
+
+    Ok(())
+}
+
+#[ignore]
 #[tokio::test]
 async fn init_and_updating() -> Result<()> {
     let client_http = Client::new();
@@ -102,9 +176,11 @@ async fn init_and_updating() -> Result<()> {
 
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let network = match env::var("NETWORK") {
-        Ok(network) if network == "Holesky" => Network::Holesky,
-        Ok(network) if network == "Mainnet" => Network::Mainnet,
-        _ => Network::Sepolia,
+        Ok(network) if network == NETWORK_HOLESKY => Network::Holesky,
+        Ok(network) if network == NETWORK_MAINNET => Network::Mainnet,
+        Ok(network) if network == NETWORK_SEPOLIA => Network::Sepolia,
+        Ok(network) => panic!("Unknown network: {network}"),
+        Err(e) => panic!("Failed to read environment variable: {e:?}"),
     };
     let init = Init {
         network,
@@ -118,7 +194,6 @@ async fn init_and_updating() -> Result<()> {
         update: sync_update,
     };
 
-    // let client = GearApi::dev_from_path("../target/release/gear").await?;
     let client = GearApi::dev().await?;
     let mut listener = client.subscribe().await?;
 
@@ -128,10 +203,6 @@ async fn init_and_updating() -> Result<()> {
 
     println!();
     println!();
-
-    if env::var("UPDATING").is_err() {
-        return Ok(());
-    }
 
     for _ in 0..30 {
         let update = utils::get_finality_update(&client_http, &rpc_url).await?;
@@ -210,6 +281,7 @@ async fn init_and_updating() -> Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test]
 async fn replaying_back() -> Result<()> {
     let client_http = Client::new();
@@ -262,7 +334,6 @@ async fn replaying_back() -> Result<()> {
         update: sync_update,
     };
 
-    // let client = GearApi::dev_from_path("../target/release/gear").await?;
     let client = GearApi::dev().await?;
     let mut listener = client.subscribe().await?;
 
@@ -354,6 +425,7 @@ async fn replaying_back() -> Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test]
 async fn sync_update_requires_replaying_back() -> Result<()> {
     let client_http = Client::new();

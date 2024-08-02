@@ -131,26 +131,26 @@ struct ProofStorageArgs {
 #[derive(Args)]
 struct RelayCheckpointsArgs {
     /// Specify ProgramId of the Checkpoint-light-client program
-    #[arg(long)]
+    #[arg(long, env = "PROGRAM_ID")]
     program_id: String,
 
     /// Specify an endpoint providing Beacon API
-    #[arg(long)]
+    #[arg(long, env = "BEACON_ENDPOINT")]
     beacon_endpoint: String,
 
     /// Domain of the VARA RPC endpoint
-    #[arg(long, default_value = "ws://127.0.0.1")]
+    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
     vara_domain: String,
 
     /// Port of the VARA RPC endpoint
-    #[arg(long, default_value = "9944")]
+    #[arg(long, default_value = "9944", env = "VARA_PORT")]
     vara_port: u16,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
     /// etc.). The password for URI should be specified in the same `suri`,
     /// separated by the ':' char
-    #[arg(long, default_value = "//Alice")]
+    #[arg(long, default_value = "//Alice", env = "SURI")]
     suri: String,
 
     #[clap(flatten)]

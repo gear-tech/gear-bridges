@@ -131,7 +131,7 @@ struct ProofStorageArgs {
 #[derive(Args)]
 struct RelayCheckpointsArgs {
     /// Specify ProgramId of the Checkpoint-light-client program
-    #[arg(long, env = "PROGRAM_ID")]
+    #[arg(long, env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS")]
     program_id: String,
 
     /// Specify an endpoint providing Beacon API
@@ -150,8 +150,8 @@ struct RelayCheckpointsArgs {
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
     /// etc.). The password for URI should be specified in the same `suri`,
     /// separated by the ':' char
-    #[arg(long, default_value = "//Alice", env = "SURI")]
-    suri: String,
+    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
+    vara_suri: String,
 
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,

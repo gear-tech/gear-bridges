@@ -10,12 +10,11 @@ pub fn spawn_receiver(
     tokio::spawn(async move {
         log::info!("Update receiver spawned");
 
-        let duration = Duration::from_secs(DELAY_SECS_UPDATE_REQUEST);
         let mut failures = 0;
         loop {
             match receive(&client_http, &beacon_endpoint, &sender).await {
                 Ok(Break(_)) => break,
-                Ok(Continue(_)) => time::sleep(duration).await,
+                Ok(Continue(_)) => (),
                 Err(e) => {
                     log::error!("{e:?}");
 
@@ -23,10 +22,10 @@ pub fn spawn_receiver(
                     if failures >= COUNT_FAILURE {
                         break;
                     }
-
-                    time::sleep(duration).await;
                 }
             }
+
+            time::sleep(Duration::from_secs(DELAY_SECS_UPDATE_REQUEST)).await;
         }
     });
 }
@@ -70,8 +69,6 @@ async fn receive(
     if sender.send(sync_update).await.is_err() {
         return Ok(Break(()));
     }
-
-    time::sleep(Duration::from_secs(DELAY_SECS_UPDATE_REQUEST)).await;
 
     Ok(Continue(()))
 }

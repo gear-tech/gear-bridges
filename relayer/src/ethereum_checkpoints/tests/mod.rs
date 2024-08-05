@@ -17,7 +17,7 @@ use tokio::time::{self, Duration};
 const RPC_URL: &str = "http://127.0.0.1:5052";
 const NETWORK_MAINNET: &str = "Mainnet";
 const NETWORK_HOLESKY: &str = "Holesky";
-const NETWORK_SEPOLIA: &str = "";
+const NETWORK_SEPOLIA: &str = "Sepolia";
 
 const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
     include_bytes!("./sepolia-finality-update-5_254_112.json");

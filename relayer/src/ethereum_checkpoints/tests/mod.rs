@@ -11,13 +11,9 @@ use checkpoint_light_client_io::{
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use parity_scale_codec::{Decode, Encode};
 use reqwest::Client;
-use std::env;
 use tokio::time::{self, Duration};
 
 const RPC_URL: &str = "http://127.0.0.1:5052";
-const NETWORK_MAINNET: &str = "Mainnet";
-const NETWORK_HOLESKY: &str = "Holesky";
-const NETWORK_SEPOLIA: &str = "Sepolia";
 
 const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
     include_bytes!("./sepolia-finality-update-5_254_112.json");
@@ -64,17 +60,13 @@ async fn upload_program(
     Ok(program_id)
 }
 
-#[ignore]
-#[tokio::test]
-async fn init() -> Result<()> {
+async fn init(network: Network) -> Result<()> {
     let client_http = Client::new();
 
-    let rpc_url = env::var("RPC_URL").unwrap_or(RPC_URL.into());
-
     // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update = utils::get_finality_update(&client_http, &rpc_url).await?;
+    let finality_update = utils::get_finality_update(&client_http, RPC_URL).await?;
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
+    let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
 
     println!(
         "finality_update slot = {}, period = {}",
@@ -94,7 +86,7 @@ async fn init() -> Result<()> {
         update.finalized_header.slot, checkpoint_hex
     );
 
-    let bootstrap = utils::get_bootstrap(&client_http, &rpc_url, &checkpoint_hex).await?;
+    let bootstrap = utils::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
@@ -105,13 +97,6 @@ async fn init() -> Result<()> {
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
-    let network = match env::var("NETWORK") {
-        Ok(network) if network == NETWORK_HOLESKY => Network::Holesky,
-        Ok(network) if network == NETWORK_MAINNET => Network::Mainnet,
-        Ok(network) if network == NETWORK_SEPOLIA => Network::Sepolia,
-        Ok(network) => panic!("Unknown network: {network}"),
-        Err(e) => panic!("Failed to read environment variable: {e:?}"),
-    };
     let init = Init {
         network,
         sync_committee_current_pub_keys: pub_keys,
@@ -136,15 +121,31 @@ async fn init() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
+async fn init_sepolia() -> Result<()> {
+    init(Network::Sepolia).await
+}
+
+#[ignore]
+#[tokio::test]
+async fn init_holesky() -> Result<()> {
+    init(Network::Holesky).await
+}
+
+#[ignore]
+#[tokio::test]
+async fn init_mainnet() -> Result<()> {
+    init(Network::Mainnet).await
+}
+
+#[ignore]
+#[tokio::test]
 async fn init_and_updating() -> Result<()> {
     let client_http = Client::new();
 
-    let rpc_url = env::var("RPC_URL").unwrap_or(RPC_URL.into());
-
     // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update = utils::get_finality_update(&client_http, &rpc_url).await?;
+    let finality_update = utils::get_finality_update(&client_http, RPC_URL).await?;
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
+    let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
 
     println!(
         "finality_update slot = {}, period = {}",
@@ -164,7 +165,7 @@ async fn init_and_updating() -> Result<()> {
         update.finalized_header.slot, checkpoint_hex
     );
 
-    let bootstrap = utils::get_bootstrap(&client_http, &rpc_url, &checkpoint_hex).await?;
+    let bootstrap = utils::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
@@ -175,15 +176,8 @@ async fn init_and_updating() -> Result<()> {
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
-    let network = match env::var("NETWORK") {
-        Ok(network) if network == NETWORK_HOLESKY => Network::Holesky,
-        Ok(network) if network == NETWORK_MAINNET => Network::Mainnet,
-        Ok(network) if network == NETWORK_SEPOLIA => Network::Sepolia,
-        Ok(network) => panic!("Unknown network: {network}"),
-        Err(e) => panic!("Failed to read environment variable: {e:?}"),
-    };
     let init = Init {
-        network,
+        network: Network::Holesky,
         sync_committee_current_pub_keys: pub_keys,
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
@@ -205,11 +199,11 @@ async fn init_and_updating() -> Result<()> {
     println!();
 
     for _ in 0..30 {
-        let update = utils::get_finality_update(&client_http, &rpc_url).await?;
+        let update = utils::get_finality_update(&client_http, RPC_URL).await?;
 
         let slot: u64 = update.finalized_header.slot;
         let current_period = eth_utils::calculate_period(slot);
-        let mut updates = utils::get_updates(&client_http, &rpc_url, current_period, 1).await?;
+        let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");

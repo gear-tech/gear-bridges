@@ -27,7 +27,7 @@ pub enum Error {
     InvalidNextSyncCommitteeProof,
     InvalidPublicKeys,
     ReplayBackRequired {
-        replayed_slot: Option<Slot>,
+        replay_back: Option<meta::ReplayBack>,
         checkpoint: (Slot, Hash256),
     },
 }

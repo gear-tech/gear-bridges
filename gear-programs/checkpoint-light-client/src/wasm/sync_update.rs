@@ -28,10 +28,13 @@ pub async fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, sync_update: Sy
         {
             let result =
                 HandleResult::SyncUpdate(Err(io::sync_update::Error::ReplayBackRequired {
-                    replayed_slot: state
+                    replay_back: state
                         .replay_back
                         .as_ref()
-                        .map(|replay_back| replay_back.last_header.slot),
+                        .map(|replay_back| meta::ReplayBack {
+                            finalized_header: replay_back.finalized_header.slot,
+                            last_header: replay_back.last_header.slot,
+                        }),
                     checkpoint: state
                         .checkpoints
                         .last()

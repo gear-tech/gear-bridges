@@ -101,7 +101,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
             return;
         }
         Ok(Err(sync_update::Error::ReplayBackRequired {
-            replayed_slot,
+            replay_back,
             checkpoint,
         })) => {
             if let Err(e) = replay_back::execute(
@@ -111,7 +111,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 &mut listener,
                 program_id,
                 gas_limit,
-                replayed_slot,
+                replay_back.map(|r| r.last_header),
                 checkpoint,
                 sync_update,
             )

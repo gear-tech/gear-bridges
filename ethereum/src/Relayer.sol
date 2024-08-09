@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
-//import  "./libraries/Environment.sol";
 
 contract Relayer is IRelayer {
     IVerifier private _verifier;

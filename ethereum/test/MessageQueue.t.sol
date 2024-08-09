@@ -34,35 +34,8 @@ contract MessageQueueTest is TestHelper {
 
 
     function setUp() public override {
+        super.setUp();
         vm.startPrank(OWNER, OWNER);
-        
-        ProxyContract _relayer_proxy = new ProxyContract();
-
-        ProxyContract _message_queue_proxy = new ProxyContract();
-
-        ProxyContract _treasury_proxy = new ProxyContract();
-        
-        erc20_token = new ERC20Mock("wVARA");
-
-        Verifier _verifier = new Verifier();
-
-        Relayer _relayer = new Relayer(address(_verifier));
-
-
-        ERC20Treasury _treasury = new ERC20Treasury(address(_message_queue_proxy));
-        MessageQueue _message_queue = new MessageQueue(address(_relayer_proxy));
-
-        verifier = IVerifier(address(_verifier));
-
-        relayer = Relayer(address(_relayer_proxy));
-        treasury = ERC20Treasury(address(_treasury_proxy));
-        message_queue = MessageQueue(address(_message_queue_proxy));
-
-        _relayer_proxy.upgradeToAndCall(address(_relayer), "");
-        _treasury_proxy.upgradeToAndCall(address(_treasury), "");
-        _message_queue_proxy.upgradeToAndCall(address(_message_queue), "");
-
-
         erc20_token.transfer(address(treasury), 100 * (10 ** 18));
         
         vm.stopPrank();

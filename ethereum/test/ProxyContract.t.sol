@@ -12,17 +12,20 @@ contract ProxyTest is Test {
     ProxyContract public message_queue_proxy;
 
     function setUp() public  {
-        ERC20Treasury treasury = new ERC20Treasury();
-        MessageQueue message_queue = new MessageQueue();
-        message_queue_proxy = new ProxyContract( address(message_queue), bytes("") ); 
-        treasury_proxy = new ProxyContract(address(treasury), bytes("")  );
+        message_queue_proxy = new ProxyContract(); 
+        treasury_proxy = new ProxyContract();
+
+        ERC20Treasury treasury = new ERC20Treasury(address(message_queue_proxy));
+        MessageQueue message_queue = new MessageQueue(address(treasury_proxy));
+
+         message_queue_proxy.upgradeToAndCall(address(message_queue), "");
+         treasury_proxy.upgradeToAndCall(address(treasury), "");
     }
 
 
 
-
     function test_renewImplementation() public {
-        ERC20Treasury new_treasury = new ERC20Treasury();
+        ERC20Treasury new_treasury = new ERC20Treasury(address(message_queue_proxy));
 
 
         // from pranker

@@ -4,8 +4,8 @@ import {IVerifier} from "../interfaces/IVerifier.sol";
 
 contract Verifier is IVerifier {
     function verifyProof(
-        bytes calldata proof,
-        uint256[] calldata public_inputs
+        bytes calldata,
+        uint256[] calldata
     ) external pure returns (bool) {
         return true;
     }

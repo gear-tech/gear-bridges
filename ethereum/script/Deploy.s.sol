@@ -6,6 +6,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {Test, console} from "forge-std/Test.sol";
 import {Verifier} from "../src/Verifier.sol";
+import {Verifier as VerifierMock} from "../src/mocks/VerifierMock.sol";
 import {Relayer} from "../src/Relayer.sol";
 
 import {ERC20Treasury} from "../src/ERC20Treasury.sol";
@@ -13,6 +14,9 @@ import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
+
+import {IVerifier} from "../src/interfaces/IVerifier.sol";
+
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
@@ -29,23 +33,46 @@ contract DeployScript is Script {
 
     function run() public {
         vm.broadcast();
-        Verifier _verifier = new Verifier();
-        vm.broadcast();
-        Relayer _relayer = new Relayer();
-        vm.broadcast();
-        ERC20Treasury _treasury = new ERC20Treasury();
+        ProxyContract _relayer_proxy = new ProxyContract();
 
         vm.broadcast();
-        MessageQueue _message_queue = new MessageQueue();
+        ProxyContract _message_queue_proxy = new ProxyContract();
 
         vm.broadcast();
-        ProxyContract _relayer_proxy = new ProxyContract(address(_relayer), bytes(""));
+        ProxyContract _treasury_proxy = new ProxyContract();
+
+        IVerifier _verifier;
 
         vm.broadcast();
-        ProxyContract _message_queue_proxy = new ProxyContract(address(_message_queue), bytes(""));
+        try vm.envBool("MOCK") {
+            if (vm.envBool("MOCK")) {
+                console.log("Deploying MockVerifier");
+                _verifier = IVerifier(address(new VerifierMock()));
+            }else{
+                console.log("Deploying Verifier");
+                _verifier = IVerifier(address(new Verifier()));
+            }
+
+        } catch {
+                console.log("Deploying Verifier");
+                _verifier = IVerifier(address(new Verifier()));
+        }
+        
+        vm.broadcast();
+        Relayer _relayer = new Relayer(address(_verifier));
+        vm.broadcast();
+        ERC20Treasury _treasury = new ERC20Treasury(address(_message_queue_proxy));
 
         vm.broadcast();
-        ProxyContract _treasury_proxy = new ProxyContract(address(_treasury), bytes(""));
+        MessageQueue _message_queue = new MessageQueue(address(_relayer_proxy));
+
+        vm.broadcast();
+        _relayer_proxy.upgradeToAndCall(address(_relayer), "");
+        vm.broadcast();
+        _treasury_proxy.upgradeToAndCall(address(_treasury), "");
+        vm.broadcast();
+        _message_queue_proxy.upgradeToAndCall(address(_message_queue), "");
+
 
         relayer = Relayer(address(_relayer_proxy));
         treasury = ERC20Treasury(address(_treasury_proxy));

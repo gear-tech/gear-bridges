@@ -8,13 +8,17 @@ import {IRelayer} from "./interfaces/IRelayer.sol";
 
 import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
-import {RELAYER_ADDRESS} from "./libraries/Environment.sol";
-
 
 
 contract MessageQueue is IMessageQueue {
     using Address for address;
     using Hasher for VaraMessage;
+
+    address immutable RELAYER_ADDRESS;
+
+    constructor (address relayer_address){
+        RELAYER_ADDRESS = relayer_address;
+    }
 
     function hash_vara_msg(
         VaraMessage calldata message

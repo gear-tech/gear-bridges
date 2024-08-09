@@ -7,11 +7,17 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {IERC20Treasury, WithdrawMessage} from "./interfaces/IERC20Treasury.sol";
-import {GRC_20_GATEWAY_ADDRESS, MESSAGE_QUEUE_ADDRESS} from "./libraries/Environment.sol";
+import {GRC_20_GATEWAY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 
 contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
+
+    address immutable MESSAGE_QUEUE_ADDRESS;
+
+    constructor(address message_queue) {
+        MESSAGE_QUEUE_ADDRESS = message_queue; 
+    }
 
     /** @dev Deposit token to `Treasury` using `safeTransferFrom`. Allowance needs to allow treasury
      * contract transferring `amount` of tokens. Emits `Deposit` event.

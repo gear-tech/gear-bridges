@@ -26,14 +26,14 @@ contract RelayerTest is TestHelper {
         super.setUp();
     }
 
-    function test_empty() public {
+    function test_empty() view public {
         bytes32 merkleRoot = bytes32(0xb1029042e7087428694e243cb5b777d17a1676d9074debb6fe2c9789c0264418);
         uint256 blockNumber = 274;
         assertEq(0, relayer.getBlockNumber(merkleRoot));
         assertEq(bytes32(0), relayer.getMerkleRoot(blockNumber));
     }
 
-    function test_build_public_inputs() public {
+    function test_build_public_inputs() view public {
         bytes32 merkleRoot = BLOCK_MERKLE_ROOT;
         uint256 blockNumber = BLOCK_ID;
 

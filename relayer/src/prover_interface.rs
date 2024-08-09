@@ -1,6 +1,6 @@
 use std::{str::FromStr, time::Instant};
 
-use crate::metrics::MeteredService;
+use utils_prometheus::MeteredService;
 
 use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};

@@ -8756,9 +8756,12 @@ name = "relayer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-serialize 0.4.2",
  "axum",
  "bridging_payment",
  "cgo_oligami",
+ "checkpoint_light_client",
+ "checkpoint_light_client-io",
  "clap",
  "dotenv",
  "ethereum-client",
@@ -8779,10 +8782,12 @@ dependencies = [
  "prometheus",
  "prover",
  "rand 0.8.5",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "utils-prometheus",
 ]
 
 [[package]]
@@ -12480,6 +12485,15 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utils-prometheus"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "prometheus",
+ "tokio",
+]
 
 [[package]]
 name = "uuid"

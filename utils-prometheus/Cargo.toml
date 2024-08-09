@@ -1,0 +1,9 @@
+[package]
+name = "utils-prometheus"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum.workspace = true
+prometheus.workspace = true
+tokio.workspace = true

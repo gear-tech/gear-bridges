@@ -80,6 +80,7 @@ pub enum Handle {
         headers: Vec<BeaconBlockHeader>,
     },
     ReplayBack(Vec<BeaconBlockHeader>),
+    GetState(meta::StateRequest),
 }
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
@@ -88,4 +89,5 @@ pub enum HandleResult {
     SyncUpdate(Result<(), sync_update::Error>),
     ReplayBackStart(Result<replay_back::StatusStart, replay_back::Error>),
     ReplayBack(Option<replay_back::Status>),
+    State(meta::State),
 }

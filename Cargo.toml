@@ -9,6 +9,7 @@ members = [
     "ethereum-common",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
+    "utils-prometheus",
 ]
 
 resolver = "2"
@@ -32,6 +33,8 @@ grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
+utils-prometheus = { path = "utils-prometheus" }
+checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }

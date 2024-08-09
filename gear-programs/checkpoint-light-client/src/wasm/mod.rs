@@ -1,5 +1,6 @@
 use super::*;
 use ark_serialize::CanonicalSerialize;
+use core::{cmp, num::Saturating};
 use gstd::{msg, vec};
 use io::{
     ethereum_common::{
@@ -9,6 +10,7 @@ use io::{
         tree_hash::TreeHash,
         utils as eth_utils, Hash256, SYNC_COMMITTEE_SIZE,
     },
+    meta,
     sync_update::Error as SyncCommitteeUpdateError,
     BeaconBlockHeader, Handle, HandleResult, Init, SyncCommitteeKeys, SyncCommitteeUpdate, G1, G2,
 };
@@ -51,7 +53,8 @@ async fn init() {
         panic!("Current sync committee proof is not valid");
     }
 
-    finalized_header.slot -= 1;
+    let period = eth_utils::calculate_period(finalized_header.slot) - 1;
+    finalized_header.slot = eth_utils::calculate_slot(period);
     match sync_update::verify(
         &network,
         &finalized_header,
@@ -79,7 +82,11 @@ async fn init() {
             })
         },
 
-        _ => panic!("Incorrect initial sync committee update"),
+        Ok((finalized_header, sync_committee_next)) => panic!(
+            "Incorrect initial sync committee update ({}, {})",
+            finalized_header.is_some(),
+            sync_committee_next.is_some()
+        ),
     }
 }
 
@@ -102,28 +109,21 @@ async fn main() {
         } => replay_back::handle_start(state, sync_update, headers).await,
 
         Handle::ReplayBack(headers) => replay_back::handle(state, headers),
+
+        Handle::GetState(request) => {
+            let reply = utils::construct_state_reply(request, state);
+            msg::reply(HandleResult::State(reply), 0)
+                .expect("Unable to reply with `HandleResult::State`");
+        }
     }
 }
 
 #[no_mangle]
 extern "C" fn state() {
-    let state = unsafe { STATE.as_ref() };
-    let checkpoints = state
-        .map(|state| state.checkpoints.checkpoints())
-        .unwrap_or(vec![]);
-    let replay_back = state.and_then(|state| {
-        state
-            .replay_back
-            .as_ref()
-            .map(|replay_back| replay_back.last_header.clone())
-    });
+    let request = msg::load().expect("Unable to decode `StateRequest` message");
+    let state = unsafe { STATE.as_ref() }.expect("The program should be initialized");
+    let reply = utils::construct_state_reply(request, state);
 
-    msg::reply(
-        io::meta::State {
-            checkpoints,
-            replay_back,
-        },
-        0,
-    )
-    .expect("Failed to encode or reply with `<AppMetadata as Metadata>::State` from `state()`");
+    msg::reply(reply, 0)
+        .expect("Failed to encode or reply with `<AppMetadata as Metadata>::State` from `state()`");
 }

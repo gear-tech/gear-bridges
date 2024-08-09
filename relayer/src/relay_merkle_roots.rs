@@ -5,7 +5,6 @@ use std::{
 };
 
 use crate::{
-    metrics::{impl_metered_service, MeteredService},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
     GENESIS_CONFIG,
@@ -13,6 +12,8 @@ use crate::{
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
+
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 

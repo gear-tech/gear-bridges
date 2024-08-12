@@ -168,10 +168,15 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 }
             }
             Ok(Err(sync_update::Error::ReplayBackRequired { .. })) => {
-                log::info!("Replay back within the main loop. Exiting");
+                log::error!("Replay back within the main loop. Exiting");
                 return;
             }
-            Ok(Err(e)) => log::info!("The program failed with: {e:?}. Skipping"),
+            Ok(Err(e)) => {
+                log::info!("The program failed with: {e:?}. Skipping");
+                if let sync_update::Error::NotActual = e {
+                    slot_last = slot;
+                }
+            }
             Err(e) => {
                 log::error!("{e:?}");
                 return;

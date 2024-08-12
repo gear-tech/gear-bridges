@@ -7,7 +7,6 @@ pub async fn execute(
     client_http: &Client,
     beacon_endpoint: &str,
     client: &GearApi,
-    listener: &mut EventListener,
     program_id: [u8; 32],
     gas_limit: u64,
     replayed_slot: Option<Slot>,
@@ -25,7 +24,6 @@ pub async fn execute(
             client_http,
             beacon_endpoint,
             client,
-            listener,
             program_id,
             gas_limit,
             slots_batch_iter,
@@ -65,7 +63,6 @@ pub async fn execute(
             client_http,
             beacon_endpoint,
             client,
-            listener,
             program_id,
             gas_limit,
             slots_batch_iter.next(),
@@ -77,7 +74,6 @@ pub async fn execute(
             client_http,
             beacon_endpoint,
             client,
-            listener,
             program_id,
             gas_limit,
             slots_batch_iter,
@@ -97,7 +93,6 @@ pub async fn execute(
         client_http,
         beacon_endpoint,
         client,
-        listener,
         program_id,
         gas_limit,
         slots_batch_iter.next(),
@@ -109,7 +104,6 @@ pub async fn execute(
         client_http,
         beacon_endpoint,
         client,
-        listener,
         program_id,
         gas_limit,
         slots_batch_iter,
@@ -125,7 +119,6 @@ async fn replay_back_slots(
     client_http: &Client,
     beacon_endpoint: &str,
     client: &GearApi,
-    listener: &mut EventListener,
     program_id: [u8; 32],
     gas_limit: u64,
     slots_batch_iter: SlotsBatchIter,
@@ -135,7 +128,6 @@ async fn replay_back_slots(
             client_http,
             beacon_endpoint,
             client,
-            listener,
             program_id,
             slot_start,
             slot_end,
@@ -152,7 +144,6 @@ async fn replay_back_slots_inner(
     client_http: &Client,
     beacon_endpoint: &str,
     client: &GearApi,
-    listener: &mut EventListener,
     program_id: [u8; 32],
     slot_start: Slot,
     slot_end: Slot,
@@ -161,6 +152,8 @@ async fn replay_back_slots_inner(
     let payload = Handle::ReplayBack(
         request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
     );
+
+    let mut listener = client.subscribe().await?;
 
     let (message_id, _) = client
         .send_message(program_id.into(), payload, gas_limit, 0)
@@ -190,7 +183,6 @@ async fn replay_back_slots_start(
     client_http: &Client,
     beacon_endpoint: &str,
     client: &GearApi,
-    listener: &mut EventListener,
     program_id: [u8; 32],
     gas_limit: u64,
     slots: Option<(Slot, Slot)>,
@@ -204,6 +196,8 @@ async fn replay_back_slots_start(
         sync_update,
         headers: request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
     };
+
+    let mut listener = client.subscribe().await?;
 
     let (message_id, _) = client
         .send_message(program_id.into(), payload, gas_limit, 0)

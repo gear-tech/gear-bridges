@@ -75,11 +75,12 @@ async fn receive(
 
 pub async fn try_to_apply(
     client: &GearApi,
-    listener: &mut EventListener,
     program_id: [u8; 32],
     sync_update: SyncCommitteeUpdate,
     gas_limit: u64,
 ) -> AnyResult<Result<(), Error>> {
+    let mut listener = client.subscribe().await?;
+
     let payload = Handle::SyncUpdate(sync_update);
     let (message_id, _) = client
         .send_message(program_id.into(), payload, gas_limit, 0)

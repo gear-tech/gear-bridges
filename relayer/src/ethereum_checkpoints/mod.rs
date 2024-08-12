@@ -9,7 +9,7 @@ use futures::{
     future::{self, Either},
     pin_mut,
 };
-use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
+use gclient::{EventProcessor, GearApi, WSAddress};
 use parity_scale_codec::Decode;
 use reqwest::Client;
 use tokio::{
@@ -75,11 +75,6 @@ pub async fn relay(args: RelayCheckpointsArgs) {
     let gas_limit = gas_limit_block / 100 * 95;
     log::info!("Gas limit for extrinsics: {gas_limit}");
 
-    let mut listener = client
-        .subscribe()
-        .await
-        .expect("Events listener should be created");
-
     let sync_update = receiver
         .recv()
         .await
@@ -87,15 +82,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
 
     let mut slot_last = sync_update.finalized_header.slot;
 
-    match sync_update::try_to_apply(
-        &client,
-        &mut listener,
-        program_id,
-        sync_update.clone(),
-        gas_limit,
-    )
-    .await
-    {
+    match sync_update::try_to_apply(&client, program_id, sync_update.clone(), gas_limit).await {
         Err(e) => {
             log::error!("{e:?}");
             return;
@@ -108,7 +95,6 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 &client_http,
                 &beacon_endpoint,
                 &client,
-                &mut listener,
                 program_id,
                 gas_limit,
                 replay_back.map(|r| r.last_header),
@@ -171,9 +157,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         }
 
         let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
-        match sync_update::try_to_apply(&client, &mut listener, program_id, sync_update, gas_limit)
-            .await
-        {
+        match sync_update::try_to_apply(&client, program_id, sync_update, gas_limit).await {
             Ok(Ok(_)) => {
                 slot_last = slot;
 

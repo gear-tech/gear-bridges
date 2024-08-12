@@ -2,6 +2,7 @@ use super::*;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::{
     ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH},
+    meta::ReplayBack,
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
 };
@@ -97,18 +98,15 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 &client,
                 program_id,
                 gas_limit,
-                replay_back.map(|r| r.last_header),
+                replay_back,
                 checkpoint,
                 sync_update,
             )
             .await
             {
-                log::error!("{e:?}");
+                log::error!("{e:?}. Exiting");
+                return;
             }
-
-            log::info!("Exiting");
-
-            return;
         }
         Ok(Ok(_) | Err(sync_update::Error::NotActual)) => (),
         _ => {

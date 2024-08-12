@@ -9,14 +9,18 @@ pub async fn execute(
     client: &GearApi,
     program_id: [u8; 32],
     gas_limit: u64,
-    replayed_slot: Option<Slot>,
+    replay_back: Option<ReplayBack>,
     checkpoint: (Slot, Hash256),
     sync_update: SyncCommitteeUpdate,
 ) -> AnyResult<()> {
     log::info!("Replaying back started");
 
     let (mut slot_start, _) = checkpoint;
-    if let Some(slot_end) = replayed_slot {
+    if let Some(ReplayBack {
+        finalized_header,
+        last_header: slot_end,
+    }) = replay_back
+    {
         let slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH)
             .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}."))?;
 
@@ -30,9 +34,7 @@ pub async fn execute(
         )
         .await?;
 
-        log::info!("The ongoing replaying back finished");
-
-        return Ok(());
+        slot_start = finalized_header;
     }
 
     let period_start = 1 + eth_utils::calculate_period(slot_start);

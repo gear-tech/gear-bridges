@@ -2,6 +2,7 @@ use super::*;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::{
     ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH},
+    meta::ReplayBack,
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
 };
@@ -9,7 +10,7 @@ use futures::{
     future::{self, Either},
     pin_mut,
 };
-use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
+use gclient::{EventProcessor, GearApi, WSAddress};
 use parity_scale_codec::Decode;
 use reqwest::Client;
 use tokio::{
@@ -75,11 +76,6 @@ pub async fn relay(args: RelayCheckpointsArgs) {
     let gas_limit = gas_limit_block / 100 * 95;
     log::info!("Gas limit for extrinsics: {gas_limit}");
 
-    let mut listener = client
-        .subscribe()
-        .await
-        .expect("Events listener should be created");
-
     let sync_update = receiver
         .recv()
         .await
@@ -87,15 +83,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
 
     let mut slot_last = sync_update.finalized_header.slot;
 
-    match sync_update::try_to_apply(
-        &client,
-        &mut listener,
-        program_id,
-        sync_update.clone(),
-        gas_limit,
-    )
-    .await
-    {
+    match sync_update::try_to_apply(&client, program_id, sync_update.clone(), gas_limit).await {
         Err(e) => {
             log::error!("{e:?}");
             return;
@@ -108,21 +96,17 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 &client_http,
                 &beacon_endpoint,
                 &client,
-                &mut listener,
                 program_id,
                 gas_limit,
-                replay_back.map(|r| r.last_header),
+                replay_back,
                 checkpoint,
                 sync_update,
             )
             .await
             {
-                log::error!("{e:?}");
+                log::error!("{e:?}. Exiting");
+                return;
             }
-
-            log::info!("Exiting");
-
-            return;
         }
         Ok(Ok(_) | Err(sync_update::Error::NotActual)) => (),
         _ => {
@@ -171,9 +155,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         }
 
         let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
-        match sync_update::try_to_apply(&client, &mut listener, program_id, sync_update, gas_limit)
-            .await
-        {
+        match sync_update::try_to_apply(&client, program_id, sync_update, gas_limit).await {
             Ok(Ok(_)) => {
                 slot_last = slot;
 
@@ -186,10 +168,15 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 }
             }
             Ok(Err(sync_update::Error::ReplayBackRequired { .. })) => {
-                log::info!("Replay back within the main loop. Exiting");
+                log::error!("Replay back within the main loop. Exiting");
                 return;
             }
-            Ok(Err(e)) => log::info!("The program failed with: {e:?}. Skipping"),
+            Ok(Err(e)) => {
+                log::error!("The program failed with: {e:?}. Skipping");
+                if let sync_update::Error::NotActual = e {
+                    slot_last = slot;
+                }
+            }
             Err(e) => {
                 log::error!("{e:?}");
                 return;

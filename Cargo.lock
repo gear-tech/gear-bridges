@@ -1971,26 +1971,17 @@ dependencies = [
 name = "checkpoint_light_client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "ark-bls12-381",
  "ark-serialize 0.4.2",
  "checkpoint_light_client-io",
  "circular-buffer",
- "futures",
  "gbuiltin-bls381",
- "gclient",
  "gear-wasm-builder",
  "getrandom 0.2.15",
  "gstd",
- "hex",
  "hex-literal",
  "lazy_static",
  "parity-scale-codec",
  "primitive-types 0.12.2",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "tokio",
  "tree_hash_derive",
 ]
 

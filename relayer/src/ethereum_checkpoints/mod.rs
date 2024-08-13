@@ -172,7 +172,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 return;
             }
             Ok(Err(e)) => {
-                log::info!("The program failed with: {e:?}. Skipping");
+                log::error!("The program failed with: {e:?}. Skipping");
                 if let sync_update::Error::NotActual = e {
                     slot_last = slot;
                 }

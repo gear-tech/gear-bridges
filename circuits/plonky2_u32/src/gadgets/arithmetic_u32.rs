@@ -231,7 +231,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderU32<F, D>
 }
 
 #[derive(Debug)]
-struct SplitToU32Generator<F: RichField + Extendable<D>, const D: usize> {
+pub struct SplitToU32Generator<F: RichField + Extendable<D>, const D: usize> {
     x: Target,
     low: U32Target,
     high: U32Target,

@@ -34,35 +34,8 @@ contract MessageQueueTest is TestHelper {
 
 
     function setUp() public override {
+        super.setUp();
         vm.startPrank(OWNER, OWNER);
-        erc20_token = new ERC20Mock("wVARA");
-
-        Verifier _verifier = new Verifier();
-
-        Relayer _relayer = new Relayer();
-        ERC20Treasury _treasury = new ERC20Treasury();
-        MessageQueue _message_queue = new MessageQueue();
-
-        ProxyContract _relayer_proxy = new ProxyContract(
-            address(_relayer),
-            bytes("")
-        );
-
-        ProxyContract _message_queue_proxy = new ProxyContract(
-            address(_message_queue),
-            bytes("")
-        );
-        ProxyContract _treasury_proxy = new ProxyContract(
-            address(_treasury),
-            bytes("")
-        );
-
-        relayer = Relayer(address(_relayer_proxy));
-        treasury = ERC20Treasury(address(_treasury_proxy));
-        message_queue = MessageQueue(address(_message_queue_proxy));
-
-        verifier = IVerifier(address(_verifier));
-        
         erc20_token.transfer(address(treasury), 100 * (10 ** 18));
         
         vm.stopPrank();
@@ -74,7 +47,7 @@ contract MessageQueueTest is TestHelper {
 
 
 
-    function test_calculate_root_buffer() public {
+    function test_calculate_root_buffer() public view {
         uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i ++) {
@@ -93,7 +66,7 @@ contract MessageQueueTest is TestHelper {
     }
 
 
-    function test_calculate_root_buffer_2() public {
+    function test_calculate_root_buffer_2() public view  {
 
         uint8[86] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -114,7 +87,7 @@ contract MessageQueueTest is TestHelper {
     }
 
 
-    function test_calculate_root_buffer_3() public {
+    function test_calculate_root_buffer_3() public view {
         uint8[98] memory msgt = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i ++) {
@@ -133,7 +106,7 @@ contract MessageQueueTest is TestHelper {
         assertEq(root, bytes32(0x7188ce46fd6dc24003be8667cd73ca4a4cef97687b21343020681d2e192f5fcc));
     }
 
-    function test_calculate_root() public {
+    function test_calculate_root() public view {
         uint8[2] memory msgt = [3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i ++) {
@@ -167,7 +140,7 @@ contract MessageQueueTest is TestHelper {
         assertEq(root, bytes32(0xc739e5c26b49b1a0753fc66f21703ef508ecb53549290219fba0df2819d95aa0));
     }
 
-    function test_calculate_root_buffer_leaf_2() public {
+    function test_calculate_root_buffer_leaf_2() public view  {
         uint8[98] memory msgt = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2];
 
         bytes memory ms = new bytes(msgt.length);
@@ -193,7 +166,7 @@ contract MessageQueueTest is TestHelper {
 
     }
 
-    function test_calculate_root_buffer_leaf_3() public {
+    function test_calculate_root_buffer_leaf_3() public view  {
         uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
 
         bytes memory ms = new bytes(msgt.length);
@@ -221,7 +194,7 @@ contract MessageQueueTest is TestHelper {
 
     }
 
-    function test_calculate_root_buffer_leaf_100() public {
+    function test_calculate_root_buffer_leaf_100() public view  {
         uint8[3] memory msgt = [3, 3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i ++) {
@@ -271,7 +244,7 @@ contract MessageQueueTest is TestHelper {
         });
 
         bytes32 msg_hash = vara_message.hash();
-        assertEq(msg_hash, bytes32(0x0b391b6a39429a86fb9bac38e1c8b440e8aafb2cf12a3db4283d2fe652319a3f));
+        assertEq(msg_hash, bytes32(0x08cd8737899a4429f30e776378f014ed3fa619d6db473458fc8d024ea06e6ade));
 
 
         bytes32[] memory proof = new bytes32[](3);
@@ -284,7 +257,7 @@ contract MessageQueueTest is TestHelper {
 
         bytes32 calculatedRoot = message_queue.calculateMerkleRoot(proof, msg_hash, 101, 100);
 
-        assertEq(calculatedRoot, bytes32(0x5019b3be4a6a941f6698e74d5fc211ef381db0440d02b6669436e2aabf55b0b4));
+        assertEq(calculatedRoot, bytes32(0xaecb4397edb628f9ac7408336b4090bba1ad40c4b0a9e8934c7e94b9c967e5ea));
 
         bytes memory block_proof = bytes(hex"00");
 

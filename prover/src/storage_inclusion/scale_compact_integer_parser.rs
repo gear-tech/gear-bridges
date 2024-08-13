@@ -3,9 +3,9 @@
 //! There're 2 circuits present: `single_byte` and `full`.
 //!
 //! - `single_byte` allows to parse only integers encoded in so-called single-byte mode, having values
-//! in range (0..=63).
+//!   in range (0..=63).
 //! - `full` allows to parse integers encoded in single-, two- and four-byte modes, having values in
-//! range (0..=2^30 - 1).
+//!   range (0..=2^30 - 1).
 
 use crate::{
     common::{

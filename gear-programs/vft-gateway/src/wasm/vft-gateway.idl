@@ -25,6 +25,40 @@ type Error = enum {
   ReplyTimeoutError,
   TokensRefundedError,
   ErrorDuringTokensMint,
+  NoCorrespondingEthAddress,
+  ReplyHook,
+  MessageNotFound,
+  InvalidMessageStatus,
+  MessageFailed,
+  BurnTokensFailed,
+  BridgeBuiltinMessageFailed,
+};
+
+type MessageInfo = struct {
+  status: MessageStatus,
+  details: TransactionDetails,
+};
+
+type MessageStatus = enum {
+  SendingMessageToBurnTokens,
+  TokenBurnCompleted: bool,
+  WaitingReplyFromBurn,
+  SendingMessageToBridgeBuiltin,
+  BridgeResponseReceived: opt u256,
+  WaitingReplyFromBuiltin,
+  BridgeBuiltinStep,
+  SendingMessageToMintTokens,
+  TokenMintCompleted,
+  WaitingReplyFromMint,
+  MintTokensStep,
+  MessageProcessedWithSuccess: u256,
+};
+
+type TransactionDetails = struct {
+  vara_token_id: actor_id,
+  sender: actor_id,
+  amount: u256,
+  receiver: h160,
 };
 
 constructor {
@@ -32,9 +66,15 @@ constructor {
 };
 
 service VftGateway {
-  HandleInterruptedTransfer : (msg_id: message_id) -> result (u256, Error);
+  HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
   TransferVaraToEth : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   UpdateReceiverContractAddress : (new_receiver_contract_address: h160) -> null;
+  query Admin : () -> actor_id;
+  query GearBridgeBuiltin : () -> actor_id;
+  query GetConfig : () -> Config;
+  query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
+  query ReceiverContractAddress : () -> h160;
+  query VaraToEthAddresses : () -> vec struct { actor_id, h160 };
 };
 

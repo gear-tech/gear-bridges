@@ -197,7 +197,7 @@ impl BridgingPayment for Program<'_> {
         let init_config = InitConfig::new(
             ADMIN_ID.into(),
             VFT_GATEWAY_ID.into(),
-            Config::new(FEE, 15_000_000_000, 50_000_000_000, 15_000_000_000),
+            Config::new(FEE, 15_000_000_000, 100_000_000_000, 15_000_000_000, 1000),
         );
         let payload = ["New".encode(), init_config.encode()].concat();
         let result = program.send_bytes(10, payload);
@@ -242,10 +242,10 @@ pub trait VftGateway {
 impl VftGateway for Program<'_> {
     fn vft_gateway(system: &System) -> Program<'_> {
         let program = Program::from_binary_with_id(system, VFT_GATEWAY_ID, VFT_GATEWAY_WASM_BINARY);
-        let init_config = vft_gateway::services::InitConfig::new(
+        let init_config = vft_gateway_app::services::InitConfig::new(
             [1; 20].into(),
             BRIDGE_BUILTIN_ID.into(),
-            vft_gateway::services::Config::new(
+            vft_gateway_app::services::Config::new(
                 15_000_000_000,
                 15_000_000_000,
                 15_000_000_000,

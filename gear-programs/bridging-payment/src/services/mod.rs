@@ -7,10 +7,10 @@ use gstd::exec;
 mod error;
 use error::Error;
 mod msg_tracker;
-use msg_tracker::{msg_tracker_mut, MessageStatus, TransactionDetails};
+use msg_tracker::{msg_tracker, msg_tracker_mut, MessageInfo, MessageStatus, TransactionDetails};
 mod token_msg;
 use msg_tracker::MessageTracker;
-use token_msg::transfer_tokens;
+use token_msg::{transfer_tokens, transfer_tokens_back};
 mod utils;
 mod vft;
 mod vft_gateway;
@@ -65,6 +65,7 @@ pub struct Config {
     gas_for_reply_deposit: u64,
     gas_to_send_request_to_gateway: u64,
     gas_to_transfer_tokens: u64,
+    reply_timeout: u32,
 }
 
 impl Config {
@@ -73,12 +74,14 @@ impl Config {
         gas_for_reply_deposit: u64,
         gas_to_send_request_to_gateway: u64,
         gas_to_transfer_tokens: u64,
+        reply_timeout: u32,
     ) -> Self {
         Self {
             fee,
             gas_for_reply_deposit,
             gas_to_send_request_to_gateway,
             gas_to_transfer_tokens,
+            reply_timeout,
         }
     }
 }
@@ -200,8 +203,7 @@ where
                 .expect("Unexpected: msg status does not exist");
 
             match msg_info.status {
-                MessageStatus::MessageToGatewayStep
-                | MessageStatus::TokenTransferCompleted(true) => {
+                MessageStatus::MessageToGatewayStep => {
                     if let TransactionDetails::SendMessageToGateway {
                         sender,
                         vara_token_id,
@@ -224,7 +226,7 @@ where
                         panic!("Unexpected tx details")
                     }
                 }
-                MessageStatus::GatewayMessageProcessingCompleted(Some((nonce, eth_token_id))) => {
+                MessageStatus::GatewayMessageProcessingCompleted((nonce, eth_token_id)) => {
                     if let TransactionDetails::SendMessageToGateway {
                         sender,
                         amount,
@@ -252,6 +254,35 @@ where
                 }
             }
         });
+    }
+
+    pub async fn return_tokens(&mut self, msg_id: MessageId) {
+        let msg_tracker = msg_tracker_mut();
+
+        let msg_info = msg_tracker
+            .get_message_info(&msg_id)
+            .expect("Unexpected: msg status does not exist");
+        if msg_info.status != MessageStatus::ReturnTokensBackStep {
+            panic!("Wrong status");
+        }
+
+        let config = self.config();
+        if let TransactionDetails::SendMessageToGateway {
+            sender,
+            vara_token_id,
+            amount,
+            receiver: _,
+            attached_value,
+        } = msg_info.details
+        {
+            transfer_tokens_back(vara_token_id, exec::program_id(), sender, amount, config)
+                .await
+                .expect("Unable to send tokens back");
+            process_refund(sender, attached_value, config);
+        }
+    }
+    pub fn msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {
+        msg_tracker().message_info.clone().into_iter().collect()
     }
 }
 

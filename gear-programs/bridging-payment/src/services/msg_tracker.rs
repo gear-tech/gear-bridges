@@ -1,16 +1,12 @@
-use super::{error::Error, vft::vft::io as vft_io, Config, MSG_TRACKER};
-use gstd::{
-    debug, msg,
-    prelude::collections::{BTreeMap, HashMap},
-};
+use super::{error::Error, MSG_TRACKER};
+use gstd::prelude::collections::HashMap;
 use sails_rs::{calls::ActionIo, prelude::*};
-
 #[derive(Default)]
 pub struct MessageTracker {
     pub message_info: HashMap<MessageId, MessageInfo>,
 }
 
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+#[derive(Debug, Encode, Decode, TypeInfo, Clone)]
 pub struct MessageInfo {
     pub status: MessageStatus,
     pub details: TransactionDetails,
@@ -33,7 +29,7 @@ pub enum TransactionDetails {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
+#[derive(Debug, PartialEq, Encode, Decode, TypeInfo, Clone)]
 pub enum MessageStatus {
     // Transfer tokens statuses
     SendingMessageToTransferTokens,
@@ -42,9 +38,16 @@ pub enum MessageStatus {
 
     // Send message to gateway statuses
     SendingMessageToGateway,
-    GatewayMessageProcessingCompleted(Option<(U256, H160)>),
+    GatewayMessageProcessingCompleted((U256, H160)),
     WaitingReplyFromGateway,
     MessageToGatewayStep,
+
+    ReturnTokensBackStep,
+    SendingMessageToTransferTokensBack,
+    WaitingReplyFromTokenTransferBack,
+    TokenTransferBackCompleted,
+
+    MessageProcessedWithSuccess((U256, H160)),
 }
 
 impl MessageTracker {
@@ -71,8 +74,67 @@ impl MessageTracker {
     pub fn remove_message_info(&mut self, msg_id: &MessageId) -> Option<MessageInfo> {
         self.message_info.remove(msg_id)
     }
+
+    pub fn check_transfer_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+        if let Some(info) = self.message_info.get(msg_id) {
+            match info.status {
+                MessageStatus::TokenTransferCompleted(true) => Ok(()),
+                MessageStatus::TokenTransferCompleted(false) => {
+                    self.message_info.remove(msg_id);
+                    Err(Error::TransferTokensFailed)
+                }
+                _ => Err(Error::InvalidMessageStatus),
+            }
+        } else {
+            Err(Error::MessageNotFound)
+        }
+    }
+
+    pub fn check_transfer_back_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+        if let Some(info) = self.message_info.get(msg_id) {
+            match info.status {
+                MessageStatus::TokenTransferBackCompleted => {
+                    self.message_info.remove(msg_id);
+                    Ok(())
+                }
+                MessageStatus::ReturnTokensBackStep => Err(Error::TransferTokensFailed),
+                _ => Err(Error::InvalidMessageStatus),
+            }
+        } else {
+            Err(Error::MessageNotFound)
+        }
+    }
+
+    pub fn check_vft_gateway_reply(&mut self, msg_id: &MessageId) -> Result<(U256, H160), Error> {
+        if let Some(info) = self.message_info.get(msg_id) {
+            match info.status {
+                MessageStatus::GatewayMessageProcessingCompleted((nonce, eth_token_id)) => {
+                    self.remove_message_info(msg_id);
+                    Ok((nonce, eth_token_id))
+                }
+                MessageStatus::ReturnTokensBackStep | MessageStatus::MessageToGatewayStep => {
+                    Err(Error::GatewayMessageProcessingFailed)
+                }
+                _ => Err(Error::InvalidMessageStatus),
+            }
+        } else {
+            Err(Error::MessageNotFound)
+        }
+    }
 }
 
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
-    unsafe { MSG_TRACKER.as_mut().expect("Pair::seed() should be called") }
+    unsafe {
+        MSG_TRACKER
+            .as_mut()
+            .expect("BridgingPaymentData::seed() should be called")
+    }
+}
+
+pub fn msg_tracker() -> &'static MessageTracker {
+    unsafe {
+        MSG_TRACKER
+            .as_ref()
+            .expect("BridgingPaymentData::seed() should be called")
+    }
 }

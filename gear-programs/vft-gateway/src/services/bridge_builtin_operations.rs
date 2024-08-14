@@ -1,5 +1,5 @@
-use super::{msg_tracker_mut, utils, Config, Error, MessageStatus, MessageTracker};
-use gstd::msg;
+use super::{msg_tracker, msg_tracker_mut, utils, Config, Error, MessageStatus, MessageTracker};
+use gstd::{msg, MessageId};
 use sails_rs::prelude::*;
 
 pub async fn send_message_to_bridge_builtin(
@@ -28,24 +28,16 @@ pub async fn send_message_to_bridge_builtin(
     .encode();
 
     utils::set_critical_hook(msg_id);
-    let reply_bytes = utils::send_message_with_gas_for_reply(
+    utils::send_message_with_gas_for_reply(
         gear_bridge_builtin.into(),
         bytes,
         config.gas_to_send_request_to_builtin,
         config.gas_for_reply_deposit,
         config.reply_timeout,
+        msg_id,
     )
     .await?;
-
-    let reply = gbuiltin_bridge::Response::decode(&mut reply_bytes.as_slice())
-        .map_err(|_| Error::BuiltinDecodeError)?;
-    match reply {
-        gbuiltin_bridge::Response::MessageSent { nonce, hash: _ } => {
-            msg_tracker_mut().remove_message_info(&msg_id);
-            Ok(nonce)
-        }
-        _ => Err(Error::RequestToBuiltinReplyError),
-    }
+    msg_tracker_mut().check_bridge_reply(&msg_id)
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]

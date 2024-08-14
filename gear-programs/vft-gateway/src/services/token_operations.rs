@@ -1,5 +1,7 @@
 use super::msg_tracker::TransactionDetails;
-use super::{msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus};
+use super::{
+    msg_tracker, msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus,
+};
 use gstd::msg;
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
@@ -22,22 +24,16 @@ pub async fn burn_tokens(
     );
 
     utils::set_critical_hook(msg_id);
-
-    let reply_bytes = utils::send_message_with_gas_for_reply(
+    utils::send_message_with_gas_for_reply(
         token_id,
         bytes,
         config.gas_to_burn_tokens,
         config.gas_for_reply_deposit,
         config.reply_timeout,
+        msg_id,
     )
     .await?;
-
-    let reply: bool =
-        vft_io::Burn::decode_reply(&reply_bytes).map_err(|_| Error::BurnTokensDecodeError)?;
-    if !reply {
-        return Err(Error::ErrorDuringTokensBurn);
-    }
-    Ok(())
+    msg_tracker_mut().check_burn_result(&msg_id)
 }
 
 pub async fn mint_tokens(
@@ -51,20 +47,17 @@ pub async fn mint_tokens(
 
     let bytes: Vec<u8> = vft_io::Mint::encode_call(sender, amount);
 
-    let reply_bytes = utils::send_message_with_gas_for_reply(
+    utils::send_message_with_gas_for_reply(
         token_id,
         bytes,
         config.gas_to_mint_tokens,
         config.gas_for_reply_deposit,
         config.reply_timeout,
+        msg_id,
     )
     .await?;
 
-    let reply: bool =
-        vft_io::Mint::decode_reply(&reply_bytes).map_err(|_| Error::MintTokensDecodeError)?;
-    if !reply {
-        return Err(Error::ErrorDuringTokensMint);
-    }
-    msg_tracker_mut().remove_message_info(&msg_id);
-    Ok(())
+    msg_tracker_mut().check_mint_result(&msg_id)
+    //  msg_tracker_mut().remove_message_info(&msg_id);
+    //   Ok(())
 }

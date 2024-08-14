@@ -1,5 +1,5 @@
 use gtest::{Program, System};
-use sails_rs::{collections::HashMap, prelude::*};
+use sails_rs::{prelude::*};
 
 mod utils;
 use utils::{
@@ -30,4 +30,5 @@ fn transfer_tokens_success() {
 
     system.mint_to(account_id, FEE);
     bridging_payment.request_to_gateway(account_id, amount, [1; 20].into(), vft.id(), false);
+    assert_eq!(vft.balance_of(account_id.into()), U256::zero());
 }

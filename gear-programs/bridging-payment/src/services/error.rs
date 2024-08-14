@@ -1,6 +1,6 @@
 use sails_rs::prelude::*;
 
-#[derive(Debug, Encode, Decode, TypeInfo)]
+#[derive(Debug, Encode, Decode, TypeInfo, Clone)]
 pub enum Error {
     SendError,
     ReplyError,
@@ -15,4 +15,9 @@ pub enum Error {
     TokensRefundedError,
     ErrorDuringTransaction,
     ErrorInVftGateway,
+    ReplyHook,
+    GatewayMessageProcessingFailed,
+    InvalidMessageStatus,
+    MessageNotFound,
+    TransferTokensFailed,
 }

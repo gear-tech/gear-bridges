@@ -1,6 +1,6 @@
 use sails_rs::prelude::*;
 
-#[derive(Debug, Encode, Decode, TypeInfo)]
+#[derive(Debug, Encode, Decode, TypeInfo, Clone, PartialEq, Eq)]
 pub enum Error {
     SendError,
     ReplyError,
@@ -14,4 +14,11 @@ pub enum Error {
     ReplyTimeoutError,
     TokensRefundedError,
     ErrorDuringTokensMint,
+    NoCorrespondingEthAddress,
+    ReplyHook,
+    MessageNotFound,
+    InvalidMessageStatus,
+    MessageFailed,
+    BurnTokensFailed,
+    BridgeBuiltinMessageFailed,
 }

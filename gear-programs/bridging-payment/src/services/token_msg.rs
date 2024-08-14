@@ -33,19 +33,53 @@ pub async fn transfer_tokens(
 
     utils::set_critical_hook(msg_id);
 
-    let reply_bytes = utils::send_message_with_gas_for_reply(
+    utils::send_message_with_gas_for_reply(
         token_id,
         bytes,
         config.gas_to_transfer_tokens,
         config.gas_for_reply_deposit,
+        config.reply_timeout,
+        msg_id,
     )
     .await?;
 
-    let reply: bool = vft_io::TransferFrom::decode_reply(&reply_bytes)
-        .map_err(|_| Error::TransferTokensDecodeError)?;
+    msg_tracker_mut().check_transfer_result(&msg_id)
+}
 
-    if !reply {
-        return Err(Error::ErrorDuringTokensTransfer);
-    }
-    Ok(())
+pub async fn transfer_tokens_back(
+    token_id: ActorId,
+    sender: ActorId,
+    receiver: ActorId,
+    amount: U256,
+    config: &Config,
+) -> Result<(), Error> {
+    let msg_id = gstd::msg::id();
+    let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, receiver, amount);
+
+    let transaction_details = TransactionDetails::Transfer {
+        sender,
+        receiver,
+        amount,
+        token_id,
+    };
+
+    msg_tracker_mut().insert_message_info(
+        msg_id,
+        MessageStatus::SendingMessageToTransferTokensBack,
+        transaction_details,
+    );
+
+    utils::set_critical_hook(msg_id);
+
+    utils::send_message_with_gas_for_reply(
+        token_id,
+        bytes,
+        config.gas_to_transfer_tokens,
+        config.gas_for_reply_deposit,
+        config.reply_timeout,
+        msg_id,
+    )
+    .await?;
+
+    msg_tracker_mut().check_transfer_back_result(&msg_id)
 }

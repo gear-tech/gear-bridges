@@ -42,22 +42,15 @@ pub async fn send_message_to_gateway(
 
     utils::set_critical_hook(msg_id);
 
-    let reply_bytes = utils::send_message_with_gas_for_reply(
+    utils::send_message_with_gas_for_reply(
         gateway_address,
         bytes,
         config.gas_to_send_request_to_gateway,
         config.gas_for_reply_deposit,
+        config.reply_timeout,
+        msg_id,
     )
     .await?;
 
-    msg_tracker_mut().remove_message_info(&msg_id);
-
-    let reply: Result<(U256, H160), vft_gateway::Error> =
-        vft_gateway_io::TransferVaraToEth::decode_reply(reply_bytes)
-            .map_err(|_| Error::RequestToGateWayDecodeError)?;
-
-    match reply {
-        Ok((nonce, eth_token_id)) => Ok((nonce, eth_token_id)),
-        Err(_) => Err(Error::ErrorInVftGateway),
-    }
+    msg_tracker_mut().check_vft_gateway_reply(&msg_id)
 }

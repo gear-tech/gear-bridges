@@ -5,6 +5,7 @@ mod block_body;
 mod block_header;
 mod common;
 mod execution_payload;
+pub mod light;
 
 pub use block::Block;
 pub use block_body::BlockBody;

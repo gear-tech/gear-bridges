@@ -19,8 +19,8 @@ pub async fn send_message_to_bridge_builtin(
     }
     .pack();
 
-    let bytes = gbuiltin_bridge::Request::SendMessage {
-        dest: token_id,
+    let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
+        destination: token_id,
         payload: payload_bytes
             .try_into()
             .map_err(|_| Error::PayloadSizeError)?,

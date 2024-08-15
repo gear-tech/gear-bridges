@@ -112,21 +112,22 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", features = [
-    "nightly",
-] }
-gmeta = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gear-wasm-builder = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false }
-gsdk = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gclient = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gear-core = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
+gstd = { version = "=1.5.0", features = ["nightly"] }
+gtest = "=1.5.0"
+gwasm-builder = { version = "=1.5.0", package = "gear-wasm-builder" }
+gmeta = "=1.5.0"
+gear-wasm-builder = { version = "=1.5.0", default-features = false }
+gsdk = "=1.5.0"
+gclient = "=1.5.0"
+gear-core = "=1.5.0"
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
+gbuiltin-eth-bridge =  { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = { git = "https://github.com/gear-tech/sails" }
-sails-client-gen = { git = "https://github.com/gear-tech/sails" }
-sails-rs = { git = "https://github.com/gear-tech/sails", features = ["debug"] }
+sails-idl-gen = "0.3.0"
+sails-client-gen = "0.3.0"
+sails-rs = "0.3.0"
 
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }

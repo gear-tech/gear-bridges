@@ -132,11 +132,11 @@ fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
 }
 
 fn decode_bridge_reply(bytes: &[u8]) -> Result<Option<U256>, Error> {
-    let reply = gbuiltin_bridge::Response::decode(&mut bytes.as_ref())
+    let reply = gbuiltin_eth_bridge::Response::decode(&mut bytes.as_ref())
         .map_err(|_| Error::BuiltinDecodeError)?;
 
     match reply {
-        gbuiltin_bridge::Response::MessageSent { nonce, .. } => Ok(Some(nonce)),
+        gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => Ok(Some(nonce)),
         _ => Ok(None),
     }
 }

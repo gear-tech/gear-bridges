@@ -8,7 +8,7 @@ sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 gstd.workspace = true
-gbuiltin-bridge.workspace = true
+gbuiltin-eth-bridge.workspace = true
 
 [build-dependencies]
 git-download.workspace = true

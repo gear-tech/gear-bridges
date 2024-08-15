@@ -1,9 +1,9 @@
 pragma solidity ^0.8.24;
 
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {Proxy} from "@openzeppelin/contracts/proxy/Proxy.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
-contract ProxyContract is ERC1967Proxy {
+contract ProxyContract is Proxy {
     error ProxyDeniedAdminAccess();
 
     /**
@@ -11,10 +11,7 @@ contract ProxyContract is ERC1967Proxy {
      * `initialOwner`,backed by the implementation at `_logic`, and optionally initialized with
      * `_data` as explained in {ERC1967Proxy-constructor}.
      */
-    constructor(
-        address _logic,
-        bytes memory _data
-    ) payable ERC1967Proxy(_logic, _data) {
+    constructor() payable {
         ERC1967Utils.changeAdmin(msg.sender);
     }
 
@@ -53,6 +50,17 @@ contract ProxyContract is ERC1967Proxy {
         } else {
             ERC1967Utils.changeAdmin(newAdmin);
         }
+    }
+
+    /**
+     * @dev Returns the current implementation address.
+     *
+     * TIP: To get this value clients can read directly from the storage slot shown below (specified by ERC-1967) using
+     * the https://eth.wiki/json-rpc/API#eth_getstorageat[`eth_getStorageAt`] RPC call.
+     * `0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`
+     */
+    function _implementation() internal view virtual override returns (address) {
+        return ERC1967Utils.getImplementation();
     }
 
     function implementation() public view returns (address) {

@@ -1,9 +1,8 @@
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
-use keccak_hash::keccak_256;
 use primitive_types::{H256, U256};
 
-use crate::metrics::MeteredService;
+use utils_prometheus::MeteredService;
 
 mod event_listener;
 mod merkle_root_listener;
@@ -95,55 +94,4 @@ impl MessageRelayer {
 
         Ok(())
     }
-}
-
-async fn submit_message(
-    gear_api: &GearApi,
-    eth_api: &EthApi,
-    message: &Message,
-    merkle_root_block: u32,
-    merkle_root_block_hash: H256,
-) -> anyhow::Result<TxHash> {
-    let message_hash = message_hash(message);
-
-    log::info!("Relaying message with hash {}", hex::encode(message_hash));
-
-    let proof = gear_api
-        .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
-        .await?;
-
-    // TODO: Fully decode
-    let nonce = H256::from(message.nonce_le);
-
-    let tx_hash = eth_api
-        .provide_content_message(
-            merkle_root_block,
-            proof.num_leaves as u32,
-            proof.leaf_index as u32,
-            nonce.to_fixed_bytes(),
-            message.source,
-            message.destination,
-            message.payload.to_vec(),
-            proof.proof,
-        )
-        .await?;
-
-    log::info!("Message #{} relaying started", nonce);
-
-    Ok(tx_hash)
-}
-
-fn message_hash(message: &Message) -> [u8; 32] {
-    let data = [
-        message.nonce_le.as_ref(),
-        message.source.as_ref(),
-        message.destination.as_ref(),
-        message.payload.as_ref(),
-    ]
-    .concat();
-
-    let mut hash = [0; 32];
-    keccak_256(&data, &mut hash);
-
-    hash
 }

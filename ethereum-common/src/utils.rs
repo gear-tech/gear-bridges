@@ -1,6 +1,18 @@
 use super::*;
 use core::str::FromStr;
 
+pub fn calculate_epoch(slot: u64) -> u64 {
+    slot / SLOTS_PER_EPOCH
+}
+
+pub fn calculate_period(slot: u64) -> u64 {
+    calculate_epoch(slot) / EPOCHS_PER_SYNC_COMMITTEE
+}
+
+pub fn calculate_slot(period: u64) -> u64 {
+    period * SLOTS_PER_EPOCH * EPOCHS_PER_SYNC_COMMITTEE
+}
+
 pub fn decode_hex_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: serde::Deserializer<'de>,

@@ -8,7 +8,7 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 
-use crate::metrics::{impl_metered_service, MeteredService};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::RelayedMerkleRoot;
 

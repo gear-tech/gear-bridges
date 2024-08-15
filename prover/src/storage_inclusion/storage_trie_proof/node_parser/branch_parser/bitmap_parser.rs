@@ -154,7 +154,7 @@ mod tests {
 
         let data_block_target =
             NodeDataBlockTarget::constant(&pad_byte_vec(bitmap.to_vec()), &mut builder);
-        let read_offset = builder.zero().into();
+        let read_offset = builder.zero();
         let claimed_child_node_nibble = HalfByteTarget::constant(claimed_nibble, &mut builder);
 
         let input = BitmapParserInputTarget {

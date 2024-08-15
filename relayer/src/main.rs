@@ -6,13 +6,13 @@ use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
-use metrics::MetricsBuilder;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
+use utils_prometheus::MetricsBuilder;
 
+mod ethereum_checkpoints;
 mod message_relayer;
-mod metrics;
 mod proof_storage;
 mod prover_interface;
 mod relay_merkle_roots;
@@ -38,6 +38,7 @@ struct Cli {
     command: CliCommands,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Subcommand)]
 enum CliCommands {
     /// Start service constantly relaying messages to ethereum
@@ -46,6 +47,8 @@ enum CliCommands {
     /// Relay message to ethereum
     #[clap(visible_alias("rm"))]
     RelayMessages(RelayMessagesArgs),
+    /// Start service constantly relaying Ethereum checkpoints to the Vara program
+    RelayCheckpoints(RelayCheckpointsArgs),
 }
 
 #[derive(Args)]
@@ -125,6 +128,35 @@ struct ProofStorageArgs {
     gear_fee_payer: Option<String>,
 }
 
+#[derive(Args)]
+struct RelayCheckpointsArgs {
+    /// Specify ProgramId of the Checkpoint-light-client program
+    #[arg(long, env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS")]
+    program_id: String,
+
+    /// Specify an endpoint providing Beacon API
+    #[arg(long, env = "BEACON_ENDPOINT")]
+    beacon_endpoint: String,
+
+    /// Domain of the VARA RPC endpoint
+    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
+    vara_domain: String,
+
+    /// Port of the VARA RPC endpoint
+    #[arg(long, default_value = "9944", env = "VARA_PORT")]
+    vara_port: u16,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
+    vara_suri: String,
+
+    #[clap(flatten)]
+    prometheus_args: PrometheusArgs,
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
@@ -137,6 +169,7 @@ async fn main() {
         .filter(Some("ethereum-client"), log::LevelFilter::Info)
         .filter(Some("metrics"), log::LevelFilter::Info)
         .format_timestamp(Some(TimestampPrecision::Seconds))
+        .parse_default_env()
         .init();
 
     let cli = Cli::parse();
@@ -146,17 +179,21 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
+            let mut metrics = MetricsBuilder::new();
+
             let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
-                    Box::from(
-                        GearProofStorage::new(
-                            &args.vara_endpoint.vara_endpoint,
-                            &fee_payer,
-                            "./onchain_proof_storage_data".into(),
-                        )
-                        .await
-                        .expect("Failed to initilize proof storage"),
+                    let proof_storage = GearProofStorage::new(
+                        &args.vara_endpoint.vara_endpoint,
+                        &fee_payer,
+                        "./onchain_proof_storage_data".into(),
                     )
+                    .await
+                    .expect("Failed to initilize proof storage");
+
+                    metrics = metrics.register_service(&proof_storage);
+
+                    Box::from(proof_storage)
                 } else {
                     log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
                     Box::from(FileSystemProofStorage::new("./proof_storage".into()))
@@ -164,7 +201,7 @@ async fn main() {
 
             let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
 
-            MetricsBuilder::new()
+            metrics
                 .register_service(&relayer)
                 .build()
                 .run(args.prometheus_args.endpoint)
@@ -198,6 +235,8 @@ async fn main() {
 
             relayer.run().await.unwrap();
         }
+
+        CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
     };
 }
 

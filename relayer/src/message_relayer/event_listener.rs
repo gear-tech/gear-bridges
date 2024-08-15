@@ -10,7 +10,7 @@ use parity_scale_codec::Decode;
 use primitive_types::H256;
 use prometheus::{IntCounter, IntGauge};
 
-use crate::metrics::{impl_metered_service, MeteredService};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{BlockEvent, MessageInBlock};
 

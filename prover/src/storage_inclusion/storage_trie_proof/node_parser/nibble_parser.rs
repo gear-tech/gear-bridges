@@ -221,8 +221,8 @@ mod tests {
 
         let input = NibbleParserInputTarget {
             first_node_data_block: data_block_target,
-            read_offset: builder.zero().into(),
-            nibble_count: nibble_count_target.into(),
+            read_offset: builder.zero(),
+            nibble_count: nibble_count_target,
             partial_address: PartialStorageAddressTarget::empty(&mut builder),
         };
 

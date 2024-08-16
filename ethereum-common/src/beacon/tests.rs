@@ -130,9 +130,9 @@ fn patricia_trie_root_simple() {
     let (key, value) = utils::rlp_encode_index_and_receipt(&0, &receipt);
 
     let root = {
-        let mut memdb = new_memory_db();
+        let mut mem_db = memory_db::new();
         let mut root = H256::default();
-        let mut triedbmut = TrieDBMut::new(&mut memdb, &mut root);
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
         triedbmut.insert(&key, &value).unwrap();
 
         *triedbmut.root()
@@ -144,9 +144,9 @@ fn patricia_trie_root_simple() {
     let (key, value) = utils::rlp_encode_index_and_receipt(&1, &receipt);
 
     let root = {
-        let mut memdb = new_memory_db();
+        let mut mem_db = memory_db::new();
         let mut root = H256::default();
-        let mut triedbmut = TrieDBMut::new(&mut memdb, &mut root);
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
         triedbmut.insert(&key, &value).unwrap();
 
         *triedbmut.root()
@@ -170,9 +170,9 @@ fn patricia_trie_root_simple() {
     let (key, value) = utils::rlp_encode_index_and_receipt(&0, &receipt);
 
     let root = {
-        let mut memdb = new_memory_db();
+        let mut mem_db = memory_db::new();
         let mut root = H256::default();
-        let mut triedbmut = TrieDBMut::new(&mut memdb, &mut root);
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
         triedbmut.insert(&key, &value).unwrap();
 
         *triedbmut.root()
@@ -212,9 +212,9 @@ fn dynamic_fee_transaction_type() {
     ]);
 
     let root = {
-        let mut memdb = new_memory_db();
+        let mut mem_db = memory_db::new();
         let mut root = H256::default();
-        let mut triedbmut = TrieDBMut::new(&mut memdb, &mut root);
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
         for (key, value) in encoded {
             triedbmut.insert(&key, &value).unwrap();
         }
@@ -229,9 +229,9 @@ fn dynamic_fee_transaction_type() {
         utils::rlp_encode_receipts_and_nibble_tuples(&[(11, receipt1.clone()), (1, receipt2)]);
 
     let root = {
-        let mut memdb = new_memory_db();
+        let mut mem_db = memory_db::new();
         let mut root = H256::default();
-        let mut triedbmut = TrieDBMut::new(&mut memdb, &mut root);
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
         for (key, value) in encoded {
             triedbmut.insert(&key, &value).unwrap();
         }
@@ -254,9 +254,9 @@ fn dynamic_fee_transaction_type() {
     let encoded = utils::rlp_encode_receipts_and_nibble_tuples(&[(0, receipt1), (1, receipt2)]);
 
     let root = {
-        let mut memdb = new_memory_db();
+        let mut mem_db = memory_db::new();
         let mut root = H256::default();
-        let mut triedbmut = TrieDBMut::new(&mut memdb, &mut root);
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
         for (key, value) in encoded {
             triedbmut.insert(&key, &value).unwrap();
         }

@@ -1,8 +1,6 @@
 // Inspired by the Parity Ethereum project.
 
 pub use crate::{keccak_hasher::KeccakHasher, rlp_node_codec::RlpNodeCodec};
-use ethereum_types::H256;
-use rlp::DecoderError;
 
 /// Convenience type alias to instantiate a Keccak-flavoured `RlpNodeCodec`
 pub type RlpCodec = RlpNodeCodec<KeccakHasher>;
@@ -29,9 +27,9 @@ impl trie_db::TrieLayout for Layout {
 /// use memory_db::*;
 /// use trie_db::*;
 /// use ethereum_types::H256;
-/// use ethereum_common::patricia_trie::{TrieDB, TrieDBMut};
+/// use ethereum_common::{patricia_trie::{TrieDB, TrieDBMut}, memory_db};
 ///
-///   let mut memdb = ethereum_common::new_memory_db();
+///   let mut memdb = memory_db::new();
 ///   let mut root = H256::zero();
 ///   TrieDBMut::new(&mut memdb, &mut root).insert(b"foo", b"bar").unwrap();
 ///   let t = TrieDB::new(&memdb, &root).unwrap();
@@ -39,12 +37,6 @@ impl trie_db::TrieLayout for Layout {
 ///   assert_eq!(t.get(b"foo").unwrap().unwrap(), b"bar".to_vec());
 /// ```
 pub type TrieDB<'db> = trie_db::TrieDB<'db, Layout>;
-
-/// Convenience type alias to instantiate a Keccak/Rlp-flavoured `SecTrieDB`
-pub type SecTrieDB<'db> = trie_db::SecTrieDB<'db, Layout>;
-
-/// Convenience type alias to instantiate a Keccak/Rlp-flavoured `FatDB`
-pub type FatDB<'db> = trie_db::FatDB<'db, Layout>;
 
 /// Convenience type alias to instantiate a Keccak/Rlp-flavoured `TrieDBMut`
 ///
@@ -58,9 +50,9 @@ pub type FatDB<'db> = trie_db::FatDB<'db, Layout>;
 /// use memory_db::*;
 /// use trie_db::*;
 /// use ethereum_types::H256;
-/// use ethereum_common::{patricia_trie::{TrieDB, TrieDBMut}, rlp_node_codec};
+/// use ethereum_common::{patricia_trie::{TrieDB, TrieDBMut}, rlp_node_codec, memory_db};
 ///
-///   let mut memdb = ethereum_common::new_memory_db();
+///   let mut memdb = memory_db::new();
 ///   let mut root = H256::zero();
 ///   let mut t = TrieDBMut::new(&mut memdb, &mut root);
 ///   assert!(t.is_empty());
@@ -72,20 +64,6 @@ pub type FatDB<'db> = trie_db::FatDB<'db, Layout>;
 ///   assert!(!t.contains(b"foo").unwrap());
 /// ```
 pub type TrieDBMut<'db> = trie_db::TrieDBMut<'db, Layout>;
-
-/// Convenience type alias to instantiate a Keccak/Rlp-flavoured `SecTrieDBMut`
-pub type SecTrieDBMut<'db> = trie_db::SecTrieDBMut<'db, Layout>;
-
-/// Convenience type alias to instantiate a Keccak/Rlp-flavoured `FatDBMut`
-pub type FatDBMut<'db> = trie_db::FatDBMut<'db, Layout>;
-
-/// Convenience type alias to instantiate a Keccak/Rlp-flavoured `TrieFactory`
-pub type TrieFactory = trie_db::TrieFactory<Layout>;
-
-/// Convenience type alias for Keccak/Rlp flavoured trie errors
-pub type TrieError = trie_db::TrieError<H256, DecoderError>;
-/// Convenience type alias for Keccak/Rlp flavoured trie results
-pub type Result<T> = trie_db::Result<T, H256, DecoderError>;
 
 #[cfg(test)]
 mod tests {

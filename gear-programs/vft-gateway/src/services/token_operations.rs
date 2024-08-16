@@ -1,8 +1,8 @@
 use super::msg_tracker::TransactionDetails;
 use super::{
-    msg_tracker, msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus,
+    msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus,
 };
-use gstd::msg;
+#[allow(unused_imports)]
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
 pub async fn burn_tokens(

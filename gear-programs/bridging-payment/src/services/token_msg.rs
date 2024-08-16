@@ -5,7 +5,7 @@ use super::{
     vft::vft::io as vft_io,
     Config,
 };
-
+#[allow(unused_imports)]
 use sails_rs::{calls::ActionIo, prelude::*};
 
 pub async fn transfer_tokens(

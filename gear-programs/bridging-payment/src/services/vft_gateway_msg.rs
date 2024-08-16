@@ -1,11 +1,9 @@
 use super::{
     error::Error,
     msg_tracker::{msg_tracker_mut, MessageStatus, TransactionDetails},
-    utils, vft_gateway,
-    vft_gateway::vft_gateway::io as vft_gateway_io,
-    Config,
+    utils, vft_gateway, Config,
 };
-use gstd::{msg, prelude::collections::HashMap, MessageId};
+#[allow(unused_imports)]
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
 

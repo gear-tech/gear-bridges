@@ -1,6 +1,6 @@
 use collections::HashMap;
 use sails_rs::{
-    gstd::{msg, ExecContext},
+    gstd::{ExecContext},
     prelude::*,
 };
 
@@ -264,14 +264,7 @@ where
                 .expect("VftGateway::seed() should be called")
         }
     }
-
-    fn config_mut(&mut self) -> &mut Config {
-        unsafe {
-            CONFIG
-                .as_mut()
-                .expect("VftGatewayData::seed() should be called")
-        }
-    }
+    
     fn get_eth_token_id(&self, vara_token_id: &ActorId) -> Result<H160, Error> {
         self.data()
             .vara_to_eth_token_id

@@ -1,12 +1,12 @@
 use gtest::{Program, System};
 
-use sails_rs::{collections::HashMap, prelude::*};
+use sails_rs::{prelude::*};
 use vft_gateway_app::services::{error::Error, msg_tracker::MessageStatus};
 
 mod utils;
 use utils::{
-    FTMockError, FTMockReturnsFalse, FTMockReturnsTrue, FTMockWrongReply, GearBridgeBuiltinMock,
-    GearBridgeBuiltinMockPanic, Token, VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, FEE, TOKEN_ID,
+    FTMockError, FTMockReturnsFalse, GearBridgeBuiltinMock,
+    GearBridgeBuiltinMockPanic, Token, VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, TOKEN_ID,
 };
 
 #[test]

@@ -1,5 +1,5 @@
 use gtest::{Program, System};
-use sails_rs::{prelude::*};
+use sails_rs::prelude::*;
 
 mod utils;
 use utils::{

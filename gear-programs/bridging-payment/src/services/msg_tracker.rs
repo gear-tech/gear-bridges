@@ -1,5 +1,6 @@
 use super::{error::Error, MSG_TRACKER};
 use gstd::prelude::collections::HashMap;
+#[allow(unused_imports)]
 use sails_rs::{calls::ActionIo, prelude::*};
 #[derive(Default)]
 pub struct MessageTracker {

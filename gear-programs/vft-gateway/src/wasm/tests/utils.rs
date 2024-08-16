@@ -4,7 +4,6 @@ use vft_gateway_app::services::{error::Error, msg_tracker::MessageInfo, Config, 
 
 use sails_rs::prelude::*;
 pub const ADMIN_ID: u64 = 1000;
-pub const FEE: u128 = 10_000_000_000_000;
 pub const TOKEN_ID: u64 = 200;
 pub const BRIDGE_BUILTIN_ID: u64 = 300;
 
@@ -71,7 +70,6 @@ create_mock!(GearBridgeBuiltinMockPanic, Err("Error"));
 pub trait Token {
     fn token(system: &System, id: u64) -> Program<'_>;
     fn mint(&self, from: u64, to: ActorId, value: U256);
-    fn approve(&self, from: u64, spender: ActorId, value: U256);
     fn grant_burner_role(&self, from: u64, to: ActorId);
     fn grant_minter_role(&self, from: u64, to: ActorId);
     fn balance_of(&self, account: ActorId) -> U256;
@@ -88,16 +86,6 @@ impl Token for Program<'_> {
 
     fn mint(&self, from: u64, to: ActorId, value: U256) {
         let payload = ["Vft".encode(), "Mint".encode(), (to, value).encode()].concat();
-        assert!(!self.send_bytes(from, payload).main_failed());
-    }
-
-    fn approve(&self, from: u64, spender: ActorId, value: U256) {
-        let payload = [
-            "Vft".encode(),
-            "Approve".encode(),
-            (spender, value).encode(),
-        ]
-        .concat();
         assert!(!self.send_bytes(from, payload).main_failed());
     }
 

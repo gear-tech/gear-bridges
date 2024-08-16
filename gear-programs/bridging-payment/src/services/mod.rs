@@ -110,13 +110,6 @@ where
         }
     }
 
-    fn data_mut(&mut self) -> &mut BridgingPaymentData {
-        unsafe {
-            DATA.as_mut()
-                .expect("BridgingPaymentData::seed() should be called")
-        }
-    }
-
     fn config(&self) -> &Config {
         unsafe {
             CONFIG

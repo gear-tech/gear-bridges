@@ -7,9 +7,9 @@ use rlp::DecoderError;
 /// Convenience type alias to instantiate a Keccak-flavoured `RlpNodeCodec`
 pub type RlpCodec = RlpNodeCodec<KeccakHasher>;
 
-#[derive(Clone, Default)]
 /// Defines the working of a particular flavour of trie:
 /// how keys are hashed, how values are encoded, does it use extension nodes or not.
+#[derive(Clone, Default)]
 pub struct Layout;
 
 impl trie_db::TrieLayout for Layout {

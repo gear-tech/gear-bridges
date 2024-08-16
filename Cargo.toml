@@ -70,6 +70,8 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
+hash-db = { version = "0.15.2", default-features = false }
+hash256-std-hasher = { version = "0.15.2", default-features = false }
 hex = { version = "0.4.3", default-features = false }
 hex-literal = "0.4.1"
 itertools = "0.10.5"
@@ -78,6 +80,7 @@ keccak-hash = "0.10.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
 log = "0.4.14"
+memory-db = { version = "0.27.0", default-features = false }
 num = { version = "0.4", features = ["rand"] }
 paste = "1.0.14"
 pretty_env_logger = "0.5.0"
@@ -89,6 +92,7 @@ reqwest = "0.11.24"
 ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = [
     "alloc",
 ] }
+rlp = { version = "0.5.2", default-features = false }
 scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }
@@ -100,6 +104,7 @@ serde_json = "1.0"
 sha2 = "0.10"
 static_assertions = "1.1.0"
 thiserror = "1.0.61"
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.23.0", features = ["full"] }
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
@@ -132,6 +137,10 @@ primitive-types = { version = "0.12.2", default-features = false }
 binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 
 # Alloy deps
+alloy-consensus = { version = "0.2.1", default-features = false }
+alloy-eips = { version = "0.2.1", default-features = false }
+alloy-rlp = { version = "0.3.8", default-features = false }
+alloy-primitives = { version = "0.7.7", default-features = false }
 alloy = { version = "0.2.0", package = "alloy", features = [
     "sol-types",
     "contract",

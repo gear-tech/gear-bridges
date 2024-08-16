@@ -16,16 +16,16 @@ bitvec.workspace = true
 scale-info = { workspace = true, features = ["bit-vec"] }
 hex-literal.workspace = true
 ring.workspace = true
-hash-db = { version = "0.15.2", default-features = false }
-hash256-std-hasher = { version = "0.15.2", default-features = false }
-tiny-keccak = { version = "2.0.2", features = ["keccak"] }
-rlp = { version = "0.5.2", default-features = false }
+hash-db.workspace = true
+hash256-std-hasher.workspace = true
+memory-db.workspace = true
+rlp.workspace = true
+tiny-keccak.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-primitives.workspace = true
 trie-db = { version = "0.22.6", default-features = false }
-memory-db = { version = "0.27.0", default-features = false }
-alloy-consensus = { version = "0.2.1", default-features = false }
-alloy-eips = { version = "0.2.1", default-features = false }
-alloy-rlp = { version = "0.3.8", default-features = false }
-alloy-primitives = { version = "0.7.7", default-features = false }
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -43,11 +43,11 @@ std = [
     "ring/std",
     "hash-db/std",
     "hash256-std-hasher/std",
-    "rlp/std",
-    "trie-db/std",
     "memory-db/std",
+    "rlp/std",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-rlp/std",
     "alloy-primitives/std",
+    "trie-db/std",
 ]

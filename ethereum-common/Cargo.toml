@@ -25,6 +25,9 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
+# we need to use this specific version of the crate since
+# its API changed a lot and the rlp implementation of NodeCodec
+# requires lots of non-trivial changes.
 trie-db = { version = "0.22.6", default-features = false }
 
 [dev-dependencies]

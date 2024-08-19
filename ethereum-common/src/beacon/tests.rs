@@ -1,5 +1,9 @@
 use super::*;
+use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
+use alloy_primitives::Log;
 use hex_literal::hex;
+use patricia_trie::TrieDBMut;
+use trie_db::TrieMut;
 
 const ETHEREUM_9_230_177: &[u8; 133_287] = include_bytes!("./chain-data/ethereum-9_230_177.json");
 const SEPOLIA_5_151_035: &[u8; 10_722] = include_bytes!("./chain-data/sepolia-5_151_035.json");
@@ -105,4 +109,160 @@ fn holesky_slot_1_820_966() {
     };
 
     assert_eq!(block_root, block.tree_hash_root());
+}
+
+#[test]
+fn patricia_trie_root_simple() {
+    let root_expected = hex!("056b23fbba480696b65fe5a59b8f2148a1299103c4f57df839233af2cf4ca2d2");
+
+    let receipt = ReceiptWithBloom::new(
+        Receipt::<Log> {
+            status: true.into(),
+            // 0x5208
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+        },
+        Default::default(),
+    );
+
+    let receipt = ReceiptEnvelope::Legacy(receipt);
+
+    let (key, value) = utils::rlp_encode_index_and_receipt(&0, &receipt);
+
+    let root = {
+        let mut mem_db = memory_db::new();
+        let mut root = H256::default();
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
+        triedbmut.insert(&key, &value).unwrap();
+
+        *triedbmut.root()
+    };
+
+    assert_eq!(root.as_ref(), root_expected);
+
+    // wrong index
+    let (key, value) = utils::rlp_encode_index_and_receipt(&1, &receipt);
+
+    let root = {
+        let mut mem_db = memory_db::new();
+        let mut root = H256::default();
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
+        triedbmut.insert(&key, &value).unwrap();
+
+        *triedbmut.root()
+    };
+
+    assert_ne!(root.as_ref(), root_expected);
+
+    // wrong status
+    let receipt = ReceiptWithBloom::new(
+        Receipt::<Log> {
+            status: false.into(),
+            // 0x5208
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+        },
+        Default::default(),
+    );
+
+    let receipt = ReceiptEnvelope::Legacy(receipt);
+
+    let (key, value) = utils::rlp_encode_index_and_receipt(&0, &receipt);
+
+    let root = {
+        let mut mem_db = memory_db::new();
+        let mut root = H256::default();
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
+        triedbmut.insert(&key, &value).unwrap();
+
+        *triedbmut.root()
+    };
+
+    assert_ne!(root.as_ref(), root_expected);
+}
+
+// Test data source: https://github.com/ethereum/go-ethereum/blob/2b9d19870646140c4dc90645cf7c828cc76860aa/cmd/evm/testdata/30/exp.json
+#[test]
+fn dynamic_fee_transaction_type() {
+    let root_expected = hex!("75308898d571eafb5cd8cde8278bf5b3d13c5f6ec074926de3bb895b519264e1");
+
+    let receipt1 = ReceiptEnvelope::Eip1559(ReceiptWithBloom::new(
+        Receipt::<Log> {
+            status: true.into(),
+            // 0x5208
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+        },
+        Default::default(),
+    ));
+
+    let receipt2 = ReceiptEnvelope::Eip1559(ReceiptWithBloom::new(
+        Receipt::<Log> {
+            status: true.into(),
+            // 0xA410
+            cumulative_gas_used: 42_000,
+            logs: vec![],
+        },
+        Default::default(),
+    ));
+
+    let encoded = utils::rlp_encode_receipts_and_nibble_tuples(&[
+        (0, receipt1.clone()),
+        (1, receipt2.clone()),
+    ]);
+
+    let root = {
+        let mut mem_db = memory_db::new();
+        let mut root = H256::default();
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
+        for (key, value) in encoded {
+            triedbmut.insert(&key, &value).unwrap();
+        }
+
+        *triedbmut.root()
+    };
+
+    assert_eq!(root.as_ref(), root_expected);
+
+    // wrong index
+    let encoded =
+        utils::rlp_encode_receipts_and_nibble_tuples(&[(11, receipt1.clone()), (1, receipt2)]);
+
+    let root = {
+        let mut mem_db = memory_db::new();
+        let mut root = H256::default();
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
+        for (key, value) in encoded {
+            triedbmut.insert(&key, &value).unwrap();
+        }
+
+        *triedbmut.root()
+    };
+
+    assert_ne!(root.as_ref(), root_expected);
+
+    // wrong cumulative gas used of receipt2
+    let receipt2 = ReceiptEnvelope::Eip1559(ReceiptWithBloom::new(
+        Receipt::<Log> {
+            status: true.into(),
+            cumulative_gas_used: 42_001,
+            logs: vec![],
+        },
+        Default::default(),
+    ));
+
+    let encoded = utils::rlp_encode_receipts_and_nibble_tuples(&[(0, receipt1), (1, receipt2)]);
+
+    let root = {
+        let mut mem_db = memory_db::new();
+        let mut root = H256::default();
+        let mut triedbmut = TrieDBMut::new(&mut mem_db, &mut root);
+        for (key, value) in encoded {
+            triedbmut.insert(&key, &value).unwrap();
+        }
+
+        *triedbmut.root()
+    };
+
+    assert_ne!(root.as_ref(), root_expected);
 }

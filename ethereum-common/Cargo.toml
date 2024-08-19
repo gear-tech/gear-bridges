@@ -16,6 +16,19 @@ bitvec.workspace = true
 scale-info = { workspace = true, features = ["bit-vec"] }
 hex-literal.workspace = true
 ring.workspace = true
+hash-db.workspace = true
+hash256-std-hasher.workspace = true
+memory-db.workspace = true
+rlp.workspace = true
+tiny-keccak.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-primitives.workspace = true
+# we need to use this specific version of the crate since
+# its API changed a lot and the rlp implementation of NodeCodec
+# requires lots of non-trivial changes.
+trie-db = { version = "0.22.6", default-features = false }
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -31,4 +44,13 @@ std = [
     "bitvec/std",
     "scale-info/std",
     "ring/std",
+    "hash-db/std",
+    "hash256-std-hasher/std",
+    "memory-db/std",
+    "rlp/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-rlp/std",
+    "alloy-primitives/std",
+    "trie-db/std",
 ]

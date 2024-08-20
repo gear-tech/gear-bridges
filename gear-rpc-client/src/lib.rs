@@ -550,7 +550,7 @@ impl GearApi {
             .api
             .rpc()
             .request(
-                "gearBridge_merkleProof",
+                "gearEthBridge_merkleProof",
                 rpc_params![message_hash, Some(block)],
             )
             .await?;

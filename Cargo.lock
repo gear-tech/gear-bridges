@@ -4389,6 +4389,7 @@ name = "gear-rpc-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake2",
  "futures-util",
  "gsdk",
  "hex",
@@ -8650,6 +8651,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "toml 0.8.19",
  "utils-prometheus",
 ]
 

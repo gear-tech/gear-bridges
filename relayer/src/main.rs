@@ -7,11 +7,11 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
 mod ethereum_checkpoints;
+mod genesis_config;
 mod message_relayer;
 mod proof_storage;
 mod prover_interface;
@@ -20,15 +20,6 @@ mod relay_merkle_roots;
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
-
-const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    authority_set_id: 1,
-    // 0xb9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24
-    validator_set_hash: [
-        0xb9853ab2, 0xfb585702, 0xdfd9040e, 0xe8bc9f94, 0xdc5b0abd, 0x8b0f809e, 0xc23fdc02,
-        0x65b21e24,
-    ],
-};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -49,6 +40,9 @@ enum CliCommands {
     RelayMessages(RelayMessagesArgs),
     /// Start service constantly relaying Ethereum checkpoints to the Vara program
     RelayCheckpoints(RelayCheckpointsArgs),
+    /// Fetch authority set hash and id at specified block
+    #[clap(visible_alias("fs"))]
+    FetchAuthoritySetState(FetchAuthoritySetStateArgs),
 }
 
 #[derive(Args)]
@@ -77,6 +71,17 @@ struct RelayMerkleRootsArgs {
     prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     proof_storage_args: ProofStorageArgs,
+}
+
+#[derive(Args)]
+struct FetchAuthoritySetStateArgs {
+    #[clap(flatten)]
+    vara_endpoint: VaraEndpointArg,
+    /// Block number which contains desired authority set
+    block_number: Option<u32>,
+    /// Wether to write fetched authority set state as genesis config
+    #[clap(long, action)]
+    write_to_file: bool,
 }
 
 #[derive(Args)]
@@ -199,7 +204,10 @@ async fn main() {
                     Box::from(FileSystemProofStorage::new("./proof_storage".into()))
                 };
 
-            let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
+            let genesis_config = genesis_config::load_from_file();
+
+            let relayer =
+                MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage).await;
 
             metrics
                 .register_service(&relayer)
@@ -235,8 +243,13 @@ async fn main() {
 
             relayer.run().await.unwrap();
         }
-
         CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
+        CliCommands::FetchAuthoritySetState(args) => {
+            let gear_api = create_gear_client(&args.vara_endpoint).await;
+            genesis_config::fetch_from_chain(gear_api, args.block_number, args.write_to_file)
+                .await
+                .expect("Failed to fetch authority set state");
+        }
     };
 }
 

@@ -2,13 +2,13 @@ use std::{str::FromStr, time::Instant};
 
 use utils_prometheus::MeteredService;
 
-use super::GENESIS_CONFIG;
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
 use prometheus::{core::Collector, HistogramOpts, HistogramVec};
 use prover::proving::{
-    self, BlockFinality, BranchNodeData, PreCommit, ProofWithCircuitData, StorageInclusion,
+    self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
+    StorageInclusion,
 };
 
 pub struct Metrics;
@@ -27,15 +27,18 @@ lazy_static::lazy_static!(
         ).unwrap();
 );
 
-pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircuitData> {
+pub async fn prove_genesis(
+    gear_api: &GearApi,
+    genesis_config: GenesisConfig,
+) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
         "Proving genesis authority set change {} -> {}",
-        GENESIS_CONFIG.authority_set_id,
-        GENESIS_CONFIG.authority_set_id + 1
+        genesis_config.authority_set_id,
+        genesis_config.authority_set_id + 1
     );
 
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(GENESIS_CONFIG.authority_set_id)
+        .fetch_finality_proof_for_session(genesis_config.authority_set_id)
         .await?;
 
     let next_validator_set_inclusion_proof = gear_api
@@ -51,7 +54,7 @@ pub async fn prove_genesis(gear_api: &GearApi) -> anyhow::Result<ProofWithCircui
 
     let proof = prover::proving::prove_genesis(
         parse_rpc_block_finality_proof(current_epoch_block_finality),
-        GENESIS_CONFIG,
+        genesis_config,
         next_validator_set_inclusion_proof,
         next_validator_set_storage_data,
     );
@@ -154,6 +157,7 @@ impl FinalProof {
 pub async fn prove_final(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
+    genesis_config: GenesisConfig,
     at_block: H256,
 ) -> anyhow::Result<FinalProof> {
     let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
@@ -168,7 +172,7 @@ pub async fn prove_final(
     let proof = proving::prove_message_sent(
         previous_proof,
         parse_rpc_block_finality_proof(block_finality),
-        GENESIS_CONFIG,
+        genesis_config,
         sent_message_inclusion_proof,
         message_contents,
     );

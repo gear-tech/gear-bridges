@@ -2,7 +2,11 @@
 #![feature(generic_const_exprs)]
 
 use anyhow::anyhow;
-use dto::BranchNodeData;
+use blake2::{
+    digest::{Update, VariableOutput},
+    Blake2bVar,
+};
+use dto::{AuthoritySetState, BranchNodeData};
 use gsdk::{
     metadata::{
         gear::Event as GearEvent,
@@ -85,10 +89,42 @@ impl GearApi {
         Ok(self.api.rpc().chain_get_finalized_head().await?)
     }
 
+    /// Fetch authority set id for the given block.
     pub async fn authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
         let block = (*self.api).blocks().at(block).await?;
         let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
         Self::fetch_from_storage(&block, &set_id_address).await
+    }
+
+    /// Get authority set state for specified block. If block is not specified
+    /// the latest finalized block is taken.
+    pub async fn authority_set_state(
+        &self,
+        block: Option<H256>,
+    ) -> anyhow::Result<AuthoritySetState> {
+        let block = match block {
+            Some(block) => block,
+            None => self.latest_finalized_block().await?,
+        };
+
+        let block = (*self.api).blocks().at(block).await?;
+        let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
+        let set_id = Self::fetch_from_storage(&block, &set_id_address).await?;
+
+        let authority_set = self.fetch_authority_set(set_id).await?;
+        let authority_set_data: Vec<_> = authority_set.into_iter().flatten().collect();
+
+        let mut hasher = Blake2bVar::new(32).expect("Failed to instantiate Blake2bVar");
+        hasher.update(&authority_set_data);
+        let mut hash = [0; 32];
+        hasher
+            .finalize_variable(&mut hash)
+            .expect("Hash is of incorrect size");
+
+        Ok(AuthoritySetState {
+            authority_set_hash: hash,
+            authority_set_id: set_id,
+        })
     }
 
     /// Find authority set id that have signed given `block`.
@@ -151,10 +187,10 @@ impl GearApi {
 
     pub async fn fetch_finality_proof_for_session(
         &self,
-        validator_set_id: u64,
+        authority_set_id: u64,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
         let block = self
-            .search_for_authority_set_block(validator_set_id)
+            .search_for_authority_set_block(authority_set_id)
             .await?;
 
         self.fetch_finality_proof(block).await
@@ -166,7 +202,7 @@ impl GearApi {
         &self,
         after_block: H256,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
-        let required_validator_set_id = self.signed_by_authority_set_id(after_block).await?;
+        let required_authority_set_id = self.signed_by_authority_set_id(after_block).await?;
 
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
@@ -190,7 +226,7 @@ impl GearApi {
 
         let signed_data = sp_consensus_grandpa::localized_payload(
             justification.round,
-            required_validator_set_id,
+            required_authority_set_id,
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(Precommit::<GearHeader>::new(
                 finality.block,
                 fetched_block_number,
@@ -202,7 +238,7 @@ impl GearApi {
             assert!(pc.signature.verify(&signed_data[..], &pc.id));
         }
 
-        let validator_set = self.fetch_authority_set(required_validator_set_id).await?;
+        let validator_set = self.fetch_authority_set(required_authority_set_id).await?;
 
         let pre_commits: Vec<_> = justification
             .commit

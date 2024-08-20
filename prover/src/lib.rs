@@ -58,6 +58,7 @@ pub mod proving {
             LatestValidatorSet,
         },
     };
+    use consts::BLAKE2_DIGEST_SIZE;
     use plonky2::{
         plonk::{
             circuit_data::{CommonCircuitData, VerifierCircuitData},
@@ -166,7 +167,23 @@ pub mod proving {
     #[derive(Clone, Copy)]
     pub struct GenesisConfig {
         pub authority_set_id: u64,
-        pub authority_set_hash: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
+        pub authority_set_hash: [u8; BLAKE2_DIGEST_SIZE],
+    }
+
+    impl GenesisConfig {
+        pub fn authority_set_hash_goldilocks(
+            &self,
+        ) -> [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS] {
+            self.authority_set_hash
+                .chunks(4)
+                .map(|limb_bytes| {
+                    u32::from_be_bytes(limb_bytes.try_into().expect("Expected 4 bytes per limb"))
+                        as u64
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("Incorrect amount of limbs")
+        }
     }
 
     /// Prove very first transition from genesis authority set to the subsequent.

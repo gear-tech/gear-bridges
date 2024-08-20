@@ -8635,6 +8635,7 @@ dependencies = [
  "gear-rpc-client",
  "gear_proof_storage",
  "hex",
+ "hex-literal",
  "keccak-hash 0.10.0",
  "lazy_static",
  "libc",

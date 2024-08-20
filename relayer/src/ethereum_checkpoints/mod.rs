@@ -19,6 +19,7 @@ use tokio::{
     time::{self, Duration},
 };
 use utils::{slots_batch::Iter as SlotsBatchIter, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
+use vara_runtime::UNITS;
 
 #[cfg(test)]
 mod tests;
@@ -123,6 +124,8 @@ pub async fn relay(args: RelayCheckpointsArgs) {
 
     log::info!("Metrics service spawned");
 
+    update_total_balance(&client, &update_metrics).await;
+
     loop {
         let future_interrupt = signal_interrupt.recv();
         pin_mut!(future_interrupt);
@@ -148,22 +151,22 @@ pub async fn relay(args: RelayCheckpointsArgs) {
             .fetched_sync_update_slot
             .set(i64::from_le_bytes(slot.to_le_bytes()));
 
-        if slot == slot_last {
+        let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
+        if !committee_update {
             update_metrics.total_fetched_finality_updates.inc();
+        }
 
+        if slot == slot_last {
             continue;
         }
 
-        let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
         match sync_update::try_to_apply(&client, program_id, sync_update, gas_limit).await {
             Ok(Ok(_)) => {
                 slot_last = slot;
 
                 if committee_update {
-                    update_metrics.total_fetched_committee_updates.inc();
                     update_metrics.processed_committee_updates.inc();
                 } else {
-                    update_metrics.total_fetched_finality_updates.inc();
                     update_metrics.processed_finality_updates.inc();
                 }
             }
@@ -182,5 +185,19 @@ pub async fn relay(args: RelayCheckpointsArgs) {
                 return;
             }
         }
+
+        update_total_balance(&client, &update_metrics).await;
+    }
+}
+
+async fn update_total_balance(client: &GearApi, update_metrics: &metrics::Updates) {
+    match client.total_balance(client.account_id()).await {
+        Ok(total_balance) => {
+            let total_balance = total_balance / UNITS;
+            let total_balance: i64 = total_balance.try_into().unwrap_or(i64::MAX);
+
+            update_metrics.account_total_balance.set(total_balance);
+        }
+        Err(e) => log::error!("Unable to get total balance: {e:?}"),
     }
 }

@@ -38,6 +38,7 @@ thiserror.workspace = true
 toml.workspace = true
 tokio.workspace = true
 utils-prometheus.workspace = true
+vara-runtime.workspace = true
 
 [build-dependencies]
 cgo_oligami = "0.3"

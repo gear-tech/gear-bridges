@@ -166,7 +166,7 @@ pub mod proving {
     #[derive(Clone, Copy)]
     pub struct GenesisConfig {
         pub authority_set_id: u64,
-        pub validator_set_hash: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
+        pub authority_set_hash: [u64; BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS],
     }
 
     /// Prove very first transition from genesis authority set to the subsequent.

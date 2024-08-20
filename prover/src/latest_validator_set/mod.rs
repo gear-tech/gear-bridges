@@ -74,7 +74,7 @@ impl Circuit {
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
         let genesis_data_pis = vec![config.authority_set_id]
             .into_iter()
-            .chain(config.validator_set_hash)
+            .chain(config.authority_set_hash)
             .map(F::from_noncanonical_u64)
             .enumerate()
             .collect();

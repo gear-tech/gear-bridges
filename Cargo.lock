@@ -4389,6 +4389,7 @@ name = "gear-rpc-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake2",
  "futures-util",
  "gsdk",
  "hex",

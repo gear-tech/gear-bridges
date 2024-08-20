@@ -98,7 +98,7 @@ impl FinalProof {
 
         let desired_genesis_validator_set_hash = Blake2TargetGoldilocks::parse_exact(
             &mut genesis_config
-                .validator_set_hash
+                .authority_set_hash
                 .iter()
                 .map(|el| builder.constant(F::from_noncanonical_u64(*el))),
         );

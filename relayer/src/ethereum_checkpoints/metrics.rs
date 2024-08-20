@@ -5,9 +5,9 @@ impl_metered_service! {
     pub struct Updates {
         pub fetched_sync_update_slot: IntGauge,
         pub total_fetched_finality_updates: IntCounter,
-        pub total_fetched_committee_updates: IntCounter,
         pub processed_finality_updates: IntCounter,
         pub processed_committee_updates: IntCounter,
+        pub account_total_balance: IntGauge,
     }
 }
 
@@ -26,10 +26,6 @@ impl Updates {
                 "checkpoints_relayer_total_fetched_finality_updates",
                 "Total amount of fetched finality updates",
             )?,
-            total_fetched_committee_updates: IntCounter::new(
-                "checkpoints_relayer_total_fetched_committee_updates",
-                "Total amount of fetched committee updates",
-            )?,
             processed_finality_updates: IntCounter::new(
                 "checkpoints_relayer_processed_finality_updates",
                 "Amount of processed finality updates",
@@ -37,6 +33,10 @@ impl Updates {
             processed_committee_updates: IntCounter::new(
                 "checkpoints_relayer_processed_committee_updates",
                 "Amount of processed committee updates",
+            )?,
+            account_total_balance: IntGauge::new(
+                "checkpoints_relayer_account_total_balance",
+                "The total balance of the account used to send messages",
             )?,
         })
     }

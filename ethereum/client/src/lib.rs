@@ -275,10 +275,7 @@ where
 
         let event: Event<T, P, MerkleRoot, Ethereum> = Event::new(self.provider.clone(), filter);
 
-        let logs = event
-            .query()
-            .await
-            .map_err(|e| Error::ErrorQueryingEvent(e))?;
+        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
 
         Ok(logs
             .iter()

@@ -1,14 +1,12 @@
 extern crate pretty_env_logger;
 
 use clap::{Args, Parser, Subcommand};
-use hex_literal::hex;
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::MessageRelayer;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
@@ -22,11 +20,6 @@ mod relay_merkle_roots;
 const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
-
-const GENESIS_CONFIG: GenesisConfig = GenesisConfig {
-    authority_set_id: 1,
-    authority_set_hash: hex!("b9853ab2fb585702dfd9040ee8bc9f94dc5b0abd8b0f809ec23fdc0265b21e24"),
-};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -211,7 +204,10 @@ async fn main() {
                     Box::from(FileSystemProofStorage::new("./proof_storage".into()))
                 };
 
-            let relayer = MerkleRootRelayer::new(gear_api, eth_api, proof_storage).await;
+            let genesis_config = genesis_config::load_from_file();
+
+            let relayer =
+                MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage).await;
 
             metrics
                 .register_service(&relayer)

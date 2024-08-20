@@ -206,7 +206,13 @@ impl MerkleRootRelayer {
     async fn prove_message_sent(&self) -> anyhow::Result<FinalProof> {
         let finalized_head = self.gear_api.latest_finalized_block().await?;
 
-        log::info!("Proving merkle root presense in block #{}", finalized_head);
+        let finalized_block_number = self.gear_api.block_hash_to_number(finalized_head).await?;
+
+        log::info!(
+            "Proving merkle root presense in block #{} with hash {}",
+            finalized_block_number,
+            finalized_head
+        );
 
         let authority_set_id = self
             .gear_api

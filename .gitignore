@@ -13,3 +13,5 @@ out/
 ethereum/broadcast
 
 .env
+
+GenesisConfig.toml

@@ -13,7 +13,7 @@ use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
 mod ethereum_checkpoints;
-mod fetch_authority_set_state;
+mod genesis_config;
 mod message_relayer;
 mod proof_storage;
 mod prover_interface;
@@ -84,7 +84,11 @@ struct RelayMerkleRootsArgs {
 struct FetchAuthoritySetStateArgs {
     #[clap(flatten)]
     vara_endpoint: VaraEndpointArg,
+    /// Block number which contains desired authority set
     block_number: Option<u32>,
+    /// Wether to write fetched authority set state as genesis config
+    #[clap(long, action)]
+    write_to_file: bool,
 }
 
 #[derive(Args)]
@@ -246,7 +250,7 @@ async fn main() {
         CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
         CliCommands::FetchAuthoritySetState(args) => {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
-            fetch_authority_set_state::fetch(gear_api, args.block_number)
+            genesis_config::fetch_from_chain(gear_api, args.block_number, args.write_to_file)
                 .await
                 .expect("Failed to fetch authority set state");
         }

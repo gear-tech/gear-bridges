@@ -212,14 +212,9 @@ where
     }
 
     pub async fn get_approx_balance(&self, address: Address) -> Result<f64, Error> {
-        let balance = self.provider.get_balance(address).latest().await;
-
-        if let Ok(balance) = balance {
-            let balance: f64 = balance.into();
-            Ok(balance / 1_000_000_000_000_000_000.0)
-        } else {
-            Err(Error::ErrorInHTTPTransport)
-        }
+        let balance = self.provider.get_balance(address).latest().await?;
+        let balance: f64 = balance.into();
+        Ok(balance / 1_000_000_000_000_000_000.0)
     }
 
     pub async fn provide_merkle_root(
@@ -254,18 +249,11 @@ where
     }
 
     pub async fn block_number(&self) -> Result<u64, Error> {
-        self.provider
-            .get_block_number()
-            .await
-            .map_err(|_| Error::ErrorInHTTPTransport)
+        self.provider.get_block_number().await.map_err(|e| e.into())
     }
 
     pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {
-        let current_block: u64 = self
-            .provider
-            .get_block_number()
-            .await
-            .map_err(|_| Error::ErrorInHTTPTransport)?;
+        let current_block: u64 = self.provider.get_block_number().await?;
 
         self.fetch_merkle_roots_in_range(
             current_block.checked_sub(depth).unwrap_or_default(),
@@ -287,15 +275,14 @@ where
 
         let event: Event<T, P, MerkleRoot, Ethereum> = Event::new(self.provider.clone(), filter);
 
-        match event.query().await {
-            Ok(logs) => Ok(logs
-                .iter()
-                .map(|(event, _)| MerkleRootEntry {
-                    block_number: event.blockNumber.to(),
-                })
-                .collect()),
-            Err(_) => Err(Error::ErrorInHTTPTransport),
-        }
+        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
+
+        Ok(logs
+            .iter()
+            .map(|(event, _)| MerkleRootEntry {
+                block_number: event.blockNumber.to(),
+            })
+            .collect())
     }
 
     #[allow(clippy::too_many_arguments)]

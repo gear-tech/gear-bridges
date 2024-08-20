@@ -137,10 +137,7 @@ where
         erc20_treasury_proxy: *erc20_treasury_proxy.address(),
     };
 
-    let nonce = provider
-        .get_transaction_count(signer_address)
-        .await
-        .map_err(|_| Error::ErrorInHTTPTransport)?;
+    let nonce = provider.get_transaction_count(signer_address).await?;
 
     let relayer_proxy = ProxyContract::new(deployment.relayer_proxy, provider.clone());
 
@@ -158,10 +155,7 @@ where
         .await
         .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
 
-    let nonce = provider
-        .get_transaction_count(signer_address)
-        .await
-        .map_err(|_| Error::ErrorInHTTPTransport)?;
+    let nonce = provider.get_transaction_count(signer_address).await?;
 
     let pending_tx = message_queue_proxy
         .upgradeToAndCall(deployment.message_queue, Bytes::new())
@@ -177,10 +171,7 @@ where
         .await
         .map_err(|_| Error::ErrorWaitingTransactionReceipt)?;
 
-    let nonce = provider
-        .get_transaction_count(signer_address)
-        .await
-        .map_err(|_| Error::ErrorInHTTPTransport)?;
+    let nonce = provider.get_transaction_count(signer_address).await?;
 
     let pending_tx = erc20_treasury_proxy
         .upgradeToAndCall(deployment.erc20_treasury, Bytes::new())

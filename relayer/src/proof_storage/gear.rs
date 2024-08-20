@@ -115,15 +115,9 @@ impl GearProofStorage {
     ) -> anyhow::Result<GearProofStorage> {
         let wrapped_gear_api = WrappedGearApi::new(endpoint).await?;
 
-        assert_eq!(
-            &endpoint[..5],
-            "ws://",
-            "Invalid endpoint format: expected ws://..."
-        );
-
-        let endpoint: Vec<_> = endpoint[5..].split(':').collect();
-        let domain = ["ws://", endpoint[0]].concat();
-        let port = endpoint[1].parse::<u16>()?;
+        let endpoint: Vec<_> = endpoint.split(':').collect();
+        let domain = [endpoint[0], ":", endpoint[1]].concat();
+        let port = endpoint[2].parse::<u16>()?;
         let address = WSAddress::try_new(domain, port)?;
 
         let gear_api = GearApi::init_with(address, fee_payer).await?;

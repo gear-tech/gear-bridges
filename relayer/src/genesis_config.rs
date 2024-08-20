@@ -22,7 +22,7 @@ pub async fn fetch_from_chain(
     println!("Authority set id: {}", state.authority_set_id);
     println!(
         "Authority set hash: {}",
-        hex::encode(&state.authority_set_hash)
+        hex::encode(state.authority_set_hash)
     );
 
     if write_to_file {
@@ -64,7 +64,7 @@ pub fn load_from_file() -> GenesisConfig {
 fn write_config_to_file(config: GenesisConfig) {
     let config = GenesisConfigToml {
         authority_set_id: config.authority_set_id,
-        authority_set_hash: hex::encode(&config.authority_set_hash),
+        authority_set_hash: hex::encode(config.authority_set_hash),
     };
 
     let data = toml::to_string(&config).expect("Failed to serialize config");

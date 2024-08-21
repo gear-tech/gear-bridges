@@ -17,6 +17,7 @@ mod vft_gateway;
 mod vft_gateway_msg;
 use crate::event_or_panic_async;
 use vft_gateway_msg::send_message_to_gateway;
+
 pub struct BridgingPayment<ExecContext> {
     exec_context: ExecContext,
 }

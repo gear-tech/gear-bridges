@@ -3,8 +3,6 @@ use super::{
     msg_tracker::{msg_tracker_mut, MessageStatus, TransactionDetails},
     utils, vft_gateway, Config,
 };
-#[allow(unused_imports)]
-use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
 
 pub async fn send_message_to_gateway(

@@ -183,11 +183,11 @@ where
         .await
         {
             Ok(nonce) => nonce,
-            Err(_) => {
+            Err(e) => {
                 // In case of failure, mint tokens back to the sender
                 token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
                     .await?;
-                return Err(Error::TokensRefundedError);
+                return Err(e);
             }
         };
         Ok((nonce, eth_token_id))

@@ -16,7 +16,6 @@ sails-client-gen.workspace = true
 [dev-dependencies]
 gtest.workspace = true
 vft-gateway-app.workspace = true
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 sails-rs.workspace = true

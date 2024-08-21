@@ -12,7 +12,6 @@ pub enum Error {
     PayloadSizeError,
     MintTokensDecodeError,
     ReplyTimeoutError,
-    TokensRefundedError,
     ErrorDuringTokensMint,
     NoCorrespondingEthAddress,
     ReplyHook,
@@ -21,4 +20,5 @@ pub enum Error {
     MessageFailed,
     BurnTokensFailed,
     BridgeBuiltinMessageFailed,
+    TokensRefundedError,
 }

@@ -13839,7 +13839,6 @@ name = "vft-gateway-app"
 version = "0.1.0"
 dependencies = [
  "blake2",
- "extended_vft_wasm",
  "gbuiltin-eth-bridge",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -13870,6 +13869,7 @@ name = "vft_gateway_wasm"
 version = "0.1.0"
 dependencies = [
  "blake2",
+ "extended_vft_wasm",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",

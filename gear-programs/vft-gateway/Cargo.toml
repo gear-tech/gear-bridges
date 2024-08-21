@@ -20,4 +20,3 @@ tokio.workspace = true
 blake2.workspace = true
 gear-core.workspace = true
 primitive-types.workspace = true
-extended_vft_wasm.workspace = true

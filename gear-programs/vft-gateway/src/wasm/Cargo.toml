@@ -22,3 +22,4 @@ sails-rs.workspace = true
 tokio.workspace = true
 blake2 = { version = "0.10.6", default-features = false }
 gear-core.workspace = true
+extended_vft_wasm.workspace = true

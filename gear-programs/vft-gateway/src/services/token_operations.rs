@@ -3,6 +3,7 @@ use super::{msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, Messa
 #[allow(unused_imports)]
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
+
 pub async fn burn_tokens(
     token_id: ActorId,
     sender: ActorId,

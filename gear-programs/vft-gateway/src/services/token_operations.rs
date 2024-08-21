@@ -1,7 +1,5 @@
 use super::msg_tracker::TransactionDetails;
-use super::{
-    msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus,
-};
+use super::{msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus};
 #[allow(unused_imports)]
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;

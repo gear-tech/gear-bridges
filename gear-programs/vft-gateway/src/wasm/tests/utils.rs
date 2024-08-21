@@ -147,6 +147,7 @@ impl VftGateway for Program<'_> {
                 15_000_000_000,
                 15_000_000_000,
                 100,
+                20_000_000_000,
             ),
         );
         let payload = ["New".encode(), init_config.encode()].concat();

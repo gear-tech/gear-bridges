@@ -135,7 +135,6 @@ fn decode_bridge_reply(bytes: &[u8]) -> Result<Option<U256>, Error> {
     let reply = gbuiltin_eth_bridge::Response::decode(&mut bytes.as_ref())
         .map_err(|_| Error::BuiltinDecodeError)?;
 
-
     match reply {
         gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => Ok(Some(nonce)),
     }

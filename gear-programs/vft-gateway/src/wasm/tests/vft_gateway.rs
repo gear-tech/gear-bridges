@@ -1,14 +1,16 @@
 use gtest::{Program, System};
 
-use sails_rs::{prelude::*};
+use sails_rs::prelude::*;
 use vft_gateway_app::services::{error::Error, msg_tracker::MessageStatus};
 
 mod utils;
+use blake2::{digest::typenum::U32, Blake2b, Digest};
 use utils::{
-    FTMockError, FTMockReturnsFalse, GearBridgeBuiltinMock,
-    GearBridgeBuiltinMockPanic, Token, VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, TOKEN_ID,
+    FTMockError, FTMockReturnsFalse, GearBridgeBuiltinMock, GearBridgeBuiltinMockPanic, Token,
+    VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, TOKEN_ID,
 };
-
+type Blake2b256 = Blake2b<U32>;
+use gear_core::ids::ProgramId;
 #[test]
 fn test_successful_transfer_vara_to_eth() {
     let system = System::new();
@@ -251,4 +253,17 @@ async fn test_transfer_fails_due_to_gas_depletion_after_bridge_reply() {
     assert_eq!(reply, exp_reply);
     let msg_tracker = vft_gateway.get_msg_tracker_state();
     assert!(msg_tracker.is_empty());
+}
+
+#[test]
+fn calculate_bridge_builtint() {
+    let bytes = hash((b"built/in", 3).encode().as_slice());
+    let program_id: ProgramId = bytes.into();
+    println!("{:?}", program_id);
+}
+
+pub fn hash(data: &[u8]) -> [u8; 32] {
+    let mut ctx = Blake2b256::new();
+    ctx.update(data);
+    ctx.finalize().into()
 }

@@ -1,5 +1,5 @@
 use super::{msg_tracker_mut, utils, Config, Error, MessageStatus};
-use gstd::{MessageId};
+use gstd::MessageId;
 use sails_rs::prelude::*;
 
 pub async fn send_message_to_bridge_builtin(

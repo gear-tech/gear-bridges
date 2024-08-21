@@ -66,6 +66,7 @@ pub struct Config {
     gas_to_send_request_to_gateway: u64,
     gas_to_transfer_tokens: u64,
     reply_timeout: u32,
+    gas_for_request_to_gateway_msg: u64,
 }
 
 impl Config {
@@ -75,6 +76,7 @@ impl Config {
         gas_to_send_request_to_gateway: u64,
         gas_to_transfer_tokens: u64,
         reply_timeout: u32,
+        gas_for_request_to_gateway_msg: u64,
     ) -> Self {
         Self {
             fee,
@@ -82,6 +84,7 @@ impl Config {
             gas_to_send_request_to_gateway,
             gas_to_transfer_tokens,
             reply_timeout,
+            gas_for_request_to_gateway_msg,
         }
     }
 }
@@ -150,6 +153,43 @@ where
         msg::send_with_gas(data.admin_address, "", 0, fee_balance).expect("Failed to reclaim fees");
     }
 
+    pub fn update_config(
+        &mut self,
+        fee: Option<u128>,
+        gas_for_reply_deposit: Option<u64>,
+        gas_to_send_request_to_gateway: Option<u64>,
+        gas_to_transfer_tokens: Option<u64>,
+        reply_timeout: Option<u32>,
+        gas_for_request_to_gateway_msg: Option<u64>,
+    ) {
+        if self.data().admin_address != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+        if let Some(fee) = fee {
+            self.config_mut().fee = fee;
+        }
+
+        if let Some(gas_for_reply_deposit) = gas_for_reply_deposit {
+            self.config_mut().gas_for_reply_deposit = gas_for_reply_deposit;
+        }
+
+        if let Some(gas_to_send_request_to_gateway) = gas_to_send_request_to_gateway {
+            self.config_mut().gas_to_send_request_to_gateway = gas_to_send_request_to_gateway;
+        }
+
+        if let Some(gas_to_transfer_tokens) = gas_to_transfer_tokens {
+            self.config_mut().gas_to_transfer_tokens = gas_to_transfer_tokens;
+        }
+
+        if let Some(reply_timeout) = reply_timeout {
+            self.config_mut().reply_timeout = reply_timeout;
+        }
+
+        if let Some(gas_for_request_to_gateway_msg) = gas_for_request_to_gateway_msg {
+            self.config_mut().gas_for_request_to_gateway_msg = gas_for_request_to_gateway_msg;
+        }
+    }
+
     pub async fn request_to_gateway(
         &mut self,
         amount: U256,
@@ -159,6 +199,15 @@ where
         let vft_gateway_address = self.data().vft_gateway_address;
         let config = self.config();
         let sender = self.exec_context.actor_id();
+
+        if gstd::exec::gas_available()
+            < config.gas_to_transfer_tokens
+                + config.gas_to_send_request_to_gateway
+                + config.gas_for_request_to_gateway_msg
+                + 3 * config.gas_for_reply_deposit
+        {
+            panic!("Please attach more gas");
+        }
 
         event_or_panic_async!(self, || async move {
             let attached_value = msg::value();

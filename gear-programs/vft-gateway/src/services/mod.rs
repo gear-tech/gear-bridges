@@ -1,8 +1,5 @@
 use collections::HashMap;
-use sails_rs::{
-    gstd::{ExecContext},
-    prelude::*,
-};
+use sails_rs::{gstd::ExecContext, prelude::*};
 
 mod bridge_builtin_operations;
 pub mod error;
@@ -62,6 +59,7 @@ pub struct Config {
     gas_to_mint_tokens: u64,
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
+    gas_for_transfer_to_eth_msg: u64,
 }
 
 impl Config {
@@ -71,6 +69,7 @@ impl Config {
         gas_to_mint_tokens: u64,
         gas_to_send_request_to_builtin: u64,
         reply_timeout: u32,
+        gas_for_transfer_to_eth_msg: u64,
     ) -> Self {
         Self {
             gas_to_burn_tokens,
@@ -78,6 +77,7 @@ impl Config {
             gas_to_mint_tokens,
             gas_to_send_request_to_builtin,
             reply_timeout,
+            gas_for_transfer_to_eth_msg,
         }
     }
 }
@@ -103,6 +103,50 @@ where
             .insert(vara_token_id, eth_token_id);
     }
 
+    pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+        self.data_mut().vara_to_eth_token_id.remove(&vara_token_id);
+    }
+
+    pub fn update_config(
+        &mut self,
+        gas_to_burn_tokens: Option<u64>,
+        gas_to_mint_tokens: Option<u64>,
+        gas_for_reply_deposit: Option<u64>,
+        gas_to_send_request_to_builtin: Option<u64>,
+        reply_timeout: Option<u32>,
+        gas_for_transfer_to_eth_msg: Option<u64>,
+    ) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+        if let Some(gas_to_burn_tokens) = gas_to_burn_tokens {
+            self.config_mut().gas_to_burn_tokens = gas_to_burn_tokens;
+        }
+
+        if let Some(gas_to_mint_tokens) = gas_to_mint_tokens {
+            self.config_mut().gas_to_mint_tokens = gas_to_mint_tokens;
+        }
+
+        if let Some(gas_to_send_request_to_builtin) = gas_to_send_request_to_builtin {
+            self.config_mut().gas_to_send_request_to_builtin = gas_to_send_request_to_builtin;
+        }
+
+        if let Some(reply_timeout) = reply_timeout {
+            self.config_mut().reply_timeout = reply_timeout;
+        }
+
+        if let Some(gas_for_reply_deposit) = gas_for_reply_deposit {
+            self.config_mut().gas_for_reply_deposit = gas_for_reply_deposit;
+        }
+
+        if let Some(gas_for_transfer_to_eth_msg) = gas_for_transfer_to_eth_msg {
+            self.config_mut().gas_for_transfer_to_eth_msg = gas_for_transfer_to_eth_msg;
+        }
+    }
+
     pub async fn transfer_vara_to_eth(
         &mut self,
         vara_token_id: ActorId,
@@ -116,6 +160,14 @@ where
         let eth_token_id = self.get_eth_token_id(&vara_token_id)?;
         let config = self.config();
 
+        if gstd::exec::gas_available()
+            < config.gas_to_burn_tokens
+                + config.gas_to_send_request_to_builtin
+                + config.gas_for_transfer_to_eth_msg
+                + 3 * config.gas_for_reply_deposit
+        {
+            panic!("Please attach more gas");
+        }
         token_operations::burn_tokens(vara_token_id, sender, receiver, amount, config, msg_id)
             .await?;
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
@@ -264,7 +316,15 @@ where
                 .expect("VftGateway::seed() should be called")
         }
     }
-    
+
+    fn config_mut(&mut self) -> &mut Config {
+        unsafe {
+            CONFIG
+                .as_mut()
+                .expect("VftGateway::seed() should be called")
+        }
+    }
+
     fn get_eth_token_id(&self, vara_token_id: &ActorId) -> Result<H160, Error> {
         self.data()
             .vara_to_eth_token_id

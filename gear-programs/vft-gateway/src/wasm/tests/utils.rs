@@ -51,10 +51,12 @@ create_mock!(
         ["Vft".encode(), "Burn".encode(), true.encode()].concat()
     ))
 );
+
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub enum Response {
     MessageSent { nonce: U256, hash: H256 },
 }
+
 create_mock!(
     GearBridgeBuiltinMock,
     Ok(Some(

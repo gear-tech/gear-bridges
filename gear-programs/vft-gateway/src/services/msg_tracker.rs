@@ -1,6 +1,7 @@
 use super::Error;
 use gstd::{prelude::collections::HashMap, MessageId};
 use sails_rs::prelude::*;
+
 #[derive(Default, Debug)]
 pub struct MessageTracker {
     pub message_info: HashMap<MessageId, MessageInfo>,

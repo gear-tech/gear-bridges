@@ -1594,7 +1594,7 @@ name = "binary-merkle-tree"
 version = "4.0.0-dev"
 source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0#09bdd2a6953d057ae360ec3ef6ec735f9306cc04"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
  "log",
 ]
 
@@ -3600,18 +3600,28 @@ dependencies = [
 name = "ethereum-common"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
  "bitvec",
  "derive_more",
  "ethereum-types",
+ "hash-db 0.15.2",
+ "hash256-std-hasher",
  "hex",
  "hex-literal",
+ "memory-db 0.27.0",
  "parity-scale-codec",
  "ring 0.17.8 (git+https://github.com/gear-tech/ring.git?branch=gear-v0.17.8)",
+ "rlp",
  "scale-info",
  "serde",
  "serde_json",
+ "tiny-keccak",
  "tree_hash",
  "tree_hash_derive",
+ "trie-db 0.22.6",
 ]
 
 [[package]]
@@ -4863,6 +4873,7 @@ name = "gear-rpc-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake2",
  "futures-util",
  "gsdk 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
@@ -5720,6 +5731,12 @@ dependencies = [
 
 [[package]]
 name = "hash-db"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
+
+[[package]]
+name = "hash-db"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e7d7786361d7425ae2fe4f9e407eb0efaa0840f5212d109cc018c40c35c6ab4"
@@ -5731,6 +5748,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92c171d55b98633f4ed3860808f004099b36c1cc29c42cfc53aa8591b21efcf2"
 dependencies = [
  "crunchy",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
+dependencies = [
+ "ahash 0.7.8",
 ]
 
 [[package]]
@@ -6075,7 +6101,7 @@ dependencies = [
  "iana-time-zone-haiku",
  "js-sys",
  "wasm-bindgen",
- "windows-core 0.52.0",
+ "windows-core",
 ]
 
 [[package]]
@@ -7508,11 +7534,22 @@ dependencies = [
 
 [[package]]
 name = "memory-db"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de006e09d04fc301a5f7e817b75aa49801c4479a8af753764416b085337ddcc5"
+dependencies = [
+ "hash-db 0.15.2",
+ "hashbrown 0.11.2",
+ "parity-util-mem",
+]
+
+[[package]]
+name = "memory-db"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "808b50db46293432a45e63bc15ea51e0ab4c0a1647b8eb114e31a3e698dd6fbe"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
 ]
 
 [[package]]
@@ -8498,6 +8535,31 @@ name = "parity-send-wrapper"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9777aa91b8ad9dd5aaa04a9b6bcb02c7f1deb952fca5a66034d5e63afc5c6f"
+
+[[package]]
+name = "parity-util-mem"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f4cb4e169446179cbc6b8b6320cc9fca49bd2e94e8db25f25f200a8ea774770"
+dependencies = [
+ "cfg-if",
+ "hashbrown 0.11.2",
+ "impl-trait-for-tuples",
+ "parity-util-mem-derive",
+ "parking_lot 0.11.2",
+ "winapi",
+]
+
+[[package]]
+name = "parity-util-mem-derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f557c32c6d268a07c921471619c0295f5efad3a0e76d4f97a05c091a51d110b2"
+dependencies = [
+ "proc-macro2",
+ "syn 1.0.109",
+ "synstructure",
+]
 
 [[package]]
 name = "parity-wasm"
@@ -9704,6 +9766,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "toml 0.8.19",
  "utils-prometheus",
 ]
 
@@ -11471,7 +11534,7 @@ name = "sp-api"
 version = "4.0.0-dev"
 source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0#09bdd2a6953d057ae360ec3ef6ec735f9306cc04"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
  "log",
  "parity-scale-codec",
  "scale-info",
@@ -11720,7 +11783,7 @@ dependencies = [
  "dyn-clonable",
  "ed25519-zebra",
  "futures",
- "hash-db",
+ "hash-db 0.16.0",
  "hash256-std-hasher",
  "impl-serde",
  "itertools 0.10.5",
@@ -11887,7 +11950,7 @@ dependencies = [
 [[package]]
 name = "sp-crypto-ec-utils"
 version = "0.10.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-377-ext",
@@ -11937,7 +12000,7 @@ dependencies = [
 [[package]]
 name = "sp-debug-derive"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11970,7 +12033,7 @@ dependencies = [
 [[package]]
 name = "sp-externalities"
 version = "0.25.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "environmental",
  "parity-scale-codec",
@@ -12244,7 +12307,7 @@ dependencies = [
 [[package]]
 name = "sp-runtime-interface"
 version = "24.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "bytes",
  "impl-trait-for-tuples",
@@ -12288,7 +12351,7 @@ dependencies = [
 [[package]]
 name = "sp-runtime-interface-proc-macro"
 version = "17.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "Inflector",
  "expander",
@@ -12347,7 +12410,7 @@ name = "sp-state-machine"
 version = "0.28.0"
 source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0#09bdd2a6953d057ae360ec3ef6ec735f9306cc04"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
  "log",
  "parity-scale-codec",
  "parking_lot 0.12.3",
@@ -12382,7 +12445,7 @@ dependencies = [
  "sp-trie 23.0.0",
  "thiserror",
  "tracing",
- "trie-db 0.27.1",
+ "trie-db 0.28.0",
 ]
 
 [[package]]
@@ -12429,7 +12492,7 @@ checksum = "2d5bbc9339227d1b6a9b7ccd9b2920c818653d40eef1512f1e2e824d72e7a336"
 [[package]]
 name = "sp-std"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 
 [[package]]
 name = "sp-storage"
@@ -12461,7 +12524,7 @@ dependencies = [
 [[package]]
 name = "sp-storage"
 version = "19.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "impl-serde",
  "parity-scale-codec",
@@ -12524,36 +12587,12 @@ dependencies = [
 [[package]]
 name = "sp-tracing"
 version = "16.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "parity-scale-codec",
  "tracing",
  "tracing-core",
  "tracing-subscriber 0.3.18",
-]
-
-[[package]]
-name = "sp-trie"
-version = "22.0.0"
-source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0#09bdd2a6953d057ae360ec3ef6ec735f9306cc04"
-dependencies = [
- "ahash 0.8.11",
- "hash-db",
- "hashbrown 0.13.2",
- "lazy_static",
- "memory-db",
- "nohash-hasher",
- "parity-scale-codec",
- "parking_lot 0.12.3",
- "rand 0.8.5",
- "scale-info",
- "schnellru",
- "sp-core 21.0.0",
- "sp-std 8.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0)",
- "thiserror",
- "tracing",
- "trie-db 0.28.0",
- "trie-root",
 ]
 
 [[package]]
@@ -12670,7 +12709,7 @@ dependencies = [
 [[package]]
 name = "sp-wasm-interface"
 version = "20.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#149c70938f2b29f8d92ba1cc952aeb63d4084e27"
+source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
 dependencies = [
  "impl-trait-for-tuples",
  "log",
@@ -13552,12 +13591,12 @@ dependencies = [
 
 [[package]]
 name = "trie-db"
-version = "0.27.1"
+version = "0.22.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "767abe6ffed88a1889671a102c2861ae742726f52e0a5a425b92c9fbfa7e9c85"
+checksum = "9eac131e334e81b6b3be07399482042838adcd7957aa0010231d0813e39e02fa"
 dependencies = [
- "hash-db",
- "hashbrown 0.13.2",
+ "hash-db 0.15.2",
+ "hashbrown 0.11.2",
  "log",
  "rustc-hex",
  "smallvec",
@@ -13569,7 +13608,7 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff28e0f815c2fea41ebddf148e008b077d2faddb026c9555b29696114d602642"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
  "hashbrown 0.13.2",
  "log",
  "rustc-hex",
@@ -13582,7 +13621,7 @@ version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4ed310ef5ab98f5fa467900ed906cb9232dd5376597e00fd4cba2a449d06c0b"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
 ]
 
 [[package]]
@@ -14784,7 +14823,7 @@ version = "0.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca229916c5ee38c2f2bc1e9d8f04df975b4bd93f9955dc69fabb5d91270045c9"
 dependencies = [
- "windows-core 0.51.1",
+ "windows-core",
  "windows-targets 0.48.5",
 ]
 
@@ -14795,15 +14834,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1f8cf84f35d2db49a46868f947758c7a1138116f7fac3bc844f43ade1292e64"
 dependencies = [
  "windows-targets 0.48.5",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
-dependencies = [
- "windows-targets 0.52.6",
 ]
 
 [[package]]

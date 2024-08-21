@@ -1,6 +1,7 @@
 const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 const ED25519_SIGNATURE_SIZE: usize = 64;
 const KECCAK_HASH_SIZE: usize = 32;
+const BLAKE2_HASH_SIZE: usize = 32;
 
 pub struct PreCommit {
     pub public_key: [u8; ED25519_PUBLIC_KEY_SIZE],
@@ -56,4 +57,9 @@ pub struct Message {
 
 pub struct UserMessageSent {
     pub payload: Vec<u8>,
+}
+
+pub struct AuthoritySetState {
+    pub authority_set_id: u64,
+    pub authority_set_hash: [u8; BLAKE2_HASH_SIZE],
 }

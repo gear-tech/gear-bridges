@@ -1,4 +1,5 @@
 use prometheus::{Gauge, IntGauge};
+use prover::proving::GenesisConfig;
 use std::{
     thread,
     time::{Duration, Instant},
@@ -7,7 +8,6 @@ use std::{
 use crate::{
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
-    GENESIS_CONFIG,
 };
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
@@ -20,8 +20,11 @@ const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 pub struct MerkleRootRelayer {
     gear_api: GearApi,
     eth_api: EthApi,
+
     proof_storage: Box<dyn ProofStorage>,
     eras: Eras,
+
+    genesis_config: GenesisConfig,
 
     metrics: Metrics,
 }
@@ -73,9 +76,10 @@ impl MerkleRootRelayer {
     pub async fn new(
         gear_api: GearApi,
         eth_api: EthApi,
+        genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
     ) -> MerkleRootRelayer {
-        let eras = Eras::new(None, gear_api.clone(), eth_api.clone())
+        let eras = Eras::new(None, gear_api.clone(), eth_api.clone(), genesis_config)
             .await
             .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
 
@@ -84,6 +88,7 @@ impl MerkleRootRelayer {
         MerkleRootRelayer {
             gear_api,
             eth_api,
+            genesis_config,
             proof_storage,
             eras,
             metrics,
@@ -162,18 +167,18 @@ impl MerkleRootRelayer {
 
         match latest_proven_authority_set_id {
             None => {
-                if latest_authority_set_id <= GENESIS_CONFIG.authority_set_id {
+                if latest_authority_set_id <= self.genesis_config.authority_set_id {
                     log::warn!(
                         "Network haven't reached genesis authority set id yet. Current authority set id: {}, expected genesis: {}", 
                         latest_authority_set_id,
-                        GENESIS_CONFIG.authority_set_id,
+                        self.genesis_config.authority_set_id,
                     );
                     return Ok(0);
                 }
 
-                let proof = prover_interface::prove_genesis(&self.gear_api).await?;
+                let proof = prover_interface::prove_genesis(&self.gear_api, self.genesis_config).await?;
                 self.proof_storage
-                    .init(proof, GENESIS_CONFIG.authority_set_id)
+                    .init(proof, self.genesis_config.authority_set_id)
                     .unwrap();
 
                 Ok(1)
@@ -201,7 +206,13 @@ impl MerkleRootRelayer {
     async fn prove_message_sent(&self) -> anyhow::Result<FinalProof> {
         let finalized_head = self.gear_api.latest_finalized_block().await?;
 
-        log::info!("Proving merkle root presense in block #{}", finalized_head);
+        let finalized_block_number = self.gear_api.block_hash_to_number(finalized_head).await?;
+
+        log::info!(
+            "Proving merkle root presense in block #{} with hash {}",
+            finalized_block_number,
+            finalized_head
+        );
 
         let authority_set_id = self
             .gear_api
@@ -211,7 +222,13 @@ impl MerkleRootRelayer {
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
 
-        prover_interface::prove_final(&self.gear_api, inner_proof, finalized_head).await
+        prover_interface::prove_final(
+            &self.gear_api,
+            inner_proof,
+            self.genesis_config,
+            finalized_head,
+        )
+        .await
     }
 }
 
@@ -221,6 +238,8 @@ struct Eras {
 
     gear_api: GearApi,
     eth_api: EthApi,
+
+    genesis_config: GenesisConfig,
 
     metrics: EraMetrics,
 }
@@ -266,6 +285,7 @@ impl Eras {
         last_sealed: Option<u64>,
         gear_api: GearApi,
         eth_api: EthApi,
+        genesis_config: GenesisConfig,
     ) -> anyhow::Result<Self> {
         let last_sealed = if let Some(l) = last_sealed {
             l
@@ -284,6 +304,8 @@ impl Eras {
             sealed_not_finalized: vec![],
             gear_api,
             eth_api,
+
+            genesis_config,
 
             metrics,
         })
@@ -316,7 +338,9 @@ impl Eras {
             .find_era_first_block(authority_set_id + 1)
             .await?;
         let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
-        let proof = prover_interface::prove_final(&self.gear_api, inner_proof, block).await?;
+        let proof =
+            prover_interface::prove_final(&self.gear_api, inner_proof, self.genesis_config, block)
+                .await?;
 
         let block_number = self.gear_api.block_hash_to_number(block).await?;
 

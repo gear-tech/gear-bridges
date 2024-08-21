@@ -6,8 +6,8 @@ edition.workspace = true
 [dependencies]
 hex.workspace = true
 futures-util.workspace = true
-
 anyhow.workspace = true
+blake2.workspace = true
 gsdk.workspace = true
 subxt.workspace = true
 sc-consensus-grandpa.workspace = true

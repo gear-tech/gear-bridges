@@ -9,6 +9,7 @@ mod vft;
 use error::Error;
 use msg_tracker::{MessageInfo, MessageStatus, MessageTracker};
 mod token_operations;
+
 pub struct VftGateway<ExecContext> {
     exec_context: ExecContext,
 }

@@ -52,6 +52,7 @@ impl InitConfig {
         }
     }
 }
+
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
     gas_to_burn_tokens: u64,

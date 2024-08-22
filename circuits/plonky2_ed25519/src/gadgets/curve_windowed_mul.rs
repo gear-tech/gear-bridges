@@ -130,7 +130,6 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderWindowedMul<F, 
         let q_init = AffinePoint {
             x: C::BaseField::ZERO,
             y: C::BaseField::ONE,
-            zero: false,
         };
         let q_init = self.constant_affine_point(q_init);
         self.curve_scalar_mul_windowed_part(num_limbs, p, &q_init, n)
@@ -187,7 +186,7 @@ mod tests {
     use std::ops::Neg;
 
     use anyhow::Result;
-    use log::{Level, LevelFilter};
+    use log::Level;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
@@ -238,14 +237,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_curve_windowed_mul() -> Result<()> {
-        // Initialize logging
-        let mut builder = env_logger::Builder::from_default_env();
-        builder.format_timestamp(None);
-        builder.filter_level(LevelFilter::Info);
-        builder.try_init()?;
-
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;

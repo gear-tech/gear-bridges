@@ -110,19 +110,22 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
         AffinePointTarget { x, y }
     }
 
-    // y^2 = a + x^2 + b*x^2*y^2
+    // A * x^2 + y^2 = 1 + D*x^2*y^2
     fn curve_assert_valid<C: Curve>(&mut self, p: &AffinePointTarget<C>) {
         let a = self.constant_nonnative(C::A);
         let d = self.constant_nonnative(C::D);
+        let one = self.constant_nonnative(C::BaseField::ONE);
 
         let y_squared = self.mul_nonnative(&p.y, &p.y);
         let x_squared = self.mul_nonnative(&p.x, &p.x);
         let x_squared_y_squared = self.mul_nonnative(&x_squared, &y_squared);
         let d_x_squared_y_squared = self.mul_nonnative(&d, &x_squared_y_squared);
-        let a_plus_x_squared = self.add_nonnative(&a, &x_squared);
-        let rhs = self.add_nonnative(&a_plus_x_squared, &d_x_squared_y_squared);
+        let a_x_squared = self.mul_nonnative(&a, &x_squared);
 
-        self.connect_nonnative(&y_squared, &rhs);
+        let lhs = self.add_nonnative(&a_x_squared, &y_squared);
+        let rhs = self.add_nonnative(&one, &d_x_squared_y_squared);
+
+        self.connect_nonnative(&lhs, &rhs);
     }
 
     fn curve_neg<C: Curve>(&mut self, p: &AffinePointTarget<C>) -> AffinePointTarget<C> {
@@ -148,14 +151,17 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
     fn curve_double<C: Curve>(&mut self, p: &AffinePointTarget<C>) -> AffinePointTarget<C> {
         let AffinePointTarget { x, y } = p;
         let one = self.constant_nonnative(C::BaseField::ONE);
+        let a = self.constant_nonnative(C::A);
         let d = self.constant_nonnative(C::D);
 
         let xx = self.mul_nonnative(x, x);
         let yy = self.mul_nonnative(y, y);
         let xy = self.mul_nonnative(x, y);
 
-        let xy_plus_xy = self.add_nonnative(&xy, &xy);
-        let xx_plus_yy = self.add_nonnative(&xx, &yy);
+        let a_xx = self.mul_nonnative(&a, &xx);
+
+        let x_nom = self.add_nonnative(&xy, &xy);
+        let y_nom = self.sub_nonnative(&yy, &a_xx);
 
         let xxyy = self.mul_nonnative(&xx, &yy);
         let dxxyy = self.mul_nonnative(&d, &xxyy);
@@ -165,8 +171,8 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
         let inv_one_plus_dxxyy = self.inv_nonnative(&one_plus_dxxyy);
         let inv_one_minus_dxxyy = self.inv_nonnative(&one_minus_dxxyy);
 
-        let x3 = self.mul_nonnative(&xy_plus_xy, &inv_one_plus_dxxyy);
-        let y3 = self.mul_nonnative(&xx_plus_yy, &inv_one_minus_dxxyy);
+        let x3 = self.mul_nonnative(&x_nom, &inv_one_plus_dxxyy);
+        let y3 = self.mul_nonnative(&y_nom, &inv_one_minus_dxxyy);
 
         AffinePointTarget { x: x3, y: y3 }
     }
@@ -194,6 +200,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
         let AffinePointTarget { x: x1, y: y1 } = p1;
         let AffinePointTarget { x: x2, y: y2 } = p2;
         let one = self.constant_nonnative(C::BaseField::ONE);
+        let a = self.constant_nonnative(C::A);
         let d = self.constant_nonnative(C::D);
 
         let x1y2 = self.mul_nonnative(x1, y2);
@@ -201,19 +208,20 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderCurve<F, D>
         let y1y2 = self.mul_nonnative(y1, y2);
         let x1x2 = self.mul_nonnative(x1, x2);
 
-        let x1y2_add_y1x2 = self.add_nonnative(&x1y2, &y1x2);
-        let y1y2_add_x1x2 = self.add_nonnative(&y1y2, &x1x2);
+        let ax1x2 = self.mul_nonnative(&a, &x1x2);
+
+        let x_nom = self.add_nonnative(&x1y2, &y1x2);
+        let y_nom = self.sub_nonnative(&y1y2, &ax1x2);
 
         let x1x2y1y2 = self.mul_nonnative(&x1y2, &y1x2);
         let dx1x2y1y2 = self.mul_nonnative(&d, &x1x2y1y2);
-        let neg_dx1x2y1y2 = self.neg_nonnative(&dx1x2y1y2);
         let one_add_dx1x2y1y2 = self.add_nonnative(&one, &dx1x2y1y2);
-        let one_neg_dx1x2y1y2 = self.add_nonnative(&one, &neg_dx1x2y1y2);
+        let one_sub_dx1x2y1y2 = self.sub_nonnative(&one, &dx1x2y1y2);
         let inv_one_add_dx1x2y1y2 = self.inv_nonnative(&one_add_dx1x2y1y2);
-        let inv_one_neg_dx1x2y1y2 = self.inv_nonnative(&one_neg_dx1x2y1y2);
+        let inv_one_sub_dx1x2y1y2 = self.inv_nonnative(&one_sub_dx1x2y1y2);
 
-        let x3 = self.mul_nonnative(&x1y2_add_y1x2, &inv_one_add_dx1x2y1y2);
-        let y3 = self.mul_nonnative(&y1y2_add_x1x2, &inv_one_neg_dx1x2y1y2);
+        let x3 = self.mul_nonnative(&x_nom, &inv_one_add_dx1x2y1y2);
+        let y3 = self.mul_nonnative(&y_nom, &inv_one_sub_dx1x2y1y2);
 
         AffinePointTarget { x: x3, y: y3 }
     }
@@ -432,11 +440,7 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let g = Ed25519::GENERATOR_AFFINE;
-        let not_g = AffinePoint::<Ed25519> {
-            x: g.x,
-            y: g.y + Ed25519Base::ONE,
-            zero: g.zero,
-        };
+        let not_g = AffinePoint::<Ed25519>::nonzero(g.x, g.y + Ed25519Base::ONE);
         let not_g_target = builder.constant_affine_point(not_g);
 
         builder.curve_assert_valid(&not_g_target);
@@ -547,7 +551,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_curve_mul() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
@@ -580,7 +583,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_curve_random() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;

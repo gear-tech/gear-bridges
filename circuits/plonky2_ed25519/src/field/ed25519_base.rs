@@ -86,14 +86,21 @@ impl Field for Ed25519Base {
         0x7FFFFFFFFFFFFFFF,
     ]);
 
-    const TWO_ADICITY: usize = 1;
+    const TWO_ADICITY: usize = 2;
     const CHARACTERISTIC_TWO_ADICITY: usize = Self::TWO_ADICITY;
 
     // Sage: `g = GF(p).multiplicative_generator()`
     const MULTIPLICATIVE_GROUP_GENERATOR: Self = Self([2, 0, 0, 0]);
 
-    // Sage: `g_2 = g^((p - 1) / 2)`
-    const POWER_OF_TWO_GENERATOR: Self = Self::NEG_ONE;
+    // Sage: `g_2 = g^((p - 1) / 4)`
+    // 19681161376707505956807079304988542015446066515923890162744021073123829784752
+    // 0x2B8324804FC1DF0B_2B4D00993DFBD7A7_2F431806AD2FE478_C4EE1B274A0EA0B0
+    const POWER_OF_TWO_GENERATOR: Self = Self([
+        0xC4EE1B274A0EA0B0,
+        0x2F431806AD2FE478,
+        0x2B4D00993DFBD7A7,
+        0x2B8324804FC1DF0B,
+    ]);
 
     const BITS: usize = 256;
 
@@ -117,6 +124,8 @@ impl Field for Ed25519Base {
     }
 
     fn from_noncanonical_biguint(val: BigUint) -> Self {
+        let val = val % Self::order();
+
         Self(
             val.to_u64_digits()
                 .into_iter()

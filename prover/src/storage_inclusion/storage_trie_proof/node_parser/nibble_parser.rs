@@ -1,6 +1,7 @@
 //! ### Circuit that's used to parse nibble array from encoded node.
 
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
+use plonky2_field::types::Field;
 use std::iter;
 
 use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
@@ -19,7 +20,8 @@ impl_target_set! {
         pub first_node_data_block: NodeDataBlockTarget,
         /// Read nibbles starting from this index.
         pub read_offset: Target,
-        /// Nibble count to read.
+        /// Nibble count to read. The circuit asserts that
+        /// `nibble_count <= storage_address::MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES`.
         pub nibble_count: Target,
         /// Previously composed address, to which we should append read nibbles.
         pub partial_address: PartialStorageAddressTarget
@@ -39,6 +41,12 @@ pub fn define(
     input: NibbleParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> NibbleParserOutputTarget {
+    let max_nibble_count = builder.constant(F::from_canonical_usize(
+        MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
+    ));
+    let max_nibble_count_sub_input = builder.sub(max_nibble_count, input.nibble_count);
+    builder.range_check(max_nibble_count_sub_input, 32);
+
     let potential_address_bytes: ArrayTarget<_, MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES> = input
         .first_node_data_block
         .random_read_array(input.read_offset, builder);
@@ -62,13 +70,20 @@ pub fn define(
 
     let nibble_count_odd = builder.low_bits(input.nibble_count, 1, 32)[0];
 
+    // If nibble count is odd, the first nibble serves as padding and must be set to 0.
+    // So the case when nibble count is odd and first nibble != 0 is invalid.
+    let zero = builder.zero();
+    let first_nibble_is_zero = builder.is_equal(first_nibble.to_target(), zero);
+    let first_nibble_is_nonzero = builder.not(first_nibble_is_zero);
+    let invalid_padding = builder.and(nibble_count_odd, first_nibble_is_nonzero);
+    builder.assert_zero(invalid_padding.target);
+
     // If nibble count is odd:
     //  we take `input.nibble_count` nibbles from `remaining_nibbles`
     // If nibble count is 0:
     //  we take `input.nibble_count` nibbles from `remaining_nibbles`
     // If nibble count is even:
     //  we take `first_nibble` and input.nibble_count - 1` nibbles from `remaining_nibbles`
-    let zero = builder.zero();
     let nibble_count_is_zero = builder.is_equal(input.nibble_count, zero);
     let dont_take_first_nibble = builder.or(nibble_count_odd, nibble_count_is_zero);
     let take_first_nibble = builder.not(dont_take_first_nibble);
@@ -120,7 +135,6 @@ mod tests {
             proof::ProofWithPublicInputs,
         },
     };
-    use plonky2_field::types::Field;
 
     use super::*;
     use crate::{
@@ -158,6 +172,26 @@ mod tests {
                 resulting_offset: 3,
                 address: vec![0xA, 0xB, 0xB, 0xC, 0xC],
             }),
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Partition containing Wire(Wire { row: 105, column: 11 }) was set twice with different values: 0 != 1"
+    )]
+    fn test_nibble_parser_fails_on_invalid_padding() {
+        test_case(pad_byte_vec(vec![0x10, 0x00, 0x00]), 5, None);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Partition containing Wire(Wire { row: 1, column: 33 }) was set twice with different values: 0 != 1"
+    )]
+    fn test_nibble_parser_upper_nibble_count_limit() {
+        test_case(
+            [0; NODE_DATA_BLOCK_BYTES],
+            MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES + 1,
+            None,
         );
     }
 

@@ -27,7 +27,7 @@ use crate::{
             header_parser::HeaderDescriptor,
             leaf_parser::{
                 hashed_data_parser::HashedDataParserInputTarget,
-                inlined_data_parser::InlindedDataParserInputTarget,
+                inlined_data_parser::InlinedDataParserInputTarget,
             },
         },
         storage_address::PartialStorageAddressTarget,
@@ -131,7 +131,7 @@ impl LeafParser {
             }
             LeafType::Leaf => {
                 let parsed_data = {
-                    let input = InlindedDataParserInputTarget {
+                    let input = InlinedDataParserInputTarget {
                         first_node_data_block: node_data_target.clone(),
                         read_offset: parsed_nibbles.resulting_offset,
                     };

@@ -4,6 +4,7 @@ use alloc::vec;
 #[cfg(not(test))]
 use alloc::vec::Vec;
 use core::marker::PhantomData;
+use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
 
 use num::{BigUint, Integer, Zero};
 use plonky2::field::extension::Extendable;
@@ -241,7 +242,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderBiguint<F, D>
         let div_num_limbs = if b_len > a_len + 1 {
             0
         } else {
-            a_len - b_len + 1
+            a_len + 1 - b_len
         };
         let div = self.add_virtual_biguint_target(div_num_limbs);
         let rem = self.add_virtual_biguint_target(b_len);
@@ -254,12 +255,16 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderBiguint<F, D>
             _phantom: PhantomData,
         });
 
+        range_check_u32_circuit(self, div.limbs.clone());
+        range_check_u32_circuit(self, rem.limbs.clone());
+
         let div_b = self.mul_biguint(&div, b);
         let div_b_plus_rem = self.add_biguint(&div_b, &rem);
         self.connect_biguint(a, &div_b_plus_rem);
 
-        let cmp_rem_b = self.cmp_biguint(&rem, b);
-        self.assert_one(cmp_rem_b.target);
+        // Check that `b <= rem == false`.
+        let cmp_rem_b = self.cmp_biguint(b, &rem);
+        self.assert_zero(cmp_rem_b.target);
 
         (div, rem)
     }

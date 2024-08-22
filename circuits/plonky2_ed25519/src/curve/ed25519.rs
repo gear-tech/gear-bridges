@@ -20,7 +20,7 @@ impl Curve for Ed25519 {
     type BaseField = Ed25519Base;
     type ScalarField = Ed25519Scalar;
 
-    const A: Ed25519Base = Ed25519Base::ONE;
+    const A: Ed25519Base = Ed25519Base::NEG_ONE;
     const D: Ed25519Base = Ed25519Base([
         0x75eb4dca135978a3,
         0x00700a4d4141d8ab,
@@ -30,7 +30,6 @@ impl Curve for Ed25519 {
     const GENERATOR_AFFINE: AffinePoint<Self> = AffinePoint {
         x: ED25519_GENERATOR_X,
         y: ED25519_GENERATOR_Y,
-        zero: false,
     };
 }
 
@@ -73,10 +72,12 @@ pub(crate) fn mul_naive(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Neg;
+
     use num::BigUint;
     use plonky2_field::types::Field;
 
-    use crate::curve::curve_types::{AffinePoint, Curve};
+    use crate::curve::curve_types::Curve;
     use crate::curve::ed25519::mul_naive;
     use crate::curve::ed25519::Ed25519;
     use crate::field::ed25519_scalar::Ed25519Scalar;
@@ -87,11 +88,8 @@ mod tests {
         assert!(g.is_valid());
         assert!(g.to_projective().is_valid());
 
-        let neg_g = AffinePoint::<Ed25519> {
-            x: -g.x,
-            y: g.y,
-            zero: g.zero,
-        };
+        let neg_g = g.neg();
+
         assert!(neg_g.is_valid());
         assert!(neg_g.to_projective().is_valid());
     }
@@ -114,5 +112,10 @@ mod tests {
             Ed25519::convert(lhs) * Ed25519::GENERATOR_PROJECTIVE,
             mul_naive(lhs, Ed25519::GENERATOR_PROJECTIVE)
         );
+    }
+
+    #[test]
+    fn test_curve_valid() {
+        Ed25519::assert_curve_valid();
     }
 }

@@ -78,20 +78,27 @@ impl Field for Ed25519Scalar {
     const ONE: Self = Self([1, 0, 0, 0]);
     const TWO: Self = Self([2, 0, 0, 0]);
     const NEG_ONE: Self = Self([
-        0x5812631a5cf5d3ee,
+        0x5812631a5cf5d3ec,
         0x14def9dea2f79cd6,
         0x0000000000000000,
         0x1000000000000000,
     ]);
 
-    const TWO_ADICITY: usize = 1;
+    const TWO_ADICITY: usize = 2;
     const CHARACTERISTIC_TWO_ADICITY: usize = Self::TWO_ADICITY;
 
     // Sage: `g = GF(p).multiplicative_generator()`
     const MULTIPLICATIVE_GROUP_GENERATOR: Self = Self([2, 0, 0, 0]);
 
-    // Sage: `g_2 = g^((p - 1) / 2)`
-    const POWER_OF_TWO_GENERATOR: Self = Self::NEG_ONE;
+    // Sage: `g_2 = g^((p - 1) / 4)`
+    // 4202356475871964119699734399548423449193549369991576068503119564443318355924
+    // 0x094A7310E07981E7_7D3D6D60ABC1C27A_0EF0565342CE83FE_BE8775DFEBBE07D4
+    const POWER_OF_TWO_GENERATOR: Self = Self([
+        0xBE8775DFEBBE07D4,
+        0x0EF0565342CE83FE,
+        0x7D3D6D60ABC1C27A,
+        0x094A7310E07981E7,
+    ]);
 
     const BITS: usize = 256;
 
@@ -115,6 +122,8 @@ impl Field for Ed25519Scalar {
     }
 
     fn from_noncanonical_biguint(val: BigUint) -> Self {
+        let val = val % Self::order();
+
         Self(
             val.to_u64_digits()
                 .into_iter()

@@ -309,12 +309,11 @@ pub fn array_to_bits(data: &[u8]) -> Vec<bool> {
 
 /// Perform conversion from byte to bits, placing most significant bit first.
 pub fn byte_to_bits(byte: u8) -> [bool; 8] {
-    (0..8)
-        .rev()
-        .map(move |bit_idx| (byte >> bit_idx) % 2 == 1)
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("8 bits in byte")
+    let mut bits = [false; 8];
+    for bit_idx in 0..8 {
+        bits[7 - bit_idx] = (byte >> bit_idx) % 2 == 1;
+    }
+    bits
 }
 
 /// Pad `Vec<u8>` with zeroes to fit in desired length.
@@ -323,4 +322,17 @@ pub fn pad_byte_vec<const L: usize>(mut data: Vec<u8>) -> [u8; L] {
 
     data.append(&mut vec![0; L - data.len()]);
     data.try_into().expect("Correct length of Vec")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_byte_to_bits() {
+        let byte = 0b11001100;
+        let bits = [true, true, false, false, true, true, false, false];
+
+        assert_eq!(byte_to_bits(byte), bits);
+    }
 }

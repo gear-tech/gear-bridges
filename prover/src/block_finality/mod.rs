@@ -94,11 +94,7 @@ impl BlockFinality {
         log::debug!("Proving block finality...");
 
         // Find such a number that processed_validator_count > 2/3 * validator_count.
-        let processed_validator_count = match self.validator_set.len() % 3 {
-            0 | 1 => 2 * (self.validator_set.len() / 3) + 1,
-            2 => 2 * (self.validator_set.len() - 2) / 3 + 2,
-            _ => unreachable!(),
-        };
+        let processed_validator_count = (2 * self.validator_set.len()) / 3 + 1;
 
         let processed_pre_commits: Vec<_> = self
             .pre_commits

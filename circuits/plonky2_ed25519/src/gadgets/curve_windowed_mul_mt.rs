@@ -290,7 +290,6 @@ where
     let proof0_q_init = AffinePoint {
         x: CV::BaseField::ZERO,
         y: CV::BaseField::ONE,
-        zero: false,
     };
     let proof0_q_init = builder.constant_affine_point(proof0_q_init);
     builder.connect_affine_point(&proof0_q_init, &proof0_targets.q_init_target);
@@ -330,7 +329,6 @@ where
     let q0_init = AffinePoint {
         x: Ed25519Base::ZERO,
         y: Ed25519Base::ONE,
-        zero: false,
     };
     let q1_init = (CurveScalar::<Ed25519>(n0) * p.to_projective()).to_affine();
     let q_expected = (CurveScalar::<Ed25519>(*n) * p.to_projective()).to_affine();
@@ -375,7 +373,6 @@ mod tests {
     use std::ops::Neg;
 
     use anyhow::Result;
-    use log::LevelFilter;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2_field::types::{Field, Sample};
@@ -386,14 +383,7 @@ mod tests {
     use crate::gadgets::curve_windowed_mul_mt::prove_curve25519_mul_mt;
 
     #[test]
-    // #[ignore]
     fn test_prove_curve25519_mul_mt() -> Result<()> {
-        // Initialize logging
-        let mut builder = env_logger::Builder::from_default_env();
-        builder.format_timestamp(None);
-        builder.filter_level(LevelFilter::Info);
-        builder.try_init()?;
-
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;

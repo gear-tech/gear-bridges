@@ -30,48 +30,44 @@ pub trait Curve: 'static + Sync + Sized + Copy + Debug {
         CurveScalar(x)
     }
 
-    fn is_safe_curve() -> bool {
-        // Added additional check to prevent using vulnerabilties in case a discriminant is equal to 0.
-        (Self::A.cube().double().double() + Self::D.square().triple().triple().triple())
-            .is_nonzero()
+    fn assert_curve_valid() {
+        assert!(Self::A.is_nonzero());
+        assert!(Self::D.is_nonzero());
+        assert_ne!(Self::A, Self::D);
     }
 }
 
 /// A point on a Twisted Edwards curve, represented in affine coordinates.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct AffinePoint<C: Curve> {
     pub x: C::BaseField,
     pub y: C::BaseField,
-    pub zero: bool,
 }
 
 impl<C: Curve> AffinePoint<C> {
     pub const ZERO: Self = Self {
         x: C::BaseField::ZERO,
-        y: C::BaseField::ZERO,
-        zero: true,
+        y: C::BaseField::ONE,
     };
 
+    // TODO: Rename to new
     pub fn nonzero(x: C::BaseField, y: C::BaseField) -> Self {
-        let point = Self { x, y, zero: false };
+        let point = Self { x, y };
         debug_assert!(point.is_valid());
         point
     }
 
     pub fn is_valid(&self) -> bool {
-        let Self { x, y, zero } = *self;
-        zero || y.square() == x.square() + C::D * x.square() * y.square() + C::A
+        let Self { x, y } = *self;
+        C::A * x.square() + y.square() == C::BaseField::ONE + C::D * x.square() * y.square()
     }
 
     pub fn to_projective(&self) -> ProjectivePoint<C> {
-        let Self { x, y, zero } = *self;
-        let z = if zero {
-            C::BaseField::ZERO
-        } else {
-            C::BaseField::ONE
-        };
-
-        ProjectivePoint { x, y, z }
+        ProjectivePoint {
+            x: self.x,
+            y: self.y,
+            z: C::BaseField::ONE,
+        }
     }
 
     pub fn batch_to_projective(affine_points: &[Self]) -> Vec<ProjectivePoint<C>> {
@@ -80,63 +76,26 @@ impl<C: Curve> AffinePoint<C> {
 
     #[must_use]
     pub fn double(&self) -> Self {
-        let AffinePoint { x: x1, y: y1, zero } = *self;
+        let AffinePoint { x, y, .. } = *self;
 
-        if zero {
-            return AffinePoint::ZERO;
-        }
+        let x_sq = x * x;
+        let y_sq = y * y;
 
-        let x1_x1 = x1 * x1;
-        let x1_y1 = x1 * y1;
-        let y1_y1 = y1 * y1;
+        let d_x_sq_y_sq = C::D * x_sq * y_sq;
 
-        let x1_y1_plus_y1_x1 = x1_y1.double();
-        let x1_x1_plus_y1_y1 = x1_x1 + y1_y1;
+        let x1 = (x * y).double() / (C::BaseField::ONE + d_x_sq_y_sq);
+        let y1 = (y_sq - C::A * x_sq) / (C::BaseField::ONE - d_x_sq_y_sq);
 
-        let d_x1_x1_y1_y1 = C::D * x1_x1 * y1_y1;
-        let one_plus_d_x1_x1_y1_y1_plus_1 = C::BaseField::ONE + d_x1_x1_y1_y1;
-        let one_minus_d_x1_x1_y1_y1 = C::BaseField::ONE - d_x1_x1_y1_y1;
-
-        let x3 = x1_y1_plus_y1_x1 / one_plus_d_x1_x1_y1_y1_plus_1;
-        let y3 = x1_x1_plus_y1_y1 / one_minus_d_x1_x1_y1_y1;
-
-        Self {
-            x: x3,
-            y: y3,
-            zero: false,
-        }
+        Self::nonzero(x1, y1)
     }
 }
 
-impl<C: Curve> PartialEq for AffinePoint<C> {
-    fn eq(&self, other: &Self) -> bool {
-        let AffinePoint {
-            x: x1,
-            y: y1,
-            zero: zero1,
-        } = *self;
-        let AffinePoint {
-            x: x2,
-            y: y2,
-            zero: zero2,
-        } = *other;
-        if zero1 || zero2 {
-            return zero1 == zero2;
-        }
-        x1 == x2 && y1 == y2
-    }
-}
+impl<C: Curve> Neg for AffinePoint<C> {
+    type Output = AffinePoint<C>;
 
-impl<C: Curve> Eq for AffinePoint<C> {}
-
-impl<C: Curve> Hash for AffinePoint<C> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        if self.zero {
-            self.zero.hash(state);
-        } else {
-            self.x.hash(state);
-            self.y.hash(state);
-        }
+    fn neg(mut self) -> Self::Output {
+        self.x = -self.x;
+        self
     }
 }
 
@@ -152,7 +111,7 @@ impl<C: Curve> ProjectivePoint<C> {
     pub const ZERO: Self = Self {
         x: C::BaseField::ZERO,
         y: C::BaseField::ONE,
-        z: C::BaseField::ZERO,
+        z: C::BaseField::ONE,
     };
 
     pub fn nonzero(x: C::BaseField, y: C::BaseField, z: C::BaseField) -> Self {
@@ -163,19 +122,21 @@ impl<C: Curve> ProjectivePoint<C> {
 
     pub fn is_valid(&self) -> bool {
         let Self { x, y, z } = *self;
-        z.is_zero()
-            || y.square() * z.square()
-                == x.square() * z.square() + z.square().square() + x.square() * y.square() * C::D
+
+        let x_sq = x.square();
+        let y_sq = y.square();
+        let z_sq = z.square();
+
+        z.is_nonzero() && (z_sq * (C::A * x_sq + y_sq) == z_sq.square() + C::D * x_sq * y_sq)
     }
 
     pub fn to_affine(&self) -> AffinePoint<C> {
         let Self { x, y, z } = *self;
-        if z == C::BaseField::ZERO {
-            AffinePoint::ZERO
-        } else {
-            let z_inv = z.inverse();
-            AffinePoint::nonzero(x * z_inv, y * z_inv)
-        }
+
+        debug_assert!(z.is_nonzero());
+
+        let z_inv = z.inverse();
+        AffinePoint::nonzero(x * z_inv, y * z_inv)
     }
 
     pub fn batch_to_affine(proj_points: &[Self]) -> Vec<AffinePoint<C>> {
@@ -186,13 +147,14 @@ impl<C: Curve> ProjectivePoint<C> {
         let mut result = Vec::with_capacity(n);
         for i in 0..n {
             let Self { x, y, z } = proj_points[i];
-            result.push(if z == C::BaseField::ZERO {
-                AffinePoint::ZERO
-            } else {
-                let z_inv = z_invs[i];
-                AffinePoint::nonzero(x * z_inv, y * z_inv)
-            });
+
+            debug_assert!(z.is_nonzero());
+
+            let z_inv = z_invs[i];
+            let affine = AffinePoint::nonzero(x * z_inv, y * z_inv);
+            result.push(affine);
         }
+
         result
     }
 
@@ -200,14 +162,13 @@ impl<C: Curve> ProjectivePoint<C> {
     #[must_use]
     pub fn double(&self) -> Self {
         let Self { x, y, z } = *self;
-        if z == C::BaseField::ZERO {
-            return ProjectivePoint::ZERO;
-        }
+
+        debug_assert!(z.is_nonzero());
 
         let b = (x + y).square();
         let c = x.square();
         let d = y.square();
-        let e = c.neg();
+        let e = c * C::A;
         let f = e + d;
         let h = z.square();
         let j = f - C::BaseField::TWO * h;
@@ -252,9 +213,9 @@ impl<C: Curve> PartialEq for ProjectivePoint<C> {
             y: y2,
             z: z2,
         } = *other;
-        if z1 == C::BaseField::ZERO || z2 == C::BaseField::ZERO {
-            return z1 == z2;
-        }
+
+        debug_assert!(z1.is_nonzero());
+        debug_assert!(z2.is_nonzero());
 
         // We want to compare (x1/z1, y1/z1) == (x2/z2, y2/z2).
         // But to avoid field division, it is better to compare (x1*z2, y1*z2) == (x2*z1, y2*z1).
@@ -263,15 +224,6 @@ impl<C: Curve> PartialEq for ProjectivePoint<C> {
 }
 
 impl<C: Curve> Eq for ProjectivePoint<C> {}
-
-impl<C: Curve> Neg for AffinePoint<C> {
-    type Output = AffinePoint<C>;
-
-    fn neg(self) -> Self::Output {
-        let AffinePoint { x, y, zero } = self;
-        AffinePoint { x: -x, y, zero }
-    }
-}
 
 impl<C: Curve> Neg for ProjectivePoint<C> {
     type Output = ProjectivePoint<C>;

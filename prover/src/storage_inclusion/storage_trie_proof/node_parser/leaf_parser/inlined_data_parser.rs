@@ -19,7 +19,7 @@ use crate::{
 const INLINED_DATA_LENGTH: usize = 32;
 
 impl_target_set! {
-    pub struct InlindedDataParserInputTarget {
+    pub struct InlinedDataParserInputTarget {
         // TODO: replace to `LeafNodeData`
         /// Node encoded data.
         pub first_node_data_block: NodeDataBlockTarget,
@@ -38,7 +38,7 @@ impl_target_set! {
 }
 
 pub fn define(
-    input: InlindedDataParserInputTarget,
+    input: InlinedDataParserInputTarget,
     builder: &mut CircuitBuilder<F, D>,
 ) -> InlinedDataParserOutputTarget {
     log::debug!("    Composing inlined data parser");

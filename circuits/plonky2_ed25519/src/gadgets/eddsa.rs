@@ -65,7 +65,7 @@ pub fn make_verify_circuits<F: RichField + Extendable<D>, const D: usize>(
 
     let s_bits = bits_in_le(sig[256..512].to_vec());
     let s_biguint = bits_to_biguint_target(builder, s_bits);
-    let s = builder.biguint_to_nonnative(&s_biguint);
+    let s = builder.reduce(&s_biguint);
 
     let pk_bits = bits_in_le(pk.clone());
     let a = builder.point_decompress(&pk_bits);
@@ -180,19 +180,17 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_eddsa_circuit_narrow() -> Result<()> {
+        // NOTE: Due to the range check added to some underlying circuits this test is failing.
         test_eddsa_circuit_with_config(CircuitConfig::standard_ecc_config())
     }
 
     #[test]
-    #[ignore]
     fn test_eddsa_circuit_wide() -> Result<()> {
         test_eddsa_circuit_with_config(CircuitConfig::wide_ecc_config())
     }
 
     #[test]
-    #[ignore]
     #[should_panic]
     fn test_eddsa_circuit_failure() {
         test_eddsa_circuit_with_config_failure(CircuitConfig::wide_ecc_config());

@@ -18,7 +18,7 @@ serde.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
 log.workspace = true
-rand.workspace = true
+rand = { workspace = true, features = ["std", "std_rng"] }
 rand_chacha.workspace = true
 unroll.workspace = true
 keccak-hash.workspace = true

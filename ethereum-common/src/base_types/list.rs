@@ -245,3 +245,19 @@ impl<T: TreeHash, const N: usize> TreeHash for List<T, N> {
         tree_hash::mix_in_length(&root, self.len())
     }
 }
+
+#[test]
+fn scale_codec_list() {
+    const N: usize = 100;
+
+    let mut list = List::<_, N>::default();
+
+    for i in 0..N {
+        list.push(i as u32);
+    }
+
+    let encoded = Encode::encode(&list);
+    let decoded = List::decode(&mut &encoded[..]).unwrap();
+
+    assert_eq!(list, decoded);
+}

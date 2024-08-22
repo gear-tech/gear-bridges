@@ -10,3 +10,15 @@ pub struct BlockHeader {
     pub state_root: Hash256,
     pub body_root: Hash256,
 }
+
+impl From<Block> for BlockHeader {
+    fn from(value: Block) -> Self {
+        Self {
+            slot: value.slot,
+            proposer_index: value.proposer_index,
+            parent_root: value.parent_root,
+            state_root: value.state_root,
+            body_root: value.body.tree_hash_root(),
+        }
+    }
+}

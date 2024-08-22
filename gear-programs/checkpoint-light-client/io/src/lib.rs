@@ -16,7 +16,9 @@ pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
     self,
-    beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate},
+    beacon::{
+        BLSPubKey, Block as BeaconBlock, BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate,
+    },
     network::Network,
     tree_hash, SYNC_COMMITTEE_SIZE,
 };

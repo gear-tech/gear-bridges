@@ -2,7 +2,6 @@ use super::*;
 
 /// A homogenous collection of a variable number of values.
 #[derive(Clone, TypeInfo)]
-#[scale_info(bounds(T: TypeInfo))]
 pub struct List<T, const N: usize> {
     data: Vec<T>,
 }
@@ -196,7 +195,7 @@ impl<T: Decode, const N: usize> Decode for List<T, N> {
         input: &mut I,
     ) -> Result<Self, parity_scale_codec::Error> {
         let data = <Vec<T> as Decode>::decode(input)?;
-        if data.len() >= N {
+        if data.len() > N {
             return Err("Decoded Vec length is greater than N".into());
         }
 
@@ -244,4 +243,20 @@ impl<T: TreeHash, const N: usize> TreeHash for List<T, N> {
 
         tree_hash::mix_in_length(&root, self.len())
     }
+}
+
+#[test]
+fn scale_codec_list() {
+    const N: usize = 100;
+
+    let mut list = List::<_, N>::default();
+
+    for i in 0..N {
+        list.push(i as u32);
+    }
+
+    let encoded = Encode::encode(&list);
+    let decoded = List::decode(&mut &encoded[..]).unwrap();
+
+    assert_eq!(list, decoded);
 }

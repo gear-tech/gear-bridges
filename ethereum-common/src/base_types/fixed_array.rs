@@ -1,7 +1,6 @@
 use super::*;
 
 #[derive(Clone, TypeInfo)]
-#[scale_info(bounds(T: TypeInfo))]
 pub struct FixedArray<T, const N: usize>(pub [T; N]);
 
 impl<T: Debug, const N: usize> fmt::Debug for FixedArray<T, N> {

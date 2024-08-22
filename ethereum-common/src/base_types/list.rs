@@ -196,7 +196,7 @@ impl<T: Decode, const N: usize> Decode for List<T, N> {
         input: &mut I,
     ) -> Result<Self, parity_scale_codec::Error> {
         let data = <Vec<T> as Decode>::decode(input)?;
-        if data.len() >= N {
+        if data.len() > N {
             return Err("Decoded Vec length is greater than N".into());
         }
 

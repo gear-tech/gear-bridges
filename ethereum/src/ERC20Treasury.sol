@@ -16,7 +16,7 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
     address immutable MESSAGE_QUEUE_ADDRESS;
 
     constructor(address message_queue) {
-        MESSAGE_QUEUE_ADDRESS = message_queue; 
+        MESSAGE_QUEUE_ADDRESS = message_queue;
     }
 
     /** @dev Deposit token to `Treasury` using `safeTransferFrom`. Allowance needs to allow treasury
@@ -49,7 +49,7 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
             revert NotAuthorized();
         }
 
-        if (vara_msg.data.length != 20 + 20 + 16) {
+        if (vara_msg.data.length != 20 + 20 + 32) {
             revert BadArguments();
         }
         if (vara_msg.receiver != address(this)) {
@@ -62,7 +62,7 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
         assembly {
             receiver := shr(96, calldataload(0xC4))
             token := shr(96, calldataload(0xD8))
-            amount := shr(128, calldataload(0xEC))
+            amount := calldataload(0xEC)
         }
         IERC20(address(token)).safeTransfer(address(receiver), amount);
         emit Withdraw(address(receiver), address(token), amount);

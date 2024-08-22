@@ -165,42 +165,62 @@ impl MerkleRootRelayer {
             self.metrics.latest_proven_era.set(latest_proven as i64);
         }
 
-        match latest_proven_authority_set_id {
-            None => {
-                if latest_authority_set_id <= self.genesis_config.authority_set_id {
-                    log::warn!(
-                        "Network haven't reached genesis authority set id yet. Current authority set id: {}, expected genesis: {}", 
-                        latest_authority_set_id,
-                        self.genesis_config.authority_set_id,
-                    );
-                    return Ok(0);
-                }
-
-                let proof = prover_interface::prove_genesis(&self.gear_api, self.genesis_config).await?;
-                self.proof_storage
-                    .init(proof, self.genesis_config.authority_set_id)
-                    .unwrap();
-
-                Ok(1)
+        let Some(latest_proven) = latest_proven_authority_set_id else {
+            if latest_authority_set_id <= self.genesis_config.authority_set_id {
+                log::warn!(
+                    "Network haven't reached authority set id #(GENESIS + 1). \
+                    Current authority set id: {}, genesis: {}",
+                    latest_authority_set_id,
+                    self.genesis_config.authority_set_id,
+                );
+                return Ok(0);
             }
-            Some(latest_proven) if latest_proven < latest_authority_set_id => {
-                let mut proof = self.proof_storage.get_proof_for_authority_set_id(latest_proven)?;
 
-                for set_id in latest_proven..latest_authority_set_id {
-                    proof = prover_interface::prove_validator_set_change(&self.gear_api, proof, set_id).await?;
-                    self.proof_storage.update(proof.proof.clone(), set_id + 1)?;
-                }
+            let proof =
+                prover_interface::prove_genesis(&self.gear_api, self.genesis_config).await?;
+            self.proof_storage
+                .init(proof, self.genesis_config.authority_set_id)
+                .unwrap();
 
-                let step_count = latest_authority_set_id - latest_proven;
-                Ok(step_count as usize)
-            }
-            Some(latest_proven) if latest_proven == latest_authority_set_id => Ok(0),
-            Some(latest_proven) => panic!(
-                "Invalid state of proof storage detected: latest stored authority set id = {} but latest authority set id on VARA = {}", 
-                latest_proven,
-                latest_authority_set_id
-            ),
+            return Ok(1);
+        };
+
+        if latest_proven < self.genesis_config.authority_set_id + 1 {
+            panic!(
+                "Invalid state of proof storage detected: \
+                latest proven authority set id = {} \
+                but genesis = {}. \
+                Clean proof storage state and restart the relayer.",
+                latest_proven, self.genesis_config.authority_set_id
+            );
         }
+
+        if latest_proven < latest_authority_set_id {
+            let mut proof = self
+                .proof_storage
+                .get_proof_for_authority_set_id(latest_proven)?;
+
+            for set_id in latest_proven..latest_authority_set_id {
+                proof = prover_interface::prove_validator_set_change(&self.gear_api, proof, set_id)
+                    .await?;
+                self.proof_storage.update(proof.proof.clone(), set_id + 1)?;
+            }
+
+            let step_count = latest_authority_set_id - latest_proven;
+            return Ok(step_count as usize);
+        }
+
+        if latest_proven == latest_authority_set_id {
+            return Ok(0);
+        }
+
+        panic!(
+            "Invalid state of proof storage detected: \
+            latest proven authority set id = {} \
+            but latest authority set id on VARA = {}. \
+            Clean proof storage state and restart the relayer.",
+            latest_proven, latest_authority_set_id
+        )
     }
 
     async fn prove_message_sent(&self) -> anyhow::Result<FinalProof> {

@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Decode, Encode, tree_hash_derive::TreeHash, Deserialize)]
+#[derive(Debug, Clone, Decode, Encode, tree_hash_derive::TreeHash, Deserialize, TypeInfo)]
 pub struct BlockBody {
     pub randao_reveal: SignatureBytes,
     pub eth1_data: Eth1Data,

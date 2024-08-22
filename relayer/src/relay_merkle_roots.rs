@@ -169,7 +169,8 @@ impl MerkleRootRelayer {
             None => {
                 if latest_authority_set_id <= self.genesis_config.authority_set_id {
                     log::warn!(
-                        "Network haven't reached genesis authority set id yet. Current authority set id: {}, expected genesis: {}", 
+                        "Network haven't reached authority set id #(GENESIS + 1). \
+                        Current authority set id: {}, genesis: {}", 
                         latest_authority_set_id,
                         self.genesis_config.authority_set_id,
                     );

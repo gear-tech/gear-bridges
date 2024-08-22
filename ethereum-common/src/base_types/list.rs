@@ -2,7 +2,6 @@ use super::*;
 
 /// A homogenous collection of a variable number of values.
 #[derive(Clone, TypeInfo)]
-#[scale_info(bounds(T: TypeInfo))]
 pub struct List<T, const N: usize> {
     data: Vec<T>,
 }

@@ -222,6 +222,12 @@ async fn main() {
             let eth_api = create_eth_client(&args.ethereum_args);
 
             let bridging_payment_address = args.bridging_payment_address.map(|addr| {
+                let addr = if &addr[..2] == "0x" {
+                    &addr[2..]
+                } else {
+                    &addr
+                };
+
                 let arr: [u8; 32] = hex::decode(addr)
                     .expect("Wrong format of bridging-payment-address")
                     .try_into()

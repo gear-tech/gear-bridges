@@ -23,8 +23,6 @@ pub async fn send_message_to_bridge_builtin(
     let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
         destination: receiver_contract_address,
         payload: payload_bytes
-            .try_into()
-            .map_err(|_| Error::PayloadSizeError)?,
     }
     .encode();
 

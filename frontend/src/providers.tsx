@@ -54,6 +54,7 @@ const config = defaultWagmiConfig({
   projectId,
   metadata,
   transports: { [ETH_CHAIN_ID]: http(ETH_NODE_ADDRESS) },
+  auth: { email: false },
 });
 
 createWeb3Modal({

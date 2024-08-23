@@ -1,7 +1,7 @@
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
 use gtest::{Program, System, WasmProgram};
-use vft_gateway_app::services::{error::Error, msg_tracker::MessageInfo, Config, InitConfig};
 use sails_rs::prelude::*;
+use vft_gateway_app::services::{error::Error, msg_tracker::MessageInfo, Config, InitConfig};
 
 pub const ADMIN_ID: u64 = 1000;
 pub const TOKEN_ID: u64 = 200;

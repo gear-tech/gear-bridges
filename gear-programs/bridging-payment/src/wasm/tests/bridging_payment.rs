@@ -3,8 +3,8 @@ use sails_rs::prelude::*;
 
 mod utils;
 use utils::{
-    BridgingPayment, FTMockError, FTMockReturnsFalse, FTMockReturnsTrue, FTMockWrongReply,
-    GearBridgeBuiltinMock, Token, VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, FEE, TOKEN_ID,
+    BridgingPayment, GearBridgeBuiltinMock, Token, VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, FEE,
+    TOKEN_ID,
 };
 
 #[test]

@@ -121,7 +121,6 @@ where
         }
     }
 
-
     fn config(&self) -> &Config {
         unsafe {
             CONFIG

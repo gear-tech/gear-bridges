@@ -5,7 +5,7 @@ use super::{
     vft::vft::io as vft_io,
     Config,
 };
-use sails_rs::{prelude::*};
+use sails_rs::prelude::*;
 
 pub async fn transfer_tokens(
     token_id: ActorId,

@@ -197,7 +197,14 @@ impl BridgingPayment for Program<'_> {
         let init_config = InitConfig::new(
             ADMIN_ID.into(),
             VFT_GATEWAY_ID.into(),
-            Config::new(FEE, 15_000_000_000, 100_000_000_000, 15_000_000_000, 1000),
+            Config::new(
+                FEE,
+                15_000_000_000,
+                100_000_000_000,
+                15_000_000_000,
+                1000,
+                50_000_000_000,
+            ),
         );
         let payload = ["New".encode(), init_config.encode()].concat();
         let result = program.send_bytes(10, payload);
@@ -251,6 +258,7 @@ impl VftGateway for Program<'_> {
                 15_000_000_000,
                 15_000_000_000,
                 1000,
+                20_000_000_000,
             ),
         );
         let payload = ["New".encode(), init_config.encode()].concat();

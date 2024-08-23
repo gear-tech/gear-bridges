@@ -17,18 +17,17 @@ type Props = {
 };
 
 function WalletModal({ close }: Props) {
-  const { extensions, account, login, logout } = useAccount();
-  const { wallet, walletAccounts, setWalletId, resetWalletId, getWalletAccounts } = useWallet();
+  const { wallets, isAnyWallet, account, login, logout } = useAccount();
+  const { wallet, walletAccounts, setWalletId, resetWalletId } = useWallet();
 
   const getWallets = () =>
     WALLETS.map(([id, { SVG, name }]) => {
-      const isEnabled = extensions?.some((extension) => extension.name === id);
-      const status = isEnabled ? 'Enabled' : 'Disabled';
+      const { status, accounts, connect } = wallets?.[id] || {};
+      const isEnabled = Boolean(status);
+      const isConnected = status === 'connected';
 
-      const accountsCount = getWalletAccounts(id)?.length;
+      const accountsCount = accounts?.length;
       const accountsStatus = `${accountsCount} ${accountsCount === 1 ? 'account' : 'accounts'}`;
-
-      const onClick = () => setWalletId(id);
 
       return (
         <li key={id}>
@@ -36,15 +35,15 @@ function WalletModal({ close }: Props) {
             className={styles.walletButton}
             color="light"
             size="small"
-            onClick={onClick}
+            onClick={() => (isConnected ? setWalletId(id) : connect?.())}
             disabled={!isEnabled}
             block>
             <WalletItem SVG={SVG} name={name} />
 
             <span className={styles.status}>
-              <p className={styles.statusText}>{status}</p>
+              <p className={styles.statusText}>{isConnected ? 'Enabled' : 'Disabled'}</p>
 
-              {isEnabled && <p className={styles.statusAccounts}>{accountsStatus}</p>}
+              {isConnected && <p className={styles.statusAccounts}>{accountsStatus}</p>}
             </span>
           </Button>
         </li>
@@ -78,26 +77,25 @@ function WalletModal({ close }: Props) {
     close();
   };
 
-  return (
-    <Modal
-      heading="Connect Wallet"
-      close={close}
-      footer={
-        wallet ? (
-          <div className={styles.footer}>
-            <Button color="transparent" onClick={resetWalletId}>
-              <WalletItem SVG={wallet.SVG} name={wallet.name} />
+  const renderFooter = () => {
+    if (!wallet) return;
 
-              <span className={styles.changeText}>Change</span>
-            </Button>
+    return (
+      <div className={styles.footer}>
+        <Button color="transparent" onClick={resetWalletId}>
+          <WalletItem SVG={wallet.SVG} name={wallet.name} />
 
-            {account && <Button icon={ExitSVG} text="Logout" color="transparent" onClick={handleLogoutButtonClick} />}
-          </div>
-        ) : null
-      }>
-      {extensions?.length ? (
-        <ul className={styles.list}>{getAccounts() || getWallets()}</ul>
-      ) : (
+          <span className={styles.changeText}>Change</span>
+        </Button>
+
+        {account && <Button icon={ExitSVG} text="Logout" color="transparent" onClick={handleLogoutButtonClick} />}
+      </div>
+    );
+  };
+
+  const render = () => {
+    if (!isAnyWallet)
+      return (
         <div className={styles.instruction}>
           <p>A compatible wallet wasn&apos;t found or is disabled.</p>
           <p>
@@ -108,7 +106,18 @@ function WalletModal({ close }: Props) {
             .
           </p>
         </div>
-      )}
+      );
+
+    if (!walletAccounts) return <ul className={styles.list}>{getWallets()}</ul>;
+
+    if (walletAccounts.length) return <ul className={styles.list}>{getAccounts()}</ul>;
+
+    return <p>No accounts found. Please open your extension and create a new account or import existing.</p>;
+  };
+
+  return (
+    <Modal heading="Connect Wallet" close={close} footer={renderFooter()}>
+      {render()}
     </Modal>
   );
 }

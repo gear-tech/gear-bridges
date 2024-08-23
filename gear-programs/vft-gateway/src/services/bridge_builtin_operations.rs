@@ -30,7 +30,7 @@ pub async fn send_message_to_bridge_builtin(
 
     utils::set_critical_hook(msg_id);
     utils::send_message_with_gas_for_reply(
-        gear_bridge_builtin.into(),
+        gear_bridge_builtin,
         bytes,
         config.gas_to_send_request_to_builtin,
         config.gas_for_reply_deposit,

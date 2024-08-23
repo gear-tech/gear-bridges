@@ -175,7 +175,7 @@ where
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
             data.gear_bridge_builtin,
             data.receiver_contract_address,
-            receiver.into(),
+            receiver,
             eth_token_id,
             amount,
             config,
@@ -218,7 +218,7 @@ where
                 match bridge_builtin_operations::send_message_to_bridge_builtin(
                     data.gear_bridge_builtin,
                     data.receiver_contract_address,
-                    receiver.into(),
+                    receiver,
                     *eth_token_id,
                     amount,
                     config,

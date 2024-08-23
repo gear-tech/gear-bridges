@@ -48,7 +48,7 @@ pub async fn send_message_with_gas_for_reply(
     msg_id: MessageId,
 ) -> Result<(), Error> {
     gstd::msg::send_bytes_with_gas_for_reply(
-        destination.into(),
+        destination,
         message,
         gas_to_send,
         0,

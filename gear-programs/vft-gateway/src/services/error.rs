@@ -1,5 +1,6 @@
 use sails_rs::prelude::*;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Encode, Decode, TypeInfo, Clone, PartialEq, Eq)]
 pub enum Error {
     SendError,

@@ -1,0 +1,13 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text {
+  padding: 32px 0;
+
+  text-align: center;
+  font-size: 18px;
+  line-height: 130%;
+}

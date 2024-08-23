@@ -1,0 +1,15 @@
+.filters {
+  margin-bottom: 16px;
+
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+
+.counter {
+  margin-bottom: 16px;
+
+  color: #858585;
+  font-size: 16px;
+  line-height: 130%;
+}

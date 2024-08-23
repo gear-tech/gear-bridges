@@ -1,0 +1,52 @@
+.accordion {
+  padding: 0;
+  overflow: hidden;
+
+  transition: border-color 0.25s;
+
+  svg {
+    flex-shrink: 0;
+
+    transition: all 0.25s;
+  }
+
+  &.open {
+    border-color: #00ffc4;
+
+    svg {
+      transform: rotate(180deg);
+    }
+  }
+}
+
+.button {
+  width: 100%;
+  padding: 16px 24px;
+
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+
+  background-color: transparent;
+  transition: background-color 0.25s;
+
+  &:hover {
+    background-color: #f0f0f0;
+  }
+}
+
+.heading {
+  color: #000;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 133.333%;
+}
+
+.text {
+  padding: 0 24px 16px;
+
+  color: #535352;
+  font-size: 16px;
+  line-height: 160%;
+}

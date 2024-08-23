@@ -60,7 +60,7 @@ impl InitConfig {
     }
 }
 
-#[derive(Debug, Decode, Encode, TypeInfo)]
+#[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
     fee: u128,
     gas_for_reply_deposit: u64,
@@ -114,6 +114,14 @@ where
         }
     }
 
+    fn data_mut(&self) -> &mut BridgingPaymentData {
+        unsafe {
+            DATA.as_mut()
+                .expect("BridgingPaymentData::seed() should be called")
+        }
+    }
+
+
     fn config(&self) -> &Config {
         unsafe {
             CONFIG
@@ -152,6 +160,14 @@ where
         }
         let fee_balance = exec::value_available();
         msg::send_with_gas(data.admin_address, "", 0, fee_balance).expect("Failed to reclaim fees");
+    }
+
+    pub fn update_vft_gateway_address(&mut self, new_vft_gateway_address: ActorId) {
+        let data = self.data();
+        if data.admin_address != self.exec_context.actor_id() {
+            panic!("Not admin");
+        }
+        self.data_mut().vft_gateway_address = new_vft_gateway_address;
     }
 
     pub fn update_config(
@@ -326,6 +342,18 @@ where
     }
     pub fn msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {
         msg_tracker().message_info.clone().into_iter().collect()
+    }
+
+    pub fn admin_address(&self) -> ActorId {
+        self.data().admin_address
+    }
+
+    pub fn vft_gateway_address(&self) -> ActorId {
+        self.data().vft_gateway_address
+    }
+
+    pub fn get_config(&self) -> Config {
+        self.config().clone()
     }
 }
 

@@ -174,6 +174,7 @@ where
             .await?;
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
             data.gear_bridge_builtin,
+            data.receiver_contract_address,
             receiver.into(),
             eth_token_id,
             amount,
@@ -216,6 +217,7 @@ where
             MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
                 match bridge_builtin_operations::send_message_to_bridge_builtin(
                     data.gear_bridge_builtin,
+                    data.receiver_contract_address,
                     receiver.into(),
                     *eth_token_id,
                     amount,

@@ -2322,7 +2322,7 @@ dependencies = [
  "gear-core-errors 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-lazy-pages-common 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gsys 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gsys",
  "log",
  "parity-scale-codec",
  "scale-info",
@@ -4508,7 +4508,7 @@ dependencies = [
  "gear-core-errors 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-stack-buffer 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gprimitives 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gsys 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gsys",
  "parity-scale-codec",
 ]
 
@@ -4520,7 +4520,7 @@ dependencies = [
  "gear-core-errors 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-stack-buffer 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gprimitives 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
- "gsys 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
+ "gsys",
  "parity-scale-codec",
 ]
 
@@ -4537,7 +4537,7 @@ dependencies = [
  "gear-common-codegen 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gsys 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gsys",
  "log",
  "primitive-types 0.12.2",
  "sp-arithmetic 17.0.0",
@@ -4559,7 +4559,7 @@ dependencies = [
  "gear-common-codegen 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-core 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-wasm-instrument 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
- "gsys 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
+ "gsys",
  "log",
  "primitive-types 0.12.2",
  "sp-arithmetic 16.0.0",
@@ -4601,7 +4601,7 @@ dependencies = [
  "gear-core-errors 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gprimitives 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gsys 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gsys",
  "hashbrown 0.14.5",
  "hex",
  "log",
@@ -4627,7 +4627,7 @@ dependencies = [
  "gear-core-errors 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-wasm-instrument 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gprimitives 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
- "gsys 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
+ "gsys",
  "hashbrown 0.14.5",
  "hex",
  "log",
@@ -4656,7 +4656,7 @@ dependencies = [
  "gear-sandbox 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-sandbox-env 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gsys 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gsys",
  "log",
  "parity-scale-codec",
 ]
@@ -4675,7 +4675,7 @@ dependencies = [
  "gear-sandbox 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-sandbox-env 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-wasm-instrument 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
- "gsys 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
+ "gsys",
  "log",
  "parity-scale-codec",
 ]
@@ -4715,7 +4715,7 @@ dependencies = [
  "gear-core-errors 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-lazy-pages-common 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-wasm-instrument 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
- "gsys 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
+ "gsys",
  "log",
  "parity-scale-codec",
  "scale-info",
@@ -5589,12 +5589,6 @@ dependencies = [
 [[package]]
 name = "gsys"
 version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2c857620fd28f327ce1fa479ec1b473523e7e636201a71f11865e36055e34fc"
-
-[[package]]
-name = "gsys"
-version = "1.5.0"
 source = "git+https://github.com/gear-tech/gear.git?tag=v1.5.0#e8e01a8c8a08954b3f80083512201abc058ee730"
 
 [[package]]
@@ -5617,7 +5611,7 @@ dependencies = [
  "gear-lazy-pages-native-interface 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-utils 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gsys 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gsys",
  "hex",
  "indexmap 2.3.0",
  "log",
@@ -5645,7 +5639,7 @@ dependencies = [
  "gear-lazy-pages-native-interface 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-utils 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
  "gear-wasm-instrument 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
- "gsys 1.5.0 (git+https://github.com/gear-tech/gear.git?tag=v1.5.0)",
+ "gsys",
  "hex",
  "indexmap 2.3.0",
  "log",
@@ -11556,7 +11550,7 @@ version = "20.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa63dcdd3fb081a894189f83115dd683be1339a919cd7d3f98f145d1870626c"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
  "log",
  "parity-scale-codec",
  "scale-info",
@@ -11831,7 +11825,7 @@ dependencies = [
  "dyn-clonable",
  "ed25519-zebra",
  "futures",
- "hash-db",
+ "hash-db 0.16.0",
  "hash256-std-hasher",
  "impl-serde",
  "lazy_static",
@@ -11950,7 +11944,7 @@ dependencies = [
 [[package]]
 name = "sp-crypto-ec-utils"
 version = "0.10.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-377-ext",
@@ -12000,7 +11994,7 @@ dependencies = [
 [[package]]
 name = "sp-debug-derive"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12033,7 +12027,7 @@ dependencies = [
 [[package]]
 name = "sp-externalities"
 version = "0.25.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "environmental",
  "parity-scale-codec",
@@ -12307,7 +12301,7 @@ dependencies = [
 [[package]]
 name = "sp-runtime-interface"
 version = "24.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "bytes",
  "impl-trait-for-tuples",
@@ -12351,7 +12345,7 @@ dependencies = [
 [[package]]
 name = "sp-runtime-interface-proc-macro"
 version = "17.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "Inflector",
  "expander",
@@ -12432,7 +12426,7 @@ version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2e84d8ed3acc6aed5a3d5cfd500fb5b99c1e299c86086b2fe82c3e4be93178f"
 dependencies = [
- "hash-db",
+ "hash-db 0.16.0",
  "log",
  "parity-scale-codec",
  "parking_lot 0.12.3",
@@ -12445,7 +12439,7 @@ dependencies = [
  "sp-trie 23.0.0",
  "thiserror",
  "tracing",
- "trie-db 0.28.0",
+ "trie-db 0.27.1",
 ]
 
 [[package]]
@@ -12492,7 +12486,7 @@ checksum = "2d5bbc9339227d1b6a9b7ccd9b2920c818653d40eef1512f1e2e824d72e7a336"
 [[package]]
 name = "sp-std"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 
 [[package]]
 name = "sp-storage"
@@ -12524,7 +12518,7 @@ dependencies = [
 [[package]]
 name = "sp-storage"
 version = "19.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "impl-serde",
  "parity-scale-codec",
@@ -12587,7 +12581,7 @@ dependencies = [
 [[package]]
 name = "sp-tracing"
 version = "16.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "parity-scale-codec",
  "tracing",
@@ -12597,15 +12591,39 @@ dependencies = [
 
 [[package]]
 name = "sp-trie"
+version = "22.0.0"
+source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0#09bdd2a6953d057ae360ec3ef6ec735f9306cc04"
+dependencies = [
+ "ahash 0.8.11",
+ "hash-db 0.16.0",
+ "hashbrown 0.13.2",
+ "lazy_static",
+ "memory-db 0.32.0",
+ "nohash-hasher",
+ "parity-scale-codec",
+ "parking_lot 0.12.3",
+ "rand 0.8.5",
+ "scale-info",
+ "schnellru",
+ "sp-core 21.0.0",
+ "sp-std 8.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-v1.4.0)",
+ "thiserror",
+ "tracing",
+ "trie-db 0.28.0",
+ "trie-root",
+]
+
+[[package]]
+name = "sp-trie"
 version = "23.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf63ea90ffb5d61048d8fb2fac669114dac198fc2739e913e615f0fd2c36c3e7"
 dependencies = [
  "ahash 0.8.11",
- "hash-db",
+ "hash-db 0.16.0",
  "hashbrown 0.13.2",
  "lazy_static",
- "memory-db",
+ "memory-db 0.32.0",
  "nohash-hasher",
  "parity-scale-codec",
  "parking_lot 0.12.3",
@@ -12709,7 +12727,7 @@ dependencies = [
 [[package]]
 name = "sp-wasm-interface"
 version = "20.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk#a4b51593dbe9b9390fa64f5040a9230b5d33b898"
+source = "git+https://github.com/paritytech/polkadot-sdk#b2ec017c0e5e49f3cbf782a5255bb0f9e88bd6c1"
 dependencies = [
  "impl-trait-for-tuples",
  "log",
@@ -13597,6 +13615,19 @@ checksum = "9eac131e334e81b6b3be07399482042838adcd7957aa0010231d0813e39e02fa"
 dependencies = [
  "hash-db 0.15.2",
  "hashbrown 0.11.2",
+ "log",
+ "rustc-hex",
+ "smallvec",
+]
+
+[[package]]
+name = "trie-db"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "767abe6ffed88a1889671a102c2861ae742726f52e0a5a425b92c9fbfa7e9c85"
+dependencies = [
+ "hash-db 0.16.0",
+ "hashbrown 0.13.2",
  "log",
  "rustc-hex",
  "smallvec",

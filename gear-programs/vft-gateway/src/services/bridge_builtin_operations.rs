@@ -4,6 +4,7 @@ use sails_rs::prelude::*;
 
 pub async fn send_message_to_bridge_builtin(
     gear_bridge_builtin: ActorId,
+    receiver_contract_address: H160,
     receiver: H160,
     token_id: H160,
     amount: U256,
@@ -20,7 +21,7 @@ pub async fn send_message_to_bridge_builtin(
     .pack();
 
     let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
-        destination: token_id,
+        destination: receiver_contract_address,
         payload: payload_bytes
             .try_into()
             .map_err(|_| Error::PayloadSizeError)?,

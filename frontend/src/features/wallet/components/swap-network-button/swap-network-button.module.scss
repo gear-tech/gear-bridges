@@ -1,0 +1,23 @@
+@keyframes rotate {
+  from {
+    transform: translateY(50%) rotate(0deg);
+  }
+
+  to {
+    transform: translateY(50%) rotate(720deg);
+  }
+}
+
+.button {
+  padding: 8px !important; // overriding @gear-js/vara-ui
+
+  position: absolute;
+  bottom: 0;
+  right: 32px;
+
+  transform: translateY(50%);
+
+  // using animation instead of transition,
+  // cuz swap form is rendering different components based on network
+  animation: rotate 0.25s ease-in-out;
+}

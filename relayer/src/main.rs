@@ -43,6 +43,8 @@ enum CliCommands {
     /// Fetch authority set hash and id at specified block
     #[clap(visible_alias("fs"))]
     FetchAuthoritySetState(FetchAuthoritySetStateArgs),
+    /// Relay the ERC20 tokens to the Vara network
+    RelayErc20(RelayErc20Args),
 }
 
 #[derive(Args)]
@@ -162,6 +164,44 @@ struct RelayCheckpointsArgs {
     prometheus_args: PrometheusArgs,
 }
 
+#[derive(Args)]
+struct RelayErc20Args {
+    /// Specify ProgramId of the program
+    #[arg(long, env = "ADDRESS")]
+    program_id: String,
+
+    /// Specify an endpoint providing Beacon API
+    #[arg(long, env = "BEACON_ENDPOINT")]
+    beacon_endpoint: String,
+
+    /// Domain of the VARA RPC endpoint
+    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
+    vara_domain: String,
+
+    /// Port of the VARA RPC endpoint
+    #[arg(long, default_value = "9944", env = "VARA_PORT")]
+    vara_port: u16,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
+    vara_suri: String,
+
+    /// Address of the ethereum endpoint
+    #[arg(
+        long = "ethereum-endpoint",
+        default_value = DEFAULT_ETH_RPC,
+        env = "ETH_RPC"
+    )]
+    eth_endpoint: String,
+
+    /// Specify the hash of the ERC20-transaction to relay
+    #[arg(long, env = "TX_HASH")]
+    tx_hash: String,
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
@@ -256,6 +296,7 @@ async fn main() {
                 .await
                 .expect("Failed to fetch authority set state");
         }
+        CliCommands::RelayErc20(_args) => todo!(),
     };
 }
 

@@ -1,0 +1,52 @@
+.footer {
+  padding: 64px 0 32px;
+}
+
+.list {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+
+  &Container {
+    margin-bottom: 24px;
+
+    display: flex;
+    gap: 165px;
+  }
+
+  .heading {
+    margin-bottom: 16px;
+    font-weight: 700;
+    line-height: 30px;
+    letter-spacing: 0.98px;
+    text-transform: uppercase;
+    color: rgba(#000, 0.8);
+  }
+
+  .link {
+    font-weight: 500;
+    line-height: 24px;
+    color: rgba(#000, 0.7);
+
+    &:not(:last-child) {
+      margin-bottom: 4px;
+    }
+  }
+}
+
+.copyright {
+  color: rgba(0, 0, 0, 0.8);
+  font-weight: 300;
+  line-height: 142.857%;
+
+  &Container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.socials {
+  display: flex;
+  gap: 12px;
+}

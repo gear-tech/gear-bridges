@@ -1,6 +1,6 @@
 import {
   ApiProvider as GearApiProvider,
-  AccountProvider,
+  AccountProvider as GearAccountProvider,
   AlertProvider as GearAlertProvider,
   ProviderProps,
 } from '@gear-js/react-hooks';
@@ -16,6 +16,10 @@ import { VARA_NODE_ADDRESS, ETH_CHAIN_ID, ETH_NODE_ADDRESS } from './consts';
 
 function ApiProvider({ children }: ProviderProps) {
   return <GearApiProvider initialArgs={{ endpoint: VARA_NODE_ADDRESS }}>{children}</GearApiProvider>;
+}
+
+function AccountProvider({ children }: ProviderProps) {
+  return <GearAccountProvider appName="Vara Network Bridge">{children}</GearAccountProvider>;
 }
 
 function AlertProvider({ children }: ProviderProps) {

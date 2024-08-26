@@ -71,19 +71,19 @@ pub async fn send_message_with_gas_for_reply(
     msg_id: MessageId,
 ) -> Result<(), Error> {
     gstd::msg::send_bytes_with_gas_for_reply(
-        destination.into(),
+        destination,
         message,
         gas_to_send,
         0,
         gas_deposit,
     )
-    .map_err(|_| Error::SendError)?
+    .map_err(|_| Error::SendFailure)?
     .up_to(Some(reply_timeout))
-    .map_err(|_| Error::ReplyTimeoutError)?
+    .map_err(|_| Error::ReplyTimeout)?
     .handle_reply(move || handle_reply_hook(msg_id))
     .map_err(|_| Error::ReplyHook)?
     .await
-    .map_err(|_| Error::ReplyError)?;
+    .map_err(|_| Error::ReplyFailure)?;
     Ok(())
 }
 
@@ -174,10 +174,10 @@ fn handle_reply_hook(msg_id: MessageId) {
 }
 
 fn decode_transfer_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferTokensDecodeError)
+    vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferTokensDecode)
 }
 
 fn decode_vft_gateway_reply(bytes: &[u8]) -> Result<Result<(U256, H160), VftGatewayError>, Error> {
     vft_gateway_io::TransferVaraToEth::decode_reply(bytes)
-        .map_err(|_| Error::RequestToGateWayDecodeError)
+        .map_err(|_| Error::RequestToGateWayDecode)
 }

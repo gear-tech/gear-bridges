@@ -237,7 +237,7 @@ where
                             msg_id,
                         )
                         .await?;
-                        Err(Error::TokensRefundedError)
+                        Err(Error::TokensRefunded)
                     }
                 }
             }
@@ -248,7 +248,7 @@ where
             MessageStatus::MintTokensStep => {
                 token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
                     .await?;
-                Err(Error::TokensRefundedError)
+                Err(Error::TokensRefunded)
             }
             _ => {
                 panic!("Unexpected status or transaction completed.")

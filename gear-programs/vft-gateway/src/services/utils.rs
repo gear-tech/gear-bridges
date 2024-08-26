@@ -54,13 +54,13 @@ pub async fn send_message_with_gas_for_reply(
         0,
         gas_deposit,
     )
-    .map_err(|_| Error::SendError)?
+    .map_err(|_| Error::SendFailure)?
     .up_to(Some(reply_timeout))
-    .map_err(|_| Error::ReplyTimeoutError)?
+    .map_err(|_| Error::ReplyTimeout)?
     .handle_reply(move || handle_reply_hook(msg_id))
     .map_err(|_| Error::ReplyHook)?
     .await
-    .map_err(|_| Error::ReplyError)?;
+    .map_err(|_| Error::ReplyFailure)?;
     Ok(())
 }
 
@@ -128,12 +128,12 @@ fn handle_reply_hook(msg_id: MessageId) {
 }
 
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::Burn::decode_reply(bytes).map_err(|_| Error::BurnTokensDecodeError)
+    vft_io::Burn::decode_reply(bytes).map_err(|_| Error::BurnTokensDecode)
 }
 
-fn decode_bridge_reply(bytes: &[u8]) -> Result<Option<U256>, Error> {
-    let reply = gbuiltin_eth_bridge::Response::decode(&mut bytes.as_ref())
-        .map_err(|_| Error::BuiltinDecodeError)?;
+fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<U256>, Error> {
+    let reply = gbuiltin_eth_bridge::Response::decode(&mut bytes)
+        .map_err(|_| Error::BuiltinDecode)?;
 
     match reply {
         gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => Ok(Some(nonce)),
@@ -141,5 +141,5 @@ fn decode_bridge_reply(bytes: &[u8]) -> Result<Option<U256>, Error> {
 }
 
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecodeError)
+    vft_io::Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecode)
 }

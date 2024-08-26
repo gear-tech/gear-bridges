@@ -1,19 +1,18 @@
 use sails_rs::prelude::*;
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Encode, Decode, TypeInfo, Clone, PartialEq, Eq)]
 pub enum Error {
-    SendError,
-    ReplyError,
-    BurnTokensDecodeError,
-    ErrorDuringTokensBurn,
-    RequestToBuiltinSendError,
-    RequestToBuiltinReplyError,
-    BuiltinDecodeError,
-    PayloadSizeError,
-    MintTokensDecodeError,
-    ReplyTimeoutError,
-    ErrorDuringTokensMint,
+    SendFailure,
+    ReplyFailure,
+    BurnTokensDecode,
+    BurnFailure, 
+    RequestToBuiltinSend,
+    RequestToBuiltinReply,
+    BuiltinDecode,
+    PayloadSize,
+    MintTokensDecode,
+    ReplyTimeout,
+    MintFailure, 
     NoCorrespondingEthAddress,
     ReplyHook,
     MessageNotFound,
@@ -21,5 +20,5 @@ pub enum Error {
     MessageFailed,
     BurnTokensFailed,
     BridgeBuiltinMessageFailed,
-    TokensRefundedError,
+    TokensRefunded,
 }

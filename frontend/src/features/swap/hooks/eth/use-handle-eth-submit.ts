@@ -1,26 +1,22 @@
+import { HexString } from '@gear-js/api';
 import { useAlert } from '@gear-js/react-hooks';
 import { BaseError } from 'viem';
 import { useWriteContract } from 'wagmi';
 
-import { isUndefined, logger } from '@/utils';
+import { logger } from '@/utils';
 
 import { FUNCTION_NAME, ABI } from '../../consts';
-import { Config, Contract, FeeCalculator, FormattedValues } from '../../types';
+import { Contract, FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
-function useHandleEthSubmit(
-  { address: bridgeAddress }: Contract,
-  { ftAddress }: Config,
-  feeCalculatorData?: FeeCalculator,
-) {
+function useHandleEthSubmit({ address: bridgeAddress }: Contract, ftAddress: HexString | undefined) {
   const alert = useAlert();
   const { writeContract, isPending } = useWriteContract();
   const approve = useApprove(ftAddress);
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (isUndefined(feeCalculatorData)) throw new Error('FeeCalculatorData is not defined');
-    const { fee, mortality, timestamp, signature } = feeCalculatorData || {};
+    const fee = { value: BigInt(0) };
 
     const address = bridgeAddress;
     const amount = expectedAmount;
@@ -31,7 +27,7 @@ function useHandleEthSubmit(
     const transit = () => {
       logger.info(
         FUNCTION_NAME.TRANSIT,
-        `\naddress: ${address}\nargs: [\nfee: ${fee.value}\nmortality: ${mortality}\ntimestamp: ${timestamp}\nsignature: ${signature}\n${accountAddress} \namount: ${amount}\n]` +
+        `\naddress: ${address}\nargs: [\nfee: ${fee.value}\namount: ${amount}]` +
           `\nvalue: ${value}\nisNativeToken: ${isNativeToken}`,
       );
 
@@ -40,7 +36,9 @@ function useHandleEthSubmit(
           abi: ABI,
           address,
           functionName: FUNCTION_NAME.TRANSIT,
-          args: [fee.value, BigInt(mortality), BigInt(timestamp), signature, accountAddress, amount],
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          args: [fee.value, accountAddress, amount],
           value,
         },
         {

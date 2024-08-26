@@ -1,5 +1,5 @@
-import { Sails } from 'sails-js';
 import { HexString } from '@gear-js/api';
+import { Sails } from 'sails-js';
 
 import { NETWORK_NAME } from '@/consts';
 

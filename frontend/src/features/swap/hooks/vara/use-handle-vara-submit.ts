@@ -1,10 +1,12 @@
+import { HexString } from '@gear-js/api';
+
 import { isUndefined, logger } from '@/utils';
 
-import { Config, Contract, FormattedValues, FeeCalculator } from '../../types';
+import { Contract, FormattedValues } from '../../types';
 
 import { useSendMessage } from './use-send-message';
 
-function useHandleVaraSubmit({ address, sails }: Contract, { ftAddress }: Config, feeCalculatorData?: FeeCalculator) {
+function useHandleVaraSubmit({ address, sails }: Contract, ftAddress: HexString | undefined) {
   const isNativeToken = !ftAddress;
 
   // For fungble token contracts gas calculation does not work cuz contracts check the amount of gas applied
@@ -13,8 +15,8 @@ function useHandleVaraSubmit({ address, sails }: Contract, { ftAddress }: Config
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
     if (isUndefined(sails)) throw new Error('Sails is not defined');
-    if (isUndefined(feeCalculatorData)) throw new Error('FeeCalculatorData is not defined');
-    const { fee, mortality, timestamp, signature } = feeCalculatorData;
+
+    const fee = { value: BigInt(0) };
 
     const amount = expectedAmount;
     const recipient = accountAddress;
@@ -23,12 +25,11 @@ function useHandleVaraSubmit({ address, sails }: Contract, { ftAddress }: Config
 
     logger.info(
       'TransitVaraToEth',
-      `\nprogramId:${address}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nisNativeToken: ${isNativeToken}` +
-        `\nfee: ${fee.value}\nmortality: ${mortality}\ntimestamp: ${timestamp}\nsignature: ${signature}`,
+      `\nprogramId:${address}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nisNativeToken: ${isNativeToken}\nfee: ${fee.value}`,
     );
 
     const { TransitVaraToEth } = sails.services.VaraBridge.functions;
-    const transaction = TransitVaraToEth<null>(fee.value, mortality, timestamp, signature, recipient, amount);
+    const transaction = TransitVaraToEth<null>(fee.value, recipient, amount);
 
     return sendMessage(transaction, value, { onSuccess });
   };

@@ -1,5 +1,5 @@
 import { Values, FormattedValues } from './form';
-import { Config, UseBalance, UseConfig, UseHandleSubmit, FeeCalculator, FeeCalculatorResponse } from './hooks';
+import { Config, UseBalance, UseConfig, UseHandleSubmit } from './hooks';
 import { NetworkName, TokenType, Bridge, Contract } from './spec';
 import { ConfigState } from './vara';
 
@@ -10,8 +10,6 @@ export type {
   Bridge,
   Contract,
   Config,
-  FeeCalculator,
-  FeeCalculatorResponse,
   UseBalance,
   UseConfig,
   UseHandleSubmit,

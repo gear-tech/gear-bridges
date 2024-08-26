@@ -1,17 +1,33 @@
-import { STATE_FUNCTION } from '../../consts';
-import { ConfigState, Contract } from '../../types';
+import { HexString } from '@gear-js/api';
+import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 
-import { useReadState } from './use-read-state';
+import { isUndefined } from '@/utils';
 
-function useVaraConfig({ address, sails }: Contract) {
-  const { data: config, isPending } = useReadState<ConfigState>(address, sails, STATE_FUNCTION.CONFIG);
+import { BridgingPaymentProgram } from '../../consts';
 
-  const minValue = config ? BigInt(config.min_amount) : undefined;
-  const ftAddress = BigInt(config?.ft_token_id || 0) === 0n ? undefined : config?.ft_token_id;
+function useVaraConfig(id: HexString | undefined) {
+  const { getFormattedBalance } = useBalanceFormat();
+
+  const { data: program } = useProgram({
+    library: BridgingPaymentProgram,
+    id,
+  });
+
+  const { data: config, isPending } = useProgramQuery({
+    program,
+    serviceName: 'bridgingPayment',
+    functionName: 'getConfig',
+    args: [],
+  });
+
+  const fee = {
+    value: !isUndefined(config?.fee) ? BigInt(config.fee) : undefined,
+    formattedValue: !isUndefined(config?.fee) ? getFormattedBalance(config.fee).value : undefined,
+  };
 
   const isLoading = isPending;
 
-  return { minValue, ftAddress, isLoading };
+  return { fee, isLoading };
 }
 
 export { useVaraConfig };

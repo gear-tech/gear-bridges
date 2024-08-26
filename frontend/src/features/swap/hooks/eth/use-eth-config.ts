@@ -1,23 +1,27 @@
-import { useReadContracts } from 'wagmi';
+import { HexString } from '@gear-js/api';
+import { formatEther } from 'viem';
+import { useReadContract } from 'wagmi';
+
+import { isUndefined } from '@/utils';
 
 import { ABI, FUNCTION_NAME } from '../../consts';
-import { Contract } from '../../types';
 
-function useEthConfig({ address }: Contract) {
+function useEthConfig(address: HexString | undefined) {
   // TODO: logger
   const abi = ABI;
 
-  const { data, isLoading } = useReadContracts({
-    contracts: [
-      { abi, address, functionName: FUNCTION_NAME.MIN_AMOUNT },
-      { abi, address, functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_ADDRESS },
-    ],
+  const { data, isLoading } = useReadContract({
+    abi,
+    address,
+    functionName: FUNCTION_NAME.MIN_AMOUNT,
   });
 
-  const minValue = data?.[0]?.result;
-  const ftAddress = data?.[1]?.result;
+  const fee = {
+    value: data,
+    formattedValue: !isUndefined(data) ? formatEther(data) : undefined,
+  };
 
-  return { minValue, ftAddress, isLoading };
+  return { fee, isLoading };
 }
 
 export { useEthConfig };

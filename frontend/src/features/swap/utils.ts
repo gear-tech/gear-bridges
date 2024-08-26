@@ -7,7 +7,6 @@ import { Pair } from '@/types';
 import { isUndefined } from '@/utils';
 
 import { ERROR_MESSAGE } from './consts';
-import { NetworkName } from './types';
 
 const getAmountSchema = (
   balanceValue: bigint | undefined,
@@ -41,9 +40,4 @@ const getOptions = () => {
   return { varaOptions, ethOptions };
 };
 
-const getNormalizedTime = (networkName: NetworkName, time?: number) => {
-  const toMilisecondsMultiplier = networkName === NETWORK_NAME.VARA ? 1 : 1000;
-  return isUndefined(time) ? undefined : time * toMilisecondsMultiplier;
-};
-
-export { getAmountSchema, getOptions, getNormalizedTime };
+export { getAmountSchema, getOptions };

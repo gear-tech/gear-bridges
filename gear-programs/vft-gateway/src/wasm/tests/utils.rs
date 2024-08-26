@@ -190,7 +190,7 @@ impl VftGateway for Program<'_> {
         let result = self.send_bytes_with_gas(from, payload, with_gas, 0);
         if panic {
             assert!(result.main_failed());
-            return Err(Error::MessageFailed);
+            Err(Error::MessageFailed)
         } else {
             let log_entry = result
                 .log()
@@ -202,7 +202,7 @@ impl VftGateway for Program<'_> {
                 <(String, String, Result<(U256, H160), Error>)>::decode(&mut log_entry.payload())
                     .expect("Unable to decode reply"); // Panic if decoding fails
 
-            return reply.2;
+            reply.2
         }
     }
 
@@ -245,6 +245,6 @@ impl VftGateway for Program<'_> {
             <(String, String, Vec<(MessageId, MessageInfo)>)>::decode(&mut log_entry.payload())
                 .expect("Unable to decode reply"); // Panic if decoding fails
 
-        return reply.2;
+        reply.2
     }
 }

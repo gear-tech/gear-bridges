@@ -193,7 +193,7 @@ pub trait BridgingPayment {
 
 impl BridgingPayment for Program<'_> {
     fn bridge_payment(system: &System) -> Program<'_> {
-        let program = Program::current(&system);
+        let program = Program::current(system);
         let init_config = InitConfig::new(
             ADMIN_ID.into(),
             VFT_GATEWAY_ID.into(),

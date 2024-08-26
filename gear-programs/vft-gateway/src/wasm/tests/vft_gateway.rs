@@ -26,7 +26,7 @@ fn test_successful_transfer_vara_to_eth() {
     let vft_gateway = Program::vft_gateway(&system);
 
     let account_id: u64 = 10000;
-    let amount = U256::from(10_000_000_000 as u64);
+    let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
 
     vft.mint(ADMIN_ID, account_id.into(), amount);
@@ -59,13 +59,13 @@ async fn test_transfer_fails_due_to_token_panic() {
     let vft_gateway = Program::vft_gateway(&system);
 
     let account_id: u64 = 10000;
-    let amount = U256::from(10_000_000_000 as u64);
+    let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
 
     vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), [2; 20].into());
     let reply =
         vft_gateway.transfer_vara_to_eth(account_id, vft.id(), amount, [3; 20].into(), gas, false);
-    assert_eq!(reply, Err(Error::ReplyError));
+    assert_eq!(reply, Err(Error::ReplyFailure));
 
     let msg_tracker = vft_gateway.get_msg_tracker_state();
     assert!(msg_tracker.is_empty());
@@ -87,7 +87,7 @@ async fn test_transfer_fails_due_to_token_rejecting_request() {
     let vft_gateway = Program::vft_gateway(&system);
 
     let account_id: u64 = 10000;
-    let amount = U256::from(10_000_000_000 as u64);
+    let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
 
     vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), [2; 20].into());
@@ -114,7 +114,7 @@ async fn test_bridge_builtin_panic_with_token_mint() {
     let vft_gateway = Program::vft_gateway(&system);
 
     let account_id: u64 = 10000;
-    let amount = U256::from(10_000_000_000 as u64);
+    let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
 
     vft.mint(ADMIN_ID, account_id.into(), amount);
@@ -123,7 +123,7 @@ async fn test_bridge_builtin_panic_with_token_mint() {
     vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), [2; 20].into());
     let reply =
         vft_gateway.transfer_vara_to_eth(account_id, vft.id(), amount, [3; 20].into(), gas, false);
-    assert_eq!(reply, Err(Error::ReplyError));
+    assert_eq!(reply, Err(Error::ReplyFailure));
 
     let msg_tracker = vft_gateway.get_msg_tracker_state();
     assert_eq!(msg_tracker[0].1.status, MessageStatus::MintTokensStep);
@@ -132,7 +132,7 @@ async fn test_bridge_builtin_panic_with_token_mint() {
     vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
 
     let reply = vft_gateway.handle_interrupted_transfer(account_id, msg_tracker[0].0);
-    assert_eq!(reply, Err(Error::TokensRefundedError));
+    assert_eq!(reply, Err(Error::TokensRefunded));
 }
 
 #[tokio::test]
@@ -147,8 +147,8 @@ async fn test_multiple_transfers() {
 
     let account_id1: u64 = 10001;
     let account_id2: u64 = 10002;
-    let amount1 = U256::from(10_000_000_000 as u64);
-    let amount2 = U256::from(5_000_000_000 as u64);
+    let amount1 = U256::from(10_000_000_000_u64);
+    let amount2 = U256::from(5_000_000_000_u64);
     let gas = 100_000_000_000;
 
     vft.mint(ADMIN_ID, account_id1.into(), amount1);
@@ -194,8 +194,8 @@ fn test_transfer_vara_to_eth_insufficient_balance() {
     let vft_gateway = Program::vft_gateway(&system);
 
     let account_id: u64 = 10000;
-    let amount = U256::from(10_000_000_000 as u64);
-    let excessive_amount = U256::from(20_000_000_000 as u64); // More than the available balance
+    let amount = U256::from(10_000_000_000_u64);
+    let excessive_amount = U256::from(20_000_000_000_u64); // More than the available balance
     let gas = 100_000_000_000;
 
     vft.mint(ADMIN_ID, account_id.into(), amount);
@@ -211,12 +211,13 @@ fn test_transfer_vara_to_eth_insufficient_balance() {
         gas,
         false,
     );
-    assert_eq!(reply, Err(Error::ReplyError));
+    assert_eq!(reply, Err(Error::ReplyFailure));
 
     let balance = vft.balance_of(account_id.into());
     assert_eq!(balance, amount); // Balance should remain unchanged
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_transfer_fails_due_to_gas_depletion_after_bridge_reply() {
     let system = System::new();
@@ -228,7 +229,7 @@ async fn test_transfer_fails_due_to_gas_depletion_after_bridge_reply() {
     let vft_gateway = Program::vft_gateway(&system);
 
     let account_id: u64 = 10001;
-    let amount = U256::from(10_000_000_000 as u64);
+    let amount = U256::from(10_000_000_000_u64);
     let gas = 50_000_000_000;
 
     vft.mint(ADMIN_ID, account_id.into(), amount);

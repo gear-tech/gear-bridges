@@ -9,10 +9,25 @@ type BalanceValues = {
 };
 
 type Config = {
-  fee: BalanceValues;
   minValue: bigint | undefined;
   ftAddress: HexString | undefined;
   isLoading: boolean;
+};
+
+type FeeCalculatorResponse = {
+  fee: string;
+  mortality: number;
+  timestamp: number;
+  bytes: string;
+  signature: HexString;
+};
+
+type FeeCalculator = {
+  fee: { value: bigint; formattedValue: string };
+  mortality: number;
+  timestamp: number;
+  bytes: string;
+  signature: HexString;
 };
 
 type UseBalance = (config: Config) => BalanceValues & {
@@ -25,9 +40,10 @@ type UseConfig = (contract: Contract) => Config;
 type UseHandleSubmit = (
   contract: Contract,
   config: Config,
+  feeCalculator?: FeeCalculator,
 ) => {
   onSubmit: (values: FormattedValues, reset: () => void) => void;
   isSubmitting: boolean;
 };
 
-export type { Config, UseBalance, UseConfig, UseHandleSubmit };
+export type { Config, UseBalance, UseConfig, UseHandleSubmit, FeeCalculatorResponse, FeeCalculator };

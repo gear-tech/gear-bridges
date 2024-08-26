@@ -1,27 +1,34 @@
-import { HexString, ProgramMetadata } from '@gear-js/api';
-import {
-  SendMessageWithGasOptions,
-  UseSendMessageWithGasOptions,
-  useSendMessageWithGas as useGearSendMessageWithGas,
-} from '@gear-js/react-hooks';
+import { useAccount } from '@gear-js/react-hooks';
+import { TransactionBuilder } from 'sails-js';
 
 import { useLoading } from '@/hooks';
+import { isUndefined } from '@/utils';
 
-function useSendMessage(
-  programId: HexString,
-  metadata: ProgramMetadata | undefined,
-  options?: UseSendMessageWithGasOptions,
-) {
-  const sendMessage = useGearSendMessageWithGas(programId, metadata, options);
+import { Options, useSignAndSend } from './use-sign-and-send';
 
+function useSendMessage(gasLimit?: bigint) {
+  const { account } = useAccount();
   const [isLoading, enableLoading, disableLoading] = useLoading();
+  const signAndSend = useSignAndSend();
 
   return {
-    sendMessage: (args: SendMessageWithGasOptions) => {
+    sendMessage: async (transaction: TransactionBuilder<null>, value: bigint, args: Partial<Options>) => {
+      if (isUndefined(account)) throw new Error('Account is not defined');
       enableLoading();
 
-      const onSuccess = (messageId: HexString) => {
-        args.onSuccess?.(messageId);
+      const { signer } = account;
+      transaction.withAccount(account.address, { signer });
+      await transaction.withValue(value);
+
+      if (gasLimit) {
+        await transaction.withGas(gasLimit);
+      } else {
+        await transaction.calculateGas();
+      }
+      const { extrinsic } = transaction;
+
+      const onSuccess = () => {
+        args.onSuccess?.();
         disableLoading();
       };
 
@@ -30,7 +37,11 @@ function useSendMessage(
         disableLoading();
       };
 
-      sendMessage({ ...args, onSuccess, onError });
+      const onFinally = () => {
+        disableLoading();
+      };
+
+      signAndSend(extrinsic, { ...args, onSuccess, onError, onFinally });
     },
 
     isPending: isLoading,

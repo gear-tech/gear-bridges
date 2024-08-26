@@ -5,28 +5,34 @@ import { useWriteContract } from 'wagmi';
 import { isUndefined, logger } from '@/utils';
 
 import { FUNCTION_NAME, ABI } from '../../consts';
-import { Config, Contract, FormattedValues } from '../../types';
+import { Config, Contract, FeeCalculator, FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
-function useHandleEthSubmit({ address: bridgeAddress }: Contract, { fee, ftAddress }: Config) {
+function useHandleEthSubmit(
+  { address: bridgeAddress }: Contract,
+  { ftAddress }: Config,
+  feeCalculatorData?: FeeCalculator,
+) {
   const alert = useAlert();
   const { writeContract, isPending } = useWriteContract();
   const approve = useApprove(ftAddress);
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (isUndefined(fee.value)) throw new Error('Fee is not defined');
+    if (isUndefined(feeCalculatorData)) throw new Error('FeeCalculatorData is not defined');
+    const { fee, mortality, timestamp, signature } = feeCalculatorData || {};
 
     const address = bridgeAddress;
     const amount = expectedAmount;
 
     const isNativeToken = !ftAddress;
-    const value = isNativeToken ? _amount : fee.value;
+    const value = isNativeToken ? _amount + fee.value : fee.value;
 
     const transit = () => {
       logger.info(
         FUNCTION_NAME.TRANSIT,
-        `\naddress: ${address}\nargs: [${accountAddress}, ${amount}]\nvalue: ${value}\nisNativeToken: ${isNativeToken}`,
+        `\naddress: ${address}\nargs: [\nfee: ${fee.value}\nmortality: ${mortality}\ntimestamp: ${timestamp}\nsignature: ${signature}\n${accountAddress} \namount: ${amount}\n]` +
+          `\nvalue: ${value}\nisNativeToken: ${isNativeToken}`,
       );
 
       writeContract(
@@ -34,7 +40,7 @@ function useHandleEthSubmit({ address: bridgeAddress }: Contract, { fee, ftAddre
           abi: ABI,
           address,
           functionName: FUNCTION_NAME.TRANSIT,
-          args: [accountAddress, amount],
+          args: [fee.value, BigInt(mortality), BigInt(timestamp), signature, accountAddress, amount],
           value,
         },
         {

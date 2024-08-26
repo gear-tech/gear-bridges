@@ -22,26 +22,14 @@ const ABI = [
         type: 'uint256',
       },
       {
-        internalType: 'uint256',
-        name: '_fee',
-        type: 'uint256',
+        internalType: 'address',
+        name: '_feeProvider',
+        type: 'address',
       },
       {
-        components: [
-          {
-            internalType: 'uint256',
-            name: 'x',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'y',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct LibSecp256k1.Point[]',
-        name: '_configAuthorityKeys',
-        type: 'tuple[]',
+        internalType: 'address[]',
+        name: '_authorityKeys',
+        type: 'address[]',
       },
       {
         internalType: 'address[]',
@@ -92,6 +80,17 @@ const ABI = [
     inputs: [
       {
         internalType: 'uint256',
+        name: 'minimumAmount',
+        type: 'uint256',
+      },
+    ],
+    name: 'AmountBelowMinimum',
+    type: 'error',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint256',
         name: 'feeBalance',
         type: 'uint256',
       },
@@ -107,6 +106,11 @@ const ABI = [
   {
     inputs: [],
     name: 'AuthorityKeyAlreadyExists',
+    type: 'error',
+  },
+  {
+    inputs: [],
+    name: 'AuthorityKeyDoesNotExist',
     type: 'error',
   },
   {
@@ -132,6 +136,17 @@ const ABI = [
   {
     inputs: [],
     name: 'DuplicateSignaturesDetected',
+    type: 'error',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'validatorAddress',
+        type: 'address',
+      },
+    ],
+    name: 'DuplicateValidatorAddress',
     type: 'error',
   },
   {
@@ -183,11 +198,6 @@ const ABI = [
     type: 'error',
   },
   {
-    inputs: [],
-    name: 'IndexOutOfBounds',
-    type: 'error',
-  },
-  {
     inputs: [
       {
         internalType: 'uint256',
@@ -228,6 +238,11 @@ const ABI = [
       },
     ],
     name: 'InsufficientSignersError',
+    type: 'error',
+  },
+  {
+    inputs: [],
+    name: 'InvalidFeeProviderSignature',
     type: 'error',
   },
   {
@@ -333,6 +348,11 @@ const ABI = [
   },
   {
     inputs: [],
+    name: 'QueueNotEmpty',
+    type: 'error',
+  },
+  {
+    inputs: [],
     name: 'ReentrancyGuardReentrantCall',
     type: 'error',
   },
@@ -350,6 +370,33 @@ const ABI = [
       },
     ],
     name: 'SignatureMismatch',
+    type: 'error',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint256',
+        name: 'currentTimestamp',
+        type: 'uint256',
+      },
+      {
+        internalType: 'uint256',
+        name: 'deadline',
+        type: 'uint256',
+      },
+    ],
+    name: 'SignatureOutOfDate',
+    type: 'error',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint256',
+        name: 'signaturesRequired',
+        type: 'uint256',
+      },
+    ],
+    name: 'SignaturesThresholdNotReached',
     type: 'error',
   },
   {
@@ -430,17 +477,6 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'uint256',
-        name: 'validatorsRequired',
-        type: 'uint256',
-      },
-    ],
-    name: 'ValidatorsNotReached',
-    type: 'error',
-  },
-  {
-    inputs: [
-      {
         internalType: 'string',
         name: '',
         type: 'string',
@@ -483,6 +519,11 @@ const ABI = [
   },
   {
     inputs: [],
+    name: 'ZeroFee',
+    type: 'error',
+  },
+  {
+    inputs: [],
     name: 'ZeroSignatureThreshold',
     type: 'error',
   },
@@ -520,25 +561,6 @@ const ABI = [
       },
     ],
     name: 'EthToVaraTransferEvent',
-    type: 'event',
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: 'address',
-        name: 'to',
-        type: 'address',
-      },
-      {
-        indexed: false,
-        internalType: 'uint256',
-        name: 'amount',
-        type: 'uint256',
-      },
-    ],
-    name: 'EtherWithdrawn',
     type: 'event',
   },
   {
@@ -712,24 +734,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
     ],
     name: 'activateEmergencyStopByConfigAuthority',
@@ -747,44 +754,17 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
-      },
-      {
-        components: [
-          {
-            internalType: 'uint256',
-            name: 'x',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'y',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct LibSecp256k1.Point',
-        name: '_configAuthorityKey',
-        type: 'tuple',
+        internalType: 'address',
+        name: '_authorityKey',
+        type: 'address',
       },
     ],
-    name: 'addConfigAuthorityKey',
+    name: 'addAuthorityKey',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -792,32 +772,17 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
-      },
-      {
-        internalType: 'address',
-        name: 'newValidatorAddress',
-        type: 'address',
+        internalType: 'address[]',
+        name: 'newValidatorAddresses',
+        type: 'address[]',
       },
     ],
-    name: 'addValidator',
+    name: 'addValidators',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -830,6 +795,44 @@ const ABI = [
         internalType: 'address',
         name: '',
         type: 'address',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint256',
+        name: '',
+        type: 'uint256',
+      },
+    ],
+    name: 'authorityKeys',
+    outputs: [
+      {
+        internalType: 'address',
+        name: '',
+        type: 'address',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: '',
+        type: 'address',
+      },
+    ],
+    name: 'authorityKeysIndices',
+    outputs: [
+      {
+        internalType: 'uint256',
+        name: '',
+        type: 'uint256',
       },
     ],
     stateMutability: 'view',
@@ -868,63 +871,23 @@ const ABI = [
         name: 'signatures',
         type: 'bytes[]',
       },
-    ],
-    name: 'checkUniqueness',
-    outputs: [
       {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
+        internalType: 'uint256',
+        name: '_lastExecutedVaraNonceId',
+        type: 'uint256',
       },
     ],
+    name: 'clearEthToVaraTransfers',
+    outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },
   {
     inputs: [
       {
-        internalType: 'uint256',
-        name: '',
-        type: 'uint256',
-      },
-    ],
-    name: 'configAuthorityKeys',
-    outputs: [
-      {
-        internalType: 'uint256',
-        name: 'x',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'y',
-        type: 'uint256',
-      },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
     ],
     name: 'deactivateEmergencyStop',
@@ -948,24 +911,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
     ],
     name: 'endMigration',
@@ -1022,7 +970,7 @@ const ABI = [
   },
   {
     inputs: [],
-    name: 'fee',
+    name: 'feeBalance',
     outputs: [
       {
         internalType: 'uint256',
@@ -1035,12 +983,12 @@ const ABI = [
   },
   {
     inputs: [],
-    name: 'feeBalance',
+    name: 'feeProvider',
     outputs: [
       {
-        internalType: 'uint256',
+        internalType: 'address',
         name: '',
-        type: 'uint256',
+        type: 'address',
       },
     ],
     stateMutability: 'view',
@@ -1061,37 +1009,12 @@ const ABI = [
   },
   {
     inputs: [],
-    name: 'getAuthorityEthAddresses',
+    name: 'getAuthorityKeys',
     outputs: [
       {
         internalType: 'address[]',
         name: '',
         type: 'address[]',
-      },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'getConfigAuthorityKeys',
-    outputs: [
-      {
-        components: [
-          {
-            internalType: 'uint256',
-            name: 'x',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'y',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct LibSecp256k1.Point[]',
-        name: '',
-        type: 'tuple[]',
       },
     ],
     stateMutability: 'view',
@@ -1149,32 +1072,6 @@ const ABI = [
     type: 'function',
   },
   {
-    inputs: [],
-    name: 'getLastEthToVaraNonce',
-    outputs: [
-      {
-        internalType: 'uint256',
-        name: '',
-        type: 'uint256',
-      },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'getLastVaraToEthNonce',
-    outputs: [
-      {
-        internalType: 'uint256',
-        name: '',
-        type: 'uint256',
-      },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
     inputs: [
       {
         internalType: 'bytes32',
@@ -1196,24 +1093,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'address',
@@ -1282,31 +1164,13 @@ const ABI = [
     type: 'function',
   },
   {
-    inputs: [
-      {
-        components: [
-          {
-            internalType: 'uint256',
-            name: 'x',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'y',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct LibSecp256k1.Point',
-        name: '_configAuthorityKey',
-        type: 'tuple',
-      },
-    ],
-    name: 'isKeyNotPresent',
+    inputs: [],
+    name: 'lastExecutedVaraNonceId',
     outputs: [
       {
-        internalType: 'bool',
+        internalType: 'uint256',
         name: '',
-        type: 'bool',
+        type: 'uint256',
       },
     ],
     stateMutability: 'view',
@@ -1314,77 +1178,6 @@ const ABI = [
   },
   {
     inputs: [
-      {
-        internalType: 'string',
-        name: '_addr',
-        type: 'string',
-      },
-    ],
-    name: 'isValidVaraAddress',
-    outputs: [
-      {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
-      },
-    ],
-    stateMutability: 'pure',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'address',
-        name: '_validator',
-        type: 'address',
-      },
-    ],
-    name: 'isValidator',
-    outputs: [
-      {
-        internalType: 'bool',
-        name: '',
-        type: 'bool',
-      },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'uint256',
-        name: 'authorityKeyId',
-        type: 'uint256',
-      },
-      {
-        internalType: 'address',
-        name: 'newContract',
-        type: 'address',
-      },
-      {
-        internalType: 'uint256',
-        name: 'start',
-        type: 'uint256',
-      },
-      {
-        internalType: 'uint256',
-        name: 'count',
-        type: 'uint256',
-      },
-    ],
-    name: 'migrateEthToVaraTransfers',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'uint256',
-        name: 'authorityKeyId',
-        type: 'uint256',
-      },
       {
         internalType: 'address',
         name: 'newContract',
@@ -1392,6 +1185,19 @@ const ABI = [
       },
     ],
     name: 'migrateNonces',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'newContract',
+        type: 'address',
+      },
+    ],
+    name: 'migrateTokenBalance',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -1438,100 +1244,35 @@ const ABI = [
   {
     inputs: [
       {
-        components: [
-          {
-            internalType: 'address',
-            name: 'sender',
-            type: 'address',
-          },
-          {
-            internalType: 'string',
-            name: 'recipient',
-            type: 'string',
-          },
-          {
-            internalType: 'uint256',
-            name: 'amount',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'nonceId',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct Bridge.EthToVaraTransfer[]',
-        name: 'transfers',
-        type: 'tuple[]',
-      },
-    ],
-    name: 'receiveEthToVaraTransfers',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
-      },
-      {
-        internalType: 'uint256',
-        name: '_configAuthorityKeyId',
-        type: 'uint256',
-      },
-    ],
-    name: 'removeConfigAuthorityKey',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'address',
-        name: 'validatorAddress',
+        name: '_authorityKey',
         type: 'address',
       },
     ],
-    name: 'removeValidator',
+    name: 'removeAuthorityKey',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
+      },
+      {
+        internalType: 'address[]',
+        name: 'validatorAddresses',
+        type: 'address[]',
+      },
+    ],
+    name: 'removeValidators',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -1557,24 +1298,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'address',
@@ -1626,24 +1352,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'address',
@@ -1672,106 +1383,9 @@ const ABI = [
   {
     inputs: [
       {
-        components: [
-          {
-            internalType: 'address',
-            name: 'sender',
-            type: 'address',
-          },
-          {
-            internalType: 'string',
-            name: 'recipient',
-            type: 'string',
-          },
-          {
-            internalType: 'uint256',
-            name: 'amount',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'nonceId',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct Bridge.EthToVaraTransfer[]',
-        name: 'transfers',
-        type: 'tuple[]',
-      },
-    ],
-    name: 'sortTransactionNonces',
-    outputs: [
-      {
-        internalType: 'uint256[]',
-        name: '',
-        type: 'uint256[]',
-      },
-    ],
-    stateMutability: 'pure',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        components: [
-          {
-            internalType: 'string',
-            name: 'sender',
-            type: 'string',
-          },
-          {
-            internalType: 'address payable',
-            name: 'recipient',
-            type: 'address',
-          },
-          {
-            internalType: 'uint256',
-            name: 'amount',
-            type: 'uint256',
-          },
-          {
-            internalType: 'uint256',
-            name: 'nonceId',
-            type: 'uint256',
-          },
-        ],
-        internalType: 'struct Bridge.VaraToEthTransfer[]',
-        name: 'transfers',
-        type: 'tuple[]',
-      },
-    ],
-    name: 'sortTransactionNonces',
-    outputs: [
-      {
-        internalType: 'uint256[]',
-        name: '',
-        type: 'uint256[]',
-      },
-    ],
-    stateMutability: 'pure',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
     ],
     name: 'startMigration',
@@ -1800,6 +1414,26 @@ const ABI = [
   },
   {
     inputs: [
+      {
+        internalType: 'uint256',
+        name: 'fee',
+        type: 'uint256',
+      },
+      {
+        internalType: 'uint256',
+        name: 'mortality',
+        type: 'uint256',
+      },
+      {
+        internalType: 'uint256',
+        name: 'timestamp',
+        type: 'uint256',
+      },
+      {
+        internalType: 'bytes',
+        name: 'signature',
+        type: 'bytes',
+      },
       {
         internalType: 'string',
         name: '_recipient',
@@ -1852,7 +1486,7 @@ const ABI = [
       },
       {
         internalType: 'uint256',
-        name: 'lastExecutedVaraNonceId',
+        name: '_lastExecutedVaraNonceId',
         type: 'uint256',
       },
     ],
@@ -1864,32 +1498,17 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
-      },
-      {
-        internalType: 'uint256',
-        name: 'newFee',
-        type: 'uint256',
+        internalType: 'address',
+        name: '_feeProvider',
+        type: 'address',
       },
     ],
-    name: 'updateFee',
+    name: 'updateFeeProvider',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -1897,24 +1516,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'uint256',
@@ -1930,24 +1534,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'uint8',
@@ -1963,24 +1552,9 @@ const ABI = [
   {
     inputs: [
       {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
       },
       {
         internalType: 'uint8',
@@ -2002,51 +1576,6 @@ const ABI = [
       },
     ],
     name: 'updateValidatorKey',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    inputs: [
-      {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
-      },
-      {
-        components: [
-          {
-            internalType: 'address',
-            name: 'previousValidatorAddress',
-            type: 'address',
-          },
-          {
-            internalType: 'address',
-            name: 'newValidatorAddress',
-            type: 'address',
-          },
-        ],
-        internalType: 'struct Bridge.ValidatorKeyUpdateByAutority[]',
-        name: 'validatorKeyUpdate',
-        type: 'tuple[]',
-      },
-    ],
-    name: 'updateValidatorKeysByAuthority',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -2105,6 +1634,11 @@ const ABI = [
   {
     inputs: [
       {
+        internalType: 'bytes[]',
+        name: 'signatures',
+        type: 'bytes[]',
+      },
+      {
         internalType: 'address payable',
         name: '_to',
         type: 'address',
@@ -2114,28 +1648,8 @@ const ABI = [
         name: '_amount',
         type: 'uint256',
       },
-      {
-        internalType: 'bytes32',
-        name: 'signature',
-        type: 'bytes32',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentAggregated',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'bytes20',
-        name: 'commitmentSigners',
-        type: 'bytes20',
-      },
-      {
-        internalType: 'uint256[]',
-        name: 'pubKeysIds',
-        type: 'uint256[]',
-      },
     ],
-    name: 'withdrawEther',
+    name: 'withdrawFee',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

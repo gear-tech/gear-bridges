@@ -1,13 +1,10 @@
 import { HexString } from '@gear-js/api';
 
 type ConfigState = {
-  Config: {
-    minAmount: string;
-    minValidatorsRequired: string;
-    gasForMigration: string;
-    fee: string;
-    ftTokenId?: HexString;
-  };
+  min_amount: number;
+  min_validators_required: 3;
+  gas_for_migration: number;
+  ft_token_id?: HexString;
 };
 
 export type { ConfigState };

@@ -1,4 +1,5 @@
-import { HexString, ProgramMetadata } from '@gear-js/api';
+import { Sails } from 'sails-js';
+import { HexString } from '@gear-js/api';
 
 import { NETWORK_NAME } from '@/consts';
 
@@ -17,7 +18,7 @@ type Bridge = {
 
 type Contract = {
   address: HexString;
-  metadata?: ProgramMetadata | undefined;
+  sails?: Sails | undefined;
 };
 
 export type { NetworkName, TokenType, Bridge, Contract };

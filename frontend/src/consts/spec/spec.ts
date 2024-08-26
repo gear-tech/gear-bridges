@@ -10,14 +10,14 @@ import { NATIVE_SYMBOL, NETWORK_NAME } from './network';
 const SPEC = {
   VaraWrappedVara: {
     [NETWORK_NAME.VARA]: {
-      address: '0x46a599fc64e2d8c8765491a8ca3cc2ab11e7c3a32e1dbd9cb14681a3db09d1b6',
+      address: '0x7aef50c8e4e641c34fa16ee03bc77f4e58c5aa47a0e1a6ad501aa39a3109d7bd',
       symbol: NATIVE_SYMBOL.VARA,
       tokenType: 'native',
       decimals: 12,
       SVG: VaraSVG,
     },
     [NETWORK_NAME.ETH]: {
-      address: '0xEb51145B04d7fF94aEF976f74eAE879baC21A9D5',
+      address: '0x8e12DDfcEA92B054Ea43E1a451DB111BaAaab4F4',
       symbol: 'WVARA',
       tokenType: 'fungible',
       decimals: 12,
@@ -27,14 +27,14 @@ const SPEC = {
 
   EthWrappedEth: {
     [NETWORK_NAME.VARA]: {
-      address: '0xbc22e51aedfcb8d4a580483b51cb627baa9b54f2d40e8dd7629f580e1571cee7',
+      address: '0x79b9575138933425e32a2b04b54134566ff54263a9b3c2fdb2fe33f0f7a57160',
       symbol: 'WETH',
       tokenType: 'fungible',
       decimals: 18,
       SVG: WrappedEthSVG,
     },
     [NETWORK_NAME.ETH]: {
-      address: '0x9d2eB695a2Ea57e40b81FB99fd7f80C8Eb98ecFa',
+      address: '0x0db12bb862125B8798098F619eE50e812A3800C8',
       symbol: NATIVE_SYMBOL.ETH,
       tokenType: 'native',
       decimals: 18,
@@ -44,14 +44,14 @@ const SPEC = {
 
   USDCWrappedUSDC: {
     [NETWORK_NAME.VARA]: {
-      address: '0xf4c486a710ae0fb67acee5c2665f989b39ce99329fa56e8f9fac0e1f71ce065f',
+      address: '0x1b9701dfffe53de8a63991557a75fd4528aafec466b1e335ce51f4dcfeb4d4c4',
       symbol: 'VUSDC',
       tokenType: 'fungible',
       decimals: 6,
       SVG: VaraUsdcSVG,
     },
     [NETWORK_NAME.ETH]: {
-      address: '0xDfC73A8AFE32508a4fd1e055427C9C5093108322',
+      address: '0xc17163E4BC023B0c50DE1d32Ff7c87284fD89883',
       symbol: 'USDC',
       tokenType: 'fungible',
       decimals: 6,

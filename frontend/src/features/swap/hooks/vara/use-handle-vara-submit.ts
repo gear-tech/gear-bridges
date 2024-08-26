@@ -1,32 +1,36 @@
 import { isUndefined, logger } from '@/utils';
 
-import { Config, Contract, FormattedValues } from '../../types';
+import { Config, Contract, FormattedValues, FeeCalculator } from '../../types';
 
 import { useSendMessage } from './use-send-message';
 
-function useHandleVaraSubmit({ address, metadata }: Contract, { fee, ftAddress }: Config) {
+function useHandleVaraSubmit({ address, sails }: Contract, { ftAddress }: Config, feeCalculatorData?: FeeCalculator) {
   const isNativeToken = !ftAddress;
 
-  const { sendMessage, isPending } = useSendMessage(address, metadata, {
-    disableAlerts: true,
-    isMaxGasLimit: !isNativeToken,
-  });
+  // For fungble token contracts gas calculation does not work cuz contracts check the amount of gas applied
+  const gasLimit = isNativeToken ? undefined : BigInt(100_000_000_000);
+  const { sendMessage, isPending } = useSendMessage(gasLimit);
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (isUndefined(fee.value)) throw new Error('Fee is not defined');
+    if (isUndefined(sails)) throw new Error('Sails is not defined');
+    if (isUndefined(feeCalculatorData)) throw new Error('FeeCalculatorData is not defined');
+    const { fee, mortality, timestamp, signature } = feeCalculatorData;
 
-    const amount = String(expectedAmount); // TODO: fix after @gear-js/react-hooks bigint support
+    const amount = expectedAmount;
     const recipient = accountAddress;
-    const payload = { TransitVaraToEth: { amount, recipient } };
 
-    const value = String(isNativeToken ? _amount : fee.value); // TODO: fix after @gear-js/react-hooks bigint support
+    const value = isNativeToken ? _amount + fee.value : fee.value;
 
     logger.info(
       'TransitVaraToEth',
-      `\nprogramId:${address}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nisNativeToken: ${isNativeToken}`,
+      `\nprogramId:${address}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nisNativeToken: ${isNativeToken}` +
+        `\nfee: ${fee.value}\nmortality: ${mortality}\ntimestamp: ${timestamp}\nsignature: ${signature}`,
     );
 
-    sendMessage({ payload, value, onSuccess });
+    const { TransitVaraToEth } = sails.services.VaraBridge.functions;
+    const transaction = TransitVaraToEth<null>(fee.value, mortality, timestamp, signature, recipient, amount);
+
+    return sendMessage(transaction, value, { onSuccess });
   };
 
   const isSubmitting = isPending;

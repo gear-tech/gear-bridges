@@ -1,19 +1,24 @@
-import { HexString, ProgramMetadata } from '@gear-js/api';
-import { useApi } from '@gear-js/react-hooks';
-import { AnyJson } from '@polkadot/types/types';
+import { Sails } from 'sails-js';
+import { HexString } from '@gear-js/api';
+import { useAccount } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
 
 import { isUndefined } from '@/utils';
 
-function useReadState<T>(programId: HexString | undefined, metadata: ProgramMetadata | undefined, payload: AnyJson) {
-  const { api, isApiReady } = useApi();
+function useReadState<T>(programId: HexString | undefined, sails: Sails | undefined, queryName: string) {
+  const { account } = useAccount();
 
-  const isEnabled = isApiReady && programId && metadata && !isUndefined(payload);
+  const isEnabled = programId && account && sails && !isUndefined(queryName);
 
   return useQuery({
-    queryKey: ['readState', isApiReady, programId, metadata, payload],
-    queryFn: async () =>
-      isEnabled ? ((await api.programState.read({ programId, payload }, metadata)).toHuman() as T) : null,
+    queryKey: ['readState', isEnabled, programId, queryName],
+    queryFn: async () => {
+      if (!isEnabled) {
+        return null;
+      }
+      sails.setProgramId(programId);
+      return (await sails.services.VaraBridge.queries.Config(account.decodedAddress)) as T;
+    },
     enabled: isEnabled,
   });
 }

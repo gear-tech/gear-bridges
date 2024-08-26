@@ -1,6 +1,5 @@
 const FUNCTION_NAME = {
   TRANSIT: 'transitEthToVara',
-  FEE: 'fee',
   MIN_AMOUNT: 'minAmount',
 
   FUNGIBLE_TOKEN_ADDRESS: 'addressOfToken',

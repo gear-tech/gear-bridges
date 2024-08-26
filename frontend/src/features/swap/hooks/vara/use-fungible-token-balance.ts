@@ -6,7 +6,7 @@ import { formatUnits } from 'viem';
 
 import { isUndefined } from '@/utils';
 
-import fungibleTokenIdlUrl from '../../assets/ft.idl?url';
+import fungibleTokenIdlUrl from '../../assets/vft.idl?url';
 import { BALANCE_REFETCH_INTERVAL } from '../../consts';
 
 function useFungibleTokenBalance(address: HexString | undefined) {
@@ -26,7 +26,7 @@ function useFungibleTokenBalance(address: HexString | undefined) {
     const sails = (await Sails.new()).setApi(api).setProgramId(address);
     const parsedIdl = sails.parseIdl(idl);
 
-    const { BalanceOf, Decimals } = parsedIdl.services.Erc20.queries;
+    const { BalanceOf, Decimals } = parsedIdl.services.Vft.queries;
 
     const balance = await BalanceOf<HexString>(decodedAddress, undefined, undefined, decodedAddress);
     const decimals = await Decimals<number>(decodedAddress);

@@ -1,5 +1,5 @@
 [package]
-name = "bridging_payment"
+name = "vft-gateway-app"
 version.workspace = true
 edition.workspace = true
 
@@ -14,3 +14,9 @@ gbuiltin-eth-bridge.workspace = true
 git-download.workspace = true
 sails-client-gen.workspace = true
 
+[dev-dependencies]
+gclient.workspace = true
+tokio.workspace = true
+blake2.workspace = true
+gear-core.workspace = true
+primitive-types.workspace = true

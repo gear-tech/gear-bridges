@@ -7,6 +7,10 @@ members = [
     "relayer",
     "circuits/*",
     "ethereum-common",
+    "gear-programs/bridging-payment",
+    "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/vft-gateway",
+    "gear-programs/vft-gateway/src/wasm",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "utils-prometheus",
@@ -29,8 +33,10 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
-grc20_gateway = { path = "gear-programs/grc20-gateway" }
 bridging_payment = { path = "gear-programs/bridging-payment" }
+bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
+vft-gateway-app = { path = "gear-programs/vft-gateway" }
+vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
@@ -67,9 +73,11 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
     "codec",
     "rlp",
 ] }
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
+git-download = "0.1"
 hash-db = { version = "0.15.2", default-features = false }
 hash256-std-hasher = { version = "0.15.2", default-features = false }
 hex = { version = "0.4.3", default-features = false }
@@ -112,18 +120,23 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", features = [
-    "nightly",
-] }
-gmeta = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gear-wasm-builder = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false }
-gsdk = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gclient = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gear-core = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
+gstd = { version = "=1.5.0", features = ["nightly"] }
+gtest = "=1.5.0"
+gwasm-builder = { version = "=1.5.0", package = "gear-wasm-builder" }
+gmeta = "=1.5.0"
+gear-wasm-builder = { version = "=1.5.0", default-features = false }
+gsdk = "=1.5.0"
+gclient = "=1.5.0"
+gear-core = "=1.5.0"
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
+gbuiltin-eth-bridge =  { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }
+sails-idl-gen = "0.3.0"
+sails-client-gen = "0.3.0"
+sails-rs = "0.3.0"
+
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
@@ -158,3 +171,6 @@ alloy = { version = "0.2.0", package = "alloy", features = [
     "json-rpc",
     "rpc-types",
 ] }
+
+[patch.crates-io]
+gsys = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }

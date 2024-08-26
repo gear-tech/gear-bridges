@@ -1,31 +1,19 @@
 #![no_std]
 
-use gstd::ActorId;
-use parity_scale_codec::{Decode, Encode};
-use primitive_types::U256;
-use scale_info::TypeInfo;
+use sails_rs::{gstd::GStdExecContext, program};
+pub mod services;
+use services::{BridgingPayment, InitConfig};
+#[derive(Default)]
+pub struct Program;
 
-#[cfg(not(feature = "std"))]
-mod wasm;
+#[program]
+impl Program {
+    pub fn new(init_config: InitConfig) -> Self {
+        BridgingPayment::<GStdExecContext>::seed(init_config, GStdExecContext::new());
+        Self
+    }
 
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct InitMessage {
-    pub grc20_gateway: ActorId,
-    pub fee: u128,
-}
-
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub enum AdminMessage {
-    SetFee(u128),
-    ReclaimFees,
-}
-
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct UserReply {
-    pub nonce: U256,
-}
-
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct State {
-    pub fee: u128,
+    pub fn bridging_payment(&self) -> BridgingPayment<GStdExecContext> {
+        BridgingPayment::new(GStdExecContext::new())
+    }
 }

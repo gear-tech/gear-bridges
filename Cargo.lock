@@ -8619,6 +8619,11 @@ dependencies = [
 name = "relayer"
 version = "0.1.0"
 dependencies = [
+ "alloy",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
  "anyhow",
  "ark-serialize 0.4.2",
  "axum",

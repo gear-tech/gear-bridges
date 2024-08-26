@@ -10,6 +10,11 @@ gear_proof_storage.workspace = true
 gear-rpc-client.workspace = true
 prover.workspace = true
 
+alloy.workspace = true
+alloy-consensus = { version = "0.2.1", default-features = false }
+alloy-eips = { version = "0.2.1", default-features = false }
+alloy-primitives = { version = "0.7.7", default-features = false }
+alloy-rlp.workspace = true
 anyhow.workspace = true
 ark-serialize = { workspace = true, features = ["std"] }
 axum.workspace = true

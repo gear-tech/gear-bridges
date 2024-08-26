@@ -1,13 +1,16 @@
-use anyhow::{Error as AnyError, Result as AnyResult};
+use anyhow::{anyhow, Error as AnyError, Result as AnyResult};
 use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{BLSPubKey, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
+        beacon::{
+            BLSPubKey, Block as BeaconBlock, Bytes32, SignedBeaconBlockHeader, SyncAggregate,
+            SyncCommittee,
+        },
         utils as eth_utils,
     },
-    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, SyncCommitteeKeys, SyncCommitteeUpdate,
-    G1, G2, SYNC_COMMITTEE_SIZE,
+    ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
+    SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE,
 };
 use reqwest::{Client, RequestBuilder};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -38,6 +41,16 @@ pub struct BeaconBlockHeaderResponse {
 #[derive(Deserialize, Debug)]
 pub struct BeaconBlockHeaderData {
     pub header: SignedBeaconBlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+struct BeaconBlockResponse {
+    data: BeaconBlockData,
+}
+
+#[derive(Deserialize, Debug)]
+struct BeaconBlockData {
+    message: BeaconBlock,
 }
 
 #[allow(dead_code)]
@@ -182,6 +195,42 @@ pub async fn get_block_header(
         .map(|response| response.data.header.message)
 }
 
+pub async fn get_block_finalized(client: &Client, rpc_url: &str) -> AnyResult<BeaconBlock> {
+    let url = format!("{rpc_url}/eth/v2/beacon/blocks/finalized");
+
+    get::<BeaconBlockResponse>(client.get(&url))
+        .await
+        .map(|response| response.data.message)
+}
+
+pub async fn get_block(client: &Client, rpc_url: &str, slot: u64) -> AnyResult<BeaconBlock> {
+    let url = format!("{rpc_url}/eth/v2/beacon/blocks/{slot}");
+
+    get::<BeaconBlockResponse>(client.get(&url))
+        .await
+        .map(|response| response.data.message)
+}
+
+pub async fn get_block_by_hash(
+    client: &Client,
+    rpc_url: &str,
+    hash: &[u8; 32],
+) -> AnyResult<BeaconBlock> {
+    let mut hex_encoded = [0u8; 66];
+    hex_encoded[0] = b'0';
+    hex_encoded[1] = b'x';
+
+    hex::encode_to_slice(hash, &mut hex_encoded[2..]).expect("The buffer has the right size");
+    let url = format!(
+        "{rpc_url}/eth/v2/beacon/blocks/{}",
+        String::from_utf8_lossy(&hex_encoded)
+    );
+
+    get::<BeaconBlockResponse>(client.get(&url))
+        .await
+        .map(|response| response.data.message)
+}
+
 pub async fn get_finality_update(client: &Client, rpc_url: &str) -> AnyResult<FinalityUpdate> {
     let url = format!("{rpc_url}/eth/v1/beacon/light_client/finality_update");
 
@@ -258,4 +307,37 @@ pub fn sync_update_from_update(signature: G2, update: Update) -> SyncCommitteeUp
             .map(|BytesFixed(array)| array.0)
             .collect::<_>(),
     }
+}
+
+pub fn try_from_hex_encoded<T: TryFrom<Vec<u8>>>(hex_encoded: &str) -> Option<T> {
+    let data = match hex_encoded.starts_with("0x") {
+        true => &hex_encoded[2..],
+        false => hex_encoded,
+    };
+
+    hex::decode(data)
+        .ok()
+        .and_then(|bytes| <T as TryFrom<Vec<u8>>>::try_from(bytes).ok())
+}
+
+pub async fn request_headers(
+    client_http: &Client,
+    beacon_endpoint: &str,
+    slot_start: Slot,
+    slot_end: Slot,
+) -> AnyResult<Vec<BeaconBlockHeader>> {
+    let batch_size = (slot_end - slot_start) as usize;
+    let mut requests_headers = Vec::with_capacity(batch_size);
+    for i in slot_start..slot_end {
+        requests_headers.push(get_block_header(client_http, beacon_endpoint, i));
+    }
+
+    futures::future::join_all(requests_headers)
+        .await
+        .into_iter()
+        .filter(|maybe_header| !matches!(maybe_header, Err(e) if e.downcast_ref::<ErrorNotFound>().is_some()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            anyhow!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}")
+        })
 }

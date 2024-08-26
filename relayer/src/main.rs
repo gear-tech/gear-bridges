@@ -10,6 +10,7 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
+mod erc20;
 mod ethereum_checkpoints;
 mod genesis_config;
 mod message_relayer;
@@ -296,7 +297,7 @@ async fn main() {
                 .await
                 .expect("Failed to fetch authority set state");
         }
-        CliCommands::RelayErc20(_args) => todo!(),
+        CliCommands::RelayErc20(args) => erc20::relay(args).await,
     };
 }
 

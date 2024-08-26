@@ -228,7 +228,7 @@ impl VftGateway for Program<'_> {
             <(String, String, Result<(U256, H160), Error>)>::decode(&mut log_entry.payload())
                 .expect("Unable to decode reply"); // Panic if decoding fails
 
-        return reply.2;
+        reply.2
     }
 
     fn get_msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {

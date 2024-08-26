@@ -100,7 +100,7 @@ function WalletModal({ close }: Props) {
           <p>A compatible wallet wasn&apos;t found or is disabled.</p>
           <p>
             Please, install it following the{' '}
-            <a href="https://wiki.vara-network.io/docs/account/create-account/" target="_blank" rel="noreferrer">
+            <a href="https://wiki.vara.network/docs/account/" target="_blank" rel="noreferrer">
               instructions
             </a>
             .

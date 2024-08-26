@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 
 import { NETWORK_NAME, NETWORK_NATIVE_SYMBOL, SPEC } from '@/consts';
 
-import { METADATA_URL } from '../consts';
+import { IDL_URL } from '../consts';
 import { NetworkName } from '../types';
 import { getOptions } from '../utils';
 
-import { useMetadata } from './vara';
+import { useSails } from './vara';
 
 function useBridge(networkName: NetworkName) {
   const isVaraNetwork = networkName === NETWORK_NAME.VARA;
@@ -18,8 +18,8 @@ function useBridge(networkName: NetworkName) {
   const bridge = SPEC[pair][networkName];
   const { address } = bridge;
 
-  const metadata = useMetadata(isVaraNetwork ? METADATA_URL[bridge.tokenType] : undefined);
-  const contract = { address, metadata };
+  const sails = useSails(isVaraNetwork ? IDL_URL : undefined);
+  const contract = { address, sails };
 
   const nativeSymbol = NETWORK_NATIVE_SYMBOL[networkName];
   const symbol = { value: bridge.symbol, native: nativeSymbol };

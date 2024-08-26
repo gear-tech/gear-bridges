@@ -11,7 +11,7 @@ function useVaraAccountBalance(isEnabled: boolean) {
 
   const { freeBalance } = data || {};
   const value = freeBalance?.toBigInt();
-  const formattedValue = value ? getFormattedBalance(value).value : undefined;
+  const formattedValue = value !== undefined ? getFormattedBalance(value).value : undefined;
 
   // cuz swap vara form is rendered by default without login and we have to handle empty balance state
   const isLoading = useMemo(() => {

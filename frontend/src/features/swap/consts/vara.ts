@@ -1,5 +1,5 @@
 const STATE_FUNCTION = {
-  CONFIG: 'config',
+  CONFIG: 'Config',
 } as const;
 
 export { STATE_FUNCTION };

@@ -1,4 +1,5 @@
 import { Input, Select, SelectProps } from '@gear-js/vara-ui';
+import { ReactNode } from 'react';
 import { Controller } from 'react-hook-form';
 import { NumericFormat } from 'react-number-format';
 import { SourceType } from 'react-number-format/types/types';
@@ -6,7 +7,7 @@ import { SourceType } from 'react-number-format/types/types';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { NetworkCard } from '@/components';
-import { Pair, SVGComponent } from '@/types';
+import { SVGComponent } from '@/types';
 
 import { FIELD_NAME } from '../../consts';
 
@@ -16,11 +17,11 @@ type Props = {
   name: string;
   SVG: SVGComponent;
   options: SelectProps['options'];
-  selectValue: Pair;
+  selectValue: string;
   inputName: typeof FIELD_NAME.VALUE | typeof FIELD_NAME.EXPECTED_VALUE;
   onChange: (value: string) => void;
-  onSelectChange: (value: Pair) => void;
-  renderBalance?: () => JSX.Element;
+  onSelectChange: (value: string) => void;
+  renderBalance?: () => ReactNode;
 };
 
 function Network({
@@ -38,7 +39,7 @@ function Network({
       <NetworkCard SVG={SVG} name={name} />
 
       <div className={styles.inputs}>
-        <Select options={options} value={selectValue} onChange={({ target }) => onSelectChange(target.value as Pair)} />
+        <Select options={options} value={selectValue} onChange={({ target }) => onSelectChange(target.value)} />
 
         <div className={styles.input}>
           <Controller

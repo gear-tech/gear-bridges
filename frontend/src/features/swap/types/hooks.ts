@@ -1,7 +1,6 @@
 import { HexString } from '@gear-js/api';
 
 import { FormattedValues } from './form';
-import { Contract } from './spec';
 
 type BalanceValues = {
   value: bigint | undefined;
@@ -24,7 +23,7 @@ type UseBalance = (
 type UseConfig = (id: HexString) => Config;
 
 type UseHandleSubmit = (
-  contract: Contract,
+  address: HexString | undefined,
   ftAddress: HexString | undefined,
 ) => {
   onSubmit: (values: FormattedValues, reset: () => void) => void;

@@ -1,6 +1,5 @@
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
-    thread,
     time::Duration,
 };
 
@@ -128,7 +127,7 @@ impl MerkleRootListener {
                 current_block = latest + 1;
                 self.metrics.latest_processed_block.inc();
             } else {
-                thread::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2)
+                tokio::time::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2).await;
             }
         }
     }

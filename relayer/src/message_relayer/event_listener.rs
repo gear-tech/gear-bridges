@@ -1,6 +1,5 @@
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
-    thread,
     time::Duration,
 };
 
@@ -105,7 +104,7 @@ impl EventListener {
 
                 current_block = finalized_head + 1;
             } else {
-                thread::sleep(GEAR_BLOCK_TIME_APPROX);
+                tokio::time::sleep(GEAR_BLOCK_TIME_APPROX).await;
             }
         }
     }

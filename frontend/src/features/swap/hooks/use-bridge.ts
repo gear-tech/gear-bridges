@@ -5,16 +5,21 @@ import { useState } from 'react';
 import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
-import { BridgingPaymentProgram, FUNGIBLE_TOKEN_ABI, NETWORK_INDEX, VftGatewayProgram, VftProgram } from '../consts';
-
-const BRIDGING_PAYMENT_ADDRESS = '0xb9c7edd377b31834bfd539497eafa49e77752cf79cf5521f5de8fef041e45d1c';
+import {
+  BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+  BridgingPaymentProgram,
+  FUNGIBLE_TOKEN_ABI,
+  NETWORK_INDEX,
+  VftGatewayProgram,
+  VftProgram,
+} from '../consts';
 
 function useTokens() {
   const wagmiConfig = useConfig();
 
   const { data: program } = useProgram({
     library: BridgingPaymentProgram,
-    id: BRIDGING_PAYMENT_ADDRESS,
+    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   });
 
   const { data: vftGatewayAddress } = useProgramQuery({

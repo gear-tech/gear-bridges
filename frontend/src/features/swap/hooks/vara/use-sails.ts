@@ -1,6 +1,6 @@
-import { Sails } from 'sails-js';
-import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@gear-js/react-hooks';
+import { useQuery } from '@tanstack/react-query';
+import { Sails } from 'sails-js';
 
 function useSails(url: string | undefined) {
   const { api } = useApi();

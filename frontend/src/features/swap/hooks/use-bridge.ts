@@ -43,7 +43,7 @@ function useTokens() {
 
   const { api, isApiReady } = useApi();
 
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ['options', ftAdresses],
 
     queryFn: () => {
@@ -53,6 +53,7 @@ function useTokens() {
         const varaAddress = addressPair[0].toString() as HexString;
         const ethAddress = addressPair[1].toString() as HexString;
 
+        // TODO: read decimals only for selected?
         const vftProgram = new VftProgram(api, varaAddress);
         const varaSymbol = await vftProgram.vft.symbol();
         const varaDecimals = await vftProgram.vft.decimals();
@@ -81,10 +82,12 @@ function useTokens() {
     enabled: isApiReady && Boolean(ftAdresses),
   });
 
-  return data;
+  const isLoading = isPending;
+
+  return { data, isLoading };
 }
 
-const getOptions = (data: ReturnType<typeof useTokens>) => {
+const getOptions = (data: ReturnType<typeof useTokens>['data']) => {
   const varaOptions: { label: string; value: string }[] = [];
   const ethOptions: { label: string; value: string }[] = [];
 
@@ -102,16 +105,16 @@ function useBridge(networkIndex: number) {
   const tokens = useTokens();
   const [pair, setPair] = useState('0');
 
-  const { varaOptions, ethOptions } = getOptions(tokens);
+  const { varaOptions, ethOptions } = getOptions(tokens.data);
   const options = { from: isVaraNetwork ? varaOptions : ethOptions, to: isVaraNetwork ? ethOptions : varaOptions };
 
-  const bridge = tokens?.[Number(pair)][networkIndex];
+  const bridge = tokens.data?.[Number(pair)][networkIndex];
   const { address } = bridge || {};
 
   const nativeSymbol = isVaraNetwork ? 'VARA' : 'ETH';
   const symbol = { value: bridge?.symbol, native: nativeSymbol };
 
-  return { address, options, symbol, pair: { value: pair, set: setPair } };
+  return { address, options, symbol, pair: { value: pair, set: setPair }, isLoading: tokens.isLoading };
 }
 
 export { useBridge };

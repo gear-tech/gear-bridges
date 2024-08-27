@@ -26,7 +26,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair } = useBridge(networkIndex);
+  const { address, options, symbol, pair, ...bridge } = useBridge(networkIndex);
   const config = useVaraConfig(isVaraNetwork);
   const balance = useBalance(address, false);
   const { onSubmit, isSubmitting } = useHandleSubmit(address, '0x00');
@@ -90,7 +90,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
             type="submit"
             text="Swap"
             disabled={disabled}
-            isLoading={isSubmitting || balance.isLoading || config.isLoading}
+            isLoading={isSubmitting || balance.isLoading || config.isLoading || bridge.isLoading}
           />
         </footer>
       </form>

@@ -25,7 +25,7 @@ function useFungibleTokenBalance(address: HexString | undefined) {
     program,
     serviceName: SERVICE_NAME,
     functionName: QUERY_NAME.BALANCE,
-    args: [account!.decodedAddress],
+    args: [account?.decodedAddress || '0x00'],
     query: { enabled: Boolean(account), refetchInterval: BALANCE_REFETCH_INTERVAL },
   });
 

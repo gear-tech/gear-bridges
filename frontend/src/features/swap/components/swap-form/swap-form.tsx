@@ -34,8 +34,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
   const { form, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     balance,
-    BigInt(0),
-    BigInt(0),
+    config.fee.value,
     disabled,
     onSubmit,
   );

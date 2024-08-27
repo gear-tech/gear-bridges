@@ -18,7 +18,10 @@ function useVaraConfig(enabled: boolean) {
     serviceName: 'bridgingPayment',
     functionName: 'getConfig',
     args: [],
+    query: { enabled },
   });
+
+  if (!enabled) return { fee: { value: BigInt(0), formattedValue: '0' }, isLoading: false };
 
   const fee = {
     value: !isUndefined(config?.fee) ? BigInt(config.fee) : undefined,

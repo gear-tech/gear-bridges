@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
-import { BridgingPaymentProgram, FUNGIBLE_TOKEN_ABI, VftGatewayProgram, VftProgram } from '../consts';
+import { BridgingPaymentProgram, FUNGIBLE_TOKEN_ABI, NETWORK_INDEX, VftGatewayProgram, VftProgram } from '../consts';
 
 const BRIDGING_PAYMENT_ADDRESS = '0xb9c7edd377b31834bfd539497eafa49e77752cf79cf5521f5de8fef041e45d1c';
 
@@ -92,7 +92,7 @@ const getOptions = (data: ReturnType<typeof useTokens>) => {
 };
 
 function useBridge(networkIndex: number) {
-  const isVaraNetwork = networkIndex === 0;
+  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
   const tokens = useTokens();
   const [pair, setPair] = useState('0');
@@ -100,7 +100,7 @@ function useBridge(networkIndex: number) {
   const { varaOptions, ethOptions } = getOptions(tokens);
   const options = { from: isVaraNetwork ? varaOptions : ethOptions, to: isVaraNetwork ? ethOptions : varaOptions };
 
-  const bridge = tokens?.[+pair][networkIndex];
+  const bridge = tokens?.[Number(pair)][networkIndex];
   const { address } = bridge || {};
 
   const nativeSymbol = isVaraNetwork ? 'VARA' : 'ETH';

@@ -2,7 +2,7 @@ import { useAccount } from '@gear-js/react-hooks';
 
 import { NETWORK_NAME } from '@/consts';
 
-import { useHandleVaraSubmit, useVaraBalance, useVaraConfig } from '../../hooks';
+import { useHandleVaraSubmit, useVaraBalance } from '../../hooks';
 
 import { SwapForm } from './swap-form';
 
@@ -18,7 +18,6 @@ function SwapVaraForm({ renderSwapNetworkButton }: Props) {
       disabled={!account}
       useHandleSubmit={useHandleVaraSubmit}
       useBalance={useVaraBalance}
-      useConfig={useVaraConfig}
       networkName={NETWORK_NAME.VARA}
       renderSwapNetworkButton={renderSwapNetworkButton}
     />

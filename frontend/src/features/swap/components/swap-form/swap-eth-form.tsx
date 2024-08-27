@@ -1,7 +1,7 @@
 import { ETH_CHAIN_ID, NETWORK_NAME } from '@/consts';
 import { useEthAccount } from '@/hooks';
 
-import { useEthBalance, useEthConfig, useHandleEthSubmit } from '../../hooks';
+import { useEthBalance, useHandleEthSubmit } from '../../hooks';
 
 import { SwapForm } from './swap-form';
 
@@ -19,7 +19,6 @@ function SwapEthForm({ renderSwapNetworkButton }: Props) {
       disabled={!ethAccount.isConnected || !isSupportedChain}
       useHandleSubmit={useHandleEthSubmit}
       useBalance={useEthBalance}
-      useConfig={useEthConfig}
       renderSwapNetworkButton={renderSwapNetworkButton}
     />
   );

@@ -6,16 +6,18 @@ import { useWriteContract } from 'wagmi';
 import { logger } from '@/utils';
 
 import { FUNCTION_NAME, ABI } from '../../consts';
-import { Contract, FormattedValues } from '../../types';
+import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
-function useHandleEthSubmit({ address: bridgeAddress }: Contract, ftAddress: HexString | undefined) {
+function useHandleEthSubmit(bridgeAddress: HexString | undefined, ftAddress: HexString | undefined) {
   const alert = useAlert();
   const { writeContract, isPending } = useWriteContract();
   const approve = useApprove(ftAddress);
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
+    if (!bridgeAddress) throw new Error('Bridge address is not defined');
+
     const fee = { value: BigInt(0) };
 
     const address = bridgeAddress;

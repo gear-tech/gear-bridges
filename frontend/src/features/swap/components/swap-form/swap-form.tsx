@@ -6,8 +6,8 @@ import { NETWORK_NAME } from '@/consts';
 
 import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME } from '../../consts';
-import { useSwapForm, useBridge } from '../../hooks';
-import { NetworkName, UseBalance, UseConfig, UseHandleSubmit } from '../../types';
+import { useSwapForm, useBridge, useVaraConfig } from '../../hooks';
+import { NetworkName, UseBalance, UseHandleSubmit } from '../../types';
 import { Balance } from '../balance';
 import { Network } from '../network';
 
@@ -17,25 +17,20 @@ type Props = {
   networkName: NetworkName;
   disabled: boolean;
   useBalance: UseBalance;
-  useConfig: UseConfig;
   useHandleSubmit: UseHandleSubmit;
   renderSwapNetworkButton: () => JSX.Element;
 };
 
-function SwapForm({ networkName, disabled, useHandleSubmit, useBalance, useConfig, renderSwapNetworkButton }: Props) {
+function SwapForm({ networkName, disabled, useHandleSubmit, useBalance, renderSwapNetworkButton }: Props) {
   // TODO: isVaraNetwork and isNativeToken can be use explicitly in some of the hooks
   const isVaraNetwork = networkName === NETWORK_NAME.VARA;
-
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { contract, options, symbol, pair } = useBridge(networkName);
-
-  const config = useConfig(contract?.address);
-
-  const balance = useBalance('0x00', false);
-
-  const { onSubmit, isSubmitting } = useHandleSubmit(contract, '0x00');
+  const { address, options, symbol, pair } = useBridge(networkName === 'vara' ? 0 : 1);
+  const config = useVaraConfig(isVaraNetwork);
+  const balance = useBalance(address, false);
+  const { onSubmit, isSubmitting } = useHandleSubmit(address, '0x00');
 
   const { form, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
@@ -46,14 +41,15 @@ function SwapForm({ networkName, disabled, useHandleSubmit, useBalance, useConfi
     onSubmit,
   );
 
-  const renderFromBalance = () => (
-    <Balance
-      value={balance.formattedValue}
-      unit={symbol.value}
-      isLoading={balance.isLoading}
-      onMaxButtonClick={setMaxBalance}
-    />
-  );
+  const renderFromBalance = () =>
+    symbol.value && (
+      <Balance
+        value={balance.formattedValue}
+        unit={symbol.value}
+        isLoading={balance.isLoading}
+        onMaxButtonClick={setMaxBalance}
+      />
+    );
 
   return (
     <FormProvider {...form}>
@@ -84,7 +80,13 @@ function SwapForm({ networkName, disabled, useHandleSubmit, useBalance, useConfi
         </div>
 
         <footer className={styles.footer}>
-          <Balance SVG={GasSVG} heading="Expected Fee" value={'0'} isLoading={config.isLoading} unit={symbol.native} />
+          <Balance
+            SVG={GasSVG}
+            heading="Expected Fee"
+            value={config.fee.formattedValue}
+            isLoading={config.isLoading}
+            unit={symbol.native}
+          />
 
           <Button
             type="submit"

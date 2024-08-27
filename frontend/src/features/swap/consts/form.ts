@@ -1,4 +1,4 @@
-import { getVaraAddress } from '@gear-js/react-hooks';
+import { decodeAddress } from '@gear-js/api';
 import { isAddress as isEthAddress } from 'viem';
 import { z } from 'zod';
 
@@ -26,13 +26,12 @@ const VARA_ADDRESS_SCHEMA = z
   .string()
   .trim()
   .refine((value) => isSubstrateAddress(value), { message: ERROR_MESSAGE.INVALID_ADDRESS })
-  .transform((value) => getVaraAddress(value));
+  .transform((value) => decodeAddress(value));
 
 const ETH_ADDRESS_SCHEMA = z
   .string()
   .trim()
-  .refine((value) => isEthAddress(value), { message: ERROR_MESSAGE.INVALID_ADDRESS })
-  .transform((value) => value.replace('0x', ''));
+  .refine((value) => isEthAddress(value), { message: ERROR_MESSAGE.INVALID_ADDRESS });
 
 const ADDRESS_SCHEMA = {
   VARA: VARA_ADDRESS_SCHEMA,

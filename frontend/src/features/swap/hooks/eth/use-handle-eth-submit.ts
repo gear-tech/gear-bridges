@@ -5,7 +5,7 @@ import { useWriteContract } from 'wagmi';
 
 import { logger } from '@/utils';
 
-import { FUNCTION_NAME, ABI } from '../../consts';
+import { FUNCTION_NAME, ERC20_TREASURY_ABI } from '../../consts';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
@@ -16,7 +16,7 @@ function useHandleEthSubmit(bridgeAddress: HexString | undefined, ftAddress: Hex
   const approve = useApprove(ftAddress);
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (!bridgeAddress) throw new Error('Bridge address is not defined');
+    if (!ftAddress || !bridgeAddress) throw new Error('Bridge address is not defined');
 
     const fee = { value: BigInt(0) };
 
@@ -28,27 +28,25 @@ function useHandleEthSubmit(bridgeAddress: HexString | undefined, ftAddress: Hex
 
     const transit = () => {
       logger.info(
-        FUNCTION_NAME.TRANSIT,
+        FUNCTION_NAME.DEPOSIT,
         `\naddress: ${address}\nargs: [\nfee: ${fee.value}\namount: ${amount}]` +
           `\nvalue: ${value}\nisNativeToken: ${isNativeToken}`,
       );
 
       writeContract(
         {
-          abi: ABI,
+          abi: ERC20_TREASURY_ABI,
           address,
-          functionName: FUNCTION_NAME.TRANSIT,
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          args: [fee.value, accountAddress, amount],
-          value,
+          functionName: FUNCTION_NAME.DEPOSIT,
+
+          args: [ftAddress, amount, accountAddress],
         },
         {
           onSuccess,
           onError: (error) => {
             const errorMessage = (error as BaseError).shortMessage || error.message;
 
-            logger.error(FUNCTION_NAME.TRANSIT, error);
+            logger.error(FUNCTION_NAME.DEPOSIT, error);
             alert.error(errorMessage);
           },
         },

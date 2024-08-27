@@ -1,8 +1,6 @@
 const FUNCTION_NAME = {
-  TRANSIT: 'transitEthToVara',
-  MIN_AMOUNT: 'minAmount',
+  DEPOSIT: 'deposit',
 
-  FUNGIBLE_TOKEN_ADDRESS: 'addressOfToken',
   FUNGIBLE_TOKEN_BALANCE: 'balanceOf', // fungible token abi
   FUNGIBLE_TOKEN_APPROVE: 'approve', // fungible token abi
   FUNGIBLE_TOKEN_DECIMALS: 'decimals', // fungible token abi

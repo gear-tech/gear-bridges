@@ -7,11 +7,6 @@ type BalanceValues = {
   formattedValue: string | undefined;
 };
 
-type Config = {
-  fee: BalanceValues;
-  isLoading: boolean;
-};
-
 type UseBalance = (
   ftAddress: HexString | undefined,
   isLoading: boolean,
@@ -19,8 +14,6 @@ type UseBalance = (
   decimals: number | undefined;
   isLoading: boolean;
 };
-
-type UseConfig = (id: HexString) => Config;
 
 type UseHandleSubmit = (
   address: HexString | undefined,
@@ -30,4 +23,4 @@ type UseHandleSubmit = (
   isSubmitting: boolean;
 };
 
-export type { Config, UseBalance, UseConfig, UseHandleSubmit };
+export type { UseBalance, UseHandleSubmit };

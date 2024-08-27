@@ -20,7 +20,6 @@ function useSwapForm(
   isVaraNetwork: boolean,
   balance: Values & { decimals: number | undefined },
   fee: bigint | undefined,
-  minValue: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues, reset: () => void) => void,
 ) {
@@ -28,8 +27,8 @@ function useSwapForm(
 
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(balance.value, minValue, fee, decimals);
-  const expectedValueSchema = getAmountSchema(balance.value, minValue, BigInt(0), decimals);
+  const valueSchema = getAmountSchema(balance.value, fee, decimals);
+  const expectedValueSchema = getAmountSchema(balance.value, BigInt(0), decimals);
 
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 

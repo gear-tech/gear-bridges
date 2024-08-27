@@ -19,7 +19,6 @@ const DEFAULT_VALUES = {
 const ERROR_MESSAGE = {
   NO_BALANCE: 'Insufficient balance',
   INVALID_ADDRESS: 'Invalid address',
-  MIN_VALUE: (value: string) => `Minimum value is ${value}`,
 } as const;
 
 const VARA_ADDRESS_SCHEMA = z

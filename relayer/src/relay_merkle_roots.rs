@@ -1,9 +1,6 @@
 use prometheus::{Gauge, IntGauge};
 use prover::proving::GenesisConfig;
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use crate::{
     proof_storage::ProofStorage,
@@ -108,7 +105,7 @@ impl MerkleRootRelayer {
 
             let main_loop_duration = now.elapsed();
             if main_loop_duration < MIN_MAIN_LOOP_DURATION {
-                thread::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration);
+                tokio::time::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration).await;
             }
         }
     }

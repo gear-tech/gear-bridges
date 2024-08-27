@@ -2,7 +2,6 @@ import { HexString } from '@gear-js/api';
 
 import { isUndefined, logger } from '@/utils';
 
-import { IDL_URL } from '../../consts';
 import { FormattedValues } from '../../types';
 
 import { useSails } from './use-sails';
@@ -14,7 +13,7 @@ function useHandleVaraSubmit(address: HexString | undefined, ftAddress: HexStrin
   // For fungble token contracts gas calculation does not work cuz contracts check the amount of gas applied
   const gasLimit = isNativeToken ? undefined : BigInt(100_000_000_000);
   const { sendMessage, isPending } = useSendMessage(gasLimit);
-  const sails = useSails(IDL_URL);
+  const sails = useSails('./test.ts');
 
   const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
     if (isUndefined(sails)) throw new Error('Sails is not defined');

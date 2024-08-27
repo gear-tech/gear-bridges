@@ -2,32 +2,31 @@ import { Button } from '@gear-js/vara-ui';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
-import { NETWORK_NAME } from '@/consts';
 
 import GasSVG from '../../assets/gas.svg?react';
-import { FIELD_NAME } from '../../consts';
+import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useBridge, useVaraConfig } from '../../hooks';
-import { NetworkName, UseBalance, UseHandleSubmit } from '../../types';
+import { UseBalance, UseHandleSubmit } from '../../types';
 import { Balance } from '../balance';
 import { Network } from '../network';
 
 import styles from './swap-form.module.scss';
 
 type Props = {
-  networkName: NetworkName;
+  networkIndex: number;
   disabled: boolean;
   useBalance: UseBalance;
   useHandleSubmit: UseHandleSubmit;
   renderSwapNetworkButton: () => JSX.Element;
 };
 
-function SwapForm({ networkName, disabled, useHandleSubmit, useBalance, renderSwapNetworkButton }: Props) {
+function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderSwapNetworkButton }: Props) {
   // TODO: isVaraNetwork and isNativeToken can be use explicitly in some of the hooks
-  const isVaraNetwork = networkName === NETWORK_NAME.VARA;
+  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair } = useBridge(networkName === 'vara' ? 0 : 1);
+  const { address, options, symbol, pair } = useBridge(networkIndex);
   const config = useVaraConfig(isVaraNetwork);
   const balance = useBalance(address, false);
   const { onSubmit, isSubmitting } = useHandleSubmit(address, '0x00');

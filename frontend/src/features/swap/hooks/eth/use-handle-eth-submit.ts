@@ -2,35 +2,36 @@ import { HexString } from '@gear-js/api';
 import { useAlert } from '@gear-js/react-hooks';
 import { BaseError } from 'viem';
 import { useWriteContract } from 'wagmi';
+import { WriteContractErrorType } from 'wagmi/actions';
 
 import { logger } from '@/utils';
 
-import { FUNCTION_NAME, ERC20_TREASURY_ABI } from '../../consts';
+import { FUNCTION_NAME, ERC20_TREASURY_ABI, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
-function useHandleEthSubmit(bridgeAddress: HexString | undefined, ftAddress: HexString | undefined) {
+function useHandleEthSubmit(ftAddress: HexString | undefined) {
   const alert = useAlert();
   const { writeContract, isPending } = useWriteContract();
   const approve = useApprove(ftAddress);
 
-  const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (!ftAddress || !bridgeAddress) throw new Error('Bridge address is not defined');
+  const onError = (error: WriteContractErrorType) => {
+    const errorMessage = (error as BaseError).shortMessage || error.message;
 
-    const fee = { value: BigInt(0) };
+    logger.error(FUNCTION_NAME.DEPOSIT, error);
+    alert.error(errorMessage);
+  };
 
-    const address = bridgeAddress;
-    const amount = expectedAmount;
+  const onSubmit = ({ amount, accountAddress }: FormattedValues, onSuccess: () => void) => {
+    if (!ftAddress) throw new Error('Fungible token address is not defined');
 
-    const isNativeToken = !ftAddress;
-    const value = isNativeToken ? _amount + fee.value : fee.value;
+    const address = ERC20_TREASURY_CONTRACT_ADDRESS;
 
-    const transit = () => {
+    const deposit = () => {
       logger.info(
         FUNCTION_NAME.DEPOSIT,
-        `\naddress: ${address}\nargs: [\nfee: ${fee.value}\namount: ${amount}]` +
-          `\nvalue: ${value}\nisNativeToken: ${isNativeToken}`,
+        `\naddress: ${address}\nargs: [ftAddress: ${ftAddress}, amount: ${amount}, accountAddress: ${accountAddress}]`,
       );
 
       writeContract(
@@ -38,22 +39,13 @@ function useHandleEthSubmit(bridgeAddress: HexString | undefined, ftAddress: Hex
           abi: ERC20_TREASURY_ABI,
           address,
           functionName: FUNCTION_NAME.DEPOSIT,
-
           args: [ftAddress, amount, accountAddress],
         },
-        {
-          onSuccess,
-          onError: (error) => {
-            const errorMessage = (error as BaseError).shortMessage || error.message;
-
-            logger.error(FUNCTION_NAME.DEPOSIT, error);
-            alert.error(errorMessage);
-          },
-        },
+        { onSuccess, onError },
       );
     };
 
-    return isNativeToken ? transit() : approve.write(address, amount, transit);
+    approve.write(amount, deposit);
   };
 
   const isSubmitting = approve.isPending || isPending;

@@ -21,33 +21,31 @@ type Props = {
 };
 
 function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderSwapNetworkButton }: Props) {
-  // TODO: isVaraNetwork and isNativeToken can be use explicitly in some of the hooks
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
   const { address, options, symbol, pair, ...bridge } = useBridge(networkIndex);
-  const config = useVaraConfig(isVaraNetwork);
-  const balance = useBalance(address, false);
-  const { onSubmit, isSubmitting } = useHandleSubmit(address, '0x00');
+  const { fee, ...config } = useVaraConfig(isVaraNetwork);
+  const balance = useBalance(address);
+  const { onSubmit, isSubmitting } = useHandleSubmit(address, fee.value);
 
   const { form, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     balance,
-    config.fee.value,
+    fee.value,
     disabled,
     onSubmit,
   );
 
-  const renderFromBalance = () =>
-    symbol.value && (
-      <Balance
-        value={balance.formattedValue}
-        unit={symbol.value}
-        isLoading={balance.isLoading}
-        onMaxButtonClick={setMaxBalance}
-      />
-    );
+  const renderFromBalance = () => (
+    <Balance
+      value={balance.formattedValue}
+      unit={symbol.value}
+      isLoading={balance.isLoading}
+      onMaxButtonClick={setMaxBalance}
+    />
+  );
 
   return (
     <FormProvider {...form}>
@@ -81,7 +79,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
           <Balance
             SVG={GasSVG}
             heading="Expected Fee"
-            value={config.fee.formattedValue}
+            value={fee.formattedValue}
             isLoading={config.isLoading}
             unit={symbol.native}
           />

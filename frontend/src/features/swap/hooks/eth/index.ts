@@ -1,4 +1,4 @@
-import { useEthBalance } from './use-eth-balance';
+import { useFungibleTokenBalance } from './use-fungible-token-balance';
 import { useHandleEthSubmit } from './use-handle-eth-submit';
 
-export { useEthBalance, useHandleEthSubmit };
+export { useFungibleTokenBalance, useHandleEthSubmit };

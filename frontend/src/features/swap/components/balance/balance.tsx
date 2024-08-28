@@ -7,7 +7,7 @@ import styles from './balance.module.scss';
 
 type Props = {
   value: string | undefined;
-  unit: string;
+  unit: string | undefined;
   isLoading: boolean;
   heading?: string;
   SVG?: SVGComponent;
@@ -37,7 +37,7 @@ function Balance({ heading = 'Balance', value, unit, isLoading, SVG, onMaxButton
         <p>
           {isLoading && <Skeleton />}
           {!isLoading && !value && <Skeleton disabled />}
-          {value && `${value} ${unit}`}
+          {value && unit && `${value} ${unit}`}
         </p>
       </div>
     </div>

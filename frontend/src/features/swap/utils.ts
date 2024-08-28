@@ -16,7 +16,7 @@ const getAmountSchema = (
     .string()
     .trim() // TODO: required field check
     .transform((value) => parseUnits(value, decimals)) // if fraction is > decimals, value will be rounded
-    .refine((value) => value <= balanceValue, { message: ERROR_MESSAGE.NO_BALANCE });
+    .refine((value) => value + feeValue <= balanceValue, { message: ERROR_MESSAGE.NO_BALANCE });
 };
 
 export { getAmountSchema };

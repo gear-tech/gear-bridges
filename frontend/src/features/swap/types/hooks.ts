@@ -7,17 +7,14 @@ type BalanceValues = {
   formattedValue: string | undefined;
 };
 
-type UseBalance = (
-  ftAddress: HexString | undefined,
-  isLoading: boolean,
-) => BalanceValues & {
+type UseBalance = (ftAddress: HexString | undefined) => BalanceValues & {
   decimals: number | undefined;
   isLoading: boolean;
 };
 
 type UseHandleSubmit = (
-  address: HexString | undefined,
   ftAddress: HexString | undefined,
+  feeValue?: bigint | undefined,
 ) => {
   onSubmit: (values: FormattedValues, reset: () => void) => void;
   isSubmitting: boolean;

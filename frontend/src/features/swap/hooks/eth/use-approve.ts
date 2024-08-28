@@ -6,7 +6,7 @@ import { watchContractEvent } from 'wagmi/actions';
 import { useEthAccount, useLoading } from '@/hooks';
 import { logger } from '@/utils';
 
-import { FUNGIBLE_TOKEN_ABI, FUNCTION_NAME, EVENT_NAME } from '../../consts';
+import { FUNGIBLE_TOKEN_ABI, FUNCTION_NAME, EVENT_NAME, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
 
 function useApprove(address: HexString | undefined) {
   const alert = useAlert();
@@ -24,9 +24,9 @@ function useApprove(address: HexString | undefined) {
     alert.error(message);
   };
 
-  const watch = (bridgeAddress: HexString, amount: bigint, onSuccess: () => void) => {
+  const watch = (amount: bigint, onSuccess: () => void) => {
     const owner = ethAccount.address;
-    const spender = bridgeAddress;
+    const spender = ERC20_TREASURY_CONTRACT_ADDRESS;
 
     // maybe better to use waitForTransactionReceipt,
     // but feels like it's getting fired before approval in contract
@@ -53,21 +53,25 @@ function useApprove(address: HexString | undefined) {
     });
   };
 
-  const write = (bridgeAddress: HexString, amount: bigint, onSuccess: () => void) => {
+  const write = (amount: bigint, onSuccess: () => void) => {
     if (!address) throw new Error('Fungible token address is not defined');
 
     enablePending();
-    logger.info(FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE, `\naddress: ${address}\nargs: [${bridgeAddress}, ${amount}]`);
+
+    logger.info(
+      FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE,
+      `\naddress: ${address}\nargs: [${ERC20_TREASURY_CONTRACT_ADDRESS}, ${amount}]`,
+    );
 
     writeContract(
       {
         address,
         abi,
         functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE,
-        args: [bridgeAddress, amount],
+        args: [ERC20_TREASURY_CONTRACT_ADDRESS, amount],
       },
       {
-        onSuccess: () => watch(bridgeAddress, amount, onSuccess),
+        onSuccess: () => watch(amount, onSuccess),
         onError: (error) => handleError((error as BaseError).shortMessage || error.message),
       },
     );

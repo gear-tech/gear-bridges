@@ -1,42 +1,72 @@
 import { HexString } from '@gear-js/api';
+import { useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
 
 import { isUndefined, logger } from '@/utils';
 
+import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, VftProgram } from '../../consts';
 import { FormattedValues } from '../../types';
 
-import { useSails } from './use-sails';
-import { useSendMessage } from './use-send-message';
+function useSendBridgingPaymentRequest() {
+  const { data: program } = useProgram({
+    library: BridgingPaymentProgram,
+    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+  });
 
-function useHandleVaraSubmit(address: HexString | undefined, ftAddress: HexString | undefined) {
-  const isNativeToken = !ftAddress;
+  return useSendProgramTransaction({
+    program,
+    serviceName: 'bridgingPayment',
+    functionName: 'requestToGateway',
+  });
+}
 
-  // For fungble token contracts gas calculation does not work cuz contracts check the amount of gas applied
-  const gasLimit = isNativeToken ? undefined : BigInt(100_000_000_000);
-  const { sendMessage, isPending } = useSendMessage(gasLimit);
-  const sails = useSails('./test.ts');
+function useSendVftApprove(ftAddress: HexString | undefined) {
+  const { data: program } = useProgram({
+    library: VftProgram,
+    id: ftAddress,
+    query: { enabled: Boolean(ftAddress) },
+  });
 
-  const onSubmit = ({ amount: _amount, expectedAmount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (isUndefined(sails)) throw new Error('Sails is not defined');
+  return useSendProgramTransaction({
+    program,
+    serviceName: 'vft',
+    functionName: 'approve',
+  });
+}
 
-    const fee = { value: BigInt(0) };
+function useHandleVaraSubmit(ftAddress: HexString | undefined, feeValue: bigint | undefined) {
+  const alert = useAlert();
 
-    const amount = expectedAmount;
+  const bridgingPaymentRequest = useSendBridgingPaymentRequest();
+  const vftApprove = useSendVftApprove(ftAddress);
+
+  const onSubmit = async ({ amount, accountAddress }: FormattedValues, onSuccess: () => void) => {
+    if (isUndefined(feeValue)) throw new Error('Fee is not found');
+    if (!ftAddress) throw new Error('Fungible token address is not found');
+
     const recipient = accountAddress;
-
-    const value = isNativeToken ? _amount + fee.value : fee.value;
+    const value = feeValue;
 
     logger.info(
       'TransitVaraToEth',
-      `\nprogramId:${address}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nisNativeToken: ${isNativeToken}\nfee: ${fee.value}`,
+      `\nprogramId:${ftAddress}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nfee: ${feeValue}`,
     );
 
-    const { TransitVaraToEth } = sails.services.VaraBridge.functions;
-    const transaction = TransitVaraToEth<null>(fee.value, recipient, amount);
+    try {
+      await vftApprove.sendTransactionAsync({ args: [BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] });
 
-    return sendMessage(transaction, value, { onSuccess });
+      await bridgingPaymentRequest.sendTransactionAsync({
+        args: [amount, recipient, ftAddress],
+        gasLimit: BigInt(350000000000),
+        value,
+      });
+
+      onSuccess();
+    } catch (error) {
+      alert.error(error instanceof Error ? error.message : String(error));
+    }
   };
 
-  const isSubmitting = isPending;
+  const isSubmitting = bridgingPaymentRequest.isPending || vftApprove.isPending;
 
   return { onSubmit, isSubmitting };
 }

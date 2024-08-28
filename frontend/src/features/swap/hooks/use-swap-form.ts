@@ -2,10 +2,7 @@ import { useAlert } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
-
-import { isUndefined } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { FormattedValues } from '../types';
@@ -23,13 +20,10 @@ function useSwapForm(
   disabled: boolean,
   onSubmit: (values: FormattedValues, reset: () => void) => void,
 ) {
-  const { decimals } = balance;
-
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(balance.value, fee, decimals);
-  const expectedValueSchema = getAmountSchema(balance.value, BigInt(0), decimals);
-
+  const valueSchema = getAmountSchema(balance.value, fee, balance.decimals);
+  const expectedValueSchema = getAmountSchema(balance.value, BigInt(0), balance.decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({
@@ -49,19 +43,8 @@ function useSwapForm(
   const setOriginalValue = (value: string) => setValue(FIELD_NAME.VALUE, value, { shouldValidate });
   const setExpectedValue = (value: string) => setValue(FIELD_NAME.EXPECTED_VALUE, value, { shouldValidate });
 
-  const getValueWithFee = (value: string, operator: '+' | '-' = '+') => {
-    if (isUndefined(fee)) throw new Error('Fee is not defined');
-    if (isUndefined(decimals)) throw new Error('Decimals is not defined');
-    if (!value) return value;
-
-    const chainValue = parseUnits(value, decimals);
-    const valueWithFee = operator === '+' ? chainValue + fee : chainValue - fee;
-
-    return valueWithFee < 0 ? '0' : formatUnits(valueWithFee, decimals);
-  };
-
-  const onValueChange = (value: string) => setExpectedValue(getValueWithFee(value, '-'));
-  const onExpectedValueChange = (value: string) => setOriginalValue(getValueWithFee(value));
+  const onValueChange = (value: string) => setExpectedValue(value);
+  const onExpectedValueChange = (value: string) => setOriginalValue(value);
 
   const handleSubmit = form.handleSubmit((values) => {
     const onSuccess = () => {

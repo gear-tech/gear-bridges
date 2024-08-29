@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 sails-rs = "0.4.0"
 ethereum-common.workspace = true
+alloy-rlp.workspace = true
+alloy-sol-types = { workspace = true, features = ["json"] }
+checkpoint_light_client-io.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["custom"] }

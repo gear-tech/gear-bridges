@@ -3560,6 +3560,9 @@ dependencies = [
 name = "erc20-relay-app"
 version = "0.1.0"
 dependencies = [
+ "alloy-rlp",
+ "alloy-sol-types",
+ "checkpoint_light_client-io",
  "ethereum-common",
  "getrandom 0.2.15",
  "lazy_static",

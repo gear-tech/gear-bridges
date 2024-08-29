@@ -1,5 +1,4 @@
 use super::*;
-use alloy_consensus::ReceiptEnvelope;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::Log;
 use alloy_rlp::Encodable;
@@ -7,8 +6,9 @@ use core::str::FromStr;
 
 const CAPACITY_RLP_RECEIPT: usize = 10_000;
 
+pub type ReceiptEnvelope = alloy_consensus::ReceiptEnvelope<Log>;
 /// Tuple with a transaction index and the related receipt.
-pub type Receipt = (u64, ReceiptEnvelope<Log>);
+pub type Receipt = (u64, ReceiptEnvelope);
 
 pub fn calculate_epoch(slot: u64) -> u64 {
     slot / SLOTS_PER_EPOCH
@@ -120,10 +120,7 @@ pub fn rlp_encode_transaction_index(index: &u64) -> Vec<u8> {
     buf
 }
 
-pub fn rlp_encode_index_and_receipt(
-    index: &u64,
-    receipt: &ReceiptEnvelope<Log>,
-) -> (Vec<u8>, Vec<u8>) {
+pub fn rlp_encode_index_and_receipt(index: &u64, receipt: &ReceiptEnvelope) -> (Vec<u8>, Vec<u8>) {
     let mut buf = Vec::with_capacity(CAPACITY_RLP_RECEIPT);
     receipt.encode_2718(&mut buf);
 

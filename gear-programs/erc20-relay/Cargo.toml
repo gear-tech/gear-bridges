@@ -1,0 +1,15 @@
+[package]
+name = "erc20-relay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+erc20-relay-app.workspace = true
+
+[build-dependencies]
+erc20-relay-app.workspace = true
+sails-rs = { version = "0.4.0", features = ["wasm-builder"] }
+sails-idl-gen = "0.4.0"
+
+[features]
+wasm-binary = []

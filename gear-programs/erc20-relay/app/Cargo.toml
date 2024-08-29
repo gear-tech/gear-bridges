@@ -1,0 +1,12 @@
+[package]
+name = "erc20-relay-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sails-rs = "0.4.0"
+ethereum-common.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+lazy_static = { version = "1.1", features = ["spin_no_std"] }

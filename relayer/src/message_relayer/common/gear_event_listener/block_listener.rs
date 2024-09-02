@@ -1,0 +1,96 @@
+use std::{
+    sync::mpsc::{channel, Receiver, Sender},
+    time::Duration,
+};
+
+use gear_rpc_client::GearApi;
+use prometheus::IntGauge;
+
+use utils_prometheus::{impl_metered_service, MeteredService};
+
+const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
+
+pub struct BlockNumber(pub u32);
+
+pub struct BlockListener {
+    gear_api: GearApi,
+    from_block: u32,
+
+    metrics: BlockListenerMetrics,
+}
+
+impl MeteredService for BlockListener {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
+}
+
+impl_metered_service! {
+    struct BlockListenerMetrics {
+        processed_block: IntGauge,
+    }
+}
+
+impl BlockListenerMetrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            processed_block: IntGauge::new(
+                "message_relayer_event_listener_processed_block",
+                "Gear block processed by event listener",
+            )?,
+        })
+    }
+}
+
+impl BlockListener {
+    pub fn new(gear_api: GearApi, from_block: u32) -> Self {
+        Self {
+            gear_api,
+            from_block,
+
+            metrics: BlockListenerMetrics::new(),
+        }
+    }
+
+    pub fn run(self) -> Receiver<BlockNumber> {
+        let (sender, receiver) = channel();
+
+        tokio::spawn(async move {
+            loop {
+                let res = self.run_inner(&sender).await;
+                if let Err(err) = res {
+                    log::error!("Block listener failed: {}", err);
+                }
+            }
+        });
+
+        receiver
+    }
+
+    async fn run_inner(&self, sender: &Sender<BlockNumber>) -> anyhow::Result<()> {
+        let mut current_block = self.from_block;
+
+        self.metrics.processed_block.set(current_block as i64);
+
+        loop {
+            let finalized_head = self.gear_api.latest_finalized_block().await?;
+            let finalized_head = self.gear_api.block_hash_to_number(finalized_head).await?;
+
+            if finalized_head >= current_block {
+                for block in current_block..=finalized_head {
+                    sender.send(BlockNumber(block))?;
+
+                    self.metrics.processed_block.inc();
+                }
+
+                current_block = finalized_head + 1;
+            } else {
+                tokio::time::sleep(GEAR_BLOCK_TIME_APPROX).await;
+            }
+        }
+    }
+}

@@ -1,21 +1,18 @@
 use ethereum_client::EthApi;
 use gear_rpc_client::{dto::Message, GearApi};
-use primitive_types::{H256, U256};
+use primitive_types::H256;
 
 use utils_prometheus::MeteredService;
 
 mod common;
-mod event_listener;
 
-use common::merkle_root_listener::MerkleRootListener;
-use event_listener::EventListener;
+use common::{
+    gear_event_listener::{block_listener::BlockListener, EventListener},
+    merkle_root_listener::MerkleRootListener,
+    message_sender::MessageSender,
+};
 
 type AuthoritySetId = u64;
-
-enum BlockEvent {
-    MessageSent { message: MessageInBlock },
-    MessagePaid { nonce: U256 },
-}
 
 struct MessageInBlock {
     message: Message,
@@ -24,9 +21,10 @@ struct MessageInBlock {
 }
 
 pub struct MessageRelayer {
+    block_listener: BlockListener,
     event_listener: EventListener,
     merkle_root_listener: MerkleRootListener,
-    //message_processor: MessageProcessor,
+    message_sender: MessageSender,
 }
 
 impl MeteredService for MessageRelayer {
@@ -35,7 +33,7 @@ impl MeteredService for MessageRelayer {
             .get_sources()
             .into_iter()
             .chain(self.merkle_root_listener.get_sources())
-        //.chain(self.message_processor.get_sources())
+            .chain(self.message_sender.get_sources())
     }
 }
 
@@ -44,7 +42,7 @@ impl MessageRelayer {
         gear_api: GearApi,
         eth_api: EthApi,
         from_block: Option<u32>,
-        bridging_payment_address: Option<H256>,
+        _bridging_payment_address: Option<H256>,
     ) -> anyhow::Result<Self> {
         let from_gear_block = if let Some(block) = from_block {
             block
@@ -61,27 +59,31 @@ impl MessageRelayer {
         );
         log::info!("Starting ethereum listener from block #{}", from_eth_block);
 
-        let event_listener =
-            EventListener::new(gear_api.clone(), from_gear_block, bridging_payment_address);
+        let block_listener = BlockListener::new(gear_api.clone(), from_gear_block);
+
+        let event_listener = EventListener::new(gear_api.clone());
 
         let merkle_root_listener =
             MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);
 
-        //let message_processor = MessageProcessor::new(eth_api, gear_api);
+        let message_sender = MessageSender::new(eth_api, gear_api);
 
         Ok(Self {
+            block_listener,
             event_listener,
             merkle_root_listener,
-            // message_processor,
+            message_sender,
         })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let messages = self.event_listener.run();
+        let block_listener = self.block_listener.run();
+        let messages = self.event_listener.run(block_listener);
         let merkle_roots = self.merkle_root_listener.run();
 
         log::info!("Starting message relayer");
-        //self.message_processor.run(messages, merkle_roots).await;
+
+        self.message_sender.run(messages, merkle_roots).await;
 
         Ok(())
     }

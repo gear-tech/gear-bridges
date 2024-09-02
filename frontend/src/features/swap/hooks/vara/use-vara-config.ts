@@ -2,7 +2,7 @@ import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-ho
 
 import { isUndefined } from '@/utils';
 
-import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram } from '../../consts';
+import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, QUERY_NAME, SERVICE_NAME } from '../../consts';
 
 function useVaraConfig(enabled: boolean) {
   const { getFormattedBalance } = useBalanceFormat();
@@ -15,8 +15,8 @@ function useVaraConfig(enabled: boolean) {
 
   const { data: config, isPending } = useProgramQuery({
     program,
-    serviceName: 'bridgingPayment',
-    functionName: 'getConfig',
+    serviceName: SERVICE_NAME.BRIDGING_PAYMENT,
+    functionName: QUERY_NAME.GET_CONFIG,
     args: [],
     query: { enabled },
   });

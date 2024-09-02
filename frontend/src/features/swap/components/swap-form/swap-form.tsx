@@ -25,7 +25,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair, ...bridge } = useBridge(networkIndex);
+  const { address, options, symbol, pair, nativeSymbol, ...bridge } = useBridge(networkIndex);
   const { fee, ...config } = useVaraConfig(isVaraNetwork);
   const balance = useBalance(address);
   const { onSubmit, isSubmitting } = useHandleSubmit(address, fee.value);
@@ -41,7 +41,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
   const renderFromBalance = () => (
     <Balance
       value={balance.formattedValue}
-      unit={symbol.value}
+      unit={symbol}
       isLoading={balance.isLoading}
       onMaxButtonClick={setMaxBalance}
     />
@@ -81,7 +81,7 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
             heading="Expected Fee"
             value={fee.formattedValue}
             isLoading={config.isLoading}
-            unit={symbol.native}
+            unit={nativeSymbol}
           />
 
           <Button

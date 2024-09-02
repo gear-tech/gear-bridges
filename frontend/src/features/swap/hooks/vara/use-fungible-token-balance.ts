@@ -4,14 +4,7 @@ import { formatUnits } from 'viem';
 
 import { isUndefined } from '@/utils';
 
-import { BALANCE_REFETCH_INTERVAL, VftProgram } from '../../consts';
-
-const SERVICE_NAME = 'vft';
-
-const QUERY_NAME = {
-  BALANCE: 'balanceOf',
-  DECIMALS: 'decimals',
-} as const;
+import { BALANCE_REFETCH_INTERVAL, QUERY_NAME, SERVICE_NAME, VftProgram } from '../../consts';
 
 function useFungibleTokenBalance(address: HexString | undefined) {
   const { account } = useAccount();
@@ -23,7 +16,7 @@ function useFungibleTokenBalance(address: HexString | undefined) {
 
   const { data: balance, isPending: isBalancePending } = useProgramQuery({
     program,
-    serviceName: SERVICE_NAME,
+    serviceName: SERVICE_NAME.VFT,
     functionName: QUERY_NAME.BALANCE,
     args: [account?.decodedAddress || '0x00'],
     query: { enabled: Boolean(account), refetchInterval: BALANCE_REFETCH_INTERVAL },
@@ -31,7 +24,7 @@ function useFungibleTokenBalance(address: HexString | undefined) {
 
   const { data: decimals, isPending: isDecimalsPending } = useProgramQuery({
     program,
-    serviceName: SERVICE_NAME,
+    serviceName: SERVICE_NAME.VFT,
     functionName: QUERY_NAME.DECIMALS,
     args: [],
   });

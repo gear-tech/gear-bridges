@@ -1,7 +1,7 @@
 import { HexString } from '@gear-js/api';
 
 import { ERC20_TREASURY_ABI, FUNGIBLE_TOKEN_ABI } from './abi';
-import { FUNCTION_NAME, EVENT_NAME } from './eth';
+import { EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE } from './form';
 import { BridgingPaymentProgram, VftGatewayProgram, VftProgram } from './sails';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
@@ -24,7 +24,6 @@ export {
   FIELD_NAME,
   DEFAULT_VALUES,
   ADDRESS_SCHEMA,
-  FUNCTION_NAME,
   EVENT_NAME,
   ERROR_MESSAGE,
   BALANCE_REFETCH_INTERVAL,

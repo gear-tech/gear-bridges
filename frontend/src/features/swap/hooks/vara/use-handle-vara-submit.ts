@@ -4,6 +4,7 @@ import { useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-
 import { isUndefined, logger } from '@/utils';
 
 import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, VftProgram } from '../../consts';
+import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
 import { FormattedValues } from '../../types';
 
 function useSendBridgingPaymentRequest() {
@@ -14,8 +15,8 @@ function useSendBridgingPaymentRequest() {
 
   return useSendProgramTransaction({
     program,
-    serviceName: 'bridgingPayment',
-    functionName: 'requestToGateway',
+    serviceName: SERVICE_NAME.BRIDGING_PAYMENT,
+    functionName: FUNCTION_NAME.REQUEST_TO_GATEWAY,
   });
 }
 
@@ -28,8 +29,8 @@ function useSendVftApprove(ftAddress: HexString | undefined) {
 
   return useSendProgramTransaction({
     program,
-    serviceName: 'vft',
-    functionName: 'approve',
+    serviceName: SERVICE_NAME.VFT,
+    functionName: FUNCTION_NAME.APPROVE,
   });
 }
 

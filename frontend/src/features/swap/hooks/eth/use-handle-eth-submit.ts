@@ -6,7 +6,8 @@ import { WriteContractErrorType } from 'wagmi/actions';
 
 import { logger } from '@/utils';
 
-import { FUNCTION_NAME, ERC20_TREASURY_ABI, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
+import { ERC20_TREASURY_ABI, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
+import { FUNCTION_NAME } from '../../consts/eth';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';

@@ -7,7 +7,6 @@ use alloy_sol_types::SolEvent;
 use cell::RefCell;
 use checkpoint_light_client_io::{Handle, HandleResult};
 use cmp::Ordering;
-use core::ops::ControlFlow;
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
@@ -18,6 +17,7 @@ use ethereum_common::{
     utils::ReceiptEnvelope,
     H160, H256,
 };
+use ops::ControlFlow;
 use sails_rs::{
     gstd::{debug, msg},
     prelude::*,
@@ -46,7 +46,7 @@ pub struct EthToVaraEvent {
 struct State {
     map: Vec<(H160, ActorId)>,
     checkpoints: ActorId,
-    vft: ActorId,
+    // vft: ActorId,
     // (slot, transaction_index)
     transactions: Vec<(u64, u64)>,
 }
@@ -72,50 +72,53 @@ impl<'a> Erc20RelayService<'a> {
             return;
         }
 
-        let state = self.0.borrow();
-        // decode log and pick the corresponding fungible token address if any
-        let Some((fungible_token, event)) = receipt.logs().iter().find_map(|log| {
-            let Ok(event) = ERC20_TREASURY::Deposit::decode_log_data(&log, true) else {
-                return None;
+        let slot = message.proof_block.block.slot;
+        {
+            let state = self.0.borrow();
+            // decode log and pick the corresponding fungible token address if any
+            let Some((_fungible_token, _event)) = receipt.logs().iter().find_map(|log| {
+                let Ok(event) = ERC20_TREASURY::Deposit::decode_log_data(log, true) else {
+                    return None;
+                };
+
+                state
+                    .map
+                    .iter()
+                    .find_map(|(address, fungible_token)| {
+                        (address.0 == event.token.0).then_some(fungible_token)
+                    })
+                    .map(|fungible_token| (fungible_token, event))
+            }) else {
+                //TODO: event
+                return;
             };
 
-            state
-                .map
-                .iter()
-                .find_map(|(address, fungible_token)| {
-                    (address.0 == event.token.0).then_some(fungible_token)
-                })
-                .map(|fungible_token| (fungible_token, event))
-        }) else {
-            //TODO: event
-            return;
-        };
+            // check for double spending
+            let Err(index) =
+                state
+                    .transactions
+                    .binary_search_by(|(slot_old, transaction_index_old)| {
+                        match slot.cmp(slot_old) {
+                            Ordering::Equal => message.transaction_index.cmp(transaction_index_old),
+                            ordering => ordering,
+                        }
+                    })
+            else {
+                // TODO: event
+                return;
+            };
 
-        // check for double spending
-        let slot = message.proof_block.block.slot;
-        let Err(index) =
-            state
-                .transactions
-                .binary_search_by(
-                    |(slot_old, transaction_index_old)| match slot.cmp(&slot_old) {
-                        Ordering::Equal => message.transaction_index.cmp(&transaction_index_old),
-                        ordering => ordering,
-                    },
-                )
-        else {
-            // TODO: event
-            return;
-        };
-
-        if state.transactions.capacity() <= state.transactions.len()
-            && index == state.transactions.len() - 1
-        {
-            // TODO: event
-            return;
+            if state.transactions.capacity() <= state.transactions.len()
+                && index == state.transactions.len() - 1
+            {
+                // TODO: event
+                return;
+            }
         }
 
         // verify the proof of block inclusion
-        let Some(result) = Self::request_checkpoint(state.checkpoints, slot).await else {
+        let checkpoints = self.0.borrow().checkpoints;
+        let Some(result) = Self::request_checkpoint(checkpoints, slot).await else {
             // TODO: event
             return;
         };
@@ -202,11 +205,11 @@ pub struct Erc20RelayProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl Erc20RelayProgram {
-    pub fn new(checkpoints: ActorId, vft: ActorId) -> Self {
+    pub fn new(checkpoints: ActorId, _vft: ActorId) -> Self {
         Self(RefCell::new(State {
             map: vec![],
             checkpoints,
-            vft,
+            // vft,
             transactions: Vec::with_capacity(CAPACITY),
         }))
     }

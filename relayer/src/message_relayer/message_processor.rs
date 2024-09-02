@@ -11,7 +11,9 @@ use prometheus::{Gauge, IntCounter, IntGauge};
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{AuthoritySetId, BlockEvent, BlockNumber, RelayedMerkleRoot};
+use super::{
+    common::merkle_root_listener::RelayedMerkleRoot, AuthoritySetId, BlockEvent, BlockNumber,
+};
 
 pub struct MessageProcessor {
     eth_api: EthApi,

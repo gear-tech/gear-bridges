@@ -4,12 +4,12 @@ use primitive_types::{H256, U256};
 
 use utils_prometheus::MeteredService;
 
+mod common;
 mod event_listener;
-mod merkle_root_listener;
 mod message_processor;
 
+use common::merkle_root_listener::MerkleRootListener;
 use event_listener::EventListener;
-use merkle_root_listener::MerkleRootListener;
 use message_processor::MessageProcessor;
 
 type AuthoritySetId = u64;
@@ -26,21 +26,15 @@ struct MessageInBlock {
     block_hash: H256,
 }
 
-#[derive(Clone, Copy)]
-struct RelayedMerkleRoot {
-    gear_block: u32,
-    authority_set_id: AuthoritySetId,
-}
-
 pub struct MessageRelayer {
-    event_processor: EventListener,
+    event_listener: EventListener,
     merkle_root_listener: MerkleRootListener,
     message_processor: MessageProcessor,
 }
 
 impl MeteredService for MessageRelayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.event_processor
+        self.event_listener
             .get_sources()
             .into_iter()
             .chain(self.merkle_root_listener.get_sources())
@@ -70,7 +64,7 @@ impl MessageRelayer {
         );
         log::info!("Starting ethereum listener from block #{}", from_eth_block);
 
-        let event_processor =
+        let event_listener =
             EventListener::new(gear_api.clone(), from_gear_block, bridging_payment_address);
 
         let merkle_root_listener =
@@ -79,14 +73,14 @@ impl MessageRelayer {
         let message_processor = MessageProcessor::new(eth_api, gear_api);
 
         Ok(Self {
-            event_processor,
+            event_listener,
             merkle_root_listener,
             message_processor,
         })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let messages = self.event_processor.run();
+        let messages = self.event_listener.run();
         let merkle_roots = self.merkle_root_listener.run();
 
         log::info!("Starting message relayer");

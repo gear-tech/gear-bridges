@@ -9,9 +9,13 @@ use prometheus::IntGauge;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::RelayedMerkleRoot;
-
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
+
+#[derive(Clone, Copy)]
+pub struct RelayedMerkleRoot {
+    pub gear_block: u32,
+    pub authority_set_id: u64,
+}
 
 pub struct MerkleRootListener {
     eth_api: EthApi,

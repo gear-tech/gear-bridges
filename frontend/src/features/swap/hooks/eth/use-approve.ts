@@ -6,7 +6,8 @@ import { watchContractEvent } from 'wagmi/actions';
 import { useEthAccount, useLoading } from '@/hooks';
 import { logger } from '@/utils';
 
-import { FUNGIBLE_TOKEN_ABI, FUNCTION_NAME, EVENT_NAME, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
+import { FUNGIBLE_TOKEN_ABI, EVENT_NAME, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
+import { FUNCTION_NAME } from '../../consts/eth';
 
 function useApprove(address: HexString | undefined) {
   const alert = useAlert();

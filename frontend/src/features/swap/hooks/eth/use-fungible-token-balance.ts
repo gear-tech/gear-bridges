@@ -5,7 +5,8 @@ import { useReadContracts } from 'wagmi';
 import { useEthAccount } from '@/hooks';
 import { isUndefined } from '@/utils';
 
-import { FUNCTION_NAME, FUNGIBLE_TOKEN_ABI, BALANCE_REFETCH_INTERVAL } from '../../consts';
+import { FUNGIBLE_TOKEN_ABI, BALANCE_REFETCH_INTERVAL } from '../../consts';
+import { FUNCTION_NAME } from '../../consts/eth';
 
 const abi = FUNGIBLE_TOKEN_ABI;
 

@@ -6,14 +6,11 @@ use utils_prometheus::MeteredService;
 
 mod common;
 mod event_listener;
-mod message_processor;
 
 use common::merkle_root_listener::MerkleRootListener;
 use event_listener::EventListener;
-use message_processor::MessageProcessor;
 
 type AuthoritySetId = u64;
-type BlockNumber = u32;
 
 enum BlockEvent {
     MessageSent { message: MessageInBlock },
@@ -29,7 +26,7 @@ struct MessageInBlock {
 pub struct MessageRelayer {
     event_listener: EventListener,
     merkle_root_listener: MerkleRootListener,
-    message_processor: MessageProcessor,
+    //message_processor: MessageProcessor,
 }
 
 impl MeteredService for MessageRelayer {
@@ -38,7 +35,7 @@ impl MeteredService for MessageRelayer {
             .get_sources()
             .into_iter()
             .chain(self.merkle_root_listener.get_sources())
-            .chain(self.message_processor.get_sources())
+        //.chain(self.message_processor.get_sources())
     }
 }
 
@@ -70,12 +67,12 @@ impl MessageRelayer {
         let merkle_root_listener =
             MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);
 
-        let message_processor = MessageProcessor::new(eth_api, gear_api);
+        //let message_processor = MessageProcessor::new(eth_api, gear_api);
 
         Ok(Self {
             event_listener,
             merkle_root_listener,
-            message_processor,
+            // message_processor,
         })
     }
 
@@ -84,7 +81,7 @@ impl MessageRelayer {
         let merkle_roots = self.merkle_root_listener.run();
 
         log::info!("Starting message relayer");
-        self.message_processor.run(messages, merkle_roots).await;
+        //self.message_processor.run(messages, merkle_roots).await;
 
         Ok(())
     }

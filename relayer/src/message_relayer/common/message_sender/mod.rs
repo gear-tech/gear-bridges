@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap, HashSet},
+    collections::{btree_map::Entry, BTreeMap},
     sync::mpsc::Receiver,
 };
 
@@ -9,15 +9,14 @@ use prometheus::{Gauge, IntGauge};
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{
-    common::{
-        era::{Era, EraMetrics},
-        merkle_root_listener::RelayedMerkleRoot,
-    },
-    AuthoritySetId, BlockEvent,
-};
+use crate::message_relayer::{AuthoritySetId, MessageInBlock};
 
-pub struct MessageProcessor {
+pub mod era;
+use era::{Era, EraMetrics};
+
+use super::merkle_root_listener::RelayedMerkleRoot;
+
+pub struct MessageSender {
     eth_api: EthApi,
     gear_api: GearApi,
 
@@ -32,7 +31,7 @@ impl_metered_service! {
     }
 }
 
-impl MeteredService for MessageProcessor {
+impl MeteredService for MessageSender {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics
             .get_sources()
@@ -60,7 +59,7 @@ impl Metrics {
     }
 }
 
-impl MessageProcessor {
+impl MessageSender {
     pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
         Self {
             eth_api,
@@ -72,11 +71,11 @@ impl MessageProcessor {
 
     pub async fn run(
         self,
-        block_events: Receiver<BlockEvent>,
+        messages: Receiver<MessageInBlock>,
         merkle_roots: Receiver<RelayedMerkleRoot>,
     ) {
         loop {
-            let res = self.run_inner(&block_events, &merkle_roots).await;
+            let res = self.run_inner(&messages, &merkle_roots).await;
             if let Err(err) = res {
                 log::error!("Message relayer failed: {}", err);
             }
@@ -85,7 +84,7 @@ impl MessageProcessor {
 
     async fn run_inner(
         &self,
-        block_events: &Receiver<BlockEvent>,
+        messages: &Receiver<MessageInBlock>,
         merkle_roots: &Receiver<RelayedMerkleRoot>,
     ) -> anyhow::Result<()> {
         let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
@@ -94,40 +93,33 @@ impl MessageProcessor {
             let fee_payer_balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(fee_payer_balance);
 
-            for event in block_events.try_iter() {
-                match event {
-                    BlockEvent::MessageSent { message } => {
-                        let authority_set_id = self
-                            .gear_api
-                            .signed_by_authority_set_id(message.block_hash)
-                            .await?;
+            for message in messages.try_iter() {
+                let authority_set_id = self
+                    .gear_api
+                    .signed_by_authority_set_id(message.block_hash)
+                    .await?;
 
-                        match eras.entry(authority_set_id) {
-                            Entry::Occupied(mut entry) => {
-                                entry.get_mut().push_message(message);
-                            }
-                            Entry::Vacant(entry) => {
-                                let mut era = Era::new(self.era_metrics.clone());
-                                era.push_message(message);
-
-                                entry.insert(era);
-                            }
-                        }
+                match eras.entry(authority_set_id) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push_message(message);
                     }
-                    BlockEvent::MessagePaid { nonce } => {
-                        todo!();
+                    Entry::Vacant(entry) => {
+                        let mut era = Era::new(self.era_metrics.clone());
+                        era.push_message(message);
+
+                        entry.insert(era);
                     }
                 }
             }
 
-            for new_merkle_root in merkle_roots.try_iter() {
-                match eras.entry(new_merkle_root.authority_set_id) {
+            for merkle_root in merkle_roots.try_iter() {
+                match eras.entry(merkle_root.authority_set_id) {
                     Entry::Occupied(mut entry) => {
-                        entry.get_mut().push_merkle_root(new_merkle_root);
+                        entry.get_mut().push_merkle_root(merkle_root);
                     }
                     Entry::Vacant(entry) => {
                         let mut era = Era::new(self.era_metrics.clone());
-                        era.push_merkle_root(new_merkle_root);
+                        era.push_merkle_root(merkle_root);
 
                         entry.insert(era);
                     }

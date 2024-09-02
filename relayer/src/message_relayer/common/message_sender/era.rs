@@ -8,9 +8,7 @@ use prometheus::IntCounter;
 
 use utils_prometheus::impl_metered_service;
 
-use crate::message_relayer::MessageInBlock;
-
-use super::merkle_root_listener::RelayedMerkleRoot;
+use crate::message_relayer::{common::merkle_root_listener::RelayedMerkleRoot, MessageInBlock};
 
 type BlockNumber = u32;
 

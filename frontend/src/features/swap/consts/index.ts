@@ -4,6 +4,7 @@ import { ERC20_TREASURY_ABI, FUNGIBLE_TOKEN_ABI } from './abi';
 import { FUNCTION_NAME, EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE } from './form';
 import { BridgingPaymentProgram, VftGatewayProgram, VftProgram } from './sails';
+import { SERVICE_NAME, QUERY_NAME } from './vara';
 
 const BRIDGING_PAYMENT_CONTRACT_ADDRESS = import.meta.env.VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS as HexString;
 const ERC20_TREASURY_CONTRACT_ADDRESS = import.meta.env.VITE_ERC20_TREASURY_CONTRACT_ADDRESS as HexString;
@@ -28,6 +29,8 @@ export {
   ERROR_MESSAGE,
   BALANCE_REFETCH_INTERVAL,
   NETWORK_INDEX,
+  SERVICE_NAME,
+  QUERY_NAME,
   BridgingPaymentProgram,
   VftGatewayProgram,
   VftProgram,

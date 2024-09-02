@@ -1,2 +1,2 @@
-pub mod era_tx_submitter;
+pub mod era;
 pub mod merkle_root_listener;

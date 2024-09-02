@@ -19,4 +19,20 @@ const getAmountSchema = (
     .refine((value) => value + feeValue <= balanceValue, { message: ERROR_MESSAGE.NO_BALANCE });
 };
 
-export { getAmountSchema };
+const getOptions = (symbols: [string, string][] | undefined) => {
+  const varaOptions: { label: string; value: string }[] = [];
+  const ethOptions: { label: string; value: string }[] = [];
+
+  if (!symbols) return { varaOptions, ethOptions };
+
+  symbols.forEach(([varaSymbol, ethSymbol], index) => {
+    const value = index.toString();
+
+    varaOptions.push({ label: varaSymbol, value });
+    ethOptions.push({ label: ethSymbol, value });
+  });
+
+  return { varaOptions, ethOptions };
+};
+
+export { getAmountSchema, getOptions };

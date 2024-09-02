@@ -7,9 +7,8 @@ use utils_prometheus::MeteredService;
 mod common;
 
 use common::{
-    gear_event_listener::{block_listener::BlockListener, EventListener},
-    merkle_root_listener::MerkleRootListener,
-    message_sender::MessageSender,
+    block_listener::BlockListener, merkle_root_listener::MerkleRootListener,
+    message_queued_listener::MessageQueuedListener, message_sender::MessageSender,
 };
 
 type AuthoritySetId = u64;
@@ -22,7 +21,7 @@ struct MessageInBlock {
 
 pub struct MessageRelayer {
     block_listener: BlockListener,
-    event_listener: EventListener,
+    event_listener: MessageQueuedListener,
     merkle_root_listener: MerkleRootListener,
     message_sender: MessageSender,
 }
@@ -61,7 +60,7 @@ impl MessageRelayer {
 
         let block_listener = BlockListener::new(gear_api.clone(), from_gear_block);
 
-        let event_listener = EventListener::new(gear_api.clone());
+        let event_listener = MessageQueuedListener::new(gear_api.clone());
 
         let merkle_root_listener =
             MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);

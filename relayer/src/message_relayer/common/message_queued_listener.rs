@@ -1,6 +1,5 @@
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-use block_listener::BlockNumber;
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntCounter;
@@ -9,27 +8,27 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::MessageInBlock;
 
-pub mod block_listener;
+use super::block_listener::BlockNumber;
 
-pub struct EventListener {
+pub struct MessageQueuedListener {
     gear_api: GearApi,
 
-    metrics: EventListenerMetrics,
+    metrics: MessageQueuedListenerMetrics,
 }
 
-impl MeteredService for EventListener {
+impl MeteredService for MessageQueuedListener {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
 }
 
 impl_metered_service! {
-    struct EventListenerMetrics {
+    struct MessageQueuedListenerMetrics {
         total_messages_found: IntCounter,
     }
 }
 
-impl EventListenerMetrics {
+impl MessageQueuedListenerMetrics {
     fn new() -> Self {
         Self::new_inner().expect("Failed to create metrics")
     }
@@ -44,11 +43,11 @@ impl EventListenerMetrics {
     }
 }
 
-impl EventListener {
+impl MessageQueuedListener {
     pub fn new(gear_api: GearApi) -> Self {
         Self {
             gear_api,
-            metrics: EventListenerMetrics::new(),
+            metrics: MessageQueuedListenerMetrics::new(),
         }
     }
 

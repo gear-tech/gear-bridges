@@ -244,7 +244,7 @@ async fn submit_message(
     log::info!(
         "Relaying message with hash {} and nonce {}",
         hex::encode(message_hash),
-        hex::encode(&message.nonce_le)
+        hex::encode(message.nonce_le)
     );
 
     let proof = gear_api
@@ -266,7 +266,7 @@ async fn submit_message(
 
     log::info!(
         "Message with nonce {} relaying started",
-        hex::encode(&message.nonce_le)
+        hex::encode(message.nonce_le)
     );
 
     Ok(tx_hash)

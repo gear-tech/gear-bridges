@@ -68,7 +68,7 @@ impl MessageRelayer {
         })
     }
 
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub fn run(self) {
         let [gear_blocks] = self.gear_block_listener.run();
         let ethereum_blocks = self.ethereum_block_listener.run();
 
@@ -76,8 +76,6 @@ impl MessageRelayer {
 
         let merkle_roots = self.merkle_root_extractor.run(ethereum_blocks);
 
-        self.message_sender.run(messages, merkle_roots).await;
-
-        Ok(())
+        self.message_sender.run(messages, merkle_roots);
     }
 }

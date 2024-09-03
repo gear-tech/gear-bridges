@@ -1,5 +1,7 @@
 extern crate pretty_env_logger;
 
+use std::time::Duration;
+
 use clap::{Args, Parser, Subcommand};
 use message_relayer::{all_token_transfers, paid_token_transfers};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
@@ -250,7 +252,7 @@ async fn main() {
                     .run(args.prometheus_args.endpoint)
                     .await;
 
-                relayer.run().await.unwrap();
+                relayer.run();
             } else {
                 let relayer =
                     all_token_transfers::MessageRelayer::new(gear_api, eth_api, args.from_block)
@@ -263,7 +265,12 @@ async fn main() {
                     .run(args.prometheus_args.endpoint)
                     .await;
 
-                relayer.run().await.unwrap();
+                relayer.run();
+            }
+
+            loop {
+                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
+                std::thread::sleep(Duration::from_millis(100));
             }
         }
         CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,

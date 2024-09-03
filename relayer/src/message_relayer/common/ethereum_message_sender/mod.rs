@@ -4,6 +4,7 @@ use std::{
 };
 
 use ethereum_client::EthApi;
+use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::{Gauge, IntGauge};
 
@@ -70,17 +71,19 @@ impl EthereumMessageSender {
         }
     }
 
-    pub async fn run(
+    pub fn run(
         self,
         messages: Receiver<MessageInBlock>,
         merkle_roots: Receiver<RelayedMerkleRoot>,
     ) {
-        loop {
-            let res = self.run_inner(&messages, &merkle_roots).await;
-            if let Err(err) = res {
-                log::error!("Ethereum message sender failed: {}", err);
+        tokio::spawn(async move {
+            loop {
+                let res = block_on(self.run_inner(&messages, &merkle_roots));
+                if let Err(err) = res {
+                    log::error!("Ethereum message sender failed: {}", err);
+                }
             }
-        }
+        });
     }
 
     async fn run_inner(

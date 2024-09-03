@@ -12,14 +12,14 @@ const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 pub struct BlockNumber(pub u32);
 
-pub struct BlockListener {
+pub struct GearBlockListener {
     gear_api: GearApi,
     from_block: u32,
 
     metrics: BlockListenerMetrics,
 }
 
-impl MeteredService for BlockListener {
+impl MeteredService for GearBlockListener {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -46,7 +46,7 @@ impl BlockListenerMetrics {
     }
 }
 
-impl BlockListener {
+impl GearBlockListener {
     pub fn new(gear_api: GearApi, from_block: u32) -> Self {
         Self {
             gear_api,

@@ -4,17 +4,18 @@ use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
 use super::common::{
-    block_listener::BlockListener, merkle_root_listener::MerkleRootListener,
-    message_queued_listener::MessageQueuedListener, message_sender::MessageSender,
+    ethereum_message_sender::EthereumMessageSender, gear_block_listener::GearBlockListener,
+    merkle_root_listener::MerkleRootListener,
+    message_queued_event_extractor::MessageQueuedEventExtractor,
 };
 
 pub struct MessageRelayer {
-    block_listener: BlockListener,
+    block_listener: GearBlockListener,
 
-    message_sent_listener: MessageQueuedListener,
+    message_sent_listener: MessageQueuedEventExtractor,
 
     merkle_root_listener: MerkleRootListener,
-    message_sender: MessageSender,
+    message_sender: EthereumMessageSender,
 }
 
 impl MeteredService for MessageRelayer {
@@ -42,14 +43,14 @@ impl MessageRelayer {
 
         let from_eth_block = eth_api.block_number().await?;
 
-        let block_listener = BlockListener::new(gear_api.clone(), from_gear_block);
+        let block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
 
-        let message_sent_listener = MessageQueuedListener::new(gear_api.clone());
+        let message_sent_listener = MessageQueuedEventExtractor::new(gear_api.clone());
 
         let merkle_root_listener =
             MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);
 
-        let message_sender = MessageSender::new(eth_api, gear_api);
+        let message_sender = EthereumMessageSender::new(eth_api, gear_api);
 
         Ok(Self {
             block_listener,

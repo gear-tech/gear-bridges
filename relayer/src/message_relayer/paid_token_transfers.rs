@@ -7,21 +7,22 @@ use utils_prometheus::MeteredService;
 use crate::message_relayer::common::paid_messages_filter::PaidMessagesFilter;
 
 use super::common::{
-    block_listener::BlockListener, merkle_root_listener::MerkleRootListener,
-    message_paid_listener::MessagePaidListener, message_queued_listener::MessageQueuedListener,
-    message_sender::MessageSender,
+    ethereum_message_sender::EthereumMessageSender, gear_block_listener::GearBlockListener,
+    merkle_root_listener::MerkleRootListener,
+    message_paid_event_extractor::MessagePaidEventExtractor,
+    message_queued_event_extractor::MessageQueuedEventExtractor,
 };
 
 pub struct MessageRelayer {
-    block_listener: BlockListener,
+    block_listener: GearBlockListener,
 
-    message_sent_listener: MessageQueuedListener,
-    message_paid_listener: MessagePaidListener,
+    message_sent_listener: MessageQueuedEventExtractor,
+    message_paid_listener: MessagePaidEventExtractor,
 
     paid_messages_filter: PaidMessagesFilter,
 
     merkle_root_listener: MerkleRootListener,
-    message_sender: MessageSender,
+    message_sender: EthereumMessageSender,
 }
 
 impl MeteredService for MessageRelayer {
@@ -56,19 +57,19 @@ impl MessageRelayer {
         );
         log::info!("Starting ethereum listener from block #{}", from_eth_block);
 
-        let block_listener = BlockListener::new(gear_api.clone(), from_gear_block);
+        let block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
 
-        let message_sent_listener = MessageQueuedListener::new(gear_api.clone());
+        let message_sent_listener = MessageQueuedEventExtractor::new(gear_api.clone());
 
         let message_paid_listener =
-            MessagePaidListener::new(gear_api.clone(), bridging_payment_address);
+            MessagePaidEventExtractor::new(gear_api.clone(), bridging_payment_address);
 
         let paid_messages_filter = PaidMessagesFilter::new();
 
         let merkle_root_listener =
             MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);
 
-        let message_sender = MessageSender::new(eth_api, gear_api);
+        let message_sender = EthereumMessageSender::new(eth_api, gear_api);
 
         Ok(Self {
             block_listener,

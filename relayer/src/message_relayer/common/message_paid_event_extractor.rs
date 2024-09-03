@@ -9,13 +9,13 @@ use prometheus::IntCounter;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::block_listener::BlockNumber;
+use super::gear_block_listener::BlockNumber;
 
 pub struct PaidMessage {
     pub nonce: [u8; 32],
 }
 
-pub struct MessagePaidListener {
+pub struct MessagePaidEventExtractor {
     bridging_payment_address: H256,
 
     gear_api: GearApi,
@@ -23,7 +23,7 @@ pub struct MessagePaidListener {
     metrics: MessagePaidListenerMetrics,
 }
 
-impl MeteredService for MessagePaidListener {
+impl MeteredService for MessagePaidEventExtractor {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -50,7 +50,7 @@ impl MessagePaidListenerMetrics {
     }
 }
 
-impl MessagePaidListener {
+impl MessagePaidEventExtractor {
     pub fn new(gear_api: GearApi, bridging_payment_address: H256) -> Self {
         Self {
             bridging_payment_address,
@@ -81,7 +81,7 @@ impl MessagePaidListener {
     ) -> anyhow::Result<()> {
         loop {
             for block in blocks.try_iter() {
-                self.process_block_events(block.0, &sender).await?;
+                self.process_block_events(block.0, sender).await?;
             }
         }
     }

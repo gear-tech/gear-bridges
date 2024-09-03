@@ -3,7 +3,7 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use super::{message_paid_listener::PaidMessage, MessageInBlock};
+use super::{message_paid_event_extractor::PaidMessage, MessageInBlock};
 
 pub struct PaidMessagesFilter {
     pending_messages: HashMap<[u8; 32], MessageInBlock>,

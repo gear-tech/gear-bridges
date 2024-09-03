@@ -6,15 +6,15 @@ use prometheus::IntCounter;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{block_listener::BlockNumber, MessageInBlock};
+use super::{gear_block_listener::BlockNumber, MessageInBlock};
 
-pub struct MessageQueuedListener {
+pub struct MessageQueuedEventExtractor {
     gear_api: GearApi,
 
     metrics: MessageQueuedListenerMetrics,
 }
 
-impl MeteredService for MessageQueuedListener {
+impl MeteredService for MessageQueuedEventExtractor {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -41,7 +41,7 @@ impl MessageQueuedListenerMetrics {
     }
 }
 
-impl MessageQueuedListener {
+impl MessageQueuedEventExtractor {
     pub fn new(gear_api: GearApi) -> Self {
         Self {
             gear_api,
@@ -71,7 +71,7 @@ impl MessageQueuedListener {
     ) -> anyhow::Result<()> {
         loop {
             for block in blocks.try_iter() {
-                self.process_block_events(block.0, &sender).await?;
+                self.process_block_events(block.0, sender).await?;
             }
         }
     }

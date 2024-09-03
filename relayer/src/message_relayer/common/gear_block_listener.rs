@@ -5,7 +5,6 @@ use std::{
 
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
-
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::GearBlockNumber;

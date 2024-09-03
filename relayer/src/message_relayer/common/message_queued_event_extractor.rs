@@ -3,7 +3,6 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntCounter;
-
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{GearBlockNumber, MessageInBlock};
@@ -52,12 +51,10 @@ impl MessageQueuedEventExtractor {
     pub fn run(self, blocks: Receiver<GearBlockNumber>) -> Receiver<MessageInBlock> {
         let (sender, receiver) = channel();
 
-        tokio::spawn(async move {
-            loop {
-                let res = block_on(self.run_inner(&sender, &blocks));
-                if let Err(err) = res {
-                    log::error!("Message queued extractor failed: {}", err);
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&sender, &blocks));
+            if let Err(err) = res {
+                log::error!("Message queued extractor failed: {}", err);
             }
         });
 

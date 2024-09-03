@@ -4,11 +4,9 @@ use ethereum_client::EthApi;
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
-
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::GearBlockNumber;
-
 use super::{AuthoritySetId, EthereumBlockNumber, RelayedMerkleRoot};
 
 pub struct MerkleRootExtractor {
@@ -58,12 +56,10 @@ impl MerkleRootExtractor {
     pub fn run(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<RelayedMerkleRoot> {
         let (sender, receiver) = channel();
 
-        tokio::spawn(async move {
-            loop {
-                let res = block_on(self.run_inner(&blocks, &sender));
-                if let Err(err) = res {
-                    log::error!("Merkle root extractor failed: {}", err);
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&blocks, &sender));
+            if let Err(err) = res {
+                log::error!("Merkle root extractor failed: {}", err);
             }
         });
 

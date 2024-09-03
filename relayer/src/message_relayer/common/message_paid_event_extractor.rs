@@ -6,7 +6,6 @@ use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
 use prometheus::IntCounter;
-
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{GearBlockNumber, PaidMessage};
@@ -58,12 +57,10 @@ impl MessagePaidEventExtractor {
     pub fn run(self, blocks: Receiver<GearBlockNumber>) -> Receiver<PaidMessage> {
         let (sender, receiver) = channel();
 
-        tokio::spawn(async move {
-            loop {
-                let res = block_on(self.run_inner(&sender, &blocks));
-                if let Err(err) = res {
-                    log::error!("Message paid event extractor failed: {}", err);
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&sender, &blocks));
+            if let Err(err) = res {
+                log::error!("Message paid event extractor failed: {}", err);
             }
         });
 

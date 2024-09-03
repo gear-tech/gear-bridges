@@ -1,11 +1,10 @@
-use keccak_hash::keccak_256;
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::{dto::Message, GearApi};
+use keccak_hash::keccak_256;
 use primitive_types::H256;
 use prometheus::IntCounter;
-
 use utils_prometheus::impl_metered_service;
 
 use crate::message_relayer::common::{GearBlockNumber, MessageInBlock, RelayedMerkleRoot};

@@ -3,21 +3,17 @@ use std::iter;
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use primitive_types::H256;
-
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::{
-    ethereum_block_listener::EthereumBlockListener, paid_messages_filter::PaidMessagesFilter,
-};
-
 use super::common::{
-    ethereum_message_sender::EthereumMessageSender, gear_block_listener::GearBlockListener,
-    merkle_root_extractor::MerkleRootExtractor,
+    ethereum_block_listener::EthereumBlockListener, ethereum_message_sender::EthereumMessageSender,
+    gear_block_listener::GearBlockListener, merkle_root_extractor::MerkleRootExtractor,
     message_paid_event_extractor::MessagePaidEventExtractor,
     message_queued_event_extractor::MessageQueuedEventExtractor,
+    paid_messages_filter::PaidMessagesFilter,
 };
 
-pub struct MessageRelayer {
+pub struct Relayer {
     gear_block_listener: GearBlockListener,
     ethereum_block_listener: EthereumBlockListener,
 
@@ -30,7 +26,7 @@ pub struct MessageRelayer {
     message_sender: EthereumMessageSender,
 }
 
-impl MeteredService for MessageRelayer {
+impl MeteredService for Relayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         iter::empty()
             .chain(self.gear_block_listener.get_sources())
@@ -43,7 +39,7 @@ impl MeteredService for MessageRelayer {
     }
 }
 
-impl MessageRelayer {
+impl Relayer {
     pub async fn new(
         gear_api: GearApi,
         eth_api: EthApi,

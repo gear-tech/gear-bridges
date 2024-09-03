@@ -237,7 +237,7 @@ async fn main() {
 
                 let bridging_payment_address = bridging_payment_address.into();
 
-                let relayer = paid_token_transfers::MessageRelayer::new(
+                let relayer = paid_token_transfers::Relayer::new(
                     gear_api,
                     eth_api,
                     args.from_block,
@@ -254,10 +254,9 @@ async fn main() {
 
                 relayer.run();
             } else {
-                let relayer =
-                    all_token_transfers::MessageRelayer::new(gear_api, eth_api, args.from_block)
-                        .await
-                        .unwrap();
+                let relayer = all_token_transfers::Relayer::new(gear_api, eth_api, args.from_block)
+                    .await
+                    .unwrap();
 
                 MetricsBuilder::new()
                     .register_service(&relayer)

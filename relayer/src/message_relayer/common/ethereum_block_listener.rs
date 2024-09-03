@@ -5,7 +5,6 @@ use std::{
 
 use ethereum_client::EthApi;
 use prometheus::IntGauge;
-
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::EthereumBlockNumber;

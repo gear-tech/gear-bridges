@@ -7,7 +7,6 @@ use ethereum_client::EthApi;
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::{Gauge, IntGauge};
-
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
@@ -76,12 +75,10 @@ impl EthereumMessageSender {
         messages: Receiver<MessageInBlock>,
         merkle_roots: Receiver<RelayedMerkleRoot>,
     ) {
-        tokio::spawn(async move {
-            loop {
-                let res = block_on(self.run_inner(&messages, &merkle_roots));
-                if let Err(err) = res {
-                    log::error!("Ethereum message sender failed: {}", err);
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&messages, &merkle_roots));
+            if let Err(err) = res {
+                log::error!("Ethereum message sender failed: {}", err);
             }
         });
     }

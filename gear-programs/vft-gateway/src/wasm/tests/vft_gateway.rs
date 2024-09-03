@@ -7,10 +7,11 @@ mod utils;
 use blake2::{digest::typenum::U32, Blake2b, Digest};
 use utils::{
     FTMockError, FTMockReturnsFalse, GearBridgeBuiltinMock, GearBridgeBuiltinMockPanic, Token,
-    VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, TOKEN_ID,
+    VftGateway, ADMIN_ID, BRIDGE_BUILTIN_ID, ETH_CLIENT_ID, TOKEN_ID,
 };
 type Blake2b256 = Blake2b<U32>;
 use gear_core::ids::ProgramId;
+
 #[test]
 fn test_successful_transfer_vara_to_eth() {
     let system = System::new();
@@ -217,43 +218,29 @@ fn test_transfer_vara_to_eth_insufficient_balance() {
     assert_eq!(balance, amount); // Balance should remain unchanged
 }
 
-#[ignore]
-#[tokio::test]
-async fn test_transfer_fails_due_to_gas_depletion_after_bridge_reply() {
+#[test]
+fn test_mint_tokens_from_eth_client() {
     let system = System::new();
     system.init_logger();
 
     let vft = Program::token(&system, TOKEN_ID);
-    let bridge_build_in = Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!bridge_build_in.send_bytes(ADMIN_ID, b"INIT").main_failed());
+    let gear_bridge_builtin =
+        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+    assert!(!gear_bridge_builtin
+        .send_bytes(ADMIN_ID, b"INIT")
+        .main_failed());
+
     let vft_gateway = Program::vft_gateway(&system);
 
-    let account_id: u64 = 10001;
+    let receiver: u64 = 10000;
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 50_000_000_000;
 
-    vft.mint(ADMIN_ID, account_id.into(), amount);
-    vft.grant_burner_role(ADMIN_ID, vft_gateway.id());
+    vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
 
-    vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), [2; 20].into());
+    vft_gateway.mint_tokens(ETH_CLIENT_ID, vft.id().into(), amount, receiver.into());
 
-    // gas ended after contract receives reply from bridge builtin
-
-    let reply =
-        vft_gateway.transfer_vara_to_eth(account_id, vft.id(), amount, [3; 20].into(), gas, true);
-    assert_eq!(reply, Err(Error::MessageFailed));
-
-    let msg_tracker = vft_gateway.get_msg_tracker_state();
-    assert_eq!(
-        msg_tracker[0].1.status,
-        MessageStatus::BridgeResponseReceived(Some(U256::one()))
-    );
-
-    let reply = vft_gateway.handle_interrupted_transfer(account_id, msg_tracker[0].0);
-    let exp_reply: Result<(U256, H160), Error> = Ok((U256::from(1), H160::from([2; 20])));
-    assert_eq!(reply, exp_reply);
-    let msg_tracker = vft_gateway.get_msg_tracker_state();
-    assert!(msg_tracker.is_empty());
+    let balance = vft.balance_of(receiver.into());
+    assert_eq!(balance, amount);
 }
 
 #[test]

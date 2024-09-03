@@ -6,7 +6,7 @@ import { Input } from '@/components';
 import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useBridge, useVaraConfig } from '../../hooks';
-import { UseBalance, UseHandleSubmit } from '../../types';
+import { UseHandleSubmit, UseAccountBalance, UseFTBalance } from '../../types';
 import { Balance } from '../balance';
 import { Network } from '../network';
 
@@ -15,24 +15,34 @@ import styles from './swap-form.module.scss';
 type Props = {
   networkIndex: number;
   disabled: boolean;
-  useBalance: UseBalance;
+  useAccountBalance: UseAccountBalance;
+  useFTBalance: UseFTBalance;
   useHandleSubmit: UseHandleSubmit;
   renderSwapNetworkButton: () => JSX.Element;
 };
 
-function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderSwapNetworkButton }: Props) {
+function SwapForm({
+  networkIndex,
+  disabled,
+  useHandleSubmit,
+  useAccountBalance,
+  useFTBalance,
+  renderSwapNetworkButton,
+}: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair, nativeSymbol, ...bridge } = useBridge(networkIndex);
+  const { address, options, symbol, pair,  ...bridge } = useBridge(networkIndex);
   const { fee, ...config } = useVaraConfig(isVaraNetwork);
-  const balance = useBalance(address);
+  const accountBalance = useAccountBalance();
+  const ftBalance = useFTBalance(address);
   const { onSubmit, isSubmitting } = useHandleSubmit(address, fee.value);
 
   const { form, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
-    balance,
+    accountBalance,
+    ftBalance,
     fee.value,
     disabled,
     onSubmit,
@@ -40,9 +50,9 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
 
   const renderFromBalance = () => (
     <Balance
-      value={balance.formattedValue}
+      value={ftBalance.formattedValue}
       unit={symbol}
-      isLoading={balance.isLoading}
+      isLoading={ftBalance.isLoading || bridge.isLoading}
       onMaxButtonClick={setMaxBalance}
     />
   );
@@ -81,14 +91,16 @@ function SwapForm({ networkIndex, disabled, useHandleSubmit, useBalance, renderS
             heading="Expected Fee"
             value={fee.formattedValue}
             isLoading={config.isLoading}
-            unit={nativeSymbol}
+            unit={isVaraNetwork ? 'VARA' : 'ETH'}
           />
 
           <Button
             type="submit"
             text="Swap"
             disabled={disabled}
-            isLoading={isSubmitting || balance.isLoading || config.isLoading || bridge.isLoading}
+            isLoading={
+              isSubmitting || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || bridge.isLoading
+            }
           />
         </footer>
       </form>

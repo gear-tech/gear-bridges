@@ -6,7 +6,7 @@ import { isUndefined } from '@/utils';
 
 import { BALANCE_REFETCH_INTERVAL, QUERY_NAME, SERVICE_NAME, VftProgram } from '../../consts';
 
-function useFungibleTokenBalance(address: HexString | undefined) {
+function useVaraFTBalance(address: HexString | undefined) {
   const { account } = useAccount();
 
   const { data: program } = useProgram({
@@ -37,4 +37,4 @@ function useFungibleTokenBalance(address: HexString | undefined) {
   return { value, formattedValue, decimals, isLoading };
 }
 
-export { useFungibleTokenBalance };
+export { useVaraFTBalance };

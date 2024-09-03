@@ -9,11 +9,7 @@ use prometheus::IntCounter;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::gear_block_listener::BlockNumber;
-
-pub struct PaidMessage {
-    pub nonce: [u8; 32],
-}
+use super::{GearBlockNumber, PaidMessage};
 
 pub struct MessagePaidEventExtractor {
     bridging_payment_address: H256,
@@ -59,7 +55,7 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<BlockNumber>) -> Receiver<PaidMessage> {
+    pub fn run(self, blocks: Receiver<GearBlockNumber>) -> Receiver<PaidMessage> {
         let (sender, receiver) = channel();
 
         tokio::spawn(async move {
@@ -77,7 +73,7 @@ impl MessagePaidEventExtractor {
     async fn run_inner(
         &self,
         sender: &Sender<PaidMessage>,
-        blocks: &Receiver<BlockNumber>,
+        blocks: &Receiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
             for block in blocks.try_iter() {

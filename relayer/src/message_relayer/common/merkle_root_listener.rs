@@ -9,13 +9,11 @@ use prometheus::IntGauge;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
+use crate::message_relayer::common::GearBlockNumber;
 
-#[derive(Clone, Copy)]
-pub struct RelayedMerkleRoot {
-    pub gear_block: u32,
-    pub authority_set_id: u64,
-}
+use super::{AuthoritySetId, RelayedMerkleRoot};
+
+const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 
 pub struct MerkleRootListener {
     eth_api: EthApi,
@@ -114,7 +112,7 @@ impl MerkleRootListener {
                         .await?;
 
                     let authority_set_id =
-                        self.gear_api.signed_by_authority_set_id(block_hash).await?;
+                        AuthoritySetId(self.gear_api.signed_by_authority_set_id(block_hash).await?);
 
                     log::info!(
                         "Found merkle root for gear block #{} and era #{}",
@@ -123,7 +121,7 @@ impl MerkleRootListener {
                     );
 
                     sender.send(RelayedMerkleRoot {
-                        gear_block: merkle_root.block_number as u32,
+                        block: GearBlockNumber(merkle_root.block_number as u32),
                         authority_set_id,
                     })?;
                 }

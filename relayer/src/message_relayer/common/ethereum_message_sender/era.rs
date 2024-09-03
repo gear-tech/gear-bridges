@@ -8,16 +8,20 @@ use prometheus::IntCounter;
 
 use utils_prometheus::impl_metered_service;
 
-use crate::message_relayer::common::{merkle_root_listener::RelayedMerkleRoot, MessageInBlock};
-
-type BlockNumber = u32;
+use crate::message_relayer::common::{GearBlockNumber, MessageInBlock, RelayedMerkleRoot};
 
 pub struct Era {
     latest_merkle_root: Option<RelayedMerkleRoot>,
-    messages: BTreeMap<BlockNumber, Vec<Message>>,
+    messages: BTreeMap<GearBlockNumber, Vec<Message>>,
     pending_txs: Vec<RelayMessagePendingTx>,
 
     metrics: EraMetrics,
+}
+
+struct RelayMessagePendingTx {
+    hash: TxHash,
+    message_block: GearBlockNumber,
+    message: Message,
 }
 
 impl_metered_service! {
@@ -51,12 +55,6 @@ impl EraMetrics {
     }
 }
 
-struct RelayMessagePendingTx {
-    hash: TxHash,
-    message_block: u32,
-    message: Message,
-}
-
 impl Era {
     pub fn new(metrics: EraMetrics) -> Self {
         Self {
@@ -81,7 +79,7 @@ impl Era {
 
     pub fn push_merkle_root(&mut self, merkle_root: RelayedMerkleRoot) {
         if let Some(mr) = self.latest_merkle_root.as_ref() {
-            if mr.gear_block < merkle_root.gear_block {
+            if mr.block < merkle_root.block {
                 self.latest_merkle_root = Some(merkle_root);
             }
         } else {
@@ -97,12 +95,12 @@ impl Era {
         let mut processed_blocks = vec![];
 
         for (&message_block, messages) in self.messages.iter() {
-            if message_block > latest_merkle_root.gear_block {
+            if message_block > latest_merkle_root.block {
                 break;
             }
 
             let merkle_root_block_hash = gear_api
-                .block_number_to_hash(latest_merkle_root.gear_block)
+                .block_number_to_hash(latest_merkle_root.block.0)
                 .await?;
 
             for message in messages {
@@ -110,7 +108,7 @@ impl Era {
                     gear_api,
                     eth_api,
                     message,
-                    latest_merkle_root.gear_block,
+                    latest_merkle_root.block,
                     merkle_root_block_hash,
                 )
                 .await?;
@@ -191,7 +189,7 @@ impl Era {
                     .ok_or(anyhow::anyhow!(
                         "Cannot finalize era without any merkle roots"
                     ))?
-                    .gear_block;
+                    .block;
 
                 if merkle_root_block < tx.message_block {
                     anyhow::bail!(
@@ -202,7 +200,7 @@ impl Era {
                 }
 
                 let merkle_root_block_hash =
-                    gear_api.block_number_to_hash(merkle_root_block).await?;
+                    gear_api.block_number_to_hash(merkle_root_block.0).await?;
 
                 let tx_hash = submit_message(
                     gear_api,
@@ -234,7 +232,7 @@ async fn submit_message(
     gear_api: &GearApi,
     eth_api: &EthApi,
     message: &Message,
-    merkle_root_block: u32,
+    merkle_root_block: GearBlockNumber,
     merkle_root_block_hash: H256,
 ) -> anyhow::Result<TxHash> {
     let message_hash = message_hash(message);
@@ -247,7 +245,7 @@ async fn submit_message(
 
     let tx_hash = eth_api
         .provide_content_message(
-            merkle_root_block,
+            merkle_root_block.0,
             proof.num_leaves as u32,
             proof.leaf_index as u32,
             message.nonce_le,

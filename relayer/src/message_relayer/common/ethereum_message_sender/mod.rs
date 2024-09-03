@@ -14,7 +14,7 @@ use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
 mod era;
 use era::{Era, EraMetrics};
 
-use super::merkle_root_listener::RelayedMerkleRoot;
+use super::RelayedMerkleRoot;
 
 pub struct EthereumMessageSender {
     eth_api: EthApi,
@@ -94,10 +94,11 @@ impl EthereumMessageSender {
             self.metrics.fee_payer_balance.set(fee_payer_balance);
 
             for message in messages.try_iter() {
-                let authority_set_id = self
-                    .gear_api
-                    .signed_by_authority_set_id(message.block_hash)
-                    .await?;
+                let authority_set_id = AuthoritySetId(
+                    self.gear_api
+                        .signed_by_authority_set_id(message.block_hash)
+                        .await?,
+                );
 
                 match eras.entry(authority_set_id) {
                     Entry::Occupied(mut entry) => {

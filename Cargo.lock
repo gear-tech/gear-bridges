@@ -9736,6 +9736,7 @@ dependencies = [
  "checkpoint_light_client",
  "checkpoint_light_client-io",
  "clap",
+ "derive_more",
  "dotenv",
  "ethereum-client",
  "futures",

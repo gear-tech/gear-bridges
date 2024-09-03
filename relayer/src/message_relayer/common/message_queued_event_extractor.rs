@@ -6,7 +6,7 @@ use prometheus::IntCounter;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{gear_block_listener::BlockNumber, MessageInBlock};
+use super::{GearBlockNumber, MessageInBlock};
 
 pub struct MessageQueuedEventExtractor {
     gear_api: GearApi,
@@ -49,7 +49,7 @@ impl MessageQueuedEventExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<BlockNumber>) -> Receiver<MessageInBlock> {
+    pub fn run(self, blocks: Receiver<GearBlockNumber>) -> Receiver<MessageInBlock> {
         let (sender, receiver) = channel();
 
         tokio::spawn(async move {
@@ -67,22 +67,22 @@ impl MessageQueuedEventExtractor {
     async fn run_inner(
         &self,
         sender: &Sender<MessageInBlock>,
-        blocks: &Receiver<BlockNumber>,
+        blocks: &Receiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
             for block in blocks.try_iter() {
-                self.process_block_events(block.0, sender).await?;
+                self.process_block_events(block, sender).await?;
             }
         }
     }
 
     async fn process_block_events(
         &self,
-        block: u32,
+        block: GearBlockNumber,
         sender: &Sender<MessageInBlock>,
     ) -> anyhow::Result<()> {
         log::info!("Processing gear block #{}", block);
-        let block_hash = self.gear_api.block_number_to_hash(block).await?;
+        let block_hash = self.gear_api.block_number_to_hash(block.0).await?;
 
         let messages = self.gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {

@@ -8,9 +8,9 @@ use prometheus::IntGauge;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
+use super::GearBlockNumber;
 
-pub struct BlockNumber(pub u32);
+const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 pub struct GearBlockListener {
     gear_api: GearApi,
@@ -56,7 +56,7 @@ impl GearBlockListener {
         }
     }
 
-    pub fn run<const RECEIVER_COUNT: usize>(self) -> [Receiver<BlockNumber>; RECEIVER_COUNT] {
+    pub fn run<const RECEIVER_COUNT: usize>(self) -> [Receiver<GearBlockNumber>; RECEIVER_COUNT] {
         let (senders, receivers): (Vec<_>, Vec<_>) = (0..RECEIVER_COUNT).map(|_| channel()).unzip();
 
         tokio::spawn(async move {
@@ -73,7 +73,7 @@ impl GearBlockListener {
             .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(&self, senders: &[Sender<BlockNumber>]) -> anyhow::Result<()> {
+    async fn run_inner(&self, senders: &[Sender<GearBlockNumber>]) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
         self.metrics.processed_block.set(current_block as i64);
@@ -85,7 +85,7 @@ impl GearBlockListener {
             if finalized_head >= current_block {
                 for block in current_block..=finalized_head {
                     for sender in senders {
-                        sender.send(BlockNumber(block))?;
+                        sender.send(GearBlockNumber(block))?;
                     }
 
                     self.metrics.processed_block.inc();

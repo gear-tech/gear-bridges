@@ -1,12 +1,14 @@
 #![no_std]
 
 pub mod abi;
+pub mod error;
 
 use abi::ERC20_TREASURY;
 use alloy_sol_types::SolEvent;
 use cell::RefCell;
 use checkpoint_light_client_io::{Handle, HandleResult};
 use cmp::Ordering;
+use error::Error;
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
@@ -51,85 +53,85 @@ struct State {
     transactions: Vec<(u64, u64)>,
 }
 
+#[derive(Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+enum Event {
+    Relayed {
+        fungible_token: ActorId,
+        to: ActorId,
+        amount: u128,
+    },
+}
+
 struct Erc20RelayService<'a>(&'a RefCell<State>);
 
-#[sails_rs::service]
+#[sails_rs::service(events = Event)]
 impl<'a> Erc20RelayService<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self(state)
     }
 
-    pub async fn relay(&mut self, message: EthToVaraEvent) {
+    pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
         use alloy_rlp::Decodable;
 
-        let Ok(receipt) = ReceiptEnvelope::decode(&mut &message.receipt_rlp[..]) else {
-            // TODO: event
-            return;
-        };
+        let receipt = ReceiptEnvelope::decode(&mut &message.receipt_rlp[..])
+            .map_err(|_| Error::DecodeReceiptEnvelopeFailure)?;
 
         if !receipt.is_success() {
-            // TODO: event
-            return;
+            return Err(Error::FailedEthTransaction);
         }
 
         let slot = message.proof_block.block.slot;
-        {
-            let state = self.0.borrow();
+        let (fungible_token, event) = {
+            let mut state = self.0.borrow_mut();
             // decode log and pick the corresponding fungible token address if any
-            let Some((_fungible_token, _event)) = receipt.logs().iter().find_map(|log| {
-                let Ok(event) = ERC20_TREASURY::Deposit::decode_log_data(log, true) else {
-                    return None;
-                };
+            let (fungible_token, event) = receipt
+                .logs()
+                .iter()
+                .find_map(|log| {
+                    let Ok(event) = ERC20_TREASURY::Deposit::decode_log_data(log, true) else {
+                        return None;
+                    };
 
-                state
-                    .map
-                    .iter()
-                    .find_map(|(address, fungible_token)| {
-                        (address.0 == event.token.0).then_some(fungible_token)
-                    })
-                    .map(|fungible_token| (fungible_token, event))
-            }) else {
-                //TODO: event
-                return;
-            };
+                    state
+                        .map
+                        .iter()
+                        .find_map(|(address, fungible_token)| {
+                            (address.0 == event.token.0).then_some(fungible_token)
+                        })
+                        .map(|fungible_token| (*fungible_token, event))
+                })
+                .ok_or(Error::NotSupportedEvent)?;
 
             // check for double spending
-            let Err(index) =
-                state
-                    .transactions
-                    .binary_search_by(|(slot_old, transaction_index_old)| {
-                        match slot.cmp(slot_old) {
-                            Ordering::Equal => message.transaction_index.cmp(transaction_index_old),
-                            ordering => ordering,
-                        }
-                    })
-            else {
-                // TODO: event
-                return;
-            };
+            let index = state
+                .transactions
+                .binary_search_by(
+                    |(slot_old, transaction_index_old)| match slot.cmp(slot_old) {
+                        Ordering::Equal => message.transaction_index.cmp(transaction_index_old),
+                        ordering => ordering,
+                    },
+                )
+                .err()
+                .ok_or(Error::AlreadyProcessed)?;
 
-            if state.transactions.capacity() <= state.transactions.len()
-                && index == state.transactions.len() - 1
-            {
-                // TODO: event
-                return;
+            if state.transactions.capacity() <= state.transactions.len() {
+                if index == state.transactions.len() - 1 {
+                    return Err(Error::TooOldTransaction);
+                }
+
+                state.transactions.pop();
             }
-        }
+
+            (fungible_token, event)
+        };
+
+        let amount = u128::try_from(event.amount).map_err(|_| Error::InvalidAmount)?;
 
         // verify the proof of block inclusion
         let checkpoints = self.0.borrow().checkpoints;
-        let Some(result) = Self::request_checkpoint(checkpoints, slot).await else {
-            // TODO: event
-            return;
-        };
-        let checkpoint = match result {
-            HandleResult::Checkpoint(Ok(checkpoint)) => checkpoint.1,
-            HandleResult::Checkpoint(Err(_)) => {
-                // TODO: event
-                return;
-            }
-            _ => panic!("Unexpected result to `GetCheckpointFor` request"),
-        };
+        let checkpoint = Self::request_checkpoint(checkpoints, slot).await?;
 
         // TODO: sort headers
         let ControlFlow::Continue(block_root_parent) =
@@ -146,14 +148,12 @@ impl<'a> Erc20RelayService<'a> {
                     }
                 })
         else {
-            // TODO: event
-            return;
+            return Err(Error::InvalidBlockProof);
         };
 
         let block_root = message.proof_block.block.tree_hash_root();
         if block_root != block_root_parent {
-            // TODO: event
-            return;
+            return Err(Error::InvalidBlockProof);
         }
 
         // verify Merkle-PATRICIA proof
@@ -172,32 +172,44 @@ impl<'a> Erc20RelayService<'a> {
             memory_db.insert(hash_db::EMPTY_PREFIX, proof_node);
         }
 
-        let Ok(trie) = TrieDB::new(&memory_db, &receipts_root) else {
-            //TODO: event
-            return;
-        };
+        let trie = TrieDB::new(&memory_db, &receipts_root).map_err(|_| Error::TrieDbFailure)?;
 
         let (key_db, value_db) =
             eth_utils::rlp_encode_index_and_receipt(&message.transaction_index, &receipt);
         match trie.get(&key_db) {
             Ok(Some(found_value)) if found_value == value_db => {
+                // TODO
                 debug!("Proofs are valid. Mint the tokens");
-                //TODO: event
+                // TODO: save slot and index of the processed transaction
+
+                self.notify_on(Event::Relayed {
+                    fungible_token,
+                    to: ActorId::from(event.to.0),
+                    amount,
+                })
+                .unwrap();
+
+                Ok(())
             }
-            _ => {
-                //TODO: event
-            }
+
+            _ => Err(Error::InvalidReceiptProof),
         }
     }
 
-    pub async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Option<HandleResult> {
+    pub async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {
         let request = Handle::GetCheckpointFor { slot }.encode();
         let reply = msg::send_bytes_for_reply(checkpoints, &request, 0, 0)
-            .ok()?
+            .map_err(|_| Error::SendFailure)?
             .await
-            .ok()?;
+            .map_err(|_| Error::ReplyFailure)?;
 
-        HandleResult::decode(&mut reply.as_slice()).ok()
+        match HandleResult::decode(&mut reply.as_slice())
+            .map_err(|_| Error::HandleResultDecodeFailure)?
+        {
+            HandleResult::Checkpoint(Ok((_slot, hash))) => Ok(hash),
+            HandleResult::Checkpoint(Err(_)) => Err(Error::MissingCheckpoint),
+            _ => panic!("Unexpected result to `GetCheckpointFor` request"),
+        }
     }
 }
 

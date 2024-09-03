@@ -12,7 +12,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
 
 mod era;
-use era::{Era, EraMetrics};
+use era::{Era, Metrics as EraMetrics};
 
 use super::RelayedMerkleRoot;
 
@@ -24,19 +24,19 @@ pub struct EthereumMessageSender {
     era_metrics: EraMetrics,
 }
 
-impl_metered_service! {
-    struct Metrics {
-        pending_tx_count: IntGauge,
-        fee_payer_balance: Gauge
-    }
-}
-
 impl MeteredService for EthereumMessageSender {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics
             .get_sources()
             .into_iter()
             .chain(self.era_metrics.get_sources())
+    }
+}
+
+impl_metered_service! {
+    struct Metrics {
+        pending_tx_count: IntGauge,
+        fee_payer_balance: Gauge
     }
 }
 
@@ -48,11 +48,11 @@ impl Metrics {
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             pending_tx_count: IntGauge::new(
-                "message_relayer_message_processor_pending_tx_count",
+                "ethereum_message_sender_pending_tx_count",
                 "Amount of txs pending finalization on ethereum",
             )?,
             fee_payer_balance: Gauge::new(
-                "message_relayer_message_processor_fee_payer_balance",
+                "ethereum_message_sender_fee_payer_balance",
                 "Transaction fee payer balance",
             )?,
         })
@@ -64,6 +64,7 @@ impl EthereumMessageSender {
         Self {
             eth_api,
             gear_api,
+
             metrics: Metrics::new(),
             era_metrics: EraMetrics::new(),
         }
@@ -150,8 +151,8 @@ impl EthereumMessageSender {
                 }
             }
 
-            //let pending_tx_count: usize = eras.iter().map(|era| era.1.pending_txs.len()).sum();
-            //self.metrics.pending_tx_count.set(pending_tx_count as i64);
+            let pending_tx_count: usize = eras.iter().map(|era| era.1.pending_tx_count()).sum();
+            self.metrics.pending_tx_count.set(pending_tx_count as i64);
 
             for finalized in finalized_eras {
                 eras.remove(&finalized);

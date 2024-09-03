@@ -15,7 +15,7 @@ pub struct Era {
     messages: BTreeMap<GearBlockNumber, Vec<Message>>,
     pending_txs: Vec<RelayMessagePendingTx>,
 
-    metrics: EraMetrics,
+    metrics: Metrics,
 }
 
 struct RelayMessagePendingTx {
@@ -25,14 +25,14 @@ struct RelayMessagePendingTx {
 }
 
 impl_metered_service! {
-    pub struct EraMetrics {
+    pub struct Metrics {
         total_submitted_txs: IntCounter,
         total_failed_txs: IntCounter,
         total_failed_txs_because_processed: IntCounter,
     }
 }
 
-impl EraMetrics {
+impl Metrics {
     pub fn new() -> Self {
         Self::new_inner().expect("Failed to create metrics")
     }
@@ -40,23 +40,23 @@ impl EraMetrics {
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             total_submitted_txs: IntCounter::new(
-                "message_relayer_message_processor_total_submitted_txs",
+                "ethereum_message_sender_total_submitted_txs",
                 "Total amount of txs sent to ethereum",
             )?,
             total_failed_txs: IntCounter::new(
-                "message_relayer_message_processor_total_failed_txs",
+                "ethereum_message_sender_total_failed_txs",
                 "Total amount of txs sent to ethereum and failed",
             )?,
             total_failed_txs_because_processed: IntCounter::new(
-                "message_relayer_message_processor_total_failed_txs_because_processed",
-                "Amount of txs sent to ethereum and failed because they've already bee processed",
+                "ethereum_message_sender_total_failed_txs_because_processed",
+                "Amount of txs sent to ethereum and failed because they've already been processed",
             )?,
         })
     }
 }
 
 impl Era {
-    pub fn new(metrics: EraMetrics) -> Self {
+    pub fn new(metrics: Metrics) -> Self {
         Self {
             latest_merkle_root: None,
             messages: BTreeMap::new(),
@@ -85,6 +85,10 @@ impl Era {
         } else {
             self.latest_merkle_root = Some(merkle_root);
         }
+    }
+
+    pub fn pending_tx_count(&self) -> usize {
+        self.pending_txs.len()
     }
 
     pub async fn process(&mut self, gear_api: &GearApi, eth_api: &EthApi) -> anyhow::Result<()> {

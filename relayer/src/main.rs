@@ -1,11 +1,13 @@
 extern crate pretty_env_logger;
 
+use std::time::Duration;
+
 use clap::{Args, Parser, Subcommand};
+use message_relayer::{all_token_transfers, paid_token_transfers};
 use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
-use message_relayer::MessageRelayer;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
@@ -221,33 +223,54 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let bridging_payment_address = args.bridging_payment_address.map(|addr| {
-                let addr = if &addr[..2] == "0x" {
-                    &addr[2..]
+            if let Some(bridging_payment_address) = args.bridging_payment_address {
+                let bridging_payment_address = if &bridging_payment_address[..2] == "0x" {
+                    &bridging_payment_address[2..]
                 } else {
-                    &addr
+                    &bridging_payment_address
                 };
 
-                let arr: [u8; 32] = hex::decode(addr)
+                let bridging_payment_address: [u8; 32] = hex::decode(bridging_payment_address)
                     .expect("Wrong format of bridging-payment-address")
                     .try_into()
                     .expect("Wrong format of bridging-payment-address");
 
-                arr.into()
-            });
+                let bridging_payment_address = bridging_payment_address.into();
 
-            let relayer =
-                MessageRelayer::new(gear_api, eth_api, args.from_block, bridging_payment_address)
+                let relayer = paid_token_transfers::Relayer::new(
+                    gear_api,
+                    eth_api,
+                    args.from_block,
+                    bridging_payment_address,
+                )
+                .await
+                .unwrap();
+
+                MetricsBuilder::new()
+                    .register_service(&relayer)
+                    .build()
+                    .run(args.prometheus_args.endpoint)
+                    .await;
+
+                relayer.run();
+            } else {
+                let relayer = all_token_transfers::Relayer::new(gear_api, eth_api, args.from_block)
                     .await
                     .unwrap();
 
-            MetricsBuilder::new()
-                .register_service(&relayer)
-                .build()
-                .run(args.prometheus_args.endpoint)
-                .await;
+                MetricsBuilder::new()
+                    .register_service(&relayer)
+                    .build()
+                    .run(args.prometheus_args.endpoint)
+                    .await;
 
-            relayer.run().await.unwrap();
+                relayer.run();
+            }
+
+            loop {
+                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
+                std::thread::sleep(Duration::from_millis(100));
+            }
         }
         CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
         CliCommands::FetchAuthoritySetState(args) => {

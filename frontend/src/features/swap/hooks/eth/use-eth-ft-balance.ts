@@ -10,7 +10,7 @@ import { FUNCTION_NAME } from '../../consts/eth';
 
 const abi = FUNGIBLE_TOKEN_ABI;
 
-function useFungibleTokenBalance(address: HexString | undefined) {
+function useEthFTBalance(address: HexString | undefined) {
   const ethAccount = useEthAccount();
 
   // TODO: logger
@@ -42,4 +42,4 @@ function useFungibleTokenBalance(address: HexString | undefined) {
   return { value, formattedValue, decimals, isLoading };
 }
 
-export { useFungibleTokenBalance };
+export { useEthFTBalance };

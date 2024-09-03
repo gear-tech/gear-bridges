@@ -6,17 +6,20 @@ import { isUndefined } from '@/utils';
 import { ERROR_MESSAGE } from './consts';
 
 const getAmountSchema = (
-  balanceValue: bigint | undefined,
+  accountBalanceValue: bigint | undefined,
+  ftBalanceValue: bigint | undefined,
   feeValue: bigint | undefined,
   decimals: number | undefined,
 ) => {
-  if (isUndefined(balanceValue) || isUndefined(feeValue) || isUndefined(decimals)) return z.bigint();
+  if (isUndefined(accountBalanceValue) || isUndefined(ftBalanceValue) || isUndefined(feeValue) || isUndefined(decimals))
+    return z.bigint();
 
   return z
     .string()
     .trim() // TODO: required field check
     .transform((value) => parseUnits(value, decimals)) // if fraction is > decimals, value will be rounded
-    .refine((value) => value + feeValue <= balanceValue, { message: ERROR_MESSAGE.NO_BALANCE });
+    .refine((value) => value <= ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE })
+    .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
 };
 
 const getOptions = (symbols: [string, string][] | undefined) => {

@@ -1,6 +1,7 @@
 import { useFTAddresses } from './use-ft-addresses';
-import { useFungibleTokenBalance } from './use-fungible-token-balance';
 import { useHandleVaraSubmit } from './use-handle-vara-submit';
+import { useVaraAccountBalance } from './use-vara-account-balance';
 import { useVaraConfig } from './use-vara-config';
+import { useVaraFTBalance } from './use-vara-ft-balance';
 
-export { useVaraConfig, useFungibleTokenBalance, useHandleVaraSubmit, useFTAddresses };
+export { useVaraConfig, useVaraFTBalance, useHandleVaraSubmit, useFTAddresses, useVaraAccountBalance };

@@ -9,7 +9,6 @@ import { useFTAddresses } from './vara';
 
 function useBridge(networkIndex: number) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
-  const nativeSymbol = isVaraNetwork ? 'VARA' : 'ETH';
 
   const { data: ftAddresses } = useFTAddresses();
   const { data: ftSymbols, isPending } = useFTSymbols(ftAddresses);
@@ -22,7 +21,7 @@ function useBridge(networkIndex: number) {
   const address = ftAddresses?.[pairIndex][networkIndex].toString() as HexString | undefined;
   const symbol = ftSymbols?.[pairIndex][networkIndex];
 
-  return { address, options, symbol, nativeSymbol, pair: { value: pair, set: setPair }, isLoading: isPending };
+  return { address, options, symbol, pair: { value: pair, set: setPair }, isLoading: isPending };
 }
 
 export { useBridge };

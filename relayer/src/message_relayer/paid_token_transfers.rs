@@ -1,3 +1,5 @@
+use std::iter;
+
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use primitive_types::H256;
@@ -30,9 +32,12 @@ pub struct MessageRelayer {
 
 impl MeteredService for MessageRelayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.message_sent_listener
-            .get_sources()
-            .into_iter()
+        iter::empty()
+            .chain(self.gear_block_listener.get_sources())
+            .chain(self.ethereum_block_listener.get_sources())
+            .chain(self.message_sent_listener.get_sources())
+            .chain(self.message_paid_listener.get_sources())
+            .chain(self.paid_messages_filter.get_sources())
             .chain(self.merkle_root_extractor.get_sources())
             .chain(self.message_sender.get_sources())
     }

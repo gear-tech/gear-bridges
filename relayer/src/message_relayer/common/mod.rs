@@ -6,6 +6,7 @@ pub mod merkle_root_listener;
 pub mod message_paid_listener;
 pub mod message_queued_listener;
 pub mod message_sender;
+pub mod paid_messages_filter;
 
 type AuthoritySetId = u64;
 

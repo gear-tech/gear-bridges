@@ -11,7 +11,7 @@ use super::{GearBlockNumber, MessageInBlock};
 pub struct MessageQueuedEventExtractor {
     gear_api: GearApi,
 
-    metrics: MessageQueuedListenerMetrics,
+    metrics: Metrics,
 }
 
 impl MeteredService for MessageQueuedEventExtractor {
@@ -21,12 +21,12 @@ impl MeteredService for MessageQueuedEventExtractor {
 }
 
 impl_metered_service! {
-    struct MessageQueuedListenerMetrics {
+    struct Metrics {
         total_messages_found: IntCounter,
     }
 }
 
-impl MessageQueuedListenerMetrics {
+impl Metrics {
     fn new() -> Self {
         Self::new_inner().expect("Failed to create metrics")
     }
@@ -34,8 +34,8 @@ impl MessageQueuedListenerMetrics {
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             total_messages_found: IntCounter::new(
-                "message_relayer_event_listener_total_messages_found",
-                "Total amount of messages found by event listener, including not paid",
+                "message_queued_event_extractor_total_messages_found",
+                "Total amount of messages discovered",
             )?,
         })
     }
@@ -45,7 +45,7 @@ impl MessageQueuedEventExtractor {
     pub fn new(gear_api: GearApi) -> Self {
         Self {
             gear_api,
-            metrics: MessageQueuedListenerMetrics::new(),
+            metrics: Metrics::new(),
         }
     }
 

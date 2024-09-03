@@ -16,7 +16,7 @@ pub struct MessagePaidEventExtractor {
 
     gear_api: GearApi,
 
-    metrics: MessagePaidListenerMetrics,
+    metrics: Metrics,
 }
 
 impl MeteredService for MessagePaidEventExtractor {
@@ -26,21 +26,21 @@ impl MeteredService for MessagePaidEventExtractor {
 }
 
 impl_metered_service! {
-    struct MessagePaidListenerMetrics {
-        total_paid_messages_found: IntCounter,
+    struct Metrics {
+        total_messages_found: IntCounter,
     }
 }
 
-impl MessagePaidListenerMetrics {
+impl Metrics {
     fn new() -> Self {
         Self::new_inner().expect("Failed to create metrics")
     }
 
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
-            total_paid_messages_found: IntCounter::new(
-                "message_relayer_message_paid_listener_total_paid_messages_found",
-                "Total amount of paid messages found by event listener",
+            total_messages_found: IntCounter::new(
+                "message_paid_event_extractor_total_messages_found",
+                "Total amount of paid messages discovered",
             )?,
         })
     }
@@ -51,7 +51,7 @@ impl MessagePaidEventExtractor {
         Self {
             bridging_payment_address,
             gear_api,
-            metrics: MessagePaidListenerMetrics::new(),
+            metrics: Metrics::new(),
         }
     }
 
@@ -97,7 +97,7 @@ impl MessagePaidEventExtractor {
         if !messages.is_empty() {
             log::info!("Found {} paid messages", messages.len());
             self.metrics
-                .total_paid_messages_found
+                .total_messages_found
                 .inc_by(messages.len() as u64);
 
             for message in messages {

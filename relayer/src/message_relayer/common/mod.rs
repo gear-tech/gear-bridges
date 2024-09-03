@@ -12,7 +12,6 @@ pub mod paid_messages_filter;
 pub struct AuthoritySetId(pub u64);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
-
 pub struct GearBlockNumber(pub u32);
 
 #[derive(Clone, Debug)]

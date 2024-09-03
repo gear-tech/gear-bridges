@@ -16,7 +16,7 @@ pub struct GearBlockListener {
     gear_api: GearApi,
     from_block: u32,
 
-    metrics: BlockListenerMetrics,
+    metrics: Metrics,
 }
 
 impl MeteredService for GearBlockListener {
@@ -26,21 +26,21 @@ impl MeteredService for GearBlockListener {
 }
 
 impl_metered_service! {
-    struct BlockListenerMetrics {
-        processed_block: IntGauge,
+    struct Metrics {
+        latest_block: IntGauge,
     }
 }
 
-impl BlockListenerMetrics {
+impl Metrics {
     fn new() -> Self {
         Self::new_inner().expect("Failed to create metrics")
     }
 
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
-            processed_block: IntGauge::new(
-                "message_relayer_event_listener_processed_block",
-                "Gear block processed by event listener",
+            latest_block: IntGauge::new(
+                "gear_block_listener_latest_block",
+                "Latest gear block discovered by gear block listener",
             )?,
         })
     }
@@ -52,7 +52,7 @@ impl GearBlockListener {
             gear_api,
             from_block,
 
-            metrics: BlockListenerMetrics::new(),
+            metrics: Metrics::new(),
         }
     }
 
@@ -76,7 +76,7 @@ impl GearBlockListener {
     async fn run_inner(&self, senders: &[Sender<GearBlockNumber>]) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
-        self.metrics.processed_block.set(current_block as i64);
+        self.metrics.latest_block.set(current_block as i64);
 
         loop {
             let finalized_head = self.gear_api.latest_finalized_block().await?;
@@ -88,7 +88,7 @@ impl GearBlockListener {
                         sender.send(GearBlockNumber(block))?;
                     }
 
-                    self.metrics.processed_block.inc();
+                    self.metrics.latest_block.inc();
                 }
 
                 current_block = finalized_head + 1;

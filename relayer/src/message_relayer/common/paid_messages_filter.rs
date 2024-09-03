@@ -3,11 +3,43 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
+use prometheus::IntGauge;
+use utils_prometheus::{impl_metered_service, MeteredService};
+
 use super::{MessageInBlock, PaidMessage};
 
 pub struct PaidMessagesFilter {
     pending_messages: HashMap<[u8; 32], MessageInBlock>,
     pending_nonces: Vec<[u8; 32]>,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for PaidMessagesFilter {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
+}
+
+impl_metered_service! {
+    struct Metrics {
+        pending_messages_count: IntGauge
+    }
+}
+
+impl Metrics {
+    fn new() -> Self {
+        Self::new_inner().expect("Failed to create metrics")
+    }
+
+    fn new_inner() -> prometheus::Result<Self> {
+        Ok(Self {
+            pending_messages_count: IntGauge::new(
+                "paid_messages_filter_pending_messages_count",
+                "Amount of discovered but not paid messages",
+            )?,
+        })
+    }
 }
 
 impl PaidMessagesFilter {
@@ -15,6 +47,8 @@ impl PaidMessagesFilter {
         Self {
             pending_messages: HashMap::default(),
             pending_nonces: vec![],
+
+            metrics: Metrics::new(),
         }
     }
 
@@ -60,6 +94,14 @@ impl PaidMessagesFilter {
                     self.pending_nonces.remove(i);
                 }
             }
+
+            if !self.pending_nonces.is_empty() {
+                log::warn!("Discovered message that was paid but it's contents haven't discovered");
+            }
+
+            self.metrics
+                .pending_messages_count
+                .set(self.pending_messages.len() as i64);
         }
     }
 }

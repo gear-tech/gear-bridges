@@ -1,9 +1,7 @@
-use std::{
-    sync::mpsc::{channel, Receiver, Sender},
-    time::Duration,
-};
+use std::sync::mpsc::{channel, Receiver, Sender};
 
 use ethereum_client::EthApi;
+use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 
@@ -11,19 +9,16 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::GearBlockNumber;
 
-use super::{AuthoritySetId, RelayedMerkleRoot};
+use super::{AuthoritySetId, EthereumBlockNumber, RelayedMerkleRoot};
 
-const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
-
-pub struct MerkleRootListener {
+pub struct MerkleRootExtractor {
     eth_api: EthApi,
     gear_api: GearApi,
-    from_block: u64,
 
     metrics: Metrics,
 }
 
-impl MeteredService for MerkleRootListener {
+impl MeteredService for MerkleRootExtractor {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -31,7 +26,6 @@ impl MeteredService for MerkleRootListener {
 
 impl_metered_service! {
     struct Metrics {
-        latest_processed_block: IntGauge,
         latest_merkle_root_for_block: IntGauge
     }
 }
@@ -43,35 +37,30 @@ impl Metrics {
 
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
-            latest_processed_block: IntGauge::new(
-                "message_relayer_merkle_root_listener_latest_processed_block",
-                "Latest ethereum block processed by merkle root listener",
-            )?,
             latest_merkle_root_for_block: IntGauge::new(
-                "message_relayer_merkle_root_listener_latest_merkle_root_for_block",
+                "merkle_root_extractor_latest_merkle_root_for_block",
                 "Latest gear block present in found merkle roots",
             )?,
         })
     }
 }
 
-impl MerkleRootListener {
-    pub fn new(eth_api: EthApi, gear_api: GearApi, from_block: u64) -> Self {
+impl MerkleRootExtractor {
+    pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
         Self {
             eth_api,
             gear_api,
-            from_block,
 
             metrics: Metrics::new(),
         }
     }
 
-    pub fn run(self) -> Receiver<RelayedMerkleRoot> {
+    pub fn run(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<RelayedMerkleRoot> {
         let (sender, receiver) = channel();
 
         tokio::spawn(async move {
             loop {
-                let res = self.run_inner(&sender).await;
+                let res = block_on(self.run_inner(&blocks, &sender));
                 if let Err(err) = res {
                     log::error!("Merkle root listener failed: {}", err);
                 }
@@ -81,20 +70,16 @@ impl MerkleRootListener {
         receiver
     }
 
-    async fn run_inner(&self, sender: &Sender<RelayedMerkleRoot>) -> anyhow::Result<()> {
-        let mut current_block = self.from_block;
-
-        self.metrics
-            .latest_processed_block
-            .set(current_block as i64);
-
+    async fn run_inner(
+        &self,
+        blocks: &Receiver<EthereumBlockNumber>,
+        sender: &Sender<RelayedMerkleRoot>,
+    ) -> anyhow::Result<()> {
         loop {
-            let latest = self.eth_api.block_number().await?;
-            if latest >= current_block {
-                log::info!("Processing ethereum blocks #{}..#{}", current_block, latest);
+            for current_block in blocks.try_iter() {
                 let merkle_roots = self
                     .eth_api
-                    .fetch_merkle_roots_in_range(current_block, latest)
+                    .fetch_merkle_roots_in_range(current_block.0, current_block.0)
                     .await?;
 
                 if !merkle_roots.is_empty() {
@@ -125,11 +110,6 @@ impl MerkleRootListener {
                         authority_set_id,
                     })?;
                 }
-
-                current_block = latest + 1;
-                self.metrics.latest_processed_block.inc();
-            } else {
-                tokio::time::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2).await;
             }
         }
     }

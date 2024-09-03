@@ -4,24 +4,27 @@ use primitive_types::H256;
 
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::paid_messages_filter::PaidMessagesFilter;
+use crate::message_relayer::common::{
+    ethereum_block_listener::EthereumBlockListener, paid_messages_filter::PaidMessagesFilter,
+};
 
 use super::common::{
     ethereum_message_sender::EthereumMessageSender, gear_block_listener::GearBlockListener,
-    merkle_root_listener::MerkleRootListener,
+    merkle_root_extractor::MerkleRootExtractor,
     message_paid_event_extractor::MessagePaidEventExtractor,
     message_queued_event_extractor::MessageQueuedEventExtractor,
 };
 
 pub struct MessageRelayer {
-    block_listener: GearBlockListener,
+    gear_block_listener: GearBlockListener,
+    ethereum_block_listener: EthereumBlockListener,
 
     message_sent_listener: MessageQueuedEventExtractor,
     message_paid_listener: MessagePaidEventExtractor,
 
     paid_messages_filter: PaidMessagesFilter,
 
-    merkle_root_listener: MerkleRootListener,
+    merkle_root_extractor: MerkleRootExtractor,
     message_sender: EthereumMessageSender,
 }
 
@@ -30,7 +33,7 @@ impl MeteredService for MessageRelayer {
         self.message_sent_listener
             .get_sources()
             .into_iter()
-            .chain(self.merkle_root_listener.get_sources())
+            .chain(self.merkle_root_extractor.get_sources())
             .chain(self.message_sender.get_sources())
     }
 }
@@ -57,7 +60,9 @@ impl MessageRelayer {
         );
         log::info!("Starting ethereum listener from block #{}", from_eth_block);
 
-        let block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
+        let gear_block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
+
+        let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let message_sent_listener = MessageQueuedEventExtractor::new(gear_api.clone());
 
@@ -66,33 +71,34 @@ impl MessageRelayer {
 
         let paid_messages_filter = PaidMessagesFilter::new();
 
-        let merkle_root_listener =
-            MerkleRootListener::new(eth_api.clone(), gear_api.clone(), from_eth_block);
+        let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), gear_api.clone());
 
         let message_sender = EthereumMessageSender::new(eth_api, gear_api);
 
         Ok(Self {
-            block_listener,
+            gear_block_listener,
+            ethereum_block_listener,
 
             message_sent_listener,
             message_paid_listener,
 
             paid_messages_filter,
 
-            merkle_root_listener,
+            merkle_root_extractor: merkle_root_listener,
             message_sender,
         })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let [blocks_0, blocks_1] = self.block_listener.run();
+        let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run();
+        let ethereum_blocks = self.ethereum_block_listener.run();
 
-        let messages = self.message_sent_listener.run(blocks_0);
-        let paid_messages = self.message_paid_listener.run(blocks_1);
+        let messages = self.message_sent_listener.run(gear_blocks_0);
+        let paid_messages = self.message_paid_listener.run(gear_blocks_1);
 
         let filtered_messages = self.paid_messages_filter.run(messages, paid_messages);
 
-        let merkle_roots = self.merkle_root_listener.run();
+        let merkle_roots = self.merkle_root_extractor.run(ethereum_blocks);
 
         log::info!("Starting message relayer");
 

@@ -7,6 +7,7 @@ import { BridgingPaymentProgram, VftGatewayProgram, VftProgram } from './sails';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
 
 const BRIDGING_PAYMENT_CONTRACT_ADDRESS = import.meta.env.VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS as HexString;
+console.log('RIDGING_PAYMENT_CONTRACT_ADDRESS: ', BRIDGING_PAYMENT_CONTRACT_ADDRESS);
 const ERC20_TREASURY_CONTRACT_ADDRESS = import.meta.env.VITE_ERC20_TREASURY_CONTRACT_ADDRESS as HexString;
 
 const NETWORK_INDEX = {

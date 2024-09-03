@@ -1,14 +1,16 @@
-import { useFungibleTokenBalance as useEthBalance, useHandleEthSubmit } from './eth';
+import { useEthFTBalance, useEthAccountBalance, useHandleEthSubmit } from './eth';
 import { useBridge } from './use-bridge';
 import { useSwapForm } from './use-swap-form';
-import { useVaraConfig, useFungibleTokenBalance as useVaraBalance, useHandleVaraSubmit } from './vara';
+import { useVaraConfig, useVaraAccountBalance, useVaraFTBalance, useHandleVaraSubmit } from './vara';
 
 export {
-  useEthBalance,
+  useEthFTBalance,
+  useEthAccountBalance,
   useHandleEthSubmit,
   useSwapForm,
   useVaraConfig,
-  useVaraBalance,
+  useVaraAccountBalance,
+  useVaraFTBalance,
   useHandleVaraSubmit,
   useBridge,
 };

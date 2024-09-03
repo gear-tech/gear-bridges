@@ -1,4 +1,5 @@
-import { useFungibleTokenBalance } from './use-fungible-token-balance';
+import { useEthAccountBalance } from './use-eth-account-balance';
+import { useEthFTBalance } from './use-eth-ft-balance';
 import { useHandleEthSubmit } from './use-handle-eth-submit';
 
-export { useFungibleTokenBalance, useHandleEthSubmit };
+export { useEthFTBalance, useEthAccountBalance, useHandleEthSubmit };

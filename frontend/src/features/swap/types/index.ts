@@ -1,4 +1,4 @@
 import { Values, FormattedValues } from './form';
-import { UseBalance, UseHandleSubmit } from './hooks';
+import { UseAccountBalance, UseFTBalance, UseHandleSubmit } from './hooks';
 
-export type { UseBalance, UseHandleSubmit, Values, FormattedValues };
+export type { UseAccountBalance, UseFTBalance, UseHandleSubmit, Values, FormattedValues };

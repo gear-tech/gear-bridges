@@ -63,7 +63,7 @@ impl EthereumBlockListener {
             loop {
                 let res = self.run_inner(&sender).await;
                 if let Err(err) = res {
-                    log::error!("Merkle root listener failed: {}", err);
+                    log::error!("Ethereum block listener failed: {}", err);
                 }
             }
         });

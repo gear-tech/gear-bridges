@@ -56,7 +56,7 @@ impl MessageQueuedEventExtractor {
             loop {
                 let res = block_on(self.run_inner(&sender, &blocks));
                 if let Err(err) = res {
-                    log::error!("Event processor failed: {}", err);
+                    log::error!("Message queued extractor failed: {}", err);
                 }
             }
         });
@@ -81,12 +81,15 @@ impl MessageQueuedEventExtractor {
         block: GearBlockNumber,
         sender: &Sender<MessageInBlock>,
     ) -> anyhow::Result<()> {
-        log::info!("Processing gear block #{}", block);
         let block_hash = self.gear_api.block_number_to_hash(block.0).await?;
 
         let messages = self.gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {
-            log::info!("Found {} sent messages", messages.len());
+            log::info!(
+                "Found {} queued messages in block #{}",
+                messages.len(),
+                block
+            );
             self.metrics
                 .total_messages_found
                 .inc_by(messages.len() as u64);

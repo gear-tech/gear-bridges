@@ -62,7 +62,7 @@ impl MerkleRootExtractor {
             loop {
                 let res = block_on(self.run_inner(&blocks, &sender));
                 if let Err(err) = res {
-                    log::error!("Merkle root listener failed: {}", err);
+                    log::error!("Merkle root extractor failed: {}", err);
                 }
             }
         });
@@ -76,14 +76,18 @@ impl MerkleRootExtractor {
         sender: &Sender<RelayedMerkleRoot>,
     ) -> anyhow::Result<()> {
         loop {
-            for current_block in blocks.try_iter() {
+            for block in blocks.try_iter() {
                 let merkle_roots = self
                     .eth_api
-                    .fetch_merkle_roots_in_range(current_block.0, current_block.0)
+                    .fetch_merkle_roots_in_range(block.0, block.0)
                     .await?;
 
                 if !merkle_roots.is_empty() {
-                    log::info!("Found {} merkle roots", merkle_roots.len());
+                    log::info!(
+                        "Found {} merkle roots at block #{}",
+                        merkle_roots.len(),
+                        block
+                    );
                 }
 
                 for merkle_root in merkle_roots {

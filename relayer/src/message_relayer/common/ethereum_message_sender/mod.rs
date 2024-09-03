@@ -78,7 +78,7 @@ impl EthereumMessageSender {
         loop {
             let res = self.run_inner(&messages, &merkle_roots).await;
             if let Err(err) = res {
-                log::error!("Message relayer failed: {}", err);
+                log::error!("Ethereum message sender failed: {}", err);
             }
         }
     }

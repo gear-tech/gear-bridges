@@ -62,7 +62,7 @@ impl MessagePaidEventExtractor {
             loop {
                 let res = block_on(self.run_inner(&sender, &blocks));
                 if let Err(err) = res {
-                    log::error!("Event processor failed: {}", err);
+                    log::error!("Message paid event extractor failed: {}", err);
                 }
             }
         });
@@ -87,7 +87,6 @@ impl MessagePaidEventExtractor {
         block: u32,
         sender: &Sender<PaidMessage>,
     ) -> anyhow::Result<()> {
-        log::info!("Processing gear block #{}", block);
         let block_hash = self.gear_api.block_number_to_hash(block).await?;
 
         let messages = self
@@ -95,7 +94,7 @@ impl MessagePaidEventExtractor {
             .user_message_sent_events(self.bridging_payment_address, block_hash)
             .await?;
         if !messages.is_empty() {
-            log::info!("Found {} paid messages", messages.len());
+            log::info!("Found {} paid messages at block #{}", messages.len(), block);
             self.metrics
                 .total_messages_found
                 .inc_by(messages.len() as u64);

@@ -241,7 +241,11 @@ async fn submit_message(
 ) -> anyhow::Result<TxHash> {
     let message_hash = message_hash(message);
 
-    log::info!("Relaying message with hash {}", hex::encode(message_hash));
+    log::info!(
+        "Relaying message with hash {} and nonce {}",
+        hex::encode(message_hash),
+        hex::encode(&message.nonce_le)
+    );
 
     let proof = gear_api
         .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
@@ -260,7 +264,10 @@ async fn submit_message(
         )
         .await?;
 
-    log::info!("Message #{:?} relaying started", message.nonce_le);
+    log::info!(
+        "Message with nonce {} relaying started",
+        hex::encode(&message.nonce_le)
+    );
 
     Ok(tx_hash)
 }

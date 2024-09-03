@@ -63,7 +63,7 @@ impl GearBlockListener {
             loop {
                 let res = self.run_inner(&senders).await;
                 if let Err(err) = res {
-                    log::error!("Block listener failed: {}", err);
+                    log::error!("Gear block listener failed: {}", err);
                 }
             }
         });

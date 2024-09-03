@@ -4,7 +4,7 @@ use bridging_payment::services::BridgingPaymentEvents;
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
-use primitive_types::{H256, U256};
+use primitive_types::H256;
 use prometheus::IntCounter;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -12,7 +12,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use super::block_listener::BlockNumber;
 
 pub struct PaidMessage {
-    pub nonce: U256,
+    pub nonce: [u8; 32],
 }
 
 pub struct MessagePaidListener {
@@ -64,16 +64,26 @@ impl MessagePaidListener {
 
         tokio::spawn(async move {
             loop {
-                for block in blocks.try_iter() {
-                    let res = block_on(self.process_block_events(block.0, &sender));
-                    if let Err(err) = res {
-                        log::error!("Event processor failed: {}", err);
-                    }
+                let res = block_on(self.run_inner(&sender, &blocks));
+                if let Err(err) = res {
+                    log::error!("Event processor failed: {}", err);
                 }
             }
         });
 
         receiver
+    }
+
+    async fn run_inner(
+        &self,
+        sender: &Sender<PaidMessage>,
+        blocks: &Receiver<BlockNumber>,
+    ) -> anyhow::Result<()> {
+        loop {
+            for block in blocks.try_iter() {
+                self.process_block_events(block.0, &sender).await?;
+            }
+        }
     }
 
     async fn process_block_events(
@@ -98,7 +108,10 @@ impl MessagePaidListener {
                 let user_reply = BridgingPaymentEvents::decode(&mut &message.payload[..])?;
                 let BridgingPaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
 
-                sender.send(PaidMessage { nonce })?;
+                let mut nonce_le = [0; 32];
+                nonce.to_little_endian(&mut nonce_le);
+
+                sender.send(PaidMessage { nonce: nonce_le })?;
             }
         }
 

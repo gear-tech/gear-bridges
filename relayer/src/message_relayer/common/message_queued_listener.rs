@@ -6,9 +6,7 @@ use prometheus::IntCounter;
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::MessageInBlock;
-
-use super::block_listener::BlockNumber;
+use super::{block_listener::BlockNumber, MessageInBlock};
 
 pub struct MessageQueuedListener {
     gear_api: GearApi,
@@ -56,16 +54,26 @@ impl MessageQueuedListener {
 
         tokio::spawn(async move {
             loop {
-                for block in blocks.try_iter() {
-                    let res = block_on(self.process_block_events(block.0, &sender));
-                    if let Err(err) = res {
-                        log::error!("Event processor failed: {}", err);
-                    }
+                let res = block_on(self.run_inner(&sender, &blocks));
+                if let Err(err) = res {
+                    log::error!("Event processor failed: {}", err);
                 }
             }
         });
 
         receiver
+    }
+
+    async fn run_inner(
+        &self,
+        sender: &Sender<MessageInBlock>,
+        blocks: &Receiver<BlockNumber>,
+    ) -> anyhow::Result<()> {
+        loop {
+            for block in blocks.try_iter() {
+                self.process_block_events(block.0, &sender).await?;
+            }
+        }
     }
 
     async fn process_block_events(

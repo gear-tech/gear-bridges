@@ -9,7 +9,7 @@ use prometheus::{Gauge, IntGauge};
 
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::{AuthoritySetId, MessageInBlock};
+use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
 
 pub mod era;
 use era::{Era, EraMetrics};

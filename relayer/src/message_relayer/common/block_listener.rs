@@ -56,22 +56,24 @@ impl BlockListener {
         }
     }
 
-    pub fn run(self) -> Receiver<BlockNumber> {
-        let (sender, receiver) = channel();
+    pub fn run<const RECEIVER_COUNT: usize>(self) -> [Receiver<BlockNumber>; RECEIVER_COUNT] {
+        let (senders, receivers): (Vec<_>, Vec<_>) = (0..RECEIVER_COUNT).map(|_| channel()).unzip();
 
         tokio::spawn(async move {
             loop {
-                let res = self.run_inner(&sender).await;
+                let res = self.run_inner(&senders).await;
                 if let Err(err) = res {
                     log::error!("Block listener failed: {}", err);
                 }
             }
         });
 
-        receiver
+        receivers
+            .try_into()
+            .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(&self, sender: &Sender<BlockNumber>) -> anyhow::Result<()> {
+    async fn run_inner(&self, senders: &[Sender<BlockNumber>]) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
         self.metrics.processed_block.set(current_block as i64);
@@ -82,7 +84,9 @@ impl BlockListener {
 
             if finalized_head >= current_block {
                 for block in current_block..=finalized_head {
-                    sender.send(BlockNumber(block))?;
+                    for sender in senders {
+                        sender.send(BlockNumber(block))?;
+                    }
 
                     self.metrics.processed_block.inc();
                 }

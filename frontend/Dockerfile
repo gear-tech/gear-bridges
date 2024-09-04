@@ -4,6 +4,7 @@ MAINTAINER gear
 WORKDIR /app
 
 COPY ./frontend .
+COPY ./frontend/package.json .
 
 RUN apk update
 

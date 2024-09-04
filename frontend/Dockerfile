@@ -4,7 +4,8 @@ MAINTAINER gear
 WORKDIR /app
 
 COPY ./frontend .
-COPY ./frontend/package.json .
+
+RUN npm install -g pnpm
 
 RUN apk update
 
@@ -34,4 +35,4 @@ RUN pnpm build
 
 RUN npm install --global serve
 
-CMD ["serve", "-s", "/app/frontend/build"]
+CMD ["serve", "-s", "/app/frontend/dist"]

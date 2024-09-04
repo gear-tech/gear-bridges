@@ -3,7 +3,7 @@ MAINTAINER gear
 
 WORKDIR /app
 
-COPY . .
+COPY ./frontend .
 
 RUN apk update
 

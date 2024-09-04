@@ -27,12 +27,10 @@ ENV VITE_VARA_NODE_ADDRESS=${VITE_VARA_NODE_ADDRESS} \
     VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS=${VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS} \
     VITE_ERC20_TREASURY_CONTRACT_ADDRESS=${VITE_ERC20_TREASURY_CONTRACT_ADDRESS}
 
-WORKDIR /app/frontend
-
 RUN pnpm install
 
 RUN pnpm build
 
 RUN npm install --global serve
 
-CMD ["serve", "-s", "/app/frontend/dist"]
+CMD ["serve", "-s", "/app/dist"]

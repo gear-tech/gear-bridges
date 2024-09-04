@@ -79,9 +79,15 @@ impl PaidMessagesFilter {
     ) -> anyhow::Result<()> {
         loop {
             for message in messages.try_iter() {
-                self.pending_messages
+                if let Some(msg) = self
+                    .pending_messages
                     .insert(message.message.nonce_le, message)
-                    .expect("Received 2 messages with the same nonce");
+                {
+                    panic!(
+                        "Received 2 messages with the same nonce: {}",
+                        hex::encode(msg.message.nonce_le)
+                    );
+                }
             }
 
             for PaidMessage { nonce } in paid_messages.try_iter() {
@@ -93,10 +99,6 @@ impl PaidMessagesFilter {
                     sender.send(message)?;
                     self.pending_nonces.remove(i);
                 }
-            }
-
-            if !self.pending_nonces.is_empty() {
-                log::warn!("Discovered message that was paid but it's contents haven't discovered");
             }
 
             self.metrics

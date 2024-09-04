@@ -33,6 +33,7 @@ primitive-types = { workspace = true, features = ["std"] }
 prometheus.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+sails-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -41,4 +42,5 @@ tokio.workspace = true
 utils-prometheus.workspace = true
 
 [build-dependencies]
-cgo_oligami = "0.3"
+cgo_oligami.workspace = true
+sails-client-gen.workspace = true

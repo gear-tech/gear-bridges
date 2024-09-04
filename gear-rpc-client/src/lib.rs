@@ -11,10 +11,7 @@ use gsdk::{
     metadata::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
-        runtime_types::{
-            gear_core::message::user::UserMessage, gear_core_errors::simple::ReplyCode,
-            gprimitives::ActorId,
-        },
+        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
         storage::{GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
@@ -598,39 +595,35 @@ impl GearApi {
     pub async fn user_message_sent_events(
         &self,
         from_program: H256,
+        to_user: H256,
         block: H256,
     ) -> anyhow::Result<Vec<dto::UserMessageSent>> {
         let events = self.api.get_events_at(Some(block)).await?;
 
-        let from = ActorId(from_program.0);
-
         let events = events.into_iter().filter_map(|event| {
-            let (source, payload, details) =
-                if let RuntimeEvent::Gear(GearEvent::UserMessageSent {
-                    message:
-                        UserMessage {
-                            source,
-                            payload,
-                            details,
-                            ..
-                        },
-                    ..
-                }) = event
-                {
-                    (source, payload, details?)
-                } else {
-                    return None;
-                };
+            let RuntimeEvent::Gear(GearEvent::UserMessageSent {
+                message:
+                    UserMessage {
+                        source,
+                        destination,
+                        payload,
+                        ..
+                    },
+                ..
+            }) = event
+            else {
+                return None;
+            };
 
-            if source != from {
+            if source != ActorId(from_program.0) {
                 return None;
             }
 
-            if let ReplyCode::Success(_) = details.code {
-                Some(dto::UserMessageSent { payload: payload.0 })
-            } else {
-                None
+            if destination != ActorId(to_user.0) {
+                return None;
             }
+
+            Some(dto::UserMessageSent { payload: payload.0 })
         });
 
         Ok(events.collect())

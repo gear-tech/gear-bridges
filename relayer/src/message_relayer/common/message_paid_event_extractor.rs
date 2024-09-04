@@ -1,14 +1,22 @@
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-use bridging_payment::services::BridgingPaymentEvents;
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
-use parity_scale_codec::Decode;
 use primitive_types::H256;
 use prometheus::IntCounter;
+use sails_rs::events::EventIo;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{GearBlockNumber, PaidMessage};
+
+#[allow(dead_code)]
+mod bridging_payment_client {
+    use sails_rs::prelude::*;
+
+    include!(concat!(env!("OUT_DIR"), "/bridging_payment_client.rs"));
+}
+
+use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
 
 pub struct MessagePaidEventExtractor {
     bridging_payment_address: H256,
@@ -86,25 +94,34 @@ impl MessagePaidEventExtractor {
     ) -> anyhow::Result<()> {
         let block_hash = self.gear_api.block_number_to_hash(block).await?;
 
+        // As bridging-payment uses sails to send events, destnation will be zeroed.
+        let destination = H256::zero();
+
         let messages = self
             .gear_api
-            .user_message_sent_events(self.bridging_payment_address, block_hash)
+            .user_message_sent_events(self.bridging_payment_address, destination, block_hash)
             .await?;
-        if !messages.is_empty() {
-            log::info!("Found {} paid messages at block #{}", messages.len(), block);
-            self.metrics
-                .total_messages_found
-                .inc_by(messages.len() as u64);
 
-            for message in messages {
-                let user_reply = BridgingPaymentEvents::decode(&mut &message.payload[..])?;
-                let BridgingPaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+        if messages.is_empty() {
+            return Ok(());
+        }
 
-                let mut nonce_le = [0; 32];
-                nonce.to_little_endian(&mut nonce_le);
+        log::info!("Found {} paid messages at block #{}", messages.len(), block);
 
-                sender.send(PaidMessage { nonce: nonce_le })?;
-            }
+        self.metrics
+            .total_messages_found
+            .inc_by(messages.len() as u64);
+
+        for message in messages {
+            let user_reply = BridgingPaymentEvents::decode_event(message.payload)
+                .map_err(|_| anyhow::anyhow!("Failed to decode bridging payment event"))?;
+
+            let BridgingPaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+
+            let mut nonce_le = [0; 32];
+            nonce.to_little_endian(&mut nonce_le);
+
+            sender.send(PaidMessage { nonce: nonce_le })?;
         }
 
         Ok(())

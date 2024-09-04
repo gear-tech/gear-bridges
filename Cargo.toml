@@ -61,10 +61,11 @@ axum = "0.7.5"
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
-clap = { version = "4.4.13", features = ["derive", "env"] }
+cgo_oligami = "0.3"
 circular-buffer = { version = "0.1.7", default-features = false, features = [
     "alloc",
 ] }
+clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.9.0"
@@ -73,7 +74,7 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
     "codec",
     "rlp",
 ] }
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
@@ -129,7 +130,7 @@ gsdk = "=1.5.0"
 gclient = "=1.5.0"
 gear-core = "=1.5.0"
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
-gbuiltin-eth-bridge =  { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
+gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }

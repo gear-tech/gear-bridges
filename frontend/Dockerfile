@@ -28,9 +28,9 @@ ENV VITE_VARA_NODE_ADDRESS=${VITE_VARA_NODE_ADDRESS} \
 
 WORKDIR /app/frontend
 
-RUN yarn install
+RUN pnpm install
 
-RUN yarn build
+RUN pnpm build
 
 RUN npm install --global serve
 

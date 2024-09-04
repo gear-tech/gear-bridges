@@ -11,7 +11,7 @@ enum Event {
     },
 }
 
-pub(crate) struct Erc20Relay<'a>(&'a RefCell<State>);
+pub struct Erc20Relay<'a>(&'a RefCell<State>);
 
 #[sails_rs::service(events = Event)]
 impl<'a> Erc20Relay<'a> {

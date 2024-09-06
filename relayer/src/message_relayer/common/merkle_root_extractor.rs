@@ -23,22 +23,10 @@ impl MeteredService for MerkleRootExtractor {
 
 impl_metered_service! {
     struct Metrics {
-        latest_merkle_root_for_block: IntGauge
-    }
-}
-
-impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            latest_merkle_root_for_block: IntGauge::new(
-                "merkle_root_extractor_latest_merkle_root_for_block",
-                "Latest gear block present in found merkle roots",
-            )?,
-        })
+        latest_merkle_root_for_block: IntGauge = IntGauge::new(
+            "merkle_root_extractor_latest_merkle_root_for_block",
+            "Latest gear block present in found merkle roots",
+        )
     }
 }
 

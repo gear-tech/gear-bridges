@@ -23,22 +23,10 @@ impl MeteredService for PaidMessagesFilter {
 
 impl_metered_service! {
     struct Metrics {
-        pending_messages_count: IntGauge
-    }
-}
-
-impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            pending_messages_count: IntGauge::new(
-                "paid_messages_filter_pending_messages_count",
-                "Amount of discovered but not paid messages",
-            )?,
-        })
+        pending_messages_count: IntGauge = IntGauge::new(
+            "paid_messages_filter_pending_messages_count",
+            "Amount of discovered but not paid messages",
+        )
     }
 }
 

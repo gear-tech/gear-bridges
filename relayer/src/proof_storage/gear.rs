@@ -44,22 +44,10 @@ struct Cache {
 
 impl_metered_service! {
     struct Metrics {
-        fee_payer_balance: Gauge
-    }
-}
-
-impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            fee_payer_balance: Gauge::new(
-                "gear_proof_storage_fee_payer_balance",
-                "Gear proof storage fee payer balance",
-            )?,
-        })
+        fee_payer_balance: Gauge = Gauge::new(
+            "gear_proof_storage_fee_payer_balance",
+            "Gear proof storage fee payer balance",
+        )
     }
 }
 

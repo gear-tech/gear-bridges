@@ -28,32 +28,18 @@ pub struct MerkleRootRelayer {
 
 impl_metered_service! {
     struct Metrics {
-        latest_proven_era: IntGauge,
-        latest_observed_gear_era: IntGauge,
-        fee_payer_balance: Gauge
-    }
-}
-
-impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            latest_proven_era: IntGauge::new(
-                "merkle_root_relayer_latest_proven_era",
-                "Latest proven era number",
-            )?,
-            latest_observed_gear_era: IntGauge::new(
-                "merkle_root_relayer_latest_observed_gear_era",
-                "Latest era number observed by relayer",
-            )?,
-            fee_payer_balance: Gauge::new(
-                "merkle_root_relayer_fee_payer_balance",
-                "Transaction fee payer balance",
-            )?,
-        })
+        latest_proven_era: IntGauge = IntGauge::new(
+            "merkle_root_relayer_latest_proven_era",
+            "Latest proven era number",
+        ),
+        latest_observed_gear_era: IntGauge = IntGauge::new(
+            "merkle_root_relayer_latest_observed_gear_era",
+            "Latest era number observed by relayer",
+        ),
+        fee_payer_balance: Gauge = Gauge::new(
+            "merkle_root_relayer_fee_payer_balance",
+            "Transaction fee payer balance",
+        )
     }
 }
 
@@ -276,24 +262,11 @@ impl MeteredService for Eras {
 
 impl_metered_service! {
     struct EraMetrics {
-        sealed_not_finalized_count: IntGauge,
-        last_sealed_era: IntGauge
-    }
-}
-
-impl EraMetrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            sealed_not_finalized_count: IntGauge::new(
-                "sealed_not_finalized_count",
-                "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
-            )?,
-            last_sealed_era: IntGauge::new("last_sealed_era", "Latest era that have been sealed")?,
-        })
+        sealed_not_finalized_count: IntGauge = IntGauge::new(
+            "sealed_not_finalized_count",
+            "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
+        ),
+        last_sealed_era: IntGauge = IntGauge::new("last_sealed_era", "Latest era that have been sealed"),
     }
 }
 

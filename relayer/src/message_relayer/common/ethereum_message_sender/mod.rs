@@ -35,27 +35,14 @@ impl MeteredService for EthereumMessageSender {
 
 impl_metered_service! {
     struct Metrics {
-        pending_tx_count: IntGauge,
-        fee_payer_balance: Gauge
-    }
-}
-
-impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            pending_tx_count: IntGauge::new(
-                "ethereum_message_sender_pending_tx_count",
-                "Amount of txs pending finalization on ethereum",
-            )?,
-            fee_payer_balance: Gauge::new(
-                "ethereum_message_sender_fee_payer_balance",
-                "Transaction fee payer balance",
-            )?,
-        })
+        pending_tx_count: IntGauge = IntGauge::new(
+            "ethereum_message_sender_pending_tx_count",
+            "Amount of txs pending finalization on ethereum",
+        ),
+        fee_payer_balance: Gauge = Gauge::new(
+            "ethereum_message_sender_fee_payer_balance",
+            "Transaction fee payer balance",
+        )
     }
 }
 

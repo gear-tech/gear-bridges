@@ -34,22 +34,10 @@ impl MeteredService for MessagePaidEventExtractor {
 
 impl_metered_service! {
     struct Metrics {
-        total_messages_found: IntCounter,
-    }
-}
-
-impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            total_messages_found: IntCounter::new(
-                "message_paid_event_extractor_total_messages_found",
-                "Total amount of paid messages discovered",
-            )?,
-        })
+        total_messages_found: IntCounter = IntCounter::new(
+            "message_paid_event_extractor_total_messages_found",
+            "Total amount of paid messages discovered",
+        ),
     }
 }
 

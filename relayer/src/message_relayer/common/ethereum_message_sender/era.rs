@@ -25,32 +25,18 @@ struct RelayMessagePendingTx {
 
 impl_metered_service! {
     pub struct Metrics {
-        total_submitted_txs: IntCounter,
-        total_failed_txs: IntCounter,
-        total_failed_txs_because_processed: IntCounter,
-    }
-}
-
-impl Metrics {
-    pub fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            total_submitted_txs: IntCounter::new(
-                "ethereum_message_sender_total_submitted_txs",
-                "Total amount of txs sent to ethereum",
-            )?,
-            total_failed_txs: IntCounter::new(
-                "ethereum_message_sender_total_failed_txs",
-                "Total amount of txs sent to ethereum and failed",
-            )?,
-            total_failed_txs_because_processed: IntCounter::new(
-                "ethereum_message_sender_total_failed_txs_because_processed",
-                "Amount of txs sent to ethereum and failed because they've already been processed",
-            )?,
-        })
+        total_submitted_txs: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_submitted_txs",
+            "Total amount of txs sent to ethereum",
+        ),
+        total_failed_txs: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_failed_txs",
+            "Total amount of txs sent to ethereum and failed",
+        ),
+        total_failed_txs_because_processed: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_failed_txs_because_processed",
+            "Amount of txs sent to ethereum and failed because they've already been processed",
+        ),
     }
 }
 

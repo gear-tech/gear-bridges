@@ -41,17 +41,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            total_messages_found: IntCounter::new(
-                "message_paid_event_extractor_total_messages_found",
-                "Total amount of paid messages discovered",
-            )?,
-        })
-    }
-}
-
 impl MessagePaidEventExtractor {
     pub fn new(gear_api: GearApi, bridging_payment_address: H256) -> Self {
         Self {

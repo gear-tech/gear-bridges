@@ -51,17 +51,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            fee_payer_balance: Gauge::new(
-                "gear_proof_storage_fee_payer_balance",
-                "Gear proof storage fee payer balance",
-            )?,
-        })
-    }
-}
-
 impl MeteredService for GearProofStorage {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()

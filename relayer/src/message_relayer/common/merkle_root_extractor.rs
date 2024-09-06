@@ -30,17 +30,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            latest_merkle_root_for_block: IntGauge::new(
-                "merkle_root_extractor_latest_merkle_root_for_block",
-                "Latest gear block present in found merkle roots",
-            )?,
-        })
-    }
-}
-
 impl MerkleRootExtractor {
     pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
         Self {

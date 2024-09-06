@@ -46,21 +46,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            pending_tx_count: IntGauge::new(
-                "ethereum_message_sender_pending_tx_count",
-                "Amount of txs pending finalization on ethereum",
-            )?,
-            fee_payer_balance: Gauge::new(
-                "ethereum_message_sender_fee_payer_balance",
-                "Transaction fee payer balance",
-            )?,
-        })
-    }
-}
-
 impl EthereumMessageSender {
     pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
         Self {

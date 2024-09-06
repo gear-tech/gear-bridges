@@ -43,25 +43,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            latest_proven_era: IntGauge::new(
-                "merkle_root_relayer_latest_proven_era",
-                "Latest proven era number",
-            )?,
-            latest_observed_gear_era: IntGauge::new(
-                "merkle_root_relayer_latest_observed_gear_era",
-                "Latest era number observed by relayer",
-            )?,
-            fee_payer_balance: Gauge::new(
-                "merkle_root_relayer_fee_payer_balance",
-                "Transaction fee payer balance",
-            )?,
-        })
-    }
-}
-
 impl MeteredService for MerkleRootRelayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics
@@ -286,18 +267,6 @@ impl_metered_service! {
             "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
         ),
         last_sealed_era: IntGauge = IntGauge::new("last_sealed_era", "Latest era that have been sealed"),
-    }
-}
-
-impl EraMetrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            sealed_not_finalized_count: IntGauge::new(
-                "sealed_not_finalized_count",
-                "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
-            )?,
-            last_sealed_era: IntGauge::new("last_sealed_era", "Latest era that have been sealed")?,
-        })
     }
 }
 

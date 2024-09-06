@@ -40,25 +40,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            total_submitted_txs: IntCounter::new(
-                "ethereum_message_sender_total_submitted_txs",
-                "Total amount of txs sent to ethereum",
-            )?,
-            total_failed_txs: IntCounter::new(
-                "ethereum_message_sender_total_failed_txs",
-                "Total amount of txs sent to ethereum and failed",
-            )?,
-            total_failed_txs_because_processed: IntCounter::new(
-                "ethereum_message_sender_total_failed_txs_because_processed",
-                "Amount of txs sent to ethereum and failed because they've already been processed",
-            )?,
-        })
-    }
-}
-
 impl Era {
     pub fn new(metrics: Metrics) -> Self {
         Self {

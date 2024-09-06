@@ -28,17 +28,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            total_messages_found: IntCounter::new(
-                "message_queued_event_extractor_total_messages_found",
-                "Total amount of messages discovered",
-            )?,
-        })
-    }
-}
-
 impl MessageQueuedEventExtractor {
     pub fn new(gear_api: GearApi) -> Self {
         Self {

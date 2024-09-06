@@ -33,17 +33,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            latest_block: IntGauge::new(
-                "gear_block_listener_latest_block",
-                "Latest gear block discovered by gear block listener",
-            )?,
-        })
-    }
-}
-
 impl GearBlockListener {
     pub fn new(gear_api: GearApi, from_block: u32) -> Self {
         Self {

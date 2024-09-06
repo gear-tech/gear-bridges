@@ -33,17 +33,6 @@ impl_metered_service! {
     }
 }
 
-impl Metrics {
-    fn new_inner() -> prometheus::Result<Self> {
-        Ok(Self {
-            latest_block: IntGauge::new(
-                "ethereum_block_listener_latest_block",
-                "Latest ethereum block discovered by listener",
-            )?,
-        })
-    }
-}
-
 impl EthereumBlockListener {
     pub fn new(eth_api: EthApi, from_block: u64) -> Self {
         Self {

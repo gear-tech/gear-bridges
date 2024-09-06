@@ -44,7 +44,10 @@ struct Cache {
 
 impl_metered_service! {
     struct Metrics {
-        fee_payer_balance: Gauge
+        fee_payer_balance: Gauge = Gauge::new(
+            "gear_proof_storage_fee_payer_balance",
+            "Gear proof storage fee payer balance",
+        )
     }
 }
 

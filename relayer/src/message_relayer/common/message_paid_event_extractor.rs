@@ -34,7 +34,10 @@ impl MeteredService for MessagePaidEventExtractor {
 
 impl_metered_service! {
     struct Metrics {
-        total_messages_found: IntCounter,
+        total_messages_found: IntCounter = IntCounter::new(
+            "message_paid_event_extractor_total_messages_found",
+            "Total amount of paid messages discovered",
+        ),
     }
 }
 

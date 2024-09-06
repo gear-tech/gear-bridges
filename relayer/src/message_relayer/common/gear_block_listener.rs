@@ -26,7 +26,10 @@ impl MeteredService for GearBlockListener {
 
 impl_metered_service! {
     struct Metrics {
-        latest_block: IntGauge,
+        latest_block: IntGauge = IntGauge::new(
+            "gear_block_listener_latest_block",
+            "Latest gear block discovered by gear block listener",
+        )
     }
 }
 

@@ -17,9 +17,6 @@ pub trait MeteredService {
 #[macro_export]
 macro_rules! impl_metered_service {
     ($($impl:tt)*) => {
-        #[derive(::core::clone::Clone)]
-        $($impl)*
-
         $crate::impl_metered_service_inner! {
             $($impl)*
         }
@@ -33,11 +30,20 @@ macro_rules! impl_metered_service_inner {
         $vis:vis struct $struct_name:ident {
             $(
                 $(#[$($attributes:tt)*])*
-                $field_vis:vis $field_name:ident: $field_type:ty
+                $field_vis:vis $field_name:ident : $field_type:ty = $constructor:expr
             ),*
             $(,)?
         }
     ) => {
+        #[derive(Clone)]
+        $(#[$($struct_attributes)*])*
+        $vis struct $struct_name {
+            $(
+                $(#[$($attributes)*])*
+                $field_vis $field_name: $field_type
+            ),*
+        }
+
         impl $crate::MeteredService for $struct_name {
             fn get_sources(&self) -> impl ::core::iter::IntoIterator<
                 Item = ::std::boxed::Box<dyn prometheus::core::Collector>

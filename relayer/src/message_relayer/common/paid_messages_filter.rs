@@ -23,7 +23,10 @@ impl MeteredService for PaidMessagesFilter {
 
 impl_metered_service! {
     struct Metrics {
-        pending_messages_count: IntGauge
+        pending_messages_count: IntGauge = IntGauge::new(
+            "paid_messages_filter_pending_messages_count",
+            "Amount of discovered but not paid messages",
+        )
     }
 }
 

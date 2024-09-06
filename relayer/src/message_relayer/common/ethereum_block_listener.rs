@@ -26,7 +26,10 @@ impl MeteredService for EthereumBlockListener {
 
 impl_metered_service! {
     struct Metrics {
-        latest_block: IntGauge,
+        latest_block: IntGauge = IntGauge::new(
+            "ethereum_block_listener_latest_block",
+            "Latest ethereum block discovered by listener",
+        ),
     }
 }
 

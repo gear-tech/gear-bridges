@@ -12,10 +12,6 @@ impl_metered_service! {
 }
 
 impl Updates {
-    pub fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             fetched_sync_update_slot: IntGauge::new(

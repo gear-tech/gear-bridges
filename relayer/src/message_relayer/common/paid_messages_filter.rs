@@ -28,10 +28,6 @@ impl_metered_service! {
 }
 
 impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             pending_messages_count: IntGauge::new(

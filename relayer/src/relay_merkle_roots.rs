@@ -35,10 +35,6 @@ impl_metered_service! {
 }
 
 impl Metrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             latest_proven_era: IntGauge::new(
@@ -282,10 +278,6 @@ impl_metered_service! {
 }
 
 impl EraMetrics {
-    fn new() -> Self {
-        Self::new_inner().expect("Failed to create metrics")
-    }
-
     fn new_inner() -> prometheus::Result<Self> {
         Ok(Self {
             sealed_not_finalized_count: IntGauge::new(

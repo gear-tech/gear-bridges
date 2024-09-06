@@ -54,6 +54,12 @@ macro_rules! impl_metered_service_inner {
                 ]
             }
         }
+
+        impl $struct_name {
+            $vis fn new() -> Self {
+                Self::new_inner().expect("Failed to create metrics")
+            }
+        }
     }
 }
 

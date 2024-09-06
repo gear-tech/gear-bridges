@@ -16,15 +16,6 @@ pub trait MeteredService {
 
 #[macro_export]
 macro_rules! impl_metered_service {
-    ($($impl:tt)*) => {
-        $crate::impl_metered_service_inner! {
-            $($impl)*
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! impl_metered_service_inner {
     (
         $(#[$($struct_attributes:tt)*])*
         $vis:vis struct $struct_name:ident {

@@ -3563,10 +3563,16 @@ dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
  "checkpoint_light_client-io",
+ "erc20-relay-client",
  "ethereum-common",
+ "futures",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex-literal",
  "lazy_static",
  "sails-rs 0.4.0",
+ "tokio",
 ]
 
 [[package]]
@@ -10328,8 +10334,7 @@ dependencies = [
 [[package]]
 name = "sails-client-gen"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "298eecdb11ee41e68215a02c97541f2bcc7c24c310cec026483a9324254a283a"
+source = "git+https://github.com/gear-tech/sails.git?rev=aab08733ee9ccdb809dc9b29c57dd411b2b917b1#aab08733ee9ccdb809dc9b29c57dd411b2b917b1"
 dependencies = [
  "anyhow",
  "convert_case 0.6.0",
@@ -10370,8 +10375,7 @@ dependencies = [
 [[package]]
 name = "sails-idl-gen"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9007c11042e82c2a1edf720ff510ba0996af4ee549dce3faba455679533f06d9"
+source = "git+https://github.com/gear-tech/sails.git?rev=aab08733ee9ccdb809dc9b29c57dd411b2b917b1#aab08733ee9ccdb809dc9b29c57dd411b2b917b1"
 dependencies = [
  "convert_case 0.6.0",
  "handlebars",
@@ -10408,8 +10412,7 @@ dependencies = [
 [[package]]
 name = "sails-idl-parser"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "711bea52cfacceeca67312491b905bd2df6a1a4c0969be313381b30367b54092"
+source = "git+https://github.com/gear-tech/sails.git?rev=aab08733ee9ccdb809dc9b29c57dd411b2b917b1#aab08733ee9ccdb809dc9b29c57dd411b2b917b1"
 dependencies = [
  "lalrpop",
  "lalrpop-util",
@@ -10439,8 +10442,7 @@ dependencies = [
 [[package]]
 name = "sails-macros"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4efcda7e656871d17e79259110a6b17d0d660e2ab3f949a91d55c165bcbd4d0d"
+source = "git+https://github.com/gear-tech/sails.git?rev=aab08733ee9ccdb809dc9b29c57dd411b2b917b1#aab08733ee9ccdb809dc9b29c57dd411b2b917b1"
 dependencies = [
  "proc-macro-error",
  "sails-macros-core 0.4.0",
@@ -10476,8 +10478,7 @@ dependencies = [
 [[package]]
 name = "sails-macros-core"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3694ccad10e20282caf8111c39382c3e1f00433c5f0c48d4592e1f201b82f598"
+source = "git+https://github.com/gear-tech/sails.git?rev=aab08733ee9ccdb809dc9b29c57dd411b2b917b1#aab08733ee9ccdb809dc9b29c57dd411b2b917b1"
 dependencies = [
  "convert_case 0.6.0",
  "parity-scale-codec",
@@ -10534,10 +10535,10 @@ dependencies = [
 [[package]]
 name = "sails-rs"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67effccdaef6232976af5cabf54775bd57e362b09e201ceb5e732f8dd7194c9c"
+source = "git+https://github.com/gear-tech/sails.git?rev=aab08733ee9ccdb809dc9b29c57dd411b2b917b1#aab08733ee9ccdb809dc9b29c57dd411b2b917b1"
 dependencies = [
  "futures",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core-errors 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",

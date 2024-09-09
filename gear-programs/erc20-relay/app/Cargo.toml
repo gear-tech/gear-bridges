@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sails-rs = "0.4.0"
+sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
 ethereum-common.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
@@ -13,3 +13,12 @@ checkpoint_light_client-io.workspace = true
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 lazy_static = { version = "1.1", features = ["spin_no_std"] }
+
+[dev-dependencies]
+erc20-relay-client = { path = "../client" }
+futures.workspace = true
+gclient.workspace = true
+gstd.workspace = true
+sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1", features = ["gclient"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+hex-literal.workspace = true

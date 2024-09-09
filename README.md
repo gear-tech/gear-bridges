@@ -118,6 +118,9 @@ curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
 
+> [!NOTE]
+> To build `ring` crate follow [BUILDING.md](https://github.com/gear-tech/ring/blob/main/BUILDING.md).
+
 ### Run relayer
 
 Build workspace:

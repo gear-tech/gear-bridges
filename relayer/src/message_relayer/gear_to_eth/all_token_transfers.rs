@@ -4,10 +4,15 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
-use super::common::{
-    ethereum_block_listener::EthereumBlockListener, ethereum_message_sender::EthereumMessageSender,
-    gear_block_listener::GearBlockListener, merkle_root_extractor::MerkleRootExtractor,
-    message_queued_event_extractor::MessageQueuedEventExtractor,
+use crate::message_relayer::common::{
+    ethereum::{
+        block_listener::BlockListener as EthereumBlockListener,
+        merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+    },
+    gear::{
+        block_listener::BlockListener as GearBlockListener,
+        message_queued_event_extractor::MessageQueuedEventExtractor,
+    },
 };
 
 pub struct Relayer {
@@ -17,7 +22,7 @@ pub struct Relayer {
     message_sent_listener: MessageQueuedEventExtractor,
 
     merkle_root_extractor: MerkleRootExtractor,
-    message_sender: EthereumMessageSender,
+    message_sender: MessageSender,
 }
 
 impl MeteredService for Relayer {
@@ -54,7 +59,7 @@ impl Relayer {
 
         let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), gear_api.clone());
 
-        let message_sender = EthereumMessageSender::new(eth_api, gear_api);
+        let message_sender = MessageSender::new(eth_api, gear_api);
 
         Ok(Self {
             gear_block_listener,

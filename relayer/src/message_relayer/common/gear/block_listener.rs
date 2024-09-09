@@ -7,18 +7,18 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::GearBlockNumber;
+use crate::message_relayer::common::GearBlockNumber;
 
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
-pub struct GearBlockListener {
+pub struct BlockListener {
     gear_api: GearApi,
     from_block: u32,
 
     metrics: Metrics,
 }
 
-impl MeteredService for GearBlockListener {
+impl MeteredService for BlockListener {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -33,7 +33,7 @@ impl_metered_service! {
     }
 }
 
-impl GearBlockListener {
+impl BlockListener {
     pub fn new(gear_api: GearApi, from_block: u32) -> Self {
         Self {
             gear_api,

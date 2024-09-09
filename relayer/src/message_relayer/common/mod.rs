@@ -1,12 +1,8 @@
 use gear_rpc_client::dto::Message;
 use primitive_types::H256;
 
-pub mod ethereum_block_listener;
-pub mod ethereum_message_sender;
-pub mod gear_block_listener;
-pub mod merkle_root_extractor;
-pub mod message_paid_event_extractor;
-pub mod message_queued_event_extractor;
+pub mod ethereum;
+pub mod gear;
 pub mod paid_messages_filter;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]

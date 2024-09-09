@@ -7,7 +7,7 @@ use prometheus::IntCounter;
 use sails_rs::events::EventIo;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{GearBlockNumber, PaidMessage};
+use crate::message_relayer::common::{GearBlockNumber, PaidMessage};
 
 #[allow(dead_code)]
 mod bridging_payment_client {

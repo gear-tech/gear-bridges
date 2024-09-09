@@ -20,7 +20,6 @@ use ethereum_common::{
     utils::ReceiptEnvelope,
     H160, H256,
 };
-use ops::ControlFlow;
 use sails_rs::{
     gstd::{debug, msg, ExecContext, GStdExecContext},
     prelude::*,

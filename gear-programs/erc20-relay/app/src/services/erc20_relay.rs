@@ -1,4 +1,5 @@
 use super::*;
+use ops::ControlFlow::*;
 
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -23,54 +24,50 @@ impl<'a> Erc20Relay<'a> {
         let (fungible_token, receipt, event) = self.prepare(&message)?;
         let amount = u128::try_from(event.amount).map_err(|_| Error::InvalidAmount)?;
 
+        let EthToVaraEvent {
+            proof_block: BlockInclusionProof { block, mut headers },
+            proof,
+            transaction_index,
+            ..
+        } = message;
+
         // verify the proof of block inclusion
         let checkpoints = self.0.borrow().checkpoints;
-        let slot = message.proof_block.block.slot;
+        let slot = block.slot;
         let checkpoint = Self::request_checkpoint(checkpoints, slot).await?;
 
-        // TODO: sort headers
-        let ControlFlow::Continue(block_root_parent) =
-            message
-                .proof_block
-                .headers
+        headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
+        let Continue(block_root_parent) =
+            headers
                 .iter()
+                .rev()
                 .try_fold(checkpoint, |block_root_parent, header| {
                     let block_root = header.tree_hash_root();
-                    if block_root == block_root_parent {
-                        ControlFlow::Continue(block_root)
-                    } else {
-                        ControlFlow::Break(block_root_parent)
+                    match block_root == block_root_parent {
+                        true => Continue(header.parent_root),
+                        false => Break(()),
                     }
                 })
         else {
             return Err(Error::InvalidBlockProof);
         };
 
-        let block_root = message.proof_block.block.tree_hash_root();
+        let block_root = block.tree_hash_root();
         if block_root != block_root_parent {
             return Err(Error::InvalidBlockProof);
         }
 
         // verify Merkle-PATRICIA proof
-        let receipts_root = H256::from(
-            message
-                .proof_block
-                .block
-                .body
-                .execution_payload
-                .receipts_root
-                .0
-                 .0,
-        );
+        let receipts_root = H256::from(block.body.execution_payload.receipts_root.0 .0);
         let mut memory_db = memory_db::new();
-        for proof_node in &message.proof {
+        for proof_node in &proof {
             memory_db.insert(hash_db::EMPTY_PREFIX, proof_node);
         }
 
         let trie = TrieDB::new(&memory_db, &receipts_root).map_err(|_| Error::TrieDbFailure)?;
 
         let (key_db, value_db) =
-            eth_utils::rlp_encode_index_and_receipt(&message.transaction_index, &receipt);
+            eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
         match trie.get(&key_db) {
             Ok(Some(found_value)) if found_value == value_db => {
                 // TODO

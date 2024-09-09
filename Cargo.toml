@@ -13,6 +13,7 @@ members = [
     "gear-programs/vft-gateway/src/wasm",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
+    "gear-programs/vara-tokenizer",
     "utils-prometheus",
 ]
 
@@ -134,9 +135,9 @@ gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = "0.3.0"
-sails-client-gen = "0.3.0"
-sails-rs = "0.3.0"
+sails-idl-gen = "0.4.0"
+sails-client-gen = "0.4.0"
+sails-rs = "0.4.0"
 
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }

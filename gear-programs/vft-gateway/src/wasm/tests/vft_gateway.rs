@@ -237,10 +237,34 @@ fn test_mint_tokens_from_eth_client() {
 
     vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
 
-    vft_gateway.mint_tokens(ETH_CLIENT_ID, vft.id().into(), amount, receiver.into());
+    vft_gateway.mint_tokens(ETH_CLIENT_ID, vft.id().into(), amount, receiver.into(), false);
 
     let balance = vft.balance_of(receiver.into());
     assert_eq!(balance, amount);
+}
+
+#[test]
+fn test_mint_tokens_from_arbitrary_address() {
+    let system = System::new();
+    system.init_logger();
+
+    let vft = Program::token(&system, TOKEN_ID);
+    let gear_bridge_builtin =
+        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+    assert!(!gear_bridge_builtin
+        .send_bytes(ADMIN_ID, b"INIT")
+        .main_failed());
+
+    let vft_gateway = Program::vft_gateway(&system);
+
+    let receiver: u64 = 10000;
+    let amount = U256::from(10_000_000_000_u64);
+
+    vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
+
+    let wrond_address = 1010;
+
+    vft_gateway.mint_tokens(wrond_address, vft.id().into(), amount, receiver.into(), true);
 }
 
 #[test]

@@ -21,4 +21,6 @@ pub enum Error {
     BurnTokensFailed,
     BridgeBuiltinMessageFailed,
     TokensRefunded,
+    NotEthClient,
+    NotEnoughGas,
 }

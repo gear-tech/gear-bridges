@@ -119,6 +119,7 @@ where
         self.data_mut().vara_to_eth_token_id.remove(&vara_token_id);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_config(
         &mut self,
         gas_to_burn_tokens: Option<u64>,
@@ -170,7 +171,9 @@ where
         let data = self.data();
         let sender = self.exec_context.actor_id();
 
-        assert_eq!(sender, data.eth_client, "Only eth client can mint tokens");
+        if sender != data.eth_client {
+            return Err(Error::NotEthClient);
+        }
 
         let config = self.config();
         if gstd::exec::gas_available()
@@ -178,7 +181,7 @@ where
                 + config.gas_to_process_mint_request
                 + config.gas_for_reply_deposit
         {
-            panic!("Please attach more gas");
+            return Err(Error::NotEnoughGas);
         }
 
         let msg_id = gstd::msg::id();
@@ -254,15 +257,13 @@ where
             .get_message_info(&msg_id)
             .expect("Unexpected: msg status does not exist");
 
-        let (sender, amount, receiver, vara_token_id) = if let TxDetails::TransferVaraToEth {
+        let TxDetails::TransferVaraToEth {
             vara_token_id,
             sender,
             amount,
             receiver,
         } = msg_info.details
-        {
-            (sender, amount, receiver, vara_token_id)
-        } else {
+        else {
             panic!("Wrong message type")
         };
 

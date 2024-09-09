@@ -35,6 +35,8 @@ type Error = enum {
   BurnTokensFailed,
   BridgeBuiltinMessageFailed,
   TokensRefunded,
+  NotEthClient,
+  NotEnoughGas,
 };
 
 type MessageInfo = struct {

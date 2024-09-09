@@ -135,7 +135,7 @@ pub trait VftGateway {
         from: u64,
         msg_id: MessageId,
     ) -> Result<(U256, H160), Error>;
-    fn mint_tokens(&self, from: u64, vara_token_id: ActorId, amount: U256, receiver: ActorId);
+    fn mint_tokens(&self, from: u64, vara_token_id: ActorId, amount: U256, receiver: ActorId, error: bool);
     fn get_msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)>;
 }
 
@@ -235,7 +235,7 @@ impl VftGateway for Program<'_> {
         reply.2
     }
 
-    fn mint_tokens(&self, from: u64, vara_token_id: ActorId, amount: U256, receiver: ActorId) {
+    fn mint_tokens(&self, from: u64, vara_token_id: ActorId, amount: U256, receiver: ActorId, error: bool) {
         let payload = [
             "VftGateway".encode(),
             "MintTokens".encode(),
@@ -251,8 +251,11 @@ impl VftGateway for Program<'_> {
 
         let reply = <(String, String, Result<(), Error>)>::decode(&mut log_entry.payload())
             .expect("Unable to decode reply");
-        println!("{:?}", reply.2);
-        assert!(reply.2.is_ok());
+        if error {
+            assert!(reply.2.is_err());
+        } else {
+            assert!(reply.2.is_ok());
+        }
     }
 
     fn get_msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {

@@ -1,0 +1,13 @@
+[package]
+name = "vara-tokenizer-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sails-rs.workspace = true
+
+[build-dependencies]
+sails-client-gen.workspace = true
+
+[features]
+mockall = []

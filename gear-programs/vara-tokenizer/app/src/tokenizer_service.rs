@@ -1,22 +1,22 @@
-use crate::extended_vft_client::traits::Vft;
+use crate::{admin_service, extended_vft_client::traits::Vft};
 use sails_rs::{calls::*, gstd::msg, prelude::*};
 
 static mut STORAGE: Option<TokenizerConfig> = None;
 
 #[derive(Debug)]
 pub(crate) struct TokenizerConfig {
-    pub vft_program_id: ActorId,
+    pub vft_address: ActorId,
 }
 
-pub(crate) fn init(vft_program_id: ActorId) {
+pub(crate) fn init(vft_address: ActorId) {
     unsafe {
-        STORAGE = Some(TokenizerConfig { vft_program_id });
+        STORAGE = Some(TokenizerConfig { vft_address });
     };
 }
 
-// pub(crate) fn storage_mut() -> &'static mut TokenizerConfig {
-//     unsafe { STORAGE.as_mut().expect("program is not initialized") }
-// }
+pub(crate) fn storage_mut() -> &'static mut TokenizerConfig {
+    unsafe { STORAGE.as_mut().expect("program is not initialized") }
+}
 
 pub(crate) fn storage() -> &'static TokenizerConfig {
     unsafe { STORAGE.as_ref().expect("program is not initialized") }
@@ -45,34 +45,38 @@ where
     }
 
     pub async fn mint_from_value(&mut self) -> u128 {
-        let source = msg::source();
         let value = msg::value();
-        let vft_program_id = storage().vft_program_id;
+        if value == 0 {
+            return value;
+        }
+
+        let source = msg::source();
+        let vft_program_id = storage().vft_address;
 
         let success = self
             .vft_client
             .mint(source, value.into())
             .send_recv(vft_program_id)
             .await
-            .unwrap();
+            .expect("Failed to send message to vft program");
         if !success {
             panic!("mint failed");
         }
         self.notify_on(TokenizerEvent::Minted { to: source, value })
-            .unwrap();
+            .expect("Failed to send event");
         value
     }
 
     pub async fn burn_and_return_value(&mut self, value: u128) -> u128 {
         let source = msg::source();
-        let vft_program_id = storage().vft_program_id;
+        let vft_program_id = storage().vft_address;
 
         let success = self
             .vft_client
             .burn(source, value.into())
             .send_recv(vft_program_id)
             .await
-            .unwrap();
+            .expect("Failed to send message to vft program");
         if !success {
             panic!("burn failed");
         }
@@ -80,8 +84,16 @@ where
             from: source,
             value,
         })
-        .unwrap();
-        // TODO program::send_reply_with_value
+        .expect("Failed to send event");
+
+        // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+        msg::send_bytes_with_gas(source, vec![], 0, value)
+            .expect("Failed to send message with retuned value");
         value
+    }
+
+    pub fn update_vft_address(&mut self, new_vft_address: ActorId) {
+        admin_service::ensure_is_admin();
+        storage_mut().vft_address = new_vft_address;
     }
 }

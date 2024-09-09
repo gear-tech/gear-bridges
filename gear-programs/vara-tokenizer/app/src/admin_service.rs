@@ -26,16 +26,13 @@ pub(crate) fn storage() -> &'static AdminConfig {
     unsafe { STORAGE.as_ref().expect("program is not initialized") }
 }
 
-pub(crate) struct AdminService(());
-
-// private methods
-impl AdminService {
-    pub fn ensure_is_admin(&self) {
-        if !storage().admins.contains(&msg::source()) {
-            panic!("Not admin")
-        };
-    }
+pub(crate) fn ensure_is_admin() {
+    if !storage().admins.contains(&msg::source()) {
+        panic!("Not admin")
+    };
 }
+
+pub(crate) struct AdminService(());
 
 #[sails_rs::service]
 impl AdminService {
@@ -48,12 +45,15 @@ impl AdminService {
     }
 
     pub fn grant_admin_role(&mut self, to: ActorId) {
-        self.ensure_is_admin();
+        ensure_is_admin();
         storage_mut().admins.insert(to);
     }
 
     pub fn revoke_admin_role(&mut self, from: ActorId) {
-        self.ensure_is_admin();
+        ensure_is_admin();
+        if storage().admins.len() == 1 {
+            panic!("Can't revoke last admin role")
+        }
         storage_mut().admins.remove(&from);
     }
 }

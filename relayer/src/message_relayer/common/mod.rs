@@ -15,6 +15,9 @@ pub struct GearBlockNumber(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
 pub struct EthereumBlockNumber(pub u64);
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
+pub struct EthereumSlotNumber(pub u64);
+
 #[derive(Clone, Debug)]
 pub struct MessageInBlock {
     pub message: Message,

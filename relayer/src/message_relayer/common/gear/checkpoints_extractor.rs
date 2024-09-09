@@ -9,14 +9,14 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 
-use crate::message_relayer::common::{EthereumBlockNumber, GearBlockNumber};
+use crate::message_relayer::common::{EthereumSlotNumber, GearBlockNumber};
 
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
 
     gear_api: GearApi,
 
-    latest_checkpoint: Option<EthereumBlockNumber>,
+    latest_checkpoint: Option<EthereumSlotNumber>,
 
     metrics: Metrics,
 }
@@ -46,7 +46,7 @@ impl CheckpointsExtractor {
         }
     }
 
-    pub fn run(mut self, blocks: Receiver<GearBlockNumber>) -> Receiver<EthereumBlockNumber> {
+    pub fn run(mut self, blocks: Receiver<GearBlockNumber>) -> Receiver<EthereumSlotNumber> {
         let (sender, receiver) = channel();
 
         tokio::task::spawn_blocking(move || loop {
@@ -61,7 +61,7 @@ impl CheckpointsExtractor {
 
     async fn run_inner(
         &mut self,
-        sender: &Sender<EthereumBlockNumber>,
+        sender: &Sender<EthereumSlotNumber>,
         blocks: &Receiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
@@ -74,7 +74,7 @@ impl CheckpointsExtractor {
     async fn process_block_events(
         &mut self,
         block: u32,
-        sender: &Sender<EthereumBlockNumber>,
+        sender: &Sender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
         let block_hash = self.gear_api.block_number_to_hash(block).await?;
 
@@ -112,17 +112,17 @@ impl CheckpointsExtractor {
                 );
             }
             (Some(checkpoint), None) => {
-                self.latest_checkpoint = Some(EthereumBlockNumber(checkpoint.0));
+                self.latest_checkpoint = Some(EthereumSlotNumber(checkpoint.0));
 
                 self.metrics.latest_checkpoint_slot.set(checkpoint.0 as i64);
 
-                sender.send(EthereumBlockNumber(checkpoint.0))?;
+                sender.send(EthereumSlotNumber(checkpoint.0))?;
             }
             (Some(latest), Some(stored)) => {
                 if latest.0 > stored.0 {
                     self.metrics.latest_checkpoint_slot.set(latest.0 as i64);
 
-                    let latest = EthereumBlockNumber(latest.0);
+                    let latest = EthereumSlotNumber(latest.0);
 
                     self.latest_checkpoint = Some(latest);
 

@@ -38,6 +38,12 @@ sol! {
     }
 }
 
+sol!(
+    #[sol(rpc)]
+    IERC20Treasury,
+    "../out/IERC20Treasury.sol/IERC20Treasury.json"
+);
+
 impl ContentMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut ret: Vec<u8> = Vec::with_capacity(32 + 32 + 20 + self.data.len());

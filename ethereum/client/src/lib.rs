@@ -62,6 +62,8 @@ pub struct DepositEventEntry {
     pub to: H256,
     pub token: H160,
     pub amount: primitive_types::U256,
+
+    pub tx_hash: TxHash,
 }
 
 #[derive(Debug)]
@@ -169,16 +171,20 @@ impl EthApi {
             .await?
             .into_iter()
             .map(
-                |IERC20Treasury::Deposit {
-                     from,
-                     to,
-                     token,
-                     amount,
-                 }| DepositEventEntry {
+                |(
+                    IERC20Treasury::Deposit {
+                        from,
+                        to,
+                        token,
+                        amount,
+                    },
+                    tx_hash,
+                )| DepositEventEntry {
                     from: H160(*from.0),
                     to: H256(to.0),
                     token: H160(*token.0),
                     amount: primitive_types::U256::from_little_endian(&amount.to_le_bytes_vec()),
+                    tx_hash,
                 },
             )
             .collect())
@@ -321,7 +327,7 @@ where
         &self,
         contract_address: Address,
         block: u64,
-    ) -> Result<Vec<IERC20Treasury::Deposit>, Error> {
+    ) -> Result<Vec<(IERC20Treasury::Deposit, TxHash)>, Error> {
         let filter = Filter::new()
             .address(contract_address)
             .event_signature(IERC20Treasury::Deposit::SIGNATURE_HASH)
@@ -333,7 +339,15 @@ where
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
 
-        Ok(logs.into_iter().map(|(event, _)| event).collect())
+        logs.into_iter()
+            .map(|(event, log)| {
+                Ok((
+                    event,
+                    log.transaction_hash
+                        .ok_or(Error::ErrorFetchingTransaction)?,
+                ))
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]

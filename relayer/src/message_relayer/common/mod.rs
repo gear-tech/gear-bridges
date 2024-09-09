@@ -1,5 +1,6 @@
+use ethereum_client::TxHash;
 use gear_rpc_client::dto::Message;
-use primitive_types::H256;
+use primitive_types::{H160, H256, U256};
 
 pub mod ethereum;
 pub mod gear;
@@ -30,4 +31,14 @@ pub struct PaidMessage {
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub authority_set_id: AuthoritySetId,
+}
+
+#[derive(Clone, Debug)]
+pub struct ERC20DepositTx {
+    pub from: H160,
+    pub to: H256,
+    pub token: H160,
+    pub amount: U256,
+
+    pub tx_hash: TxHash,
 }

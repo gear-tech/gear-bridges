@@ -3,28 +3,12 @@ use sails_rs::{
     prelude::{collections::HashSet, *},
 };
 
-static mut STORAGE: Option<AdminConfig> = None;
-
 #[derive(Debug)]
 pub(crate) struct AdminConfig {
     pub admins: HashSet<ActorId>,
 }
 
-pub(crate) fn init(admin: ActorId) {
-    unsafe {
-        STORAGE = Some(AdminConfig {
-            admins: [admin].into(),
-        });
-    };
-}
-
-pub(crate) fn storage_mut() -> &'static mut AdminConfig {
-    unsafe { STORAGE.as_mut().expect("program is not initialized") }
-}
-
-pub(crate) fn storage() -> &'static AdminConfig {
-    unsafe { STORAGE.as_ref().expect("program is not initialized") }
-}
+static_storage!(AdminConfig);
 
 pub(crate) fn ensure_is_admin() {
     if !storage().admins.contains(&msg::source()) {

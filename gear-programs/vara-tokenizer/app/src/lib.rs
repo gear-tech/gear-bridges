@@ -1,7 +1,6 @@
 #![no_std]
 
 mod admin_service;
-mod extended_vft_client;
 mod tokenizer_service;
 
 use admin_service::AdminService;
@@ -23,8 +22,8 @@ impl VaraTokenizerProgram {
     }
 
     // Exposed tokenizer service
-    pub fn tokenizer(&self) -> TokenizerService<crate::extended_vft_client::Vft<GStdRemoting>> {
-        let vft_client = crate::extended_vft_client::Vft::new(GStdRemoting);
+    pub fn tokenizer(&self) -> TokenizerService<vft_client::Vft<GStdRemoting>> {
+        let vft_client = vft_client::Vft::new(GStdRemoting);
         TokenizerService::new(vft_client)
     }
 

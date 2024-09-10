@@ -1,5 +1,6 @@
-use crate::{admin_service, extended_vft_client::traits::Vft};
+use crate::admin_service;
 use sails_rs::{calls::*, gstd::msg, prelude::*};
+use vft_client::traits::Vft;
 
 static mut STORAGE: Option<TokenizerConfig> = None;
 
@@ -68,6 +69,10 @@ where
     }
 
     pub async fn burn_and_return_value(&mut self, value: u128) -> u128 {
+        if value == 0 {
+            return value;
+        }
+
         let source = msg::source();
         let vft_program_id = storage().vft_address;
 
@@ -90,6 +95,10 @@ where
         msg::send_bytes_with_gas(source, vec![], 0, value)
             .expect("Failed to send message with retuned value");
         value
+    }
+
+    pub fn vft_address(&self) -> ActorId {
+        storage().vft_address
     }
 
     pub fn update_vft_address(&mut self, new_vft_address: ActorId) {

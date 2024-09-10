@@ -13937,6 +13937,7 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 name = "vara-tokenizer"
 version = "0.1.0"
 dependencies = [
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sails-client-gen 0.4.0",
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
@@ -13944,6 +13945,7 @@ dependencies = [
  "vara-tokenizer",
  "vara-tokenizer-app",
  "vara-tokenizer-client",
+ "vft-client",
 ]
 
 [[package]]
@@ -13952,6 +13954,7 @@ version = "0.1.0"
 dependencies = [
  "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
+ "vft-client",
 ]
 
 [[package]]
@@ -13976,6 +13979,15 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vft-client"
+version = "0.1.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-rs 0.4.0",
+]
 
 [[package]]
 name = "vft-gateway-app"

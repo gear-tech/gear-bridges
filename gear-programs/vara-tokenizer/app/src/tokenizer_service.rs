@@ -2,26 +2,12 @@ use crate::admin_service;
 use sails_rs::{calls::*, gstd::msg, prelude::*};
 use vft_client::traits::Vft;
 
-static mut STORAGE: Option<TokenizerConfig> = None;
-
 #[derive(Debug)]
 pub(crate) struct TokenizerConfig {
     pub vft_address: ActorId,
 }
 
-pub(crate) fn init(vft_address: ActorId) {
-    unsafe {
-        STORAGE = Some(TokenizerConfig { vft_address });
-    };
-}
-
-pub(crate) fn storage_mut() -> &'static mut TokenizerConfig {
-    unsafe { STORAGE.as_mut().expect("program is not initialized") }
-}
-
-pub(crate) fn storage() -> &'static TokenizerConfig {
-    unsafe { STORAGE.as_ref().expect("program is not initialized") }
-}
+static_storage!(TokenizerConfig);
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]

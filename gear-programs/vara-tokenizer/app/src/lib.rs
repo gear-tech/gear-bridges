@@ -1,23 +1,28 @@
 #![no_std]
 
+#[macro_use]
+mod storage;
+
 mod admin_service;
 mod tokenizer_service;
 
-use admin_service::AdminService;
+use admin_service::{AdminConfig, AdminService};
 use sails_rs::{
     gstd::{calls::GStdRemoting, msg},
     prelude::*,
 };
-use tokenizer_service::TokenizerService;
+use tokenizer_service::{TokenizerConfig, TokenizerService};
 
 pub struct VaraTokenizerProgram(());
 
 #[sails_rs::program]
 impl VaraTokenizerProgram {
     // Program's constructor
-    pub fn new(vft_program_id: ActorId) -> Self {
-        tokenizer_service::init(vft_program_id);
-        admin_service::init(msg::source());
+    pub fn new(vft_address: ActorId) -> Self {
+        tokenizer_service::init(TokenizerConfig { vft_address });
+        admin_service::init(AdminConfig {
+            admins: [msg::source()].into(),
+        });
         Self(())
     }
 

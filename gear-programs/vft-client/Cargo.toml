@@ -1,11 +1,14 @@
 [package]
-name = "vara-tokenizer-app"
+name = "vft-client"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+mockall = { version = "0.12", optional = true }
 sails-rs.workspace = true
-vft-client = { path = "../../vft-client" }
 
 [build-dependencies]
 sails-client-gen.workspace = true
+
+[features]
+mocks = ["sails-rs/mockall", "dep:mockall"]

@@ -17,6 +17,8 @@ vara-tokenizer = { path = ".", features = ["wasm-binary"] }
 vara-tokenizer-client = { path = "client" }
 sails-rs = { version = "0.4.0", features = ["gtest"] }
 tokio = { version = "1.39", features = ["rt", "macros"] }
+gtest.workspace = true
+vft-client = { path = "../vft-client" }
 
 [features]
 wasm-binary = []

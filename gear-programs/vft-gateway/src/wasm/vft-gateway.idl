@@ -74,7 +74,7 @@ service VftGateway {
   MintTokens : (vara_token_id: actor_id, receiver: actor_id, amount: u256) -> result (null, Error);
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
   TransferVaraToEth : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
-  UpdateConfig : (gas_to_burn_tokens: opt u64, gas_to_mint_tokens: opt u64, gas_to_process_mint_request: opt u64, gas_for_reply_deposit: opt u64, gas_to_send_request_to_builtin: opt u64, reply_timeout: opt u32, gas_for_transfer_to_eth_msg: opt u64) -> null;
+  UpdateConfig : (config: Config) -> null;
   UpdateReceiverContractAddress : (new_receiver_contract_address: h160) -> null;
   query Admin : () -> actor_id;
   query GearBridgeBuiltin : () -> actor_id;

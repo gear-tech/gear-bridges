@@ -31,56 +31,61 @@ where
         Self { vft_client }
     }
 
-    pub async fn mint_from_value(&mut self) -> u128 {
+    pub async fn mint_from_value(&mut self) -> Result<u128, &'static str> {
         let value = msg::value();
         if value == 0 {
-            return value;
+            return Ok(value);
         }
 
         let source = msg::source();
         let vft_program_id = storage().vft_address;
 
-        let success = self
+        let result = self
             .vft_client
             .mint(source, value.into())
             .send_recv(vft_program_id)
-            .await
-            .expect("Failed to send message to vft program");
-        if !success {
-            panic!("mint failed");
+            .await;
+
+        if result.is_ok_and(|success| success) {
+            self.notify_on(TokenizerEvent::Minted { to: source, value })
+                .expect("Failed to send event");
+            return Ok(value);
         }
-        self.notify_on(TokenizerEvent::Minted { to: source, value })
-            .expect("Failed to send event");
-        value
+
+        // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+        msg::send_bytes_with_gas(source, vec![], 0, value)
+            .expect("Failed to send message with value");
+        Err("deposit failed")
     }
 
-    pub async fn burn_and_return_value(&mut self, value: u128) -> u128 {
+    pub async fn burn_and_return_value(&mut self, value: u128) -> Result<u128, &'static str> {
         if value == 0 {
-            return value;
+            return Ok(value);
         }
 
         let source = msg::source();
         let vft_program_id = storage().vft_address;
 
-        let success = self
+        let result = self
             .vft_client
             .burn(source, value.into())
             .send_recv(vft_program_id)
-            .await
-            .expect("Failed to send message to vft program");
-        if !success {
-            panic!("burn failed");
-        }
-        self.notify_on(TokenizerEvent::Burned {
-            from: source,
-            value,
-        })
-        .expect("Failed to send event");
+            .await;
 
-        // TODO reply with value `program::send_reply_with_value` when `sails` allows it
-        msg::send_bytes_with_gas(source, vec![], 0, value)
-            .expect("Failed to send message with retuned value");
-        value
+        if result.is_ok_and(|success| success) {
+            self.notify_on(TokenizerEvent::Burned {
+                from: source,
+                value,
+            })
+            .expect("Failed to send event");
+
+            // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+            msg::send_bytes_with_gas(source, vec![], 0, value)
+                .expect("Failed to send message with value");
+            return Ok(value);
+        }
+
+        Err("withdraw failed")
     }
 
     pub fn vft_address(&self) -> ActorId {

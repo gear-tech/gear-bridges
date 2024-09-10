@@ -28,7 +28,12 @@ impl WasmProgram for ExtendedVftMock {
     fn handle(&mut self, payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
         if payload.starts_with(vft_client::vft::io::Mint::ROUTE) {
             let mut input = &payload[vft_client::vft::io::Mint::ROUTE.len()..];
-            let (_to, _value): (ActorId, U256) = Decode::decode(&mut input).unwrap();
+            let (_to, value): (ActorId, U256) = Decode::decode(&mut input).unwrap();
+            // Mock error
+            if value >= U256::from(10_000_000_000_000u64) {
+                return Err("Value is too big");
+            }
+
             let reply = [vft_client::vft::io::Mint::ROUTE, true.encode().as_slice()].concat();
             return Ok(Some(reply));
         }

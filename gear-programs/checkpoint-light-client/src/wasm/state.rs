@@ -423,3 +423,61 @@ fn checkpoints_with_gaps() {
 
     compare_checkpoints(&data, &checkpoints);
 }
+
+#[test]
+fn checkpoints_get() {
+    use hex_literal::hex;
+
+    const COUNT: usize = 7;
+
+    // Holesky
+    let data = [
+        (
+            2_498_432,
+            hex!("192cbc312720ee203ed023837c7dd7783db6cee1f1b9d57411f348e8a143a308").into(),
+        ),
+        (
+            2_498_464,
+            hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
+        ),
+        (
+            2_498_496,
+            hex!("4185e76eb0865e9ae5f8ea7601407261d1db9e66ba10818ebe717976d9bf201c").into(),
+        ),
+        (
+            2_498_527,
+            hex!("e722020546e89a17228aa9365e5418aaf09d9c31b014a0b4df911a54702ccd57").into(),
+        ),
+        (
+          2_498_560,
+          hex!("b50cd206a8ba4019baad810bbcd4fe1871be4944ea9cb06e15259376e996afde").into(),
+        ),
+        (
+          2_498_592,
+          hex!("844300ded738bdad37cc202ad4ade0cc79f0e4aa311e8fee5668cb20341c52aa").into(),
+        ),
+        (
+          2_498_624,
+          hex!("aca973372ac65cd5203e1521ba941bbbf836c5e591a9b459ca061c79a5740023").into(),
+        ),
+    ];
+    assert_eq!(data.len(), COUNT);
+
+    let mut checkpoints = Checkpoints::<COUNT>::new();
+
+    for (slot, checkpoint) in &data {
+        checkpoints.push(*slot, *checkpoint);
+    }
+
+    assert!(checkpoints.checkpoint(2_498_625).is_err());
+
+    for i in 1..data.len() {
+        let (slot_previous, _checkpoint) = data[i - 1];
+        let (expected_slot, expected_checkpoint) = data[i];
+        for slot in (1 + slot_previous)..=expected_slot {
+            let (actual_slot, actual_checkpoint) = checkpoints.checkpoint(slot).unwrap();
+            assert_eq!(actual_slot, expected_slot, "slot = {slot}");
+            assert_eq!(actual_checkpoint, expected_checkpoint);
+        }
+    }
+}

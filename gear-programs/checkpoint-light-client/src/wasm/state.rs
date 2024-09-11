@@ -449,16 +449,16 @@ fn checkpoints_get() {
             hex!("e722020546e89a17228aa9365e5418aaf09d9c31b014a0b4df911a54702ccd57").into(),
         ),
         (
-          2_498_560,
-          hex!("b50cd206a8ba4019baad810bbcd4fe1871be4944ea9cb06e15259376e996afde").into(),
+            2_498_560,
+            hex!("b50cd206a8ba4019baad810bbcd4fe1871be4944ea9cb06e15259376e996afde").into(),
         ),
         (
-          2_498_592,
-          hex!("844300ded738bdad37cc202ad4ade0cc79f0e4aa311e8fee5668cb20341c52aa").into(),
+            2_498_592,
+            hex!("844300ded738bdad37cc202ad4ade0cc79f0e4aa311e8fee5668cb20341c52aa").into(),
         ),
         (
-          2_498_624,
-          hex!("aca973372ac65cd5203e1521ba941bbbf836c5e591a9b459ca061c79a5740023").into(),
+            2_498_624,
+            hex!("aca973372ac65cd5203e1521ba941bbbf836c5e591a9b459ca061c79a5740023").into(),
         ),
     ];
     assert_eq!(data.len(), COUNT);

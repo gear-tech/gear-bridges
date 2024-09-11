@@ -65,12 +65,13 @@ async fn init(network: Network) -> Result<()> {
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = utils::get_finality_update(&client_http, RPC_URL).await?;
-    let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
+    let slot = finality_update.finalized_header.slot;
+    let current_period = eth_utils::calculate_period(slot);
     let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
 
     println!(
         "finality_update slot = {}, period = {}",
-        finality_update.finalized_header.slot, current_period
+        slot, current_period
     );
 
     let update = match updates.pop() {

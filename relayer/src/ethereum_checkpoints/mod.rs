@@ -12,7 +12,7 @@ use futures::{
 };
 use gclient::{EventProcessor, GearApi, WSAddress};
 use parity_scale_codec::Decode;
-use reqwest::Client;
+use reqwest::{Client, ClientBuilder};
 use tokio::{
     signal::unix::{self, SignalKind},
     sync::mpsc::{self, Sender},
@@ -41,6 +41,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
     let RelayCheckpointsArgs {
         program_id,
         beacon_endpoint,
+        beacon_timeout,
         vara_domain,
         vara_port,
         vara_suri,
@@ -59,10 +60,14 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
         .expect("Expecting correct ProgramId");
 
+    let client_http = ClientBuilder::new()
+        .timeout(Duration::from_secs(beacon_timeout))
+        .build()
+        .expect("Reqwest client should be created");
+
     let mut signal_interrupt = unix::signal(SignalKind::interrupt()).expect("Set SIGINT handler");
 
     let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
-    let client_http = Client::new();
 
     sync_update::spawn_receiver(client_http.clone(), beacon_endpoint.clone(), sender);
 

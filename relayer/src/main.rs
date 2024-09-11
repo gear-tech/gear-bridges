@@ -141,9 +141,13 @@ struct RelayCheckpointsArgs {
     #[arg(long, env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS")]
     program_id: String,
 
-    /// Specify an endpoint providing Beacon API
+    /// Specify the endpoint providing Beacon API
     #[arg(long, env = "BEACON_ENDPOINT")]
     beacon_endpoint: String,
+
+    /// Specify the timeout in seconds for requests to the Beacon API endpoint
+    #[arg(long, default_value = "120", env = "BEACON_TIMEOUT")]
+    beacon_timeout: u64,
 
     /// Domain of the VARA RPC endpoint
     #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]

@@ -1,4 +1,4 @@
-use super::utils::{self, slots_batch, FinalityUpdateResponse};
+use super::utils::{self, slots_batch, BootstrapResponse, FinalityUpdateResponse, UpdateData};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
@@ -19,6 +19,8 @@ const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
     include_bytes!("./sepolia-finality-update-5_254_112.json");
 const FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./sepolia-finality-update-5_263_072.json");
+const UPDATE_640: &[u8; 57_202] = include_bytes!("./sepolia-update-640.json");
+const BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./sepolia-bootstrap-640.json");
 
 async fn common_upload_program(
     client: &GearApi,
@@ -65,12 +67,13 @@ async fn init(network: Network) -> Result<()> {
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = utils::get_finality_update(&client_http, RPC_URL).await?;
-    let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
+    let slot = finality_update.finalized_header.slot;
+    let current_period = eth_utils::calculate_period(slot);
     let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
 
     println!(
         "finality_update slot = {}, period = {}",
-        finality_update.finalized_header.slot, current_period
+        slot, current_period
     );
 
     let update = match updates.pop() {
@@ -419,11 +422,8 @@ async fn replaying_back() -> Result<()> {
     Ok(())
 }
 
-#[ignore]
 #[tokio::test]
 async fn sync_update_requires_replaying_back() -> Result<()> {
-    let client_http = Client::new();
-
     let finality_update: FinalityUpdateResponse =
         serde_json::from_slice(FINALITY_UPDATE_5_263_072).unwrap();
     let finality_update = finality_update.data;
@@ -433,18 +433,25 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     );
 
     let slot = finality_update.finalized_header.slot;
-    let current_period = eth_utils::calculate_period(slot);
-    let mut updates = utils::get_updates(&client_http, RPC_URL, current_period, 1).await?;
+    let mut updates: Vec<UpdateData> = serde_json::from_slice(UPDATE_640).unwrap();
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
         _ => unreachable!("Requested single update"),
     };
 
-    let checkpoint = update.finalized_header.tree_hash_root();
-    let checkpoint_hex = hex::encode(checkpoint);
+    let BootstrapResponse { data: bootstrap } = serde_json::from_slice(BOOTSTRAP_640).unwrap();
 
-    let bootstrap = utils::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
+    let checkpoint_update = update.finalized_header.tree_hash_root();
+    let checkpoint_bootstrap = bootstrap.header.tree_hash_root();
+    assert_eq!(
+        checkpoint_update,
+        checkpoint_bootstrap,
+        "checkpoint_update = {}, checkpoint_bootstrap = {}",
+        hex::encode(checkpoint_update),
+        hex::encode(checkpoint_bootstrap)
+    );
+
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
@@ -497,10 +504,13 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
 
     let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
     let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
-    assert!(matches!(
-        result_decoded,
-        HandleResult::SyncUpdate(Err(sync_update::Error::ReplayBackRequired { .. }))
-    ));
+    assert!(
+        matches!(
+            result_decoded,
+            HandleResult::SyncUpdate(Err(sync_update::Error::ReplayBackRequired { .. }))
+        ),
+        "result_decoded = {result_decoded:?}"
+    );
 
     Ok(())
 }

@@ -125,37 +125,26 @@ impl<const N: usize> Checkpoints<N> {
 
             Err(0) => Err(CheckpointError::OutDated),
 
-            Err(index) if index < self.slots.len() => {
+            Err(index) => {
                 let (index_previous, slot_previous) = self.slots[index - 1];
-                let (index_next, slot_next) = self.slots[index];
+                let maybe_next = self.slots.get(index);
 
-                let gap = match (slot_next - slot_previous) % SLOTS_PER_EPOCH {
-                    // both slots are divisable by SLOTS_PER_EPOCH and the distance
-                    // between them is greater than SLOTS_PER_EPOCH
-                    0 if slot_previous + SLOTS_PER_EPOCH < slot_next => true,
-                    _ => false,
-                };
-
-                let offset = ((slot - 1 - slot_previous) / SLOTS_PER_EPOCH + 1) as usize;
-                let slot_checkpoint = slot_previous + offset as u64 * SLOTS_PER_EPOCH;
-                if slot_previous % SLOTS_PER_EPOCH != 0
-                    || slot_next < slot_checkpoint
-                    || slot_next > slot_checkpoint + SLOTS_PER_EPOCH
-                    || gap
-                {
-                    Ok((slot_next, self.checkpoints[index_next]))
-                } else {
-                    Ok((slot_checkpoint, self.checkpoints[index_previous + offset]))
+                let count = maybe_next
+                    .map(|(index_next, _slot)| *index_next)
+                    .unwrap_or(self.checkpoints.len())
+                    - index_previous;
+                for i in 1..count {
+                    let slot_next = slot_previous + i as u64 * SLOTS_PER_EPOCH;
+                    if slot <= slot_next {
+                        return Ok((slot_next, self.checkpoints[index_previous + i]));
+                    }
                 }
-            }
 
-            _ => {
-                let offset = ((slot - 1 - slot_last) / SLOTS_PER_EPOCH + 1) as usize;
-                let slot_checkpoint = slot_last + offset as u64 * SLOTS_PER_EPOCH;
-                let index = index_last + offset;
-                match self.checkpoints.get(index) {
-                    Some(checkpoint) => Ok((slot_checkpoint, *checkpoint)),
+                match maybe_next {
                     None => Err(CheckpointError::NotPresent),
+                    Some((index_next, slot_next)) => {
+                        Ok((*slot_next, self.checkpoints[*index_next]))
+                    }
                 }
             }
         }

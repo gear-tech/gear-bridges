@@ -77,6 +77,7 @@ impl DepositEventExtractor {
             .fetch_deposit_events(self.erc20_treasury_address, block.0)
             .await?;
 
+        // TODO: fetch slot number by block number.
         let slot_number = todo!();
 
         self.metrics

@@ -1,10 +1,10 @@
-use super::msg_tracker::TransactionDetails;
+use super::msg_tracker::TxDetails;
 use super::{msg_tracker_mut, utils, vft::vft::io as vft_io, Config, Error, MessageStatus};
 
 use sails_rs::prelude::*;
 
 pub async fn burn_tokens(
-    token_id: ActorId,
+    vara_token_id: ActorId,
     sender: ActorId,
     receiver: H160,
     amount: U256,
@@ -13,7 +13,12 @@ pub async fn burn_tokens(
 ) -> Result<(), Error> {
     let bytes: Vec<u8> = vft_io::Burn::encode_call(sender, amount);
 
-    let transaction_details = TransactionDetails::new(sender, amount, receiver, token_id);
+    let transaction_details = TxDetails::TransferVaraToEth {
+        vara_token_id,
+        sender,
+        amount,
+        receiver,
+    };
 
     msg_tracker_mut().insert_message_info(
         msg_id,
@@ -23,7 +28,7 @@ pub async fn burn_tokens(
 
     utils::set_critical_hook(msg_id);
     utils::send_message_with_gas_for_reply(
-        token_id,
+        vara_token_id,
         bytes,
         config.gas_to_burn_tokens,
         config.gas_for_reply_deposit,
@@ -36,15 +41,14 @@ pub async fn burn_tokens(
 
 pub async fn mint_tokens(
     token_id: ActorId,
-    sender: ActorId,
+    receiver: ActorId,
     amount: U256,
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
     msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToMintTokens);
 
-    let bytes: Vec<u8> = vft_io::Mint::encode_call(sender, amount);
-
+    let bytes: Vec<u8> = vft_io::Mint::encode_call(receiver, amount);
     utils::send_message_with_gas_for_reply(
         token_id,
         bytes,

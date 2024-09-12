@@ -10,15 +10,22 @@ pub struct MessageTracker {
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct MessageInfo {
     pub status: MessageStatus,
-    pub details: TransactionDetails,
+    pub details: TxDetails,
 }
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub struct TransactionDetails {
-    vara_token_id: ActorId,
-    sender: ActorId,
-    amount: U256,
-    receiver: H160,
+pub enum TxDetails {
+    TransferVaraToEth {
+        vara_token_id: ActorId,
+        sender: ActorId,
+        amount: U256,
+        receiver: H160,
+    },
+    MintTokens {
+        vara_token_id: ActorId,
+        receiver: ActorId,
+        amount: U256,
+    },
 }
 
 impl MessageTracker {
@@ -26,7 +33,7 @@ impl MessageTracker {
         &mut self,
         msg_id: MessageId,
         status: MessageStatus,
-        details: TransactionDetails,
+        details: TxDetails,
     ) {
         self.message_info
             .insert(msg_id, MessageInfo { status, details });
@@ -110,19 +117,4 @@ pub enum MessageStatus {
     MintTokensStep,
 
     MessageProcessedWithSuccess(U256),
-}
-
-impl TransactionDetails {
-    pub fn new(sender: ActorId, amount: U256, receiver: H160, vara_token_id: ActorId) -> Self {
-        Self {
-            vara_token_id,
-            sender,
-            amount,
-            receiver,
-        }
-    }
-
-    pub fn data(&self) -> (ActorId, U256, H160, ActorId) {
-        (self.sender, self.amount, self.receiver, self.vara_token_id)
-    }
 }

@@ -3,6 +3,27 @@ use committee::{Error as CommitteeError, Update as CommitteeUpdate};
 use gstd::debug;
 
 pub async fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, sync_update: SyncCommitteeUpdate) {
+    if eth_utils::calculate_epoch(state.finalized_header.slot) + io::sync_update::MAX_EPOCHS_GAP
+        <= eth_utils::calculate_epoch(sync_update.finalized_header.slot)
+    {
+        let result = HandleResult::SyncUpdate(Err(io::sync_update::Error::ReplayBackRequired {
+            replay_back: state
+                .replay_back
+                .as_ref()
+                .map(|replay_back| meta::ReplayBack {
+                    finalized_header: replay_back.finalized_header.slot,
+                    last_header: replay_back.last_header.slot,
+                }),
+            checkpoint: state
+                .checkpoints
+                .last()
+                .expect("The program should be initialized so there is a checkpoint"),
+        }));
+        msg::reply(result, 0).expect("Unable to reply with `HandleResult::SyncUpdate::Error`");
+
+        return;
+    }
+
     let (finalized_header_update, committee_update) = match verify(
         &state.network,
         &state.finalized_header,
@@ -23,28 +44,6 @@ pub async fn handle(state: &mut State<STORED_CHECKPOINTS_COUNT>, sync_update: Sy
     };
 
     if let Some(finalized_header) = finalized_header_update {
-        if eth_utils::calculate_epoch(state.finalized_header.slot) + io::sync_update::MAX_EPOCHS_GAP
-            <= eth_utils::calculate_epoch(finalized_header.slot)
-        {
-            let result =
-                HandleResult::SyncUpdate(Err(io::sync_update::Error::ReplayBackRequired {
-                    replay_back: state
-                        .replay_back
-                        .as_ref()
-                        .map(|replay_back| meta::ReplayBack {
-                            finalized_header: replay_back.finalized_header.slot,
-                            last_header: replay_back.last_header.slot,
-                        }),
-                    checkpoint: state
-                        .checkpoints
-                        .last()
-                        .expect("The program should be initialized so there is a checkpoint"),
-                }));
-            msg::reply(result, 0).expect("Unable to reply with `HandleResult::SyncUpdate::Error`");
-
-            return;
-        }
-
         state
             .checkpoints
             .push(finalized_header.slot, finalized_header.tree_hash_root());

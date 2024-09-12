@@ -21,12 +21,12 @@ macro_rules! impl_metered_service {
         $vis:vis struct $struct_name:ident {
             $(
                 $(#[$($attributes:tt)*])*
-                $field_vis:vis $field_name:ident: $field_type:ty
+                $field_vis:vis $field_name:ident : $field_type:ty = $constructor:expr
             ),*
             $(,)?
         }
     ) => {
-        #[derive(Clone, Debug)]
+        #[derive(Clone)]
         $(#[$($struct_attributes)*])*
         $vis struct $struct_name {
             $(
@@ -49,6 +49,20 @@ macro_rules! impl_metered_service {
                         $field_name
                     ),*
                 ]
+            }
+        }
+
+        impl $struct_name {
+            $vis fn new() -> Self {
+                let new_inner = || -> prometheus::Result<Self> {
+                    Ok(Self {
+                        $(
+                            $field_name: $constructor ?
+                        ),*
+                    })
+                };
+
+                new_inner().expect("Failed to create metrics")
             }
         }
     }

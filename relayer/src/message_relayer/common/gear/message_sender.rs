@@ -1,9 +1,9 @@
 use std::sync::mpsc::Receiver;
 
 use futures::executor::block_on;
+use gclient::GearApi;
 use gear_core::ids::MessageId;
-use gear_rpc_client::GearApi;
-use prometheus::{Gauge, IntGauge};
+use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::{ERC20DepositTx, EthereumSlotNumber};
@@ -30,7 +30,7 @@ impl_metered_service! {
             "gear_message_sender_messages_waiting_finality",
             "Amount of messages waiting for finality on gear",
         ),
-        fee_payer_balance: Gauge = Gauge::new(
+        fee_payer_balance: IntGauge = IntGauge::new(
             "gear_message_sender_fee_payer_balance",
             "Transaction fee payer balance",
         )
@@ -70,7 +70,7 @@ impl MessageSender {
         let mut latest_checkpoint_slot = None;
 
         loop {
-            // TODO: update balance metric.
+            self.update_balance_metric().await?;
 
             for checkpoint in checkpoints.try_iter() {
                 if latest_checkpoint_slot.unwrap_or_default() < checkpoint {
@@ -91,8 +91,7 @@ impl MessageSender {
 
             for i in (0..waiting_checkpoint.len()).rev() {
                 if waiting_checkpoint[i].slot_number <= latest_checkpoint_slot.unwrap_or_default() {
-                    // TODO: Submit tx
-                    let message_id = todo!();
+                    let message_id = self.submit_message(&waiting_checkpoint[i]).await?;
 
                     let message = waiting_checkpoint.remove(i);
                     waiting_finality.push((message, message_id));
@@ -111,5 +110,25 @@ impl MessageSender {
                 .messages_waiting_finality
                 .set(waiting_finality.len() as i64);
         }
+    }
+
+    async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<MessageId> {
+        // TODO: submit message to gear.
+
+        todo!()
+    }
+
+    async fn update_balance_metric(&self) -> anyhow::Result<()> {
+        let balance = self
+            .gear_api
+            .total_balance(self.gear_api.account_id())
+            .await?;
+
+        let balance = balance / 1_000_000_000_000;
+        let balance: i64 = balance.try_into().unwrap_or(i64::MAX);
+
+        self.metrics.fee_payer_balance.set(balance);
+
+        Ok(())
     }
 }

@@ -9,6 +9,8 @@ members = [
     "ethereum-common",
     "gear-programs/bridging-payment",
     "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/bridging-payment-vara-supply",
+    "gear-programs/bridging-payment-vara-supply/src/wasm",
     "gear-programs/vft-gateway",
     "gear-programs/vft-gateway/src/wasm",
     "gear-programs/vft-treasury",
@@ -37,6 +39,8 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 
 bridging_payment = { path = "gear-programs/bridging-payment" }
 bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
+bridging_payment_vara_supply = { path = "gear-programs/bridging-payment-vara-supply" }
+bridging_payment_vara_supply_wasm = { path = "gear-programs/bridging-payment-vara-supply/src/wasm" }
 vft-gateway-app = { path = "gear-programs/vft-gateway" }
 vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
 vft-treasury-app = { path = "gear-programs/vft-treasury" }

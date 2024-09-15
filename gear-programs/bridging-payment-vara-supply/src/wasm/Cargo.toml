@@ -1,0 +1,24 @@
+[package]
+name = "bridging_payment_vara_supply_wasm"
+version.workspace = true
+edition.workspace = true 
+
+[dependencies]
+bridging_payment_vara_supply.workspace = true
+
+[build-dependencies]
+gwasm-builder.workspace = true
+sails-idl-gen.workspace = true
+bridging_payment_vara_supply.workspace = true
+
+[dev-dependencies]
+gtest.workspace = true
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
+vft_treasury_wasm.workspace = true
+vft-treasury-app.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+sails-rs.workspace = true
+
+[lib]
+crate-type = ["rlib"]

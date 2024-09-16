@@ -1,38 +1,50 @@
-mod utils;
-
-use gtest::Program;
-use sails_rs::calls::*;
-use utils::{init_remoting, ExtendedVftMock, ADMIN_ID, VFT_PROGRAM_ID};
+use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vara_tokenizer_client::traits::*;
+
+pub const ADMIN_ID: u64 = 42;
+
+pub fn init_remoting() -> (GTestRemoting, CodeId) {
+    let remoting = GTestRemoting::new(ADMIN_ID.into());
+    remoting.system().mint_to(ADMIN_ID, 100_000_000_000_000);
+    remoting.system().init_logger();
+
+    // Submit program code into the system
+    let program_code_id = remoting.system().submit_code(vara_tokenizer::WASM_BINARY);
+    (remoting, program_code_id)
+}
 
 #[tokio::test]
 async fn factory_works() {
     let (remoting, program_code_id) = init_remoting();
-    let vft_program = Program::mock_with_id(remoting.system(), VFT_PROGRAM_ID, ExtendedVftMock);
 
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new(vft_program.id()) // Call program's constructor (see app/src/lib.rs:29)
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
 
     let client = vara_tokenizer_client::Tokenizer::new(remoting.clone());
 
-    let vft_adresss = client.vft_address().recv(program_id).await.expect("Failed");
-    assert_eq!(vft_adresss, vft_program.id());
+    let total_supply = client
+        .total_supply()
+        .recv(program_id)
+        .await
+        .expect("Failed");
+
+    // assert
+    assert!(total_supply.is_zero());
 }
 
 #[tokio::test]
 async fn mint_from_value_works() {
     let (remoting, program_code_id) = init_remoting();
-    let vft_program = Program::mock_with_id(remoting.system(), VFT_PROGRAM_ID, ExtendedVftMock);
 
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new(vft_program.id()) // Call program's constructor (see app/src/lib.rs:29)
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -52,40 +64,66 @@ async fn mint_from_value_works() {
 
     let balance = remoting.system().balance_of(ADMIN_ID);
     let program_balance = remoting.system().balance_of(program_id);
+    // TODO update test after next `gtest` release
     assert_eq!(balance, initial_balance - mint_value);
     assert_eq!(program_balance, mint_value);
 }
 
 #[tokio::test]
-async fn mint_from_value_fails() {
+async fn burn_and_return_value_works() {
     let (remoting, program_code_id) = init_remoting();
-    let vft_program = Program::mock_with_id(remoting.system(), VFT_PROGRAM_ID, ExtendedVftMock);
 
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new(vft_program.id())
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
 
-    let _initial_balance = remoting.system().balance_of(ADMIN_ID);
-    let mint_value = 20_000_000_000_000;
+    let initial_balance = remoting.system().balance_of(ADMIN_ID);
+    let mint_value = 10_000_000_000_000;
 
     let mut client = vara_tokenizer_client::Tokenizer::new(remoting.clone());
 
-    let err = client
+    client
         .mint_from_value()
         .with_value(mint_value)
         .send_recv(program_id)
         .await
         .expect("Failed send_recv")
-        .expect_err("Should fail to mint from value");
-    assert_eq!(err, "deposit failed");
+        .expect("Failed to mint from value");
 
-    let _balance = remoting.system().balance_of(ADMIN_ID);
-    let _program_balance = remoting.system().balance_of(program_id);
-    // TODO asserts not working
+    let client_balance = client
+        .balance_of(ADMIN_ID.into())
+        .recv(program_id)
+        .await
+        .unwrap();
+
+    let balance = remoting.system().balance_of(ADMIN_ID);
+    let program_balance = remoting.system().balance_of(program_id);
+    assert_eq!(balance, initial_balance - mint_value);
+    assert_eq!(program_balance, mint_value);
+    assert_eq!(client_balance, mint_value.into());
+
+    client
+        .burn_and_return_value(mint_value)
+        .send_recv(program_id)
+        .await
+        .expect("Failed send_recv")
+        .expect("Failed to burn and return value");
+
+    let client_balance = client
+        .balance_of(ADMIN_ID.into())
+        .recv(program_id)
+        .await
+        .unwrap();
+
+    let balance = remoting.system().balance_of(ADMIN_ID);
+    let program_balance = remoting.system().balance_of(program_id);
+    // TODO update test after next `gtest` release
+    dbg!(balance, program_balance, client_balance);
+    assert!(client_balance.is_zero());
     // assert_eq!(balance, initial_balance);
     // assert_eq!(program_balance, 0);
 }
@@ -93,12 +131,11 @@ async fn mint_from_value_fails() {
 #[tokio::test]
 async fn admin_service_works() {
     let (remoting, program_code_id) = init_remoting();
-    let vft_program = Program::mock_with_id(remoting.system(), VFT_PROGRAM_ID, ExtendedVftMock);
 
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new(vft_program.id())
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();

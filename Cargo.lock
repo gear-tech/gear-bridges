@@ -3714,7 +3714,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.2.1",
  "scale-info",
- "vft-service",
+ "vft-service 0.1.0 (git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0)",
 ]
 
 [[package]]
@@ -13956,7 +13956,7 @@ version = "0.1.0"
 dependencies = [
  "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
- "vft-client",
+ "vft-service 0.1.0",
 ]
 
 [[package]]
@@ -14007,6 +14007,18 @@ dependencies = [
  "sails-rs 0.4.0",
  "scale-info",
  "tokio",
+]
+
+[[package]]
+name = "vft-service"
+version = "0.1.0"
+dependencies = [
+ "env_logger 0.9.3",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log",
+ "sails-rs 0.4.0",
 ]
 
 [[package]]

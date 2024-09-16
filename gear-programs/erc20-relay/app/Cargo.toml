@@ -22,3 +22,11 @@ gstd.workspace = true
 sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1", features = ["gclient"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 hex-literal.workspace = true
+hex.workspace = true
+
+[build-dependencies]
+sails-client-gen = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
+
+[features]
+gas_calculation = []
+mocks = []

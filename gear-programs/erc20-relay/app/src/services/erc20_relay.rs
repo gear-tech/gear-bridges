@@ -1,5 +1,13 @@
+// Incorporate code generated based on the IDL file
+#[allow(dead_code)]
+mod vft {
+    include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
+}
+
 use super::*;
 use ops::ControlFlow::*;
+use sails_rs::{calls::ActionIo, gstd};
+use vft::vft_gateway;
 
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -8,21 +16,29 @@ enum Event {
     Relayed {
         fungible_token: ActorId,
         to: ActorId,
-        amount: u128,
+        amount: U256,
     },
 }
 
-pub struct Erc20Relay<'a>(&'a RefCell<State>);
+pub struct Erc20Relay<'a, ExecContext> {
+    state: &'a RefCell<State>,
+    exec_context: ExecContext,
+}
 
 #[sails_rs::service(events = Event)]
-impl<'a> Erc20Relay<'a> {
-    pub fn new(state: &'a RefCell<State>) -> Self {
-        Self(state)
+impl<'a, T> Erc20Relay<'a, T>
+where
+    T: ExecContext,
+{
+    pub fn new(state: &'a RefCell<State>, exec_context: T) -> Self {
+        Self {
+            state,
+            exec_context,
+        }
     }
 
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
         let (fungible_token, receipt, event) = self.prepare(&message)?;
-        let amount = u128::try_from(event.amount).map_err(|_| Error::InvalidAmount)?;
 
         let EthToVaraEvent {
             proof_block: BlockInclusionProof { block, mut headers },
@@ -32,7 +48,7 @@ impl<'a> Erc20Relay<'a> {
         } = message;
 
         // verify the proof of block inclusion
-        let checkpoints = self.0.borrow().checkpoints;
+        let checkpoints = self.state.borrow().checkpoints;
         let slot = block.slot;
         let checkpoint = Self::request_checkpoint(checkpoints, slot).await?;
 
@@ -69,23 +85,36 @@ impl<'a> Erc20Relay<'a> {
         let (key_db, value_db) =
             eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
         match trie.get(&key_db) {
-            Ok(Some(found_value)) if found_value == value_db => {
-                // TODO
-                debug!("Proofs are valid. Mint the tokens");
-                // TODO: save slot and index of the processed transaction
-
-                self.notify_on(Event::Relayed {
-                    fungible_token,
-                    to: ActorId::from(event.to.0),
-                    amount,
-                })
-                .unwrap();
-
-                Ok(())
-            }
-
-            _ => Err(Error::InvalidReceiptProof),
+            Ok(Some(found_value)) if found_value == value_db => (),
+            _ => return Err(Error::InvalidReceiptProof),
         }
+
+        let amount = U256::from_little_endian(event.amount.as_le_slice());
+        let receiver = ActorId::from(event.to.0);
+        let call_payload =
+            vft_gateway::io::MintTokens::encode_call(fungible_token, receiver, amount);
+        let (vft, reply_timeout, reply_deposit) = {
+            let state = self.state.borrow();
+
+            (state.vft, state.reply_timeout, state.reply_deposit)
+        };
+        gstd::msg::send_bytes_for_reply(vft, call_payload, 0, reply_deposit)
+            .map_err(|_| Error::SendFailure)?
+            .up_to(Some(reply_timeout))
+            .map_err(|_| Error::ReplyTimeout)?
+            .handle_reply(move || handle_reply(slot, transaction_index))
+            .map_err(|_| Error::ReplyHook)?
+            .await
+            .map_err(|_| Error::ReplyFailure)?;
+
+        self.notify_on(Event::Relayed {
+            fungible_token,
+            to: ActorId::from(event.to.0),
+            amount,
+        })
+        .expect("Unable to notify about relaying tokens");
+
+        Ok(())
     }
 
     fn prepare(
@@ -102,7 +131,7 @@ impl<'a> Erc20Relay<'a> {
         }
 
         let slot = message.proof_block.block.slot;
-        let mut state = self.0.borrow_mut();
+        let state = self.state.borrow_mut();
         // decode log and pick the corresponding fungible token address if any
         let (fungible_token, event) = receipt
             .logs()
@@ -123,23 +152,19 @@ impl<'a> Erc20Relay<'a> {
             .ok_or(Error::NotSupportedEvent)?;
 
         // check for double spending
-        let index = state
-            .transactions
-            .binary_search_by(
-                |(slot_old, transaction_index_old)| match slot.cmp(slot_old) {
-                    Ordering::Equal => message.transaction_index.cmp(transaction_index_old),
-                    ordering => ordering,
-                },
-            )
-            .err()
-            .ok_or(Error::AlreadyProcessed)?;
+        let transactions = transactions_mut();
+        let key = (slot, message.transaction_index);
+        if transactions.contains(&key) {
+            return Err(Error::AlreadyProcessed);
+        }
 
-        if state.transactions.capacity() <= state.transactions.len() {
-            if index == state.transactions.len() - 1 {
-                return Err(Error::TooOldTransaction);
-            }
-
-            state.transactions.pop();
+        if CAPACITY <= transactions.len()
+            && transactions
+                .first()
+                .map(|first| &key < first)
+                .unwrap_or(false)
+        {
+            return Err(Error::TooOldTransaction);
         }
 
         Ok((fungible_token, receipt, event))
@@ -160,4 +185,75 @@ impl<'a> Erc20Relay<'a> {
             _ => panic!("Unexpected result to `GetCheckpointFor` request"),
         }
     }
+
+    pub fn fill_transactions(&mut self) -> bool {
+        #[cfg(feature = "gas_calculation")]
+        {
+            let transactions = transactions_mut();
+            if CAPACITY == transactions.len() {
+                return false;
+            }
+
+            let count = cmp::min(CAPACITY - transactions.len(), CAPACITY_STEP_SIZE);
+            let (last, _) = transactions.last().copied().unwrap();
+            for i in 0..count {
+                transactions.insert((last + 1, i as u64));
+            }
+
+            true
+        }
+
+        #[cfg(not(feature = "gas_calculation"))]
+        panic!("Please rebuild with enabled `gas_calculation` feature")
+    }
+
+    pub async fn calculate_gas_for_reply(
+        &mut self,
+        _slot: u64,
+        _transaction_index: u64,
+    ) -> Result<(), Error> {
+        #[cfg(feature = "gas_calculation")]
+        {
+            let call_payload = vft_gateway::io::MintTokens::encode_call(
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            );
+            let (reply_timeout, reply_deposit) = {
+                let state = self.state.borrow();
+
+                (state.reply_timeout, state.reply_deposit)
+            };
+            let source = self.exec_context.actor_id();
+            gstd::msg::send_bytes_for_reply(source, call_payload, 0, reply_deposit)
+                .map_err(|_| Error::SendFailure)?
+                .up_to(Some(reply_timeout))
+                .map_err(|_| Error::ReplyTimeout)?
+                .handle_reply(move || handle_reply(_slot, _transaction_index))
+                .map_err(|_| Error::ReplyHook)?
+                .await
+                .map_err(|_| Error::ReplyFailure)?;
+
+            Ok(())
+        }
+
+        #[cfg(not(feature = "gas_calculation"))]
+        panic!("Please rebuild with enabled `gas_calculation` feature")
+    }
+}
+
+fn handle_reply(slot: u64, transaction_index: u64) {
+    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
+    let reply = vft_gateway::io::MintTokens::decode_reply(&reply_bytes)
+        .expect("Unable to decode MintTokens reply");
+    if let Err(e) = reply {
+        panic!("Request to mint tokens failed: {e:?}");
+    }
+
+    let transactions = transactions_mut();
+    if CAPACITY <= transactions.len() {
+        transactions.pop_first();
+    }
+
+    transactions.insert((slot, transaction_index));
 }

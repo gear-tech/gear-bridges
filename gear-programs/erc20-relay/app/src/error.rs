@@ -16,5 +16,6 @@ pub enum Error {
     InvalidBlockProof,
     TrieDbFailure,
     InvalidReceiptProof,
-    InvalidAmount,
+    ReplyTimeout,
+    ReplyHook,
 }

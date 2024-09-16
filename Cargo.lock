@@ -3569,8 +3569,10 @@ dependencies = [
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
  "hex-literal",
  "lazy_static",
+ "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
  "tokio",
 ]

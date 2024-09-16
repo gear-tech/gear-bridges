@@ -13,3 +13,4 @@ sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", rev = "aab0873
 
 [features]
 wasm-binary = []
+gas_calculation = ["erc20-relay-app/gas_calculation"]

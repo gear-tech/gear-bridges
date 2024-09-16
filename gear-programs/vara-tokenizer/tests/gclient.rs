@@ -129,11 +129,7 @@ async fn burn_and_return_value_works() {
         .expect("Failed send_recv")
         .expect("Failed to mint from value");
 
-    let client_balance = client
-        .balance_of(admin_id.into())
-        .recv(program_id)
-        .await
-        .unwrap();
+    let client_balance = client.balance_of(admin_id).recv(program_id).await.unwrap();
 
     let balance = api
         .free_balance(admin_id)
@@ -154,11 +150,7 @@ async fn burn_and_return_value_works() {
         .expect("Failed send_recv")
         .expect("Failed to burn and return value");
 
-    let client_balance = client
-        .balance_of(admin_id.into())
-        .recv(program_id)
-        .await
-        .unwrap();
+    let client_balance = client.balance_of(admin_id).recv(program_id).await.unwrap();
 
     let balance = api
         .free_balance(admin_id)

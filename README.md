@@ -2,6 +2,17 @@
 
 Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge facilitating the transfer of assets between Ethereum and Gear-based blockchains, such as the [Vara network](https://vara.network/).
 
+## Security
+
+> [!NOTE]
+> This code has not yet been fully audited and therefore shouldn't be used in production.
+
+[Ethernal](https://ethernal.tech/) team have performed partial [audit](https://github.com/gear-tech/gear-bridges/blob/main/audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):
+
+- [prover](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/prover)
+- `plonky2` [circuits](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/circuits) for crypto primitives
+- `ethereum` [smart-contracts](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/ethereum)
+
 ## High-Level Bi-Directional `Gear <-> Eth` Design
 
 The **Gear <-> Eth** transfer protocol allows relaying messages from Gear-based blockchains to Ethereum and back. These messages consist of generic data defined by protocols built on top of the bridge. The protocol doesn't guarantee the order in which messages are relayed.

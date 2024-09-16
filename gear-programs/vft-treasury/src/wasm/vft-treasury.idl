@@ -1,0 +1,20 @@
+type InitConfig = struct {
+  ethereum_event_client: actor_id,
+};
+
+constructor {
+  New : (init_config: InitConfig);
+};
+
+service VftTreasury {
+  Deposit : (token: actor_id, amount: u256, to: h160) -> null;
+  UpdateEthereumEventClientAddress : (new_address: actor_id) -> null;
+  Withdraw : (token: actor_id, recepient: actor_id, amount: u256) -> null;
+  query Admin : () -> actor_id;
+
+  events {
+    Deposit: struct { from: actor_id, to: h160, token: actor_id, amount: u256 };
+    Withdraw: struct { receiver: actor_id, token: actor_id, amount: u256 };
+  }
+};
+

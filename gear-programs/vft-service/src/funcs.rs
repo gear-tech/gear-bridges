@@ -601,7 +601,7 @@ mod tests {
         }
 
         pub fn balances_map<const N: usize>(content: [(ActorId, U256); N]) -> BalancesMap {
-            content.into_iter().map(|(k, v)| (k, v)).collect()
+            content.into_iter().collect()
         }
 
         pub fn alice() -> ActorId {

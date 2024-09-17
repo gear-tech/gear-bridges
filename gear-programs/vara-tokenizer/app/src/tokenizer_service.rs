@@ -38,6 +38,7 @@ impl TokenizerService {
         let to = msg::source();
         if let Err(err) = vft_funcs::mint(to, value.into()) {
             // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+            // see https://github.com/gear-tech/sails/issues/475
             msg::send_bytes_with_gas(to, vec![], 0, value).expect("Failed to send value to user");
             Err(err)
         } else {
@@ -59,6 +60,7 @@ impl TokenizerService {
             .expect("Failed to send `Burned` event");
 
         // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+        // see https://github.com/gear-tech/sails/issues/475
         msg::send_bytes_with_gas(from, vec![], 0, value).expect("Failed to send value to user");
         Ok(value)
     }

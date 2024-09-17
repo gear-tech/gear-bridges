@@ -35,9 +35,6 @@ impl AdminService {
 
     pub fn revoke_admin_role(&mut self, from: ActorId) {
         ensure_is_admin();
-        if storage().admins.len() == 1 {
-            panic!("Can't revoke last admin role")
-        }
         storage_mut().admins.remove(&from);
     }
 }

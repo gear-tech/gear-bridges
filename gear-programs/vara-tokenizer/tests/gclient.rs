@@ -18,13 +18,12 @@ async fn init_remoting() -> (GearApi, GClientRemoting, CodeId) {
 #[ignore = "requires run gear node on GEAR_PATH"]
 async fn factory_works() {
     // arrange
-    let (api, remoting, program_code_id) = init_remoting().await;
-    let _admin_id =
-        ActorId::try_from(api.account_id().encode().as_ref()).expect("failed to create actor id");
+    let (_api, remoting, program_code_id) = init_remoting().await;
 
+    // act
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -51,7 +50,7 @@ async fn mint_from_value_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -103,15 +102,11 @@ async fn burn_and_return_value_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
 
-    let _initial_balance = api
-        .free_balance(admin_id)
-        .await
-        .expect("Failed to get free balance");
     let program_initial_balance = api
         .free_balance(program_id)
         .await

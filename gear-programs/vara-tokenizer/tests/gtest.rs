@@ -20,7 +20,7 @@ async fn factory_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -44,7 +44,7 @@ async fn mint_from_value_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -64,7 +64,8 @@ async fn mint_from_value_works() {
 
     let balance = remoting.system().balance_of(ADMIN_ID);
     let program_balance = remoting.system().balance_of(program_id);
-    // TODO update test after next `gtest` release
+    // TODO update test after next `gtest` release, fixing gas issues
+    // see https://github.com/gear-tech/gear/pull/4200 and other `gtest` related PRs
     assert_eq!(balance, initial_balance - mint_value);
     assert_eq!(program_balance, mint_value);
 }
@@ -76,7 +77,7 @@ async fn burn_and_return_value_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -121,7 +122,8 @@ async fn burn_and_return_value_works() {
 
     let balance = remoting.system().balance_of(ADMIN_ID);
     let program_balance = remoting.system().balance_of(program_id);
-    // TODO update test after next `gtest` release
+    // TODO update test after next `gtest` release, fixing gas issues
+    // see https://github.com/gear-tech/gear/pull/4200 and other `gtest` related PRs
     dbg!(balance, program_balance, client_balance);
     assert!(client_balance.is_zero());
     // assert_eq!(balance, initial_balance);
@@ -135,7 +137,7 @@ async fn admin_service_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8)
+        .new("Name".into(), "Symbol".into(), 10u8, true)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();

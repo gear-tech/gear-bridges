@@ -16,7 +16,7 @@ sails-idl-gen.workspace = true
 vara-tokenizer = { path = ".", features = ["wasm-binary"] }
 vara-tokenizer-client = { path = "client" }
 sails-rs = { workspace = true, features = ["gtest", "gclient"] }
-tokio = { version = "1.39", features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
 gclient.workspace = true
 gtest.workspace = true
 vft-client = { path = "../vft-client" }

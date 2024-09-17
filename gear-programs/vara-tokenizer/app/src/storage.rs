@@ -1,4 +1,4 @@
-// macros
+/// create static storage from given struct with `storage_mut` and `storage` accessors
 macro_rules! static_storage {
     ($type:ty) => {
         static mut STORAGE: Option<$type> = None;

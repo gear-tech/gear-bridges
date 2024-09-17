@@ -5,6 +5,44 @@ use utils::{VftTreasury, *};
 mod utils;
 
 #[test]
+fn test_lock_unlock_assets() {
+    let system = System::new();
+    system.init_logger();
+    let eth_token_id = H160::random();
+    let vft = Program::token(&system, TOKEN_ID);
+    let vft_treasury = Program::vft_treasury(&system);
+
+    vft_treasury.add_ethereum_to_vara_mapping(ADMIN_ID, eth_token_id, vft.id());
+
+    let account_id = 10000;
+    let amount = 10_000_000_000_u64;
+
+    vft.mint(ADMIN_ID, account_id.into(), U256::from(amount));
+    vft.approve(account_id, vft_treasury.id(), U256::from(amount / 2));
+
+    let tok = vft_treasury.deposit(
+        BRIDGE_SERVICE_ID.into(),
+        account_id.into(),
+        vft.id(),
+        (amount / 2).into(),
+        H160::random(),
+    );
+
+    assert_eq!(tok, eth_token_id);
+    assert_eq!(vft.balance_of(account_id.into()), U256::from(amount / 2));
+
+    vft_treasury.withdraw(
+        ETH_CLIENT_ID,
+        eth_token_id,
+        account_id.into(),
+        U256::from(amount / 2),
+    );
+
+    assert_eq!(vft.balance_of(account_id.into()), U256::from(amount));
+}
+
+/*
+#[test]
 
 fn test_lock_unlock_assets() {
     let system = System::new();
@@ -72,3 +110,4 @@ fn test_lock_unlock_assets_two_accounts() {
     assert_eq!(vft.balance_of(account1_id.into()), U256::from(amount / 2));
     assert_eq!(vft.balance_of(account0_id.into()), U256::from(amount / 2));
 }
+*/

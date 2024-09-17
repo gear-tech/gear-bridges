@@ -1,5 +1,6 @@
 type InitConfig = struct {
   ethereum_event_client: actor_id,
+  bridging_payment_service: actor_id,
 };
 
 constructor {
@@ -7,10 +8,14 @@ constructor {
 };
 
 service VftTreasury {
-  Deposit : (token: actor_id, amount: u256, to: h160) -> null;
+  AddEthereumToVaraMapping : (ethereum_token: h160, vara_token: actor_id) -> null;
+  Deposit : (sender: actor_id, token: actor_id, amount: u256, to: h160) -> h160;
+  RemoveEthereumToVaraMapping : (ethereum_token: h160) -> opt actor_id;
+  UpdateBridgingPaymentServiceAddress : (new_address: actor_id) -> null;
   UpdateEthereumEventClientAddress : (new_address: actor_id) -> null;
-  Withdraw : (token: actor_id, recepient: actor_id, amount: u256) -> null;
+  Withdraw : (token: h160, recepient: actor_id, amount: u256) -> null;
   query Admin : () -> actor_id;
+  query ProgramAddress : () -> actor_id;
 
   events {
     Deposit: struct { from: actor_id, to: h160, token: actor_id, amount: u256 };

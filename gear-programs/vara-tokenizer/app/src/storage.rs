@@ -9,11 +9,11 @@ macro_rules! static_storage {
             };
         }
 
-        pub(crate) fn storage_mut() -> &'static mut $type {
+        pub(crate) fn storage_mut<'a>() -> &'a mut $type {
             unsafe { STORAGE.as_mut().expect("program is not initialized") }
         }
 
-        pub(crate) fn storage() -> &'static $type {
+        pub(crate) fn storage<'a>() -> &'a $type {
             unsafe { STORAGE.as_ref().expect("program is not initialized") }
         }
     };

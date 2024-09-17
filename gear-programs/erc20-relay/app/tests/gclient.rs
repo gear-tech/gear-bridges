@@ -6,7 +6,7 @@ mod vft {
 
 use erc20_relay_client::{
     ft_manage::events::FtManageEvents,
-    traits::{Erc20RelayFactory, FtManage},
+    traits::{Erc20Relay, Erc20RelayFactory, FtManage},
 };
 use futures::StreamExt;
 use gclient::{Event, EventProcessor, GearApi, GearEvent};
@@ -169,6 +169,7 @@ async fn tokens_map() {
 }
 
 #[tokio::test]
+#[ignore = "Firstly compile the program with enabled `gas_calculation` feature"]
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 
@@ -236,4 +237,69 @@ async fn gas_for_reply() {
 
         println!("gas_info = {gas_info:?}");
     }
+}
+
+#[tokio::test]
+async fn set_vft_gateway() {
+    let (remoting, code_id, gas_limit) = spin_up_node().await;
+
+    let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
+
+    let program_id = factory
+        .new(
+            Default::default(),
+            Default::default(),
+            10_000,
+            1_000_000_000,
+        )
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [])
+        .await
+        .unwrap();
+
+    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
+
+    // by default address of the VFT gateway is not set
+    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
+    assert!(vft_gateway.is_none());
+
+    let vft_gateway_new = ActorId::from([1u8; 32]);
+
+    // admin should be able to set the VFT gateway address
+    client
+        .set_vft_gateway(Some(vft_gateway_new))
+        .send_recv(program_id)
+        .await
+        .unwrap();
+
+    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
+    assert_eq!(vft_gateway, Some(vft_gateway_new));
+
+    // and reset it
+    client
+        .set_vft_gateway(None)
+        .send_recv(program_id)
+        .await
+        .unwrap();
+
+    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
+    assert!(vft_gateway.is_none());
+
+    // another account isn't permitted to change the VFT gateway address
+    let api = GearApi::dev().await.unwrap().with("//Bob").unwrap();
+    let remoting = GClientRemoting::new(api);
+
+    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
+    let result = client.set_vft_gateway(None).send_recv(program_id).await;
+    assert!(result.is_err());
+
+    let result = client
+        .set_vft_gateway(Some(vft_gateway_new))
+        .send_recv(program_id)
+        .await;
+    assert!(result.is_err());
+
+    // anyone should be able to read the address
+    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
+    assert!(vft_gateway.is_none());
 }

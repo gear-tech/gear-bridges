@@ -64,7 +64,7 @@ pub struct State {
     admin: ActorId,
     map: Vec<(H160, ActorId)>,
     checkpoints: ActorId,
-    vft: ActorId,
+    vft_gateway: Option<ActorId>,
     reply_timeout: u32,
     reply_deposit: u64,
 }
@@ -73,7 +73,12 @@ pub struct Erc20RelayProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl Erc20RelayProgram {
-    pub fn new(checkpoints: ActorId, vft: ActorId, reply_timeout: u32, reply_deposit: u64) -> Self {
+    pub fn new(
+        checkpoints: ActorId,
+        vft_gateway: Option<ActorId>,
+        reply_timeout: u32,
+        reply_deposit: u64,
+    ) -> Self {
         unsafe {
             TRANSACTIONS = Some(BTreeSet::new());
         }
@@ -83,7 +88,7 @@ impl Erc20RelayProgram {
             admin: exec_context.actor_id(),
             map: Vec::with_capacity(CAPACITY_MAP),
             checkpoints,
-            vft,
+            vft_gateway,
             reply_timeout,
             reply_deposit,
         }))

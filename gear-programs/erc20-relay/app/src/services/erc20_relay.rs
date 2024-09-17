@@ -37,7 +37,25 @@ where
         }
     }
 
+    pub fn vft_gateway(&self) -> Option<ActorId> {
+        self.state.borrow().vft_gateway
+    }
+
+    pub fn set_vft_gateway(&mut self, vft_gateway: Option<ActorId>) {
+        let source = self.exec_context.actor_id();
+        let mut state = self.state.borrow_mut();
+        if source != state.admin {
+            panic!("Not admin");
+        }
+
+        state.vft_gateway = vft_gateway;
+    }
+
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
+        let Some(vft_gateway_id) = self.state.borrow().vft_gateway else {
+            return Err(Error::AbsentVftGateway);
+        };
+
         let (fungible_token, receipt, event) = self.prepare(&message)?;
 
         let EthToVaraEvent {
@@ -93,12 +111,12 @@ where
         let receiver = ActorId::from(event.to.0);
         let call_payload =
             vft_gateway::io::MintTokens::encode_call(fungible_token, receiver, amount);
-        let (vft, reply_timeout, reply_deposit) = {
+        let (reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
-            (state.vft, state.reply_timeout, state.reply_deposit)
+            (state.reply_timeout, state.reply_deposit)
         };
-        gstd::msg::send_bytes_for_reply(vft, call_payload, 0, reply_deposit)
+        gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
             .map_err(|_| Error::SendFailure)?
             .up_to(Some(reply_timeout))
             .map_err(|_| Error::ReplyTimeout)?
@@ -107,12 +125,11 @@ where
             .await
             .map_err(|_| Error::ReplyFailure)?;
 
-        self.notify_on(Event::Relayed {
+        let _ = self.notify_on(Event::Relayed {
             fungible_token,
             to: ActorId::from(event.to.0),
             amount,
-        })
-        .expect("Unable to notify about relaying tokens");
+        });
 
         Ok(())
     }

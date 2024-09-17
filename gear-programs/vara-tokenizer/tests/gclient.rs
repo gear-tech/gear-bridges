@@ -28,8 +28,8 @@ async fn factory_works() {
         .await
         .unwrap();
 
-    let client = vara_tokenizer_client::Tokenizer::new(remoting.clone());
-    let total_supply = client
+    let vft_client = vara_tokenizer_client::Vft::new(remoting.clone());
+    let total_supply = vft_client
         .total_supply()
         .recv(program_id)
         .await
@@ -115,6 +115,7 @@ async fn burn_and_return_value_works() {
     let mint_value = 10_000_000_000_000;
 
     let mut client = vara_tokenizer_client::Tokenizer::new(remoting.clone());
+    let vft_client = vara_tokenizer_client::Vft::new(remoting.clone());
 
     client
         .mint_from_value()
@@ -124,7 +125,11 @@ async fn burn_and_return_value_works() {
         .expect("Failed send_recv")
         .expect("Failed to mint from value");
 
-    let client_balance = client.balance_of(admin_id).recv(program_id).await.unwrap();
+    let client_balance = vft_client
+        .balance_of(admin_id)
+        .recv(program_id)
+        .await
+        .unwrap();
 
     let balance = api
         .free_balance(admin_id)
@@ -145,7 +150,11 @@ async fn burn_and_return_value_works() {
         .expect("Failed send_recv")
         .expect("Failed to burn and return value");
 
-    let client_balance = client.balance_of(admin_id).recv(program_id).await.unwrap();
+    let client_balance = vft_client
+        .balance_of(admin_id)
+        .recv(program_id)
+        .await
+        .unwrap();
 
     let balance = api
         .free_balance(admin_id)

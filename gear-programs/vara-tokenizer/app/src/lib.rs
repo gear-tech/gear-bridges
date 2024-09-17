@@ -32,6 +32,11 @@ impl VaraTokenizerProgram {
         TokenizerService::new()
     }
 
+    // Exposed vft service
+    pub fn vft(&self) -> vft_service::Service {
+        vft_service::Service::new()
+    }
+
     // Exposed admin service
     pub fn admin(&self) -> AdminService {
         AdminService::new()

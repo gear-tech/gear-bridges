@@ -1,6 +1,6 @@
 use crate::vft_funcs;
 use sails_rs::{gstd::msg, prelude::*};
-use vft_service::{utils::Result, Service as VftService};
+use vft_service::utils::Result;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -10,23 +10,13 @@ pub enum TokenizerEvent {
     Burned { from: ActorId, value: u128 },
 }
 
-#[derive(Clone)]
-pub struct TokenizerService {
-    vft: VftService,
-}
+#[derive(Clone, Debug, Default)]
+pub struct TokenizerService(());
 
-impl Default for TokenizerService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[sails_rs::service(extends = VftService, events = TokenizerEvent)]
+#[sails_rs::service(events = TokenizerEvent)]
 impl TokenizerService {
     pub fn new() -> Self {
-        Self {
-            vft: VftService::new(),
-        }
+        Self(())
     }
 
     pub async fn mint_from_value(&mut self) -> Result<u128> {
@@ -63,11 +53,5 @@ impl TokenizerService {
         // see https://github.com/gear-tech/sails/issues/475
         msg::send_bytes_with_gas(from, vec![], 0, value).expect("Failed to send value to user");
         Ok(value)
-    }
-}
-
-impl AsRef<VftService> for TokenizerService {
-    fn as_ref(&self) -> &VftService {
-        &self.vft
     }
 }

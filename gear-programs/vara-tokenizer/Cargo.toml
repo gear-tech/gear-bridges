@@ -4,22 +4,21 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-vara-tokenizer-app = { path = "app" }
+vara-tokenizer-app.workspace = true
 
 [build-dependencies]
-vara-tokenizer-app = { path = "app" }
+vara-tokenizer-app.workspace = true
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-client-gen.workspace = true
 sails-idl-gen.workspace = true
 
 [dev-dependencies]
-vara-tokenizer = { path = ".", features = ["wasm-binary"] }
-vara-tokenizer-client = { path = "client" }
+vara-tokenizer = { workspace = true, features = ["wasm-binary"] }
+vara-tokenizer-client.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 gclient.workspace = true
 gtest.workspace = true
-vft-client = { path = "../vft-client" }
 
 [features]
 wasm-binary = []

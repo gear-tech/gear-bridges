@@ -13947,7 +13947,6 @@ dependencies = [
  "vara-tokenizer",
  "vara-tokenizer-app",
  "vara-tokenizer-client",
- "vft-client",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 sails-rs.workspace = true
-vft-service = { path = "../../vft-service" }
+vft-service.workspace = true
 
 [build-dependencies]
 sails-client-gen.workspace = true

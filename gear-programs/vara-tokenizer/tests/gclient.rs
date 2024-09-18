@@ -23,7 +23,7 @@ async fn factory_works() {
     // act
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8, true)
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -50,7 +50,7 @@ async fn mint_from_value_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8, true)
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();
@@ -102,7 +102,7 @@ async fn burn_and_return_value_works() {
     let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
 
     let program_id = program_factory
-        .new("Name".into(), "Symbol".into(), 10u8, true)
+        .new("Name".into(), "Symbol".into(), 10u8)
         .send_recv(program_code_id, b"salt")
         .await
         .unwrap();

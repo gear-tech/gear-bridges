@@ -1,12 +1,14 @@
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
 use gtest::{Program, System, WasmProgram};
 use sails_rs::prelude::*;
-use vft_treasury_app::services::InitConfig;
+use vft_treasury_app::services::error::Error;
+use vft_treasury_app::services::{Config, InitConfig};
 
 pub const ADMIN_ID: u64 = 1000;
 pub const TOKEN_ID: u64 = 200;
 pub const ETH_CLIENT_ID: u64 = 500;
 pub const BRIDGE_SERVICE_ID: u64 = 501;
+pub const BRIDGE_BUILTIN_ID: u64 = 300;
 
 // Mocks for programs
 macro_rules! create_mock {
@@ -120,23 +122,47 @@ impl Token for Program<'_> {
 
 pub trait VftTreasury {
     fn vft_treasury(system: &System) -> Program<'_>;
-    fn deposit(&self, from: u64, sender: ActorId, token: ActorId, amount: U256, to: H160) -> H160;
-    fn withdraw(&self, from: u64, token: H160, recepient: ActorId, amount: U256);
+    fn deposit_tokens(
+        &self,
+        from: u64,
+        vara_token_id: ActorId,
+        sender: ActorId,
+        amount: U256,
+        to: H160,
+        with_gas: u64,
+        panic: bool,
+    ) -> Result<(U256, H160), Error>;
 
-    fn add_ethereum_to_vara_mapping(&self, from: u64, ethereum_token: H160, vara_token: ActorId);
-    fn remove_ethereum_to_vara_mapping(&self, from: u64, ethereum_token: H160) -> Option<ActorId>;
+    fn withdraw_tokens(
+        &self,
+        from: u64,
+        eth_token_id: H160,
+        recepient: ActorId,
+        amount: U256,
+        with_gas: u64,
+        error: bool,
+        panic: bool,
+    );
 
-    fn admin(&self) -> ActorId;
-    fn program_address(&self) -> ActorId;
+    fn map_vara_to_eth_address(&self, from: u64, ethereum_token: H160, vara_token: ActorId);
 }
 
 impl VftTreasury for Program<'_> {
     fn vft_treasury(system: &System) -> Program<'_> {
         let program = Program::current(system);
-        let init_config = InitConfig {
-            ethereum_event_client: ETH_CLIENT_ID.into(),
-            bridging_payment_service: BRIDGE_SERVICE_ID.into(),
-        };
+        let init_config = InitConfig::new(
+            [1; 20].into(),
+            BRIDGE_BUILTIN_ID.into(),
+            ETH_CLIENT_ID.into(),
+            BRIDGE_SERVICE_ID.into(),
+            Config::new(
+                15_000_000_000,
+                15_000_000_000,
+                15_000_000_000,
+                100,
+                15_000_000_000,
+            ),
+        );
 
         let payload = ["New".encode(), init_config.encode()].concat();
         let result = program.send_bytes(ADMIN_ID, payload);
@@ -144,98 +170,92 @@ impl VftTreasury for Program<'_> {
         program
     }
 
-    fn deposit(&self, from: u64, sender: ActorId, token: ActorId, amount: U256, to: H160) -> H160 {
+    fn deposit_tokens(
+        &self,
+        from: u64,
+        vara_token_id: ActorId,
+        sender: ActorId,
+        amount: U256,
+        to: H160,
+        with_gas: u64,
+        panic: bool,
+    ) -> Result<(U256, H160), Error> {
         let payload = [
             "VftTreasury".encode(),
-            "Deposit".encode(),
-            (sender, token, amount, to).encode(),
+            "DepositTokens".encode(),
+            (vara_token_id, sender, amount, to).encode(),
         ]
         .concat();
 
-        let result = self.send_bytes(from, payload);
-        let log_entry = result
-            .log()
-            .iter()
-            .find(|log_entry| log_entry.destination() == from.into())
-            .expect("Unable to get query reply");
+        let result = self.send_bytes_with_gas(from, payload, with_gas, 0);
 
-        let query_reply = <(String, String, H160)>::decode(&mut log_entry.payload())
-            .expect("Unable to decode reply");
-        query_reply.2
+        if panic {
+            assert!(result.main_failed());
+            Err(Error::MessageFailed)
+        } else {
+            let log_entry = result
+                .log()
+                .iter()
+                .find(|log_entry| log_entry.destination() == from.into())
+                .expect("Unable to get reply");
+
+            let reply =
+                <(String, String, Result<(U256, H160), Error>)>::decode(&mut log_entry.payload())
+                    .expect("Unable to decode reply"); // Panic if decoding fails
+
+            reply.2
+        }
     }
 
-    fn withdraw(&self, from: u64, token: H160, recepient: ActorId, amount: U256) {
+    fn withdraw_tokens(
+        &self,
+        from: u64,
+        eth_token_id: H160,
+        recepient: ActorId,
+        amount: U256,
+        with_gas: u64,
+        error: bool,
+        panic: bool,
+    ) {
         let payload = [
             "VftTreasury".encode(),
-            "Withdraw".encode(),
-            (token, recepient, amount).encode(),
+            "WithdrawTokens".encode(),
+            (eth_token_id, recepient, amount).encode(),
         ]
         .concat();
 
-        let result = self.send_bytes(from, payload);
-        assert!(!result.main_failed());
+        let result = self.send_bytes_with_gas(from, payload, with_gas, 0);
+
+        if panic {
+            assert!(result.main_failed());
+        } else {
+            let log_entry = result
+                .log()
+                .iter()
+                .find(|log_entry| log_entry.destination() == from.into())
+                .expect("Unable to get reply");
+
+            let reply = <(String, String, Result<(), Error>)>::decode(&mut log_entry.payload())
+                .expect("Unable to decode reply");
+
+            if error {
+                assert!(reply.2.is_err());
+            } else {
+                assert!(reply.2.is_ok());
+            }
+        }
     }
 
-    fn add_ethereum_to_vara_mapping(&self, from: u64, ethereum_token: H160, vara_token: ActorId) {
+    fn map_vara_to_eth_address(&self, from: u64, ethereum_token: H160, vara_token: ActorId) {
         let payload = [
             "VftTreasury".encode(),
-            "AddEthereumToVaraMapping".encode(),
+            "MapVaraToEthAddress".encode(),
             (ethereum_token, vara_token).encode(),
         ]
         .concat();
 
         let result = self.send_bytes(from, payload);
+
         assert!(!result.main_failed());
-    }
-
-    fn remove_ethereum_to_vara_mapping(&self, from: u64, ethereum_token: H160) -> Option<ActorId> {
-        let payload = [
-            "VftTreasury".encode(),
-            "RemoveEthereumToVaraMapping".encode(),
-            (ethereum_token).encode(),
-        ]
-        .concat();
-
-        let result = self.send_bytes(from, payload);
-        assert!(!result.main_failed());
-        let log_entry = result
-            .log()
-            .iter()
-            .find(|log_entry| log_entry.destination() == from.into())
-            .expect("Unable to get query reply");
-
-        let query_reply = <(String, String, Option<ActorId>)>::decode(&mut log_entry.payload())
-            .expect("Unable to decode reply");
-        query_reply.2
-    }
-
-    fn admin(&self) -> ActorId {
-        let query = ["VftTreasury".encode(), "Admin".encode()].concat();
-        let result = self.send_bytes(ADMIN_ID, query.clone());
-
-        let log_entry = result
-            .log()
-            .iter()
-            .find(|log_entry| log_entry.destination() == ADMIN_ID.into())
-            .expect("Unable to get query reply");
-
-        let query_reply = <(String, String, ActorId)>::decode(&mut log_entry.payload())
-            .expect("Unable to decode reply");
-        query_reply.2
-    }
-
-    fn program_address(&self) -> ActorId {
-        let query = ["VftTreasury".encode(), "ProgramAddress".encode()].concat();
-        let result = self.send_bytes(ADMIN_ID, query.clone());
-
-        let log_entry = result
-            .log()
-            .iter()
-            .find(|log_entry| log_entry.destination() == ADMIN_ID.into())
-            .expect("Unable to get query reply");
-
-        let query_reply = <(String, String, ActorId)>::decode(&mut log_entry.payload())
-            .expect("Unable to decode reply");
-        query_reply.2
     }
 }

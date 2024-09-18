@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 vft-treasury-app.workspace = true
+
 sails-rs.workspace = true
 
 [build-dependencies]

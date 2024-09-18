@@ -1,6 +1,71 @@
 type InitConfig = struct {
+  receiver_contract_address: h160,
+  gear_bridge_builtin: actor_id,
   ethereum_event_client: actor_id,
   bridging_payment_service: actor_id,
+  config: Config,
+};
+
+type Config = struct {
+  gas_for_transfer_tokens: u64,
+  gas_for_reply_deposit: u64,
+  gas_to_send_request_to_builtin: u64,
+  reply_timeout: u32,
+  gas_for_transfer_to_eth_msg: u64,
+};
+
+type Error = enum {
+  SendFailure,
+  ReplyFailure,
+  BurnTokensDecode,
+  BurnFailure,
+  RequestToBuiltinSend,
+  RequestToBuiltinReply,
+  BuiltinDecode,
+  PayloadSize,
+  MintTokensDecode,
+  ReplyTimeout,
+  MintFailure,
+  NoCorrespondingEthAddress,
+  ReplyHook,
+  MessageNotFound,
+  InvalidMessageStatus,
+  MessageFailed,
+  BurnTokensFailed,
+  BridgeBuiltinMessageFailed,
+  TokensRefunded,
+  NotEthClient,
+  NotBridgingClient,
+  NotEnoughGas,
+  TransferFailed,
+  TransferTokensDecode,
+  TokensTransferFailure,
+  RequestToGateWayDecode,
+  TransactionFailure,
+  FailureInVftGateway,
+  GatewayMessageProcessingFailed,
+  TransferTokensFailed,
+};
+
+type MessageInfo = struct {
+  status: MessageStatus,
+  details: TxDetails,
+};
+
+type MessageStatus = enum {
+  SendingMessageToTransferTokens,
+  TokenTransferCompleted: bool,
+  WaitingReplyFromTransfer,
+  SendingMessageToBridgeBuiltin,
+  BridgeResponseReceived: opt u256,
+  WaitingReplyFromBuiltin,
+  BridgeBuiltinStep,
+  MessageProcessedWithSuccess: u256,
+};
+
+type TxDetails = enum {
+  DepositVaraToTreasury: struct { vara_token_id: actor_id, eth_token_id: h160, sender: actor_id, amount: u256, receiver: h160 },
+  WithdrawVaraFromTreasury: struct { vara_token_id: actor_id, eth_token_id: h160, recepient: actor_id, amount: u256 },
 };
 
 constructor {
@@ -8,14 +73,20 @@ constructor {
 };
 
 service VftTreasury {
-  AddEthereumToVaraMapping : (ethereum_token: h160, vara_token: actor_id) -> null;
-  Deposit : (sender: actor_id, token: actor_id, amount: u256, to: h160) -> h160;
+  DepositTokens : (vara_token_id: actor_id, from: actor_id, amount: u256, to: h160) -> result (struct { u256, h160 }, Error);
+  HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
+  MapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> null;
   RemoveEthereumToVaraMapping : (ethereum_token: h160) -> opt actor_id;
   UpdateBridgingPaymentServiceAddress : (new_address: actor_id) -> null;
+  UpdateConfig : (config: Config) -> null;
   UpdateEthereumEventClientAddress : (new_address: actor_id) -> null;
-  Withdraw : (token: h160, recepient: actor_id, amount: u256) -> null;
+  WithdrawTokens : (eth_token_id: h160, recepient: actor_id, amount: u256) -> result (null, Error);
   query Admin : () -> actor_id;
+  query GearBridgeBuiltin : () -> actor_id;
+  query GetConfig : () -> Config;
+  query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
   query ProgramAddress : () -> actor_id;
+  query VaraToEthAddresses : () -> vec struct { actor_id, h160 };
 
   events {
     Deposit: struct { from: actor_id, to: h160, token: actor_id, amount: u256 };

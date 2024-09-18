@@ -176,14 +176,15 @@ where
             .insert(vara_token, ethereum_token);
     }
 
-    pub fn remove_ethereum_to_vara_mapping(&mut self, ethereum_token: H160) -> Option<ActorId> {
+    pub fn unmap_vara_to_eth_address(&mut self, ethereum_token: H160, vara_token: ActorId) {
         let data = self.data();
 
         if data.admin != self.exec_context.actor_id() {
             panic!("Not admin");
         }
 
-        self.data_mut().eth_to_vara_token_id.remove(&ethereum_token)
+        self.data_mut().eth_to_vara_token_id.remove(&ethereum_token);
+        self.data_mut().vara_to_eth_token_id.remove(&vara_token);
     }
 
     pub fn update_ethereum_event_client_address(&mut self, new_address: ActorId) {

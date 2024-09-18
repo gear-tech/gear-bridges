@@ -8,7 +8,7 @@ use abi::ERC20_TREASURY;
 use alloy_sol_types::SolEvent;
 use cell::RefCell;
 use checkpoint_light_client_io::{Handle, HandleResult};
-use collections::BTreeSet;
+use collections::{BTreeMap, BTreeSet};
 use error::Error;
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -27,7 +27,6 @@ use sails_rs::{
 use services::{Erc20Relay as Erc20RelayService, FTManage as FTManageService};
 
 const CAPACITY: usize = 500_000;
-const CAPACITY_MAP: usize = 100;
 
 #[cfg(feature = "gas_calculation")]
 const CAPACITY_STEP_SIZE: usize = 50_000;
@@ -62,7 +61,7 @@ pub struct EthToVaraEvent {
 
 pub struct State {
     admin: ActorId,
-    map: Vec<(H160, ActorId)>,
+    map: BTreeMap<(H160, H160), ActorId>,
     checkpoints: ActorId,
     vft_gateway: Option<ActorId>,
     reply_timeout: u32,
@@ -86,7 +85,7 @@ impl Erc20RelayProgram {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
-            map: Vec::with_capacity(CAPACITY_MAP),
+            map: Default::default(),
             checkpoints,
             vft_gateway,
             reply_timeout,

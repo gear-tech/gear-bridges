@@ -54,9 +54,10 @@ async fn tokens_map() {
     let mut listener = erc20_relay_client::ft_manage::events::listener(remoting.clone());
     let mut events = listener.listen().await.unwrap();
 
+    let eth_token = H160::from(hex!("52c953cac2269c599b075359EdA11E738a750000"));
     let eth_address = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F6"));
     let result = ft_client
-        .add_fungible_token(eth_address, [0u8; 32].into())
+        .add_fungible_token(eth_address, eth_token, [0u8; 32].into())
         .send_recv(program_id)
         .await
         .unwrap();
@@ -68,18 +69,19 @@ async fn tokens_map() {
             program_id,
             FtManageEvents::Added {
                 eth_address,
-                fungible_token: [0u8; 32].into()
+                eth_token,
+                vara_token: [0u8; 32].into()
             }
         ),
         event
     );
 
     let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(&tokens[..], &[(eth_address, [0u8; 32].into())]);
+    assert_eq!(&tokens[..], &[(eth_address, eth_token, [0u8; 32].into())]);
 
-    // duplicate Eth address
+    // duplicate Eth address/token
     let result = ft_client
-        .add_fungible_token(eth_address, [0u8; 32].into())
+        .add_fungible_token(eth_address, eth_token, [0u8; 32].into())
         .send_recv(program_id)
         .await
         .unwrap();
@@ -88,7 +90,7 @@ async fn tokens_map() {
     // another mapping
     let eth_address2 = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F7"));
     let result = ft_client
-        .add_fungible_token(eth_address2, [0u8; 32].into())
+        .add_fungible_token(eth_address2, eth_token, [0u8; 32].into())
         .send_recv(program_id)
         .await
         .unwrap();
@@ -100,7 +102,8 @@ async fn tokens_map() {
             program_id,
             FtManageEvents::Added {
                 eth_address: eth_address2,
-                fungible_token: [0u8; 32].into()
+                eth_token,
+                vara_token: [0u8; 32].into()
             }
         ),
         event
@@ -110,13 +113,13 @@ async fn tokens_map() {
     assert_eq!(
         &tokens[..],
         &[
-            (eth_address, [0u8; 32].into()),
-            (eth_address2, [0u8; 32].into())
+            (eth_address, eth_token, [0u8; 32].into()),
+            (eth_address2, eth_token, [0u8; 32].into())
         ]
     );
 
     let result = ft_client
-        .remove_fungible_token(eth_address2)
+        .remove_fungible_token(eth_address2, eth_token)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -127,18 +130,19 @@ async fn tokens_map() {
         (
             program_id,
             FtManageEvents::Removed {
-                eth_address: eth_address2
+                eth_address: eth_address2,
+                eth_token,
             }
         ),
         event
     );
 
     let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(&tokens[..], &[(eth_address, [0u8; 32].into())]);
+    assert_eq!(&tokens[..], &[(eth_address, eth_token, [0u8; 32].into())]);
 
     // attempt to remove non-existant entry should do nothig
     let result = ft_client
-        .remove_fungible_token(eth_address2)
+        .remove_fungible_token(eth_address2, eth_token)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -152,17 +156,17 @@ async fn tokens_map() {
 
     // there should be the single mapping
     let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(&tokens[..], &[(eth_address, [0u8; 32].into())]);
+    assert_eq!(&tokens[..], &[(eth_address, eth_token, [0u8; 32].into())]);
 
     let eth_address3 = hex!("52c953cac2269c599b075359EdA11E738a75c6F8");
     let result = ft_client
-        .add_fungible_token(eth_address3.into(), [0u8; 32].into())
+        .add_fungible_token(eth_address3.into(), eth_token, [0u8; 32].into())
         .send_recv(program_id)
         .await;
     assert!(result.is_err());
 
     let result = ft_client
-        .remove_fungible_token(eth_address)
+        .remove_fungible_token(eth_address, eth_token)
         .send_recv(program_id)
         .await;
     assert!(result.is_err());

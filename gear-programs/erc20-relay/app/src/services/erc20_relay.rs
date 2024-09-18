@@ -154,16 +154,14 @@ where
             .logs()
             .iter()
             .find_map(|log| {
+                let eth_address = H160::from(log.address.0 .0);
                 let Ok(event) = ERC20_TREASURY::Deposit::decode_log_data(log, true) else {
                     return None;
                 };
 
                 state
                     .map
-                    .iter()
-                    .find_map(|(address, fungible_token)| {
-                        (address.0 == event.token.0).then_some(fungible_token)
-                    })
+                    .get(&(eth_address, H160::from(event.token.0 .0)))
                     .map(|fungible_token| (*fungible_token, event))
             })
             .ok_or(Error::NotSupportedEvent)?;

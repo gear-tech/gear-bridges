@@ -6,10 +6,12 @@ use super::*;
 enum Event {
     Added {
         eth_address: H160,
-        fungible_token: ActorId,
+        eth_token: H160,
+        vara_token: ActorId,
     },
     Removed {
         eth_address: H160,
+        eth_token: H160,
     },
 }
 
@@ -30,54 +32,57 @@ where
         }
     }
 
-    pub fn tokens(&self) -> Vec<(H160, ActorId)> {
-        self.state.borrow().map.clone()
+    pub fn tokens(&self) -> Vec<(H160, H160, ActorId)> {
+        self.state
+            .borrow()
+            .map
+            .iter()
+            .map(|((eth_address, eth_token), vara_token)| (*eth_address, *eth_token, *vara_token))
+            .collect()
     }
 
-    pub fn add_fungible_token(&mut self, eth_address: H160, address: ActorId) -> Option<()> {
+    pub fn add_fungible_token(
+        &mut self,
+        eth_address: H160,
+        eth_token: H160,
+        vara_token: ActorId,
+    ) -> Option<()> {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
             panic!("Not admin");
         }
 
-        match state
-            .map
-            .binary_search_by(|(eth_address_old, _address)| eth_address_old.cmp(&eth_address))
-        {
-            Ok(_) => None,
-            Err(i) => {
-                state.map.insert(i, (eth_address, address));
-                self.notify_on(Event::Added {
-                    eth_address,
-                    fungible_token: address,
-                })
-                .expect("Notify on add");
-
-                Some(())
-            }
+        if state.map.contains_key(&(eth_address, eth_token)) {
+            return None;
         }
+
+        state.map.insert((eth_address, eth_token), vara_token);
+        self.notify_on(Event::Added {
+            eth_address,
+            eth_token,
+            vara_token,
+        })
+        .expect("Notify on add");
+
+        Some(())
     }
 
-    pub fn remove_fungible_token(&mut self, eth_address: H160) -> Option<()> {
+    pub fn remove_fungible_token(&mut self, eth_address: H160, eth_token: H160) -> Option<()> {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
             panic!("Not admin");
         }
 
-        match state
-            .map
-            .binary_search_by(|(eth_address_old, _address)| eth_address_old.cmp(&eth_address))
-        {
-            Ok(i) => {
-                state.map.remove(i);
-                self.notify_on(Event::Removed { eth_address })
-                    .expect("Notify on remove");
+        state.map.remove(&(eth_address, eth_token)).map(|_| {
+            self.notify_on(Event::Removed {
+                eth_address,
+                eth_token,
+            })
+            .expect("Notify on remove");
 
-                Some(())
-            }
-            Err(_) => None,
-        }
+            ()
+        })
     }
 }

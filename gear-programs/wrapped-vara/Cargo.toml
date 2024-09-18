@@ -1,20 +1,20 @@
 [package]
-name = "vara-tokenizer"
+name = "wrapped-vara"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-vara-tokenizer-app.workspace = true
+wrapped-vara-app.workspace = true
 
 [build-dependencies]
-vara-tokenizer-app.workspace = true
+wrapped-vara-app.workspace = true
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-client-gen.workspace = true
 sails-idl-gen.workspace = true
 
 [dev-dependencies]
-vara-tokenizer = { workspace = true, features = ["wasm-binary"] }
-vara-tokenizer-client.workspace = true
+wrapped-vara = { workspace = true, features = ["wasm-binary"] }
+wrapped-vara-client.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 gclient.workspace = true

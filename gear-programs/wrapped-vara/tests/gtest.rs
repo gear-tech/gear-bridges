@@ -1,5 +1,5 @@
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vara_tokenizer_client::traits::*;
+use wrapped_vara_client::traits::*;
 
 pub const ADMIN_ID: u64 = 42;
 
@@ -9,7 +9,7 @@ pub fn init_remoting() -> (GTestRemoting, CodeId) {
     remoting.system().init_logger();
 
     // Submit program code into the system
-    let program_code_id = remoting.system().submit_code(vara_tokenizer::WASM_BINARY);
+    let program_code_id = remoting.system().submit_code(wrapped_vara::WASM_BINARY);
     (remoting, program_code_id)
 }
 
@@ -17,7 +17,7 @@ pub fn init_remoting() -> (GTestRemoting, CodeId) {
 async fn factory_works() {
     let (remoting, program_code_id) = init_remoting();
 
-    let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
+    let program_factory = wrapped_vara_client::WrappedVaraFactory::new(remoting.clone());
 
     let program_id = program_factory
         .new("Name".into(), "Symbol".into(), 10u8)
@@ -25,7 +25,7 @@ async fn factory_works() {
         .await
         .unwrap();
 
-    let vft_client = vara_tokenizer_client::Vft::new(remoting.clone());
+    let vft_client = wrapped_vara_client::Vft::new(remoting.clone());
 
     let total_supply = vft_client
         .total_supply()
@@ -41,7 +41,7 @@ async fn factory_works() {
 async fn mint_from_value_works() {
     let (remoting, program_code_id) = init_remoting();
 
-    let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
+    let program_factory = wrapped_vara_client::WrappedVaraFactory::new(remoting.clone());
 
     let program_id = program_factory
         .new("Name".into(), "Symbol".into(), 10u8)
@@ -52,10 +52,10 @@ async fn mint_from_value_works() {
     let initial_balance = remoting.system().balance_of(ADMIN_ID);
     let mint_value = 10_000_000_000_000;
 
-    let mut client = vara_tokenizer_client::Tokenizer::new(remoting.clone());
+    let mut client = wrapped_vara_client::Tokenizer::new(remoting.clone());
 
     client
-        .mint_from_value()
+        .mint()
         .with_value(mint_value)
         .send_recv(program_id)
         .await
@@ -74,7 +74,7 @@ async fn mint_from_value_works() {
 async fn burn_and_return_value_works() {
     let (remoting, program_code_id) = init_remoting();
 
-    let program_factory = vara_tokenizer_client::VaraTokenizerFactory::new(remoting.clone());
+    let program_factory = wrapped_vara_client::WrappedVaraFactory::new(remoting.clone());
 
     let program_id = program_factory
         .new("Name".into(), "Symbol".into(), 10u8)
@@ -85,11 +85,11 @@ async fn burn_and_return_value_works() {
     let initial_balance = remoting.system().balance_of(ADMIN_ID);
     let mint_value = 10_000_000_000_000;
 
-    let mut client = vara_tokenizer_client::Tokenizer::new(remoting.clone());
-    let vft_client = vara_tokenizer_client::Vft::new(remoting.clone());
+    let mut client = wrapped_vara_client::Tokenizer::new(remoting.clone());
+    let vft_client = wrapped_vara_client::Vft::new(remoting.clone());
 
     client
-        .mint_from_value()
+        .mint()
         .with_value(mint_value)
         .send_recv(program_id)
         .await
@@ -109,7 +109,7 @@ async fn burn_and_return_value_works() {
     assert_eq!(client_balance, mint_value.into());
 
     client
-        .burn_and_return_value(mint_value)
+        .burn(mint_value)
         .send_recv(program_id)
         .await
         .expect("Failed send_recv")

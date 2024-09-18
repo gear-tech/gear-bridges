@@ -19,7 +19,7 @@ impl TokenizerService {
         Self(())
     }
 
-    pub async fn mint_from_value(&mut self) -> Result<u128> {
+    pub async fn mint(&mut self) -> Result<u128> {
         let value = msg::value();
         if value == 0 {
             return Ok(value);
@@ -38,7 +38,7 @@ impl TokenizerService {
         }
     }
 
-    pub async fn burn_and_return_value(&mut self, value: u128) -> Result<u128> {
+    pub async fn burn(&mut self, value: u128) -> Result<u128> {
         if value == 0 {
             return Ok(value);
         }

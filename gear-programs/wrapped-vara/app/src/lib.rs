@@ -6,10 +6,10 @@ mod vft_funcs;
 use sails_rs::prelude::*;
 use tokenizer_service::TokenizerService;
 
-pub struct VaraTokenizerProgram(());
+pub struct WrappedVaraProgram(());
 
 #[sails_rs::program]
-impl VaraTokenizerProgram {
+impl WrappedVaraProgram {
     // Program's constructor
     pub fn new(name: String, symbol: String, decimals: u8) -> Self {
         vft_service::Service::seed(name, symbol, decimals);

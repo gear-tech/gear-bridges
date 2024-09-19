@@ -81,8 +81,6 @@ where
                 eth_token,
             })
             .expect("Notify on remove");
-
-            ()
         })
     }
 }

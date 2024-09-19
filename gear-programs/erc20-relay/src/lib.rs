@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused_imports)]
 
 #[cfg(target_arch = "wasm32")]
 pub use erc20_relay_app::wasm::*;

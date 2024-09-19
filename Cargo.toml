@@ -43,6 +43,7 @@ gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
+erc20-relay = { path = "gear-programs/erc20-relay" }
 erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
 erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
 

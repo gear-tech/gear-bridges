@@ -3563,6 +3563,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
  "checkpoint_light_client-io",
+ "erc20-relay",
  "erc20-relay-client",
  "ethereum-common",
  "futures",

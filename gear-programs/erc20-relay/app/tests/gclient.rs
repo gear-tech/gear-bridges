@@ -14,16 +14,15 @@ use hex_literal::hex;
 use sails_rs::{calls::*, events::*, gclient::calls::*, prelude::*};
 use vft::vft_gateway;
 
-const PATH_WASM: &str = match cfg!(debug_assertions) {
-    true => "../../../target/wasm32-unknown-unknown/debug/erc20_relay.opt.wasm",
-    false => "../../../target/wasm32-unknown-unknown/release/erc20_relay.opt.wasm",
-};
-
 async fn spin_up_node() -> (GClientRemoting, CodeId, GasUnit) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
     let remoting = GClientRemoting::new(api);
-    let code_id = remoting.upload_code_by_path(PATH_WASM).await.unwrap();
+    let (code_id, _) = remoting
+        .api()
+        .upload_code(erc20_relay::WASM_BINARY)
+        .await
+        .unwrap();
 
     (remoting, code_id, gas_limit)
 }
@@ -173,7 +172,6 @@ async fn tokens_map() {
 }
 
 #[tokio::test]
-#[ignore = "Firstly compile the program with enabled `gas_calculation` feature"]
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 

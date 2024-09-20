@@ -30,7 +30,6 @@ type MessageStatus = enum {
   SendingMessageToTransferTokensBack,
   WaitingReplyFromTokenTransferBack,
   TokenTransferBackCompleted,
-  MessageProcessedWithSuccess: struct { u256, h160 },
 };
 
 type TransactionDetails = enum {

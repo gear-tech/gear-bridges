@@ -142,7 +142,7 @@ fn handle_reply_hook(msg_id: MessageId) {
                 Ok(Ok((nonce, eth_token_id))) => {
                     msg_tracker.update_message_status(
                         msg_id,
-                        MessageStatus::MessageProcessedWithSuccess((nonce, eth_token_id)),
+                        MessageStatus::GatewayMessageProcessingCompleted((nonce, eth_token_id)),
                     );
                 }
                 _ => {

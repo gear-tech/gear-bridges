@@ -48,8 +48,6 @@ pub enum MessageStatus {
     SendingMessageToTransferTokensBack,
     WaitingReplyFromTokenTransferBack,
     TokenTransferBackCompleted,
-
-    MessageProcessedWithSuccess((U256, H160)),
 }
 
 impl MessageTracker {

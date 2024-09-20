@@ -43,7 +43,7 @@ service BridgingPayment {
   ReclaimFee : () -> null;
   RequestToGateway : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
   SetFee : (fee: u128) -> null;
-  UpdateConfig : (fee: opt u128, gas_for_reply_deposit: opt u64, gas_to_send_request_to_gateway: opt u64, gas_to_transfer_tokens: opt u64, reply_timeout: opt u32, gas_for_request_to_gateway_msg: opt u64) -> null;
+  UpdateConfig : (fee: opt u128, gas_for_reply_deposit: opt u64, gas_to_send_request_to_gateway: opt u64, reply_timeout: opt u32, gas_for_request_to_gateway_msg: opt u64) -> null;
   UpdateVftGatewayAddress : (new_vft_gateway_address: actor_id) -> null;
   query AdminAddress : () -> actor_id;
   query GetConfig : () -> Config;

@@ -171,7 +171,6 @@ where
         fee: Option<u128>,
         gas_for_reply_deposit: Option<u64>,
         gas_to_send_request_to_gateway: Option<u64>,
-        gas_to_transfer_tokens: Option<u64>,
         reply_timeout: Option<u32>,
         gas_for_request_to_gateway_msg: Option<u64>,
     ) {
@@ -188,10 +187,6 @@ where
 
         if let Some(gas_to_send_request_to_gateway) = gas_to_send_request_to_gateway {
             self.config_mut().gas_to_send_request_to_gateway = gas_to_send_request_to_gateway;
-        }
-
-        if let Some(gas_to_transfer_tokens) = gas_to_transfer_tokens {
-            self.config_mut().gas_to_transfer_tokens = gas_to_transfer_tokens;
         }
 
         if let Some(reply_timeout) = reply_timeout {
@@ -214,10 +209,9 @@ where
         let sender = self.exec_context.actor_id();
 
         if gstd::exec::gas_available()
-            < config.gas_to_transfer_tokens
-                + config.gas_to_send_request_to_gateway
+            < config.gas_to_send_request_to_gateway
                 + config.gas_for_request_to_gateway_msg
-                + 2 * config.gas_for_reply_deposit
+                + config.gas_for_reply_deposit
         {
             panic!("Please attach more gas");
         }

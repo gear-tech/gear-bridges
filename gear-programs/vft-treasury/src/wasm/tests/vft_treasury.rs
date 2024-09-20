@@ -5,19 +5,26 @@ use vft_treasury_app::services::error::Error;
 
 mod utils;
 
+macro_rules! setup_for_test {
+    ($system: ident, $vft: ident, $vft_treasury: ident, $gear_bridge_builtin: ident) => {
+        let $system = System::new();
+        $system.init_logger();
+
+        let $vft = Program::token(&$system, TOKEN_ID);
+        let $gear_bridge_builtin =
+            Program::mock_with_id(&$system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+        assert!(!$gear_bridge_builtin
+            .send_bytes(ADMIN_ID, b"INIT")
+            .main_failed());
+
+        let $vft_treasury = Program::vft_treasury(&$system);
+    };
+}
+
 #[test]
 fn test_treasury() {
-    let system = System::new();
-    system.init_logger();
+    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
 
-    let vft = Program::token(&system, TOKEN_ID);
-    let gear_bridge_builtin =
-        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
-
-    let vft_treasury = Program::vft_treasury(&system);
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
     let account_id: u64 = 100000;
@@ -44,15 +51,16 @@ fn test_treasury() {
     assert!(vft.balance_of(account_id.into()).is_zero());
     assert_eq!(vft.balance_of(vft_treasury.id()), amount);
 
-    vft_treasury.withdraw_tokens(
-        ETH_CLIENT_ID,
-        [2; 20].into(),
-        account_id.into(),
-        amount,
-        gas,
-        false,
-        false,
-    );
+    vft_treasury
+        .withdraw_tokens(
+            ETH_CLIENT_ID,
+            [2; 20].into(),
+            account_id.into(),
+            amount,
+            gas,
+            false,
+        )
+        .unwrap();
 
     assert_eq!(vft.balance_of(account_id.into()), amount);
     assert!(vft.balance_of(vft_treasury.id()).is_zero());
@@ -60,17 +68,7 @@ fn test_treasury() {
 
 #[test]
 fn test_mapping_does_not_exists() {
-    let system = System::new();
-    system.init_logger();
-
-    let vft = Program::token(&system, TOKEN_ID);
-    let gear_bridge_builtin =
-        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
-
-    let vft_treasury = Program::vft_treasury(&system);
+    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
 
     let account_id: u64 = 100000;
     let amount = U256::from(10_000_000_000_u64);
@@ -94,31 +92,22 @@ fn test_mapping_does_not_exists() {
 }
 
 #[test]
-fn test_withdraw_fails() {
-    let system = System::new();
-    system.init_logger();
-
-    let vft = Program::token(&system, TOKEN_ID);
-    let gear_bridge_builtin =
-        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
-
-    let vft_treasury = Program::vft_treasury(&system);
+fn test_withdraw_fails_with_bad_origin() {
+    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
     let account_id: u64 = 100000;
 
-    vft_treasury.withdraw_tokens(
+    let result = vft_treasury.withdraw_tokens(
         ADMIN_ID,
         [2; 20].into(),
         account_id.into(),
         U256::from(42),
         100_000_000_000,
-        true,
         false,
     );
+
+    assert!(matches!(result, Err(Error::NotEthClient)));
 }
 
 #[test]

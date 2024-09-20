@@ -17,24 +17,21 @@ type Config = struct {
 type Error = enum {
   SendFailure,
   ReplyFailure,
-  BurnTokensDecode,
-  BurnFailure,
   RequestToBuiltinSend,
   RequestToBuiltinReply,
   BuiltinDecode,
   PayloadSize,
-  MintTokensDecode,
   ReplyTimeout,
-  MintFailure,
+  DuplicateAddressMapping,
   NoCorrespondingEthAddress,
   ReplyHook,
   MessageNotFound,
   InvalidMessageStatus,
   MessageFailed,
-  BurnTokensFailed,
   BridgeBuiltinMessageFailed,
   TokensRefunded,
   NotEthClient,
+  NotAdmin,
   NotBridgingClient,
   NotEnoughGas,
   TransferFailed,
@@ -74,12 +71,13 @@ constructor {
 
 service VftTreasury {
   DepositTokens : (vara_token_id: actor_id, from: actor_id, amount: u256, to: h160) -> result (struct { u256, h160 }, Error);
+  EnsureAdmin : (admin: actor_id) -> result (null, Error);
   HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
-  MapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> null;
+  MapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);
   UnmapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);
-  UpdateBridgingPaymentServiceAddress : (new_address: actor_id) -> null;
-  UpdateConfig : (config: Config) -> null;
-  UpdateEthereumEventClientAddress : (new_address: actor_id) -> null;
+  UpdateBridgingPaymentServiceAddress : (new_address: actor_id) -> result (null, Error);
+  UpdateConfig : (config: Config) -> result (null, Error);
+  UpdateEthereumEventClientAddress : (new_address: actor_id) -> result (null, Error);
   WithdrawTokens : (eth_token_id: h160, recepient: actor_id, amount: u256) -> result (null, Error);
   query Admin : () -> actor_id;
   query GearBridgeBuiltin : () -> actor_id;

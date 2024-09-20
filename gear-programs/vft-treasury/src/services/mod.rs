@@ -158,26 +158,49 @@ impl<T> VftTreasury<T>
 where
     T: ExecContext,
 {
-    pub fn update_config(&mut self, config: Config) {
+    pub fn ensure_admin(&mut self, admin: ActorId) -> Result<(), Error> {
         if self.data().admin != self.exec_context.actor_id() {
-            panic!("not admin");
+            return Err(Error::NotAdmin);
+        }
+
+        self.data_mut().admin = admin;
+        Ok(())
+    }
+
+    pub fn update_config(&mut self, config: Config) -> Result<(), Error> {
+        if self.data().admin != self.exec_context.actor_id() {
+            return Err(Error::NotAdmin);
         }
 
         unsafe {
             CONFIG = Some(config);
         }
+
+        Ok(())
     }
 
-    pub fn map_vara_to_eth_address(&mut self, ethereum_token: H160, vara_token: ActorId) {
+    pub fn map_vara_to_eth_address(
+        &mut self,
+        ethereum_token: H160,
+        vara_token: ActorId,
+    ) -> Result<(), Error> {
         let data = self.data();
 
         if data.admin != self.exec_context.actor_id() {
-            panic!("Not admin");
+            return Err(Error::NotAdmin);
+        }
+
+        for (vara, eth) in self.data().vara_eth_mapping.iter() {
+            if vara == &vara_token || eth == &ethereum_token {
+                return Err(Error::DuplicateAddressMapping);
+            }
         }
 
         self.data_mut()
             .vara_eth_mapping
             .push((vara_token, ethereum_token));
+
+        Ok(())
     }
 
     pub fn unmap_vara_to_eth_address(
@@ -188,7 +211,7 @@ where
         let data = self.data();
 
         if data.admin != self.exec_context.actor_id() {
-            panic!("Not admin");
+            return Err(Error::NotAdmin);
         }
 
         let ix = self
@@ -205,22 +228,30 @@ where
         Ok(())
     }
 
-    pub fn update_ethereum_event_client_address(&mut self, new_address: ActorId) {
+    pub fn update_ethereum_event_client_address(
+        &mut self,
+        new_address: ActorId,
+    ) -> Result<(), Error> {
         let data = self.data();
         if data.admin != self.exec_context.actor_id() {
-            panic!("Not admin");
+            return Err(Error::NotAdmin);
         }
 
         self.data_mut().ethereum_event_client = new_address;
+        Ok(())
     }
 
-    pub fn update_bridging_payment_service_address(&mut self, new_address: ActorId) {
+    pub fn update_bridging_payment_service_address(
+        &mut self,
+        new_address: ActorId,
+    ) -> Result<(), Error> {
         let data = self.data();
         if data.admin != self.exec_context.actor_id() {
-            panic!("Not admin");
+            return Err(Error::NotAdmin);
         }
 
         self.data_mut().bridging_payment_service = new_address;
+        Ok(())
     }
 
     pub fn admin(&self) -> ActorId {

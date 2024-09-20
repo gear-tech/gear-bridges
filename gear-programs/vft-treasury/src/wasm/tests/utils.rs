@@ -140,9 +140,8 @@ pub trait VftTreasury {
         recepient: ActorId,
         amount: U256,
         with_gas: u64,
-        error: bool,
         panic: bool,
-    );
+    ) -> Result<(), Error>;
 
     fn map_vara_to_eth_address(&self, from: u64, ethereum_token: H160, vara_token: ActorId);
 }
@@ -214,9 +213,8 @@ impl VftTreasury for Program<'_> {
         recepient: ActorId,
         amount: U256,
         with_gas: u64,
-        error: bool,
         panic: bool,
-    ) {
+    ) -> Result<(), Error> {
         let payload = [
             "VftTreasury".encode(),
             "WithdrawTokens".encode(),
@@ -228,6 +226,7 @@ impl VftTreasury for Program<'_> {
 
         if panic {
             assert!(result.main_failed());
+            Ok(())
         } else {
             let log_entry = result
                 .log()
@@ -238,11 +237,7 @@ impl VftTreasury for Program<'_> {
             let reply = <(String, String, Result<(), Error>)>::decode(&mut log_entry.payload())
                 .expect("Unable to decode reply");
 
-            if error {
-                assert!(reply.2.is_err());
-            } else {
-                assert!(reply.2.is_ok());
-            }
+            reply.2
         }
     }
 

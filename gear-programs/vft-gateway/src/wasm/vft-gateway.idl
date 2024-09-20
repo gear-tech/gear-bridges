@@ -73,7 +73,7 @@ service VftGateway {
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
   MintTokens : (vara_token_id: actor_id, receiver: actor_id, amount: u256) -> result (null, Error);
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
-  TransferVaraToEth : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  TransferVaraToEth : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   UpdateConfig : (config: Config) -> null;
   UpdateReceiverContractAddress : (new_receiver_contract_address: h160) -> null;
   query Admin : () -> actor_id;

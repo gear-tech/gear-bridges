@@ -15,39 +15,22 @@ pub struct MessageInfo {
 }
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub enum TransactionDetails {
-    Transfer {
-        sender: ActorId,
-        receiver: ActorId,
-        amount: U256,
-        token_id: ActorId,
-    },
-    SendMessageToGateway {
-        sender: ActorId,
-        vara_token_id: ActorId,
-        amount: U256,
-        receiver: H160,
-        attached_value: u128,
-    },
+pub struct TransactionDetails {
+    pub sender: ActorId,
+    pub vara_token_id: ActorId,
+    pub amount: U256,
+    pub receiver: H160,
+    pub attached_value: u128,
 }
 
 #[derive(Debug, PartialEq, Encode, Decode, TypeInfo, Clone)]
 pub enum MessageStatus {
-    // Transfer tokens statuses
-    SendingMessageToTransferTokens,
-    TokenTransferCompleted(bool),
-    WaitingReplyFromTokenTransfer,
-
     // Send message to gateway statuses
     SendingMessageToGateway,
     GatewayMessageProcessingCompleted((U256, H160)),
+    GatewayMessageProcessingFailed,
     WaitingReplyFromGateway,
     MessageToGatewayStep,
-
-    ReturnTokensBackStep,
-    SendingMessageToTransferTokensBack,
-    WaitingReplyFromTokenTransferBack,
-    TokenTransferBackCompleted,
 }
 
 impl MessageTracker {
@@ -75,36 +58,6 @@ impl MessageTracker {
         self.message_info.remove(msg_id)
     }
 
-    pub fn check_transfer_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenTransferCompleted(true) => Ok(()),
-                MessageStatus::TokenTransferCompleted(false) => {
-                    self.message_info.remove(msg_id);
-                    Err(Error::TransferTokensFailed)
-                }
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
-    pub fn check_transfer_back_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenTransferBackCompleted => {
-                    self.message_info.remove(msg_id);
-                    Ok(())
-                }
-                MessageStatus::ReturnTokensBackStep => Err(Error::TransferTokensFailed),
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
     pub fn check_vft_gateway_reply(&mut self, msg_id: &MessageId) -> Result<(U256, H160), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
@@ -112,7 +65,8 @@ impl MessageTracker {
                     self.remove_message_info(msg_id);
                     Ok((nonce, eth_token_id))
                 }
-                MessageStatus::ReturnTokensBackStep | MessageStatus::MessageToGatewayStep => {
+                MessageStatus::MessageToGatewayStep
+                | MessageStatus::GatewayMessageProcessingFailed => {
                     Err(Error::GatewayMessageProcessingFailed)
                 }
                 _ => Err(Error::InvalidMessageStatus),

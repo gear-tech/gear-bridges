@@ -138,7 +138,7 @@ pub trait VftGateway {
     fn mint_tokens(
         &self,
         from: u64,
-        vara_token_id: ActorId,
+        eth_token_id: H160,
         amount: U256,
         receiver: ActorId,
         error: bool,
@@ -245,7 +245,7 @@ impl VftGateway for Program<'_> {
     fn mint_tokens(
         &self,
         from: u64,
-        vara_token_id: ActorId,
+        eth_token_id: H160,
         amount: U256,
         receiver: ActorId,
         error: bool,
@@ -253,7 +253,7 @@ impl VftGateway for Program<'_> {
         let payload = [
             "VftGateway".encode(),
             "MintTokens".encode(),
-            (vara_token_id, receiver, amount).encode(),
+            (eth_token_id, receiver, amount).encode(),
         ]
         .concat();
         let result = self.send_bytes(from, payload);

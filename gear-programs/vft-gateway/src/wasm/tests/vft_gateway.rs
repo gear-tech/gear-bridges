@@ -231,13 +231,15 @@ fn test_mint_tokens_from_eth_client() {
         .main_failed());
 
     let vft_gateway = Program::vft_gateway(&system);
+    let eth_token_id = H160::default();
+    vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), eth_token_id);
 
-    let receiver: u64 = 10000;
+    let receiver: u64 = 10_000;
     let amount = U256::from(10_000_000_000_u64);
 
     vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
 
-    vft_gateway.mint_tokens(ETH_CLIENT_ID, vft.id(), amount, receiver.into(), false);
+    vft_gateway.mint_tokens(ETH_CLIENT_ID, eth_token_id, amount, receiver.into(), false);
 
     let balance = vft.balance_of(receiver.into());
     assert_eq!(balance, amount);
@@ -256,15 +258,17 @@ fn test_mint_tokens_from_arbitrary_address() {
         .main_failed());
 
     let vft_gateway = Program::vft_gateway(&system);
+    let eth_token_id = H160::default();
+    vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), eth_token_id);
 
-    let receiver: u64 = 10000;
+    let receiver: u64 = 10_000;
     let amount = U256::from(10_000_000_000_u64);
 
     vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
 
-    let wrond_address = 1010;
+    let wrond_address = 1_010;
 
-    vft_gateway.mint_tokens(wrond_address, vft.id(), amount, receiver.into(), true);
+    vft_gateway.mint_tokens(wrond_address, eth_token_id, amount, receiver.into(), true);
 }
 
 #[test]

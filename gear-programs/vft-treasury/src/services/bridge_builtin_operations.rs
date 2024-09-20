@@ -11,7 +11,9 @@ pub async fn send_message_to_bridge_builtin(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<U256, Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
+    msg_tracker_mut()
+        .update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin)
+        .expect("no message found");
 
     let payload_bytes = Payload {
         receiver,

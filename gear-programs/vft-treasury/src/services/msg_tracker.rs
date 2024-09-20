@@ -1,3 +1,8 @@
+//! # Message Tracker
+//!
+//! This module tracks lifetime of a message: handle reply,
+//! execute next step, handles an error appropriatly.
+
 use super::Error;
 use gstd::{prelude::collections::HashMap, MessageId};
 use sails_rs::prelude::*;
@@ -15,7 +20,7 @@ pub struct MessageInfo {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum TxDetails {
-    DepositVaraToTreasury {
+    DepositToTreasury {
         vara_token_id: ActorId,
         eth_token_id: H160,
         sender: ActorId,
@@ -23,7 +28,7 @@ pub enum TxDetails {
         receiver: H160,
     },
 
-    WithdrawVaraFromTreasury {
+    WithdrawFromTreasury {
         vara_token_id: ActorId,
         eth_token_id: H160,
         recepient: ActorId,
@@ -42,10 +47,16 @@ impl MessageTracker {
             .insert(msg_id, MessageInfo { status, details });
     }
 
-    pub fn update_message_status(&mut self, msg_id: MessageId, status: MessageStatus) {
-        if let Some(info) = self.message_info.get_mut(&msg_id) {
-            info.status = status;
-        }
+    pub fn update_message_status(
+        &mut self,
+        msg_id: MessageId,
+        status: MessageStatus,
+    ) -> Result<(), Error> {
+        self.message_info
+            .get_mut(&msg_id)
+            .ok_or(Error::MessageNotFound)?
+            .status = status;
+        Ok(())
     }
 
     pub fn get_message_info(&self, msg_id: &MessageId) -> Option<&MessageInfo> {

@@ -21,6 +21,6 @@ parity-scale-codec.workspace = true
 scale-info.workspace = true
 sails-rs.workspace = true
 tokio.workspace = true
-blake2 = { version = "0.10.6", default-features = false }
+blake2.workspace = true
 gear-core.workspace = true
 extended_vft_wasm.workspace = true

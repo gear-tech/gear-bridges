@@ -1,4 +1,3 @@
-use collections::HashMap;
 pub(super) use error::Error;
 use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
 use sails_rs::{gstd::debug, gstd::ExecContext, prelude::*};
@@ -24,8 +23,7 @@ struct VftTreasuryData {
     gear_bridge_builtin: ActorId,
     ethereum_event_client: ActorId,
     bridging_payment_service: ActorId,
-    eth_to_vara_token_id: HashMap<H160, ActorId>,
-    vara_to_eth_token_id: HashMap<ActorId, H160>,
+    vara_eth_mapping: Vec<(ActorId, H160)>,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
@@ -92,8 +90,7 @@ where
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 ethereum_event_client: config.ethereum_event_client,
                 admin: exec_context.actor_id(),
-                eth_to_vara_token_id: HashMap::new(),
-                vara_to_eth_token_id: HashMap::new(),
+                vara_eth_mapping: Vec::new(),
                 bridging_payment_service: config.bridging_payment_service,
             });
             CONFIG = Some(config.config);
@@ -123,9 +120,19 @@ where
 
     fn get_eth_token_id(&self, vara_token_id: &ActorId) -> Result<H160, Error> {
         self.data()
-            .vara_to_eth_token_id
-            .get(vara_token_id)
-            .cloned()
+            .vara_eth_mapping
+            .iter()
+            .find(|(vara, _)| vara_token_id == vara)
+            .map(|(_, eth)| *eth)
+            .ok_or(Error::NoCorrespondingEthAddress)
+    }
+
+    fn get_vara_token_id(&self, eth_token_id: &H160) -> Result<ActorId, Error> {
+        self.data()
+            .vara_eth_mapping
+            .iter()
+            .find(|(_, eth)| eth_token_id == eth)
+            .map(|(vara, _)| *vara)
             .ok_or(Error::NoCorrespondingEthAddress)
     }
 }
@@ -169,22 +176,33 @@ where
         }
 
         self.data_mut()
-            .eth_to_vara_token_id
-            .insert(ethereum_token, vara_token);
-        self.data_mut()
-            .vara_to_eth_token_id
-            .insert(vara_token, ethereum_token);
+            .vara_eth_mapping
+            .push((vara_token, ethereum_token));
     }
 
-    pub fn unmap_vara_to_eth_address(&mut self, ethereum_token: H160, vara_token: ActorId) {
+    pub fn unmap_vara_to_eth_address(
+        &mut self,
+        ethereum_token: H160,
+        vara_token: ActorId,
+    ) -> Result<(), Error> {
         let data = self.data();
 
         if data.admin != self.exec_context.actor_id() {
             panic!("Not admin");
         }
 
-        self.data_mut().eth_to_vara_token_id.remove(&ethereum_token);
-        self.data_mut().vara_to_eth_token_id.remove(&vara_token);
+        let ix = self
+            .data()
+            .vara_eth_mapping
+            .iter()
+            .enumerate()
+            .find(|(_, map)| *map == &(vara_token, ethereum_token))
+            .map(|(ix, _)| ix)
+            .ok_or(Error::NoCorrespondingEthAddress)?;
+
+        self.data_mut().vara_eth_mapping.swap_remove(ix);
+
+        Ok(())
     }
 
     pub fn update_ethereum_event_client_address(&mut self, new_address: ActorId) {
@@ -209,10 +227,6 @@ where
         self.data().admin
     }
 
-    pub fn program_address(&self) -> ActorId {
-        self.exec_context.actor_id()
-    }
-
     pub fn get_config(&self) -> Config {
         self.config().clone()
     }
@@ -226,11 +240,7 @@ where
     }
 
     pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160)> {
-        self.data()
-            .vara_to_eth_token_id
-            .clone()
-            .into_iter()
-            .collect()
+        self.data().vara_eth_mapping.clone()
     }
 
     pub async fn deposit_tokens(
@@ -241,12 +251,6 @@ where
         to: H160,
     ) -> Result<(U256, H160), Error> {
         let data = self.data();
-        let sender = self.exec_context.actor_id();
-
-        if sender != data.bridging_payment_service {
-            return Err(Error::NotBridgingClient);
-        }
-
         let config = self.config();
 
         if gstd::exec::gas_available()
@@ -310,12 +314,7 @@ where
     ) -> Result<(), Error> {
         let data = self.data();
         let sender = self.exec_context.actor_id();
-
-        let vara_token_id = data
-            .eth_to_vara_token_id
-            .get(&eth_token_id)
-            .copied()
-            .ok_or(Error::NoCorrespondingEthAddress)?;
+        let vara_token_id = self.get_vara_token_id(&eth_token_id)?;
 
         if sender != data.ethereum_event_client {
             return Err(Error::NotEthClient);
@@ -355,7 +354,7 @@ where
             .get_message_info(&msg_id)
             .expect("Unexpected: msg status does not exist");
 
-        let TxDetails::DepositVaraToTreasury {
+        let TxDetails::DepositToTreasury {
             vara_token_id,
             eth_token_id,
             sender,

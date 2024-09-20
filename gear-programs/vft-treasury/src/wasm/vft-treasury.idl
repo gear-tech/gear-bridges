@@ -64,8 +64,8 @@ type MessageStatus = enum {
 };
 
 type TxDetails = enum {
-  DepositVaraToTreasury: struct { vara_token_id: actor_id, eth_token_id: h160, sender: actor_id, amount: u256, receiver: h160 },
-  WithdrawVaraFromTreasury: struct { vara_token_id: actor_id, eth_token_id: h160, recepient: actor_id, amount: u256 },
+  DepositToTreasury: struct { vara_token_id: actor_id, eth_token_id: h160, sender: actor_id, amount: u256, receiver: h160 },
+  WithdrawFromTreasury: struct { vara_token_id: actor_id, eth_token_id: h160, recepient: actor_id, amount: u256 },
 };
 
 constructor {
@@ -76,7 +76,7 @@ service VftTreasury {
   DepositTokens : (vara_token_id: actor_id, from: actor_id, amount: u256, to: h160) -> result (struct { u256, h160 }, Error);
   HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
   MapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> null;
-  UnmapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> null;
+  UnmapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);
   UpdateBridgingPaymentServiceAddress : (new_address: actor_id) -> null;
   UpdateConfig : (config: Config) -> null;
   UpdateEthereumEventClientAddress : (new_address: actor_id) -> null;
@@ -85,7 +85,6 @@ service VftTreasury {
   query GearBridgeBuiltin : () -> actor_id;
   query GetConfig : () -> Config;
   query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
-  query ProgramAddress : () -> actor_id;
   query VaraToEthAddresses : () -> vec struct { actor_id, h160 };
 
   events {

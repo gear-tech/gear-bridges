@@ -1,7 +1,15 @@
+//! # utils
+//!
+//! Various utility functions necessary to run VFT Treasury service.
+
 use super::Error;
 use super::{msg_tracker::MessageStatus, msg_tracker_mut, vft::vft::io as vft_io};
 use sails_rs::{calls::ActionIo, prelude::*};
 
+/// Set a critical hook that guarantees code execution for `msg_id` in case of any unexpected
+/// code failure be it not enough gas, panic, unexpected error etc.
+///
+/// The hook is executed inside `handle_signal`, refer to [`gstd::critical`] for more information.
 pub fn set_critical_hook(msg_id: MessageId) {
     gstd::critical::set_hook(move || {
         let msg_tracker = msg_tracker_mut();
@@ -11,15 +19,21 @@ pub fn set_critical_hook(msg_id: MessageId) {
 
         match msg_info.status {
             MessageStatus::SendingMessageToBridgeBuiltin => {
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin);
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin)
+                    .expect("message not found");
             }
 
             MessageStatus::SendingMessageToTransferTokens => {
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromTransfer);
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::WaitingReplyFromTransfer)
+                    .expect("message not found");
             }
 
             MessageStatus::TokenTransferCompleted(true) => {
-                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::BridgeBuiltinStep)
+                    .expect("message not found");
             }
 
             MessageStatus::TokenTransferCompleted(false) => {
@@ -57,10 +71,9 @@ fn handle_reply_hook(msg_id: MessageId) {
         MessageStatus::SendingMessageToTransferTokens => {
             match decode_transfer_reply(&reply_bytes) {
                 Ok(reply) => {
-                    msg_tracker.update_message_status(
-                        msg_id,
-                        MessageStatus::TokenTransferCompleted(reply),
-                    );
+                    msg_tracker
+                        .update_message_status(msg_id, MessageStatus::TokenTransferCompleted(reply))
+                        .expect("message not found");
                 }
 
                 Err(_) => {
@@ -73,7 +86,9 @@ fn handle_reply_hook(msg_id: MessageId) {
             let reply = decode_transfer_reply(&reply_bytes).unwrap_or(false);
 
             if reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::BridgeBuiltinStep)
+                    .expect("message not found");
             } else {
                 msg_tracker.remove_message_info(&msg_id);
             }
@@ -88,7 +103,8 @@ fn handle_reply_hook(msg_id: MessageId) {
             };
 
             msg_tracker
-                .update_message_status(msg_id, MessageStatus::BridgeResponseReceived(result));
+                .update_message_status(msg_id, MessageStatus::BridgeResponseReceived(result))
+                .expect("message not found");
         }
 
         MessageStatus::WaitingReplyFromBuiltin => {
@@ -96,10 +112,12 @@ fn handle_reply_hook(msg_id: MessageId) {
 
             match reply {
                 Ok(Some(nonce)) => {
-                    msg_tracker.update_message_status(
-                        msg_id,
-                        MessageStatus::MessageProcessedWithSuccess(nonce),
-                    );
+                    msg_tracker
+                        .update_message_status(
+                            msg_id,
+                            MessageStatus::MessageProcessedWithSuccess(nonce),
+                        )
+                        .expect("message not found");
                 }
 
                 _ => {
@@ -112,6 +130,12 @@ fn handle_reply_hook(msg_id: MessageId) {
     }
 }
 
+/// Send message to `destination` with `message` bytes as payload and include
+/// gas to send, deposit for reply and reply timeout.
+///
+/// `msg_id` is an message ID that we wait to get reply from. This function sets
+/// reply hook which will decode reply and perform necessary actions for message depending
+/// on [MessageInfo](super::msg_tracker::MessageInfo) of the `msg_id`.
 pub async fn send_message_with_gas_for_reply(
     destination: ActorId,
     message: Vec<u8>,

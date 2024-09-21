@@ -5,18 +5,10 @@ use sails_rs::prelude::*;
 pub enum Error {
     SendFailure,
     ReplyFailure,
-    TransferTokensDecode,
-    TokensTransferFailure,
     RequestToGateWayDecode,
-    PayloadSize,
-    MintTokensDecode,
     ReplyTimeout,
-    TokensRefunded,
-    TransactionFailure,
-    FailureInVftGateway,
     ReplyHook,
     GatewayMessageProcessingFailed,
     InvalidMessageStatus,
     MessageNotFound,
-    TransferTokensFailed,
 }

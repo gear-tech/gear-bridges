@@ -27,7 +27,7 @@ pub enum MessageStatus {
     SendingMessageToTreasury,
     WaitingReplyFromTreasury,
     ProcessRefund,
-    TreasuryMessageProcessingCompleted,
+    TreasuryMessageProcessingCompleted((U256, H160)),
 }
 
 impl MessageTracker {
@@ -55,12 +55,12 @@ impl MessageTracker {
         self.message_info.remove(msg_id)
     }
 
-    pub fn check_vft_treasury_reply(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+    pub fn check_vft_treasury_reply(&mut self, msg_id: &MessageId) -> Result<(U256, H160), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
-                MessageStatus::TreasuryMessageProcessingCompleted => {
+                MessageStatus::TreasuryMessageProcessingCompleted(nonce_and_eth_token_id) => {
                     self.remove_message_info(msg_id);
-                    Ok(())
+                    Ok(nonce_and_eth_token_id)
                 }
                 MessageStatus::ProcessRefund | MessageStatus::SendingMessageToTreasury => {
                     Err(Error::TreasuryMessageProcessingFailed)

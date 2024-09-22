@@ -23,9 +23,11 @@ pub struct BridgingPayment<ExecContext> {
 #[derive(Encode, Decode, TypeInfo)]
 pub enum BridgingPaymentEvents {
     DepositVaraToTreasury {
+        nonce: U256,
         sender: ActorId,
         amount: U256,
         receiver: H160,
+        eth_token_id: H160,
     },
 }
 
@@ -265,7 +267,7 @@ where
                     .await
                     .map(Some)
                 }
-                MessageStatus::TreasuryMessageProcessingCompleted => {
+                MessageStatus::TreasuryMessageProcessingCompleted((nonce, eth_token_id)) => {
                     let TransactionDetails {
                         sender,
                         amount,
@@ -277,9 +279,11 @@ where
                     process_refund(sender, attached_value, config);
 
                     Ok(Some(BridgingPaymentEvents::DepositVaraToTreasury {
+                        nonce,
                         sender,
                         amount,
                         receiver,
+                        eth_token_id,
                     }))
                 }
                 MessageStatus::ProcessRefund => {
@@ -289,7 +293,7 @@ where
                         ..
                     } = msg_info.details;
 
-                    handle_refund(sender, attached_value);
+                    process_refund(sender, attached_value, config);
 
                     Ok(None)
                 }
@@ -327,7 +331,7 @@ async fn handle_treasury_transaction(
     vft_gateway_address: ActorId,
     config: &Config,
 ) -> Result<BridgingPaymentEvents, Error> {
-    send_message_to_treasury(
+    let (nonce, eth_token_id) = send_message_to_treasury(
         vft_gateway_address,
         sender,
         vara_token_id,
@@ -341,9 +345,11 @@ async fn handle_treasury_transaction(
     process_refund(sender, attached_value, config);
 
     Ok(BridgingPaymentEvents::DepositVaraToTreasury {
+        nonce,
         sender,
         amount,
         receiver,
+        eth_token_id,
     })
 }
 

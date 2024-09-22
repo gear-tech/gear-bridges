@@ -21,7 +21,7 @@ type MessageStatus = enum {
   SendingMessageToTreasury,
   WaitingReplyFromTreasury,
   ProcessRefund,
-  TreasuryMessageProcessingCompleted,
+  TreasuryMessageProcessingCompleted: struct { u256, h160 },
 };
 
 type TransactionDetails = struct {
@@ -49,7 +49,7 @@ service BridgingPayment {
   query VftTreasuryAddress : () -> actor_id;
 
   events {
-    DepositVaraToTreasury: struct { sender: actor_id, amount: u256, receiver: h160 };
+    DepositVaraToTreasury: struct { nonce: u256, sender: actor_id, amount: u256, receiver: h160, eth_token_id: h160 };
   }
 };
 

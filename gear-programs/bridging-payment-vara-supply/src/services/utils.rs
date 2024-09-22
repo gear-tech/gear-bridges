@@ -2,6 +2,7 @@ use super::{
     error::Error,
     msg_tracker::{msg_tracker_mut, MessageStatus},
     vft_treasury::vft_treasury::io as vft_treasury_io,
+    vft_treasury::Error as VftTreasuryError,
 };
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
@@ -74,13 +75,13 @@ fn handle_reply_hook(msg_id: MessageId) {
         MessageStatus::SendingMessageToTreasury | MessageStatus::WaitingReplyFromTreasury => {
             let reply = decode_vft_treasury_reply(&reply_bytes);
             match reply {
-                Ok(()) => {
+                Ok(Ok(nonce_eth_id)) => {
                     msg_tracker.update_message_status(
                         msg_id,
-                        MessageStatus::TreasuryMessageProcessingCompleted,
+                        MessageStatus::TreasuryMessageProcessingCompleted(nonce_eth_id),
                     );
                 }
-                Err(_) => {
+                Err(_) | Ok(_) => {
                     msg_tracker.update_message_status(msg_id, MessageStatus::ProcessRefund);
                 }
             };
@@ -89,6 +90,8 @@ fn handle_reply_hook(msg_id: MessageId) {
     };
 }
 
-fn decode_vft_treasury_reply(bytes: &[u8]) -> Result<(), Error> {
-    vft_treasury_io::Deposit::decode_reply(bytes).map_err(|_| Error::RequestToTreasuryDecode)
+fn decode_vft_treasury_reply(
+    bytes: &[u8],
+) -> Result<Result<(U256, H160), VftTreasuryError>, Error> {
+    vft_treasury_io::DepositTokens::decode_reply(bytes).map_err(|_| Error::RequestToTreasuryDecode)
 }

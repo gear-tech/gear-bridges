@@ -13,12 +13,12 @@ pub async fn send_message_to_treasury(
     receiver: H160,
     attached_value: u128,
     config: &Config,
-) -> Result<(), Error> {
+) -> Result<(U256, H160), Error> {
     let msg_id = gstd::msg::id();
 
-    let bytes: Vec<u8> = vft_treasury::vft_treasury::io::Deposit::encode_call(
-        sender,
+    let bytes: Vec<u8> = vft_treasury::vft_treasury::io::DepositTokens::encode_call(
         vara_token_id,
+        sender,
         amount,
         receiver,
     );

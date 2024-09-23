@@ -37,6 +37,7 @@ type Error = enum {
   TokensRefunded,
   NotEthClient,
   NotEnoughGas,
+  NoCorrespondingVaraAddress,
 };
 
 type MessageInfo = struct {
@@ -71,7 +72,7 @@ constructor {
 service VftGateway {
   HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
-  MintTokens : (vara_token_id: actor_id, receiver: actor_id, amount: u256) -> result (null, Error);
+  MintTokens : (eth_token_id: h160, receiver: actor_id, amount: u256) -> result (null, Error);
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
   TransferVaraToEth : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   UpdateConfig : (config: Config) -> null;

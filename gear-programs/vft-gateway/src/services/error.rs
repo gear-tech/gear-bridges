@@ -23,4 +23,5 @@ pub enum Error {
     TokensRefunded,
     NotEthClient,
     NotEnoughGas,
+    NoCorrespondingVaraAddress,
 }

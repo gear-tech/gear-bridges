@@ -214,9 +214,11 @@ where
             panic!("Please attach more gas");
         }
 
-        maybe_event_or_panic_async!(self, || async move {
-            let attached_value = msg::value();
+        let attached_value = msg::value();
+        // Return surplus of attached value
+        return_surplus(sender, attached_value, config);
 
+        maybe_event_or_panic_async!(self, || async move {
             if attached_value < config.fee {
                 panic!("Not enough fee");
             }
@@ -272,11 +274,8 @@ where
                         sender,
                         amount,
                         receiver,
-                        attached_value,
                         ..
                     } = msg_info.details;
-
-                    process_refund(sender, attached_value, config);
 
                     Ok(Some(BridgingPaymentEvents::DepositVaraToTreasury {
                         nonce,
@@ -293,7 +292,7 @@ where
                         ..
                     } = msg_info.details;
 
-                    process_refund(sender, attached_value, config);
+                    process_refund(sender, attached_value);
 
                     Ok(None)
                 }
@@ -328,11 +327,11 @@ async fn handle_treasury_transaction(
     amount: U256,
     receiver: H160,
     attached_value: u128,
-    vft_gateway_address: ActorId,
+    vft_treasury_address: ActorId,
     config: &Config,
 ) -> Result<BridgingPaymentEvents, Error> {
     let (nonce, eth_token_id) = send_message_to_treasury(
-        vft_gateway_address,
+        vft_treasury_address,
         sender,
         vara_token_id,
         amount,
@@ -340,9 +339,10 @@ async fn handle_treasury_transaction(
         attached_value,
         config,
     )
-    .await?;
-
-    process_refund(sender, attached_value, config);
+    .await
+    .inspect_err(|_| {
+        process_refund(sender, attached_value);
+    })?;
 
     Ok(BridgingPaymentEvents::DepositVaraToTreasury {
         nonce,
@@ -353,13 +353,18 @@ async fn handle_treasury_transaction(
     })
 }
 
-fn process_refund(sender: ActorId, attached_value: u128, config: &Config) {
+fn return_surplus(sender: ActorId, attached_value: u128, config: &Config) {
     let refund = attached_value - config.fee;
     if refund >= exec::env_vars().existential_deposit {
-        handle_refund(sender, refund);
+        send_refund(sender, refund);
     }
 }
 
-fn handle_refund(actor_id: ActorId, amount: u128) {
+fn process_refund(sender: ActorId, attached_value: u128) {
+    send_refund(sender, attached_value);
+    msg_tracker_mut().remove_message_info(&msg::id());
+}
+
+fn send_refund(actor_id: ActorId, amount: u128) {
     msg::send_with_gas(actor_id, "", 0, amount).expect("Error in refund");
 }

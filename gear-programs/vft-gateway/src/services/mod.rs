@@ -168,12 +168,12 @@ where
 
     pub async fn transfer_vara_to_eth(
         &mut self,
+        sender: ActorId,
         vara_token_id: ActorId,
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
         let data = self.data();
-        let sender = self.exec_context.actor_id();
         let msg_id = gstd::msg::id();
         let eth_token_id = self.get_eth_token_id(&vara_token_id)?;
         let config = self.config();

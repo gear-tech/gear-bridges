@@ -159,6 +159,7 @@ create_mock!(
 pub trait BridgingPayment {
     fn bridge_payment(system: &System) -> Program<'_>;
     create_function!(request_transaction, "RequestToGateway", amount: U256, receiver: H160, vara_token_id: ActorId);
+    create_function!(reclaim_fee, "ReclaimFee");
 }
 
 impl BridgingPayment for Program<'_> {
@@ -170,11 +171,12 @@ impl BridgingPayment for Program<'_> {
             Config::new(FEE, 15_000_000_000, 100_000_000_000, 1000, 50_000_000_000),
         );
         let payload = ["New".encode(), init_config.encode()].concat();
-        let result = program.send_bytes(10, payload);
+        let result = program.send_bytes(ADMIN_ID, payload);
         assert!(!result.main_failed());
         program
     }
     implement_function!(request_transaction, "BridgingPayment", "RequestTransaction", amount: U256, receiver: H160, vara_token_id: ActorId; true);
+    implement_function!(reclaim_fee, "BridgingPayment", "ReclaimFee");
 }
 
 pub trait Token {

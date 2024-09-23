@@ -88,10 +88,10 @@ impl<T> BridgingPayment<T>
 where
     T: ExecContext,
 {
-    pub fn seed(config: InitConfig, exec_context: T) {
+    pub fn seed(config: InitConfig) {
         unsafe {
             DATA = Some(BridgingPaymentData {
-                admin_address: exec_context.actor_id(),
+                admin_address: config.admin_address,
                 vft_treasury_address: config.vft_treasury_address,
             });
             CONFIG = Some(config.config);

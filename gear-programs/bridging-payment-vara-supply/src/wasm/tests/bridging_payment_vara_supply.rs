@@ -1,10 +1,10 @@
-use gtest::{Program, System};
+use gtest::{Log, Program, System};
 use sails_rs::prelude::*;
 
 mod utils;
 use utils::{
     BridgingPayment, GearBridgeBuiltinMock, Token, VftTreasury, ADMIN_ID, BRIDGE_BUILTIN_ID, FEE,
-    TOKEN_ID,
+    TOKEN_ID, VFT_TREASURY_ID,
 };
 
 #[test]
@@ -30,4 +30,13 @@ fn deposit_to_treasury_success() {
     system.mint_to(account_id, FEE);
     bridging_payment.request_transaction(account_id, amount, [1; 20].into(), vft.id(), false);
     assert_eq!(vft.balance_of(account_id.into()), U256::zero());
+    assert_eq!(vft.balance_of(VFT_TREASURY_ID.into()), amount);
+
+    // Claim fee
+    bridging_payment.reclaim_fee(ADMIN_ID, false);
+    system
+        .get_mailbox(ADMIN_ID)
+        .claim_value(Log::builder().dest(ADMIN_ID))
+        .unwrap();
+    assert_eq!(system.balance_of(ADMIN_ID), FEE);
 }

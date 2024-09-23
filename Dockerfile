@@ -23,12 +23,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo install wasm-opt
 
 # Install go
-RUN wget -P /tmp "https://go.dev/dl/go1.20.1.linux-amd64.tar.gz"
-RUN tar -C /usr/local -xzf "/tmp/go1.20.1.linux-amd64.tar.gz"
-RUN rm "/tmp/go1.20.1.linux-amd64.tar.gz"
-ENV GOPATH /go
-ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
-RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH"
+ENV GO_VERSION 1.20.1
+RUN wget -P /tmp "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+RUN tar -C /usr/local -xzf "/tmp/go${GO_VERSION}.linux-amd64.tar.gz"
+RUN rm "/tmp/go${GO_VERSION}.linux-amd64.tar.gz"
+ENV PATH /go/bin:/usr/local/go/bin:$PATH
 
 # Install foundry
 RUN curl -L https://foundry.paradigm.xyz | bash

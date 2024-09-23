@@ -29,7 +29,15 @@ async fn test_treasury() -> Result<()> {
     vft.approve(&client, &mut listener, actor, treasury.program_id(), amount)
         .await?;
     println!("approved");
-
+    treasury
+        .map_vara_to_eth_address(&client, &mut listener, [3; 20].into(), vft.program_id())
+        .await?;
+    println!(
+        "{:?}",
+        treasury
+            .vara_to_eth_addresses(&client, &mut listener)
+            .await?
+    );
     let reply = treasury
         .deposit_tokens(
             &client,

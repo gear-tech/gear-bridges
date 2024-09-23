@@ -1,13 +1,15 @@
 use bridging_payment_vara_supply::services::{Config, InitConfig};
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
 use gtest::{Program, System, WasmProgram};
+use sails_rs::prelude::*;
 use vft_treasury_wasm::WASM_BINARY as VFT_TREASURY_WASM_BINARY;
 
-use sails_rs::prelude::*;
 pub const ADMIN_ID: u64 = 1000;
 pub const FEE: u128 = 10_000_000_000_000;
 pub const VFT_TREASURY_ID: u64 = 100;
 pub const TOKEN_ID: u64 = 200;
+pub const ETH_CLIENT_ID: u64 = 500;
+pub const BRIDGE_BUILTIN_ID: u64 = 300;
 
 // macros
 macro_rules! create_function {
@@ -108,7 +110,7 @@ macro_rules! implement_token_query {
     };
 }
 
-macro_rules! create_ft_mock {
+macro_rules! create_mock {
     ($name:ident, $handle_result:expr) => {
         #[derive(Debug)]
         pub struct $name;
@@ -137,18 +139,19 @@ macro_rules! create_ft_mock {
     };
 }
 
-create_ft_mock!(FTMockError, Err("Error"));
-create_ft_mock!(FTMockWrongReply, Ok(None));
-create_ft_mock!(
-    FTMockReturnsFalse,
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
+pub enum Response {
+    MessageSent { nonce: U256, hash: H256 },
+}
+
+create_mock!(
+    GearBridgeBuiltinMock,
     Ok(Some(
-        ["Vft".encode(), "TransferFrom".encode(), false.encode()].concat()
-    ))
-);
-create_ft_mock!(
-    FTMockReturnsTrue,
-    Ok(Some(
-        ["Vft".encode(), "TransferFrom".encode(), true.encode()].concat()
+        Response::MessageSent {
+            nonce: U256::from(1),
+            hash: [1; 32].into(),
+        }
+        .encode(),
     ))
 );
 
@@ -196,18 +199,30 @@ impl Token for Program<'_> {
 
 pub trait VftTreasury {
     fn vft_treasury(system: &System) -> Program<'_>;
-    create_function!(_map_vara_to_eth_address, "MapVaraToEthAddress", vara_token_id: ActorId, eth_token_id: H160);
+    create_function!(map_vara_to_eth_address, "MapVaraToEthAddress", eth_token_id: H160, vara_token_id: ActorId);
 }
 
 impl VftTreasury for Program<'_> {
     fn vft_treasury(system: &System) -> Program<'_> {
         let program =
             Program::from_binary_with_id(system, VFT_TREASURY_ID, VFT_TREASURY_WASM_BINARY);
-        let init_config = vft_treasury_app::services::InitConfig::new(1010.into());
+        let init_config = vft_treasury_app::services::InitConfig::new(
+            [1; 20].into(),
+            BRIDGE_BUILTIN_ID.into(),
+            ETH_CLIENT_ID.into(),
+            vft_treasury_app::services::Config::new(
+                15_000_000_000,
+                15_000_000_000,
+                15_000_000_000,
+                100,
+                15_000_000_000,
+            ),
+        );
+
         let payload = ["New".encode(), init_config.encode()].concat();
         let result = program.send_bytes(ADMIN_ID, payload);
         assert!(!result.main_failed());
         program
     }
-    implement_function!(_map_vara_to_eth_address, "VftTreasury", "MapVaraToEthAddress", vara_token_id: ActorId, eth_token_id: H160; false);
+    implement_function!(map_vara_to_eth_address, "VftTreasury", "MapVaraToEthAddress", eth_token_id: H160, vara_token_id: ActorId; false);
 }

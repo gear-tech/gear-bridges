@@ -2,7 +2,10 @@ use gtest::{Program, System};
 use sails_rs::prelude::*;
 
 mod utils;
-use utils::{BridgingPayment, Token, VftTreasury, ADMIN_ID, FEE, TOKEN_ID};
+use utils::{
+    BridgingPayment, GearBridgeBuiltinMock, Token, VftTreasury, ADMIN_ID, BRIDGE_BUILTIN_ID, FEE,
+    TOKEN_ID,
+};
 
 #[test]
 fn deposit_to_treasury_success() {
@@ -10,6 +13,9 @@ fn deposit_to_treasury_success() {
     system.init_logger();
 
     let vft = Program::token(&system, TOKEN_ID);
+    let bridge_built_in = Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+    // Init bridge builtin
+    assert!(!bridge_built_in.send_bytes(ADMIN_ID, vec![]).main_failed());
 
     let vft_treasury = Program::vft_treasury(&system);
     let bridging_payment = Program::bridge_payment(&system);
@@ -19,7 +25,7 @@ fn deposit_to_treasury_success() {
 
     vft.mint(ADMIN_ID, account_id.into(), amount, false);
     vft.approve(account_id, vft_treasury.id(), amount, false);
-    //vft_gateway.map_vara_to_eth_address(ADMIN_ID, vft.id(), [2; 20].into(), false);
+    vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id(), false);
 
     system.mint_to(account_id, FEE);
     bridging_payment.request_transaction(account_id, amount, [1; 20].into(), vft.id(), false);

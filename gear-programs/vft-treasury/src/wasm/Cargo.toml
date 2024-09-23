@@ -24,3 +24,4 @@ tokio.workspace = true
 blake2.workspace = true
 gear-core.workspace = true
 extended_vft_wasm.workspace = true
+gclient.workspace = true

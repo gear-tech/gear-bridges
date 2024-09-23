@@ -1,4 +1,5 @@
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
+use gclient::EventProcessor;
 use gtest::{Program, System, WasmProgram};
 use sails_rs::prelude::*;
 use vft_treasury_app::services::error::Error;

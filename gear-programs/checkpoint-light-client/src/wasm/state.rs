@@ -38,14 +38,14 @@ impl<const N: usize> Checkpoints<N> {
     }
 
     pub fn checkpoint(&self, slot: Slot) -> Result<(Slot, Hash256), CheckpointError> {
-        let search = |slice: &[(Slot, Hash256)]| {
-            match slice.binary_search_by(|(slot_current, _checkpoint)| slot_current.cmp(&slot)) {
-                Ok(index) => Ok(slice[index]),
-                Err(index_next) => match slice.get(index_next) {
-                    Some(result) => Ok(*result),
-                    None => Err(CheckpointError::NotPresent),
-                }
-            }
+        let search = |slice: &[(Slot, Hash256)]| match slice
+            .binary_search_by(|(slot_current, _checkpoint)| slot_current.cmp(&slot))
+        {
+            Ok(index) => Ok(slice[index]),
+            Err(index_next) => match slice.get(index_next) {
+                Some(result) => Ok(*result),
+                None => Err(CheckpointError::NotPresent),
+            },
         };
 
         let (left, right) = self.0.as_slices();

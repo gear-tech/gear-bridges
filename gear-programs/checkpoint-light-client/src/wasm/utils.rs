@@ -64,9 +64,11 @@ pub fn construct_state_reply(
     }
 }
 
-fn collect<'a, T: 'a + Copy>(request: &StateRequest, iter: impl DoubleEndedIterator<Item = &'a T>) -> Vec<T> {
-    iter
-        .skip(request.index_start as usize)
+fn collect<'a, T: 'a + Copy>(
+    request: &StateRequest,
+    iter: impl DoubleEndedIterator<Item = &'a T>,
+) -> Vec<T> {
+    iter.skip(request.index_start as usize)
         .take(request.count as usize)
         .copied()
         .collect()

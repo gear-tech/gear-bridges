@@ -36,7 +36,7 @@ pub fn get_participating_keys(
         .iter()
         .zip(committee.0.iter())
         .filter_map(|(bit, pub_key)| bit.then_some(pub_key.clone().0 .0))
-        .collect::<Vec<_>>()
+        .collect()
 }
 
 pub fn construct_state_reply(

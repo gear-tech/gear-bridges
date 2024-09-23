@@ -13,6 +13,7 @@ use io::{
     meta,
     sync_update::Error as SyncCommitteeUpdateError,
     BeaconBlockHeader, Handle, HandleResult, Init, SyncCommitteeKeys, SyncCommitteeUpdate, G1, G2,
+    Slot,
 };
 use primitive_types::H256;
 use state::{Checkpoints, ReplayBackState, State};

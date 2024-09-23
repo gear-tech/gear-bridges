@@ -2,7 +2,7 @@ use super::*;
 use circular_buffer::CircularBuffer;
 use io::{
     ethereum_common::{network::Network, Hash256, SLOTS_PER_EPOCH},
-    BeaconBlockHeader, CheckpointError, Slot, SyncCommitteeKeys,
+    BeaconBlockHeader, CheckpointError, SyncCommitteeKeys,
 };
 
 pub struct State<const N: usize> {
@@ -59,6 +59,10 @@ impl<const N: usize> Checkpoints<N> {
 
     pub fn last(&self) -> Option<(Slot, Hash256)> {
         self.0.back().copied()
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &(Slot, Hash256)> {
+        self.0.iter()
     }
 }
 

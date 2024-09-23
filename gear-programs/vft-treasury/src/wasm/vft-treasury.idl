@@ -2,7 +2,6 @@ type InitConfig = struct {
   receiver_contract_address: h160,
   gear_bridge_builtin: actor_id,
   ethereum_event_client: actor_id,
-  bridging_payment_service: actor_id,
   config: Config,
 };
 
@@ -17,10 +16,7 @@ type Config = struct {
 type Error = enum {
   SendFailure,
   ReplyFailure,
-  RequestToBuiltinSend,
-  RequestToBuiltinReply,
   BuiltinDecode,
-  PayloadSize,
   ReplyTimeout,
   DuplicateAddressMapping,
   NoCorrespondingEthAddress,
@@ -36,12 +32,6 @@ type Error = enum {
   NotEnoughGas,
   TransferFailed,
   TransferTokensDecode,
-  TokensTransferFailure,
-  RequestToGateWayDecode,
-  TransactionFailure,
-  FailureInVftGateway,
-  GatewayMessageProcessingFailed,
-  TransferTokensFailed,
 };
 
 type MessageInfo = struct {
@@ -75,7 +65,6 @@ service VftTreasury {
   HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
   MapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);
   UnmapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);
-  UpdateBridgingPaymentServiceAddress : (new_address: actor_id) -> result (null, Error);
   UpdateConfig : (config: Config) -> result (null, Error);
   UpdateEthereumEventClientAddress : (new_address: actor_id) -> result (null, Error);
   WithdrawTokens : (eth_token_id: h160, recepient: actor_id, amount: u256) -> result (null, Error);

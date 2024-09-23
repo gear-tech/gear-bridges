@@ -4,10 +4,7 @@ use sails_rs::prelude::*;
 pub enum Error {
     SendFailure,
     ReplyFailure,
-    RequestToBuiltinSend,
-    RequestToBuiltinReply,
     BuiltinDecode,
-    PayloadSize,
     ReplyTimeout,
     DuplicateAddressMapping,
     NoCorrespondingEthAddress,
@@ -23,10 +20,4 @@ pub enum Error {
     NotEnoughGas,
     TransferFailed,
     TransferTokensDecode,
-    TokensTransferFailure,
-    RequestToGateWayDecode,
-    TransactionFailure,
-    FailureInVftGateway,
-    GatewayMessageProcessingFailed,
-    TransferTokensFailed,
 }

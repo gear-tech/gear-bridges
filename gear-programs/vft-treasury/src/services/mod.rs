@@ -22,7 +22,6 @@ struct VftTreasuryData {
     receiver_contract_address: H160,
     gear_bridge_builtin: ActorId,
     ethereum_event_client: ActorId,
-    bridging_payment_service: ActorId,
     vara_eth_mapping: Vec<(ActorId, H160)>,
 }
 
@@ -58,7 +57,6 @@ pub struct InitConfig {
     pub receiver_contract_address: H160,
     pub gear_bridge_builtin: ActorId,
     pub ethereum_event_client: ActorId,
-    pub bridging_payment_service: ActorId,
     pub config: Config,
 }
 
@@ -67,14 +65,12 @@ impl InitConfig {
         receiver_contract_address: H160,
         gear_bridge_builtin: ActorId,
         ethereum_event_client: ActorId,
-        bridging_payment_service: ActorId,
         config: Config,
     ) -> Self {
         Self {
             receiver_contract_address,
             gear_bridge_builtin,
             ethereum_event_client,
-            bridging_payment_service,
             config,
         }
     }
@@ -91,7 +87,6 @@ where
                 ethereum_event_client: config.ethereum_event_client,
                 admin: exec_context.actor_id(),
                 vara_eth_mapping: Vec::new(),
-                bridging_payment_service: config.bridging_payment_service,
             });
             CONFIG = Some(config.config);
             MSG_TRACKER = Some(MessageTracker::default());
@@ -241,19 +236,6 @@ where
         Ok(())
     }
 
-    pub fn update_bridging_payment_service_address(
-        &mut self,
-        new_address: ActorId,
-    ) -> Result<(), Error> {
-        let data = self.data();
-        if data.admin != self.exec_context.actor_id() {
-            return Err(Error::NotAdmin);
-        }
-
-        self.data_mut().bridging_payment_service = new_address;
-        Ok(())
-    }
-
     pub fn admin(&self) -> ActorId {
         self.data().admin
     }
@@ -399,7 +381,7 @@ where
         match msg_info.status {
             MessageStatus::TokenTransferCompleted(true) | MessageStatus::BridgeBuiltinStep => {
                 match bridge_builtin_operations::send_message_to_bridge_builtin(
-                    data.bridging_payment_service,
+                    data.gear_bridge_builtin,
                     data.receiver_contract_address,
                     receiver,
                     eth_token_id,

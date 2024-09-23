@@ -36,7 +36,7 @@ fn test_treasury() {
     vft.approve(account_id, vft_treasury.id(), amount);
 
     let reply = vft_treasury.deposit_tokens(
-        BRIDGE_SERVICE_ID,
+        ADMIN_ID,
         vft.id(),
         account_id.into(),
         amount,
@@ -78,7 +78,7 @@ fn test_mapping_does_not_exists() {
     vft.approve(account_id, vft_treasury.id(), amount);
 
     let reply = vft_treasury.deposit_tokens(
-        BRIDGE_SERVICE_ID,
+        ADMIN_ID,
         vft.id(),
         account_id.into(),
         amount,

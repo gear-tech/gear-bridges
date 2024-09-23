@@ -87,7 +87,7 @@ fn handle_reply_hook(msg_id: MessageId) {
 
             if reply {
                 msg_tracker
-                    .update_message_status(msg_id, MessageStatus::BridgeBuiltinStep)
+                    .update_message_status(msg_id, MessageStatus::TokenTransferCompleted(reply))
                     .expect("message not found");
             } else {
                 msg_tracker.remove_message_info(&msg_id);

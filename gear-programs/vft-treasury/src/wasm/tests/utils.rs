@@ -7,7 +7,6 @@ use vft_treasury_app::services::{Config, InitConfig};
 pub const ADMIN_ID: u64 = 1000;
 pub const TOKEN_ID: u64 = 200;
 pub const ETH_CLIENT_ID: u64 = 500;
-pub const BRIDGE_SERVICE_ID: u64 = 501;
 pub const BRIDGE_BUILTIN_ID: u64 = 300;
 
 // Mocks for programs
@@ -153,7 +152,6 @@ impl VftTreasury for Program<'_> {
             [1; 20].into(),
             BRIDGE_BUILTIN_ID.into(),
             ETH_CLIENT_ID.into(),
-            BRIDGE_SERVICE_ID.into(),
             Config::new(
                 15_000_000_000,
                 15_000_000_000,

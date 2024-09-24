@@ -2,7 +2,6 @@ use sails_rs::prelude::*;
 
 use super::vft_treasury::Error as VftTreasuryError;
 
-//#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {
     SendFailure,

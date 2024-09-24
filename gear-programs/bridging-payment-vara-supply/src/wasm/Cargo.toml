@@ -8,6 +8,7 @@ bridging_payment_vara_supply.workspace = true
 
 [build-dependencies]
 gwasm-builder.workspace = true
+gear-wasm-instrument.workspace = true
 sails-idl-gen.workspace = true
 bridging_payment_vara_supply.workspace = true
 

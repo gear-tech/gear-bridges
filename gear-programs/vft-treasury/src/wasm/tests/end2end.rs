@@ -6,6 +6,8 @@ use utils_gclient::*;
 #[tokio::test]
 #[ignore]
 async fn test_treasury() -> Result<()> {
+    // It will not work on local node as vft-treasury logic relies on pallet-gear-eth-bridge
+    // which will be initialized only in ~12 hrs from start on local node.
     let mut client = GearApi::vara_testnet().await?;
 
     let actor: ActorId = client.get_actor_id();

@@ -145,15 +145,12 @@ pub async fn send_message_with_gas_for_reply(
     msg_id: MessageId,
 ) -> Result<(), Error> {
     gstd::msg::send_bytes_with_gas_for_reply(destination, message, gas_to_send, 0, gas_deposit)
-        .map_err(|_| Error::SendFailure)?
+        .map_err(|err| Error::SendFailure(err.to_string()))?
         .up_to(Some(reply_timeout))
         .map_err(|_| Error::ReplyTimeout)?
         .handle_reply(move || handle_reply_hook(msg_id))
-        .map_err(|_| Error::ReplyHook)?
+        .map_err(|err| Error::ReplyHook(err.to_string()))?
         .await
-        .map_err(|err| {
-            gstd::debug!("reply failed with {:?}", err);
-            Error::ReplyFailure
-        })?;
+        .map_err(|err| Error::ReplyFailure(err.to_string()))?;
     Ok(())
 }

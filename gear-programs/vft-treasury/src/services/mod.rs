@@ -153,7 +153,7 @@ impl<T> VftTreasury<T>
 where
     T: ExecContext,
 {
-    pub fn ensure_admin(&mut self) -> Result<(), Error> {
+    pub fn ensure_admin(&self) -> Result<(), Error> {
         if self.data().admin != self.exec_context.actor_id() {
             return Err(Error::NotAdmin);
         }
@@ -162,9 +162,7 @@ where
     }
 
     pub fn update_config(&mut self, config: Config) -> Result<(), Error> {
-        if self.data().admin != self.exec_context.actor_id() {
-            return Err(Error::NotAdmin);
-        }
+        self.ensure_admin()?;
 
         unsafe {
             CONFIG = Some(config);
@@ -178,11 +176,7 @@ where
         ethereum_token: H160,
         vara_token: ActorId,
     ) -> Result<(), Error> {
-        let data = self.data();
-
-        if data.admin != self.exec_context.actor_id() {
-            return Err(Error::NotAdmin);
-        }
+        self.ensure_admin()?;
 
         for (vara, eth) in self.data().vara_eth_mapping.iter() {
             if vara == &vara_token || eth == &ethereum_token {
@@ -202,11 +196,7 @@ where
         ethereum_token: H160,
         vara_token: ActorId,
     ) -> Result<(), Error> {
-        let data = self.data();
-
-        if data.admin != self.exec_context.actor_id() {
-            return Err(Error::NotAdmin);
-        }
+        self.ensure_admin()?;
 
         let ix = self
             .data()
@@ -226,11 +216,7 @@ where
         &mut self,
         new_address: ActorId,
     ) -> Result<(), Error> {
-        let data = self.data();
-        if data.admin != self.exec_context.actor_id() {
-            return Err(Error::NotAdmin);
-        }
-
+        self.ensure_admin()?;
         self.data_mut().ethereum_event_client = new_address;
         Ok(())
     }

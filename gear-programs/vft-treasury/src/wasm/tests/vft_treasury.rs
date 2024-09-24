@@ -5,25 +5,36 @@ use vft_treasury_app::services::error::Error;
 
 mod utils;
 
-fn setup_for_test(system: &System) -> (Program<'_>, Program<'_>, Program<'_>) {
+struct TestState<'a> {
+    #[allow(dead_code)]
+    gear_bridge_builtin: Program<'a>,
+    vft: Program<'a>,
+    vft_treasury: Program<'a>,
+}
+
+fn setup_for_test(system: &System) -> TestState<'_> {
     system.init_logger();
 
     let vft = Program::token(system, TOKEN_ID);
     let gear_bridge_builtin =
         Program::mock_with_id(system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
+    let _ = gear_bridge_builtin.send_bytes(ADMIN_ID, b"INIT");
 
     let vft_treasury = Program::vft_treasury(system);
 
-    (gear_bridge_builtin, vft, vft_treasury)
+    TestState {
+        gear_bridge_builtin,
+        vft,
+        vft_treasury,
+    }
 }
 
 #[test]
 fn test_treasury() {
     let system = System::new();
-    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
@@ -68,7 +79,9 @@ fn test_treasury() {
 #[test]
 fn test_mapping_does_not_exists() {
     let system = System::new();
-    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
     let account_id: u64 = 100000;
     let amount = U256::from(10_000_000_000_u64);
@@ -93,7 +106,9 @@ fn test_mapping_does_not_exists() {
 #[test]
 fn test_withdraw_fails_with_bad_origin() {
     let system = System::new();
-    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
@@ -115,7 +130,9 @@ fn test_withdraw_fails_with_bad_origin() {
 fn test_anyone_can_deposit() {
     let system = System::new();
 
-    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 

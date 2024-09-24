@@ -2,13 +2,13 @@ use sails_rs::prelude::*;
 
 #[derive(Debug, Encode, Decode, TypeInfo, Clone, PartialEq, Eq)]
 pub enum Error {
-    SendFailure,
-    ReplyFailure,
+    SendFailure(String),
+    ReplyFailure(String),
     BuiltinDecode,
     ReplyTimeout,
     DuplicateAddressMapping,
     NoCorrespondingEthAddress,
-    ReplyHook,
+    ReplyHook(String),
     MessageNotFound,
     InvalidMessageStatus,
     MessageFailed,

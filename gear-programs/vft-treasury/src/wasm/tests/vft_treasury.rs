@@ -5,25 +5,36 @@ use vft_treasury_app::services::error::Error;
 
 mod utils;
 
-macro_rules! setup_for_test {
-    ($system: ident, $vft: ident, $vft_treasury: ident, $gear_bridge_builtin: ident) => {
-        let $system = System::new();
-        $system.init_logger();
+struct TestState<'a> {
+    #[allow(dead_code)]
+    gear_bridge_builtin: Program<'a>,
+    vft: Program<'a>,
+    vft_treasury: Program<'a>,
+}
 
-        let $vft = Program::token(&$system, TOKEN_ID);
-        let $gear_bridge_builtin =
-            Program::mock_with_id(&$system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-        assert!(!$gear_bridge_builtin
-            .send_bytes(ADMIN_ID, b"INIT")
-            .main_failed());
+fn setup_for_test(system: &System) -> TestState<'_> {
+    system.init_logger();
 
-        let $vft_treasury = Program::vft_treasury(&$system);
-    };
+    let vft = Program::token(system, TOKEN_ID);
+    let gear_bridge_builtin =
+        Program::mock_with_id(system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+    let _ = gear_bridge_builtin.send_bytes(ADMIN_ID, b"INIT");
+
+    let vft_treasury = Program::vft_treasury(system);
+
+    TestState {
+        gear_bridge_builtin,
+        vft,
+        vft_treasury,
+    }
 }
 
 #[test]
 fn test_treasury() {
-    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
+    let system = System::new();
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
@@ -42,7 +53,6 @@ fn test_treasury() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
 
     let expected = Ok((U256::from(1), H160::from([2; 20])));
@@ -68,7 +78,10 @@ fn test_treasury() {
 
 #[test]
 fn test_mapping_does_not_exists() {
-    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
+    let system = System::new();
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
     let account_id: u64 = 100000;
     let amount = U256::from(10_000_000_000_u64);
@@ -84,7 +97,6 @@ fn test_mapping_does_not_exists() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
 
     assert!(reply.is_err());
@@ -93,7 +105,11 @@ fn test_mapping_does_not_exists() {
 
 #[test]
 fn test_withdraw_fails_with_bad_origin() {
-    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
+    let system = System::new();
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
+
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
     let account_id: u64 = 100000;
@@ -113,16 +129,11 @@ fn test_withdraw_fails_with_bad_origin() {
 #[test]
 fn test_anyone_can_deposit() {
     let system = System::new();
-    system.init_logger();
 
-    let vft = Program::token(&system, TOKEN_ID);
-    let gear_bridge_builtin =
-        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
+    let TestState {
+        vft, vft_treasury, ..
+    } = setup_for_test(&system);
 
-    let vft_treasury = Program::vft_treasury(&system);
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
     let account0_id: u64 = 100000;
@@ -143,7 +154,6 @@ fn test_anyone_can_deposit() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
 
     let expected = Ok((U256::from(1), H160::from([2; 20])));
@@ -159,7 +169,6 @@ fn test_anyone_can_deposit() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
     assert_eq!(reply, expected);
     assert!(vft.balance_of(account1_id.into()).is_zero());

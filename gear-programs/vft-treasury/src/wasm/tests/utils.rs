@@ -1,5 +1,4 @@
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
-use gclient::EventProcessor;
 use gtest::{Program, System, WasmProgram};
 use sails_rs::prelude::*;
 use vft_treasury_app::services::error::Error;
@@ -130,7 +129,6 @@ pub trait VftTreasury {
         amount: U256,
         to: H160,
         with_gas: u64,
-        panic: bool,
     ) -> Result<(U256, H160), Error>;
 
     fn withdraw_tokens(
@@ -176,7 +174,6 @@ impl VftTreasury for Program<'_> {
         amount: U256,
         to: H160,
         with_gas: u64,
-        panic: bool,
     ) -> Result<(U256, H160), Error> {
         let payload = [
             "VftTreasury".encode(),
@@ -187,22 +184,17 @@ impl VftTreasury for Program<'_> {
 
         let result = self.send_bytes_with_gas(from, payload, with_gas, 0);
 
-        if panic {
-            assert!(result.main_failed());
-            Err(Error::MessageFailed)
-        } else {
-            let log_entry = result
-                .log()
-                .iter()
-                .find(|log_entry| log_entry.destination() == from.into())
-                .expect("Unable to get reply");
+        let log_entry = result
+            .log()
+            .iter()
+            .find(|log_entry| log_entry.destination() == from.into())
+            .expect("Unable to get reply");
 
-            let reply =
-                <(String, String, Result<(U256, H160), Error>)>::decode(&mut log_entry.payload())
-                    .expect("Unable to decode reply"); // Panic if decoding fails
+        let reply =
+            <(String, String, Result<(U256, H160), Error>)>::decode(&mut log_entry.payload())
+                .expect("Unable to decode reply"); // Panic if decoding fails
 
-            reply.2
-        }
+        reply.2
     }
 
     fn withdraw_tokens(

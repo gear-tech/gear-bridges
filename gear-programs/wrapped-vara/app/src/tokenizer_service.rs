@@ -1,0 +1,57 @@
+use crate::vft_funcs;
+use sails_rs::{gstd::msg, prelude::*};
+use vft_service::utils::Result;
+
+#[derive(Debug, Encode, Decode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum TokenizerEvent {
+    Minted { to: ActorId, value: u128 },
+    Burned { from: ActorId, value: u128 },
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TokenizerService(());
+
+#[sails_rs::service(events = TokenizerEvent)]
+impl TokenizerService {
+    pub fn new() -> Self {
+        Self(())
+    }
+
+    pub async fn mint(&mut self) -> Result<u128> {
+        let value = msg::value();
+        if value == 0 {
+            return Ok(value);
+        }
+
+        let to = msg::source();
+        if let Err(err) = vft_funcs::mint(to, value.into()) {
+            // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+            // see https://github.com/gear-tech/sails/issues/475
+            msg::send_bytes_with_gas(to, vec![], 0, value).expect("Failed to send value to user");
+            Err(err)
+        } else {
+            self.notify_on(TokenizerEvent::Minted { to, value })
+                .expect("Failed to send `Minted` event");
+            Ok(value)
+        }
+    }
+
+    pub async fn burn(&mut self, value: u128) -> Result<u128> {
+        if value == 0 {
+            return Ok(value);
+        }
+
+        let from = msg::source();
+        vft_funcs::burn(from, value.into())?;
+
+        self.notify_on(TokenizerEvent::Burned { from, value })
+            .expect("Failed to send `Burned` event");
+
+        // TODO reply with value `program::send_reply_with_value` when `sails` allows it
+        // see https://github.com/gear-tech/sails/issues/475
+        msg::send_bytes_with_gas(from, vec![], 0, value).expect("Failed to send value to user");
+        Ok(value)
+    }
+}

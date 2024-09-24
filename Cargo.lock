@@ -1789,6 +1789,7 @@ name = "bridging_payment"
 version = "0.1.0"
 dependencies = [
  "gbuiltin-eth-bridge",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
@@ -2021,6 +2022,7 @@ dependencies = [
  "circular-buffer",
  "gbuiltin-bls381",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex-literal",
@@ -5178,6 +5180,7 @@ name = "gear_proof_storage"
 version = "0.1.0"
 dependencies = [
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "scale-info",
@@ -13915,6 +13918,7 @@ dependencies = [
  "gbuiltin-eth-bridge",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
@@ -13945,6 +13949,7 @@ dependencies = [
  "gbuiltin-eth-bridge",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",

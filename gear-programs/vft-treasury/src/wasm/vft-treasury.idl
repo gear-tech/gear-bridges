@@ -61,7 +61,7 @@ constructor {
 
 service VftTreasury {
   DepositTokens : (vara_token_id: actor_id, from: actor_id, amount: u256, to: h160) -> result (struct { u256, h160 }, Error);
-  EnsureAdmin : (admin: actor_id) -> result (null, Error);
+  EnsureAdmin : () -> result (null, Error);
   HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
   MapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);
   UnmapVaraToEthAddress : (ethereum_token: h160, vara_token: actor_id) -> result (null, Error);

@@ -5,13 +5,15 @@ use gear_core::ids::*;
 use sails_rs::{Decode, Encode};
 use sails_rs::{H160, U256};
 use vft_treasury_app::services::{Config, InitConfig};
-pub async fn common_upload_program(
+
+pub async fn upload_program(
     client: &gclient::GearApi,
-    code: Vec<u8>,
+    listener: &mut gclient::EventListener,
+    code: &[u8],
     payload: Vec<u8>,
-) -> gclient::Result<([u8; 32], [u8; 32])> {
+) -> gclient::Result<ProgramId> {
     let gas_limit = client
-        .calculate_upload_gas(None, code.clone(), payload.clone(), 0, true)
+        .calculate_upload_gas(None, code.to_vec(), payload.clone(), 0, true)
         .await?
         .min_limit;
     println!("init gas {gas_limit:?}");
@@ -24,18 +26,6 @@ pub async fn common_upload_program(
             0,
         )
         .await?;
-
-    Ok((message_id.into(), program_id.into()))
-}
-
-pub async fn upload_program(
-    client: &gclient::GearApi,
-    listener: &mut gclient::EventListener,
-    code: &[u8],
-    payload: Vec<u8>,
-) -> gclient::Result<[u8; 32]> {
-    let (message_id, program_id) = common_upload_program(client, code.to_vec(), payload).await?;
-
     assert!(listener
         .message_processed(message_id.into())
         .await?
@@ -44,37 +34,9 @@ pub async fn upload_program(
     Ok(program_id)
 }
 
-#[macro_export]
-macro_rules! send_request {
-    (api: $api: expr, program_id: $program_id: expr, service_name: $name: literal, action: $action: literal, payload: ($($val: expr),*)) => {
-        {
-            let request = [
-                $name.encode(),
-                $action.to_string().encode(),
-                ( $( $val, )*).encode(),
-            ]
-            .concat();
-
-            let gas_info = $api
-                .calculate_handle_gas(None, $program_id, request.clone(), 0, true)
-                .await?;
-
-
-            let (message_id, _) = $api
-                .send_message_bytes($program_id, request.clone(), gas_info.min_limit, 0)
-                .await?;
-
-            message_id
-        }
-
-    };
-}
-
 pub fn gclient_decode<T: Decode>(payload: Vec<u8>) -> gclient::Result<T> {
     Ok(T::decode(&mut payload.as_slice())?)
 }
-
-pub const USERS_STR: &[&str] = &["//Alice", "//John", "//Mike", "//Dan"];
 
 macro_rules! impl_api {
     ($fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*) -> $return_type: ty) => {
@@ -117,9 +79,44 @@ macro_rules! impl_api {
             Ok(())
         }
     };
+
+    (manual gas $fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*)) => {
+        pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, gas: u64, $($param_name: $param_type),*) -> Result<()> {
+            let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
+
+            let (message_id, _) = api
+                .send_message_bytes(self.0.into(), query.clone(), gas, 0)
+                .await?;
+
+            assert!(listener.message_processed(message_id).await?.succeed());
+
+            Ok(())
+        }
+    };
+
+    (manual gas $fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*) -> $return_type: ty) => {
+        pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, gas: u64, $($param_name: $param_type),*) -> Result<$return_type> {
+            let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
+            let (message_id, _) = api
+                .send_message_bytes(self.0.into(), query.clone(), gas, 0)
+                .await?;
+
+            let (_, raw_reply, _) = listener
+                .reply_bytes_on(message_id)
+                .await?;
+
+            let decoded_reply: (String, String, $return_type) = match raw_reply {
+                Ok(raw_reply) => gclient_decode(raw_reply)?,
+                Err(e) => panic!("no reply: {:?}", e)
+            };
+
+            Ok(decoded_reply.2)
+        }
+    };
+
 }
 
-pub struct Vft([u8; 32]);
+pub struct Vft(ProgramId);
 
 impl Vft {
     pub async fn new(client: &GearApi, listener: &mut EventListener) -> Result<Self> {
@@ -132,7 +129,7 @@ impl Vft {
             payload,
         )
         .await?;
-
+        println!("vft ID = {:?}", ProgramId::from(program_id));
         Ok(Self(program_id))
     }
 
@@ -141,17 +138,25 @@ impl Vft {
     }
 
     impl_api!(balance_of, "Vft", "BalanceOf", (account: ActorId) -> U256);
-    impl_api!(mint, "Vft", "Mint", (account: ActorId, amount: U256));
-    impl_api!(approve, "Vft", "Approve", (from: ActorId, spender: ActorId, allowance: U256));
+    impl_api!(mint, "Vft", "Mint", (account: ActorId, amount: U256) -> bool);
+    impl_api!(approve, "Vft", "Approve", (spender: ActorId, allowance: U256) -> bool);
+    impl_api!(allowance, "Vft", "Allowance", (owner: ActorId, spender: ActorId) -> U256);
 }
 
-pub struct VftTreasury([u8; 32]);
+pub struct VftTreasury(ProgramId);
 
 impl VftTreasury {
     pub async fn new(client: &GearApi, listener: &mut EventListener) -> Result<Self> {
+        let seed = *b"built/in";
+        // a code based on what is in runtime/vara and gear-builtin pallete. Update
+        // if the pallete or runtime are changed.
+        // ActorWithId<3> is bridge builtin while `seed` comes from pallet-gear-builtin.
+        let bridge_builtin_id: ProgramId =
+            gear_core::ids::hash((seed, 3u64).encode().as_slice()).into();
+        println!("bridge builtin id={:?}", bridge_builtin_id);
         let init_config = InitConfig::new(
             [2; 20].into(),
-            3.into(),
+            bridge_builtin_id,
             44.into(),
             Config {
                 gas_for_reply_deposit: 15_000_000_000,
@@ -171,7 +176,7 @@ impl VftTreasury {
             payload,
         )
         .await?;
-
+        println!("treasury ID = {:?}", <ProgramId>::from(program_id));
         Ok(Self(program_id))
     }
 
@@ -180,11 +185,11 @@ impl VftTreasury {
     }
 
     impl_api!(
-        deposit_tokens, "VftTreasury", "DepositTokens", (vara_token_id: ActorId, from: ActorId, amount: U256, to: H160) -> (U256, H160)
+        manual gas deposit_tokens, "VftTreasury", "DepositTokens", (vara_token_id: ActorId, from: ActorId, amount: U256, to: H160) -> Result<(U256, H160), vft_treasury_app::services::error::Error>
     );
 
     impl_api!(
-        withdraw_tokens, "VftTreasury", "WithdrawTokens", (ethereum_token: H160, recepient: ActorId, amount: U256)
+        manual gas withdraw_tokens, "VftTreasury", "WithdrawTokens", (ethereum_token: H160, recepient: ActorId, amount: U256)
     );
 
     impl_api!(
@@ -199,11 +204,16 @@ impl VftTreasury {
         "VaraToEthAddresses",
         () -> Vec<(ActorId, H160)>
     );
+
+    impl_api!(update_ethereum_event_client_address,
+        "VftTreasury",
+        "UpdateEthereumEventClientAddress",
+        (new_address: ActorId) -> Result<(), vft_treasury_app::services::error::Error>
+    );
 }
 
 pub trait ApiUtils {
     fn get_actor_id(&self) -> ActorId;
-    fn get_specific_actor_id(&self, value: impl AsRef<str>) -> ActorId;
 }
 
 impl ApiUtils for GearApi {
@@ -214,13 +224,5 @@ impl ApiUtils for GearApi {
                 .try_into()
                 .expect("Unexpected invalid account id length."),
         )
-    }
-
-    fn get_specific_actor_id(&self, value: impl AsRef<str>) -> ActorId {
-        let api_temp = self
-            .clone()
-            .with(value)
-            .expect("Unable to build `GearApi` instance with provided signer.");
-        api_temp.get_actor_id()
     }
 }

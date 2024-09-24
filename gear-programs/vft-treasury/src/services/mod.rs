@@ -153,12 +153,11 @@ impl<T> VftTreasury<T>
 where
     T: ExecContext,
 {
-    pub fn ensure_admin(&mut self, admin: ActorId) -> Result<(), Error> {
+    pub fn ensure_admin(&mut self) -> Result<(), Error> {
         if self.data().admin != self.exec_context.actor_id() {
             return Err(Error::NotAdmin);
         }
 
-        self.data_mut().admin = admin;
         Ok(())
     }
 
@@ -267,7 +266,7 @@ where
         let config = self.config();
 
         if gstd::exec::gas_available()
-            < config.gas_for_transfer_tokens * 2
+            < config.gas_for_transfer_tokens
                 + config.gas_for_reply_deposit * 3
                 + config.gas_to_send_request_to_builtin
         {

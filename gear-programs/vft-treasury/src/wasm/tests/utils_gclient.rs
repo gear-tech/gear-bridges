@@ -26,10 +26,7 @@ pub async fn upload_program(
             0,
         )
         .await?;
-    assert!(listener
-        .message_processed(message_id.into())
-        .await?
-        .succeed());
+    assert!(listener.message_processed(message_id).await?.succeed());
 
     Ok(program_id)
 }
@@ -40,6 +37,7 @@ pub fn gclient_decode<T: Decode>(payload: Vec<u8>) -> gclient::Result<T> {
 
 macro_rules! impl_api {
     ($fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*) -> $return_type: ty) => {
+        #[allow(clippy::too_many_arguments)]
         pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, $($param_name: $param_type),*) -> Result<$return_type> {
             let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
             let gas_info = api
@@ -64,6 +62,7 @@ macro_rules! impl_api {
     };
 
     ($fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*)) => {
+        #[allow(clippy::too_many_arguments)]
         pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, $($param_name: $param_type),*) -> Result<()> {
             let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
             let gas_info = api
@@ -81,6 +80,7 @@ macro_rules! impl_api {
     };
 
     (manual gas $fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*)) => {
+        #[allow(clippy::too_many_arguments)]
         pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, gas: u64, $($param_name: $param_type),*) -> Result<()> {
             let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
 
@@ -95,6 +95,7 @@ macro_rules! impl_api {
     };
 
     (manual gas $fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*) -> $return_type: ty) => {
+        #[allow(clippy::too_many_arguments)]
         pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, gas: u64, $($param_name: $param_type),*) -> Result<$return_type> {
             let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
             let (message_id, _) = api
@@ -134,7 +135,7 @@ impl Vft {
     }
 
     pub fn program_id(&self) -> ActorId {
-        self.0.into()
+        self.0
     }
 
     impl_api!(balance_of, "Vft", "BalanceOf", (account: ActorId) -> U256);
@@ -181,7 +182,7 @@ impl VftTreasury {
     }
 
     pub fn program_id(&self) -> ActorId {
-        self.0.into()
+        self.0
     }
 
     impl_api!(

@@ -8,14 +8,14 @@ mod utils;
 fn setup_for_test(system: &System) -> (Program<'_>, Program<'_>, Program<'_>) {
     system.init_logger();
 
-    let vft = Program::token(&system, TOKEN_ID);
+    let vft = Program::token(system, TOKEN_ID);
     let gear_bridge_builtin =
-        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+        Program::mock_with_id(system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
     assert!(!gear_bridge_builtin
         .send_bytes(ADMIN_ID, b"INIT")
         .main_failed());
 
-    let vft_treasury = Program::vft_treasury(&system);
+    let vft_treasury = Program::vft_treasury(system);
 
     (gear_bridge_builtin, vft, vft_treasury)
 }
@@ -42,7 +42,6 @@ fn test_treasury() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
 
     let expected = Ok((U256::from(1), H160::from([2; 20])));
@@ -85,7 +84,6 @@ fn test_mapping_does_not_exists() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
 
     assert!(reply.is_err());
@@ -139,7 +137,6 @@ fn test_anyone_can_deposit() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
 
     let expected = Ok((U256::from(1), H160::from([2; 20])));
@@ -155,7 +152,6 @@ fn test_anyone_can_deposit() {
         amount,
         [3; 20].into(),
         gas,
-        false,
     );
     assert_eq!(reply, expected);
     assert!(vft.balance_of(account1_id.into()).is_zero());

@@ -217,7 +217,6 @@ impl BridgingPayment for Program<'_> {
 pub trait Token {
     fn token(system: &System, id: u64) -> Program<'_>;
     create_function!(mint, "Mint", to: ActorId, value: U256);
-    create_function!(approve, "Approve", spender: ActorId, value: U256);
     create_function!(grant_burner_role, "GrantBurnerRole", to: ActorId);
     create_query_function!(balance_of, U256, account: ActorId);
 }
@@ -231,7 +230,6 @@ impl Token for Program<'_> {
         token
     }
     implement_function!(mint, "Vft", "Mint", to: ActorId, value: U256; false);
-    implement_function!(approve,"Vft", "Approve", spender: ActorId, value: U256; false);
     implement_function!(grant_burner_role,"Vft", "GrantBurnerRole", to: ActorId; false);
     implement_token_query!(balance_of, "BalanceOf", U256, account: ActorId);
 }

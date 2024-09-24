@@ -31,6 +31,7 @@ pub struct VftGatewayData {
     admin: ActorId,
     receiver_contract_address: H160,
     vara_to_eth_token_id: HashMap<ActorId, H160>,
+    eth_to_vara_token_id: HashMap<H160, ActorId>,
     eth_client: ActorId,
 }
 
@@ -107,16 +108,24 @@ where
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
         }
+
         self.data_mut()
             .vara_to_eth_token_id
             .insert(vara_token_id, eth_token_id);
+        self.data_mut()
+            .eth_to_vara_token_id
+            .insert(eth_token_id, vara_token_id);
     }
 
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
         }
-        self.data_mut().vara_to_eth_token_id.remove(&vara_token_id);
+
+        self.data_mut()
+            .vara_to_eth_token_id
+            .remove(&vara_token_id)
+            .map(|eth_token_id| self.data_mut().eth_to_vara_token_id.remove(&eth_token_id));
     }
 
     pub fn update_config(&mut self, config: Config) {
@@ -131,10 +140,11 @@ where
 
     pub async fn mint_tokens(
         &mut self,
-        vara_token_id: ActorId,
+        eth_token_id: H160,
         receiver: ActorId,
         amount: U256,
     ) -> Result<(), Error> {
+        let vara_token_id = self.get_vara_token_id(&eth_token_id)?;
         let data = self.data();
         let sender = self.exec_context.actor_id();
 
@@ -168,12 +178,12 @@ where
 
     pub async fn transfer_vara_to_eth(
         &mut self,
+        sender: ActorId,
         vara_token_id: ActorId,
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
         let data = self.data();
-        let sender = self.exec_context.actor_id();
         let msg_id = gstd::msg::id();
         let eth_token_id = self.get_eth_token_id(&vara_token_id)?;
         let config = self.config();
@@ -234,9 +244,8 @@ where
             panic!("Wrong message type")
         };
 
-        let eth_token_id = data
-            .vara_to_eth_token_id
-            .get(&vara_token_id)
+        let eth_token_id = self
+            .get_eth_token_id(&vara_token_id)
             .expect("No corresponding Ethereum address for the specified Vara token address");
 
         match msg_info.status {
@@ -245,14 +254,14 @@ where
                     data.gear_bridge_builtin,
                     data.receiver_contract_address,
                     receiver,
-                    *eth_token_id,
+                    eth_token_id,
                     amount,
                     config,
                     msg_id,
                 )
                 .await
                 {
-                    Ok(nonce) => Ok((nonce, *eth_token_id)),
+                    Ok(nonce) => Ok((nonce, eth_token_id)),
                     Err(_) => {
                         // In case of failure, mint tokens back to the sender
                         token_operations::mint_tokens(
@@ -269,7 +278,7 @@ where
             }
             MessageStatus::BridgeResponseReceived(Some(nonce)) => {
                 msg_tracker_mut().remove_message_info(&msg_id);
-                Ok((nonce, *eth_token_id))
+                Ok((nonce, eth_token_id))
             }
             MessageStatus::MintTokensStep => {
                 token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
@@ -354,6 +363,14 @@ where
             .get(vara_token_id)
             .cloned()
             .ok_or(Error::NoCorrespondingEthAddress)
+    }
+
+    fn get_vara_token_id(&self, eth_token_id: &H160) -> Result<ActorId, Error> {
+        self.data()
+            .eth_to_vara_token_id
+            .get(eth_token_id)
+            .cloned()
+            .ok_or(Error::NoCorrespondingVaraAddress)
     }
 }
 fn msg_tracker() -> &'static MessageTracker {

@@ -16,18 +16,16 @@ import {ProxyContract} from "../src/ProxyContract.sol";
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 import {TestHelper, VARA_ADDRESS_3, VARA_ADDRESS_7, USER, OWNER} from "./TestHelper.t.sol";
-import {GRC_20_GATEWAY_ADDRESS} from "../src/libraries/Environment.sol";
+import {VFT_GATEWAY_ADDRESS} from "../src/libraries/Environment.sol";
 
 contract TreasuryTest is TestHelper {
-        using Address for address;
+    using Address for address;
 
-    
     function setUp() public override {
-        super.setUp(); 
+        super.setUp();
         vm.prank(OWNER, OWNER);
         erc20_token.transfer(USER, 100 * (10 ** 18));
     }
-
 
     function test_deposit() public {
         uint256 amount = 100 * (10 ** 18);
@@ -51,7 +49,7 @@ contract TreasuryTest is TestHelper {
         vm.expectRevert();
 
         VaraMessage memory vara_msg = VaraMessage({
-            sender: GRC_20_GATEWAY_ADDRESS,
+            sender: VFT_GATEWAY_ADDRESS,
             receiver: address(treasury),
             nonce: bytes32(uint256(10)),
             data: call_data

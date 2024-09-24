@@ -43,11 +43,19 @@ pub fn construct_state_reply(
     request: StateRequest,
     state: &State<STORED_CHECKPOINTS_COUNT>,
 ) -> meta::State {
-    use meta::Order;
+    fn collect<'a, T: 'a + Copy>(
+        request: &StateRequest,
+        iter: impl DoubleEndedIterator<Item = &'a T>,
+    ) -> Vec<T> {
+        iter.skip(request.index_start as usize)
+            .take(request.count as usize)
+            .copied()
+            .collect()
+    }
 
     let checkpoints = match request.order {
-        Order::Direct => collect(&request, state.checkpoints.iter()),
-        Order::Reverse => collect(&request, state.checkpoints.iter().rev()),
+        meta::Order::Direct => collect(&request, state.checkpoints.iter()),
+        meta::Order::Reverse => collect(&request, state.checkpoints.iter().rev()),
     };
 
     let replay_back = state
@@ -62,14 +70,4 @@ pub fn construct_state_reply(
         checkpoints,
         replay_back,
     }
-}
-
-fn collect<'a, T: 'a + Copy>(
-    request: &StateRequest,
-    iter: impl DoubleEndedIterator<Item = &'a T>,
-) -> Vec<T> {
-    iter.skip(request.index_start as usize)
-        .take(request.count as usize)
-        .copied()
-        .collect()
 }

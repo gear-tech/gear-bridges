@@ -5,25 +5,25 @@ use vft_treasury_app::services::error::Error;
 
 mod utils;
 
-macro_rules! setup_for_test {
-    ($system: ident, $vft: ident, $vft_treasury: ident, $gear_bridge_builtin: ident) => {
-        let $system = System::new();
-        $system.init_logger();
+fn setup_for_test(system: &System) -> (Program<'_>, Program<'_>, Program<'_>) {
+    system.init_logger();
 
-        let $vft = Program::token(&$system, TOKEN_ID);
-        let $gear_bridge_builtin =
-            Program::mock_with_id(&$system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-        assert!(!$gear_bridge_builtin
-            .send_bytes(ADMIN_ID, b"INIT")
-            .main_failed());
+    let vft = Program::token(&system, TOKEN_ID);
+    let gear_bridge_builtin =
+        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+    assert!(!gear_bridge_builtin
+        .send_bytes(ADMIN_ID, b"INIT")
+        .main_failed());
 
-        let $vft_treasury = Program::vft_treasury(&$system);
-    };
+    let vft_treasury = Program::vft_treasury(&system);
+
+    (gear_bridge_builtin, vft, vft_treasury)
 }
 
 #[test]
 fn test_treasury() {
-    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
+    let system = System::new();
+    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
 
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
@@ -68,7 +68,8 @@ fn test_treasury() {
 
 #[test]
 fn test_mapping_does_not_exists() {
-    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
+    let system = System::new();
+    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
 
     let account_id: u64 = 100000;
     let amount = U256::from(10_000_000_000_u64);
@@ -93,7 +94,9 @@ fn test_mapping_does_not_exists() {
 
 #[test]
 fn test_withdraw_fails_with_bad_origin() {
-    setup_for_test!(system, vft, vft_treasury, gear_bridge_builtin);
+    let system = System::new();
+    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
+
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
     let account_id: u64 = 100000;
@@ -113,16 +116,9 @@ fn test_withdraw_fails_with_bad_origin() {
 #[test]
 fn test_anyone_can_deposit() {
     let system = System::new();
-    system.init_logger();
 
-    let vft = Program::token(&system, TOKEN_ID);
-    let gear_bridge_builtin =
-        Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
+    let (_gear_bridge_builtin, vft, vft_treasury) = setup_for_test(&system);
 
-    let vft_treasury = Program::vft_treasury(&system);
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id());
 
     let account0_id: u64 = 100000;

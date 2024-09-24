@@ -22,7 +22,7 @@ pub struct BridgingPayment<ExecContext> {
 
 #[derive(Encode, Decode, TypeInfo)]
 pub enum BridgingPaymentEvents {
-    DepositVaraToTreasury {
+    DepositToTreasury {
         nonce: U256,
         sender: ActorId,
         amount: U256,
@@ -84,6 +84,7 @@ impl Config {
         }
     }
 }
+
 impl<T> BridgingPayment<T>
 where
     T: ExecContext,
@@ -109,13 +110,6 @@ where
         }
     }
 
-    fn data_mut(&mut self) -> &mut BridgingPaymentData {
-        unsafe {
-            DATA.as_mut()
-                .expect("BridgingPaymentData::seed() should be called")
-        }
-    }
-
     fn config(&self) -> &Config {
         unsafe {
             CONFIG
@@ -131,6 +125,12 @@ where
                 .expect("BridgingPaymentData::seed() should be called")
         }
     }
+
+    fn enusure_admin(&self) {
+        if self.data().admin_address != self.exec_context.actor_id() {
+            panic!("Not admin");
+        }
+    }
 }
 
 #[service(events = BridgingPaymentEvents)]
@@ -139,29 +139,18 @@ where
     T: ExecContext,
 {
     pub fn set_fee(&mut self, fee: u128) {
-        let data = self.data();
-        if data.admin_address != self.exec_context.actor_id() {
-            panic!("Not admin");
-        }
+        self.enusure_admin();
+
         let config: &mut Config = self.config_mut();
         config.fee = fee;
     }
 
     pub fn reclaim_fee(&mut self) {
-        let data = self.data();
-        if data.admin_address != self.exec_context.actor_id() {
-            panic!("Not admin");
-        }
-        let fee_balance = exec::value_available();
-        msg::send_with_gas(data.admin_address, "", 0, fee_balance).expect("Failed to reclaim fees");
-    }
+        self.enusure_admin();
 
-    pub fn update_vft_treasury_address(&mut self, new_vft_treasury_address: ActorId) {
-        let data = self.data();
-        if data.admin_address != self.exec_context.actor_id() {
-            panic!("Not admin");
-        }
-        self.data_mut().vft_treasury_address = new_vft_treasury_address;
+        let fee_balance = exec::value_available();
+        msg::send_with_gas(self.data().admin_address, "", 0, fee_balance)
+            .expect("Failed to reclaim fees");
     }
 
     pub fn update_config(
@@ -172,9 +161,8 @@ where
         reply_timeout: Option<u32>,
         gas_for_request_to_treasury_msg: Option<u64>,
     ) {
-        if self.data().admin_address != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
+        self.enusure_admin();
+
         if let Some(fee) = fee {
             self.config_mut().fee = fee;
         }
@@ -196,12 +184,7 @@ where
         }
     }
 
-    pub async fn request_transaction(
-        &mut self,
-        amount: U256,
-        receiver: H160,
-        vara_token_id: ActorId,
-    ) {
+    pub async fn request(&mut self, amount: U256, receiver: H160, vara_token_id: ActorId) {
         let vft_treasury_address = self.data().vft_treasury_address;
         let config = self.config();
         let sender = self.exec_context.actor_id();
@@ -215,26 +198,35 @@ where
         }
 
         let attached_value = msg::value();
+
+        if attached_value < config.fee {
+            panic!("Not enough fee");
+        }
+
         // Return surplus of attached value
         return_surplus(sender, attached_value, config);
 
-        maybe_event_or_panic_async!(self, || async move {
-            if attached_value < config.fee {
-                panic!("Not enough fee");
-            }
+        let result = handle_treasury_transaction(
+            sender,
+            vara_token_id,
+            amount,
+            receiver,
+            attached_value,
+            vft_treasury_address,
+            config,
+        )
+        .await;
 
-            handle_treasury_transaction(
-                sender,
-                vara_token_id,
-                amount,
-                receiver,
-                attached_value,
-                vft_treasury_address,
-                config,
-            )
-            .await
-            .map(Some)
-        });
+        match result {
+            Ok(value) => {
+                if let Err(e) = self.notify_on(value) {
+                    panic!("Error in depositing events: {:?}", e);
+                }
+            }
+            Err(e) => {
+                panic!("Message processing failed with error: {:?}", e);
+            }
+        }
     }
 
     pub async fn continue_transaction(&mut self, msg_id: MessageId) {
@@ -277,7 +269,7 @@ where
                         ..
                     } = msg_info.details;
 
-                    Ok(Some(BridgingPaymentEvents::DepositVaraToTreasury {
+                    Ok(Some(BridgingPaymentEvents::DepositToTreasury {
                         nonce,
                         sender,
                         amount,
@@ -344,7 +336,7 @@ async fn handle_treasury_transaction(
         process_refund(sender, attached_value);
     })?;
 
-    Ok(BridgingPaymentEvents::DepositVaraToTreasury {
+    Ok(BridgingPaymentEvents::DepositToTreasury {
         nonce,
         sender,
         amount,

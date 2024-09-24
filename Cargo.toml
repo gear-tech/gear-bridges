@@ -50,6 +50,9 @@ checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io"
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
 
+# Contracts' deps
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
+
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -82,7 +85,6 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
     "codec",
     "rlp",
 ] }
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"

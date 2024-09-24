@@ -210,6 +210,7 @@ impl VftTreasury {
         self.0
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn deposit_tokens(
         &self,
         client: &GearApi,

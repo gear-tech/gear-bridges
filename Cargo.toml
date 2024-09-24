@@ -133,6 +133,7 @@ gear-wasm-builder = { version = "=1.5.0", default-features = false }
 gsdk = "=1.5.0"
 gclient = "=1.5.0"
 gear-core = "=1.5.0"
+gear-wasm-instrument = "=1.5.0"
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [

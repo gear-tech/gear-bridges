@@ -12,7 +12,6 @@ interface IERC20Gateway {
     error BadEthAddress();
     error BadVaraAddress();
 
-    // TODO: rename/restructure events.
     event Deposit(
         address indexed from,
         bytes32 indexed to,

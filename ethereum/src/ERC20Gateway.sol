@@ -27,9 +27,11 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
      * @param to destination of transfer on VARA network
      */
     function deposit(address token, uint256 amount, bytes32 to) public {
-        // TODO
-        //IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
-        //emit Deposit(_msgSender(), to, token, amount);
+        IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
+
+        // TODO: burn tokens
+
+        emit Deposit(_msgSender(), to, token, amount);
     }
 
     /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only. Expected
@@ -43,29 +45,32 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
     function processVaraMessage(
         VaraMessage calldata vara_msg
     ) external returns (bool) {
-        // TODO
-        // uint160 receiver;
-        // uint160 token;
-        // uint256 amount;
-        // if (msg.sender != MESSAGE_QUEUE_ADDRESS) {
-        //     revert NotAuthorized();
-        // }
-        // if (vara_msg.data.length != 20 + 20 + 32) {
-        //     revert BadArguments();
-        // }
-        // if (vara_msg.receiver != address(this)) {
-        //     revert BadEthAddress();
-        // }
-        // if (vara_msg.sender != VFT_GATEWAY_ADDRESS) {
-        //     revert BadVaraAddress();
-        // }
-        // assembly {
-        //     receiver := shr(96, calldataload(0xC4))
-        //     token := shr(96, calldataload(0xD8))
-        //     amount := calldataload(0xEC)
-        // }
-        // IERC20(address(token)).safeTransfer(address(receiver), amount);
-        // emit Withdraw(address(receiver), address(token), amount);
-        // return true;
+        uint160 receiver;
+        uint160 token;
+        uint256 amount;
+        if (msg.sender != MESSAGE_QUEUE_ADDRESS) {
+            revert NotAuthorized();
+        }
+        if (vara_msg.data.length != 20 + 20 + 32) {
+            revert BadArguments();
+        }
+        if (vara_msg.receiver != address(this)) {
+            revert BadEthAddress();
+        }
+        if (vara_msg.sender != VFT_TREASURY_ADDRESS) {
+            revert BadVaraAddress();
+        }
+
+        assembly {
+            receiver := shr(96, calldataload(0xC4))
+            token := shr(96, calldataload(0xD8))
+            amount := calldataload(0xEC)
+        }
+
+        // TODO: mint tokens
+        IERC20(address(token)).safeTransfer(address(receiver), amount);
+
+        emit Withdraw(address(receiver), address(token), amount);
+        return true;
     }
 }

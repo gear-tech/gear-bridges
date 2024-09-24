@@ -12,6 +12,7 @@ thiserror.workspace = true
 
 [build-dependencies]
 gear-wasm-builder.workspace = true
+gear-wasm-instrument.workspace = true
 
 [lib]
 crate-type = ["rlib"]

@@ -1,0 +1,27 @@
+[package]
+name = "vft_treasury_wasm"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vft-treasury-app.workspace = true
+
+sails-rs.workspace = true
+
+[build-dependencies]
+gwasm-builder.workspace = true
+sails-idl-gen.workspace = true
+vft-treasury-app.workspace = true
+sails-client-gen.workspace = true
+
+[dev-dependencies]
+gtest.workspace = true
+vft-treasury-app.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+sails-rs.workspace = true
+tokio.workspace = true
+blake2.workspace = true
+gear-core.workspace = true
+extended_vft_wasm.workspace = true
+gclient.workspace = true

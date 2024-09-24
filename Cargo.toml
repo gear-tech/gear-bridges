@@ -11,6 +11,8 @@ members = [
     "gear-programs/bridging-payment/src/wasm",
     "gear-programs/vft-gateway",
     "gear-programs/vft-gateway/src/wasm",
+    "gear-programs/vft-treasury",
+    "gear-programs/vft-treasury/src/wasm",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "utils-prometheus",
@@ -37,6 +39,8 @@ bridging_payment = { path = "gear-programs/bridging-payment" }
 bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
 vft-gateway-app = { path = "gear-programs/vft-gateway" }
 vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
+vft-treasury-app = { path = "gear-programs/vft-treasury" }
+vft_treasury_wasm = { path = "gear-programs/vft-treasury/src/wasm" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }

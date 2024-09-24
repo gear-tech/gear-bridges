@@ -1,0 +1,27 @@
+# Rust build directory
+target
+
+# Resource files 
+audits
+images
+LICENSE
+*.md
+
+# Git directory 
+.git
+
+# IDE-generated files 
+.vscode
+.idea
+
+# Relayer config and intermediate data
+data
+proof_storage
+onchain_proof_storage_data
+.env
+GenesisConfig.toml
+
+# Ethereum-related
+ethereum/cache
+ethereum/out
+ethereum/broadcast

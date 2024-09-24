@@ -31,92 +31,67 @@ pub async fn upload_program(
     Ok(program_id)
 }
 
-pub fn gclient_decode<T: Decode>(payload: Vec<u8>) -> gclient::Result<T> {
+pub fn decode<T: Decode>(payload: Vec<u8>) -> gclient::Result<T> {
     Ok(T::decode(&mut payload.as_slice())?)
 }
 
-macro_rules! impl_api {
-    ($fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*) -> $return_type: ty) => {
-        #[allow(clippy::too_many_arguments)]
-        pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, $($param_name: $param_type),*) -> Result<$return_type> {
-            let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
-            let gas_info = api
-                .calculate_handle_gas(None, self.0.into(), query.clone(), 0, true)
-                .await?;
+async fn send_request_with_reply<R>(
+    client: &GearApi,
+    listener: &mut gclient::EventListener,
+    destination: ActorId,
+    service: &str,
+    method: &str,
+    arguments: impl Encode,
+) -> Result<R>
+where
+    R: Decode,
+{
+    let payload = [service.encode(), method.encode(), arguments.encode()].concat();
+    let gas_info = client
+        .calculate_handle_gas(None, destination, payload.clone(), 0, true)
+        .await?;
 
-            let (message_id, _) = api
-                .send_message_bytes(self.0.into(), query.clone(), gas_info.min_limit, 0)
-                .await?;
+    let (message_id, _) = client
+        .send_message_bytes(destination, payload, gas_info.min_limit, 0)
+        .await?;
 
-            let (_, raw_reply, _) = listener
-                .reply_bytes_on(message_id)
-                .await?;
+    let (_, raw_reply, _) = listener.reply_bytes_on(message_id).await?;
 
-            let decoded_reply: (String, String, $return_type) = match raw_reply {
-                Ok(raw_reply) => gclient_decode(raw_reply)?,
-                Err(e) => panic!("no reply: {:?}", e)
-            };
-
-            Ok(decoded_reply.2)
-        }
+    let decoded_reply: (String, String, R) = match raw_reply {
+        Ok(raw_reply) => decode(raw_reply)?,
+        Err(e) => panic!("no reply: {:?}", e),
     };
 
-    ($fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*)) => {
-        #[allow(clippy::too_many_arguments)]
-        pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, $($param_name: $param_type),*) -> Result<()> {
-            let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
-            let gas_info = api
-                .calculate_handle_gas(None, self.0.into(), query.clone(), 0, true)
-                .await?;
-
-            let (message_id, _) = api
-                .send_message_bytes(self.0.into(), query.clone(), gas_info.min_limit, 0)
-                .await?;
-
-            assert!(listener.message_processed(message_id).await?.succeed());
-
-            Ok(())
-        }
-    };
-
-    (manual gas $fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*)) => {
-        #[allow(clippy::too_many_arguments)]
-        pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, gas: u64, $($param_name: $param_type),*) -> Result<()> {
-            let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
-
-            let (message_id, _) = api
-                .send_message_bytes(self.0.into(), query.clone(), gas, 0)
-                .await?;
-
-            assert!(listener.message_processed(message_id).await?.succeed());
-
-            Ok(())
-        }
-    };
-
-    (manual gas $fn_name: ident, $service_name: expr, $query_name: expr,($($param_name:ident: $param_type:ty),*) -> $return_type: ty) => {
-        #[allow(clippy::too_many_arguments)]
-        pub async fn $fn_name(&self, api: &GearApi, listener: &mut EventListener, gas: u64, $($param_name: $param_type),*) -> Result<$return_type> {
-            let query = [$service_name.encode(), $query_name.encode(), ($($param_name),*).encode()].concat();
-            let (message_id, _) = api
-                .send_message_bytes(self.0.into(), query.clone(), gas, 0)
-                .await?;
-
-            let (_, raw_reply, _) = listener
-                .reply_bytes_on(message_id)
-                .await?;
-
-            let decoded_reply: (String, String, $return_type) = match raw_reply {
-                Ok(raw_reply) => gclient_decode(raw_reply)?,
-                Err(e) => panic!("no reply: {:?}", e)
-            };
-
-            Ok(decoded_reply.2)
-        }
-    };
-
+    Ok(decoded_reply.2)
 }
 
+async fn send_request_with_reply_gas<R>(
+    client: &GearApi,
+    listener: &mut gclient::EventListener,
+    destination: ActorId,
+    service: &str,
+    method: &str,
+    arguments: impl Encode,
+    gas: u64,
+) -> Result<R>
+where
+    R: Decode,
+{
+    let payload = [service.encode(), method.encode(), arguments.encode()].concat();
+
+    let (message_id, _) = client
+        .send_message_bytes(destination, payload, gas, 0)
+        .await?;
+
+    let (_, raw_reply, _) = listener.reply_bytes_on(message_id).await?;
+
+    let decoded_reply: (String, String, R) = match raw_reply {
+        Ok(raw_reply) => decode(raw_reply)?,
+        Err(e) => panic!("no reply: {:?}", e),
+    };
+
+    Ok(decoded_reply.2)
+}
 pub struct Vft(ProgramId);
 
 impl Vft {
@@ -138,10 +113,60 @@ impl Vft {
         self.0
     }
 
-    impl_api!(balance_of, "Vft", "BalanceOf", (account: ActorId) -> U256);
-    impl_api!(mint, "Vft", "Mint", (account: ActorId, amount: U256) -> bool);
-    impl_api!(approve, "Vft", "Approve", (spender: ActorId, allowance: U256) -> bool);
-    impl_api!(allowance, "Vft", "Allowance", (owner: ActorId, spender: ActorId) -> U256);
+    pub async fn balance_of(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        account: ActorId,
+    ) -> Result<U256> {
+        send_request_with_reply(client, listener, self.0, "Vft", "BalanceOf", account).await
+    }
+
+    pub async fn mint(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        account: ActorId,
+        amount: U256,
+    ) -> Result<bool> {
+        send_request_with_reply(client, listener, self.0, "Vft", "Mint", (account, amount)).await
+    }
+
+    pub async fn approve(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        spender: ActorId,
+        allowance: U256,
+    ) -> Result<bool> {
+        send_request_with_reply(
+            client,
+            listener,
+            self.0,
+            "Vft",
+            "Approve",
+            (spender, allowance),
+        )
+        .await
+    }
+
+    pub async fn allowance(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        owner: ActorId,
+        spender: ActorId,
+    ) -> Result<U256> {
+        send_request_with_reply(
+            client,
+            listener,
+            self.0,
+            "Vft",
+            "Allowance",
+            (owner, spender),
+        )
+        .await
+    }
 }
 
 pub struct VftTreasury(ProgramId);
@@ -185,32 +210,99 @@ impl VftTreasury {
         self.0
     }
 
-    impl_api!(
-        manual gas deposit_tokens, "VftTreasury", "DepositTokens", (vara_token_id: ActorId, from: ActorId, amount: U256, to: H160) -> Result<(U256, H160), vft_treasury_app::services::error::Error>
-    );
+    pub async fn deposit_tokens(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        gas: u64,
+        vara_token_id: ActorId,
+        from: ActorId,
+        amount: U256,
+        to: H160,
+    ) -> Result<Result<(U256, H160), vft_treasury_app::services::error::Error>> {
+        send_request_with_reply_gas(
+            client,
+            listener,
+            self.0,
+            "VftTreasury",
+            "DepositTokens",
+            (vara_token_id, from, amount, to),
+            gas,
+        )
+        .await
+    }
 
-    impl_api!(
-        manual gas withdraw_tokens, "VftTreasury", "WithdrawTokens", (ethereum_token: H160, recepient: ActorId, amount: U256)
-    );
+    pub async fn withdraw_tokens(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        gas: u64,
+        ethereum_token_id: H160,
+        recepient: ActorId,
+        amount: U256,
+    ) -> Result<Result<(), vft_treasury_app::services::error::Error>> {
+        send_request_with_reply_gas(
+            client,
+            listener,
+            self.0,
+            "VftTreasury",
+            "WithdrawTokens",
+            (ethereum_token_id, recepient, amount),
+            gas,
+        )
+        .await
+    }
 
-    impl_api!(
-        map_vara_to_eth_address,
-        "VftTreasury",
-        "MapVaraToEthAddress",
-        (ethereum_token: H160, vara_token: ActorId)
-    );
+    pub async fn map_vara_to_eth_address(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        ethereum_token_id: H160,
+        vara_token_id: ActorId,
+    ) -> Result<Result<(), vft_treasury_app::services::error::Error>> {
+        send_request_with_reply(
+            client,
+            listener,
+            self.0,
+            "VftTreasury",
+            "MapVaraToEthAddress",
+            (ethereum_token_id, vara_token_id),
+        )
+        .await
+    }
 
-    impl_api!(vara_to_eth_addresses,
-        "VftTreasury",
-        "VaraToEthAddresses",
-        () -> Vec<(ActorId, H160)>
-    );
+    pub async fn vara_to_eth_addresses(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+    ) -> Result<Vec<(ActorId, H160)>> {
+        send_request_with_reply(
+            client,
+            listener,
+            self.0,
+            "VftTreasury",
+            "MapVaraToEthAddress",
+            (),
+        )
+        .await
+    }
 
-    impl_api!(update_ethereum_event_client_address,
-        "VftTreasury",
-        "UpdateEthereumEventClientAddress",
-        (new_address: ActorId) -> Result<(), vft_treasury_app::services::error::Error>
-    );
+    pub async fn update_ethereum_event_client_address(
+        &self,
+        client: &GearApi,
+        listener: &mut EventListener,
+        new_address: ActorId,
+    ) -> Result<Result<(), vft_treasury_app::services::error::Error>> {
+        send_request_with_reply(
+            client,
+            listener,
+            self.0,
+            "VftTreasury",
+            "UpdateEthereumEventClientAddress",
+            new_address,
+        )
+        .await
+    }
 }
 
 pub trait ApiUtils {

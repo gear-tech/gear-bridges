@@ -47,7 +47,8 @@ async fn test_treasury() -> Result<()> {
 
     treasury
         .map_vara_to_eth_address(&client, &mut listener, [3; 20].into(), vft.program_id())
-        .await?;
+        .await?
+        .expect("failed to map address");
 
     let reply = treasury
         .deposit_tokens(
@@ -82,7 +83,8 @@ async fn test_treasury() -> Result<()> {
             actor,
             amount,
         )
-        .await?;
+        .await?
+        .expect("failed to withdraw tokens");
 
     let balance = vft.balance_of(&client, &mut listener, actor).await?;
     assert_eq!(balance, amount);

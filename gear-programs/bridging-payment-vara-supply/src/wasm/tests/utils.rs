@@ -158,7 +158,7 @@ create_mock!(
 // Smart contract functionality for Program
 pub trait BridgingPayment {
     fn bridge_payment(system: &System) -> Program<'_>;
-    create_function!(request_transaction, "RequestToGateway", amount: U256, receiver: H160, vara_token_id: ActorId);
+    create_function!(request, "Request", amount: U256, receiver: H160, vara_token_id: ActorId);
     create_function!(reclaim_fee, "ReclaimFee");
 }
 
@@ -175,7 +175,7 @@ impl BridgingPayment for Program<'_> {
         assert!(!result.main_failed());
         program
     }
-    implement_function!(request_transaction, "BridgingPayment", "RequestTransaction", amount: U256, receiver: H160, vara_token_id: ActorId; true);
+    implement_function!(request, "BridgingPayment", "Request", amount: U256, receiver: H160, vara_token_id: ActorId; true);
     implement_function!(reclaim_fee, "BridgingPayment", "ReclaimFee");
 }
 

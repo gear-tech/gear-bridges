@@ -1,7 +1,9 @@
 use sails_rs::prelude::*;
 
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Encode, Decode, TypeInfo, Clone)]
+use super::vft_treasury::Error as VftTreasuryError;
+
+//#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {
     SendFailure,
     ReplyFailure,
@@ -11,4 +13,11 @@ pub enum Error {
     TreasuryMessageProcessingFailed,
     InvalidMessageStatus,
     MessageNotFound,
+    Treasury(VftTreasuryError),
+}
+
+impl From<VftTreasuryError> for Error {
+    fn from(e: VftTreasuryError) -> Self {
+        Self::Treasury(e)
+    }
 }

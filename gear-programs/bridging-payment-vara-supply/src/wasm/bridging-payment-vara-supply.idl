@@ -12,39 +12,17 @@ type Config = struct {
   gas_for_request_to_treasury_msg: u64,
 };
 
-type MessageInfo = struct {
-  status: MessageStatus,
-  details: TransactionDetails,
-};
-
-type MessageStatus = enum {
-  SendingMessageToTreasury,
-  WaitingReplyFromTreasury,
-  ProcessRefund,
-  TreasuryMessageProcessingCompleted: struct { u256, h160 },
-};
-
-type TransactionDetails = struct {
-  sender: actor_id,
-  vara_token_id: actor_id,
-  amount: u256,
-  receiver: h160,
-  attached_value: u128,
-};
-
 constructor {
   New : (init_config: InitConfig);
 };
 
 service BridgingPayment {
-  ContinueTransaction : (msg_id: message_id) -> null;
   ReclaimFee : () -> null;
   Request : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
   SetFee : (fee: u128) -> null;
   UpdateConfig : (fee: opt u128, gas_for_reply_deposit: opt u64, gas_to_send_request_to_treasury: opt u64, reply_timeout: opt u32, gas_for_request_to_treasury_msg: opt u64) -> null;
   query AdminAddress : () -> actor_id;
   query GetConfig : () -> Config;
-  query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
   query VftTreasuryAddress : () -> actor_id;
 
   events {

@@ -28,7 +28,7 @@ fn deposit_to_treasury_success() {
     vft_treasury.map_vara_to_eth_address(ADMIN_ID, [2; 20].into(), vft.id(), false);
 
     system.mint_to(account_id, FEE);
-    bridging_payment.request_transaction(account_id, amount, [1; 20].into(), vft.id(), false);
+    bridging_payment.request(account_id, amount, [1; 20].into(), vft.id(), false);
     assert_eq!(vft.balance_of(account_id.into()), U256::zero());
     assert_eq!(vft.balance_of(VFT_TREASURY_ID.into()), amount);
 

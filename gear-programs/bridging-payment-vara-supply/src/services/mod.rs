@@ -6,14 +6,10 @@ use sails_rs::{
 use gstd::exec;
 mod error;
 use error::Error;
-mod msg_tracker;
-use msg_tracker::MessageTracker;
-use msg_tracker::{msg_tracker, msg_tracker_mut, MessageInfo, MessageStatus, TransactionDetails};
 mod utils;
 mod vft_treasury;
 mod vft_treasury_msg;
 
-use utils::maybe_event_or_panic_async;
 use vft_treasury_msg::send_message_to_treasury;
 
 pub struct BridgingPayment<ExecContext> {
@@ -33,7 +29,6 @@ pub enum BridgingPaymentEvents {
 
 static mut DATA: Option<BridgingPaymentData> = None;
 static mut CONFIG: Option<Config> = None;
-static mut MSG_TRACKER: Option<MessageTracker> = None;
 
 #[derive(Debug)]
 pub struct BridgingPaymentData {
@@ -96,7 +91,6 @@ where
                 vft_treasury_address: config.vft_treasury_address,
             });
             CONFIG = Some(config.config);
-            MSG_TRACKER = Some(MessageTracker::default());
         }
     }
     pub fn new(exec_context: T) -> Self {
@@ -204,14 +198,13 @@ where
         }
 
         // Return surplus of attached value
-        return_surplus(sender, attached_value, config);
+        refund_surplus(sender, attached_value, config.fee);
 
         let result = handle_treasury_transaction(
             sender,
             vara_token_id,
             amount,
             receiver,
-            attached_value,
             vft_treasury_address,
             config,
         )
@@ -227,77 +220,6 @@ where
                 panic!("Message processing failed with error: {:?}", e);
             }
         }
-    }
-
-    pub async fn continue_transaction(&mut self, msg_id: MessageId) {
-        let vft_treasury_address = self.data().vft_treasury_address;
-        let config = self.config();
-
-        maybe_event_or_panic_async!(self, || async move {
-            let msg_tracker = msg_tracker_mut();
-            let msg_info = msg_tracker
-                .get_message_info(&msg_id)
-                .expect("Unexpected: msg status does not exist");
-
-            match msg_info.status {
-                MessageStatus::SendingMessageToTreasury => {
-                    let TransactionDetails {
-                        sender,
-                        vara_token_id,
-                        amount,
-                        receiver,
-                        attached_value,
-                    } = msg_info.details;
-
-                    handle_treasury_transaction(
-                        sender,
-                        vara_token_id,
-                        amount,
-                        receiver,
-                        attached_value,
-                        vft_treasury_address,
-                        config,
-                    )
-                    .await
-                    .map(Some)
-                }
-                MessageStatus::TreasuryMessageProcessingCompleted((nonce, eth_token_id)) => {
-                    let TransactionDetails {
-                        sender,
-                        amount,
-                        receiver,
-                        ..
-                    } = msg_info.details;
-
-                    Ok(Some(BridgingPaymentEvents::DepositToTreasury {
-                        nonce,
-                        sender,
-                        amount,
-                        receiver,
-                        eth_token_id,
-                    }))
-                }
-                MessageStatus::ProcessRefund => {
-                    let TransactionDetails {
-                        sender,
-                        attached_value,
-                        ..
-                    } = msg_info.details;
-
-                    process_refund(sender, attached_value);
-
-                    Ok(None)
-                }
-                _ => {
-                    // Handle any other status or unexpected cases
-                    panic!("Unexpected status or transaction completed.");
-                }
-            }
-        });
-    }
-
-    pub fn msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {
-        msg_tracker().message_info.clone().into_iter().collect()
     }
 
     pub fn admin_address(&self) -> ActorId {
@@ -318,7 +240,6 @@ async fn handle_treasury_transaction(
     vara_token_id: ActorId,
     amount: U256,
     receiver: H160,
-    attached_value: u128,
     vft_treasury_address: ActorId,
     config: &Config,
 ) -> Result<BridgingPaymentEvents, Error> {
@@ -328,12 +249,11 @@ async fn handle_treasury_transaction(
         vara_token_id,
         amount,
         receiver,
-        attached_value,
         config,
     )
     .await
     .inspect_err(|_| {
-        process_refund(sender, attached_value);
+        refund_fee(sender, config.fee);
     })?;
 
     Ok(BridgingPaymentEvents::DepositToTreasury {
@@ -345,16 +265,15 @@ async fn handle_treasury_transaction(
     })
 }
 
-fn return_surplus(sender: ActorId, attached_value: u128, config: &Config) {
-    let refund = attached_value - config.fee;
+fn refund_surplus(sender: ActorId, attached_value: u128, fee: u128) {
+    let refund = attached_value - fee;
     if refund >= exec::env_vars().existential_deposit {
         send_refund(sender, refund);
     }
 }
 
-fn process_refund(sender: ActorId, attached_value: u128) {
-    send_refund(sender, attached_value);
-    msg_tracker_mut().remove_message_info(&msg::id());
+fn refund_fee(sender: ActorId, fee: u128) {
+    send_refund(sender, fee);
 }
 
 fn send_refund(actor_id: ActorId, amount: u128) {

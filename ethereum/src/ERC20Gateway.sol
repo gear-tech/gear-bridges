@@ -17,27 +17,31 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
         MESSAGE_QUEUE_ADDRESS = message_queue;
     }
 
-    /** @dev Deposit token to `Treasury` using `burn`. Allowance needs to allow treasury
-     * contract transferring `amount` of tokens. Emits `Deposit` event.
+    /** @dev Request token bridging. When the bridging is requested tokens are burned
+     * from account that've sent transaction and `BridgingRequested` event is emitted that later can be verified
+     * on other side of bridge. Allowance needs to allow gateway contract transferring `amount` of tokens.
      *
-     * @param token token address to deposit
-     * @param amount quantity of deposited token
+     * @param token token address to transfer over bridge
+     * @param amount quantity of tokens to transfer over bridge
      * @param to destination of transfer on VARA network
      */
-    function deposit(address token, uint256 amount, bytes32 to) public {
+    function requestBridging(address token, uint256 amount, bytes32 to) public {
         ERC20VaraSupply(token).burnFrom(_msgSender(), amount);
-        emit Deposit(_msgSender(), to, token, amount);
+        emit BridgingRequested(_msgSender(), to, token, amount);
     }
 
-    /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only. Expected
-     * `payload` in `VaraMessage` consisits of these:
-     *  - `receiver` - account to withdraw tokens to
-     *  - `token` - token to withdraw
-     *  - `amount` - amount of tokens to withdraw
+    /** @dev Accept bridging request made on other side of bridge.
+     * This request can be sent by `MessageQueue` only. When such a request is accpeted, tokens
+     * are minted to the corresponding account address, specified in `vara_msg`.
+     * 
+     * Expected `payload` in `VaraMessage` consisits of these:
+     *  - `receiver` - account to mint tokens to
+     *  - `token` - token to mint
+     *  - `amount` - amount of tokens to mint
      *
      * @param vara_msg `VaraMessage` received from MessageQueue.
      */
-    function processVaraMessage(
+    function acceptBridging(
         VaraMessage calldata vara_msg
     ) external returns (bool) {
         uint160 receiver;
@@ -64,7 +68,7 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
 
         ERC20VaraSupply(address(token)).mint(address(receiver), amount);
 
-        emit Withdraw(address(receiver), address(token), amount);
+        emit BridgingAccepted(address(receiver), address(token), amount);
         return true;
     }
 }

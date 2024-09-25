@@ -12,13 +12,17 @@ interface IERC20Gateway {
     error BadEthAddress();
     error BadVaraAddress();
 
-    event Deposit(
+    event BridgingRequested(
         address indexed from,
         bytes32 indexed to,
         address indexed token,
         uint256 amount
     );
-    event Withdraw(address indexed to, address indexed token, uint256 amount);
+    event BridgingAccepted(
+        address indexed to,
+        address indexed token,
+        uint256 amount
+    );
 }
 
 library Packer {

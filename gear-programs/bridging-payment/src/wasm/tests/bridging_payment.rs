@@ -14,7 +14,7 @@ fn transfer_tokens_success() {
 
     let vft = Program::token(&system, TOKEN_ID);
     let bridge_built_in = Program::mock_with_id(&system, BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    // initialise bridge builtin
+    // Init bridge builtin
     assert!(!bridge_built_in.send_bytes(ADMIN_ID, vec![]).main_failed());
 
     let vft_gateway = Program::vft_gateway(&system);

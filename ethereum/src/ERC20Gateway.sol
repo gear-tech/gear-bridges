@@ -9,9 +9,10 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IERC20Gateway, WithdrawMessage} from "./interfaces/IERC20Gateway.sol";
 import {VFT_TREASURY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
+import {ERC20VaraSupply} from "./ERC20VaraSupply.sol";
 
 contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
-    using SafeERC20 for IERC20;
+    using SafeERC20 for IERC20; // TODO: Do we need it?
 
     address immutable MESSAGE_QUEUE_ADDRESS;
 
@@ -27,10 +28,7 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
      * @param to destination of transfer on VARA network
      */
     function deposit(address token, uint256 amount, bytes32 to) public {
-        IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
-
-        // TODO: burn tokens
-
+        ERC20VaraSupply(token).burnFrom(_msgSender(), amount);
         emit Deposit(_msgSender(), to, token, amount);
     }
 
@@ -67,8 +65,7 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
             amount := calldataload(0xEC)
         }
 
-        // TODO: mint tokens
-        IERC20(address(token)).safeTransfer(address(receiver), amount);
+        ERC20VaraSupply(address(token)).mint(address(receiver), amount);
 
         emit Withdraw(address(receiver), address(token), amount);
         return true;

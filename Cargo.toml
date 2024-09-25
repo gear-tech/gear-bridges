@@ -14,7 +14,8 @@ members = [
     "gear-programs/vft-gateway",
     "gear-programs/vft-gateway/src/wasm",
     "gear-programs/vft-treasury",
-    "gear-programs/vft-treasury/src/wasm",
+    "gear-programs/vft-treasury/app",
+    "gear-programs/vft-treasury/client",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "utils-prometheus",
@@ -43,8 +44,8 @@ bridging_payment_vara_supply = { path = "gear-programs/bridging-payment-vara-sup
 bridging_payment_vara_supply_wasm = { path = "gear-programs/bridging-payment-vara-supply/src/wasm" }
 vft-gateway-app = { path = "gear-programs/vft-gateway" }
 vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
-vft-treasury-app = { path = "gear-programs/vft-treasury" }
-vft_treasury_wasm = { path = "gear-programs/vft-treasury/src/wasm" }
+vft-treasury-app = { path = "gear-programs/vft-treasury/app" }
+vft-treasury-client = { path = "gear-programs/vft-treasury/client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
@@ -145,9 +146,9 @@ gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = "0.3.0"
-sails-client-gen = "0.3.0"
-sails-rs = "0.3.0"
+sails-idl-gen = "0.4.0"
+sails-client-gen = "0.4.0"
+sails-rs = "0.4.0"
 
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }

@@ -371,7 +371,7 @@ contract MessageQueueTest is TestHelper {
         });
 
         VaraMessage memory vara_message = VaraMessage({
-            sender: GRC_20_GATEWAY_ADDRESS,
+            sender: VFT_GATEWAY_ADDRESS,
             receiver: address(treasury),
             nonce: bytes32(uint256(10)),
             data: withdraw_msg.pack()

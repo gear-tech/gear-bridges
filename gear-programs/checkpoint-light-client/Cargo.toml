@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 gstd = { workspace = true, features = ["debug"] }
+gear-wasm-instrument.workspace = true
 primitive-types.workspace = true
 parity-scale-codec.workspace = true
 checkpoint_light_client-io.workspace = true
@@ -16,6 +17,7 @@ tree_hash_derive.workspace = true
 
 [build-dependencies]
 gear-wasm-builder.workspace = true
+gear-wasm-instrument.workspace = true
 checkpoint_light_client-io.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

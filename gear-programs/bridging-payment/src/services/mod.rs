@@ -7,12 +7,9 @@ use gstd::exec;
 mod error;
 use error::Error;
 mod msg_tracker;
-use msg_tracker::{msg_tracker, msg_tracker_mut, MessageInfo, MessageStatus, TransactionDetails};
-mod token_msg;
 use msg_tracker::MessageTracker;
-use token_msg::{transfer_tokens, transfer_tokens_back};
+use msg_tracker::{msg_tracker, msg_tracker_mut, MessageInfo, MessageStatus, TransactionDetails};
 mod utils;
-mod vft;
 mod vft_gateway;
 mod vft_gateway_msg;
 use crate::event_or_panic_async;
@@ -174,7 +171,6 @@ where
         fee: Option<u128>,
         gas_for_reply_deposit: Option<u64>,
         gas_to_send_request_to_gateway: Option<u64>,
-        gas_to_transfer_tokens: Option<u64>,
         reply_timeout: Option<u32>,
         gas_for_request_to_gateway_msg: Option<u64>,
     ) {
@@ -191,10 +187,6 @@ where
 
         if let Some(gas_to_send_request_to_gateway) = gas_to_send_request_to_gateway {
             self.config_mut().gas_to_send_request_to_gateway = gas_to_send_request_to_gateway;
-        }
-
-        if let Some(gas_to_transfer_tokens) = gas_to_transfer_tokens {
-            self.config_mut().gas_to_transfer_tokens = gas_to_transfer_tokens;
         }
 
         if let Some(reply_timeout) = reply_timeout {
@@ -217,10 +209,9 @@ where
         let sender = self.exec_context.actor_id();
 
         if gstd::exec::gas_available()
-            < config.gas_to_transfer_tokens
-                + config.gas_to_send_request_to_gateway
+            < config.gas_to_send_request_to_gateway
                 + config.gas_for_request_to_gateway_msg
-                + 3 * config.gas_for_reply_deposit
+                + config.gas_for_reply_deposit
         {
             panic!("Please attach more gas");
         }
@@ -231,11 +222,6 @@ where
             if attached_value < config.fee {
                 panic!("Not enough fee");
             }
-
-            let program_id = exec::program_id();
-
-            // Transfer tokens to the contract's account
-            transfer_tokens(vara_token_id, sender, program_id, amount, config).await?;
 
             handle_gateway_transaction(
                 sender,
@@ -262,49 +248,54 @@ where
 
             match msg_info.status {
                 MessageStatus::MessageToGatewayStep => {
-                    if let TransactionDetails::SendMessageToGateway {
+                    let TransactionDetails {
                         sender,
                         vara_token_id,
                         amount,
                         receiver,
                         attached_value,
-                    } = msg_info.details
-                    {
-                        handle_gateway_transaction(
-                            sender,
-                            vara_token_id,
-                            amount,
-                            receiver,
-                            attached_value,
-                            vft_gateway_address,
-                            config,
-                        )
-                        .await
-                    } else {
-                        panic!("Unexpected tx details")
-                    }
+                    } = msg_info.details;
+
+                    handle_gateway_transaction(
+                        sender,
+                        vara_token_id,
+                        amount,
+                        receiver,
+                        attached_value,
+                        vft_gateway_address,
+                        config,
+                    )
+                    .await
                 }
                 MessageStatus::GatewayMessageProcessingCompleted((nonce, eth_token_id)) => {
-                    if let TransactionDetails::SendMessageToGateway {
+                    let TransactionDetails {
                         sender,
                         amount,
                         receiver,
                         attached_value,
                         ..
-                    } = msg_info.details
-                    {
-                        process_refund(sender, attached_value, config);
+                    } = msg_info.details;
 
-                        Ok(BridgingPaymentEvents::TeleportVaraToEth {
-                            nonce,
-                            sender,
-                            amount,
-                            receiver,
-                            eth_token_id,
-                        })
-                    } else {
-                        panic!("Unexpected tx details");
-                    }
+                    process_refund(sender, attached_value, config);
+
+                    Ok(BridgingPaymentEvents::TeleportVaraToEth {
+                        nonce,
+                        sender,
+                        amount,
+                        receiver,
+                        eth_token_id,
+                    })
+                }
+                MessageStatus::GatewayMessageProcessingFailed => {
+                    let TransactionDetails {
+                        sender,
+                        attached_value,
+                        ..
+                    } = msg_info.details;
+
+                    process_refund(sender, attached_value, config);
+
+                    Err(Error::GatewayMessageProcessingFailed)
                 }
                 _ => {
                     // Handle any other status or unexpected cases
@@ -314,31 +305,6 @@ where
         });
     }
 
-    pub async fn return_tokens(&mut self, msg_id: MessageId) {
-        let msg_tracker = msg_tracker_mut();
-
-        let msg_info = msg_tracker
-            .get_message_info(&msg_id)
-            .expect("Unexpected: msg status does not exist");
-        if msg_info.status != MessageStatus::ReturnTokensBackStep {
-            panic!("Wrong status");
-        }
-
-        let config = self.config();
-        if let TransactionDetails::SendMessageToGateway {
-            sender,
-            vara_token_id,
-            amount,
-            receiver: _,
-            attached_value,
-        } = msg_info.details
-        {
-            transfer_tokens_back(vara_token_id, exec::program_id(), sender, amount, config)
-                .await
-                .expect("Unable to send tokens back");
-            process_refund(sender, attached_value, config);
-        }
-    }
     pub fn msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {
         msg_tracker().message_info.clone().into_iter().collect()
     }

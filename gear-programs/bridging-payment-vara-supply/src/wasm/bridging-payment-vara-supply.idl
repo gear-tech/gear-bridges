@@ -1,0 +1,32 @@
+type InitConfig = struct {
+  admin_address: actor_id,
+  vft_treasury_address: actor_id,
+  config: Config,
+};
+
+type Config = struct {
+  fee: u128,
+  gas_for_reply_deposit: u64,
+  gas_to_send_request_to_treasury: u64,
+  reply_timeout: u32,
+  gas_for_request_to_treasury_msg: u64,
+};
+
+constructor {
+  New : (init_config: InitConfig);
+};
+
+service BridgingPayment {
+  ReclaimFee : () -> null;
+  Request : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
+  SetFee : (fee: u128) -> null;
+  UpdateConfig : (fee: opt u128, gas_for_reply_deposit: opt u64, gas_to_send_request_to_treasury: opt u64, reply_timeout: opt u32, gas_for_request_to_treasury_msg: opt u64) -> null;
+  query AdminAddress : () -> actor_id;
+  query GetConfig : () -> Config;
+  query VftTreasuryAddress : () -> actor_id;
+
+  events {
+    DepositToTreasury: struct { nonce: u256, sender: actor_id, amount: u256, receiver: h160, eth_token_id: h160 };
+  }
+};
+

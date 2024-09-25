@@ -1,0 +1,23 @@
+[package]
+name = "vft-treasury-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sails-rs.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+gstd = { workspace = true, features = ["debug"] }
+gbuiltin-eth-bridge.workspace = true
+gear-wasm-instrument.workspace = true
+
+[build-dependencies]
+git-download.workspace = true
+sails-client-gen.workspace = true
+
+[dev-dependencies]
+gclient.workspace = true
+tokio.workspace = true
+blake2.workspace = true
+gear-core.workspace = true
+primitive-types.workspace = true

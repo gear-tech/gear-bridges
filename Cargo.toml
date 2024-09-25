@@ -9,8 +9,12 @@ members = [
     "ethereum-common",
     "gear-programs/bridging-payment",
     "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/bridging-payment-vara-supply",
+    "gear-programs/bridging-payment-vara-supply/src/wasm",
     "gear-programs/vft-gateway",
     "gear-programs/vft-gateway/src/wasm",
+    "gear-programs/vft-treasury",
+    "gear-programs/vft-treasury/src/wasm",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "gear-programs/erc20-relay/app",
@@ -37,8 +41,12 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 
 bridging_payment = { path = "gear-programs/bridging-payment" }
 bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
+bridging_payment_vara_supply = { path = "gear-programs/bridging-payment-vara-supply" }
+bridging_payment_vara_supply_wasm = { path = "gear-programs/bridging-payment-vara-supply/src/wasm" }
 vft-gateway-app = { path = "gear-programs/vft-gateway" }
 vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
+vft-treasury-app = { path = "gear-programs/vft-treasury" }
+vft_treasury_wasm = { path = "gear-programs/vft-treasury/src/wasm" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
@@ -46,6 +54,9 @@ checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", defa
 erc20-relay = { path = "gear-programs/erc20-relay" }
 erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
 erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
+
+# Contracts' deps
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -79,7 +90,6 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
     "codec",
     "rlp",
 ] }
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
@@ -134,6 +144,7 @@ gear-wasm-builder = { version = "=1.5.0", default-features = false }
 gsdk = "=1.5.0"
 gclient = "=1.5.0"
 gear-core = "=1.5.0"
+gear-wasm-instrument = "=1.5.0"
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [

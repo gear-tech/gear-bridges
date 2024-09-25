@@ -19,23 +19,19 @@ type MessageInfo = struct {
 };
 
 type MessageStatus = enum {
-  SendingMessageToTransferTokens,
-  TokenTransferCompleted: bool,
-  WaitingReplyFromTokenTransfer,
   SendingMessageToGateway,
   GatewayMessageProcessingCompleted: struct { u256, h160 },
+  GatewayMessageProcessingFailed,
   WaitingReplyFromGateway,
   MessageToGatewayStep,
-  ReturnTokensBackStep,
-  SendingMessageToTransferTokensBack,
-  WaitingReplyFromTokenTransferBack,
-  TokenTransferBackCompleted,
-  MessageProcessedWithSuccess: struct { u256, h160 },
 };
 
-type TransactionDetails = enum {
-  Transfer: struct { sender: actor_id, receiver: actor_id, amount: u256, token_id: actor_id },
-  SendMessageToGateway: struct { sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160, attached_value: u128 },
+type TransactionDetails = struct {
+  sender: actor_id,
+  vara_token_id: actor_id,
+  amount: u256,
+  receiver: h160,
+  attached_value: u128,
 };
 
 constructor {
@@ -46,9 +42,8 @@ service BridgingPayment {
   ContinueTransaction : (msg_id: message_id) -> null;
   ReclaimFee : () -> null;
   RequestToGateway : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
-  ReturnTokens : (msg_id: message_id) -> null;
   SetFee : (fee: u128) -> null;
-  UpdateConfig : (fee: opt u128, gas_for_reply_deposit: opt u64, gas_to_send_request_to_gateway: opt u64, gas_to_transfer_tokens: opt u64, reply_timeout: opt u32, gas_for_request_to_gateway_msg: opt u64) -> null;
+  UpdateConfig : (fee: opt u128, gas_for_reply_deposit: opt u64, gas_to_send_request_to_gateway: opt u64, reply_timeout: opt u32, gas_for_request_to_gateway_msg: opt u64) -> null;
   UpdateVftGatewayAddress : (new_vft_gateway_address: actor_id) -> null;
   query AdminAddress : () -> actor_id;
   query GetConfig : () -> Config;

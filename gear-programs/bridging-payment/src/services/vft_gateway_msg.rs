@@ -17,12 +17,13 @@ pub async fn send_message_to_gateway(
     let msg_id = gstd::msg::id();
 
     let bytes: Vec<u8> = vft_gateway::vft_gateway::io::TransferVaraToEth::encode_call(
+        sender,
         vara_token_id,
         amount,
         receiver,
     );
 
-    let transaction_details = TransactionDetails::SendMessageToGateway {
+    let transaction_details = TransactionDetails {
         sender,
         vara_token_id,
         amount,

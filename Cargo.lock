@@ -1789,6 +1789,7 @@ name = "bridging_payment"
 version = "0.1.0"
 dependencies = [
  "gbuiltin-eth-bridge",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
@@ -1798,12 +1799,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridging_payment_vara_supply"
+version = "0.1.0"
+dependencies = [
+ "git-download",
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-client-gen 0.3.0",
+ "sails-rs 0.3.0",
+ "scale-info",
+]
+
+[[package]]
+name = "bridging_payment_vara_supply_wasm"
+version = "0.1.0"
+dependencies = [
+ "bridging_payment_vara_supply",
+ "extended_vft_wasm",
+ "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-idl-gen 0.3.0",
+ "sails-rs 0.3.0",
+ "scale-info",
+ "vft-treasury-app",
+ "vft_treasury_wasm",
+]
+
+[[package]]
 name = "bridging_payment_wasm"
 version = "0.1.0"
 dependencies = [
  "bridging_payment",
  "extended_vft_wasm",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "sails-idl-gen 0.3.0",
@@ -2021,6 +2052,7 @@ dependencies = [
  "circular-buffer",
  "gbuiltin-bls381",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex-literal",
@@ -5220,6 +5252,7 @@ name = "gear_proof_storage"
 version = "0.1.0"
 dependencies = [
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "scale-info",
@@ -14075,6 +14108,7 @@ dependencies = [
  "gbuiltin-eth-bridge",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
@@ -14098,6 +14132,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vft-treasury-app"
+version = "0.1.0"
+dependencies = [
+ "blake2",
+ "gbuiltin-eth-bridge",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "git-download",
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "primitive-types 0.12.2",
+ "sails-client-gen 0.3.0",
+ "sails-rs 0.3.0",
+ "scale-info",
+ "tokio",
+]
+
+[[package]]
 name = "vft_gateway_wasm"
 version = "0.1.0"
 dependencies = [
@@ -14105,6 +14158,7 @@ dependencies = [
  "extended_vft_wasm",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "sails-client-gen 0.3.0",
@@ -14113,6 +14167,26 @@ dependencies = [
  "scale-info",
  "tokio",
  "vft-gateway-app",
+]
+
+[[package]]
+name = "vft_treasury_wasm"
+version = "0.1.0"
+dependencies = [
+ "blake2",
+ "extended_vft_wasm",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-client-gen 0.3.0",
+ "sails-idl-gen 0.3.0",
+ "sails-rs 0.3.0",
+ "scale-info",
+ "tokio",
+ "vft-treasury-app",
 ]
 
 [[package]]

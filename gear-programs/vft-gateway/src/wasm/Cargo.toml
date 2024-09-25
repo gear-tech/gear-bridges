@@ -9,6 +9,7 @@ sails-rs.workspace = true
 
 [build-dependencies]
 gwasm-builder.workspace = true
+gear-wasm-instrument.workspace = true
 sails-idl-gen.workspace = true
 vft-gateway-app.workspace = true
 sails-client-gen.workspace = true

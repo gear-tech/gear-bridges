@@ -8,10 +8,6 @@ pub enum Error {
     ReplyFailure,
     RequestToTreasuryDecode,
     ReplyTimeout,
-    ReplyHook,
-    TreasuryMessageProcessingFailed,
-    InvalidMessageStatus,
-    MessageNotFound,
     Treasury(VftTreasuryError),
 }
 

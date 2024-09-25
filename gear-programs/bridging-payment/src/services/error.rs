@@ -1,14 +1,17 @@
+use super::vft_gateway::Error as VftGatewayError;
 use sails_rs::prelude::*;
 
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Encode, Decode, TypeInfo, Clone)]
+#[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {
     SendFailure,
     ReplyFailure,
     RequestToGateWayDecode,
     ReplyTimeout,
-    ReplyHook,
-    GatewayMessageProcessingFailed,
-    InvalidMessageStatus,
-    MessageNotFound,
+    Gateway(VftGatewayError),
+}
+
+impl From<VftGatewayError> for Error {
+    fn from(e: VftGatewayError) -> Self {
+        Self::Gateway(e)
+    }
 }

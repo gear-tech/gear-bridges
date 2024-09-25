@@ -9,7 +9,7 @@ pub struct Program;
 #[program]
 impl Program {
     pub fn new(init_config: InitConfig) -> Self {
-        BridgingPayment::<GStdExecContext>::seed(init_config, GStdExecContext::new());
+        BridgingPayment::<GStdExecContext>::seed(init_config);
         Self
     }
 

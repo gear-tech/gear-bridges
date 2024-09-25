@@ -8,30 +8,8 @@ type Config = struct {
   fee: u128,
   gas_for_reply_deposit: u64,
   gas_to_send_request_to_gateway: u64,
-  gas_to_transfer_tokens: u64,
   reply_timeout: u32,
   gas_for_request_to_gateway_msg: u64,
-};
-
-type MessageInfo = struct {
-  status: MessageStatus,
-  details: TransactionDetails,
-};
-
-type MessageStatus = enum {
-  SendingMessageToGateway,
-  GatewayMessageProcessingCompleted: struct { u256, h160 },
-  GatewayMessageProcessingFailed,
-  WaitingReplyFromGateway,
-  MessageToGatewayStep,
-};
-
-type TransactionDetails = struct {
-  sender: actor_id,
-  vara_token_id: actor_id,
-  amount: u256,
-  receiver: h160,
-  attached_value: u128,
 };
 
 constructor {
@@ -39,7 +17,6 @@ constructor {
 };
 
 service BridgingPayment {
-  ContinueTransaction : (msg_id: message_id) -> null;
   ReclaimFee : () -> null;
   RequestToGateway : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
   SetFee : (fee: u128) -> null;
@@ -47,7 +24,6 @@ service BridgingPayment {
   UpdateVftGatewayAddress : (new_vft_gateway_address: actor_id) -> null;
   query AdminAddress : () -> actor_id;
   query GetConfig : () -> Config;
-  query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
   query VftGatewayAddress : () -> actor_id;
 
   events {

@@ -5,7 +5,7 @@ import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
-import {IERC20Gateway, WithdrawMessage} from "./interfaces/IERC20Gateway.sol";
+import {IERC20Gateway} from "./interfaces/IERC20Gateway.sol";
 import {VFT_TREASURY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 import {ERC20VaraSupply} from "./ERC20VaraSupply.sol";
@@ -33,7 +33,7 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
     /** @dev Accept bridging request made on other side of bridge.
      * This request can be sent by `MessageQueue` only. When such a request is accpeted, tokens
      * are minted to the corresponding account address, specified in `vara_msg`.
-     * 
+     *
      * Expected `payload` in `VaraMessage` consisits of these:
      *  - `receiver` - account to mint tokens to
      *  - `token` - token to mint
@@ -41,7 +41,7 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
      *
      * @param vara_msg `VaraMessage` received from MessageQueue.
      */
-    function acceptBridging(
+    function processVaraMessage(
         VaraMessage calldata vara_msg
     ) external returns (bool) {
         uint160 receiver;

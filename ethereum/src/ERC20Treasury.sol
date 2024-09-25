@@ -6,7 +6,7 @@ import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
-import {IERC20Treasury, WithdrawMessage} from "./interfaces/IERC20Treasury.sol";
+import {IERC20Treasury} from "./interfaces/IERC20Treasury.sol";
 import {VFT_GATEWAY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 

@@ -1,6 +1,6 @@
 pragma solidity ^0.8.24;
 
-struct WithdrawMessage {
+struct BridgingRequest {
     address receiver;
     address token;
     uint128 amount;
@@ -27,7 +27,7 @@ interface IERC20Gateway {
 
 library Packer {
     function pack(
-        WithdrawMessage calldata message
+        BridgingRequest calldata message
     ) external pure returns (bytes memory) {
         return
             abi.encodePacked(message.receiver, message.token, message.amount);

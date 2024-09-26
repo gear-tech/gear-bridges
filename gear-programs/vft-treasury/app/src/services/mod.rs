@@ -6,7 +6,7 @@ pub mod error;
 mod msg_tracker;
 mod token_operations;
 mod utils;
-mod vft;
+pub mod vft;
 
 pub struct VftTreasury<ExecContext> {
     exec_context: ExecContext,

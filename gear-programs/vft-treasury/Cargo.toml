@@ -17,5 +17,16 @@ vft-treasury-client = { path = "client" }
 sails-rs = { workspace = true, features = ["gtest"] }
 tokio = { version = "1.39", features = ["rt", "macros"] }
 
+gtest.workspace = true
+vft-treasury-app.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+#sails-rs.workspace = true
+#tokio.workspace = true
+#blake2.workspace = true
+#gear-core.workspace = true
+extended_vft_wasm.workspace = true
+#gclient.workspace = true
+
 [features]
 wasm-binary = []

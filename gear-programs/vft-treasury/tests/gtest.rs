@@ -3,7 +3,7 @@ use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_treasury_app::services::vft::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_treasury_client::{
     traits::*, Config, Error, InitConfig, VftTreasury as VftTreasuryC,
-    VtfTreasuryFactory as VftTreasuryFactoryC,
+    VftTreasuryFactory as VftTreasuryFactoryC,
 };
 
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
@@ -101,12 +101,12 @@ async fn setup_for_test() -> Fixture {
 
 async fn balance_of(
     remoting: &GTestRemoting,
-    vtf_program_id: ActorId,
+    vft_program_id: ActorId,
     program_id: ActorId,
 ) -> U256 {
     VftC::new(remoting.clone())
         .balance_of(program_id)
-        .recv(vtf_program_id)
+        .recv(vft_program_id)
         .await
         .unwrap()
 }
@@ -133,7 +133,7 @@ async fn test_treasury() {
     let mut vft = VftC::new(remoting.clone());
 
     let ok = vft
-        .mint(account_id.into(), amount)
+        .mint(account_id, amount)
         .send_recv(vft_program_id)
         .await
         .unwrap();
@@ -187,7 +187,7 @@ async fn test_mapping_does_not_exists() {
     let amount = U256::from(10_000_000_000_u64);
 
     let ok = VftC::new(remoting.clone())
-        .mint(account_id.into(), amount)
+        .mint(account_id, amount)
         .send_recv(vft_program_id)
         .await
         .unwrap();
@@ -260,14 +260,14 @@ async fn test_anyone_can_deposit() {
     let mut vft = VftC::new(remoting.clone());
 
     let ok = vft
-        .mint(account0_id.into(), amount)
+        .mint(account0_id, amount)
         .send_recv(vft_program_id)
         .await
         .unwrap();
     assert!(ok);
 
     let ok = vft
-        .mint(account1_id.into(), amount)
+        .mint(account1_id, amount)
         .send_recv(vft_program_id)
         .await
         .unwrap();

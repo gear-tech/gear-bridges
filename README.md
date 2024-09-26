@@ -7,7 +7,7 @@ Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge faci
 > [!NOTE]
 > This code has not yet been fully audited and therefore shouldn't be used in production.
 
-[Ethernal](https://ethernal.tech/) team have performed partial [audit](https://github.com/gear-tech/gear-bridges/blob/main/audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):
+[Ethernal](https://ethernal.tech/) team have performed partial [audit](audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):
 
 - [prover](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/prover)
 - `plonky2` [circuits](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/circuits) for crypto primitives
@@ -21,7 +21,7 @@ This repository contains the implementation of a token bridging protocol built o
 
 ### Components Present in `Gear <-> Eth` Bridge
 
-![Components of Gear <-> Eth Bridge](https://github.com/gear-tech/gear-bridges/blob/main/images/block_diagram.png)
+![Components of Gear <-> Eth Bridge](images/block_diagram.png)
 
 #### Protocol part
 
@@ -49,7 +49,7 @@ This repository contains the implementation of a token bridging protocol built o
 > [!NOTE]
 > *Gear itself is not a blockchain network and has no native token. This refers to the token of any network built on Gear technology, such as Vara.
 
-![Workflow of Gear -> Eth Transfer](https://github.com/gear-tech/gear-bridges/blob/main/images/gear_eth_transfer.png)
+![Workflow of Gear -> Eth Transfer](images/gear_eth_transfer.png)
 
 - The user submits a message to the `GRC-20 gateway` to initiate bridging.
 - The `GRC-20 gateway` burns `GRC-20` tokens and emits a message to the `pallet-gear-bridge` built-in actor.
@@ -66,13 +66,13 @@ This repository contains the implementation of a token bridging protocol built o
 
 The Block Finality circuit proves that a specific block was finalized by an authority set on the Gear chain. This involves verifying that a majority (>2/3) of validators have signed the GRANDPA vote for the block.
 
-![block finality circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/block_finality_circuit.png)
+![block finality circuit](images/block_finality_circuit.png)
 
 ### Validator Set Change
 
 The Validator Set Change circuit proves that the validator set has changed. This change means that the current validator set finalized a block containing the next validator set in its storage. The circuit verifies that a majority of validators from the current set have set hash inclusion into the storage of `pallet-gear-bridge` and signed the vote for the change.
 
-![validator set change circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/next_validator_set_circuit.png)
+![validator set change circuit](images/next_validator_set_circuit.png)
 
 ### Substrate Storage Trie Circuits
 
@@ -82,35 +82,35 @@ Substrate storage trie circuits are used to prove the inclusion of data into the
 
 This circuit parses branch nodes in the trie, which do not contain a value but help navigate the structure.
 
-![branch node parser circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/mpt_branch_node_parser_circuit.png)
+![branch node parser circuit](images/mpt_branch_node_parser_circuit.png)
 
 #### Hashed Value Leaf
 
 This circuit parses leaf nodes in the trie, which contain the hashed values of the stored data.
 
-![leaf node parser circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/mpt_leaf_node_parser_circuit.png)
+![leaf node parser circuit](images/mpt_leaf_node_parser_circuit.png)
 
 These individual proofs are composed into a storage proof, which proves that specific data exists at a particular address within a block's storage.
 
-![storage proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/storage_proof_circuit.png)
+![storage proof circuit](images/storage_proof_circuit.png)
 
 ### Recent Validator Set
 
 The Recent Validator Set circuit is used to prove a chain of validator set changes, demonstrating the transition from the genesis validator set to the most recent validator set. The genesis validator set is encoded as a constant within the circuit.
 
-![recent validator set circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/recent_validator_set_circuit.png)
+![recent validator set circuit](images/recent_validator_set_circuit.png)
 
 ### Message Inclusion
 
 The Message Inclusion circuit is used to prove that a specific message Merkle root was submitted on the Gear chain for bridging, indicating its inclusion in the `pallet-gear-bridge` storage.
 
-![message sent circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/message_sent_circuit.png)
+![message sent circuit](images/message_sent_circuit.png)
 
 ### Final Proof
 
 The Final Proof circuit is the proof submitted to Ethereum. It proves that a message Merkle root was present in the storage of `pallet-gear-bridge` at a specific finalized block. This final proof ensures the validity of the cross-chain message.
 
-![final proof circuit](https://github.com/gear-tech/gear-bridges/blob/main/images/final_proof_circuit.png)
+![final proof circuit](images/final_proof_circuit.png)
 
 ## Build and run
 

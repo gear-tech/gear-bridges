@@ -47,21 +47,35 @@ This repository contains the implementation of a token bridging protocol built o
 - **Ethereum Event client**: Program on Gear that's capable of verifying that some event was included into some block. To check validity of the block it requests data from `ethereum block client`.
 - **Gear -> Eth Token Transfer Relayer** and **Eth -> Gear Token Transfer Relayer**: These relayers hook to the events produced by `bridging payment` services and perform cross-chain actions to guarantee message delivery. For example, `gear -> eth token transfer relayer` collects bridging fees from user on Gear. When merkle root that contain this message will be relayed to Ethereum, this relayer will send transaction to the `message queue contract` that will trigger transfer from `ERC20 treasury` to the user.
 
-### Workflow of `Gear -> Eth` Token* Transfer
-
-> [!NOTE]
-> *Gear itself is not a blockchain network and has no native token. This refers to the token of any network built on Gear technology, such as Vara.
+### Workflow of `Gear -> Ethereum` Token[^1] Transfer
 
 ![Workflow of Gear -> Eth Transfer](images/gear_eth_transfer.png)
 
-- The user submits a message to the `GRC-20 gateway` to initiate bridging.
-- The `GRC-20 gateway` burns `GRC-20` tokens and emits a message to the `pallet-gear-bridge` built-in actor.
+- The user submits his bridging request to `frontend`
+- `frontend` submits `approve` call to the `vft` program. Approve should allow `vft-gateway` to spend amount of tokens that user have requested to bridge.
+- `frontend` submits user request to the `bridging-payment`.
+- `bridging-payment` takes fee and submits a message to the `vft-gateway` to initiate bridging.
+- The `vft-gateway` burns `vft` tokens and emits a message to the `pallet-gear-bridge` built-in actor.
 - The `pallet-gear-bridge` built-in actor relays the message to `pallet-gear-bridge`.
 - The `pallet-gear-bridge` stores the message in a Merkle trie.
-- Eventually, the `backend` (or another party) relays the message to the `relayer contract`, and it gets stored there.
-- The user sees that their message was relayed and submits a Merkle proof of inclusion to the `message queue contract`.
+- Eventually, the `relayer` (or another party) relays the message to the `relayer contract`, and it gets stored there.
+- `message relayer` sees that user message was relayed and submits a Merkle proof of inclusion to the `message queue contract`.
 - The `message queue contract` reads the Merkle root from the `relayer contract`, checks the Merkle proof, and relays the message to the `ERC20 treasury`.
 - The `ERC20 treasury` releases funds to the user's account on Ethereum.
+
+### Workflow of `Ethereum -> Gear` Token[^1] Transfer
+
+![Workflow of Eth -> Gear Transfer](images/eth_gear_transfer.png)
+
+- The user submits his bridging request to `frontend`
+- `frontend` submits `approve` call to the corresponding `ERC20 contract`. Approve should allow `ERC20 Treasury` to spend amount of tokens that user have requested to bridge.
+- `frontend` submits user request to the `ERC20 Treasury`.
+- The `ERC20 Treasury` locks `ERC20` tokens on his balance and emits an event.
+- Eventually, the `checkpoint relayer` (or another party) sumbits to `checkpoint-light-client` ethereum block which has block number bigger than one where event have been emitted.
+- Eventually, the `token transfer relayer` (or another party) submits this event to `ethereum-event-client`
+- `ethereum event client` send request to mint tokens to `vft-gateway`
+- `vft-gateway` sends message to a `vft` program that corresponds to a `ERC20` token that've been locked in step 4.
+- `vft` program mints tokens to a user's address.
 
 ## Build and run
 
@@ -95,3 +109,5 @@ And then run
 cargo run --release -- --help
 ```
 to see required parameters to start relayer.
+
+[^1]: Gear itself is not a blockchain network and has no native token. This refers to the token of any network built on Gear technology, such as Vara.

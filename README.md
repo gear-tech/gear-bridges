@@ -4,7 +4,7 @@ Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge faci
 
 ## Security
 
-> [!NOTE]
+> [!CAUTION]
 > This code has not yet been fully audited and therefore shouldn't be used in production.
 
 [Ethernal](https://ethernal.tech/) team have performed partial [audit](audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):
@@ -12,6 +12,9 @@ Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge faci
 - [prover](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/prover)
 - `plonky2` [circuits](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/circuits) for crypto primitives
 - `ethereum` [smart-contracts](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/ethereum)
+
+> [!WARNING]
+> One of the conclusions of this audit was that malicious node which relayer is connected to can cause the proof generation process to be halt. So all deployed relayers **MUST** use their own dedicated gear node which is known to be non-malicious.
 
 ## High-Level Bi-Directional `Gear <-> Eth` Design
 

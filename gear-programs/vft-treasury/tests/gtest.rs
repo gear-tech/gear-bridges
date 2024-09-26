@@ -1,10 +1,9 @@
 use gtest::{Program, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_treasury_app::services::vft::traits::*;
-use vft_treasury_app::services::vft::{Vft as VftC, VftFactory as VftFactoryC};
+use vft_treasury_app::services::vft::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_treasury_client::{
-    traits::*, Config, InitConfig, VftTreasury as VftTreasuryC,
-    VtfTreasuryFactory as VftTreasuryFactoryC, Error
+    traits::*, Config, Error, InitConfig, VftTreasury as VftTreasuryC,
+    VtfTreasuryFactory as VftTreasuryFactoryC,
 };
 
 use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
@@ -229,11 +228,8 @@ async fn test_withdraw_fails_with_bad_origin() {
 
     let account_id: ActorId = 100000.into();
 
-    let result = vft_treasury.withdraw_tokens(
-        [2; 20].into(),
-        account_id,
-        U256::from(42),
-    )
+    let result = vft_treasury
+        .withdraw_tokens([2; 20].into(), account_id, U256::from(42))
         .send_recv(treasury_program_id)
         .await
         .unwrap();
@@ -315,5 +311,5 @@ async fn test_anyone_can_deposit() {
     let account1_balance = balance_of(&remoting, vft_program_id, account1_id).await;
     assert!(account1_balance.is_zero());
     let treasury_balance = balance_of(&remoting, vft_program_id, treasury_program_id).await;
-    assert_eq!(treasury_balance, amount*2);
+    assert_eq!(treasury_balance, amount * 2);
 }

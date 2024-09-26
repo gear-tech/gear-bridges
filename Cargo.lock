@@ -10455,6 +10455,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67effccdaef6232976af5cabf54775bd57e362b09e201ceb5e732f8dd7194c9c"
 dependencies = [
  "futures",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core-errors 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -14014,6 +14015,8 @@ name = "vft-treasury"
 version = "0.1.0"
 dependencies = [
  "extended_vft_wasm",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "sails-idl-gen 0.4.0",

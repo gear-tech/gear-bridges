@@ -20,6 +20,11 @@ enum Event {
     },
 }
 
+struct CheckedReceipt {
+    envelope: ReceiptEnvelope,
+    event: ERC20_TREASURY::Deposit,
+}
+
 pub struct Erc20Relay<'a, ExecContext> {
     state: &'a RefCell<State>,
     exec_context: ExecContext,
@@ -56,7 +61,10 @@ where
             return Err(Error::AbsentVftGateway);
         };
 
-        let (receipt, event) = self.prepare(&message)?;
+        let CheckedReceipt {
+            envelope: receipt,
+            event,
+        } = self.decode_and_check_receipt(&message)?;
 
         let EthToVaraEvent {
             proof_block: BlockInclusionProof { block, mut headers },
@@ -135,10 +143,7 @@ where
         Ok(())
     }
 
-    fn prepare(
-        &self,
-        message: &EthToVaraEvent,
-    ) -> Result<(ReceiptEnvelope, ERC20_TREASURY::Deposit), Error> {
+    fn decode_and_check_receipt(&self, message: &EthToVaraEvent) -> Result<CheckedReceipt, Error> {
         use alloy_rlp::Decodable;
 
         let receipt = ReceiptEnvelope::decode(&mut &message.receipt_rlp[..])
@@ -150,7 +155,7 @@ where
 
         let slot = message.proof_block.block.slot;
         let state = self.state.borrow_mut();
-        // decode log and check that it is from allowed address
+        // decode log and check that it is from an allowed address
         let event = receipt
             .logs()
             .iter()
@@ -180,7 +185,10 @@ where
             return Err(Error::TooOldTransaction);
         }
 
-        Ok((receipt, event))
+        Ok(CheckedReceipt {
+            envelope: receipt,
+            event,
+        })
     }
 
     pub async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {

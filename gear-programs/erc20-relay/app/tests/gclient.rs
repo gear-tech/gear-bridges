@@ -28,7 +28,7 @@ async fn spin_up_node() -> (GClientRemoting, CodeId, GasUnit) {
 }
 
 #[tokio::test]
-async fn tokens_map() {
+async fn addresses_map() {
     let (remoting, code_id, gas_limit) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
@@ -47,16 +47,15 @@ async fn tokens_map() {
 
     let mut ft_client = erc20_relay_client::FtManage::new(remoting.clone());
 
-    let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert!(tokens.is_empty());
+    let addresses = ft_client.addresses().recv(program_id).await.unwrap();
+    assert!(addresses.is_empty());
 
     let mut listener = erc20_relay_client::ft_manage::events::listener(remoting.clone());
     let mut events = listener.listen().await.unwrap();
 
-    let eth_token = H160::from(hex!("52c953cac2269c599b075359EdA11E738a750000"));
-    let eth_address = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F6"));
+    let erc20_treasury = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F6"));
     let result = ft_client
-        .add_fungible_token(eth_address, eth_token, [0u8; 32].into())
+        .add_erc_treasury(erc20_treasury)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -64,32 +63,25 @@ async fn tokens_map() {
 
     let event = events.next().await.unwrap();
     assert_eq!(
-        (
-            program_id,
-            FtManageEvents::Added {
-                eth_address,
-                eth_token,
-                vara_token: [0u8; 32].into()
-            }
-        ),
+        (program_id, FtManageEvents::Added { erc20_treasury }),
         event
     );
 
-    let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(&tokens[..], &[(eth_address, eth_token, [0u8; 32].into())]);
+    let addresses = ft_client.addresses().recv(program_id).await.unwrap();
+    assert_eq!(&addresses[..], &[erc20_treasury]);
 
     // duplicate Eth address/token
     let result = ft_client
-        .add_fungible_token(eth_address, eth_token, [0u8; 32].into())
+        .add_erc_treasury(erc20_treasury)
         .send_recv(program_id)
         .await
         .unwrap();
     assert!(result.is_none());
 
-    // another mapping
-    let eth_address2 = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F7"));
+    // another one
+    let erc20_treasury2 = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F7"));
     let result = ft_client
-        .add_fungible_token(eth_address2, eth_token, [0u8; 32].into())
+        .add_erc_treasury(erc20_treasury2)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -100,25 +92,17 @@ async fn tokens_map() {
         (
             program_id,
             FtManageEvents::Added {
-                eth_address: eth_address2,
-                eth_token,
-                vara_token: [0u8; 32].into()
+                erc20_treasury: erc20_treasury2,
             }
         ),
         event
     );
 
-    let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(
-        &tokens[..],
-        &[
-            (eth_address, eth_token, [0u8; 32].into()),
-            (eth_address2, eth_token, [0u8; 32].into())
-        ]
-    );
+    let addresses = ft_client.addresses().recv(program_id).await.unwrap();
+    assert_eq!(&addresses[..], &[erc20_treasury, erc20_treasury2,]);
 
     let result = ft_client
-        .remove_fungible_token(eth_address2, eth_token)
+        .remove_erc_treasury(erc20_treasury2)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -129,19 +113,18 @@ async fn tokens_map() {
         (
             program_id,
             FtManageEvents::Removed {
-                eth_address: eth_address2,
-                eth_token,
+                erc20_treasury: erc20_treasury2,
             }
         ),
         event
     );
 
-    let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(&tokens[..], &[(eth_address, eth_token, [0u8; 32].into())]);
+    let addresses = ft_client.addresses().recv(program_id).await.unwrap();
+    assert_eq!(&addresses[..], &[erc20_treasury]);
 
     // attempt to remove non-existant entry should do nothig
     let result = ft_client
-        .remove_fungible_token(eth_address2, eth_token)
+        .remove_erc_treasury(erc20_treasury2)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -154,18 +137,18 @@ async fn tokens_map() {
     let mut ft_client = erc20_relay_client::FtManage::new(remoting.clone());
 
     // there should be the single mapping
-    let tokens = ft_client.tokens().recv(program_id).await.unwrap();
-    assert_eq!(&tokens[..], &[(eth_address, eth_token, [0u8; 32].into())]);
+    let addresses = ft_client.addresses().recv(program_id).await.unwrap();
+    assert_eq!(&addresses[..], &[erc20_treasury]);
 
-    let eth_address3 = hex!("52c953cac2269c599b075359EdA11E738a75c6F8");
+    let erc20_treasury3 = H160::from(hex!("52c953cac2269c599b075359EdA11E738a75c6F8"));
     let result = ft_client
-        .add_fungible_token(eth_address3.into(), eth_token, [0u8; 32].into())
+        .add_erc_treasury(erc20_treasury3)
         .send_recv(program_id)
         .await;
     assert!(result.is_err());
 
     let result = ft_client
-        .remove_fungible_token(eth_address, eth_token)
+        .remove_erc_treasury(erc20_treasury)
         .send_recv(program_id)
         .await;
     assert!(result.is_err());

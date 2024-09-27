@@ -4,15 +4,8 @@ use super::*;
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 enum Event {
-    Added {
-        eth_address: H160,
-        eth_token: H160,
-        vara_token: ActorId,
-    },
-    Removed {
-        eth_address: H160,
-        eth_token: H160,
-    },
+    Added { erc20_treasury: H160 },
+    Removed { erc20_treasury: H160 },
 }
 
 pub struct FTManage<'a, ExecContext> {
@@ -32,55 +25,42 @@ where
         }
     }
 
-    pub fn tokens(&self) -> Vec<(H160, H160, ActorId)> {
-        self.state
-            .borrow()
-            .map
-            .iter()
-            .map(|((eth_address, eth_token), vara_token)| (*eth_address, *eth_token, *vara_token))
-            .collect()
+    pub fn addresses(&self) -> Vec<H160> {
+        self.state.borrow().addresses.iter().copied().collect()
     }
 
-    pub fn add_fungible_token(
-        &mut self,
-        eth_address: H160,
-        eth_token: H160,
-        vara_token: ActorId,
-    ) -> Option<()> {
+    pub fn add_erc_treasury(&mut self, erc20_treasury: H160) -> Option<()> {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
             panic!("Not admin");
         }
 
-        if state.map.contains_key(&(eth_address, eth_token)) {
+        if state.addresses.contains(&erc20_treasury) {
             return None;
         }
 
-        state.map.insert((eth_address, eth_token), vara_token);
-        self.notify_on(Event::Added {
-            eth_address,
-            eth_token,
-            vara_token,
-        })
-        .expect("Notify on add");
+        state.addresses.insert(erc20_treasury);
+        self.notify_on(Event::Added { erc20_treasury })
+            .expect("Notify on add");
 
         Some(())
     }
 
-    pub fn remove_fungible_token(&mut self, eth_address: H160, eth_token: H160) -> Option<()> {
+    pub fn remove_erc_treasury(&mut self, erc20_treasury: H160) -> Option<()> {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
             panic!("Not admin");
         }
 
-        state.map.remove(&(eth_address, eth_token)).map(|_| {
-            self.notify_on(Event::Removed {
-                eth_address,
-                eth_token,
-            })
-            .expect("Notify on remove");
-        })
+        if state.addresses.remove(&erc20_treasury) {
+            self.notify_on(Event::Removed { erc20_treasury })
+                .expect("Notify on remove");
+
+            return Some(());
+        }
+
+        None
     }
 }

@@ -14,7 +14,7 @@ use vft::vft_gateway;
 #[scale_info(crate = sails_rs::scale_info)]
 enum Event {
     Relayed {
-        fungible_token: ActorId,
+        fungible_token: H160,
         to: ActorId,
         amount: U256,
     },
@@ -56,7 +56,7 @@ where
             return Err(Error::AbsentVftGateway);
         };
 
-        let (fungible_token, receipt, event) = self.prepare(&message)?;
+        let (receipt, event) = self.prepare(&message)?;
 
         let EthToVaraEvent {
             proof_block: BlockInclusionProof { block, mut headers },
@@ -109,6 +109,7 @@ where
 
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
+        let fungible_token: H160 = event.token.0 .0.into();
         let call_payload =
             vft_gateway::io::MintTokens::encode_call(fungible_token, receiver, amount);
         let (reply_timeout, reply_deposit) = {
@@ -137,7 +138,7 @@ where
     fn prepare(
         &self,
         message: &EthToVaraEvent,
-    ) -> Result<(ActorId, ReceiptEnvelope, ERC20_TREASURY::Deposit), Error> {
+    ) -> Result<(ReceiptEnvelope, ERC20_TREASURY::Deposit), Error> {
         use alloy_rlp::Decodable;
 
         let receipt = ReceiptEnvelope::decode(&mut &message.receipt_rlp[..])
@@ -149,8 +150,8 @@ where
 
         let slot = message.proof_block.block.slot;
         let state = self.state.borrow_mut();
-        // decode log and pick the corresponding fungible token address if any
-        let (fungible_token, event) = receipt
+        // decode log and check that it is from allowed address
+        let event = receipt
             .logs()
             .iter()
             .find_map(|log| {
@@ -159,10 +160,7 @@ where
                     return None;
                 };
 
-                state
-                    .map
-                    .get(&(eth_address, H160::from(event.token.0 .0)))
-                    .map(|fungible_token| (*fungible_token, event))
+                state.addresses.contains(&eth_address).then_some(event)
             })
             .ok_or(Error::NotSupportedEvent)?;
 
@@ -182,7 +180,7 @@ where
             return Err(Error::TooOldTransaction);
         }
 
-        Ok((fungible_token, receipt, event))
+        Ok((receipt, event))
     }
 
     pub async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {

@@ -3600,6 +3600,7 @@ dependencies = [
  "ethereum-common",
  "futures",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",

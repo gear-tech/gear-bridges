@@ -8,7 +8,7 @@ use abi::ERC20_TREASURY;
 use alloy_sol_types::SolEvent;
 use cell::RefCell;
 use checkpoint_light_client_io::{Handle, HandleResult};
-use collections::{BTreeMap, BTreeSet};
+use collections::BTreeSet;
 use error::Error;
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -61,7 +61,7 @@ pub struct EthToVaraEvent {
 
 pub struct State {
     admin: ActorId,
-    map: BTreeMap<(H160, H160), ActorId>,
+    addresses: BTreeSet<H160>,
     checkpoints: ActorId,
     vft_gateway: Option<ActorId>,
     reply_timeout: u32,
@@ -85,7 +85,7 @@ impl Erc20RelayProgram {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
-            map: Default::default(),
+            addresses: Default::default(),
             checkpoints,
             vft_gateway,
             reply_timeout,

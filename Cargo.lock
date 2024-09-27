@@ -1791,9 +1791,15 @@ dependencies = [
  "bridging-payment",
  "bridging-payment-app",
  "bridging-payment-client",
+ "extended_vft_wasm",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
  "tokio",
+ "vft-gateway",
+ "vft-gateway-app",
+ "vft-gateway-client",
 ]
 
 [[package]]

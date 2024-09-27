@@ -6,15 +6,12 @@ use vft_treasury_client::{
     VftTreasuryFactory as VftTreasuryFactoryC,
 };
 
-use extended_vft_wasm::WASM_BINARY as TOKEN_WASM_BINARY;
-
-pub const ADMIN_ID: u64 = 1000;
-pub const TOKEN_ID: u64 = 200;
-pub const ETH_CLIENT_ID: u64 = 500;
-pub const BRIDGE_BUILTIN_ID: u64 = 300;
+const ADMIN_ID: u64 = 1000;
+const ETH_CLIENT_ID: u64 = 500;
+const BRIDGE_BUILTIN_ID: u64 = 300;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
-pub enum Response {
+enum Response {
     MessageSent { nonce: U256, hash: H256 },
 }
 
@@ -85,7 +82,9 @@ async fn setup_for_test() -> Fixture {
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting.system().submit_code(TOKEN_WASM_BINARY);
+    let vft_code_id = remoting
+        .system()
+        .submit_code(extended_vft_wasm::WASM_BINARY);
     let vft_program_id = VftFactoryC::new(remoting.clone())
         .new("Token".into(), "Token".into(), 18)
         .send_recv(vft_code_id, b"salt")

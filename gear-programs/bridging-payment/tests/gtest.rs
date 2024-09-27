@@ -120,7 +120,6 @@ async fn setup_for_test() -> Fixture {
             fee: FEE,
             gas_for_reply_deposit: 15_000_000_000,
             gas_to_send_request_to_gateway: 100_000_000_000,
-            gas_to_transfer_tokens: 15_000_000_000,
             reply_timeout: 1000,
             gas_for_request_to_gateway_msg: 50_000_000_000,
         },

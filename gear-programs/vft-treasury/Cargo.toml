@@ -14,9 +14,9 @@ sails-idl-gen.workspace = true
 [dev-dependencies]
 vft-treasury = { path = ".", features = ["wasm-binary"] }
 vft-treasury-client = { path = "client" }
+vft-client.workspace = true
 
 gtest.workspace = true
-vft-treasury-app.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient"] }

@@ -15,9 +15,9 @@ sails-idl-gen.workspace = true
 bridging-payment-vara-supply = { path = ".", features = ["wasm-binary"] }
 bridging-payment-vara-supply-client = { path = "client" }
 vft-treasury = { workspace = true, features = ["wasm-binary"] }
-vft-treasury-app.workspace = true
 vft-treasury-client.workspace = true
 extended_vft_wasm.workspace = true
+vft-client.workspace = true
 
 sails-rs = { workspace = true, features = ["gtest"] }
 tokio = { workspace = true, features = ["rt", "macros"] }

@@ -19,6 +19,7 @@ members = [
     "gear-programs/vft-treasury",
     "gear-programs/vft-treasury/app",
     "gear-programs/vft-treasury/client",
+    "gear-programs/vft-client",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "utils-prometheus",
@@ -53,6 +54,7 @@ vft-gateway-client = { path = "gear-programs/vft-gateway/client" }
 vft-treasury = { path = "gear-programs/vft-treasury" }
 vft-treasury-app = { path = "gear-programs/vft-treasury/app" }
 vft-treasury-client = { path = "gear-programs/vft-treasury/client" }
+vft-client = { path = "gear-programs/vft-client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }

@@ -14,6 +14,7 @@ sails-idl-gen.workspace = true
 [dev-dependencies]
 vft-gateway = { path = ".", features = ["wasm-binary"] }
 vft-gateway-client = { path = "client" }
+vft-client.workspace = true
 
 sails-rs = { workspace = true, features = ["gtest"] }
 tokio = { workspace = true, features = ["rt", "macros"] }

@@ -1,7 +1,7 @@
 use gclient::{EventListener, EventProcessor as _, GearApi, Result};
 use gear_core::ids::ProgramId;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use vft_treasury_app::services::vft::{traits::*, Vft as VftC};
+use vft_client::{traits::*, Vft as VftC};
 use vft_treasury_client::{traits::*, Config, InitConfig, VftTreasury as VftTreasuryC};
 
 async fn upload_program(

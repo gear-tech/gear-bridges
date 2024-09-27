@@ -1,7 +1,7 @@
 use blake2::{digest::typenum::U32, Blake2b, Digest};
 use gtest::Program;
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_gateway_app::services::vft::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
+use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_gateway_client::{
     traits::*, Config, Error, InitConfig, MessageStatus, VftGateway as VftGatewayC,
     VftGatewayFactory as VftGatewayFactoryC,

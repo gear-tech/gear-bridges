@@ -4,7 +4,7 @@ use bridging_payment_vara_supply_client::{
 };
 use gtest::{Log, Program, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_treasury_app::services::vft::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
+use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_treasury_client::{
     traits::*, Config as VftTreasuryConfig, InitConfig as VftTreasuryInitConfig,
     VftTreasury as VftTreasuryC, VftTreasuryFactory as VftTreasuryFactoryC,

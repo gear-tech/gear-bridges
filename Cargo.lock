@@ -1797,8 +1797,8 @@ dependencies = [
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
  "tokio",
+ "vft-client",
  "vft-gateway",
- "vft-gateway-app",
  "vft-gateway-client",
 ]
 
@@ -1838,8 +1838,8 @@ dependencies = [
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
  "tokio",
+ "vft-client",
  "vft-treasury",
- "vft-treasury-app",
  "vft-treasury-client",
 ]
 
@@ -14000,6 +14000,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vft-client"
+version = "0.1.0"
+dependencies = [
+ "git-download",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-rs 0.4.0",
+]
+
+[[package]]
 name = "vft-gateway"
 version = "0.1.0"
 dependencies = [
@@ -14012,6 +14022,7 @@ dependencies = [
  "sails-rs 0.4.0",
  "scale-info",
  "tokio",
+ "vft-client",
  "vft-gateway",
  "vft-gateway-app",
  "vft-gateway-client",
@@ -14029,6 +14040,7 @@ dependencies = [
  "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
  "scale-info",
+ "vft-client",
 ]
 
 [[package]]
@@ -14067,6 +14079,7 @@ dependencies = [
  "sails-rs 0.4.0",
  "scale-info",
  "tokio",
+ "vft-client",
  "vft-treasury",
  "vft-treasury-app",
  "vft-treasury-client",
@@ -14078,12 +14091,11 @@ version = "0.1.0"
 dependencies = [
  "gbuiltin-eth-bridge",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
- "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
  "scale-info",
+ "vft-client",
 ]
 
 [[package]]

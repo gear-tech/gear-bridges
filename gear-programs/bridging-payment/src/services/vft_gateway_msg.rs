@@ -1,8 +1,8 @@
 use super::{
-    error::Error,
-    msg_tracker::{msg_tracker_mut, MessageStatus, TransactionDetails},
-    utils, vft_gateway, Config,
+    error::Error, utils, vft_gateway, vft_gateway::vft_gateway::io as vft_gateway_io,
+    vft_gateway::Error as VftGatewayError, Config,
 };
+use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
 
 pub async fn send_message_to_gateway(
@@ -11,11 +11,8 @@ pub async fn send_message_to_gateway(
     vara_token_id: ActorId,
     amount: U256,
     receiver: H160,
-    attached_value: u128,
     config: &Config,
 ) -> Result<(U256, H160), Error> {
-    let msg_id = gstd::msg::id();
-
     let bytes: Vec<u8> = vft_gateway::vft_gateway::io::TransferVaraToEth::encode_call(
         sender,
         vara_token_id,
@@ -23,31 +20,19 @@ pub async fn send_message_to_gateway(
         receiver,
     );
 
-    let transaction_details = TransactionDetails {
-        sender,
-        vara_token_id,
-        amount,
-        receiver,
-        attached_value,
-    };
-
-    msg_tracker_mut().insert_message_info(
-        msg_id,
-        MessageStatus::SendingMessageToGateway,
-        transaction_details,
-    );
-
-    utils::set_critical_hook(msg_id);
-
-    utils::send_message_with_gas_for_reply(
+    let reply_bytes = utils::send_message_with_gas_for_reply(
         gateway_address,
         bytes,
         config.gas_to_send_request_to_gateway,
         config.gas_for_reply_deposit,
         config.reply_timeout,
-        msg_id,
     )
     .await?;
 
-    msg_tracker_mut().check_vft_gateway_reply(&msg_id)
+    Ok(decode_vft_gateway_reply(&reply_bytes)??)
+}
+
+fn decode_vft_gateway_reply(bytes: &[u8]) -> Result<Result<(U256, H160), VftGatewayError>, Error> {
+    vft_gateway_io::TransferVaraToEth::decode_reply(bytes)
+        .map_err(|_| Error::RequestToGateWayDecode)
 }

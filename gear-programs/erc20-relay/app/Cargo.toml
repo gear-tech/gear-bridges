@@ -4,12 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
-ethereum-common.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 checkpoint_light_client-io.workspace = true
+ethereum-common.workspace = true
 gear-wasm-instrument.workspace = true
+sails-rs.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", default-features = false, features = ["custom"] }
@@ -21,13 +21,13 @@ erc20-relay = { workspace = true, features = ["wasm-binary", "gas_calculation"] 
 futures.workspace = true
 gclient.workspace = true
 gstd.workspace = true
-sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1", features = ["gclient"] }
+sails-rs = { workspace = true, features = ["gclient"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 hex-literal.workspace = true
 hex.workspace = true
 
 [build-dependencies]
-sails-client-gen = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
+sails-client-gen.workspace = true
 
 [features]
 gas_calculation = []

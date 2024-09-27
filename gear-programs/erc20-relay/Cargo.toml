@@ -8,8 +8,8 @@ erc20-relay-app.workspace = true
 
 [build-dependencies]
 erc20-relay-app.workspace = true
-sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1", features = ["wasm-builder"] }
-sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
 
 [features]
 wasm-binary = []

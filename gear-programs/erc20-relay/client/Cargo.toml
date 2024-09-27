@@ -4,13 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-mockall = { version = "0.12", optional = true }
-sails-rs = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
+mockall = { workspace = true, optional = true }
+sails-rs.workspace = true
 
 [build-dependencies]
 erc20-relay-app.workspace = true
-sails-client-gen = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
-sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", rev = "aab08733ee9ccdb809dc9b29c57dd411b2b917b1" }
+sails-client-gen.workspace = true
+sails-idl-gen.workspace = true
 
 [features]
 mocks = ["sails-rs/mockall", "dep:mockall"]

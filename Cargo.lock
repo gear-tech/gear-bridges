@@ -1785,6 +1785,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridging-payment-vara-supply"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment-vara-supply",
+ "bridging-payment-vara-supply-app",
+ "bridging-payment-vara-supply-client",
+ "extended_vft_wasm",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "tokio",
+ "vft-treasury",
+ "vft-treasury-app",
+ "vft-treasury-client",
+]
+
+[[package]]
+name = "bridging-payment-vara-supply-app"
+version = "0.1.0"
+dependencies = [
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-rs 0.4.0",
+ "scale-info",
+ "vft-treasury-client",
+]
+
+[[package]]
+name = "bridging-payment-vara-supply-client"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment-vara-supply-app",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+]
+
+[[package]]
 name = "bridging_payment"
 version = "0.1.0"
 dependencies = [
@@ -1796,35 +1836,6 @@ dependencies = [
  "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
  "scale-info",
-]
-
-[[package]]
-name = "bridging_payment_vara_supply"
-version = "0.1.0"
-dependencies = [
- "git-download",
- "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.4.0",
- "sails-rs 0.4.0",
- "scale-info",
-]
-
-[[package]]
-name = "bridging_payment_vara_supply_wasm"
-version = "0.1.0"
-dependencies = [
- "bridging_payment_vara_supply",
- "extended_vft_wasm",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-idl-gen 0.4.0",
- "sails-rs 0.4.0",
- "scale-info",
- "vft-treasury-app",
- "vft-treasury-client",
 ]
 
 [[package]]
@@ -13401,9 +13412,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.39.2"
+version = "1.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daa4fb1bc778bd6f04cbfc4bb2d06a7396a8f299dc33ea1900cedaa316f467b1"
+checksum = "e2b070231665d27ad9ec9b8df639893f46727666c6767db40317fbe920a5d998"
 dependencies = [
  "backtrace",
  "bytes",

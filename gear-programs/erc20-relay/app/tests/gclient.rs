@@ -28,6 +28,7 @@ async fn spin_up_node() -> (GClientRemoting, CodeId, GasUnit) {
 }
 
 #[tokio::test]
+#[ignore = "Requires running node"]
 async fn addresses_map() {
     let (remoting, code_id, gas_limit) = spin_up_node().await;
 
@@ -155,6 +156,7 @@ async fn addresses_map() {
 }
 
 #[tokio::test]
+#[ignore = "Requires running node"]
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 
@@ -225,6 +227,7 @@ async fn gas_for_reply() {
 }
 
 #[tokio::test]
+#[ignore = "Requires running node"]
 async fn set_vft_gateway() {
     let (remoting, code_id, gas_limit) = spin_up_node().await;
 

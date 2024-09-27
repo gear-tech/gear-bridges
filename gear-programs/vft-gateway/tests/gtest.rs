@@ -15,9 +15,19 @@ const TOKEN_ID: u64 = 200;
 const ETH_CLIENT_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
 
+#[derive(Default)]
 enum BridgeBuiltinMock {
+    #[default]
     GearBridgeBuiltinMock,
     GearBridgeBuiltinMockPanic,
+}
+
+#[derive(Default)]
+enum VftMock {
+    #[default]
+    Binary,
+    FTMockError,
+    FTMockReturnsFalse,
 }
 
 struct Fixture {
@@ -27,10 +37,13 @@ struct Fixture {
 }
 
 async fn setup_for_test() -> Fixture {
-    setup_for_test_with_params(BridgeBuiltinMock::GearBridgeBuiltinMock).await
+    setup_for_test_with_mocks(Default::default(), Default::default()).await
 }
 
-async fn setup_for_test_with_params(bridge_builtin_mock: BridgeBuiltinMock) -> Fixture {
+async fn setup_for_test_with_mocks(
+    bridge_builtin_mock: BridgeBuiltinMock,
+    vft_mock: VftMock,
+) -> Fixture {
     let remoting = GTestRemoting::new(ADMIN_ID.into());
     remoting.system().init_logger();
 
@@ -72,14 +85,34 @@ async fn setup_for_test_with_params(bridge_builtin_mock: BridgeBuiltinMock) -> F
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting
-        .system()
-        .submit_code(extended_vft_wasm::WASM_BINARY);
-    let vft_program_id = VftFactoryC::new(remoting.clone())
-        .new("Token".into(), "Token".into(), 18)
-        .send_recv(vft_code_id, b"salt")
-        .await
-        .unwrap();
+
+    let vft_program_id = match vft_mock {
+        VftMock::Binary => {
+            let vft_code_id = remoting
+                .system()
+                .submit_code(extended_vft_wasm::WASM_BINARY);
+            let vft_program_id = VftFactoryC::new(remoting.clone())
+                .new("Token".into(), "Token".into(), 18)
+                .send_recv(vft_code_id, b"salt")
+                .await
+                .unwrap();
+            vft_program_id
+        }
+        mock => {
+            let vft = match mock {
+                VftMock::FTMockError => {
+                    Program::mock_with_id(remoting.system(), TOKEN_ID, FTMockError)
+                }
+                VftMock::FTMockReturnsFalse => {
+                    Program::mock_with_id(remoting.system(), TOKEN_ID, FTMockReturnsFalse)
+                }
+                _ => unreachable!(),
+            };
+
+            assert!(!vft.send_bytes(ADMIN_ID, b"INI").main_failed());
+            vft.id()
+        }
+    };
 
     Fixture {
         remoting,
@@ -157,12 +190,8 @@ async fn test_transfer_fails_due_to_token_panic() {
     let Fixture {
         remoting,
         gateway_program_id,
-        ..
-    } = setup_for_test().await;
-
-    let vft = Program::mock_with_id(remoting.system(), TOKEN_ID, FTMockError);
-    assert!(!vft.send_bytes(ADMIN_ID, b"INI").main_failed());
-    let vft_program_id = vft.id();
+        vft_program_id,
+    } = setup_for_test_with_mocks(Default::default(), VftMock::FTMockError).await;
 
     let account_id: ActorId = 10000.into();
     let amount = U256::from(10_000_000_000_u64);
@@ -197,12 +226,8 @@ async fn test_transfer_fails_due_to_token_rejecting_request() {
     let Fixture {
         remoting,
         gateway_program_id,
-        ..
-    } = setup_for_test().await;
-
-    let vft = Program::mock_with_id(remoting.system(), TOKEN_ID, FTMockReturnsFalse);
-    assert!(!vft.send_bytes(ADMIN_ID, b"INI").main_failed());
-    let vft_program_id = vft.id();
+        vft_program_id,
+    } = setup_for_test_with_mocks(Default::default(), VftMock::FTMockReturnsFalse).await;
 
     let account_id: ActorId = 10000.into();
     let amount = U256::from(10_000_000_000_u64);
@@ -238,7 +263,11 @@ async fn test_bridge_builtin_panic_with_token_mint() {
         remoting,
         gateway_program_id,
         vft_program_id,
-    } = setup_for_test_with_params(BridgeBuiltinMock::GearBridgeBuiltinMockPanic).await;
+    } = setup_for_test_with_mocks(
+        BridgeBuiltinMock::GearBridgeBuiltinMockPanic,
+        Default::default(),
+    )
+    .await;
 
     let account_id: ActorId = 10000.into();
     let amount = U256::from(10_000_000_000_u64);
@@ -299,7 +328,7 @@ async fn test_multiple_transfers() {
         remoting,
         gateway_program_id,
         vft_program_id,
-    } = setup_for_test_with_params(BridgeBuiltinMock::GearBridgeBuiltinMock).await;
+    } = setup_for_test().await;
 
     let account_id1: ActorId = 10001.into();
     let account_id2: ActorId = 10002.into();
@@ -358,7 +387,7 @@ async fn test_transfer_vara_to_eth_insufficient_balance() {
         remoting,
         gateway_program_id,
         vft_program_id,
-    } = setup_for_test_with_params(BridgeBuiltinMock::GearBridgeBuiltinMock).await;
+    } = setup_for_test().await;
 
     let account_id: ActorId = 10000.into();
     let amount = U256::from(10_000_000_000_u64);
@@ -407,7 +436,7 @@ async fn test_mint_tokens_from_eth_client() {
         remoting,
         gateway_program_id,
         vft_program_id,
-    } = setup_for_test_with_params(BridgeBuiltinMock::GearBridgeBuiltinMock).await;
+    } = setup_for_test().await;
 
     let eth_token_id = H160::default();
     let receiver: ActorId = 10_000.into();
@@ -444,7 +473,7 @@ async fn test_mint_tokens_from_arbitrary_address() {
         remoting,
         gateway_program_id,
         vft_program_id,
-    } = setup_for_test_with_params(BridgeBuiltinMock::GearBridgeBuiltinMock).await;
+    } = setup_for_test().await;
 
     let eth_token_id = H160::default();
     let receiver: ActorId = 10_000.into();

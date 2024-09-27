@@ -32,17 +32,10 @@ macro_rules! create_mock {
 }
 
 create_mock!(FTMockError, Err("Error"));
-create_mock!(FTMockWrongReply, Ok(None));
 create_mock!(
     FTMockReturnsFalse,
     Ok(Some(
         ["Vft".encode(), "Burn".encode(), false.encode()].concat()
-    ))
-);
-create_mock!(
-    FTMockReturnsTrue,
-    Ok(Some(
-        ["Vft".encode(), "Burn".encode(), true.encode()].concat()
     ))
 );
 

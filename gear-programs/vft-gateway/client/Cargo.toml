@@ -1,7 +1,7 @@
 [package]
 name = "vft-gateway-client"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 mockall = { version = "0.12", optional = true }

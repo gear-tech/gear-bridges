@@ -1,18 +1,3 @@
-#[package]
-#name = "bridging-payment-vara-supply"
-#version.workspace = true
-#edition.workspace = true
-#
-#[dependencies]
-#sails-rs.workspace = true
-#parity-scale-codec.workspace = true
-#scale-info.workspace = true
-#gstd.workspace = true
-#
-#[build-dependencies]
-#git-download.workspace = true
-#sails-client-gen.workspace = true
-
 [package]
 name = "bridging-payment-vara-supply"
 version.workspace = true

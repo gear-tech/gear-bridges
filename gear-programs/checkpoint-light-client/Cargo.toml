@@ -21,8 +21,8 @@ gear-wasm-instrument.workspace = true
 checkpoint_light_client-io.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-getrandom = { version = "0.2", default-features = false, features = ["custom"] }
-lazy_static = { version = "1.1", features = ["spin_no_std"] }
+getrandom = { workspace = true, features = ["custom"] }
+lazy_static = { workspace = true, features = ["spin_no_std"] }
 
 [features]
 std = [

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bridging_payment.workspace = true
+bridging-payment-client.workspace = true
 ethereum-client.workspace = true
 gear_proof_storage.workspace = true
 gear-rpc-client.workspace = true
@@ -43,4 +43,3 @@ utils-prometheus.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true
-sails-client-gen.workspace = true

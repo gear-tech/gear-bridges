@@ -1785,6 +1785,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridging-payment"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment",
+ "bridging-payment-app",
+ "bridging-payment-client",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "tokio",
+]
+
+[[package]]
+name = "bridging-payment-app"
+version = "0.1.0"
+dependencies = [
+ "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-rs 0.4.0",
+ "scale-info",
+ "vft-gateway-client",
+]
+
+[[package]]
+name = "bridging-payment-client"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment-app",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+]
+
+[[package]]
 name = "bridging-payment-vara-supply"
 version = "0.1.0"
 dependencies = [
@@ -1822,37 +1857,6 @@ dependencies = [
  "sails-client-gen 0.4.0",
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
-]
-
-[[package]]
-name = "bridging_payment"
-version = "0.1.0"
-dependencies = [
- "gbuiltin-eth-bridge",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "git-download",
- "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.4.0",
- "sails-rs 0.4.0",
- "scale-info",
-]
-
-[[package]]
-name = "bridging_payment_wasm"
-version = "0.1.0"
-dependencies = [
- "bridging_payment",
- "extended_vft_wasm",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-idl-gen 0.4.0",
- "sails-rs 0.4.0",
- "scale-info",
- "vft-gateway",
- "vft-gateway-app",
 ]
 
 [[package]]
@@ -9812,7 +9816,7 @@ dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
  "axum",
- "bridging_payment",
+ "bridging-payment-client",
  "cgo_oligami",
  "checkpoint_light_client",
  "checkpoint_light_client-io",
@@ -9838,7 +9842,6 @@ dependencies = [
  "prover",
  "rand 0.8.5",
  "reqwest 0.11.27",
- "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
  "serde",
  "serde_json",

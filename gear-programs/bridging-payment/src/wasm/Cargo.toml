@@ -15,7 +15,7 @@ bridging_payment.workspace = true
 [dev-dependencies]
 gtest.workspace = true
 extended_vft_wasm.workspace = true
-vft_gateway_wasm.workspace = true
+vft-gateway.workspace = true
 vft-gateway-app.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true

@@ -1851,8 +1851,8 @@ dependencies = [
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
  "scale-info",
+ "vft-gateway",
  "vft-gateway-app",
- "vft_gateway_wasm",
 ]
 
 [[package]]
@@ -13991,22 +13991,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vft-gateway-app"
+name = "vft-gateway"
 version = "0.1.0"
 dependencies = [
  "blake2",
- "gbuiltin-eth-bridge",
- "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "extended_vft_wasm",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "scale-info",
+ "tokio",
+ "vft-gateway",
+ "vft-gateway-app",
+ "vft-gateway-client",
+]
+
+[[package]]
+name = "vft-gateway-app"
+version = "0.1.0"
+dependencies = [
+ "gbuiltin-eth-bridge",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
- "primitive-types 0.12.2",
  "sails-client-gen 0.4.0",
  "sails-rs 0.4.0",
  "scale-info",
- "tokio",
+]
+
+[[package]]
+name = "vft-gateway-client"
+version = "0.1.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "vft-gateway-app",
 ]
 
 [[package]]
@@ -14062,25 +14086,6 @@ dependencies = [
  "sails-idl-gen 0.4.0",
  "sails-rs 0.4.0",
  "vft-treasury-app",
-]
-
-[[package]]
-name = "vft_gateway_wasm"
-version = "0.1.0"
-dependencies = [
- "blake2",
- "extended_vft_wasm",
- "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.4.0",
- "sails-idl-gen 0.4.0",
- "sails-rs 0.4.0",
- "scale-info",
- "tokio",
- "vft-gateway-app",
 ]
 
 [[package]]

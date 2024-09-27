@@ -1,23 +1,47 @@
 [package]
-name = "vft-gateway-app"
+name = "vft-gateway"
 version.workspace = true
 edition.workspace = true
 
+#[dependencies]
+#sails-rs.workspace = true
+#parity-scale-codec.workspace = true
+#scale-info.workspace = true
+#gstd.workspace = true
+#gbuiltin-eth-bridge.workspace = true
+#gear-wasm-instrument.workspace = true
+#
+#[build-dependencies]
+#git-download.workspace = true
+#sails-client-gen.workspace = true
+
 [dependencies]
-sails-rs.workspace = true
-parity-scale-codec.workspace = true
-scale-info.workspace = true
-gstd.workspace = true
-gbuiltin-eth-bridge.workspace = true
-gear-wasm-instrument.workspace = true
+vft-gateway-app = { path = "app" }
 
 [build-dependencies]
-git-download.workspace = true
-sails-client-gen.workspace = true
+vft-gateway-app = { path = "app" }
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
 
 [dev-dependencies]
-gclient.workspace = true
-tokio.workspace = true
+vft-gateway = { path = ".", features = ["wasm-binary"] }
+vft-gateway-client = { path = "client" }
+
+sails-rs = { workspace = true, features = ["gtest"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
 blake2.workspace = true
 gear-core.workspace = true
-primitive-types.workspace = true
+gtest.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+extended_vft_wasm.workspace = true
+
+[features]
+wasm-binary = []
+
+#[dev-dependencies]
+#gclient.workspace = true
+#tokio.workspace = true
+#blake2.workspace = true
+#gear-core.workspace = true
+#primitive-types.workspace = true

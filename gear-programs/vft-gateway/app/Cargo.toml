@@ -1,0 +1,16 @@
+[package]
+name = "vft-gateway-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sails-rs.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+gstd.workspace = true
+gbuiltin-eth-bridge.workspace = true
+gear-wasm-instrument.workspace = true
+
+[build-dependencies]
+git-download.workspace = true
+sails-client-gen.workspace = true

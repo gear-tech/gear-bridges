@@ -8,7 +8,8 @@ members = [
     "circuits/*",
     "ethereum-common",
     "gear-programs/bridging-payment",
-    "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/bridging-payment/app",
+    "gear-programs/bridging-payment/client",
     "gear-programs/bridging-payment-vara-supply",
     "gear-programs/bridging-payment-vara-supply/app",
     "gear-programs/bridging-payment-vara-supply/client",
@@ -40,8 +41,9 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
-bridging_payment = { path = "gear-programs/bridging-payment" }
-bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
+bridging-payment = { path = "gear-programs/bridging-payment" }
+bridging-payment-app = { path = "gear-programs/bridging-payment/app" }
+bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
 bridging-payment-vara-supply = { path = "gear-programs/bridging-payment-vara-supply" }
 bridging-payment-vara-supply-app = { path = "gear-programs/bridging-payment-vara-supply/app" }
 bridging-payment-vara-supply-client = { path = "gear-programs/bridging-payment-vara-supply/client" }

@@ -1,9 +1,9 @@
-use super::{
-    error::Error, utils, vft_gateway, vft_gateway::vft_gateway::io as vft_gateway_io,
-    vft_gateway::Error as VftGatewayError, Config,
-};
+use super::{error::Error, utils, Config};
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
+use vft_gateway_client::{
+    vft_gateway, vft_gateway::io as vft_gateway_io, Error as VftGatewayError,
+};
 
 pub async fn send_message_to_gateway(
     gateway_address: ActorId,
@@ -13,12 +13,8 @@ pub async fn send_message_to_gateway(
     receiver: H160,
     config: &Config,
 ) -> Result<(U256, H160), Error> {
-    let bytes: Vec<u8> = vft_gateway::vft_gateway::io::TransferVaraToEth::encode_call(
-        sender,
-        vara_token_id,
-        amount,
-        receiver,
-    );
+    let bytes: Vec<u8> =
+        vft_gateway::io::TransferVaraToEth::encode_call(sender, vara_token_id, amount, receiver);
 
     let reply_bytes = utils::send_message_with_gas_for_reply(
         gateway_address,

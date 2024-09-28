@@ -7,7 +7,6 @@ use gstd::exec;
 mod error;
 use error::Error;
 mod utils;
-mod vft_gateway;
 mod vft_gateway_msg;
 use vft_gateway_msg::send_message_to_gateway;
 

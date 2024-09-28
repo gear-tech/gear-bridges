@@ -5,7 +5,6 @@ mod bridge_builtin_operations;
 pub mod error;
 pub mod msg_tracker;
 mod utils;
-mod vft;
 use error::Error;
 use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
 mod token_operations;

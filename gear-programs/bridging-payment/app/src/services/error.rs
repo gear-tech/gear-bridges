@@ -1,5 +1,5 @@
-use super::vft_gateway::Error as VftGatewayError;
 use sails_rs::prelude::*;
+use vft_gateway_client::Error as VftGatewayError;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {

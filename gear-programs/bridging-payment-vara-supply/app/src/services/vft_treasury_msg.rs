@@ -1,9 +1,7 @@
-use super::{
-    error::Error, utils, vft_treasury, vft_treasury::vft_treasury::io as vft_treasury_io,
-    vft_treasury::Error as VftTreasuryError, Config,
-};
+use super::{error::Error, utils, Config};
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
+use vft_treasury_client::{vft_treasury::io as vft_treasury_io, Error as VftTreasuryError};
 
 pub async fn send_message_to_treasury(
     treasury_address: ActorId,
@@ -13,7 +11,7 @@ pub async fn send_message_to_treasury(
     receiver: H160,
     config: &Config,
 ) -> Result<(U256, H160), Error> {
-    let bytes: Vec<u8> = vft_treasury::vft_treasury::io::DepositTokens::encode_call(
+    let bytes: Vec<u8> = vft_treasury_client::vft_treasury::io::DepositTokens::encode_call(
         vara_token_id,
         sender,
         amount,

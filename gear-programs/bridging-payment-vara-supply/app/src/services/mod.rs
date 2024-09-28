@@ -7,7 +7,6 @@ use gstd::exec;
 mod error;
 use error::Error;
 mod utils;
-mod vft_treasury;
 mod vft_treasury_msg;
 
 use vft_treasury_msg::send_message_to_treasury;

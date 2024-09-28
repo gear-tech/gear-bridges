@@ -1,7 +1,8 @@
-use super::{error::Error, msg_tracker_mut, vft::vft::io as vft_io, MessageStatus};
+use super::{error::Error, msg_tracker_mut, MessageStatus};
 use gstd::{msg, MessageId};
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
+use vft_client::vft::io as vft_io;
 
 pub fn set_critical_hook(msg_id: MessageId) {
     gstd::critical::set_hook(move || {

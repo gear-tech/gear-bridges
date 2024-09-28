@@ -1,6 +1,6 @@
 use sails_rs::prelude::*;
 
-use super::vft_treasury::Error as VftTreasuryError;
+use vft_treasury_client::Error as VftTreasuryError;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {

@@ -3,8 +3,9 @@
 //! Various utility functions necessary to run VFT Treasury service.
 
 use super::Error;
-use super::{msg_tracker::MessageStatus, msg_tracker_mut, vft::vft::io as vft_io};
+use super::{msg_tracker::MessageStatus, msg_tracker_mut};
 use sails_rs::{calls::ActionIo, prelude::*};
+use vft_client::vft::io as vft_io;
 
 /// Set a critical hook that guarantees code execution for `msg_id` in case of any unexpected
 /// code failure be it not enough gas, panic, unexpected error etc.

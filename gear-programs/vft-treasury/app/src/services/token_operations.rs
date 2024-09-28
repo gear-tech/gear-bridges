@@ -3,11 +3,11 @@ use super::msg_tracker::TxDetails;
 use super::msg_tracker_mut;
 use super::utils;
 
-use super::vft::vft::io as vft_io;
 use super::Config;
 use super::Error;
 use gstd::{ActorId, MessageId};
 use sails_rs::prelude::*;
+use vft_client::vft::io as vft_io;
 
 /// Deposit VFT of `vara_token_id` to treasury from `sender` with `amount` of tokens
 /// expecting it to arrive to `receiver` on Ethereum, `eth_token_id` is a contract which

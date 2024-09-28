@@ -91,12 +91,11 @@ async fn setup_for_test_with_mocks(
             let vft_code_id = remoting
                 .system()
                 .submit_code(extended_vft_wasm::WASM_BINARY);
-            let vft_program_id = VftFactoryC::new(remoting.clone())
+            VftFactoryC::new(remoting.clone())
                 .new("Token".into(), "Token".into(), 18)
                 .send_recv(vft_code_id, b"salt")
                 .await
-                .unwrap();
-            vft_program_id
+                .unwrap()
         }
         mock => {
             let vft = match mock {

@@ -272,9 +272,31 @@ fn test_mint_tokens_from_arbitrary_address() {
 
     vft.grant_minter_role(ADMIN_ID, vft_gateway.id());
 
-    let wrond_address = 1_010;
+    let wrong_address = 1_010;
 
-    vft_gateway.mint_tokens(wrond_address, eth_token_id, amount, receiver.into(), true);
+    vft_gateway.mint_tokens(wrong_address, eth_token_id, amount, receiver.into(), true);
+}
+
+#[test]
+fn test_eth_client() {
+    let system = System::new();
+    system.init_logger();
+
+    let vft_gateway = Program::vft_gateway(&system);
+
+    assert_eq!(vft_gateway.eth_client(ADMIN_ID), ETH_CLIENT_ID.into());
+
+    // anyone is able to get the eth client address
+    let wrong_address = 1_010;
+    assert_eq!(vft_gateway.eth_client(wrong_address), ETH_CLIENT_ID.into());
+
+    // non-admin user isn't allowed to change eth client
+    assert!(!vft_gateway.update_eth_client(wrong_address, ADMIN_ID.into()));
+
+    assert!(vft_gateway.update_eth_client(ADMIN_ID, ADMIN_ID.into()));
+
+    assert_eq!(vft_gateway.eth_client(ETH_CLIENT_ID), ADMIN_ID.into());
+    assert_eq!(vft_gateway.eth_client(wrong_address), ADMIN_ID.into());
 }
 
 #[test]

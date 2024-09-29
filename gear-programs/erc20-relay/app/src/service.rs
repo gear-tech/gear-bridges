@@ -117,7 +117,7 @@ where
 
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
-        let fungible_token: H160 = event.token.0 .0.into();
+        let fungible_token = H160::from(event.token.0 .0);
         let call_payload =
             vft_gateway::io::MintTokens::encode_call(fungible_token, receiver, amount);
         let (reply_timeout, reply_deposit) = {
@@ -165,7 +165,7 @@ where
                     return None;
                 };
 
-                state.addresses.contains(&eth_address).then_some(event)
+                (eth_address == state.address && H160::from(event.token.0 .0) == state.token).then_some(event)
             })
             .ok_or(Error::NotSupportedEvent)?;
 

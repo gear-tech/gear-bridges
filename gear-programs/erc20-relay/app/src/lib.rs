@@ -2,7 +2,7 @@
 
 pub mod abi;
 pub mod error;
-pub mod services;
+pub mod service;
 
 use abi::ERC20_TREASURY;
 use alloy_sol_types::SolEvent;
@@ -24,7 +24,7 @@ use sails_rs::{
     gstd::{msg, ExecContext, GStdExecContext},
     prelude::*,
 };
-use services::{Erc20Relay as Erc20RelayService, FTManage as FTManageService};
+use service::Erc20Relay as Erc20RelayService;
 
 const CAPACITY: usize = 500_000;
 
@@ -61,8 +61,9 @@ pub struct EthToVaraEvent {
 
 pub struct State {
     admin: ActorId,
-    addresses: BTreeSet<H160>,
     checkpoints: ActorId,
+    address: H160,
+    token: H160,
     vft_gateway: Option<ActorId>,
     reply_timeout: u32,
     reply_deposit: u64,
@@ -74,7 +75,8 @@ pub struct Erc20RelayProgram(RefCell<State>);
 impl Erc20RelayProgram {
     pub fn new(
         checkpoints: ActorId,
-        vft_gateway: Option<ActorId>,
+        address: H160,
+        token: H160,
         reply_timeout: u32,
         reply_deposit: u64,
     ) -> Self {
@@ -85,9 +87,10 @@ impl Erc20RelayProgram {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
-            addresses: Default::default(),
             checkpoints,
-            vft_gateway,
+            address,
+            token,
+            vft_gateway: None,
             reply_timeout,
             reply_deposit,
         }))
@@ -97,6 +100,7 @@ impl Erc20RelayProgram {
         #[cfg(feature = "gas_calculation")]
         {
             let self_ = Self::new(
+                Default::default(),
                 Default::default(),
                 Default::default(),
                 _reply_timeout,
@@ -117,9 +121,5 @@ impl Erc20RelayProgram {
 
     pub fn erc20_relay(&self) -> Erc20RelayService<GStdExecContext> {
         Erc20RelayService::new(&self.0, GStdExecContext::new())
-    }
-
-    pub fn ft_manage(&self) -> FTManageService<GStdExecContext> {
-        FTManageService::new(&self.0, GStdExecContext::new())
     }
 }

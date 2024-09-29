@@ -237,7 +237,7 @@ where
         })
     }
 
-    pub async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {
+    async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {
         let request = Handle::GetCheckpointFor { slot }.encode();
         let reply = msg::send_bytes_for_reply(checkpoints, &request, 0, 0)
             .map_err(|_| Error::SendFailure)?

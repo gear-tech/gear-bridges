@@ -1,4 +1,4 @@
-use super::*;
+use super::{Decode, Encode, TypeInfo};
 
 #[derive(Clone, Debug, Encode, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]

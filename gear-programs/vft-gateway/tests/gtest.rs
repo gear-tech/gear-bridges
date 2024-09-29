@@ -1,5 +1,5 @@
 use blake2::{digest::typenum::U32, Blake2b, Digest};
-use gtest::Program;
+use gtest::{Program, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_gateway_client::{
@@ -7,13 +7,48 @@ use vft_gateway_client::{
     VftGatewayFactory as VftGatewayFactoryC,
 };
 
-mod utils;
-use utils::*;
-
 const ADMIN_ID: u64 = 1000;
 const TOKEN_ID: u64 = 200;
 const ETH_CLIENT_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
+
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
+pub enum Response {
+    MessageSent { nonce: U256, hash: H256 },
+}
+
+#[derive(Debug)]
+pub struct HandleMock {
+    handle_result: Result<Option<Vec<u8>>, &'static str>,
+}
+
+impl HandleMock {
+    pub fn new(handle_result: Result<Option<Vec<u8>>, &'static str>) -> Self {
+        Self { handle_result }
+    }
+}
+
+impl WasmProgram for HandleMock {
+    fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        Ok(None)
+    }
+
+    fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        self.handle_result.clone()
+    }
+
+    fn handle_reply(&mut self, _payload: Vec<u8>) -> Result<(), &'static str> {
+        unimplemented!()
+    }
+
+    fn handle_signal(&mut self, _payload: Vec<u8>) -> Result<(), &'static str> {
+        unimplemented!()
+    }
+
+    fn state(&mut self) -> Result<Vec<u8>, &'static str> {
+        unimplemented!()
+    }
+}
 
 #[derive(Default)]
 enum BridgeBuiltinMock {
@@ -48,16 +83,23 @@ async fn setup_for_test_with_mocks(
     remoting.system().init_logger();
 
     // Bridge Builtin
-    let gear_bridge_builtin = match bridge_builtin_mock {
-        BridgeBuiltinMock::GearBridgeBuiltinMock => {
-            Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock)
-        }
-        BridgeBuiltinMock::GearBridgeBuiltinMockPanic => Program::mock_with_id(
-            remoting.system(),
-            BRIDGE_BUILTIN_ID,
-            GearBridgeBuiltinMockPanic,
-        ),
-    };
+    let gear_bridge_builtin_mock = HandleMock::new(match bridge_builtin_mock {
+        BridgeBuiltinMock::GearBridgeBuiltinMock => Ok(Some(
+            Response::MessageSent {
+                nonce: U256::from(1),
+                hash: [1; 32].into(),
+            }
+            .encode(),
+        )),
+        BridgeBuiltinMock::GearBridgeBuiltinMockPanic => Err("Error"),
+    });
+
+    let gear_bridge_builtin = Program::mock_with_id(
+        remoting.system(),
+        BRIDGE_BUILTIN_ID,
+        gear_bridge_builtin_mock,
+    );
+
     assert!(!gear_bridge_builtin
         .send_bytes(ADMIN_ID, b"INIT")
         .main_failed());
@@ -85,7 +127,6 @@ async fn setup_for_test_with_mocks(
         .unwrap();
 
     // VFT
-
     let vft_program_id = match vft_mock {
         VftMock::Binary => {
             let vft_code_id = remoting
@@ -98,16 +139,15 @@ async fn setup_for_test_with_mocks(
                 .unwrap()
         }
         mock => {
-            let vft = match mock {
-                VftMock::FTMockError => {
-                    Program::mock_with_id(remoting.system(), TOKEN_ID, FTMockError)
-                }
-                VftMock::FTMockReturnsFalse => {
-                    Program::mock_with_id(remoting.system(), TOKEN_ID, FTMockReturnsFalse)
-                }
+            let vft_mock = HandleMock::new(match mock {
+                VftMock::FTMockError => Err("Error"),
+                VftMock::FTMockReturnsFalse => Ok(Some(
+                    ["Vft".encode(), "Burn".encode(), false.encode()].concat(),
+                )),
                 _ => unreachable!(),
-            };
+            });
 
+            let vft = Program::mock_with_id(remoting.system(), TOKEN_ID, vft_mock);
             assert!(!vft.send_bytes(ADMIN_ID, b"INI").main_failed());
             vft.id()
         }

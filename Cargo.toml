@@ -22,6 +22,8 @@ members = [
     "gear-programs/vft-client",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
+    "gear-programs/erc20-relay/app",
+    "gear-programs/erc20-relay/client",
     "utils-prometheus",
 ]
 
@@ -59,6 +61,9 @@ gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
+erc20-relay = { path = "gear-programs/erc20-relay" }
+erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
+erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
 
 # Contracts' deps
 extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
@@ -98,6 +103,7 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
+getrandom = { version = "0.2", default-features = false }
 git-download = "0.1"
 hash-db = { version = "0.15.2", default-features = false }
 hash256-std-hasher = { version = "0.15.2", default-features = false }
@@ -110,7 +116,7 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 log = "0.4.14"
 memory-db = { version = "0.27.0", default-features = false }
-mockall = { version = "0.12" }
+mockall = "0.12"
 num = { version = "0.4", features = ["rand"] }
 paste = "1.0.14"
 pretty_env_logger = "0.5.0"
@@ -156,9 +162,9 @@ gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = "0.4.0"
-sails-client-gen = "0.4.0"
-sails-rs = "0.4.0"
+sails-idl-gen = "0.5.0"
+sails-client-gen = "0.5.0"
+sails-rs = "0.5.0"
 
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
@@ -178,6 +184,7 @@ alloy-consensus = { version = "0.2.1", default-features = false }
 alloy-eips = { version = "0.2.1", default-features = false }
 alloy-rlp = { version = "0.3.8", default-features = false }
 alloy-primitives = { version = "0.7.7", default-features = false }
+alloy-sol-types = { version = "0.7.7", default-features = false }
 alloy = { version = "0.2.0", package = "alloy", features = [
     "sol-types",
     "contract",

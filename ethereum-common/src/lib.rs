@@ -23,7 +23,8 @@ use core::{
     slice::{self, SliceIndex},
 };
 
-pub use ethereum_types::{H256, U256};
+pub use ethereum_types::{H160, H256, U256};
+pub use hash_db;
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 use serde::{de, Deserialize};

@@ -39,7 +39,6 @@ pub struct VftGatewayData {
 pub struct InitConfig {
     pub receiver_contract_address: H160,
     pub gear_bridge_builtin: ActorId,
-    pub eth_client: ActorId,
     pub config: Config,
 }
 
@@ -47,13 +46,11 @@ impl InitConfig {
     pub fn new(
         receiver_contract_address: H160,
         gear_bridge_builtin: ActorId,
-        eth_client: ActorId,
         config: Config,
     ) -> Self {
         Self {
             receiver_contract_address,
             gear_bridge_builtin,
-            eth_client,
             config,
         }
     }
@@ -102,6 +99,14 @@ where
             panic!("Not admin")
         }
         self.data_mut().receiver_contract_address = new_receiver_contract_address;
+    }
+
+    pub fn update_eth_client(&mut self, eth_client_new: ActorId) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+
+        self.data_mut().eth_client = eth_client_new;
     }
 
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
@@ -318,6 +323,10 @@ where
     pub fn get_config(&self) -> Config {
         self.config().clone()
     }
+
+    pub fn eth_client(&self) -> ActorId {
+        self.data().eth_client
+    }
 }
 
 impl<T> VftGateway<T>
@@ -330,7 +339,7 @@ where
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 receiver_contract_address: config.receiver_contract_address,
                 admin: exec_context.actor_id(),
-                eth_client: config.eth_client,
+                eth_client: exec_context.actor_id(),
                 ..Default::default()
             });
             CONFIG = Some(config.config);

@@ -4,10 +4,59 @@ mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
 }
 
-use super::*;
+use super::{abi::ERC20_TREASURY, error::Error, BTreeSet, ExecContext, RefCell, State};
+use alloy_sol_types::SolEvent;
+use checkpoint_light_client_io::{Handle, HandleResult};
+use ethereum_common::{
+    beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
+    hash_db, memory_db,
+    patricia_trie::TrieDB,
+    tree_hash::TreeHash,
+    trie_db::{HashDB, Trie},
+    utils as eth_utils,
+    utils::ReceiptEnvelope,
+    H160, H256, U256,
+};
 use ops::ControlFlow::*;
-use sails_rs::{calls::ActionIo, gstd};
+use sails_rs::{
+    calls::ActionIo,
+    gstd::{self, msg},
+    prelude::*,
+};
 use vft::vft_gateway;
+
+pub(crate) const CAPACITY: usize = 500_000;
+
+#[cfg(feature = "gas_calculation")]
+pub(crate) const CAPACITY_STEP_SIZE: usize = 50_000;
+
+pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+
+pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
+    unsafe {
+        TRANSACTIONS
+            .as_mut()
+            .expect("Program should be constructed")
+    }
+}
+
+#[derive(Clone, Debug, Decode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct BlockInclusionProof {
+    pub block: LightBeaconBlock,
+    pub headers: Vec<BeaconBlockHeader>,
+}
+
+#[derive(Clone, Debug, Decode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct EthToVaraEvent {
+    pub proof_block: BlockInclusionProof,
+    pub proof: Vec<Vec<u8>>,
+    pub transaction_index: u64,
+    pub receipt_rlp: Vec<u8>,
+}
 
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -165,7 +214,8 @@ where
                     return None;
                 };
 
-                (eth_address == state.address && H160::from(event.token.0 .0) == state.token).then_some(event)
+                (eth_address == state.address && H160::from(event.token.0 .0) == state.token)
+                    .then_some(event)
             })
             .ok_or(Error::NotSupportedEvent)?;
 

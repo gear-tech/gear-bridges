@@ -4,14 +4,9 @@ mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
 }
 
-use erc20_relay_client::{
-    ft_manage::events::FtManageEvents,
-    traits::{Erc20Relay, Erc20RelayFactory, FtManage},
-};
-use futures::StreamExt;
+use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
 use gclient::{Event, EventProcessor, GearApi, GearEvent};
-use hex_literal::hex;
-use sails_rs::{calls::*, events::*, gclient::calls::*, prelude::*};
+use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft::vft_gateway;
 
 async fn spin_up_node() -> (GClientRemoting, CodeId, GasUnit) {
@@ -109,6 +104,7 @@ async fn set_vft_gateway() {
         .new(
             Default::default(),
             Default::default(),
+            Default::default(),
             10_000,
             1_000_000_000,
         )
@@ -121,45 +117,48 @@ async fn set_vft_gateway() {
 
     // by default address of the VFT gateway is not set
     let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert!(vft_gateway.is_none());
+    assert_eq!(vft_gateway, Default::default());
 
     let vft_gateway_new = ActorId::from([1u8; 32]);
 
     // admin should be able to set the VFT gateway address
     client
-        .set_vft_gateway(Some(vft_gateway_new))
+        .set_vft_gateway(vft_gateway_new)
         .send_recv(program_id)
         .await
         .unwrap();
 
     let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert_eq!(vft_gateway, Some(vft_gateway_new));
+    assert_eq!(vft_gateway, vft_gateway_new);
 
     // and reset it
     client
-        .set_vft_gateway(None)
+        .set_vft_gateway(Default::default())
         .send_recv(program_id)
         .await
         .unwrap();
 
     let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert!(vft_gateway.is_none());
+    assert_eq!(vft_gateway, Default::default());
 
     // another account isn't permitted to change the VFT gateway address
     let api = GearApi::dev().await.unwrap().with("//Bob").unwrap();
     let remoting = GClientRemoting::new(api);
 
     let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
-    let result = client.set_vft_gateway(None).send_recv(program_id).await;
+    let result = client
+        .set_vft_gateway(Default::default())
+        .send_recv(program_id)
+        .await;
     assert!(result.is_err());
 
     let result = client
-        .set_vft_gateway(Some(vft_gateway_new))
+        .set_vft_gateway(vft_gateway_new)
         .send_recv(program_id)
         .await;
     assert!(result.is_err());
 
     // anyone should be able to read the address
     let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert!(vft_gateway.is_none());
+    assert_eq!(vft_gateway, Default::default());
 }

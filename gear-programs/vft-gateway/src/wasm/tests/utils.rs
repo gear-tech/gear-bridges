@@ -154,6 +154,7 @@ impl VftGateway for Program<'_> {
         let init_config = InitConfig::new(
             [1; 20].into(),
             BRIDGE_BUILTIN_ID.into(),
+            ETH_CLIENT_ID.into(),
             Config::new(
                 15_000_000_000,
                 15_000_000_000,

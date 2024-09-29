@@ -39,6 +39,7 @@ pub struct VftGatewayData {
 pub struct InitConfig {
     pub receiver_contract_address: H160,
     pub gear_bridge_builtin: ActorId,
+    pub eth_client: ActorId,
     pub config: Config,
 }
 
@@ -46,11 +47,13 @@ impl InitConfig {
     pub fn new(
         receiver_contract_address: H160,
         gear_bridge_builtin: ActorId,
+        eth_client: ActorId,
         config: Config,
     ) -> Self {
         Self {
             receiver_contract_address,
             gear_bridge_builtin,
+            eth_client,
             config,
         }
     }
@@ -339,7 +342,7 @@ where
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 receiver_contract_address: config.receiver_contract_address,
                 admin: exec_context.actor_id(),
-                eth_client: exec_context.actor_id(),
+                eth_client: config.eth_client,
                 ..Default::default()
             });
             CONFIG = Some(config.config);

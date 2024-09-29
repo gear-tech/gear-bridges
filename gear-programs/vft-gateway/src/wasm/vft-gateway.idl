@@ -1,6 +1,7 @@
 type InitConfig = struct {
   receiver_contract_address: h160,
   gear_bridge_builtin: actor_id,
+  eth_client: actor_id,
   config: Config,
 };
 

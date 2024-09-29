@@ -1785,63 +1785,84 @@ dependencies = [
 ]
 
 [[package]]
-name = "bridging_payment"
+name = "bridging-payment"
 version = "0.1.0"
 dependencies = [
- "gbuiltin-eth-bridge",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "git-download",
- "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.3.0",
- "sails-rs 0.3.0",
- "scale-info",
-]
-
-[[package]]
-name = "bridging_payment_vara_supply"
-version = "0.1.0"
-dependencies = [
- "git-download",
- "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.3.0",
- "sails-rs 0.3.0",
- "scale-info",
-]
-
-[[package]]
-name = "bridging_payment_vara_supply_wasm"
-version = "0.1.0"
-dependencies = [
- "bridging_payment_vara_supply",
+ "bridging-payment",
+ "bridging-payment-app",
+ "bridging-payment-client",
  "extended_vft_wasm",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
- "sails-idl-gen 0.3.0",
- "sails-rs 0.3.0",
- "scale-info",
- "vft-treasury-app",
- "vft_treasury_wasm",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "tokio",
+ "vft-client",
+ "vft-gateway",
+ "vft-gateway-client",
 ]
 
 [[package]]
-name = "bridging_payment_wasm"
+name = "bridging-payment-app"
 version = "0.1.0"
 dependencies = [
- "bridging_payment",
- "extended_vft_wasm",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-rs 0.4.0",
+ "scale-info",
+ "vft-gateway-client",
+]
+
+[[package]]
+name = "bridging-payment-client"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment-app",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+]
+
+[[package]]
+name = "bridging-payment-vara-supply"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment-vara-supply",
+ "bridging-payment-vara-supply-app",
+ "bridging-payment-vara-supply-client",
+ "extended_vft_wasm",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
- "sails-idl-gen 0.3.0",
- "sails-rs 0.3.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "tokio",
+ "vft-client",
+ "vft-treasury",
+ "vft-treasury-client",
+]
+
+[[package]]
+name = "bridging-payment-vara-supply-app"
+version = "0.1.0"
+dependencies = [
+ "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-rs 0.4.0",
  "scale-info",
- "vft-gateway-app",
- "vft_gateway_wasm",
+ "vft-treasury-client",
+]
+
+[[package]]
+name = "bridging-payment-vara-supply-client"
+version = "0.1.0"
+dependencies = [
+ "bridging-payment-vara-supply-app",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
 ]
 
 [[package]]
@@ -7652,8 +7673,23 @@ dependencies = [
  "downcast",
  "fragile",
  "lazy_static",
- "mockall_derive",
- "predicates",
+ "mockall_derive 0.11.4",
+ "predicates 2.1.5",
+ "predicates-tree",
+]
+
+[[package]]
+name = "mockall"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43766c2b5203b10de348ffe19f7e54564b64f3d6018ff7648d1e2d6d3a0f0a48"
+dependencies = [
+ "cfg-if",
+ "downcast",
+ "fragile",
+ "lazy_static",
+ "mockall_derive 0.12.1",
+ "predicates 3.1.2",
  "predicates-tree",
 ]
 
@@ -7667,6 +7703,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "mockall_derive"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af7cbce79ec385a1d4f54baa90a76401eb15d9cab93685f62e7e9f942aa00ae2"
+dependencies = [
+ "cfg-if",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -9115,6 +9163,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "predicates"
+version = "3.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e9086cc7640c29a356d1a29fd134380bee9d8f79a17410aa76e7ad295f42c97"
+dependencies = [
+ "anstyle",
+ "predicates-core",
+]
+
+[[package]]
 name = "predicates-core"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9764,7 +9822,7 @@ dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
  "axum",
- "bridging_payment",
+ "bridging-payment-client",
  "cgo_oligami",
  "checkpoint_light_client",
  "checkpoint_light_client-io",
@@ -9790,8 +9848,7 @@ dependencies = [
  "prover",
  "rand 0.8.5",
  "reqwest 0.11.27",
- "sails-client-gen 0.3.0",
- "sails-rs 0.3.0",
+ "sails-rs 0.4.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -10280,15 +10337,15 @@ dependencies = [
 
 [[package]]
 name = "sails-client-gen"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e49447619b6576fa0c6ced2fb976db38f6afd310feaf1c28463e49edb59e024"
+checksum = "298eecdb11ee41e68215a02c97541f2bcc7c24c310cec026483a9324254a283a"
 dependencies = [
  "anyhow",
  "convert_case 0.6.0",
  "genco",
  "parity-scale-codec",
- "sails-idl-parser 0.3.0",
+ "sails-idl-parser 0.4.0",
 ]
 
 [[package]]
@@ -10307,13 +10364,13 @@ dependencies = [
 
 [[package]]
 name = "sails-idl-gen"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a48bea35405dcd6561547353a7f96bd13ee880c758c3e1e70cdd6c62a7b43c48"
+checksum = "9007c11042e82c2a1edf720ff510ba0996af4ee549dce3faba455679533f06d9"
 dependencies = [
  "convert_case 0.6.0",
  "handlebars",
- "sails-rs 0.3.0",
+ "sails-rs 0.4.0",
  "scale-info",
  "serde",
  "serde_json",
@@ -10333,9 +10390,9 @@ dependencies = [
 
 [[package]]
 name = "sails-idl-parser"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aabeb783688efdc0bfd7682af969b3c08ca9d67c413f40e5908078ec786279d8"
+checksum = "711bea52cfacceeca67312491b905bd2df6a1a4c0969be313381b30367b54092"
 dependencies = [
  "lalrpop",
  "lalrpop-util",
@@ -10354,12 +10411,12 @@ dependencies = [
 
 [[package]]
 name = "sails-macros"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78019e937cf73fc92b2d4d7ed742090f23f8edff55dfc955eae028862ad61f03"
+checksum = "4efcda7e656871d17e79259110a6b17d0d660e2ab3f949a91d55c165bcbd4d0d"
 dependencies = [
  "proc-macro-error",
- "sails-macros-core 0.3.0",
+ "sails-macros-core 0.4.0",
 ]
 
 [[package]]
@@ -10377,9 +10434,9 @@ dependencies = [
 
 [[package]]
 name = "sails-macros-core"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db0e8b6eefb878db2d1b72a560ae0105e9443d833c8a76a85972b4cfff49b848"
+checksum = "3694ccad10e20282caf8111c39382c3e1f00433c5f0c48d4592e1f201b82f598"
 dependencies = [
  "convert_case 0.6.0",
  "parity-scale-codec",
@@ -10413,21 +10470,23 @@ dependencies = [
 
 [[package]]
 name = "sails-rs"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d97e1450bd5787a320cbbaecebe12e3143f868fc44d77e78663c88442a742bd"
+checksum = "67effccdaef6232976af5cabf54775bd57e362b09e201ceb5e732f8dd7194c9c"
 dependencies = [
  "futures",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-core-errors 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gprimitives 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "hashbrown 0.14.5",
  "hex",
+ "mockall 0.12.1",
  "parity-scale-codec",
- "primitive-types 0.12.2",
- "sails-macros 0.3.0",
+ "sails-macros 0.4.0",
  "scale-info",
  "spin 0.9.8",
  "thiserror-no-std",
@@ -10529,7 +10588,7 @@ dependencies = [
  "futures-timer",
  "libp2p-identity",
  "log",
- "mockall",
+ "mockall 0.11.4",
  "parking_lot 0.12.3",
  "sc-client-api",
  "sc-utils",
@@ -10657,7 +10716,7 @@ dependencies = [
  "libp2p",
  "linked_hash_set",
  "log",
- "mockall",
+ "mockall 0.11.4",
  "parity-scale-codec",
  "parking_lot 0.12.3",
  "partial_sort",
@@ -10729,7 +10788,7 @@ dependencies = [
  "futures-timer",
  "libp2p",
  "log",
- "mockall",
+ "mockall 0.11.4",
  "parity-scale-codec",
  "prost",
  "prost-build",
@@ -13941,22 +14000,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vft-gateway-app"
+name = "vft-client"
+version = "0.1.0"
+dependencies = [
+ "git-download",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-rs 0.4.0",
+]
+
+[[package]]
+name = "vft-gateway"
 version = "0.1.0"
 dependencies = [
  "blake2",
- "gbuiltin-eth-bridge",
- "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "extended_vft_wasm",
  "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "scale-info",
+ "tokio",
+ "vft-client",
+ "vft-gateway",
+ "vft-gateway-app",
+ "vft-gateway-client",
+]
+
+[[package]]
+name = "vft-gateway-app"
+version = "0.1.0"
+dependencies = [
+ "gbuiltin-eth-bridge",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
- "primitive-types 0.12.2",
- "sails-client-gen 0.3.0",
- "sails-rs 0.3.0",
+ "sails-client-gen 0.4.0",
+ "sails-rs 0.4.0",
  "scale-info",
- "tokio",
+ "vft-client",
+]
+
+[[package]]
+name = "vft-gateway-client"
+version = "0.1.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "vft-gateway-app",
 ]
 
 [[package]]
@@ -13972,60 +14067,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "vft-treasury"
+version = "0.1.0"
+dependencies = [
+ "extended_vft_wasm",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
+ "scale-info",
+ "tokio",
+ "vft-client",
+ "vft-treasury",
+ "vft-treasury-app",
+ "vft-treasury-client",
+]
+
+[[package]]
 name = "vft-treasury-app"
 version = "0.1.0"
 dependencies = [
- "blake2",
  "gbuiltin-eth-bridge",
- "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "git-download",
  "gstd 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
- "primitive-types 0.12.2",
- "sails-client-gen 0.3.0",
- "sails-rs 0.3.0",
+ "sails-rs 0.4.0",
  "scale-info",
- "tokio",
+ "vft-client",
 ]
 
 [[package]]
-name = "vft_gateway_wasm"
+name = "vft-treasury-client"
 version = "0.1.0"
 dependencies = [
- "blake2",
- "extended_vft_wasm",
- "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.3.0",
- "sails-idl-gen 0.3.0",
- "sails-rs 0.3.0",
- "scale-info",
- "tokio",
- "vft-gateway-app",
-]
-
-[[package]]
-name = "vft_treasury_wasm"
-version = "0.1.0"
-dependencies = [
- "blake2",
- "extended_vft_wasm",
- "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-builder 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gear-wasm-instrument 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-client-gen 0.3.0",
- "sails-idl-gen 0.3.0",
- "sails-rs 0.3.0",
- "scale-info",
- "tokio",
+ "mockall 0.12.1",
+ "sails-client-gen 0.4.0",
+ "sails-idl-gen 0.4.0",
+ "sails-rs 0.4.0",
  "vft-treasury-app",
 ]
 

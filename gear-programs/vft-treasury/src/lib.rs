@@ -1,19 +1,14 @@
 #![no_std]
 
-use sails_rs::{gstd::GStdExecContext, prelude::*};
-pub mod services;
-use services::{InitConfig, VftTreasury};
-#[derive(Default)]
-pub struct Program;
+#[cfg(target_arch = "wasm32")]
+pub use vft_treasury_app::wasm::*;
 
-#[program]
-impl Program {
-    pub fn new(init_config: InitConfig) -> Self {
-        VftTreasury::<GStdExecContext>::seed(init_config, GStdExecContext::new());
-        Self
-    }
+#[cfg(feature = "wasm-binary")]
+#[cfg(not(target_arch = "wasm32"))]
+pub use code::WASM_BINARY_OPT as WASM_BINARY;
 
-    pub fn vft_treasury(&self) -> VftTreasury<GStdExecContext> {
-        VftTreasury::new(GStdExecContext::new())
-    }
+#[cfg(feature = "wasm-binary")]
+#[cfg(not(target_arch = "wasm32"))]
+mod code {
+    include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 }

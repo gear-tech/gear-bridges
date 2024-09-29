@@ -539,6 +539,67 @@ async fn test_mint_tokens_from_arbitrary_address() {
     assert_eq!(reply, Err(Error::NotEthClient));
 }
 
+#[tokio::test]
+async fn test_eth_client() {
+    let Fixture {
+        remoting,
+        gateway_program_id,
+        ..
+    } = setup_for_test().await;
+
+    assert_eq!(
+        VftGatewayC::new(remoting.clone())
+            .eth_client()
+            .recv(gateway_program_id)
+            .await
+            .unwrap(),
+        ETH_CLIENT_ID.into()
+    );
+
+    // anyone is able to get the eth client address
+    let wrong_address: ActorId = 1_010.into();
+    assert_eq!(
+        VftGatewayC::new(remoting.clone().with_actor_id(wrong_address))
+            .eth_client()
+            .recv(gateway_program_id)
+            .await
+            .unwrap(),
+        ETH_CLIENT_ID.into()
+    );
+
+    // non-admin user isn't allowed to change eth client
+    assert!(
+        VftGatewayC::new(remoting.clone().with_actor_id(wrong_address))
+            .update_eth_client(ADMIN_ID.into())
+            .send_recv(gateway_program_id)
+            .await
+            .is_err()
+    );
+
+    VftGatewayC::new(remoting.clone().with_actor_id(ADMIN_ID.into()))
+        .update_eth_client(ADMIN_ID.into())
+        .send_recv(gateway_program_id)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        VftGatewayC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
+            .eth_client()
+            .recv(gateway_program_id)
+            .await
+            .unwrap(),
+        ADMIN_ID.into()
+    );
+    assert_eq!(
+        VftGatewayC::new(remoting.clone().with_actor_id(ADMIN_ID.into()))
+            .eth_client()
+            .recv(gateway_program_id)
+            .await
+            .unwrap(),
+        ADMIN_ID.into()
+    );
+}
+
 #[test]
 fn calculate_bridge_builtint() {
     let bytes = hash((b"built/in", 3).encode().as_slice());

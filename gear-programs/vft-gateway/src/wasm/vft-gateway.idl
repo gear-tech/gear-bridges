@@ -1,0 +1,89 @@
+type InitConfig = struct {
+  receiver_contract_address: h160,
+  gear_bridge_builtin: actor_id,
+  eth_client: actor_id,
+  config: Config,
+};
+
+type Config = struct {
+  gas_to_burn_tokens: u64,
+  gas_for_reply_deposit: u64,
+  gas_to_mint_tokens: u64,
+  gas_to_process_mint_request: u64,
+  gas_to_send_request_to_builtin: u64,
+  reply_timeout: u32,
+  gas_for_transfer_to_eth_msg: u64,
+};
+
+type Error = enum {
+  SendFailure,
+  ReplyFailure,
+  BurnTokensDecode,
+  BurnFailure,
+  RequestToBuiltinSend,
+  RequestToBuiltinReply,
+  BuiltinDecode,
+  PayloadSize,
+  MintTokensDecode,
+  ReplyTimeout,
+  MintFailure,
+  NoCorrespondingEthAddress,
+  ReplyHook,
+  MessageNotFound,
+  InvalidMessageStatus,
+  MessageFailed,
+  BurnTokensFailed,
+  BridgeBuiltinMessageFailed,
+  TokensRefunded,
+  NotEthClient,
+  NotEnoughGas,
+  NoCorrespondingVaraAddress,
+};
+
+type MessageInfo = struct {
+  status: MessageStatus,
+  details: TxDetails,
+};
+
+type MessageStatus = enum {
+  SendingMessageToBurnTokens,
+  TokenBurnCompleted: bool,
+  WaitingReplyFromBurn,
+  SendingMessageToBridgeBuiltin,
+  BridgeResponseReceived: opt u256,
+  WaitingReplyFromBuiltin,
+  BridgeBuiltinStep,
+  SendingMessageToMintTokens,
+  TokenMintCompleted,
+  WaitingReplyFromMint,
+  MintTokensStep,
+  MessageProcessedWithSuccess: u256,
+};
+
+type TxDetails = enum {
+  TransferVaraToEth: struct { vara_token_id: actor_id, sender: actor_id, amount: u256, receiver: h160 },
+  MintTokens: struct { vara_token_id: actor_id, receiver: actor_id, amount: u256 },
+};
+
+constructor {
+  New : (init_config: InitConfig);
+};
+
+service VftGateway {
+  HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
+  MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
+  MintTokens : (eth_token_id: h160, receiver: actor_id, amount: u256) -> result (null, Error);
+  RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
+  TransferVaraToEth : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  UpdateConfig : (config: Config) -> null;
+  UpdateEthClient : (eth_client_new: actor_id) -> null;
+  UpdateReceiverContractAddress : (new_receiver_contract_address: h160) -> null;
+  query Admin : () -> actor_id;
+  query EthClient : () -> actor_id;
+  query GearBridgeBuiltin : () -> actor_id;
+  query GetConfig : () -> Config;
+  query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
+  query ReceiverContractAddress : () -> h160;
+  query VaraToEthAddresses : () -> vec struct { actor_id, h160 };
+};
+

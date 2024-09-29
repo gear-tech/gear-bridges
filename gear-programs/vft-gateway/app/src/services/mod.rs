@@ -103,6 +103,14 @@ where
         self.data_mut().receiver_contract_address = new_receiver_contract_address;
     }
 
+    pub fn update_eth_client(&mut self, eth_client_new: ActorId) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+
+        self.data_mut().eth_client = eth_client_new;
+    }
+
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
@@ -316,6 +324,10 @@ where
 
     pub fn get_config(&self) -> Config {
         self.config().clone()
+    }
+
+    pub fn eth_client(&self) -> ActorId {
+        self.data().eth_client
     }
 }
 

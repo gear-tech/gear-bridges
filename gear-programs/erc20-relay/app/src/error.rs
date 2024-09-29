@@ -18,5 +18,4 @@ pub enum Error {
     InvalidReceiptProof,
     ReplyTimeout,
     ReplyHook,
-    AbsentVftGateway,
 }

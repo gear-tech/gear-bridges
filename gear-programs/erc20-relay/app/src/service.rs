@@ -91,11 +91,11 @@ where
         }
     }
 
-    pub fn vft_gateway(&self) -> Option<ActorId> {
+    pub fn vft_gateway(&self) -> ActorId {
         self.state.borrow().vft_gateway
     }
 
-    pub fn set_vft_gateway(&mut self, vft_gateway: Option<ActorId>) {
+    pub fn set_vft_gateway(&mut self, vft_gateway: ActorId) {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
@@ -106,10 +106,6 @@ where
     }
 
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
-        let Some(vft_gateway_id) = self.state.borrow().vft_gateway else {
-            return Err(Error::AbsentVftGateway);
-        };
-
         let CheckedReceipt {
             envelope: receipt,
             event,
@@ -169,10 +165,10 @@ where
         let fungible_token = H160::from(event.token.0 .0);
         let call_payload =
             vft_gateway::io::MintTokens::encode_call(fungible_token, receiver, amount);
-        let (reply_timeout, reply_deposit) = {
+        let (vft_gateway_id, reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
-            (state.reply_timeout, state.reply_deposit)
+            (state.vft_gateway, state.reply_timeout, state.reply_deposit)
         };
         gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
             .map_err(|_| Error::SendFailure)?

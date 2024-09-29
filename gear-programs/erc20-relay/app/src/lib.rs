@@ -17,7 +17,7 @@ pub struct State {
     checkpoints: ActorId,
     address: H160,
     token: H160,
-    vft_gateway: Option<ActorId>,
+    vft_gateway: ActorId,
     reply_timeout: u32,
     reply_deposit: u64,
 }
@@ -43,7 +43,7 @@ impl Erc20RelayProgram {
             checkpoints,
             address,
             token,
-            vft_gateway: None,
+            vft_gateway: Default::default(),
             reply_timeout,
             reply_deposit,
         }))

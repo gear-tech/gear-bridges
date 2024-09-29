@@ -8,13 +8,18 @@ members = [
     "circuits/*",
     "ethereum-common",
     "gear-programs/bridging-payment",
-    "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/bridging-payment/app",
+    "gear-programs/bridging-payment/client",
     "gear-programs/bridging-payment-vara-supply",
-    "gear-programs/bridging-payment-vara-supply/src/wasm",
+    "gear-programs/bridging-payment-vara-supply/app",
+    "gear-programs/bridging-payment-vara-supply/client",
     "gear-programs/vft-gateway",
-    "gear-programs/vft-gateway/src/wasm",
+    "gear-programs/vft-gateway/app",
+    "gear-programs/vft-gateway/client",
     "gear-programs/vft-treasury",
-    "gear-programs/vft-treasury/src/wasm",
+    "gear-programs/vft-treasury/app",
+    "gear-programs/vft-treasury/client",
+    "gear-programs/vft-client",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "gear-programs/erc20-relay/app",
@@ -39,14 +44,19 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
-bridging_payment = { path = "gear-programs/bridging-payment" }
-bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
-bridging_payment_vara_supply = { path = "gear-programs/bridging-payment-vara-supply" }
-bridging_payment_vara_supply_wasm = { path = "gear-programs/bridging-payment-vara-supply/src/wasm" }
-vft-gateway-app = { path = "gear-programs/vft-gateway" }
-vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
-vft-treasury-app = { path = "gear-programs/vft-treasury" }
-vft_treasury_wasm = { path = "gear-programs/vft-treasury/src/wasm" }
+bridging-payment = { path = "gear-programs/bridging-payment" }
+bridging-payment-app = { path = "gear-programs/bridging-payment/app" }
+bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
+bridging-payment-vara-supply = { path = "gear-programs/bridging-payment-vara-supply" }
+bridging-payment-vara-supply-app = { path = "gear-programs/bridging-payment-vara-supply/app" }
+bridging-payment-vara-supply-client = { path = "gear-programs/bridging-payment-vara-supply/client" }
+vft-gateway = { path = "gear-programs/vft-gateway" }
+vft-gateway-app = { path = "gear-programs/vft-gateway/app" }
+vft-gateway-client = { path = "gear-programs/vft-gateway/client" }
+vft-treasury = { path = "gear-programs/vft-treasury" }
+vft-treasury-app = { path = "gear-programs/vft-treasury/app" }
+vft-treasury-client = { path = "gear-programs/vft-treasury/client" }
+vft-client = { path = "gear-programs/vft-client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }

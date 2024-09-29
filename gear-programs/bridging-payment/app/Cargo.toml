@@ -1,0 +1,12 @@
+[package]
+name = "bridging-payment-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vft-gateway-client.workspace = true
+sails-rs.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true
+gstd.workspace = true
+gear-wasm-instrument.workspace = true

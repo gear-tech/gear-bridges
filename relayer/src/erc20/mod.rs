@@ -10,33 +10,89 @@ use alloy_primitives::Log as PrimitiveLog;
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::ethereum_common::{
-    beacon::{
-        light::Block as LightBeaconBlock, Block as BeaconBlock, BlockHeader as BeaconBlockHeader,
-    },
+    beacon::{self, light::Block as LightBeaconBlock, Block as BeaconBlock},
     memory_db,
     patricia_trie::{TrieDB, TrieDBMut},
     trie_db::{Recorder, Trie, TrieMut},
     utils as eth_utils, H256, SLOTS_PER_EPOCH,
 };
-use gclient::{EventProcessor, GearApi, WSAddress};
-use parity_scale_codec::{Decode, Encode};
+use erc20_relay_client::{
+    traits::Erc20Relay as _, Block, BlockBody, BlockHeader, BlockInclusionProof, Erc20Relay,
+    EthToVaraEvent, ExecutionPayload,
+};
+use futures::StreamExt;
+use gclient::{GearApi, WSAddress};
 use reqwest::Client;
+use sails_rs::{calls::*, events::*, gclient::calls::*, prelude::*};
 use std::cmp::Ordering;
 
-// TODO: import from the program
-#[derive(Clone, Debug, Decode, Encode)]
-pub struct BlockInclusionProof {
-    pub block: LightBeaconBlock,
-    pub headers: Vec<BeaconBlockHeader>,
+fn into_idl_execution_payload(
+    execution_payload: beacon::light::ExecutionPayload,
+) -> ExecutionPayload {
+    use erc20_relay_client::{
+        ByteList, BytesFixed1, BytesFixed2, FixedArray1ForU8, FixedArray2ForU8, ListForU8,
+    };
+
+    ExecutionPayload {
+        parent_hash: BytesFixed1(FixedArray1ForU8(execution_payload.parent_hash.0 .0)),
+        fee_recipient: BytesFixed2(FixedArray2ForU8(execution_payload.fee_recipient.0 .0)),
+        state_root: BytesFixed1(FixedArray1ForU8(execution_payload.state_root.0 .0)),
+        receipts_root: BytesFixed1(FixedArray1ForU8(execution_payload.receipts_root.0 .0)),
+        logs_bloom: execution_payload.logs_bloom,
+        prev_randao: BytesFixed1(FixedArray1ForU8(execution_payload.prev_randao.0 .0)),
+        block_number: execution_payload.block_number,
+        gas_limit: execution_payload.gas_limit,
+        gas_used: execution_payload.gas_used,
+        timestamp: execution_payload.timestamp,
+        extra_data: ByteList(ListForU8 {
+            data: execution_payload.extra_data.0.as_ref().into(),
+        }),
+        base_fee_per_gas: execution_payload.base_fee_per_gas,
+        block_hash: BytesFixed1(FixedArray1ForU8(execution_payload.block_hash.0 .0)),
+        transactions: execution_payload.transactions,
+        withdrawals: execution_payload.withdrawals,
+        blob_gas_used: execution_payload.blob_gas_used,
+        excess_blob_gas: execution_payload.excess_blob_gas,
+    }
 }
 
-// TODO: import from the program
-#[derive(Clone, Debug, Decode, Encode)]
-pub struct EthToVaraEvent {
-    pub proof_block: BlockInclusionProof,
-    pub proof: Vec<Vec<u8>>,
-    pub transaction_index: u64,
-    pub receipt_rlp: Vec<u8>,
+fn into_idl_block_body(block_body: beacon::light::BlockBody) -> BlockBody {
+    use erc20_relay_client::{BytesFixed1, FixedArray1ForU8};
+
+    BlockBody {
+        randao_reveal: block_body.randao_reveal,
+        eth1_data: block_body.eth1_data,
+        graffiti: BytesFixed1(FixedArray1ForU8(block_body.graffiti.0 .0)),
+        proposer_slashings: block_body.proposer_slashings,
+        attester_slashings: block_body.attester_slashings,
+        attestations: block_body.attestations,
+        deposits: block_body.deposits,
+        voluntary_exits: block_body.voluntary_exits,
+        sync_aggregate: block_body.sync_aggregate,
+        execution_payload: into_idl_execution_payload(block_body.execution_payload),
+        bls_to_execution_changes: block_body.bls_to_execution_changes,
+        blob_kzg_commitments: block_body.blob_kzg_commitments,
+    }
+}
+
+fn into_idl_block(block: LightBeaconBlock) -> Block {
+    Block {
+        slot: block.slot,
+        proposer_index: block.proposer_index,
+        parent_root: block.parent_root,
+        state_root: block.state_root,
+        body: into_idl_block_body(block.body),
+    }
+}
+
+fn into_idl_block_header(block_heaer: beacon::BlockHeader) -> BlockHeader {
+    BlockHeader {
+        slot: block_heaer.slot,
+        proposer_index: block_heaer.proposer_index,
+        parent_root: block_heaer.parent_root,
+        state_root: block_heaer.state_root,
+        body_root: block_heaer.body_root,
+    }
 }
 
 pub async fn relay(args: RelayErc20Args) {
@@ -146,7 +202,7 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(receipt));
     Encodable::encode(receipt, &mut receipt_rlp);
-    let payload = EthToVaraEvent {
+    let message = EthToVaraEvent {
         proof_block,
         proof: recorder
             .drain()
@@ -158,26 +214,29 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
     };
 
     let client = GearApi::init_with(WSAddress::new(vara_domain, vara_port), vara_suri).await?;
-
     let gas_limit_block = client.block_gas_limit()?;
-
     // use 95% of block gas limit for all extrinsics
     let gas_limit = gas_limit_block / 100 * 95;
 
-    let mut listener = client.subscribe().await?;
+    let remoting = GClientRemoting::new(client);
 
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
+    let mut erc20_service = Erc20Relay::new(remoting.clone());
+    let mut listener = erc20_relay_client::erc_20_relay::events::listener(remoting.clone());
+    let mut events = listener.listen().await.unwrap();
+
+    let result = erc20_service
+        .relay(message)
+        .with_gas_limit(gas_limit)
+        .send_recv(program_id.into())
         .await
-        .map_err(|e| anyhow!("Failed to send message: {e:?}"))?;
+        .unwrap();
 
-    let (_message_id, payload, _value) = listener
-        .reply_bytes_on(message_id)
-        .await
-        .map_err(|e| anyhow!("Failed to get reply: {e:?}"))?;
-    let payload = payload.map_err(|e| anyhow!("Failed to get replay payload: {e:?}"))?;
+    log::debug!("result = {result:?}");
+    if result.is_ok() {
+        let event = events.next().await.unwrap();
 
-    log::debug!("payload = {payload:?}");
+        log::debug!("event = {event:?}");
+    }
 
     Ok(())
 }
@@ -191,13 +250,14 @@ async fn build_inclusion_proof(
     let beacon_block_parent =
         utils::get_block_by_hash(client_http, rpc_url, beacon_root_parent).await?;
 
-    let beacon_block =
-        find_beacon_block(client_http, rpc_url, block_number, &beacon_block_parent).await?;
+    let beacon_block = LightBeaconBlock::from(
+        find_beacon_block(client_http, rpc_url, block_number, &beacon_block_parent).await?,
+    );
 
     let slot = beacon_block.slot;
     if slot % SLOTS_PER_EPOCH == 0 {
         return Ok(BlockInclusionProof {
-            block: beacon_block.into(),
+            block: into_idl_block(beacon_block),
             headers: vec![],
         });
     }
@@ -206,9 +266,12 @@ async fn build_inclusion_proof(
     let slot_checkpoint = epoch_next * SLOTS_PER_EPOCH;
 
     Ok(BlockInclusionProof {
-        block: beacon_block.into(),
+        block: into_idl_block(beacon_block),
         headers: utils::request_headers(client_http, rpc_url, slot + 1, slot_checkpoint + 1)
-            .await?,
+            .await?
+            .into_iter()
+            .map(into_idl_block_header)
+            .collect(),
     })
 }
 

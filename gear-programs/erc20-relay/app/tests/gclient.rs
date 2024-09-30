@@ -166,3 +166,105 @@ async fn set_vft_gateway() {
     let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
     assert_eq!(vft_gateway, Default::default());
 }
+
+#[tokio::test]
+#[ignore = "Requires running node"]
+async fn test_getters() {
+    use erc20_relay_client::Config;
+
+    let (remoting, code_id, gas_limit) = spin_up_node().await;
+    let admin = <[u8; 32]>::from(remoting.api().account_id().clone());
+    let admin = ActorId::from(admin);
+
+    let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
+
+    let checkpoints = ActorId::from([1u8; 32]);
+    let address = H160::from([2u8; 20]);
+    let token = H160::from([3u8; 20]);
+    let reply_timeout = 10_000;
+    let reply_deposit = 1_000_000_000;
+    let program_id = factory
+        .new(
+            checkpoints,
+            address,
+            token,
+            Config {
+                reply_timeout,
+                reply_deposit,
+            },
+        )
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [])
+        .await
+        .unwrap();
+
+    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
+
+    assert_eq!(admin, client.admin().recv(program_id).await.unwrap());
+    assert_eq!(
+        (address, token),
+        client.eth_program().recv(program_id).await.unwrap()
+    );
+    assert_eq!(
+        checkpoints,
+        client.checkpoints().recv(program_id).await.unwrap()
+    );
+    assert_eq!(
+        Config {
+            reply_timeout,
+            reply_deposit,
+        },
+        client.config().recv(program_id).await.unwrap()
+    );
+
+    let reply_timeout = 4_000;
+    let reply_deposit = 1_222_000_000;
+    client
+        .update_config(Config {
+            reply_timeout,
+            reply_deposit,
+        })
+        .send_recv(program_id)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        Config {
+            reply_timeout,
+            reply_deposit,
+        },
+        client.config().recv(program_id).await.unwrap()
+    );
+
+    // another account isn't permitted to update the config
+    let api = GearApi::dev().await.unwrap().with("//Bob").unwrap();
+    let remoting = GClientRemoting::new(api);
+
+    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
+    let result = client
+        .update_config(Config {
+            reply_timeout: 111,
+            reply_deposit: 222,
+        })
+        .send_recv(program_id)
+        .await;
+    assert!(result.is_err());
+
+    // anyone is able to call the getters
+    assert_eq!(admin, client.admin().recv(program_id).await.unwrap());
+    assert_eq!(
+        (address, token),
+        client.eth_program().recv(program_id).await.unwrap()
+    );
+    assert_eq!(
+        checkpoints,
+        client.checkpoints().recv(program_id).await.unwrap()
+    );
+    assert_eq!(
+        Config {
+            reply_timeout,
+            reply_deposit,
+        },
+        client.config().recv(program_id).await.unwrap()
+    );
+}

@@ -96,6 +96,8 @@ async fn gas_for_reply() {
 #[tokio::test]
 #[ignore = "Requires running node"]
 async fn set_vft_gateway() {
+    use erc20_relay_client::Config;
+
     let (remoting, code_id, gas_limit) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
@@ -105,8 +107,10 @@ async fn set_vft_gateway() {
             Default::default(),
             Default::default(),
             Default::default(),
-            10_000,
-            1_000_000_000,
+            Config {
+                reply_timeout: 10_000,
+                reply_deposit: 1_000_000_000,
+            },
         )
         .with_gas_limit(gas_limit)
         .send_recv(code_id, [])

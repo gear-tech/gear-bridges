@@ -18,6 +18,13 @@ pub struct State {
     address: H160,
     token: H160,
     vft_gateway: ActorId,
+    config: Config,
+}
+
+#[derive(Clone, Copy, Debug, Encode, Decode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct Config {
     reply_timeout: u32,
     reply_deposit: u64,
 }
@@ -26,13 +33,7 @@ pub struct Erc20RelayProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl Erc20RelayProgram {
-    pub fn new(
-        checkpoints: ActorId,
-        address: H160,
-        token: H160,
-        reply_timeout: u32,
-        reply_deposit: u64,
-    ) -> Self {
+    pub fn new(checkpoints: ActorId, address: H160, token: H160, config: Config) -> Self {
         unsafe {
             service::TRANSACTIONS = Some(BTreeSet::new());
         }
@@ -44,8 +45,7 @@ impl Erc20RelayProgram {
             address,
             token,
             vft_gateway: Default::default(),
-            reply_timeout,
-            reply_deposit,
+            config,
         }))
     }
 
@@ -56,8 +56,10 @@ impl Erc20RelayProgram {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                _reply_timeout,
-                _reply_deposit,
+                Config {
+                    reply_timeout: _reply_timeout,
+                    reply_deposit: _reply_deposit,
+                },
             );
 
             let transactions = service::transactions_mut();

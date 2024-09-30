@@ -4,7 +4,7 @@ mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
 }
 
-use super::{abi::ERC20_TREASURY, error::Error, BTreeSet, ExecContext, RefCell, State};
+use super::{abi::ERC20_TREASURY, error::Error, BTreeSet, Config, ExecContext, RefCell, State};
 use alloy_sol_types::SolEvent;
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
@@ -105,6 +105,34 @@ where
         state.vft_gateway = vft_gateway;
     }
 
+    pub fn config(&self) -> Config {
+        self.state.borrow().config
+    }
+
+    pub fn update_config(&mut self, config_new: Config) {
+        let source = self.exec_context.actor_id();
+        let mut state = self.state.borrow_mut();
+        if source != state.admin {
+            panic!("Not admin");
+        }
+
+        state.config = config_new;
+    }
+
+    pub fn admin(&self) -> ActorId {
+        self.state.borrow().admin
+    }
+
+    pub fn checkpoints(&self) -> ActorId {
+        self.state.borrow().checkpoints
+    }
+
+    pub fn eth_program(&self) -> (H160, H160) {
+        let state = self.state.borrow();
+
+        (state.address, state.token)
+    }
+
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
         let CheckedReceipt {
             envelope: receipt,
@@ -168,7 +196,11 @@ where
         let (vft_gateway_id, reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
-            (state.vft_gateway, state.reply_timeout, state.reply_deposit)
+            (
+                state.vft_gateway,
+                state.config.reply_timeout,
+                state.config.reply_deposit,
+            )
         };
         gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
             .map_err(|_| Error::SendFailure)?
@@ -289,7 +321,7 @@ where
             let (reply_timeout, reply_deposit) = {
                 let state = self.state.borrow();
 
-                (state.reply_timeout, state.reply_deposit)
+                (state.config.reply_timeout, state.config.reply_deposit)
             };
             let source = self.exec_context.actor_id();
             gstd::msg::send_bytes_for_reply(source, call_payload, 0, reply_deposit)

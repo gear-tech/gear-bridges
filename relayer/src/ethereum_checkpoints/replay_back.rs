@@ -124,6 +124,7 @@ async fn replay_back_slots(
     slots_batch_iter: SlotsBatchIter,
 ) -> AnyResult<()> {
     for (slot_start, slot_end) in slots_batch_iter {
+        log::debug!("slot_start = {slot_start}, slot_end = {slot_end}");
         replay_back_slots_inner(
             client_http,
             beacon_endpoint,

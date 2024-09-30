@@ -1,31 +1,14 @@
 #![no_std]
 
-use gstd::ActorId;
-use parity_scale_codec::{Decode, Encode};
-use primitive_types::U256;
-use scale_info::TypeInfo;
+#[cfg(target_arch = "wasm32")]
+pub use bridging_payment_app::wasm::*;
 
-#[cfg(not(feature = "std"))]
-mod wasm;
+#[cfg(feature = "wasm-binary")]
+#[cfg(not(target_arch = "wasm32"))]
+pub use code::WASM_BINARY_OPT as WASM_BINARY;
 
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct InitMessage {
-    pub grc20_gateway: ActorId,
-    pub fee: u128,
-}
-
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub enum AdminMessage {
-    SetFee(u128),
-    ReclaimFees,
-}
-
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct UserReply {
-    pub nonce: U256,
-}
-
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct State {
-    pub fee: u128,
+#[cfg(feature = "wasm-binary")]
+#[cfg(not(target_arch = "wasm32"))]
+mod code {
+    include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 }

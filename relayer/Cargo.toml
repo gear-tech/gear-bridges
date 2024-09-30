@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bridging_payment.workspace = true
+bridging-payment-client.workspace = true
 ethereum-client.workspace = true
 gear_proof_storage.workspace = true
 gear-rpc-client.workspace = true
@@ -21,6 +21,7 @@ axum.workspace = true
 checkpoint_light_client-io = { workspace = true, features = ["std"] }
 checkpoint_light_client = { workspace = true, features = ["std"] }
 clap.workspace = true
+derive_more.workspace = true
 dotenv.workspace = true
 futures.workspace = true
 gear-core.workspace = true
@@ -37,6 +38,7 @@ primitive-types = { workspace = true, features = ["std"] }
 prometheus.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+sails-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -45,4 +47,4 @@ tokio.workspace = true
 utils-prometheus.workspace = true
 
 [build-dependencies]
-cgo_oligami = "0.3"
+cgo_oligami.workspace = true

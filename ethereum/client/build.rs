@@ -1,8 +1,7 @@
 use std::process::Command;
 
 fn main() {
-    println!("cargo::rerun-if-changed=../src");
-    println!("cargo::rerun-if-changed=../lib");
+    println!("cargo::rerun-if-changed=*");
 
     Command::new("forge")
         .arg("build")

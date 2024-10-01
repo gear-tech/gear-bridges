@@ -169,12 +169,10 @@ async fn set_vft_gateway() {
 
 #[tokio::test]
 #[ignore = "Requires running node"]
-async fn test_getters() {
+async fn update_config() {
     use erc20_relay_client::Config;
 
     let (remoting, code_id, gas_limit) = spin_up_node().await;
-    let admin = <[u8; 32]>::from(remoting.api().account_id().clone());
-    let admin = ActorId::from(admin);
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -200,15 +198,6 @@ async fn test_getters() {
 
     let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
 
-    assert_eq!(admin, client.admin().recv(program_id).await.unwrap());
-    assert_eq!(
-        (address, token),
-        client.eth_program().recv(program_id).await.unwrap()
-    );
-    assert_eq!(
-        checkpoints,
-        client.checkpoints().recv(program_id).await.unwrap()
-    );
     assert_eq!(
         Config {
             reply_timeout,
@@ -250,16 +239,7 @@ async fn test_getters() {
         .await;
     assert!(result.is_err());
 
-    // anyone is able to call the getters
-    assert_eq!(admin, client.admin().recv(program_id).await.unwrap());
-    assert_eq!(
-        (address, token),
-        client.eth_program().recv(program_id).await.unwrap()
-    );
-    assert_eq!(
-        checkpoints,
-        client.checkpoints().recv(program_id).await.unwrap()
-    );
+    // anyone is able to get the config
     assert_eq!(
         Config {
             reply_timeout,

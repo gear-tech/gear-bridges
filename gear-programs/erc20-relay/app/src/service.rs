@@ -123,8 +123,8 @@ where
         self.state.borrow().admin
     }
 
-    pub fn checkpoints(&self) -> ActorId {
-        self.state.borrow().checkpoints
+    pub fn checkpoint_light_client_address(&self) -> ActorId {
+        self.state.borrow().checkpoint_light_client_address
     }
 
     pub fn eth_program(&self) -> (H160, H160) {
@@ -147,7 +147,7 @@ where
         } = message;
 
         // verify the proof of block inclusion
-        let checkpoints = self.state.borrow().checkpoints;
+        let checkpoints = self.state.borrow().checkpoint_light_client_address;
         let slot = block.slot;
         let checkpoint = Self::request_checkpoint(checkpoints, slot).await?;
 

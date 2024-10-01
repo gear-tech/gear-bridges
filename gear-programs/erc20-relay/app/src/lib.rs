@@ -14,7 +14,7 @@ use service::Erc20Relay as Erc20RelayService;
 
 pub struct State {
     admin: ActorId,
-    checkpoints: ActorId,
+    checkpoint_light_client_address: ActorId,
     address: H160,
     token: H160,
     vft_gateway: ActorId,
@@ -33,7 +33,12 @@ pub struct Erc20RelayProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl Erc20RelayProgram {
-    pub fn new(checkpoints: ActorId, address: H160, token: H160, config: Config) -> Self {
+    pub fn new(
+        checkpoint_light_client_address: ActorId,
+        address: H160,
+        token: H160,
+        config: Config,
+    ) -> Self {
         unsafe {
             service::TRANSACTIONS = Some(BTreeSet::new());
         }
@@ -41,7 +46,7 @@ impl Erc20RelayProgram {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
-            checkpoints,
+            checkpoint_light_client_address,
             address,
             token,
             vft_gateway: Default::default(),

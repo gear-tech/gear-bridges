@@ -26,7 +26,7 @@ mod tests;
 mod metrics;
 mod replay_back;
 mod sync_update;
-mod utils;
+pub mod utils;
 
 const SIZE_CHANNEL: usize = 100_000;
 const SIZE_BATCH: u64 = 30 * SLOTS_PER_EPOCH;
@@ -50,15 +50,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         },
     } = args;
 
-    let program_id_no_prefix = match program_id.starts_with("0x") {
-        true => &program_id[2..],
-        false => &program_id,
-    };
-
-    let program_id = hex::decode(program_id_no_prefix)
-        .ok()
-        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
-        .expect("Expecting correct ProgramId");
+    let program_id = utils::try_from_hex_encoded(&program_id).expect("Expecting correct ProgramId");
 
     let client_http = ClientBuilder::new()
         .timeout(Duration::from_secs(beacon_timeout))

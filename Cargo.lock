@@ -9862,6 +9862,11 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 name = "relayer"
 version = "0.1.0"
 dependencies = [
+ "alloy",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
  "anyhow",
  "ark-serialize 0.4.2",
  "axum",
@@ -9872,6 +9877,7 @@ dependencies = [
  "clap",
  "derive_more",
  "dotenv",
+ "erc20-relay-client",
  "ethereum-client",
  "futures",
  "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",

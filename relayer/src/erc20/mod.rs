@@ -26,6 +26,7 @@ use reqwest::Client;
 use sails_rs::{calls::*, events::*, gclient::calls::*, prelude::*};
 use std::cmp::Ordering;
 
+// TODO: remove, #152
 fn into_idl_execution_payload(
     execution_payload: beacon::light::ExecutionPayload,
 ) -> ExecutionPayload {
@@ -56,6 +57,7 @@ fn into_idl_execution_payload(
     }
 }
 
+// TODO: remove, #152
 fn into_idl_block_body(block_body: beacon::light::BlockBody) -> BlockBody {
     use erc20_relay_client::{BytesFixed1, FixedArray1ForU8};
 
@@ -75,6 +77,7 @@ fn into_idl_block_body(block_body: beacon::light::BlockBody) -> BlockBody {
     }
 }
 
+// TODO: remove, #152
 fn into_idl_block(block: LightBeaconBlock) -> Block {
     Block {
         slot: block.slot,
@@ -85,6 +88,7 @@ fn into_idl_block(block: LightBeaconBlock) -> Block {
     }
 }
 
+// TODO: remove, #152
 fn into_idl_block_header(block_heaer: beacon::BlockHeader) -> BlockHeader {
     BlockHeader {
         slot: block_heaer.slot,

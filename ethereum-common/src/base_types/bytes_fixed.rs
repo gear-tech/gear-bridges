@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
 pub struct BytesFixed<const N: usize>(pub FixedArray<u8, N>);
 
 impl<const N: usize> AsRef<[u8]> for BytesFixed<N> {

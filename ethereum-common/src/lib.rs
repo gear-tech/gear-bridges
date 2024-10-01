@@ -21,6 +21,7 @@ use core::{
     marker::PhantomData,
     ops::{Deref, Index, IndexMut},
     slice::{self, SliceIndex},
+    cmp::PartialEq,
 };
 
 pub use ethereum_types::{H160, H256, U256};

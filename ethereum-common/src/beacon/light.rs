@@ -2,7 +2,7 @@
 
 use super::*;
 
-#[derive(Debug, Clone, Decode, Encode, Deserialize, tree_hash_derive::TreeHash, TypeInfo)]
+#[derive(Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo)]
 pub struct ExecutionPayload {
     pub parent_hash: Bytes32,
     pub fee_recipient: Address,
@@ -54,7 +54,7 @@ impl From<super::ExecutionPayload> for ExecutionPayload {
     }
 }
 
-#[derive(Debug, Clone, Decode, Encode, tree_hash_derive::TreeHash, Deserialize, TypeInfo)]
+#[derive(Debug, Clone, Decode, Encode, PartialEq, tree_hash_derive::TreeHash, Deserialize, TypeInfo)]
 pub struct BlockBody {
     pub randao_reveal: H256,
     pub eth1_data: H256,
@@ -89,7 +89,7 @@ impl From<super::BlockBody> for BlockBody {
     }
 }
 
-#[derive(Debug, Clone, tree_hash_derive::TreeHash, Decode, Encode, Deserialize, TypeInfo)]
+#[derive(Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo)]
 pub struct Block {
     #[serde(deserialize_with = "utils::deserialize_u64")]
     pub slot: u64,

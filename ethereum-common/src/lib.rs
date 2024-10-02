@@ -17,11 +17,11 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 use core::{
     any,
+    cmp::PartialEq,
     fmt::{self, Debug},
     marker::PhantomData,
     ops::{Deref, Index, IndexMut},
     slice::{self, SliceIndex},
-    cmp::PartialEq,
 };
 
 pub use ethereum_types::{H160, H256, U256};

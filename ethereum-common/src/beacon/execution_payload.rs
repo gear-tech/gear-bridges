@@ -1,6 +1,8 @@
 use super::*;
 
-#[derive(Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo)]
+#[derive(
+    Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+)]
 pub struct ExecutionPayload {
     pub parent_hash: Bytes32,
     pub fee_recipient: Address,

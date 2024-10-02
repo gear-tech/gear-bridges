@@ -1,0 +1,16 @@
+[package]
+name = "deploy-to-gear"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+extended_vft_wasm.workspace = true
+vft-client.workspace = true
+
+tokio.workspace = true
+gear-core.workspace = true
+sails-rs = { workspace = true, features = ["gclient"] }
+gclient.workspace = true
+clap.workspace = true
+dotenv.workspace = true
+hex.workspace = true

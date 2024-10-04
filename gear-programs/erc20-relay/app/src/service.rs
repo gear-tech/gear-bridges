@@ -127,10 +127,8 @@ where
         self.state.borrow().checkpoint_light_client_address
     }
 
-    pub fn eth_program(&self) -> (H160, H160) {
-        let state = self.state.borrow();
-
-        (state.address, state.token)
+    pub fn eth_program(&self) -> H160 {
+        self.state.borrow().address
     }
 
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
@@ -242,8 +240,7 @@ where
                     return None;
                 };
 
-                (eth_address == state.address && H160::from(event.token.0 .0) == state.token)
-                    .then_some(event)
+                (eth_address == state.address).then_some(event)
             })
             .ok_or(Error::NotSupportedEvent)?;
 

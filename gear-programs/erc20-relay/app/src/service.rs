@@ -63,6 +63,9 @@ pub struct EthToVaraEvent {
 #[scale_info(crate = sails_rs::scale_info)]
 enum Event {
     Relayed {
+        slot: u64,
+        block_number: u64,
+        transaction_index: u32,
         fungible_token: H160,
         to: ActorId,
         amount: U256,
@@ -210,6 +213,9 @@ where
             .map_err(|_| Error::ReplyFailure)?;
 
         let _ = self.notify_on(Event::Relayed {
+            slot,
+            block_number: block.body.execution_payload.block_number,
+            transaction_index: transaction_index as u32,
             fungible_token,
             to: ActorId::from(event.to.0),
             amount,

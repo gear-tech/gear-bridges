@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    patricia_trie::{TrieDB, TrieDBMut},
+    trie_db::{Recorder, Trie, TrieMut},
+    *,
+};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::Log;
 use alloy_rlp::Encodable;
@@ -9,6 +13,26 @@ const CAPACITY_RLP_RECEIPT: usize = 10_000;
 pub type ReceiptEnvelope = alloy_consensus::ReceiptEnvelope<Log>;
 /// Tuple with a transaction index and the related receipt.
 pub type Receipt = (u64, ReceiptEnvelope);
+
+#[derive(Clone, Debug)]
+pub enum ProofError {
+    ReceiptNotFound,
+    InsertionFailed,
+    RootIsNotValid,
+}
+
+impl fmt::Display for ProofError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
+impl core::error::Error for ProofError {}
+
+pub struct Proof {
+    pub proof: Vec<Vec<u8>>,
+    pub receipt: ReceiptEnvelope,
+}
 
 pub fn calculate_epoch(slot: u64) -> u64 {
     slot / SLOTS_PER_EPOCH
@@ -159,4 +183,36 @@ pub fn map_receipt_envelope(
         TxType::Eip2930 => ReceiptEnvelope::Eip2930(result),
         TxType::Eip4844 => ReceiptEnvelope::Eip4844(result),
     }
+}
+
+pub fn generate_proof(tx_index: u64, receipts: &[Receipt]) -> Result<Proof, ProofError> {
+    let mut memory_db = memory_db::new();
+    let key_value_tuples = rlp_encode_receipts_and_nibble_tuples(receipts);
+    let root = {
+        let mut root = H256::zero();
+        let mut triedbmut = TrieDBMut::new(&mut memory_db, &mut root);
+        for (key, value) in &key_value_tuples {
+            triedbmut
+                .insert(key, value)
+                .map_err(|_| ProofError::InsertionFailed)?;
+        }
+
+        *triedbmut.root()
+    };
+
+    let (tx_index, receipt) = receipts
+        .iter()
+        .find(|(index, _)| index == &tx_index)
+        .ok_or(ProofError::ReceiptNotFound)?;
+
+    let trie = TrieDB::new(&memory_db, &root).map_err(|_| ProofError::RootIsNotValid)?;
+    let (key, _expected_value) = rlp_encode_index_and_receipt(tx_index, receipt);
+
+    let mut recorder = Recorder::new();
+    let _value = trie.get_with(&key, &mut recorder);
+
+    Ok(Proof {
+        proof: recorder.drain().into_iter().map(|r| r.data).collect(),
+        receipt: receipt.clone(),
+    })
 }

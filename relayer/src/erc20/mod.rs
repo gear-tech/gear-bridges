@@ -8,10 +8,8 @@ use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, Block as BeaconBlock},
-    memory_db,
-    patricia_trie::{TrieDB, TrieDBMut},
-    trie_db::{Recorder, Trie, TrieMut},
-    utils as eth_utils, H256, SLOTS_PER_EPOCH,
+    utils::{self as eth_utils, Proof},
+    SLOTS_PER_EPOCH,
 };
 use erc20_relay_client::{
     traits::Erc20Relay as _, BlockInclusionProof, Erc20Relay, EthToVaraEvent,
@@ -104,39 +102,14 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default();
 
-    let mut memory_db = memory_db::new();
-    let key_value_tuples = eth_utils::rlp_encode_receipts_and_nibble_tuples(&receipts[..]);
-    let root = {
-        let mut root = H256::zero();
-        let mut triedbmut = TrieDBMut::new(&mut memory_db, &mut root);
-        for (key, value) in &key_value_tuples {
-            triedbmut.insert(key, value)?;
-        }
+    let Proof { proof, receipt } = eth_utils::generate_proof(tx_index, &receipts[..])?;
 
-        *triedbmut.root()
-    };
-
-    let (tx_index, receipt) = receipts
-        .iter()
-        .find(|(index, _)| index == &tx_index)
-        .ok_or(anyhow!("Unable to find transaction's receipt"))?;
-
-    let trie = TrieDB::new(&memory_db, &root)?;
-    let (key, _expected_value) = eth_utils::rlp_encode_index_and_receipt(tx_index, receipt);
-
-    let mut recorder = Recorder::new();
-    let _value = trie.get_with(&key, &mut recorder);
-
-    let mut receipt_rlp = Vec::with_capacity(Encodable::length(receipt));
-    Encodable::encode(receipt, &mut receipt_rlp);
+    let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
+    Encodable::encode(&receipt, &mut receipt_rlp);
     let message = EthToVaraEvent {
         proof_block,
-        proof: recorder
-            .drain()
-            .into_iter()
-            .map(|r| r.data)
-            .collect::<Vec<_>>(),
-        transaction_index: *tx_index,
+        proof,
+        transaction_index: tx_index,
         receipt_rlp,
     };
 

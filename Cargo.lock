@@ -3697,6 +3697,7 @@ dependencies = [
 name = "ethereum-common"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",

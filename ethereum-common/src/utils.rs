@@ -135,3 +135,28 @@ pub fn rlp_encode_receipts_and_nibble_tuples(receipts: &[Receipt]) -> Vec<(Vec<u
         })
         .collect::<Vec<_>>()
 }
+
+#[cfg(feature = "std")]
+pub fn map_receipt_envelope(
+    receipt: &alloy_consensus::ReceiptEnvelope<alloy::rpc::types::Log>,
+) -> ReceiptEnvelope {
+    use alloy_consensus::{Receipt, ReceiptWithBloom, TxType};
+
+    let logs = receipt.logs().iter().map(AsRef::as_ref).cloned().collect();
+
+    let result = ReceiptWithBloom::new(
+        Receipt {
+            status: receipt.status().into(),
+            cumulative_gas_used: receipt.cumulative_gas_used(),
+            logs,
+        },
+        *receipt.logs_bloom(),
+    );
+
+    match receipt.tx_type() {
+        TxType::Legacy => ReceiptEnvelope::Legacy(result),
+        TxType::Eip1559 => ReceiptEnvelope::Eip1559(result),
+        TxType::Eip2930 => ReceiptEnvelope::Eip2930(result),
+        TxType::Eip4844 => ReceiptEnvelope::Eip4844(result),
+    }
+}

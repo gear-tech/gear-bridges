@@ -2,11 +2,8 @@ use super::{ethereum_checkpoints::utils, *};
 use alloy::{
     network::primitives::BlockTransactionsKind,
     providers::{Provider, ProviderBuilder},
-    rpc::types::{Log, Receipt, ReceiptEnvelope, ReceiptWithBloom},
 };
-use alloy_consensus::TxType;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::Log as PrimitiveLog;
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::ethereum_common::{
@@ -102,7 +99,7 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
 
             tx_receipt
                 .transaction_index
-                .map(|i| (i, map_receipt_envelope(receipt)))
+                .map(|i| (i, eth_utils::map_receipt_envelope(receipt)))
         })
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default();
@@ -235,29 +232,4 @@ async fn find_beacon_block(
     }
 
     Err(anyhow!("Block was not found"))
-}
-
-fn map_receipt_envelope(receipt: &ReceiptEnvelope<Log>) -> ReceiptEnvelope<PrimitiveLog> {
-    let logs = receipt
-        .logs()
-        .iter()
-        .map(AsRef::as_ref)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let result = ReceiptWithBloom::new(
-        Receipt {
-            status: receipt.status().into(),
-            cumulative_gas_used: receipt.cumulative_gas_used(),
-            logs,
-        },
-        *receipt.logs_bloom(),
-    );
-
-    match receipt.tx_type() {
-        TxType::Legacy => ReceiptEnvelope::Legacy(result),
-        TxType::Eip1559 => ReceiptEnvelope::Eip1559(result),
-        TxType::Eip2930 => ReceiptEnvelope::Eip2930(result),
-        TxType::Eip4844 => ReceiptEnvelope::Eip4844(result),
-    }
 }

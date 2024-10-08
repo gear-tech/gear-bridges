@@ -21,6 +21,7 @@ hash256-std-hasher.workspace = true
 memory-db.workspace = true
 rlp.workspace = true
 tiny-keccak.workspace = true
+alloy = { workspace = true, optional = true }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
@@ -48,6 +49,7 @@ std = [
     "hash256-std-hasher/std",
     "memory-db/std",
     "rlp/std",
+    "alloy",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-rlp/std",

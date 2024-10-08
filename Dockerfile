@@ -41,5 +41,13 @@ RUN cargo build -p relayer --release
 
 # Compose final image
 FROM ubuntu:22.04
-COPY --from=builder /target/release/relayer /usr/local/bin/relayer
-CMD ["relayer"]
+
+RUN apt-get update
+RUN apt-get install -y ca-certificates
+
+COPY --from=builder /target/release/relayer .
+COPY GenesisConfig.toml .
+
+EXPOSE 9090
+
+ENTRYPOINT ["./relayer"]

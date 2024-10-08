@@ -25,6 +25,7 @@ members = [
     "gear-programs/erc20-relay/app",
     "gear-programs/erc20-relay/client",
     "utils-prometheus",
+    "tools/deploy-to-gear",
 ]
 
 resolver = "2"
@@ -66,7 +67,7 @@ erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
 erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
 
 # Contracts' deps
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0"}
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }

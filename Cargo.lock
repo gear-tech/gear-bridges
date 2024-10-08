@@ -3029,6 +3029,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "deploy-to-gear"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dotenv",
+ "extended_vft_wasm",
+ "gclient 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gear-core 1.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
+ "sails-rs 0.5.0",
+ "tokio",
+ "vft-client",
+]
+
+[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

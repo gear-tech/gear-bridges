@@ -7,8 +7,9 @@ images
 LICENSE
 *.md
 
-# Git directory 
+# Git 
 .git
+.gitignore
 
 # IDE-generated files 
 .vscode
@@ -19,7 +20,6 @@ data
 proof_storage
 onchain_proof_storage_data
 .env
-GenesisConfig.toml
 
 # Ethereum-related
 ethereum/cache

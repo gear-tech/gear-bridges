@@ -1,0 +1,16 @@
+[package]
+name = "erc20-relay"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+erc20-relay-app.workspace = true
+
+[build-dependencies]
+erc20-relay-app.workspace = true
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
+
+[features]
+wasm-binary = []
+gas_calculation = ["erc20-relay-app/gas_calculation"]

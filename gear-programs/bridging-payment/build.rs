@@ -1,27 +1,23 @@
-use sails_client_gen::ClientGenerator;
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    fs::File,
+    io::{BufRead, BufReader},
+    path::PathBuf,
+};
 
 fn main() {
-    let out_dir_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    sails_rs::build_wasm();
 
-    let idl_file_path = PathBuf::from("../vft-gateway/src/wasm/vft-gateway.idl");
+    if env::var("__GEAR_WASM_BUILDER_NO_BUILD").is_ok() {
+        return;
+    }
 
-    let client_rs_file_path = out_dir_path.join("vft-gateway.rs");
+    let bin_path_file = File::open(".binpath").unwrap();
+    let mut bin_path_reader = BufReader::new(bin_path_file);
+    let mut bin_path = String::new();
+    bin_path_reader.read_line(&mut bin_path).unwrap();
 
-    ClientGenerator::from_idl_path(&idl_file_path)
-        .generate_to(client_rs_file_path)
-        .unwrap();
-    let idl_file_path = out_dir_path.join("vft.idl");
-
-    let client_rs_file_path = out_dir_path.join("vft.rs");
-
-    git_download::repo("https://github.com/gear-foundation/standards")
-        .branch_name("master")
-        .add_file("extended-vft/wasm/extended_vft.idl", &idl_file_path)
-        .exec()
-        .unwrap();
-
-    ClientGenerator::from_idl_path(&idl_file_path)
-        .generate_to(client_rs_file_path)
-        .unwrap();
+    let mut idl_path = PathBuf::from(bin_path);
+    idl_path.set_extension("idl");
+    sails_idl_gen::generate_idl_to_file::<bridging_payment_app::Program>(idl_path).unwrap();
 }

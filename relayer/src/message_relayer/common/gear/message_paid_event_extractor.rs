@@ -7,15 +7,7 @@ use prometheus::IntCounter;
 use sails_rs::events::EventIo;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{GearBlockNumber, PaidMessage};
-
-#[allow(dead_code)]
-mod bridging_payment_client {
-    use sails_rs::prelude::*;
-
-    include!(concat!(env!("OUT_DIR"), "/bridging_payment_client.rs"));
-}
-
+use super::{GearBlockNumber, PaidMessage};
 use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
 
 pub struct MessagePaidEventExtractor {

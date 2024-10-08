@@ -1,0 +1,17 @@
+[package]
+name = "erc20-relay-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ethereum-common.workspace = true
+mockall = { workspace = true, optional = true }
+sails-rs.workspace = true
+
+[build-dependencies]
+erc20-relay-app.workspace = true
+sails-client-gen.workspace = true
+sails-idl-gen.workspace = true
+
+[features]
+mocks = ["sails-rs/mockall", "dep:mockall"]

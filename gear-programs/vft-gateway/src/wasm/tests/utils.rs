@@ -6,6 +6,7 @@ use vft_gateway_app::services::{error::Error, msg_tracker::MessageInfo, Config, 
 pub const ADMIN_ID: u64 = 1000;
 pub const TOKEN_ID: u64 = 200;
 pub const BRIDGE_BUILTIN_ID: u64 = 300;
+pub const ETH_CLIENT_ID: u64 = 500;
 
 // Mocks for programs
 macro_rules! create_mock {
@@ -119,6 +120,7 @@ impl Token for Program<'_> {
 
 pub trait VftGateway {
     fn vft_gateway(system: &System) -> Program<'_>;
+    fn update_eth_client(&self, from: u64, eth_client_new: ActorId) -> bool;
     fn map_vara_to_eth_address(&self, from: u64, vara_token_id: ActorId, eth_token_id: H160);
     fn transfer_vara_to_eth(
         &self,
@@ -134,7 +136,16 @@ pub trait VftGateway {
         from: u64,
         msg_id: MessageId,
     ) -> Result<(U256, H160), Error>;
+    fn mint_tokens(
+        &self,
+        from: u64,
+        eth_token_id: H160,
+        amount: U256,
+        receiver: ActorId,
+        error: bool,
+    );
     fn get_msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)>;
+    fn eth_client(&self, from: u64) -> ActorId;
 }
 
 impl VftGateway for Program<'_> {
@@ -143,8 +154,10 @@ impl VftGateway for Program<'_> {
         let init_config = InitConfig::new(
             [1; 20].into(),
             BRIDGE_BUILTIN_ID.into(),
+            ETH_CLIENT_ID.into(),
             Config::new(
-                2_000_000_000,
+                15_000_000_000,
+                15_000_000_000,
                 15_000_000_000,
                 15_000_000_000,
                 15_000_000_000,
@@ -156,6 +169,19 @@ impl VftGateway for Program<'_> {
         let result = program.send_bytes(ADMIN_ID, payload);
         assert!(!result.main_failed());
         program
+    }
+
+    fn update_eth_client(&self, from: u64, eth_client_new: ActorId) -> bool {
+        let payload = [
+            "VftGateway".encode(),
+            "UpdateEthClient".encode(),
+            (eth_client_new).encode(),
+        ]
+        .concat();
+
+        let result = self.send_bytes(from, payload);
+
+        !result.main_failed()
     }
 
     fn map_vara_to_eth_address(&self, from: u64, vara_token_id: ActorId, eth_token_id: H160) {
@@ -231,6 +257,36 @@ impl VftGateway for Program<'_> {
         reply.2
     }
 
+    fn mint_tokens(
+        &self,
+        from: u64,
+        eth_token_id: H160,
+        amount: U256,
+        receiver: ActorId,
+        error: bool,
+    ) {
+        let payload = [
+            "VftGateway".encode(),
+            "MintTokens".encode(),
+            (eth_token_id, receiver, amount).encode(),
+        ]
+        .concat();
+        let result = self.send_bytes(from, payload);
+        let log_entry = result
+            .log()
+            .iter()
+            .find(|log_entry| log_entry.destination() == from.into())
+            .expect("Unable to get reply");
+
+        let reply = <(String, String, Result<(), Error>)>::decode(&mut log_entry.payload())
+            .expect("Unable to decode reply");
+        if error {
+            assert!(reply.2.is_err());
+        } else {
+            assert!(reply.2.is_ok());
+        }
+    }
+
     fn get_msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {
         let payload = ["VftGateway".encode(), "MsgTrackerState".encode()].concat();
 
@@ -246,5 +302,22 @@ impl VftGateway for Program<'_> {
                 .expect("Unable to decode reply"); // Panic if decoding fails
 
         reply.2
+    }
+
+    fn eth_client(&self, from: u64) -> ActorId {
+        let payload = ["VftGateway".encode(), "EthClient".encode()].concat();
+
+        let result = self.send_bytes(from, payload);
+        let log_entry = result
+            .log()
+            .iter()
+            .find(|log_entry| log_entry.destination() == from.into())
+            .expect("Unable to get reply");
+
+        // Panic if decoding fails
+        let (_, _, result) = <(String, String, ActorId)>::decode(&mut log_entry.payload())
+            .expect("Unable to decode reply");
+
+        result
     }
 }

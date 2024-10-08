@@ -32,7 +32,7 @@ jobs:
         with:
           version: nightly
       - name: Build
-        run: cargo build --all-targets
+        run: cargo build --release --all-targets
   lints:
     runs-on: kuberunner
     steps:
@@ -49,6 +49,23 @@ jobs:
         with:
           version: nightly
       - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
+        run: cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
       - name: Run rustfmt
         run: cargo fmt -- --check
+  tests:
+    runs-on: kuberunner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20.1'
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: Run tests
+        run: cargo test --release --all-targets

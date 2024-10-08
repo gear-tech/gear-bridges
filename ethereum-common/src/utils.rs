@@ -1,4 +1,5 @@
 use super::{
+    beacon::{Block, BlockHeader, SignedBeaconBlockHeader},
     patricia_trie::{TrieDB, TrieDBMut},
     trie_db::{Recorder, Trie, TrieMut},
     *,
@@ -32,6 +33,38 @@ impl core::error::Error for ProofError {}
 pub struct Proof {
     pub proof: Vec<Vec<u8>>,
     pub receipt: ReceiptEnvelope,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+pub enum LightClientHeader {
+    Unwrapped(BlockHeader),
+    Wrapped(Beacon),
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Beacon {
+    pub beacon: BlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockHeaderResponse {
+    pub data: BeaconBlockHeaderData,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockHeaderData {
+    pub header: SignedBeaconBlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockResponse {
+    pub data: BeaconBlockData,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockData {
+    pub message: Block,
 }
 
 pub fn calculate_epoch(slot: u64) -> u64 {
@@ -214,5 +247,17 @@ pub fn generate_proof(tx_index: u64, receipts: &[Receipt]) -> Result<Proof, Proo
     Ok(Proof {
         proof: recorder.drain().into_iter().map(|r| r.data).collect(),
         receipt: receipt.clone(),
+    })
+}
+
+pub fn deserialize_header<'de, D>(deserializer: D) -> Result<BlockHeader, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let header: LightClientHeader = Deserialize::deserialize(deserializer)?;
+
+    Ok(match header {
+        LightClientHeader::Unwrapped(header) => header,
+        LightClientHeader::Wrapped(header) => header.beacon,
     })
 }

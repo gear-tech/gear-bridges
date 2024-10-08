@@ -1,7 +1,7 @@
 use super::*;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::{
-    ethereum_common::{utils as eth_utils, SLOTS_PER_EPOCH},
+    ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH},
     meta::ReplayBack,
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
@@ -18,7 +18,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
     time::{self, Duration},
 };
-use utils::{slots_batch::Iter as SlotsBatchIter, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
+use utils::slots_batch::Iter as SlotsBatchIter;
 
 #[cfg(test)]
 mod tests;

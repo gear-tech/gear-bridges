@@ -3,11 +3,9 @@ use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{
-            BLSPubKey, Block as BeaconBlock, Bytes32, SignedBeaconBlockHeader, SyncAggregate,
-            SyncCommittee,
-        },
-        utils as eth_utils,
+        beacon::{BLSPubKey, Block as BeaconBlock, Bytes32, SyncAggregate, SyncCommittee},
+        utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse},
+        MAX_REQUEST_LIGHT_CLIENT_UPDATES,
     },
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
     SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE,
@@ -18,45 +16,10 @@ use std::{cmp, error::Error, fmt};
 
 pub mod slots_batch;
 
-// https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/p2p-interface.md#configuration
-pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum LightClientHeader {
-    Unwrapped(BeaconBlockHeader),
-    Wrapped(Beacon),
-}
-
-#[derive(Deserialize)]
-pub struct Beacon {
-    pub beacon: BeaconBlockHeader,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct BeaconBlockHeaderResponse {
-    pub data: BeaconBlockHeaderData,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct BeaconBlockHeaderData {
-    pub header: SignedBeaconBlockHeader,
-}
-
-#[derive(Deserialize, Debug)]
-struct BeaconBlockResponse {
-    data: BeaconBlockData,
-}
-
-#[derive(Deserialize, Debug)]
-struct BeaconBlockData {
-    message: BeaconBlock,
-}
-
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct Bootstrap {
-    #[serde(deserialize_with = "deserialize_header")]
+    #[serde(deserialize_with = "eth_utils::deserialize_header")]
     pub header: BeaconBlockHeader,
     pub current_sync_committee: SyncCommittee,
     pub current_sync_committee_branch: Vec<Bytes32>,
@@ -68,18 +31,6 @@ pub struct BootstrapResponse {
     pub data: Bootstrap,
 }
 
-pub fn deserialize_header<'de, D>(deserializer: D) -> Result<BeaconBlockHeader, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let header: LightClientHeader = Deserialize::deserialize(deserializer)?;
-
-    Ok(match header {
-        LightClientHeader::Unwrapped(header) => header,
-        LightClientHeader::Wrapped(header) => header.beacon,
-    })
-}
-
 #[derive(Deserialize)]
 pub struct FinalityUpdateResponse {
     pub data: FinalityUpdate,
@@ -87,9 +38,9 @@ pub struct FinalityUpdateResponse {
 
 #[derive(Clone, Deserialize)]
 pub struct FinalityUpdate {
-    #[serde(deserialize_with = "deserialize_header")]
+    #[serde(deserialize_with = "eth_utils::deserialize_header")]
     pub attested_header: BeaconBlockHeader,
-    #[serde(deserialize_with = "deserialize_header")]
+    #[serde(deserialize_with = "eth_utils::deserialize_header")]
     pub finalized_header: BeaconBlockHeader,
     pub finality_branch: Vec<Bytes32>,
     pub sync_aggregate: SyncAggregate,
@@ -99,11 +50,11 @@ pub struct FinalityUpdate {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Update {
-    #[serde(deserialize_with = "deserialize_header")]
+    #[serde(deserialize_with = "eth_utils::deserialize_header")]
     pub attested_header: BeaconBlockHeader,
     pub next_sync_committee: SyncCommittee,
     pub next_sync_committee_branch: Vec<Bytes32>,
-    #[serde(deserialize_with = "deserialize_header")]
+    #[serde(deserialize_with = "eth_utils::deserialize_header")]
     pub finalized_header: BeaconBlockHeader,
     pub finality_branch: Vec<Bytes32>,
     pub sync_aggregate: SyncAggregate,

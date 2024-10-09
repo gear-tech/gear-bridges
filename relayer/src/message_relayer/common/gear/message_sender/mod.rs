@@ -3,13 +3,27 @@ use std::sync::mpsc::Receiver;
 use futures::executor::block_on;
 use gclient::GearApi;
 use gear_core::ids::MessageId;
+use primitive_types::H256;
 use prometheus::IntGauge;
+use sails_rs::{
+    calls::{Action, Call},
+    gclient::calls::GClientRemoting,
+};
+
+use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::{ERC20DepositTx, EthereumSlotNumber};
 
+mod compose_payload;
+
 pub struct MessageSender {
     gear_api: GearApi,
+    // TODO: Don't store strings here.
+    beacon_endpoint: String,
+    eth_endpoint: String,
+
+    ethereum_event_client_address: H256,
 
     metrics: Metrics,
 }
@@ -38,9 +52,19 @@ impl_metered_service! {
 }
 
 impl MessageSender {
-    pub fn new(gear_api: GearApi) -> Self {
+    pub fn new(
+        gear_api: GearApi,
+        beacon_endpoint: String,
+        eth_endpoint: String,
+        ethereum_event_client_address: H256,
+    ) -> Self {
         Self {
             gear_api,
+
+            beacon_endpoint,
+            eth_endpoint,
+
+            ethereum_event_client_address,
 
             metrics: Metrics::new(),
         }
@@ -91,31 +115,42 @@ impl MessageSender {
 
             for i in (0..waiting_checkpoint.len()).rev() {
                 if waiting_checkpoint[i].slot_number <= latest_checkpoint_slot.unwrap_or_default() {
-                    let message_id = self.submit_message(&waiting_checkpoint[i]).await?;
-
-                    let message = waiting_checkpoint.remove(i);
-                    waiting_finality.push((message, message_id));
+                    self.submit_message(&waiting_checkpoint[i]).await?;
+                    let _ = waiting_checkpoint.remove(i);
                 }
             }
 
             self.metrics
                 .messages_waiting_checkpoint
                 .set(waiting_checkpoint.len() as i64);
-
-            for i in (0..waiting_finality.len()).rev() {
-                // TODO: check status of tx. If it's finalized - remove from vec.
-            }
-
-            self.metrics
-                .messages_waiting_finality
-                .set(waiting_finality.len() as i64);
         }
     }
 
-    async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<MessageId> {
-        // TODO: submit message to gear.
+    async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<()> {
+        let message = compose_payload::compose(
+            self.beacon_endpoint.clone(),
+            self.eth_endpoint.clone(),
+            message.tx_hash,
+        )
+        .await?;
 
-        todo!()
+        let gas_limit_block = self.gear_api.block_gas_limit()?;
+        // Use 95% of block gas limit for all extrinsics.
+        let gas_limit = gas_limit_block / 100 * 95;
+
+        let remoting = GClientRemoting::new(self.gear_api.clone());
+
+        let mut erc20_service = Erc20Relay::new(remoting.clone());
+
+        erc20_service
+            .relay(message)
+            .with_gas_limit(gas_limit)
+            .send_recv(self.ethereum_event_client_address.into())
+            .await
+            .map_err(|_| anyhow::anyhow!("Failed to send message to ethereum event client"))?
+            .map_err(|_| anyhow::anyhow!("Internal ethereum event clint error"))?;
+
+        Ok(())
     }
 
     async fn update_balance_metric(&self) -> anyhow::Result<()> {

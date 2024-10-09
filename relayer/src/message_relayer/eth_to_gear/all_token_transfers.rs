@@ -1,5 +1,6 @@
 use std::iter;
 
+use gclient::GearApi as GclientGearApi;
 use primitive_types::{H160, H256};
 
 use ethereum_client::EthApi;
@@ -43,14 +44,18 @@ impl MeteredService for Relayer {
 impl Relayer {
     pub async fn new(
         gear_api: GearApi,
+        gclient_gear_api: GclientGearApi,
         eth_api: EthApi,
+        beacon_endpoint: String,
+        eth_endpoint: String,
         erc20_treasury_address: H160,
         checkpoint_light_client_address: H256,
+        ethereum_event_client_address: H256,
     ) -> anyhow::Result<Self> {
         let from_eth_block = eth_api.block_number().await?;
 
         let from_gear_block = gear_api.latest_finalized_block().await?;
-        let from_gear_block = gear_api.block_hash_to_number(block).await?;
+        let from_gear_block = gear_api.block_hash_to_number(from_gear_block).await?;
 
         let gear_block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
 
@@ -62,7 +67,12 @@ impl Relayer {
         let checkpoints_extractor =
             CheckpointsExtractor::new(gear_api.clone(), checkpoint_light_client_address);
 
-        let gear_message_sender = MessageSender::new(gear_api);
+        let gear_message_sender = MessageSender::new(
+            gclient_gear_api,
+            beacon_endpoint,
+            eth_endpoint,
+            ethereum_event_client_address,
+        );
 
         Ok(Self {
             gear_block_listener,

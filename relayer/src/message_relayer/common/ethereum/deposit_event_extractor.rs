@@ -42,7 +42,7 @@ impl DepositEventExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<ERC20Deposit> {
+    pub fn run(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<ERC20DepositTx> {
         let (sender, receiver) = channel();
 
         tokio::task::spawn_blocking(move || loop {
@@ -57,7 +57,7 @@ impl DepositEventExtractor {
 
     async fn run_inner(
         &self,
-        sender: &Sender<ERC20Deposit>,
+        sender: &Sender<ERC20DepositTx>,
         blocks: &Receiver<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
@@ -70,7 +70,7 @@ impl DepositEventExtractor {
     async fn process_block_events(
         &self,
         block: EthereumBlockNumber,
-        sender: &Sender<ERC20Deposit>,
+        sender: &Sender<ERC20DepositTx>,
     ) -> anyhow::Result<()> {
         let events = self
             .eth_api
@@ -92,18 +92,12 @@ impl DepositEventExtractor {
             tx_hash,
         } in events
         {
-            sender.send(ERC20Deposit {
-                data: ERC20DepositData {
-                    from,
-                    to,
-                    token,
-                    amount,
-                },
-                tx: ERC20DepositTx {
+            sender.send(
+                ERC20DepositTx {
                     slot_number,
                     tx_hash,
-                },
-            })?;
+                }
+            )?;
         }
 
         Ok(())

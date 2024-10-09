@@ -4,11 +4,7 @@ use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
         beacon::{BLSPubKey, Block as BeaconBlock},
-        utils::{
-            BeaconBlockHeaderResponse, BeaconBlockResponse, Bootstrap, BootstrapResponse,
-            FinalityUpdate, FinalityUpdateResponse, Update, UpdateResponse,
-        },
-        MAX_REQUEST_LIGHT_CLIENT_UPDATES,
+        utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES,
     },
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
     SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE,
@@ -16,6 +12,10 @@ use checkpoint_light_client_io::{
 use reqwest::{Client, RequestBuilder};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::{cmp, error::Error, fmt};
+use utils::{
+    BeaconBlockHeaderResponse, BeaconBlockResponse, FinalityUpdate, FinalityUpdateResponse, Update,
+    UpdateResponse,
+};
 
 pub mod slots_batch;
 
@@ -57,7 +57,7 @@ pub async fn get_bootstrap(
     client: &Client,
     rpc_url: &str,
     checkpoint: &str,
-) -> AnyResult<Bootstrap> {
+) -> AnyResult<utils::Bootstrap> {
     let checkpoint_no_prefix = match checkpoint.starts_with("0x") {
         true => &checkpoint[2..],
         false => checkpoint,
@@ -65,7 +65,7 @@ pub async fn get_bootstrap(
 
     let url = format!("{rpc_url}/eth/v1/beacon/light_client/bootstrap/0x{checkpoint_no_prefix}",);
 
-    get::<BootstrapResponse>(client.get(&url))
+    get::<utils::BootstrapResponse>(client.get(&url))
         .await
         .map(|response| response.data)
 }

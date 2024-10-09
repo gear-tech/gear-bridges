@@ -20,6 +20,7 @@ alloy.workspace = true
 alloy-consensus = { workspace = true, features = ["std"] }
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-rlp = { workspace = true, features = ["std"] }
+ethereum-common = { workspace = true, features = ["std"] }
 erc20-relay-client.workspace = true
 erc20-relay = { workspace = true, features = ["wasm-binary", "gas_calculation"] }
 futures.workspace = true

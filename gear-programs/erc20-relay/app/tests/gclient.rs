@@ -4,16 +4,22 @@ mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
 }
 
-use ethereum_common::{utils as eth_utils, memory_db, trie_db::{TrieMut, Trie, Recorder}, patricia_trie::{TrieDB, TrieDBMut}};
-use erc20_relay_client::{EthToVaraEvent, BlockInclusionProof, traits::{Erc20Relay, Erc20RelayFactory}};
-use gclient::{Event, EventProcessor, GearApi, GearEvent};
-use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use vft::vft_gateway;
+use alloy::rpc::types::TransactionReceipt;
 use alloy_rlp::Encodable;
-use alloy::rpc::types::{Log, TransactionReceipt};
-use alloy_primitives::Log as PrimitiveLog;
-use alloy_consensus::{TxType, Receipt, ReceiptWithBloom, ReceiptEnvelope};
+use checkpoint_light_client_io::{Handle, HandleResult};
+use erc20_relay_client::{
+    traits::{Erc20Relay, Erc20RelayFactory},
+    BlockInclusionProof, Config, EthToVaraEvent,
+};
+use ethereum_common::{
+    beacon::light::Block,
+    utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, Proof},
+};
+use gclient::{Event, EventProcessor, GearApi, GearEvent};
+use hex_literal::hex;
+use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use serde::Deserialize;
+use vft::vft_gateway;
 
 const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
     include_bytes!("./holesky-receipts-2_498_456.json");
@@ -30,31 +36,6 @@ const HOLESKY_HEADER_2_498_464: &[u8; 669] = include_bytes!("./holesky-header-2_
 #[derive(Deserialize)]
 pub struct Receipts {
     result: Vec<TransactionReceipt>,
-}
-
-fn map_receipt_envelope(receipt: &ReceiptEnvelope<Log>) -> ReceiptEnvelope<PrimitiveLog> {
-    let logs = receipt
-        .logs()
-        .iter()
-        .map(AsRef::as_ref)
-        .cloned()
-        .collect();
-
-    let result = ReceiptWithBloom::new(
-        Receipt {
-            status: receipt.status().into(),
-            cumulative_gas_used: receipt.cumulative_gas_used(),
-            logs,
-        },
-        *receipt.logs_bloom(),
-    );
-
-    match receipt.tx_type() {
-        TxType::Legacy => ReceiptEnvelope::Legacy(result),
-        TxType::Eip1559 => ReceiptEnvelope::Eip1559(result),
-        TxType::Eip2930 => ReceiptEnvelope::Eip2930(result),
-        TxType::Eip4844 => ReceiptEnvelope::Eip4844(result),
-    }
 }
 
 async fn spin_up_node() -> (GClientRemoting, CodeId, GasUnit) {
@@ -144,8 +125,6 @@ async fn gas_for_reply() {
 #[tokio::test]
 #[ignore = "Requires running node"]
 async fn set_vft_gateway() {
-    use erc20_relay_client::Config;
-
     let (remoting, code_id, gas_limit) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
@@ -217,8 +196,6 @@ async fn set_vft_gateway() {
 #[tokio::test]
 #[ignore = "Requires running node"]
 async fn update_config() {
-    use erc20_relay_client::Config;
-
     let (remoting, code_id, gas_limit) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
@@ -294,57 +271,189 @@ async fn update_config() {
     );
 }
 
-// block = 2_498_456 (number = 2_301_317),
-// checkpoint = 2_498_464 (0xb89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1)
-// tx 0x180cd2328df9c4356adc77e19e33c5aa2d5395f1b52e70d22c25070a04f16691
-
 #[tokio::test]
 #[ignore = "Requires running node"]
 async fn test_relay_erc20() {
+    // tx 0x180cd2328df9c4356adc77e19e33c5aa2d5395f1b52e70d22c25070a04f16691
+    let tx_index = 15;
+
+    let route = <vft_gateway::io::MintTokens as ActionIo>::ROUTE;
+
     let receipts: Receipts = serde_json::from_slice(HOLESKY_RECEIPTS_2_498_456.as_ref()).unwrap();
-    let receipts = receipts.result.iter().map(|tx_receipt| {
-        let receipt = tx_receipt.as_ref();
+    let receipts = receipts
+        .result
+        .iter()
+        .map(|tx_receipt| {
+            let receipt = tx_receipt.as_ref();
 
-        tx_receipt
-            .transaction_index
-            .map(|i| (i, map_receipt_envelope(receipt)))
-    }).collect::<Option<Vec<_>>>()
-    .unwrap_or_default();
+            tx_receipt
+                .transaction_index
+                .map(|i| (i, eth_utils::map_receipt_envelope(receipt)))
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default();
 
-    let mut memory_db = memory_db::new();
-    let key_value_tuples = eth_utils::rlp_encode_receipts_and_nibble_tuples(&receipts[..]);
-    let root = {
-        let mut root = H256::zero();
-        let mut triedbmut = TrieDBMut::new(&mut memory_db, &mut root);
-        for (key, value) in &key_value_tuples {
-            triedbmut.insert(key, value).unwrap();
-        }
+    let block: Block = {
+        let response: BeaconBlockResponse =
+            serde_json::from_slice(HOLESKY_BLOCK_2_498_456.as_ref()).unwrap();
 
-        *triedbmut.root()
+        response.data.message.into()
     };
 
-    let tx_index = 15;
-    let (tx_index, receipt) = receipts
-        .iter()
-        .find(|(index, _)| index == &tx_index)
+    let headers = vec![
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_457.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_458.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_459.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_460.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_461.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_462.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_463.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+        {
+            let response: BeaconBlockHeaderResponse =
+                serde_json::from_slice(HOLESKY_HEADER_2_498_464.as_ref()).unwrap();
+
+            response.data.header.message
+        },
+    ];
+
+    let Proof { proof, receipt } = eth_utils::generate_proof(tx_index, &receipts[..]).unwrap();
+
+    let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
+    Encodable::encode(&receipt, &mut receipt_rlp);
+    let message = EthToVaraEvent {
+        proof_block: BlockInclusionProof {
+            block: block.clone(),
+            headers: headers.clone(),
+        },
+        proof: proof.clone(),
+        transaction_index: tx_index,
+        receipt_rlp,
+    };
+
+    let (remoting, code_id, gas_limit) = spin_up_node().await;
+    let admin = <[u8; 32]>::from(remoting.api().account_id().clone());
+    let admin = ActorId::from(admin);
+
+    let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
+    let program_id = factory
+        .new(
+            admin,
+            H160::from(hex!("33B53f4E8bA2B127712af3C9723626cf98091D87")),
+            Config {
+                reply_timeout: 1_000,
+                reply_deposit: 5_500_000_000,
+            },
+        )
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [])
+        .await
+        .unwrap();
+    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
+    client
+        .set_vft_gateway(admin)
+        .with_gas_limit(gas_limit)
+        .send_recv(program_id)
+        .await
         .unwrap();
 
-    let trie = TrieDB::new(&memory_db, &root).unwrap();
-    let (key, _expected_value) = eth_utils::rlp_encode_index_and_receipt(tx_index, receipt);
+    let mut listener = remoting.api().subscribe().await.unwrap();
 
-    let mut recorder = Recorder::new();
-    let _value = trie.get_with(&key, &mut recorder);
+    let result = client
+        .relay(message)
+        .with_gas_limit(gas_limit)
+        .send(program_id)
+        .await
+        .unwrap();
 
-    let mut receipt_rlp = Vec::with_capacity(Encodable::length(receipt));
-    Encodable::encode(receipt, &mut receipt_rlp);
-    // let message = EthToVaraEvent {
-    //     proof_block,
-    //     proof: recorder
-    //         .drain()
-    //         .into_iter()
-    //         .map(|r| r.data)
-    //         .collect::<Vec<_>>(),
-    //     transaction_index: *tx_index,
-    //     receipt_rlp,
-    // };
+    // wait for Handle::GetCheckpointFor request and reply to it
+    let message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == admin.into() && message.details.is_none() =>
+            {
+                let request = Handle::decode(&mut &message.payload.0[..]).ok()?;
+                match request {
+                    Handle::GetCheckpointFor { slot } if slot == 2_498_456 => Some(message.id),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .await
+        .unwrap();
+
+    let reply = HandleResult::Checkpoint(Ok((
+        2_498_464,
+        hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
+    )));
+    remoting
+        .api()
+        .send_reply(message_id.into(), reply, gas_limit, 0)
+        .await
+        .unwrap();
+
+    // wait for MintTokens request and reply to it
+    let message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == admin.into() && message.details.is_none() =>
+            {
+                message.payload.0.starts_with(route).then_some(message.id)
+            }
+            _ => None,
+        })
+        .await
+        .unwrap();
+
+    let reply: <vft_gateway::io::MintTokens as ActionIo>::Reply = Ok(());
+    let payload = {
+        let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
+        result.extend_from_slice(route);
+        reply.encode_to(&mut result);
+
+        result
+    };
+    remoting
+        .api()
+        .send_reply_bytes(message_id.into(), payload, gas_limit, 0)
+        .await
+        .unwrap();
+
+    let result = result.recv().await.unwrap();
+    assert!(result.is_ok());
 }

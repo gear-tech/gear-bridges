@@ -1,14 +1,128 @@
-use super::*;
+use super::{
+    beacon::{Block, BlockHeader, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
+    memory_db,
+    patricia_trie::{TrieDB, TrieDBMut},
+    trie_db::{Recorder, Trie, TrieMut},
+    Debug, Hash256, TreeHash, TreeHashType, EPOCHS_PER_SYNC_COMMITTEE, H256, SLOTS_PER_EPOCH, U256,
+};
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::Log;
 use alloy_rlp::Encodable;
-use core::str::FromStr;
+use core::{fmt, str::FromStr};
+use serde::{de, Deserialize};
 
 const CAPACITY_RLP_RECEIPT: usize = 10_000;
 
 pub type ReceiptEnvelope = alloy_consensus::ReceiptEnvelope<Log>;
 /// Tuple with a transaction index and the related receipt.
 pub type Receipt = (u64, ReceiptEnvelope);
+
+#[derive(Clone, Debug)]
+pub enum MerkleProofError {
+    ReceiptNotFound,
+    InsertionFailed,
+    RootIsNotValid,
+}
+
+impl fmt::Display for MerkleProofError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
+impl core::error::Error for MerkleProofError {}
+
+pub struct MerkleProof {
+    pub proof: Vec<Vec<u8>>,
+    pub receipt: ReceiptEnvelope,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+pub enum LightClientHeader {
+    Unwrapped(BlockHeader),
+    Wrapped(Beacon),
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Beacon {
+    pub beacon: BlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockHeaderResponse {
+    pub data: BeaconBlockHeaderData,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockHeaderData {
+    pub header: SignedBeaconBlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockResponse {
+    pub data: BeaconBlockData,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BeaconBlockData {
+    pub message: Block,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, Debug)]
+pub struct Bootstrap {
+    #[serde(deserialize_with = "deserialize_block_header")]
+    pub header: BlockHeader,
+    pub current_sync_committee: SyncCommittee,
+    pub current_sync_committee_branch: Vec<Bytes32>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, Debug)]
+pub struct BootstrapResponse {
+    pub data: Bootstrap,
+}
+
+#[derive(Deserialize)]
+pub struct FinalityUpdateResponse {
+    pub data: FinalityUpdate,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct FinalityUpdate {
+    #[serde(deserialize_with = "deserialize_block_header")]
+    pub attested_header: BlockHeader,
+    #[serde(deserialize_with = "deserialize_block_header")]
+    pub finalized_header: BlockHeader,
+    pub finality_branch: Vec<Bytes32>,
+    pub sync_aggregate: SyncAggregate,
+    #[serde(deserialize_with = "deserialize_u64")]
+    pub signature_slot: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Update {
+    #[serde(deserialize_with = "deserialize_block_header")]
+    pub attested_header: BlockHeader,
+    pub next_sync_committee: SyncCommittee,
+    pub next_sync_committee_branch: Vec<Bytes32>,
+    #[serde(deserialize_with = "deserialize_block_header")]
+    pub finalized_header: BlockHeader,
+    pub finality_branch: Vec<Bytes32>,
+    pub sync_aggregate: SyncAggregate,
+    #[serde(deserialize_with = "deserialize_u64")]
+    pub signature_slot: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateData {
+    pub data: Update,
+}
+
+pub type UpdateResponse = Vec<UpdateData>;
 
 pub fn calculate_epoch(slot: u64) -> u64 {
     slot / SLOTS_PER_EPOCH
@@ -134,4 +248,76 @@ pub fn rlp_encode_receipts_and_nibble_tuples(receipts: &[Receipt]) -> Vec<(Vec<u
             rlp_encode_index_and_receipt(transaction_index, receipt)
         })
         .collect::<Vec<_>>()
+}
+
+#[cfg(feature = "std")]
+pub fn map_receipt_envelope(
+    receipt: &alloy_consensus::ReceiptEnvelope<alloy::rpc::types::Log>,
+) -> ReceiptEnvelope {
+    use alloy_consensus::{Receipt, ReceiptWithBloom, TxType};
+
+    let logs = receipt.logs().iter().map(AsRef::as_ref).cloned().collect();
+
+    let result = ReceiptWithBloom::new(
+        Receipt {
+            status: receipt.status().into(),
+            cumulative_gas_used: receipt.cumulative_gas_used(),
+            logs,
+        },
+        *receipt.logs_bloom(),
+    );
+
+    match receipt.tx_type() {
+        TxType::Legacy => ReceiptEnvelope::Legacy(result),
+        TxType::Eip1559 => ReceiptEnvelope::Eip1559(result),
+        TxType::Eip2930 => ReceiptEnvelope::Eip2930(result),
+        TxType::Eip4844 => ReceiptEnvelope::Eip4844(result),
+    }
+}
+
+pub fn generate_merkle_proof(
+    tx_index: u64,
+    receipts: &[Receipt],
+) -> Result<MerkleProof, MerkleProofError> {
+    let mut memory_db = memory_db::new();
+    let key_value_tuples = rlp_encode_receipts_and_nibble_tuples(receipts);
+    let root = {
+        let mut root = H256::zero();
+        let mut triedbmut = TrieDBMut::new(&mut memory_db, &mut root);
+        for (key, value) in &key_value_tuples {
+            triedbmut
+                .insert(key, value)
+                .map_err(|_| MerkleProofError::InsertionFailed)?;
+        }
+
+        *triedbmut.root()
+    };
+
+    let (tx_index, receipt) = receipts
+        .iter()
+        .find(|(index, _)| index == &tx_index)
+        .ok_or(MerkleProofError::ReceiptNotFound)?;
+
+    let trie = TrieDB::new(&memory_db, &root).map_err(|_| MerkleProofError::RootIsNotValid)?;
+    let (key, _expected_value) = rlp_encode_index_and_receipt(tx_index, receipt);
+
+    let mut recorder = Recorder::new();
+    let _value = trie.get_with(&key, &mut recorder);
+
+    Ok(MerkleProof {
+        proof: recorder.drain().into_iter().map(|r| r.data).collect(),
+        receipt: receipt.clone(),
+    })
+}
+
+pub fn deserialize_block_header<'de, D>(deserializer: D) -> Result<BlockHeader, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let header: LightClientHeader = Deserialize::deserialize(deserializer)?;
+
+    Ok(match header {
+        LightClientHeader::Unwrapped(header) => header,
+        LightClientHeader::Wrapped(header) => header.beacon,
+    })
 }

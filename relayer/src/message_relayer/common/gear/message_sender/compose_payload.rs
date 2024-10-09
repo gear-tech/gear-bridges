@@ -1,6 +1,8 @@
-use super::{ethereum_checkpoints::utils, *};
+use crate::{ethereum_checkpoints::utils, RelayErc20Args};
+
 use alloy::{
     network::primitives::BlockTransactionsKind,
+    primitives::TxHash,
     providers::{Provider, ProviderBuilder},
     rpc::types::{Log, Receipt, ReceiptEnvelope, ReceiptWithBloom},
 };
@@ -25,35 +27,17 @@ use reqwest::Client;
 use sails_rs::{calls::*, events::*, gclient::calls::*, prelude::*};
 use std::cmp::Ordering;
 
-pub async fn relay(args: RelayErc20Args) {
-    if let Err(e) = relay_inner(args).await {
-        log::error!("{e:?}");
-    }
-}
-
-async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
-    log::info!("Started");
-
-    let RelayErc20Args {
-        program_id,
-        beacon_endpoint,
-        vara_domain,
-        vara_port,
-        vara_suri,
-        eth_endpoint,
-        tx_hash,
-    } = args;
-
-    let program_id: [u8; 32] =
-        utils::try_from_hex_encoded(&program_id).expect("Expecting correct ProgramId");
-    let tx_hash: [u8; 32] =
-        utils::try_from_hex_encoded(&tx_hash).expect("Expecting correct hash of a transaction");
-
+// TODO: Don't create ethereum clients inside.
+pub async fn compose(
+    beacon_endpoint: String,
+    eth_endpoint: String,
+    tx_hash: TxHash,
+) -> AnyResult<EthToVaraEvent> {
     let rpc_url = eth_endpoint.parse()?;
     let provider = ProviderBuilder::new().on_http(rpc_url);
 
     let receipt = provider
-        .get_transaction_receipt(tx_hash.into())
+        .get_transaction_receipt(tx_hash)
         .await?
         .ok_or(anyhow!("Transaction receipt is missing"))?;
 
@@ -132,7 +116,8 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(receipt));
     Encodable::encode(receipt, &mut receipt_rlp);
-    let message = EthToVaraEvent {
+
+    Ok(EthToVaraEvent {
         proof_block,
         proof: recorder
             .drain()
@@ -141,34 +126,7 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
             .collect::<Vec<_>>(),
         transaction_index: *tx_index,
         receipt_rlp,
-    };
-
-    let client = GearApi::init_with(WSAddress::new(vara_domain, vara_port), vara_suri).await?;
-    let gas_limit_block = client.block_gas_limit()?;
-    // use 95% of block gas limit for all extrinsics
-    let gas_limit = gas_limit_block / 100 * 95;
-
-    let remoting = GClientRemoting::new(client);
-
-    let mut erc20_service = Erc20Relay::new(remoting.clone());
-    let mut listener = erc20_relay_client::erc_20_relay::events::listener(remoting.clone());
-    let mut events = listener.listen().await.unwrap();
-
-    let result = erc20_service
-        .relay(message)
-        .with_gas_limit(gas_limit)
-        .send_recv(program_id.into())
-        .await
-        .unwrap();
-
-    log::debug!("result = {result:?}");
-    if result.is_ok() {
-        let event = events.next().await.unwrap();
-
-        log::debug!("event = {event:?}");
-    }
-
-    Ok(())
+    })
 }
 
 async fn build_inclusion_proof(

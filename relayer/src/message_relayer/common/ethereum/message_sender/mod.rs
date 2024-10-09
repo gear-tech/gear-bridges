@@ -14,9 +14,9 @@ use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
 mod era;
 use era::{Era, Metrics as EraMetrics};
 
-use super::RelayedMerkleRoot;
+use crate::message_relayer::common::RelayedMerkleRoot;
 
-pub struct EthereumMessageSender {
+pub struct MessageSender {
     eth_api: EthApi,
     gear_api: GearApi,
 
@@ -24,7 +24,7 @@ pub struct EthereumMessageSender {
     era_metrics: EraMetrics,
 }
 
-impl MeteredService for EthereumMessageSender {
+impl MeteredService for MessageSender {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics
             .get_sources()
@@ -46,7 +46,7 @@ impl_metered_service! {
     }
 }
 
-impl EthereumMessageSender {
+impl MessageSender {
     pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
         Self {
             eth_api,

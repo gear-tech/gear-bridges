@@ -3,8 +3,11 @@ use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{BLSPubKey, Block as BeaconBlock, Bytes32, SyncAggregate, SyncCommittee},
-        utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse},
+        beacon::{BLSPubKey, Block as BeaconBlock},
+        utils::{
+            BeaconBlockHeaderResponse, BeaconBlockResponse, Bootstrap, BootstrapResponse,
+            FinalityUpdate, FinalityUpdateResponse, Update, UpdateResponse,
+        },
         MAX_REQUEST_LIGHT_CLIENT_UPDATES,
     },
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
@@ -15,59 +18,6 @@ use serde::{de::DeserializeOwned, Deserialize};
 use std::{cmp, error::Error, fmt};
 
 pub mod slots_batch;
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct Bootstrap {
-    #[serde(deserialize_with = "eth_utils::deserialize_header")]
-    pub header: BeaconBlockHeader,
-    pub current_sync_committee: SyncCommittee,
-    pub current_sync_committee_branch: Vec<Bytes32>,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct BootstrapResponse {
-    pub data: Bootstrap,
-}
-
-#[derive(Deserialize)]
-pub struct FinalityUpdateResponse {
-    pub data: FinalityUpdate,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct FinalityUpdate {
-    #[serde(deserialize_with = "eth_utils::deserialize_header")]
-    pub attested_header: BeaconBlockHeader,
-    #[serde(deserialize_with = "eth_utils::deserialize_header")]
-    pub finalized_header: BeaconBlockHeader,
-    pub finality_branch: Vec<Bytes32>,
-    pub sync_aggregate: SyncAggregate,
-    #[serde(deserialize_with = "eth_utils::deserialize_u64")]
-    pub signature_slot: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Update {
-    #[serde(deserialize_with = "eth_utils::deserialize_header")]
-    pub attested_header: BeaconBlockHeader,
-    pub next_sync_committee: SyncCommittee,
-    pub next_sync_committee_branch: Vec<Bytes32>,
-    #[serde(deserialize_with = "eth_utils::deserialize_header")]
-    pub finalized_header: BeaconBlockHeader,
-    pub finality_branch: Vec<Bytes32>,
-    pub sync_aggregate: SyncAggregate,
-    #[serde(deserialize_with = "eth_utils::deserialize_u64")]
-    pub signature_slot: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdateData {
-    pub data: Update,
-}
-
-pub type UpdateResponse = Vec<UpdateData>;
 
 #[derive(Clone, Debug)]
 pub struct ErrorNotFound;

@@ -8,7 +8,7 @@ use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, Block as BeaconBlock},
-    utils::{self as eth_utils, Proof},
+    utils::{self as eth_utils, MerkleProof},
     SLOTS_PER_EPOCH,
 };
 use erc20_relay_client::{
@@ -102,7 +102,7 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default();
 
-    let Proof { proof, receipt } = eth_utils::generate_proof(tx_index, &receipts[..])?;
+    let MerkleProof { proof, receipt } = eth_utils::generate_merkle_proof(tx_index, &receipts[..])?;
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
     Encodable::encode(&receipt, &mut receipt_rlp);

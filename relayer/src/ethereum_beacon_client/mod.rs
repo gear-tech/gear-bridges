@@ -11,8 +11,8 @@ use ethereum_common::{
     base_types::{BytesFixed, FixedArray},
     beacon::{BLSPubKey, Block as BeaconBlock},
     utils::{
-        BeaconBlockHeaderResponse, BeaconBlockResponse, Bootstrap, BootstrapResponse,
-        FinalityUpdate, FinalityUpdateResponse, Update, UpdateResponse,
+        BeaconBlockHeaderResponse, BeaconBlockResponse, FinalityUpdate, FinalityUpdateResponse,
+        Update, UpdateResponse,
     },
     MAX_REQUEST_LIGHT_CLIENT_UPDATES,
 };

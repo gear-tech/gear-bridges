@@ -1,4 +1,4 @@
-use crate::{ethereum_beacon_client, RelayErc20Args};
+use crate::ethereum_beacon_client;
 
 use alloy::{
     network::primitives::BlockTransactionsKind,
@@ -13,13 +13,9 @@ use checkpoint_light_client_io::ethereum_common::{
     utils::{self as eth_utils, MerkleProof},
     SLOTS_PER_EPOCH,
 };
-use erc20_relay_client::{
-    traits::Erc20Relay as _, BlockInclusionProof, Erc20Relay, EthToVaraEvent,
-};
-use futures::StreamExt;
-use gclient::{GearApi, WSAddress};
+use erc20_relay_client::{BlockInclusionProof, EthToVaraEvent};
 use reqwest::Client;
-use sails_rs::{calls::*, events::*, gclient::calls::*, prelude::*};
+use sails_rs::prelude::*;
 use std::cmp::Ordering;
 
 // TODO: Don't create ethereum clients inside.
@@ -164,10 +160,7 @@ async fn find_beacon_block(
             Ok(_) => (),
             Err(e)
                 if e.downcast_ref::<ethereum_beacon_client::ErrorNotFound>()
-                    .is_some() =>
-            {
-                ()
-            }
+                    .is_some() => {}
             Err(e) => return Err(e),
         }
     }

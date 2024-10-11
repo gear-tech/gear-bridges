@@ -101,7 +101,7 @@ impl CheckpointsExtractor {
 
         assert!(state.checkpoints.len() <= 1);
 
-        let latest_checkpoint = state.checkpoints.get(0);
+        let latest_checkpoint = state.checkpoints.first();
 
         match (latest_checkpoint, self.latest_checkpoint) {
             (None, None) => {}

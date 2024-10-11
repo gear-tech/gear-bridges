@@ -324,7 +324,7 @@ async fn main() {
                 .await
                 .expect("Failed to fetch authority set state");
         }
-        CliCommands::RelayErc20(args) => todo!(),
+        CliCommands::RelayErc20(_args) => todo!(),
     };
 }
 

@@ -2,7 +2,6 @@ use std::sync::mpsc::Receiver;
 
 use futures::executor::block_on;
 use gclient::GearApi;
-use gear_core::ids::MessageId;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
@@ -89,7 +88,6 @@ impl MessageSender {
         checkpoints: &Receiver<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
         let mut waiting_checkpoint: Vec<ERC20DepositTx> = vec![];
-        let mut waiting_finality: Vec<(ERC20DepositTx, MessageId)> = vec![];
 
         let mut latest_checkpoint_slot = None;
 

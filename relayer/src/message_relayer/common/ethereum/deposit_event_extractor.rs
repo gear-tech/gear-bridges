@@ -1,14 +1,12 @@
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-use ethereum_client::{DepositEventEntry, EthApi};
+use ethereum_client::EthApi;
 use futures::executor::block_on;
 use prometheus::IntCounter;
 use sails_rs::H160;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{
-    ERC20Deposit, ERC20DepositData, ERC20DepositTx, EthereumBlockNumber,
-};
+use crate::message_relayer::common::{ERC20DepositTx, EthereumBlockNumber};
 
 pub struct DepositEventExtractor {
     eth_api: EthApi,
@@ -70,35 +68,26 @@ impl DepositEventExtractor {
     async fn process_block_events(
         &self,
         block: EthereumBlockNumber,
-        sender: &Sender<ERC20DepositTx>,
+        _sender: &Sender<ERC20DepositTx>,
     ) -> anyhow::Result<()> {
-        let events = self
+        let _events = self
             .eth_api
             .fetch_deposit_events(self.erc20_treasury_address, block.0)
             .await?;
 
-        // TODO: fetch slot number by block number.
-        let slot_number = todo!();
+        // // TODO: fetch slot number by block number.
+        // let slot_number = todo!();
 
-        self.metrics
-            .total_deposits_found
-            .inc_by(events.len() as u64);
+        // self.metrics
+        //     .total_deposits_found
+        //     .inc_by(events.len() as u64);
 
-        for DepositEventEntry {
-            from,
-            to,
-            token,
-            amount,
-            tx_hash,
-        } in events
-        {
-            sender.send(
-                ERC20DepositTx {
-                    slot_number,
-                    tx_hash,
-                }
-            )?;
-        }
+        // for DepositEventEntry { tx_hash, .. } in events {
+        //     sender.send(ERC20DepositTx {
+        //         slot_number,
+        //         tx_hash,
+        //     })?;
+        // }
 
         Ok(())
     }

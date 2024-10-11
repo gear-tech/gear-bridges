@@ -8,15 +8,13 @@ use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
-    self,
     ethereum::{
         block_listener::BlockListener as EthereumBlockListener,
-        deposit_event_extractor::DepositEventExtractor, merkle_root_extractor::MerkleRootExtractor,
+        deposit_event_extractor::DepositEventExtractor,
     },
     gear::{
         block_listener::BlockListener as GearBlockListener,
-        checkpoints_extractor::CheckpointsExtractor,
-        message_queued_event_extractor::MessageQueuedEventExtractor, message_sender::MessageSender,
+        checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
     },
 };
 
@@ -42,6 +40,7 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         gear_api: GearApi,
         gclient_gear_api: GclientGearApi,

@@ -90,9 +90,6 @@ pub async fn compose(
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
     Encodable::encode(&receipt, &mut receipt_rlp);
-    let message = EthToVaraEvent {
-    let mut receipt_rlp = Vec::with_capacity(Encodable::length(receipt));
-    Encodable::encode(receipt, &mut receipt_rlp);
 
     Ok(EthToVaraEvent {
         proof_block,

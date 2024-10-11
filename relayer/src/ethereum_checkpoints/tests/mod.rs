@@ -1,8 +1,11 @@
-use super::utils::{self, slots_batch, BootstrapResponse, FinalityUpdateResponse, UpdateData};
+use super::utils::{self, slots_batch};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
-        base_types::BytesFixed, network::Network, utils as eth_utils, SLOTS_PER_EPOCH,
+        base_types::BytesFixed,
+        network::Network,
+        utils::{self as eth_utils, BootstrapResponse, FinalityUpdateResponse, UpdateData},
+        SLOTS_PER_EPOCH,
     },
     replay_back, sync_update,
     tree_hash::TreeHash,

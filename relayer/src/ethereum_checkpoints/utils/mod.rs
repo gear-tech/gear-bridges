@@ -3,11 +3,8 @@ use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
     ethereum_common::{
         base_types::{BytesFixed, FixedArray},
-        beacon::{
-            BLSPubKey, Block as BeaconBlock, Bytes32, SignedBeaconBlockHeader, SyncAggregate,
-            SyncCommittee,
-        },
-        utils as eth_utils,
+        beacon::{BLSPubKey, Block as BeaconBlock},
+        utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES,
     },
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
     SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE,
@@ -15,108 +12,12 @@ use checkpoint_light_client_io::{
 use reqwest::{Client, RequestBuilder};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::{cmp, error::Error, fmt};
+use utils::{
+    BeaconBlockHeaderResponse, BeaconBlockResponse, FinalityUpdate, FinalityUpdateResponse, Update,
+    UpdateResponse,
+};
 
 pub mod slots_batch;
-
-// https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/p2p-interface.md#configuration
-pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum LightClientHeader {
-    Unwrapped(BeaconBlockHeader),
-    Wrapped(Beacon),
-}
-
-#[derive(Deserialize)]
-pub struct Beacon {
-    pub beacon: BeaconBlockHeader,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct BeaconBlockHeaderResponse {
-    pub data: BeaconBlockHeaderData,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct BeaconBlockHeaderData {
-    pub header: SignedBeaconBlockHeader,
-}
-
-#[derive(Deserialize, Debug)]
-struct BeaconBlockResponse {
-    data: BeaconBlockData,
-}
-
-#[derive(Deserialize, Debug)]
-struct BeaconBlockData {
-    message: BeaconBlock,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct Bootstrap {
-    #[serde(deserialize_with = "deserialize_header")]
-    pub header: BeaconBlockHeader,
-    pub current_sync_committee: SyncCommittee,
-    pub current_sync_committee_branch: Vec<Bytes32>,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct BootstrapResponse {
-    pub data: Bootstrap,
-}
-
-pub fn deserialize_header<'de, D>(deserializer: D) -> Result<BeaconBlockHeader, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let header: LightClientHeader = Deserialize::deserialize(deserializer)?;
-
-    Ok(match header {
-        LightClientHeader::Unwrapped(header) => header,
-        LightClientHeader::Wrapped(header) => header.beacon,
-    })
-}
-
-#[derive(Deserialize)]
-pub struct FinalityUpdateResponse {
-    pub data: FinalityUpdate,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct FinalityUpdate {
-    #[serde(deserialize_with = "deserialize_header")]
-    pub attested_header: BeaconBlockHeader,
-    #[serde(deserialize_with = "deserialize_header")]
-    pub finalized_header: BeaconBlockHeader,
-    pub finality_branch: Vec<Bytes32>,
-    pub sync_aggregate: SyncAggregate,
-    #[serde(deserialize_with = "eth_utils::deserialize_u64")]
-    pub signature_slot: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Update {
-    #[serde(deserialize_with = "deserialize_header")]
-    pub attested_header: BeaconBlockHeader,
-    pub next_sync_committee: SyncCommittee,
-    pub next_sync_committee_branch: Vec<Bytes32>,
-    #[serde(deserialize_with = "deserialize_header")]
-    pub finalized_header: BeaconBlockHeader,
-    pub finality_branch: Vec<Bytes32>,
-    pub sync_aggregate: SyncAggregate,
-    #[serde(deserialize_with = "eth_utils::deserialize_u64")]
-    pub signature_slot: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdateData {
-    pub data: Update,
-}
-
-pub type UpdateResponse = Vec<UpdateData>;
 
 #[derive(Clone, Debug)]
 pub struct ErrorNotFound;
@@ -156,7 +57,7 @@ pub async fn get_bootstrap(
     client: &Client,
     rpc_url: &str,
     checkpoint: &str,
-) -> AnyResult<Bootstrap> {
+) -> AnyResult<utils::Bootstrap> {
     let checkpoint_no_prefix = match checkpoint.starts_with("0x") {
         true => &checkpoint[2..],
         false => checkpoint,
@@ -164,7 +65,7 @@ pub async fn get_bootstrap(
 
     let url = format!("{rpc_url}/eth/v1/beacon/light_client/bootstrap/0x{checkpoint_no_prefix}",);
 
-    get::<BootstrapResponse>(client.get(&url))
+    get::<utils::BootstrapResponse>(client.get(&url))
         .await
         .map(|response| response.data)
 }

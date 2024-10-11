@@ -4,19 +4,14 @@ use alloy::{
     network::primitives::BlockTransactionsKind,
     primitives::TxHash,
     providers::{Provider, ProviderBuilder},
-    rpc::types::{Log, Receipt, ReceiptEnvelope, ReceiptWithBloom},
 };
-use alloy_consensus::TxType;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::Log as PrimitiveLog;
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, Block as BeaconBlock},
-    memory_db,
-    patricia_trie::{TrieDB, TrieDBMut},
-    trie_db::{Recorder, Trie, TrieMut},
-    utils as eth_utils, H256, SLOTS_PER_EPOCH,
+    utils::{self as eth_utils, MerkleProof},
+    SLOTS_PER_EPOCH,
 };
 use erc20_relay_client::{
     traits::Erc20Relay as _, BlockInclusionProof, Erc20Relay, EthToVaraEvent,
@@ -86,45 +81,23 @@ pub async fn compose(
 
             tx_receipt
                 .transaction_index
-                .map(|i| (i, map_receipt_envelope(receipt)))
+                .map(|i| (i, eth_utils::map_receipt_envelope(receipt)))
         })
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default();
 
-    let mut memory_db = memory_db::new();
-    let key_value_tuples = eth_utils::rlp_encode_receipts_and_nibble_tuples(&receipts[..]);
-    let root = {
-        let mut root = H256::zero();
-        let mut triedbmut = TrieDBMut::new(&mut memory_db, &mut root);
-        for (key, value) in &key_value_tuples {
-            triedbmut.insert(key, value)?;
-        }
+    let MerkleProof { proof, receipt } = eth_utils::generate_merkle_proof(tx_index, &receipts[..])?;
 
-        *triedbmut.root()
-    };
-
-    let (tx_index, receipt) = receipts
-        .iter()
-        .find(|(index, _)| index == &tx_index)
-        .ok_or(anyhow!("Unable to find transaction's receipt"))?;
-
-    let trie = TrieDB::new(&memory_db, &root)?;
-    let (key, _expected_value) = eth_utils::rlp_encode_index_and_receipt(tx_index, receipt);
-
-    let mut recorder = Recorder::new();
-    let _value = trie.get_with(&key, &mut recorder);
-
+    let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
+    Encodable::encode(&receipt, &mut receipt_rlp);
+    let message = EthToVaraEvent {
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(receipt));
     Encodable::encode(receipt, &mut receipt_rlp);
 
     Ok(EthToVaraEvent {
         proof_block,
-        proof: recorder
-            .drain()
-            .into_iter()
-            .map(|r| r.data)
-            .collect::<Vec<_>>(),
-        transaction_index: *tx_index,
+        proof,
+        transaction_index: tx_index,
         receipt_rlp,
     })
 }
@@ -193,29 +166,4 @@ async fn find_beacon_block(
     }
 
     Err(anyhow!("Block was not found"))
-}
-
-fn map_receipt_envelope(receipt: &ReceiptEnvelope<Log>) -> ReceiptEnvelope<PrimitiveLog> {
-    let logs = receipt
-        .logs()
-        .iter()
-        .map(AsRef::as_ref)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let result = ReceiptWithBloom::new(
-        Receipt {
-            status: receipt.status().into(),
-            cumulative_gas_used: receipt.cumulative_gas_used(),
-            logs,
-        },
-        *receipt.logs_bloom(),
-    );
-
-    match receipt.tx_type() {
-        TxType::Legacy => ReceiptEnvelope::Legacy(result),
-        TxType::Eip1559 => ReceiptEnvelope::Eip1559(result),
-        TxType::Eip2930 => ReceiptEnvelope::Eip2930(result),
-        TxType::Eip4844 => ReceiptEnvelope::Eip4844(result),
-    }
 }

@@ -21,8 +21,8 @@ mod compose_payload;
 
 pub struct MessageSender {
     gear_api: GearApi,
+    beacon_client: BeaconClient,
     // TODO: Don't store strings here.
-    beacon_endpoint: String,
     eth_endpoint: String,
 
     ethereum_event_client_address: H256,
@@ -56,14 +56,14 @@ impl_metered_service! {
 impl MessageSender {
     pub fn new(
         gear_api: GearApi,
-        beacon_endpoint: String,
+        beacon_client: BeaconClient,
         eth_endpoint: String,
         ethereum_event_client_address: H256,
     ) -> Self {
         Self {
             gear_api,
+            beacon_client,
 
-            beacon_endpoint,
             eth_endpoint,
 
             ethereum_event_client_address,
@@ -128,12 +128,12 @@ impl MessageSender {
     }
 
     async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<()> {
-        // TODO: Don't create it here.
-        let beacon_client = BeaconClient::new(self.beacon_endpoint.clone());
-
-        let message =
-            compose_payload::compose(&beacon_client, self.eth_endpoint.clone(), message.tx_hash)
-                .await?;
+        let message = compose_payload::compose(
+            &self.beacon_client,
+            self.eth_endpoint.clone(),
+            message.tx_hash,
+        )
+        .await?;
 
         let gas_limit_block = self.gear_api.block_gas_limit()?;
         // Use 95% of block gas limit for all extrinsics.

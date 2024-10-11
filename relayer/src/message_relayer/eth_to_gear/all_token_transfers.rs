@@ -7,14 +7,17 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::{
-    ethereum::{
-        block_listener::BlockListener as EthereumBlockListener,
-        deposit_event_extractor::DepositEventExtractor,
-    },
-    gear::{
-        block_listener::BlockListener as GearBlockListener,
-        checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
+use crate::{
+    ethereum_beacon_client::BeaconClient,
+    message_relayer::common::{
+        ethereum::{
+            block_listener::BlockListener as EthereumBlockListener,
+            deposit_event_extractor::DepositEventExtractor,
+        },
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
+        },
     },
 };
 
@@ -45,7 +48,7 @@ impl Relayer {
         gear_api: GearApi,
         gclient_gear_api: GclientGearApi,
         eth_api: EthApi,
-        beacon_endpoint: String,
+        beacon_client: BeaconClient,
         eth_endpoint: String,
         erc20_treasury_address: H160,
         checkpoint_light_client_address: H256,
@@ -68,7 +71,7 @@ impl Relayer {
 
         let gear_message_sender = MessageSender::new(
             gclient_gear_api,
-            beacon_endpoint,
+            beacon_client,
             eth_endpoint,
             ethereum_event_client_address,
         );

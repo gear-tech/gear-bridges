@@ -1,4 +1,5 @@
 use super::*;
+use crate::ethereum_beacon_client;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(
@@ -36,7 +37,7 @@ pub async fn execute(
     }
 
     let period_start = 1 + eth_utils::calculate_period(slot_start);
-    let updates = utils::get_updates(
+    let updates = ethereum_beacon_client::get_updates(
         client_http,
         beacon_endpoint,
         period_start,
@@ -58,7 +59,7 @@ pub async fn execute(
         )
         .map_err(|e| anyhow!("Failed to deserialize point on G2 (replay back): {e:?}"))?;
 
-        let sync_update = utils::sync_update_from_update(signature, update.data);
+        let sync_update = ethereum_beacon_client::sync_update_from_update(signature, update.data);
         replay_back_slots_start(
             client_http,
             beacon_endpoint,
@@ -151,7 +152,8 @@ async fn replay_back_slots_inner(
     gas_limit: u64,
 ) -> AnyResult<()> {
     let payload = Handle::ReplayBack(
-        utils::request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
+        ethereum_beacon_client::request_headers(client_http, beacon_endpoint, slot_start, slot_end)
+            .await?,
     );
 
     let mut listener = client.subscribe().await?;
@@ -195,7 +197,13 @@ async fn replay_back_slots_start(
 
     let payload = Handle::ReplayBackStart {
         sync_update,
-        headers: utils::request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
+        headers: ethereum_beacon_client::request_headers(
+            client_http,
+            beacon_endpoint,
+            slot_start,
+            slot_end,
+        )
+        .await?,
     };
 
     let mut listener = client.subscribe().await?;

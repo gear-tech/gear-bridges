@@ -1,4 +1,4 @@
-use crate::{ethereum_checkpoints::utils, RelayErc20Args};
+use crate::{ethereum_beacon_client, RelayErc20Args};
 
 use alloy::{
     network::primitives::BlockTransactionsKind,
@@ -106,7 +106,7 @@ async fn build_inclusion_proof(
     block_number: u64,
 ) -> AnyResult<BlockInclusionProof> {
     let beacon_block_parent =
-        utils::get_block_by_hash(client_http, rpc_url, beacon_root_parent).await?;
+        ethereum_beacon_client::get_block_by_hash(client_http, rpc_url, beacon_root_parent).await?;
 
     let beacon_block = LightBeaconBlock::from(
         find_beacon_block(client_http, rpc_url, block_number, &beacon_block_parent).await?,
@@ -125,10 +125,15 @@ async fn build_inclusion_proof(
 
     Ok(BlockInclusionProof {
         block: beacon_block,
-        headers: utils::request_headers(client_http, rpc_url, slot + 1, slot_checkpoint + 1)
-            .await?
-            .into_iter()
-            .collect(),
+        headers: ethereum_beacon_client::request_headers(
+            client_http,
+            rpc_url,
+            slot + 1,
+            slot_checkpoint + 1,
+        )
+        .await?
+        .into_iter()
+        .collect(),
     })
 }
 
@@ -148,16 +153,21 @@ async fn find_beacon_block(
         Ordering::Greater => (),
     }
 
-    let block_finalized = utils::get_block_finalized(client_http, rpc_url).await?;
+    let block_finalized = ethereum_beacon_client::get_block_finalized(client_http, rpc_url).await?;
 
     let slot_start = block_start.slot + 1;
     for slot in slot_start..=block_finalized.slot {
-        match utils::get_block(client_http, rpc_url, slot).await {
+        match ethereum_beacon_client::get_block(client_http, rpc_url, slot).await {
             Ok(block) if block.body.execution_payload.block_number == block_number => {
                 return Ok(block)
             }
             Ok(_) => (),
-            Err(e) if e.downcast_ref::<utils::ErrorNotFound>().is_some() => (),
+            Err(e)
+                if e.downcast_ref::<ethereum_beacon_client::ErrorNotFound>()
+                    .is_some() =>
+            {
+                ()
+            }
             Err(e) => return Err(e),
         }
     }

@@ -6,6 +6,7 @@ use checkpoint_light_client_io::{
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
 };
+use ethereum_beacon_client::slots_batch::Iter as SlotsBatchIter;
 use futures::{
     future::{self, Either},
     pin_mut,
@@ -18,7 +19,6 @@ use tokio::{
     sync::mpsc::{self, Sender},
     time::{self, Duration},
 };
-use utils::slots_batch::Iter as SlotsBatchIter;
 
 #[cfg(test)]
 mod tests;
@@ -26,7 +26,6 @@ mod tests;
 mod metrics;
 mod replay_back;
 mod sync_update;
-pub mod utils;
 
 const SIZE_CHANNEL: usize = 100_000;
 const SIZE_BATCH: u64 = 30 * SLOTS_PER_EPOCH;
@@ -50,7 +49,8 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         },
     } = args;
 
-    let program_id = utils::try_from_hex_encoded(&program_id).expect("Expecting correct ProgramId");
+    let program_id = ethereum_beacon_client::try_from_hex_encoded(&program_id)
+        .expect("Expecting correct ProgramId");
 
     let client_http = ClientBuilder::new()
         .timeout(Duration::from_secs(beacon_timeout))

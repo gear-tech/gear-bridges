@@ -1,4 +1,5 @@
 use super::*;
+use crate::ethereum_beacon_client;
 pub use checkpoint_light_client_io::sync_update::Error;
 use std::ops::ControlFlow::{self, *};
 
@@ -35,12 +36,12 @@ async fn receive(
     beacon_endpoint: &str,
     sender: &Sender<SyncCommitteeUpdate>,
 ) -> AnyResult<ControlFlow<()>> {
-    let finality_update = utils::get_finality_update(client_http, beacon_endpoint)
+    let finality_update = ethereum_beacon_client::get_finality_update(client_http, beacon_endpoint)
         .await
         .map_err(|e| anyhow!("Unable to fetch FinalityUpdate: {e:?}"))?;
 
     let period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = utils::get_updates(client_http, beacon_endpoint, period, 1)
+    let mut updates = ethereum_beacon_client::get_updates(client_http, beacon_endpoint, period, 1)
         .await
         .map_err(|e| anyhow!("Unable to fetch Updates: {e:?}"))?;
 
@@ -61,9 +62,9 @@ async fn receive(
             .map_err(|e| anyhow!("Failed to deserialize point on G2: {e:?}"))?;
 
     let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
-        utils::sync_update_from_update(signature, update)
+        ethereum_beacon_client::sync_update_from_update(signature, update)
     } else {
-        utils::sync_update_from_finality(signature, finality_update)
+        ethereum_beacon_client::sync_update_from_finality(signature, finality_update)
     };
 
     if sender.send(sync_update).await.is_err() {

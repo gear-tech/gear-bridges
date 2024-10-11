@@ -12,6 +12,7 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
+mod ethereum_beacon_client;
 mod ethereum_checkpoints;
 mod genesis_config;
 mod message_relayer;

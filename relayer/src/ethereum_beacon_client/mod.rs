@@ -1,8 +1,11 @@
-use std::{cmp, error::Error, fmt};
+use std::{
+    cmp::{self, Ordering},
+    error::Error,
+    fmt,
+};
 
 use anyhow::{anyhow, Error as AnyError, Result as AnyResult};
 use ark_serialize::CanonicalDeserialize;
-// TODO: Fix this import
 use checkpoint_light_client_io::{
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
     SyncCommitteeUpdate, G1, G2, SYNC_COMMITTEE_SIZE,
@@ -39,107 +42,160 @@ struct CodeResponse {
     message: String,
 }
 
-pub async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyResult<R> {
-    let bytes = request_builder
-        .send()
-        .await
-        .map_err(AnyError::from)?
-        .bytes()
-        .await
-        .map_err(AnyError::from)?;
+#[derive(Clone)]
+pub struct BeaconClient {
+    client: Client,
+    rpc_url: String,
+}
 
-    match serde_json::from_slice::<CodeResponse>(&bytes) {
-        Ok(code_response) if code_response.code == 404 => Err(ErrorNotFound.into()),
-        _ => Ok(serde_json::from_slice::<R>(&bytes).map_err(AnyError::from)?),
+impl BeaconClient {
+    // TODO: Make a request to the node to check it's validity on construction.
+    pub fn new(rpc_url: String) -> Self {
+        // let client_http = ClientBuilder::new()
+        // .timeout(Duration::from_secs(beacon_timeout))
+        // .build()
+        // .expect("Reqwest client should be created");
+
+        Self {
+            client: Client::new(),
+            rpc_url,
+        }
     }
-}
 
-#[cfg(test)]
-pub async fn get_bootstrap(
-    client: &Client,
-    rpc_url: &str,
-    checkpoint: &str,
-) -> AnyResult<Bootstrap> {
-    let checkpoint_no_prefix = match checkpoint.starts_with("0x") {
-        true => &checkpoint[2..],
-        false => checkpoint,
-    };
+    pub async fn get_updates(&self, period: u64, count: u8) -> AnyResult<UpdateResponse> {
+        let count = cmp::min(count, MAX_REQUEST_LIGHT_CLIENT_UPDATES);
+        let url = format!(
+            "{}/eth/v1/beacon/light_client/updates?start_period={}&count={}",
+            self.rpc_url, period, count
+        );
 
-    let url = format!("{rpc_url}/eth/v1/beacon/light_client/bootstrap/0x{checkpoint_no_prefix}",);
+        get::<UpdateResponse>(self.client.get(&url)).await
+    }
 
-    get::<BootstrapResponse>(client.get(&url))
-        .await
-        .map(|response| response.data)
-}
+    pub async fn get_block_header(&self, slot: u64) -> AnyResult<BeaconBlockHeader> {
+        let url = format!("{}/eth/v1/beacon/headers/{}", self.rpc_url, slot);
 
-pub async fn get_updates(
-    client: &Client,
-    rpc_url: &str,
-    period: u64,
-    count: u8,
-) -> AnyResult<UpdateResponse> {
-    let count = cmp::min(count, MAX_REQUEST_LIGHT_CLIENT_UPDATES);
-    let url = format!(
-        "{rpc_url}/eth/v1/beacon/light_client/updates?start_period={period}&count={count}",
-    );
+        get::<BeaconBlockHeaderResponse>(self.client.get(&url))
+            .await
+            .map(|response| response.data.header.message)
+    }
 
-    get::<UpdateResponse>(client.get(&url)).await
-}
+    pub async fn get_block_finalized(&self) -> AnyResult<BeaconBlock> {
+        let url = format!("{}/eth/v2/beacon/blocks/finalized", self.rpc_url);
 
-pub async fn get_block_header(
-    client: &Client,
-    rpc_url: &str,
-    slot: u64,
-) -> AnyResult<BeaconBlockHeader> {
-    let url = format!("{rpc_url}/eth/v1/beacon/headers/{slot}");
+        get::<BeaconBlockResponse>(self.client.get(&url))
+            .await
+            .map(|response| response.data.message)
+    }
 
-    get::<BeaconBlockHeaderResponse>(client.get(&url))
-        .await
-        .map(|response| response.data.header.message)
-}
+    pub async fn get_block(&self, slot: u64) -> AnyResult<BeaconBlock> {
+        let url = format!("{}/eth/v2/beacon/blocks/{}", self.rpc_url, slot);
 
-pub async fn get_block_finalized(client: &Client, rpc_url: &str) -> AnyResult<BeaconBlock> {
-    let url = format!("{rpc_url}/eth/v2/beacon/blocks/finalized");
+        get::<BeaconBlockResponse>(self.client.get(&url))
+            .await
+            .map(|response| response.data.message)
+    }
 
-    get::<BeaconBlockResponse>(client.get(&url))
-        .await
-        .map(|response| response.data.message)
-}
+    pub async fn get_block_by_hash(&self, hash: &[u8; 32]) -> AnyResult<BeaconBlock> {
+        let mut hex_encoded = [0u8; 66];
+        hex_encoded[0] = b'0';
+        hex_encoded[1] = b'x';
 
-pub async fn get_block(client: &Client, rpc_url: &str, slot: u64) -> AnyResult<BeaconBlock> {
-    let url = format!("{rpc_url}/eth/v2/beacon/blocks/{slot}");
+        hex::encode_to_slice(hash, &mut hex_encoded[2..]).expect("The buffer has the right size");
+        let url = format!(
+            "{}/eth/v2/beacon/blocks/{}",
+            self.rpc_url,
+            String::from_utf8_lossy(&hex_encoded)
+        );
 
-    get::<BeaconBlockResponse>(client.get(&url))
-        .await
-        .map(|response| response.data.message)
-}
+        get::<BeaconBlockResponse>(self.client.get(&url))
+            .await
+            .map(|response| response.data.message)
+    }
 
-pub async fn get_block_by_hash(
-    client: &Client,
-    rpc_url: &str,
-    hash: &[u8; 32],
-) -> AnyResult<BeaconBlock> {
-    let mut hex_encoded = [0u8; 66];
-    hex_encoded[0] = b'0';
-    hex_encoded[1] = b'x';
+    pub async fn get_finality_update(&self) -> AnyResult<FinalityUpdate> {
+        let url = format!(
+            "{}/eth/v1/beacon/light_client/finality_update",
+            self.rpc_url
+        );
 
-    hex::encode_to_slice(hash, &mut hex_encoded[2..]).expect("The buffer has the right size");
-    let url = format!(
-        "{rpc_url}/eth/v2/beacon/blocks/{}",
-        String::from_utf8_lossy(&hex_encoded)
-    );
+        get::<FinalityUpdateResponse>(self.client.get(&url))
+            .await
+            .map(|response| response.data)
+    }
 
-    get::<BeaconBlockResponse>(client.get(&url))
-        .await
-        .map(|response| response.data.message)
-}
+    pub async fn request_headers(
+        &self,
+        slot_start: Slot,
+        slot_end: Slot,
+    ) -> AnyResult<Vec<BeaconBlockHeader>> {
+        let batch_size = (slot_end - slot_start) as usize;
+        let mut requests_headers = Vec::with_capacity(batch_size);
+        for i in slot_start..slot_end {
+            requests_headers.push(self.get_block_header(i));
+        }
 
-pub async fn get_finality_update(client: &Client, rpc_url: &str) -> AnyResult<FinalityUpdate> {
-    let url = format!("{rpc_url}/eth/v1/beacon/light_client/finality_update");
+        futures::future::join_all(requests_headers)
+            .await
+            .into_iter()
+            .filter(|maybe_header| !matches!(maybe_header, Err(e) if e.downcast_ref::<ErrorNotFound>().is_some()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                anyhow!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}")
+            })
+    }
 
-    get::<FinalityUpdateResponse>(client.get(&url))
-        .await
-        .map(|response| response.data)
+    pub async fn find_beacon_block(
+        &self,
+        block_number: u64,
+        block_start: &BeaconBlock,
+    ) -> AnyResult<BeaconBlock> {
+        match block_number.cmp(&block_start.body.execution_payload.block_number) {
+            Ordering::Less => {
+                return Err(anyhow!(
+                    "Requested block number is behind the start beacon block"
+                ))
+            }
+            Ordering::Equal => return Ok(block_start.clone()),
+            Ordering::Greater => (),
+        }
+
+        let block_finalized = self.get_block_finalized().await?;
+
+        let slot_start = block_start.slot + 1;
+        for slot in slot_start..=block_finalized.slot {
+            match self.get_block(slot).await {
+                Ok(block) if block.body.execution_payload.block_number == block_number => {
+                    return Ok(block)
+                }
+                Ok(_) => (),
+                Err(e) if e.downcast_ref::<ErrorNotFound>().is_some() => {}
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(anyhow!("Block was not found"))
+    }
+
+    #[cfg(test)]
+    pub async fn get_bootstrap(
+        &self,
+        checkpoint: &str,
+    ) -> AnyResult<ethereum_common::utils::Bootstrap> {
+        let checkpoint_no_prefix = match checkpoint.starts_with("0x") {
+            true => &checkpoint[2..],
+            false => checkpoint,
+        };
+
+        let url = format!(
+            "{}/eth/v1/beacon/light_client/bootstrap/0x{checkpoint_no_prefix}",
+            self.rpc_url
+        );
+
+        get::<ethereum_common::utils::BootstrapResponse>(self.client.get(&url))
+            .await
+            .map(|response| response.data)
+    }
 }
 
 pub fn map_public_keys(
@@ -223,24 +279,17 @@ pub fn try_from_hex_encoded<T: TryFrom<Vec<u8>>>(hex_encoded: &str) -> Option<T>
         .and_then(|bytes| <T as TryFrom<Vec<u8>>>::try_from(bytes).ok())
 }
 
-pub async fn request_headers(
-    client_http: &Client,
-    beacon_endpoint: &str,
-    slot_start: Slot,
-    slot_end: Slot,
-) -> AnyResult<Vec<BeaconBlockHeader>> {
-    let batch_size = (slot_end - slot_start) as usize;
-    let mut requests_headers = Vec::with_capacity(batch_size);
-    for i in slot_start..slot_end {
-        requests_headers.push(get_block_header(client_http, beacon_endpoint, i));
-    }
-
-    futures::future::join_all(requests_headers)
+async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyResult<R> {
+    let bytes = request_builder
+        .send()
         .await
-        .into_iter()
-        .filter(|maybe_header| !matches!(maybe_header, Err(e) if e.downcast_ref::<ErrorNotFound>().is_some()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            anyhow!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}")
-        })
+        .map_err(AnyError::from)?
+        .bytes()
+        .await
+        .map_err(AnyError::from)?;
+
+    match serde_json::from_slice::<CodeResponse>(&bytes) {
+        Ok(code_response) if code_response.code == 404 => Err(ErrorNotFound.into()),
+        _ => Ok(serde_json::from_slice::<R>(&bytes).map_err(AnyError::from)?),
+    }
 }

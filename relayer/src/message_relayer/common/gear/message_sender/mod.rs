@@ -12,7 +12,10 @@ use sails_rs::{
 use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{ERC20DepositTx, EthereumSlotNumber};
+use crate::{
+    ethereum_beacon_client::BeaconClient,
+    message_relayer::common::{ERC20DepositTx, EthereumSlotNumber},
+};
 
 mod compose_payload;
 
@@ -125,12 +128,12 @@ impl MessageSender {
     }
 
     async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<()> {
-        let message = compose_payload::compose(
-            self.beacon_endpoint.clone(),
-            self.eth_endpoint.clone(),
-            message.tx_hash,
-        )
-        .await?;
+        // TODO: Don't create it here.
+        let beacon_client = BeaconClient::new(self.beacon_endpoint.clone());
+
+        let message =
+            compose_payload::compose(&beacon_client, self.eth_endpoint.clone(), message.tx_hash)
+                .await?;
 
         let gas_limit_block = self.gear_api.block_gas_limit()?;
         // Use 95% of block gas limit for all extrinsics.

@@ -1,4 +1,4 @@
-use crate::ethereum_beacon_client::{self, slots_batch};
+use crate::ethereum_beacon_client::{self, slots_batch, BeaconClient};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
@@ -13,7 +13,6 @@ use checkpoint_light_client_io::{
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use parity_scale_codec::{Decode, Encode};
-use reqwest::Client;
 use tokio::time::{self, Duration};
 
 const RPC_URL: &str = "http://127.0.0.1:5052";
@@ -66,15 +65,13 @@ async fn upload_program(
 }
 
 async fn init(network: Network) -> Result<()> {
-    let client_http = Client::new();
+    let beacon_client = BeaconClient::new(RPC_URL.to_string());
 
     // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update =
-        ethereum_beacon_client::get_finality_update(&client_http, RPC_URL).await?;
+    let finality_update = beacon_client.get_finality_update().await?;
     let slot = finality_update.finalized_header.slot;
     let current_period = eth_utils::calculate_period(slot);
-    let mut updates =
-        ethereum_beacon_client::get_updates(&client_http, RPC_URL, current_period, 1).await?;
+    let mut updates = beacon_client.get_updates(current_period, 1).await?;
 
     println!(
         "finality_update slot = {}, period = {}",
@@ -94,8 +91,7 @@ async fn init(network: Network) -> Result<()> {
         update.finalized_header.slot, checkpoint_hex
     );
 
-    let bootstrap =
-        ethereum_beacon_client::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
+    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
@@ -150,14 +146,12 @@ async fn init_mainnet() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn init_and_updating() -> Result<()> {
-    let client_http = Client::new();
+    let beacon_client = BeaconClient::new(RPC_URL.to_string());
 
     // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update =
-        ethereum_beacon_client::get_finality_update(&client_http, RPC_URL).await?;
+    let finality_update = beacon_client.get_finality_update().await?;
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates =
-        ethereum_beacon_client::get_updates(&client_http, RPC_URL, current_period, 1).await?;
+    let mut updates = beacon_client.get_updates(current_period, 1).await?;
 
     println!(
         "finality_update slot = {}, period = {}",
@@ -177,8 +171,7 @@ async fn init_and_updating() -> Result<()> {
         update.finalized_header.slot, checkpoint_hex
     );
 
-    let bootstrap =
-        ethereum_beacon_client::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
+    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
@@ -213,12 +206,11 @@ async fn init_and_updating() -> Result<()> {
     println!();
 
     for _ in 0..30 {
-        let update = ethereum_beacon_client::get_finality_update(&client_http, RPC_URL).await?;
+        let update = beacon_client.get_finality_update().await?;
 
         let slot: u64 = update.finalized_header.slot;
         let current_period = eth_utils::calculate_period(slot);
-        let mut updates =
-            ethereum_beacon_client::get_updates(&client_http, RPC_URL, current_period, 1).await?;
+        let mut updates = beacon_client.get_updates(current_period, 1).await?;
         match updates.pop() {
             Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
                 println!("update sync committee");
@@ -296,7 +288,7 @@ async fn init_and_updating() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn replaying_back() -> Result<()> {
-    let client_http = Client::new();
+    let beacon_client = BeaconClient::new(RPC_URL.to_string());
 
     let finality_update: FinalityUpdateResponse =
         serde_json::from_slice(FINALITY_UPDATE_5_254_112).unwrap();
@@ -308,8 +300,7 @@ async fn replaying_back() -> Result<()> {
 
     // This SyncCommittee operated for about 13K slots, so we make adjustments
     let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates =
-        ethereum_beacon_client::get_updates(&client_http, RPC_URL, current_period - 1, 1).await?;
+    let mut updates = beacon_client.get_updates(current_period - 1, 1).await?;
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
@@ -318,8 +309,7 @@ async fn replaying_back() -> Result<()> {
     let checkpoint = update.finalized_header.tree_hash_root();
     let checkpoint_hex = hex::encode(checkpoint);
 
-    let bootstrap =
-        ethereum_beacon_client::get_bootstrap(&client_http, RPC_URL, &checkpoint_hex).await?;
+    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     println!("update slot = {}", update.finalized_header.slot);
@@ -365,11 +355,7 @@ async fn replaying_back() -> Result<()> {
     if let Some((slot_start, slot_end)) = slots_batch_iter.next() {
         let mut requests_headers = Vec::with_capacity(batch_size as usize);
         for i in slot_start..slot_end {
-            requests_headers.push(ethereum_beacon_client::get_block_header(
-                &client_http,
-                RPC_URL,
-                i,
-            ));
+            requests_headers.push(beacon_client.get_block_header(i));
         }
 
         let headers = futures::future::join_all(requests_headers)
@@ -413,11 +399,7 @@ async fn replaying_back() -> Result<()> {
     for (slot_start, slot_end) in slots_batch_iter {
         let mut requests_headers = Vec::with_capacity(batch_size as usize);
         for i in slot_start..slot_end {
-            requests_headers.push(ethereum_beacon_client::get_block_header(
-                &client_http,
-                RPC_URL,
-                i,
-            ));
+            requests_headers.push(beacon_client.get_block_header(i));
         }
 
         let headers = futures::future::join_all(requests_headers)

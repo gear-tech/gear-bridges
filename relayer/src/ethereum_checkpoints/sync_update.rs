@@ -1,19 +1,15 @@
 use super::*;
-use crate::ethereum_beacon_client;
+use crate::ethereum_beacon_client::{self, BeaconClient};
 pub use checkpoint_light_client_io::sync_update::Error;
 use std::ops::ControlFlow::{self, *};
 
-pub fn spawn_receiver(
-    client_http: Client,
-    beacon_endpoint: String,
-    sender: Sender<SyncCommitteeUpdate>,
-) {
+pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncCommitteeUpdate>) {
     tokio::spawn(async move {
         log::info!("Update receiver spawned");
 
         let mut failures = 0;
         loop {
-            match receive(&client_http, &beacon_endpoint, &sender).await {
+            match receive(&beacon_client, &sender).await {
                 Ok(Break(_)) => break,
                 Ok(Continue(_)) => (),
                 Err(e) => {
@@ -32,16 +28,17 @@ pub fn spawn_receiver(
 }
 
 async fn receive(
-    client_http: &Client,
-    beacon_endpoint: &str,
+    beacon_client: &BeaconClient,
     sender: &Sender<SyncCommitteeUpdate>,
 ) -> AnyResult<ControlFlow<()>> {
-    let finality_update = ethereum_beacon_client::get_finality_update(client_http, beacon_endpoint)
+    let finality_update = beacon_client
+        .get_finality_update()
         .await
         .map_err(|e| anyhow!("Unable to fetch FinalityUpdate: {e:?}"))?;
 
     let period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = ethereum_beacon_client::get_updates(client_http, beacon_endpoint, period, 1)
+    let mut updates = beacon_client
+        .get_updates(period, 1)
         .await
         .map_err(|e| anyhow!("Unable to fetch Updates: {e:?}"))?;
 

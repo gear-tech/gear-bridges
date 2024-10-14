@@ -138,7 +138,7 @@ async fn upload_extended_vft(params: ExtendedVftParams, api: GearApi, mut listen
     assert!(listener
         .message_processed(message_id)
         .await
-        .unwrap()
+        .expect("Message is not processed")
         .succeed());
 
     let remoting = GClientRemoting::new(api.clone());

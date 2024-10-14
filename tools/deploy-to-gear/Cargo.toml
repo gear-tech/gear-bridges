@@ -7,10 +7,10 @@ edition.workspace = true
 extended_vft_wasm.workspace = true
 vft-client.workspace = true
 
-tokio.workspace = true
-gear-core.workspace = true
-sails-rs = { workspace = true, features = ["gclient"] }
-gclient.workspace = true
 clap.workspace = true
 dotenv.workspace = true
+gclient.workspace = true
+gear-core.workspace = true
 hex.workspace = true
+sails-rs = { workspace = true, features = ["gclient"] }
+tokio.workspace = true

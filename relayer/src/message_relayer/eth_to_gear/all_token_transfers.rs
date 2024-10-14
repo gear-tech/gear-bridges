@@ -49,7 +49,6 @@ impl Relayer {
         gclient_gear_api: GclientGearApi,
         eth_api: EthApi,
         beacon_client: BeaconClient,
-        eth_endpoint: String,
         erc20_treasury_address: H160,
         checkpoint_light_client_address: H256,
         ethereum_event_client_address: H256,
@@ -74,8 +73,8 @@ impl Relayer {
 
         let gear_message_sender = MessageSender::new(
             gclient_gear_api,
+            eth_api,
             beacon_client,
-            eth_endpoint,
             ethereum_event_client_address,
         );
 

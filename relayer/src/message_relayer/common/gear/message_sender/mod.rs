@@ -1,5 +1,6 @@
 use std::sync::mpsc::Receiver;
 
+use ethereum_client::EthApi;
 use futures::executor::block_on;
 use gclient::GearApi;
 use primitive_types::H256;
@@ -21,9 +22,8 @@ mod compose_payload;
 
 pub struct MessageSender {
     gear_api: GearApi,
+    eth_api: EthApi,
     beacon_client: BeaconClient,
-    // TODO: Don't store strings here.
-    eth_endpoint: String,
 
     ethereum_event_client_address: H256,
 
@@ -56,15 +56,14 @@ impl_metered_service! {
 impl MessageSender {
     pub fn new(
         gear_api: GearApi,
+        eth_api: EthApi,
         beacon_client: BeaconClient,
-        eth_endpoint: String,
         ethereum_event_client_address: H256,
     ) -> Self {
         Self {
             gear_api,
+            eth_api,
             beacon_client,
-
-            eth_endpoint,
 
             ethereum_event_client_address,
 
@@ -128,12 +127,8 @@ impl MessageSender {
     }
 
     async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<()> {
-        let message = compose_payload::compose(
-            &self.beacon_client,
-            self.eth_endpoint.clone(),
-            message.tx_hash,
-        )
-        .await?;
+        let message =
+            compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
 
         let gas_limit_block = self.gear_api.block_gas_limit()?;
         // Use 95% of block gas limit for all extrinsics.

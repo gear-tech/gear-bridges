@@ -1,29 +1,25 @@
 use crate::ethereum_beacon_client::BeaconClient;
 
-use alloy::{
-    network::primitives::BlockTransactionsKind,
-    primitives::TxHash,
-    providers::{Provider, ProviderBuilder},
-};
+use alloy::{network::primitives::BlockTransactionsKind, primitives::TxHash, providers::Provider};
 use alloy_eips::BlockNumberOrTag;
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
+use sails_rs::prelude::*;
+
 use checkpoint_light_client_io::ethereum_common::{
     beacon::light::Block as LightBeaconBlock,
     utils::{self as eth_utils, MerkleProof},
     SLOTS_PER_EPOCH,
 };
 use erc20_relay_client::{BlockInclusionProof, EthToVaraEvent};
-use sails_rs::prelude::*;
+use ethereum_client::EthApi;
 
-// TODO: Don't create ethereum clients inside.
 pub async fn compose(
     beacon_client: &BeaconClient,
-    eth_endpoint: String,
+    eth_client: &EthApi,
     tx_hash: TxHash,
 ) -> AnyResult<EthToVaraEvent> {
-    let rpc_url = eth_endpoint.parse()?;
-    let provider = ProviderBuilder::new().on_http(rpc_url);
+    let provider = eth_client.raw_provider();
 
     let receipt = provider
         .get_transaction_receipt(tx_hash)

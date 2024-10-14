@@ -2,9 +2,10 @@ use std::{
     cmp::{self, Ordering},
     error::Error,
     fmt,
+    time::Duration,
 };
 
-use anyhow::{anyhow, Error as AnyError, Result as AnyResult};
+use anyhow::{anyhow, bail, Error as AnyError, Result as AnyResult};
 use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
     ArkScale, BeaconBlockHeader, G1TypeInfo, G2TypeInfo, Slot, SyncCommitteeKeys,
@@ -19,7 +20,7 @@ use ethereum_common::{
     },
     MAX_REQUEST_LIGHT_CLIENT_UPDATES,
 };
-use reqwest::{Client, RequestBuilder};
+use reqwest::{Client, ClientBuilder, RequestBuilder};
 use serde::{de::DeserializeOwned, Deserialize};
 
 pub mod slots_batch;
@@ -49,17 +50,33 @@ pub struct BeaconClient {
 }
 
 impl BeaconClient {
-    // TODO: Make a request to the node to check it's validity on construction.
-    pub fn new(rpc_url: String) -> Self {
-        // let client_http = ClientBuilder::new()
-        // .timeout(Duration::from_secs(beacon_timeout))
-        // .build()
-        // .expect("Reqwest client should be created");
+    pub async fn connect(rpc_url: String, timeout: Option<Duration>) -> AnyResult<Self> {
+        let client = ClientBuilder::new();
 
-        Self {
-            client: Client::new(),
-            rpc_url,
+        let client = if let Some(timeout) = timeout {
+            client.timeout(timeout)
+        } else {
+            client
+        };
+
+        let client = client
+            .build()
+            .expect("Failed to create reqwest http client");
+
+        let health = client
+            .get(format!("{}/eth/v1/node/health", rpc_url))
+            .send()
+            .await?
+            .status();
+
+        if !health.is_success() {
+            bail!(
+                "Tried to connect to unhealthy beacon node. Status code returned: {}",
+                health
+            );
         }
+
+        Ok(Self { client, rpc_url })
     }
 
     pub async fn get_updates(&self, period: u64, count: u8) -> AnyResult<UpdateResponse> {

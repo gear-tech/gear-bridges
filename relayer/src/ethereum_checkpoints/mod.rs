@@ -39,7 +39,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
     let RelayCheckpointsArgs {
         program_id,
         beacon_endpoint,
-        beacon_timeout: _, // TODO: Use this.
+        beacon_timeout,
         vara_domain,
         vara_port,
         vara_suri,
@@ -51,7 +51,10 @@ pub async fn relay(args: RelayCheckpointsArgs) {
     let program_id = ethereum_beacon_client::try_from_hex_encoded(&program_id)
         .expect("Expecting correct ProgramId");
 
-    let beacon_client = BeaconClient::new(beacon_endpoint.clone());
+    let timeout = Some(Duration::from_secs(beacon_timeout));
+    let beacon_client = BeaconClient::connect(beacon_endpoint.clone(), timeout)
+        .await
+        .expect("Failed to connect to beacon node");
 
     let mut signal_interrupt = unix::signal(SignalKind::interrupt()).expect("Set SIGINT handler");
 

@@ -65,7 +65,9 @@ async fn upload_program(
 }
 
 async fn init(network: Network) -> Result<()> {
-    let beacon_client = BeaconClient::new(RPC_URL.to_string());
+    let beacon_client = BeaconClient::connect(RPC_URL.to_string(), None)
+        .await
+        .expect("Failed to connect to beacon node");
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = beacon_client.get_finality_update().await?;
@@ -146,7 +148,9 @@ async fn init_mainnet() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn init_and_updating() -> Result<()> {
-    let beacon_client = BeaconClient::new(RPC_URL.to_string());
+    let beacon_client = BeaconClient::connect(RPC_URL.to_string(), None)
+        .await
+        .expect("Failed to connect to beacon node");
 
     // use the latest finality header as a checkpoint for bootstrapping
     let finality_update = beacon_client.get_finality_update().await?;
@@ -288,7 +292,9 @@ async fn init_and_updating() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn replaying_back() -> Result<()> {
-    let beacon_client = BeaconClient::new(RPC_URL.to_string());
+    let beacon_client = BeaconClient::connect(RPC_URL.to_string(), None)
+        .await
+        .expect("Failed to connect to beacon node");
 
     let finality_update: FinalityUpdateResponse =
         serde_json::from_slice(FINALITY_UPDATE_5_254_112).unwrap();

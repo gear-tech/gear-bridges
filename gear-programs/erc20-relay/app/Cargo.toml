@@ -16,12 +16,18 @@ getrandom = { workspace = true, features = ["custom"] }
 lazy_static = { workspace = true, features = ["spin_no_std"] }
 
 [dev-dependencies]
+alloy.workspace = true
+alloy-consensus = { workspace = true, features = ["std"] }
+alloy-primitives = { workspace = true, features = ["std"] }
+alloy-rlp = { workspace = true, features = ["std"] }
 erc20-relay-client.workspace = true
 erc20-relay = { workspace = true, features = ["wasm-binary", "gas_calculation"] }
 futures.workspace = true
 gclient.workspace = true
 gstd.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
+serde = { workspace = true, features = ["std"] }
+serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 hex-literal.workspace = true
 hex.workspace = true

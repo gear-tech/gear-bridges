@@ -3628,6 +3628,9 @@ dependencies = [
 name = "erc20-relay-app"
 version = "0.1.0"
 dependencies = [
+ "alloy",
+ "alloy-consensus",
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-sol-types",
  "checkpoint_light_client-io",
@@ -3644,6 +3647,8 @@ dependencies = [
  "lazy_static",
  "sails-client-gen 0.5.0",
  "sails-rs 0.5.0",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

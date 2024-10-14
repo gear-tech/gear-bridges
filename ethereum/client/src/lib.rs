@@ -123,6 +123,11 @@ impl EthApi {
         })
     }
 
+    // TODO: Don't expose provider here.
+    pub fn raw_provider(&self) -> &ProviderType {
+        &self.contracts.provider
+    }
+
     pub async fn get_approx_balance(&self) -> Result<f64, Error> {
         self.contracts.get_approx_balance(self.public_key).await
     }

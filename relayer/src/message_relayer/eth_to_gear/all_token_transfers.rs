@@ -63,8 +63,11 @@ impl Relayer {
 
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
-        let deposit_event_extractor =
-            DepositEventExtractor::new(eth_api.clone(), erc20_treasury_address);
+        let deposit_event_extractor = DepositEventExtractor::new(
+            eth_api.clone(),
+            beacon_client.clone(),
+            erc20_treasury_address,
+        );
 
         let checkpoints_extractor =
             CheckpointsExtractor::new(gear_api.clone(), checkpoint_light_client_address);

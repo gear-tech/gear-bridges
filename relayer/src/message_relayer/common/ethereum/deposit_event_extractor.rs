@@ -1,15 +1,24 @@
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-use ethereum_client::EthApi;
+use alloy::providers::Provider;
+use alloy_eips::BlockNumberOrTag;
+use anyhow::anyhow;
 use futures::executor::block_on;
 use prometheus::IntCounter;
 use sails_rs::H160;
+
+use ethereum_client::{DepositEventEntry, EthApi};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{ERC20DepositTx, EthereumBlockNumber};
+use crate::{
+    ethereum_beacon_client::BeaconClient,
+    message_relayer::common::{ERC20DepositTx, EthereumBlockNumber, EthereumSlotNumber},
+};
 
 pub struct DepositEventExtractor {
     eth_api: EthApi,
+    beacon_client: BeaconClient,
+
     erc20_treasury_address: H160,
 
     metrics: Metrics,
@@ -31,9 +40,11 @@ impl_metered_service! {
 }
 
 impl DepositEventExtractor {
-    pub fn new(eth_api: EthApi, erc20_treasury_address: H160) -> Self {
+    pub fn new(eth_api: EthApi, beacon_client: BeaconClient, erc20_treasury_address: H160) -> Self {
         Self {
             eth_api,
+            beacon_client,
+
             erc20_treasury_address,
 
             metrics: Metrics::new(),
@@ -68,26 +79,47 @@ impl DepositEventExtractor {
     async fn process_block_events(
         &self,
         block: EthereumBlockNumber,
-        _sender: &Sender<ERC20DepositTx>,
+        sender: &Sender<ERC20DepositTx>,
     ) -> anyhow::Result<()> {
-        let _events = self
+        let events = self
             .eth_api
             .fetch_deposit_events(self.erc20_treasury_address, block.0)
             .await?;
 
-        // // TODO: fetch slot number by block number.
-        // let slot_number = todo!();
+        let block_body = self
+            .eth_api
+            .raw_provider()
+            .get_block_by_number(BlockNumberOrTag::Number(block.0), false)
+            .await?
+            .ok_or(anyhow!("Ethereum block #{} is missing", block.0))?;
 
-        // self.metrics
-        //     .total_deposits_found
-        //     .inc_by(events.len() as u64);
+        let beacon_root_parent = block_body.header.parent_beacon_block_root.ok_or(anyhow!(
+            "Unable to determine root of parent beacon block for block #{}",
+            block.0
+        ))?;
 
-        // for DepositEventEntry { tx_hash, .. } in events {
-        //     sender.send(ERC20DepositTx {
-        //         slot_number,
-        //         tx_hash,
-        //     })?;
-        // }
+        let beacon_block_parent = self
+            .beacon_client
+            .get_block_by_hash(&beacon_root_parent.0)
+            .await?;
+
+        let beacon_block = self
+            .beacon_client
+            .find_beacon_block(block.0, &beacon_block_parent)
+            .await?;
+
+        let slot_number = EthereumSlotNumber(beacon_block.slot);
+
+        self.metrics
+            .total_deposits_found
+            .inc_by(events.len() as u64);
+
+        for DepositEventEntry { tx_hash, .. } in events {
+            sender.send(ERC20DepositTx {
+                slot_number,
+                tx_hash,
+            })?;
+        }
 
         Ok(())
     }

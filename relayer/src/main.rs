@@ -133,11 +133,11 @@ struct BeaconRpcArgs {
         default_value = DEFAULT_ETH_BEACON_RPC,
         env = "ETH_BEACON_RPC"
     )]
-    endpoint: String,
+    beacon_endpoint: String,
 
     /// Timeout in seconds for requests to the ethereum beacon RPC
     #[arg(long = "ethereum-beacon-rpc-timeout", env = "ETH_BEACON_RPC_TIMEOUT")]
-    timeout: Option<u64>,
+    beacon_timeout: Option<u64>,
 }
 
 #[derive(Args)]
@@ -417,9 +417,9 @@ fn create_eth_client(args: &EthereumArgs) -> EthApi {
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
-    let timeout = args.timeout.map(Duration::from_secs);
+    let timeout = args.beacon_timeout.map(Duration::from_secs);
 
-    BeaconClient::connect(args.endpoint.clone(), timeout)
+    BeaconClient::connect(args.beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
 }

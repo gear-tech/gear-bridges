@@ -5,7 +5,7 @@ use gear_rpc_client::GearApi;
 use prometheus::IntCounter;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{GearBlockNumber, MessageInBlock};
+use crate::message_relayer::common::{GearBlockNumber, MessageInBlock};
 
 pub struct MessageQueuedEventExtractor {
     gear_api: GearApi,

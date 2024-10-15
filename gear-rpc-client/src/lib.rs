@@ -55,7 +55,7 @@ type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo2
 
 #[derive(Clone)]
 pub struct GearApi {
-    api: gsdk::Api,
+    pub api: gsdk::Api,
 }
 
 impl GearApi {

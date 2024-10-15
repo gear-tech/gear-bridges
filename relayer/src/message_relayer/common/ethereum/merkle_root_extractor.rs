@@ -6,7 +6,9 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot};
+use crate::message_relayer::common::{
+    AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
+};
 
 pub struct MerkleRootExtractor {
     eth_api: EthApi,

@@ -1,8 +1,7 @@
 pragma solidity ^0.8.13;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {ERC20Treasury} from "../src/ERC20Treasury.sol";
-import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
 import {ERC20TreasuryBridgingPayment} from "../src/ERC20Treasury.sol";
 import {BridgingPayment} from "../src/BridgingPayment.sol";
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";

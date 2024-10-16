@@ -1,7 +1,6 @@
 pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
@@ -12,7 +11,7 @@ import {ERC20VaraSupply} from "./ERC20VaraSupply.sol";
 
 import {BridgingPayment} from "./BridgingPayment.sol";
 
-contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
+contract ERC20Gateway is IERC20Gateway, IMessageQueueReceiver {
     address immutable MESSAGE_QUEUE_ADDRESS;
 
     constructor(address message_queue) {
@@ -28,8 +27,8 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
      * @param to destination of transfer on VARA network
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public {
-        ERC20VaraSupply(token).burnFrom(_msgSender(), amount);
-        emit BridgingRequested(_msgSender(), to, token, amount);
+        ERC20VaraSupply(token).burnFrom(tx.origin, amount);
+        emit BridgingRequested(tx.origin, to, token, amount);
     }
 
     /** @dev Accept bridging request made on other side of bridge.

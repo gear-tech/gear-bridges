@@ -47,7 +47,7 @@ abstract contract BridgingPayment {
     }
 
     function getUnderlyingAddress() public view returns (address) {
-        return address(underlying);
+        return underlying;
     }
 
     function getFee() public view returns (uint256) {

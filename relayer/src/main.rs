@@ -1,10 +1,7 @@
-extern crate pretty_env_logger;
-
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use message_relayer::{all_token_transfers, paid_token_transfers};
-use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;

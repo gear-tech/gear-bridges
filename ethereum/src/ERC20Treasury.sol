@@ -78,6 +78,9 @@ contract ERC20TreasuryBridgingPayment is BridgingPayment {
         uint256 _fee
     ) BridgingPayment(_underlying, _admin, _fee) {}
 
+    /** @dev Call `deposit` function from `ERC20Treasury` contract. This function also
+     * deducting some fee in native tokens from such a call. For further info see `ERC20Treasury::deposit`.
+     */
     function deposit(address token, uint256 amount, bytes32 to) public payable {
         deductFee();
 

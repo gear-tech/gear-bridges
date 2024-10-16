@@ -81,6 +81,9 @@ contract ERC20GatewayBridgingPayment is BridgingPayment {
         uint256 _fee
     ) BridgingPayment(_underlying, _admin, _fee) {}
 
+    /** @dev Call `requestBridging` function from `ERC20Gateway` contract. This function also
+     * deducting some fee in native tokens from such a call. For further info see `ERC20Gateway::requestBridging`.
+     */
     function requestBridging(
         address token,
         uint256 amount,

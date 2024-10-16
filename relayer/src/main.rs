@@ -1,10 +1,7 @@
-extern crate pretty_env_logger;
-
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use message_relayer::{all_token_transfers, paid_token_transfers};
-use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
@@ -213,14 +210,14 @@ struct RelayErc20Args {
 async fn main() {
     let _ = dotenv::dotenv();
 
-    pretty_env_logger::formatted_builder()
+    pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
         .filter(Some("prover"), log::LevelFilter::Info)
         .filter(Some("relayer"), log::LevelFilter::Info)
         .filter(Some("ethereum-client"), log::LevelFilter::Info)
         .filter(Some("metrics"), log::LevelFilter::Info)
-        .format_timestamp(Some(TimestampPrecision::Seconds))
+        .format_timestamp_secs()
         .parse_default_env()
         .init();
 

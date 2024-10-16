@@ -10,6 +10,8 @@ import {VFT_TREASURY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 import {ERC20VaraSupply} from "./ERC20VaraSupply.sol";
 
+import {BridgingPayment} from "./BridgingPayment.sol";
+
 contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
     address immutable MESSAGE_QUEUE_ADDRESS;
 
@@ -70,5 +72,23 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
 
         emit BridgingAccepted(address(receiver), address(token), amount);
         return true;
+    }
+}
+
+contract ERC20GatewayBridgingPayment is BridgingPayment {
+    constructor(
+        address _underlying,
+        address _admin,
+        uint256 _fee
+    ) BridgingPayment(_underlying, _admin, _fee) {}
+
+    function requestBridging(
+        address token,
+        uint256 amount,
+        bytes32 to
+    ) public payable {
+        deductFee();
+
+        ERC20Gateway(underlying).requestBridging(token, amount, to);
     }
 }

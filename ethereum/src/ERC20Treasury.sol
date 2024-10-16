@@ -10,6 +10,8 @@ import {IERC20Treasury} from "./interfaces/IERC20Treasury.sol";
 import {VFT_GATEWAY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 
+import {BridgingPayment} from "./BridgingPayment.sol";
+
 contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
 
@@ -27,8 +29,8 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
      * @param to destination of transfer on VARA network
      */
     function deposit(address token, uint256 amount, bytes32 to) public {
-        IERC20(token).safeTransferFrom(_msgSender(), address(this), amount);
-        emit Deposit(_msgSender(), to, token, amount);
+        IERC20(token).safeTransferFrom(tx.origin, address(this), amount);
+        emit Deposit(tx.origin, to, token, amount);
     }
 
     /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only. Expected
@@ -67,5 +69,19 @@ contract ERC20Treasury is IERC20Treasury, Context, IMessageQueueReceiver {
         IERC20(address(token)).safeTransfer(address(receiver), amount);
         emit Withdraw(address(receiver), address(token), amount);
         return true;
+    }
+}
+
+contract ERC20TreasuryBridgingPayment is BridgingPayment {
+    constructor(
+        address _underlying,
+        address _admin,
+        uint256 _fee
+    ) BridgingPayment(_underlying, _admin, _fee) {}
+
+    function deposit(address token, uint256 amount, bytes32 to) public payable {
+        deductFee();
+
+        ERC20Treasury(underlying).deposit(token, amount, to);
     }
 }

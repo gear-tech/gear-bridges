@@ -1,65 +1,53 @@
 pragma solidity ^0.8.24;
 
-import {Proxy} from "@openzeppelin/contracts/proxy/Proxy.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+abstract contract BridgingPayment {
+    event FeePaid();
 
-contract BridgingPayment is Proxy {
-    error ProxyDeniedAdminAccess();
+    error NotAnAdmin();
     error NotEnoughFunds();
 
+    address public underlying;
+
     uint256 fee;
+    address admin;
 
-    constructor(uint256 _fee) payable {
+    constructor(address _underlying, address _admin, uint256 _fee) payable {
+        underlying = _underlying;
+        admin = _admin;
         fee = _fee;
-
-        ERC1967Utils.changeAdmin(msg.sender);
     }
 
-    function _delegate(address impl) internal override {
-        (bool feeTransferSuccess, ) = getAdmin().call{value: fee}("");
+    function deductFee() internal {
+        (bool feeTransferSuccess, ) = admin.call{value: fee}("");
         if (!feeTransferSuccess) {
             revert NotEnoughFunds();
         }
 
-        super._delegate(impl);
+        emit FeePaid();
     }
 
     function setFee(uint256 newFee) public {
-        if (msg.sender != ERC1967Utils.getAdmin()) {
-            revert ProxyDeniedAdminAccess();
+        if (msg.sender != admin) {
+            revert NotAnAdmin();
         } else {
             fee = newFee;
         }
     }
 
     function setAdmin(address newAdmin) public {
-        if (msg.sender != ERC1967Utils.getAdmin()) {
-            revert ProxyDeniedAdminAccess();
+        if (msg.sender != admin) {
+            revert NotAnAdmin();
         } else {
-            ERC1967Utils.changeAdmin(newAdmin);
+            admin = newAdmin;
         }
     }
 
-    receive() external payable {
-        _delegate(_implementation());
-    }
-
-    function _implementation()
-        internal
-        view
-        virtual
-        override
-        returns (address)
-    {
-        return ERC1967Utils.getImplementation();
-    }
-
-    function implementation() public view returns (address) {
-        return _implementation();
-    }
-
     function getAdmin() public view returns (address) {
-        return ERC1967Utils.getAdmin();
+        return admin;
+    }
+
+    function getUnderlyingAddress() public view returns (address) {
+        return address(underlying);
     }
 
     function getFee() public view returns (uint256) {

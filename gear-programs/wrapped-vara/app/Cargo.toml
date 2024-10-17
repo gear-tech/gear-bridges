@@ -1,15 +1,11 @@
 [package]
-name = "vft-client"
+name = "wrapped-vara-app"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-mockall = { workspace = true, optional = true }
 sails-rs.workspace = true
+vft-service.workspace = true
 
 [build-dependencies]
-git-download.workspace = true
 sails-client-gen.workspace = true
-
-[features]
-mocks = ["sails-rs/mockall", "dep:mockall"]

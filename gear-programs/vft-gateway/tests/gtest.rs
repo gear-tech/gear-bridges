@@ -1,5 +1,5 @@
 use blake2::{digest::typenum::U32, Blake2b, Digest};
-use gtest::{Program, WasmProgram};
+use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_gateway_client::{
@@ -79,8 +79,10 @@ async fn setup_for_test_with_mocks(
     bridge_builtin_mock: BridgeBuiltinMock,
     vft_mock: VftMock,
 ) -> Fixture {
-    let remoting = GTestRemoting::new(ADMIN_ID.into());
-    remoting.system().init_logger();
+    let system = System::new();
+    system.init_logger();
+    system.mint_to(ADMIN_ID, 100_000_000_000_000);
+    let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
     let gear_bridge_builtin_mock = HandleMock::new(match bridge_builtin_mock {

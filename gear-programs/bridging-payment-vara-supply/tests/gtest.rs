@@ -2,7 +2,7 @@ use bridging_payment_vara_supply_client::{
     traits::*, BridgingPayment as BridgingPaymentC,
     BridgingPaymentVaraSupplyFactory as BridgingPaymentVaraSupplyFactoryC, Config, InitConfig,
 };
-use gtest::{Log, Program, WasmProgram};
+use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_treasury_client::{
@@ -71,8 +71,10 @@ struct Fixture {
 }
 
 async fn setup_for_test() -> Fixture {
-    let remoting = GTestRemoting::new(ADMIN_ID.into());
-    remoting.system().init_logger();
+    let system = System::new();
+    system.init_logger();
+    system.mint_to(ADMIN_ID, 100_000_000_000_000);
+    let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
     let gear_bridge_builtin =

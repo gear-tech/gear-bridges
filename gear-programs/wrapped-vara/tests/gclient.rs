@@ -75,8 +75,7 @@ async fn mint_from_value_works() {
         .with_value(mint_value)
         .send_recv(program_id)
         .await
-        .expect("Failed send_recv")
-        .expect("Failed to mint from value");
+        .expect("Failed send_recv");
 
     // assert
     let balance = api
@@ -122,8 +121,7 @@ async fn burn_and_return_value_works() {
         .with_value(mint_value)
         .send_recv(program_id)
         .await
-        .expect("Failed send_recv")
-        .expect("Failed to mint from value");
+        .expect("Failed send_recv");
 
     let client_balance = vft_client
         .balance_of(admin_id)
@@ -147,8 +145,7 @@ async fn burn_and_return_value_works() {
         .burn(mint_value)
         .send_recv(program_id)
         .await
-        .expect("Failed send_recv")
-        .expect("Failed to burn and return value");
+        .expect("Failed send_recv");
 
     let client_balance = vft_client
         .balance_of(admin_id)

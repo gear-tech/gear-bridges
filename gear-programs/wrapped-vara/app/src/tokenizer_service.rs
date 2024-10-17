@@ -1,6 +1,5 @@
 use crate::vft_funcs;
 use sails_rs::{gstd::msg, prelude::*};
-use vft_service::utils::Result;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -19,39 +18,33 @@ impl TokenizerService {
         Self(())
     }
 
-    pub async fn mint(&mut self) -> Result<u128> {
+    pub async fn mint(&mut self) -> CommandReply<u128> {
         let value = msg::value();
         if value == 0 {
-            return Ok(value);
+            return CommandReply::new(value);
         }
 
         let to = msg::source();
-        if let Err(err) = vft_funcs::mint(to, value.into()) {
-            // TODO reply with value `program::send_reply_with_value` when `sails` allows it
-            // see https://github.com/gear-tech/sails/issues/475
-            msg::send_bytes_with_gas(to, vec![], 0, value).expect("Failed to send value to user");
-            Err(err)
+        if let Err(_err) = vft_funcs::mint(to, value.into()) {
+            CommandReply::new(0).with_value(value)
         } else {
             self.notify_on(TokenizerEvent::Minted { to, value })
                 .expect("Failed to send `Minted` event");
-            Ok(value)
+            CommandReply::new(value)
         }
     }
 
-    pub async fn burn(&mut self, value: u128) -> Result<u128> {
+    pub async fn burn(&mut self, value: u128) -> CommandReply<u128> {
         if value == 0 {
-            return Ok(value);
+            return CommandReply::new(value);
         }
 
         let from = msg::source();
-        vft_funcs::burn(from, value.into())?;
+        vft_funcs::burn(from, value.into()).expect("Failed to burn value");
 
         self.notify_on(TokenizerEvent::Burned { from, value })
             .expect("Failed to send `Burned` event");
 
-        // TODO reply with value `program::send_reply_with_value` when `sails` allows it
-        // see https://github.com/gear-tech/sails/issues/475
-        msg::send_bytes_with_gas(from, vec![], 0, value).expect("Failed to send value to user");
-        Ok(value)
+        CommandReply::new(value).with_value(value)
     }
 }

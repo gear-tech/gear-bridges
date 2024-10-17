@@ -3,6 +3,7 @@ use io::ethereum_common::{
     base_types::BytesFixed,
     beacon::{BLSPubKey, SyncCommittee},
 };
+use meta::StateRequest;
 
 pub fn construct_sync_committee(
     aggregate_pubkey: BLSPubKey,
@@ -35,39 +36,27 @@ pub fn get_participating_keys(
         .iter()
         .zip(committee.0.iter())
         .filter_map(|(bit, pub_key)| bit.then_some(pub_key.clone().0 .0))
-        .collect::<Vec<_>>()
+        .collect()
 }
 
 pub fn construct_state_reply(
-    request: meta::StateRequest,
+    request: StateRequest,
     state: &State<STORED_CHECKPOINTS_COUNT>,
 ) -> meta::State {
-    use meta::Order;
+    fn collect<'a, T: 'a + Copy>(
+        request: &StateRequest,
+        iter: impl DoubleEndedIterator<Item = &'a T>,
+    ) -> Vec<T> {
+        iter.skip(request.index_start as usize)
+            .take(request.count as usize)
+            .copied()
+            .collect()
+    }
 
-    let count = Saturating(request.count as usize);
-    let checkpoints_all = state.checkpoints.checkpoints();
-    let (start, end) = match request.order {
-        Order::Direct => {
-            let start = Saturating(request.index_start as usize);
-            let Saturating(end) = start + count;
-
-            (start.0, cmp::min(end, checkpoints_all.len()))
-        }
-
-        Order::Reverse => {
-            let len = Saturating(checkpoints_all.len());
-            let index_last = Saturating(request.index_start as usize);
-            let end = len - index_last;
-            let Saturating(start) = end - count;
-
-            (start, end.0)
-        }
+    let checkpoints = match request.order {
+        meta::Order::Direct => collect(&request, state.checkpoints.iter()),
+        meta::Order::Reverse => collect(&request, state.checkpoints.iter().rev()),
     };
-
-    let checkpoints = checkpoints_all
-        .get(start..end)
-        .map(|slice| slice.to_vec())
-        .unwrap_or(vec![]);
 
     let replay_back = state
         .replay_back

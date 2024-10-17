@@ -1,0 +1,34 @@
+[package]
+name = "erc20-relay-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alloy-rlp.workspace = true
+alloy-sol-types = { workspace = true, features = ["json"] }
+checkpoint_light_client-io.workspace = true
+ethereum-common.workspace = true
+gear-wasm-instrument.workspace = true
+sails-rs.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["custom"] }
+lazy_static = { workspace = true, features = ["spin_no_std"] }
+
+[dev-dependencies]
+erc20-relay-client.workspace = true
+erc20-relay = { workspace = true, features = ["wasm-binary", "gas_calculation"] }
+futures.workspace = true
+gclient.workspace = true
+gstd.workspace = true
+sails-rs = { workspace = true, features = ["gclient"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+hex-literal.workspace = true
+hex.workspace = true
+
+[build-dependencies]
+sails-client-gen.workspace = true
+
+[features]
+gas_calculation = []
+mocks = []

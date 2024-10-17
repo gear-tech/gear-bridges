@@ -1,10 +1,7 @@
-extern crate pretty_env_logger;
-
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use message_relayer::{all_token_transfers, paid_token_transfers};
-use pretty_env_logger::env_logger::fmt::TimestampPrecision;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
@@ -12,6 +9,7 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
+mod erc20;
 mod ethereum_checkpoints;
 mod genesis_config;
 mod message_relayer;
@@ -45,6 +43,8 @@ enum CliCommands {
     /// Fetch authority set hash and id at specified block
     #[clap(visible_alias("fs"))]
     FetchAuthoritySetState(FetchAuthoritySetStateArgs),
+    /// Relay the ERC20 tokens to the Vara network
+    RelayErc20(RelayErc20Args),
 }
 
 #[derive(Args)]
@@ -141,9 +141,13 @@ struct RelayCheckpointsArgs {
     #[arg(long, env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS")]
     program_id: String,
 
-    /// Specify an endpoint providing Beacon API
+    /// Specify the endpoint providing Beacon API
     #[arg(long, env = "BEACON_ENDPOINT")]
     beacon_endpoint: String,
+
+    /// Specify the timeout in seconds for requests to the Beacon API endpoint
+    #[arg(long, default_value = "120", env = "BEACON_TIMEOUT")]
+    beacon_timeout: u64,
 
     /// Domain of the VARA RPC endpoint
     #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
@@ -164,18 +168,56 @@ struct RelayCheckpointsArgs {
     prometheus_args: PrometheusArgs,
 }
 
+#[derive(Args)]
+struct RelayErc20Args {
+    /// Specify ProgramId of the program
+    #[arg(long, env = "ADDRESS")]
+    program_id: String,
+
+    /// Specify an endpoint providing Beacon API
+    #[arg(long, env = "BEACON_ENDPOINT")]
+    beacon_endpoint: String,
+
+    /// Domain of the VARA RPC endpoint
+    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
+    vara_domain: String,
+
+    /// Port of the VARA RPC endpoint
+    #[arg(long, default_value = "9944", env = "VARA_PORT")]
+    vara_port: u16,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
+    vara_suri: String,
+
+    /// Address of the ethereum endpoint
+    #[arg(
+        long = "ethereum-endpoint",
+        default_value = DEFAULT_ETH_RPC,
+        env = "ETH_RPC"
+    )]
+    eth_endpoint: String,
+
+    /// Specify the hash of the ERC20-transaction to relay
+    #[arg(long, env = "TX_HASH")]
+    tx_hash: String,
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
 
-    pretty_env_logger::formatted_builder()
+    pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
         .filter(Some("prover"), log::LevelFilter::Info)
         .filter(Some("relayer"), log::LevelFilter::Info)
         .filter(Some("ethereum-client"), log::LevelFilter::Info)
         .filter(Some("metrics"), log::LevelFilter::Info)
-        .format_timestamp(Some(TimestampPrecision::Seconds))
+        .format_timestamp_secs()
         .parse_default_env()
         .init();
 
@@ -279,6 +321,7 @@ async fn main() {
                 .await
                 .expect("Failed to fetch authority set state");
         }
+        CliCommands::RelayErc20(args) => erc20::relay(args).await,
     };
 }
 

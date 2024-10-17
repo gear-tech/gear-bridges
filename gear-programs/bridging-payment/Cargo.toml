@@ -1,16 +1,28 @@
 [package]
-name = "bridging_payment"
+name = "bridging-payment"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-sails-rs.workspace = true
-parity-scale-codec.workspace = true
-scale-info.workspace = true
-gstd.workspace = true
-gbuiltin-eth-bridge.workspace = true
+bridging-payment-app = { path = "app" }
 
 [build-dependencies]
-git-download.workspace = true
-sails-client-gen.workspace = true
+bridging-payment-app = { path = "app" }
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
 
+[dev-dependencies]
+bridging-payment = { path = ".", features = ["wasm-binary"] }
+bridging-payment-client = { path = "client" }
+vft-gateway = { workspace = true, features = ["wasm-binary"] }
+vft-gateway-client.workspace = true
+extended_vft_wasm.workspace = true
+vft-client.workspace = true
+
+sails-rs = { workspace = true, features = ["gtest"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+gtest.workspace = true
+parity-scale-codec.workspace = true
+
+[features]
+wasm-binary = []

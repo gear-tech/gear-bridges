@@ -8,17 +8,29 @@ members = [
     "circuits/*",
     "ethereum-common",
     "gear-programs/bridging-payment",
-    "gear-programs/bridging-payment/src/wasm",
+    "gear-programs/bridging-payment/app",
+    "gear-programs/bridging-payment/client",
+    "gear-programs/bridging-payment-vara-supply",
+    "gear-programs/bridging-payment-vara-supply/app",
+    "gear-programs/bridging-payment-vara-supply/client",
     "gear-programs/vft-gateway",
-    "gear-programs/vft-gateway/src/wasm",
+    "gear-programs/vft-gateway/app",
+    "gear-programs/vft-gateway/client",
+    "gear-programs/vft-treasury",
+    "gear-programs/vft-treasury/app",
+    "gear-programs/vft-treasury/client",
+    "gear-programs/vft-client",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
+    "gear-programs/erc20-relay/app",
+    "gear-programs/erc20-relay/client",
     "gear-programs/wrapped-vara",
     "gear-programs/wrapped-vara/app",
     "gear-programs/wrapped-vara/client",
     "gear-programs/vft-client",
     "gear-programs/vft-service",
     "utils-prometheus",
+    "tools/deploy-to-gear",
 ]
 
 resolver = "2"
@@ -38,19 +50,34 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
-bridging_payment = { path = "gear-programs/bridging-payment" }
-bridging_payment_wasm = { path = "gear-programs/bridging_payment/src/wasm" }
-vft-gateway-app = { path = "gear-programs/vft-gateway" }
-vft_gateway_wasm = { path = "gear-programs/vft-gateway/src/wasm" }
+bridging-payment = { path = "gear-programs/bridging-payment" }
+bridging-payment-app = { path = "gear-programs/bridging-payment/app" }
+bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
+bridging-payment-vara-supply = { path = "gear-programs/bridging-payment-vara-supply" }
+bridging-payment-vara-supply-app = { path = "gear-programs/bridging-payment-vara-supply/app" }
+bridging-payment-vara-supply-client = { path = "gear-programs/bridging-payment-vara-supply/client" }
+vft-gateway = { path = "gear-programs/vft-gateway" }
+vft-gateway-app = { path = "gear-programs/vft-gateway/app" }
+vft-gateway-client = { path = "gear-programs/vft-gateway/client" }
+vft-treasury = { path = "gear-programs/vft-treasury" }
+vft-treasury-app = { path = "gear-programs/vft-treasury/app" }
+vft-treasury-client = { path = "gear-programs/vft-treasury/client" }
+vft-client = { path = "gear-programs/vft-client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
+erc20-relay = { path = "gear-programs/erc20-relay" }
+erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
+erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
 
 wrapped-vara = { path = "gear-programs/wrapped-vara" }
 wrapped-vara-app = { path = "gear-programs/wrapped-vara/app" }
 wrapped-vara-client = { path = "gear-programs/wrapped-vara/client" }
 vft-service = { path = "gear-programs/vft-service" }
+
+# Contracts' deps
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -84,10 +111,10 @@ ethereum-types = { version = "0.14.1", default-features = false, features = [
     "codec",
     "rlp",
 ] }
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
 ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
+getrandom = { version = "0.2", default-features = false }
 git-download = "0.1"
 hash-db = { version = "0.15.2", default-features = false }
 hash256-std-hasher = { version = "0.15.2", default-features = false }
@@ -100,7 +127,7 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 log = "0.4.14"
 memory-db = { version = "0.27.0", default-features = false }
-mockall = { version = "0.12" }
+mockall = "0.12"
 num = { version = "0.4", features = ["rand"] }
 paste = "1.0.14"
 pretty_env_logger = "0.5.0"
@@ -140,14 +167,15 @@ gear-wasm-builder = { version = "=1.5.0", default-features = false }
 gsdk = "=1.5.0"
 gclient = "=1.5.0"
 gear-core = "=1.5.0"
+gear-wasm-instrument = "=1.5.0"
 gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = "0.4.0"
-sails-client-gen = "0.4.0"
-sails-rs = "0.4.0"
+sails-idl-gen = "0.5.0"
+sails-client-gen = "0.5.0"
+sails-rs = "0.5.0"
 
 subxt = "0.32.1"
 sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
@@ -167,6 +195,7 @@ alloy-consensus = { version = "0.2.1", default-features = false }
 alloy-eips = { version = "0.2.1", default-features = false }
 alloy-rlp = { version = "0.3.8", default-features = false }
 alloy-primitives = { version = "0.7.7", default-features = false }
+alloy-sol-types = { version = "0.7.7", default-features = false }
 alloy = { version = "0.2.0", package = "alloy", features = [
     "sol-types",
     "contract",

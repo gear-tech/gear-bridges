@@ -3,6 +3,12 @@ use super::*;
 #[derive(Clone, TypeInfo)]
 pub struct FixedArray<T, const N: usize>(pub [T; N]);
 
+impl<T: PartialEq, const N: usize> PartialEq for FixedArray<T, N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
 impl<T: Debug, const N: usize> fmt::Debug for FixedArray<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         if f.alternate() {

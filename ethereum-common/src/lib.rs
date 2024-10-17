@@ -17,13 +17,15 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 use core::{
     any,
+    cmp::PartialEq,
     fmt::{self, Debug},
     marker::PhantomData,
     ops::{Deref, Index, IndexMut},
     slice::{self, SliceIndex},
 };
 
-pub use ethereum_types::{H256, U256};
+pub use ethereum_types::{H160, H256, U256};
+pub use hash_db;
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 use serde::{de, Deserialize};
@@ -34,3 +36,5 @@ pub use trie_db;
 pub const SLOTS_PER_EPOCH: u64 = 32;
 pub const EPOCHS_PER_SYNC_COMMITTEE: u64 = 256;
 pub const SYNC_COMMITTEE_SIZE: usize = 512;
+// https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/light-client/p2p-interface.md#configuration
+pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;

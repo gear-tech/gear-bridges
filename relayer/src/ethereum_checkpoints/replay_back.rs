@@ -1,6 +1,4 @@
 use super::*;
-use checkpoint_light_client_io::BeaconBlockHeader;
-use utils::ErrorNotFound;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(
@@ -126,6 +124,7 @@ async fn replay_back_slots(
     slots_batch_iter: SlotsBatchIter,
 ) -> AnyResult<()> {
     for (slot_start, slot_end) in slots_batch_iter {
+        log::debug!("slot_start = {slot_start}, slot_end = {slot_end}");
         replay_back_slots_inner(
             client_http,
             beacon_endpoint,
@@ -152,7 +151,7 @@ async fn replay_back_slots_inner(
     gas_limit: u64,
 ) -> AnyResult<()> {
     let payload = Handle::ReplayBack(
-        request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
+        utils::request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
     );
 
     let mut listener = client.subscribe().await?;
@@ -196,7 +195,7 @@ async fn replay_back_slots_start(
 
     let payload = Handle::ReplayBackStart {
         sync_update,
-        headers: request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
+        headers: utils::request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
     };
 
     let mut listener = client.subscribe().await?;
@@ -222,26 +221,4 @@ async fn replay_back_slots_start(
         HandleResult::ReplayBackStart(Err(e)) => Err(anyhow!("ReplayBackStart failed: {e:?}")),
         _ => Err(anyhow!("Wrong handle result to ReplayBackStart")),
     }
-}
-
-async fn request_headers(
-    client_http: &Client,
-    beacon_endpoint: &str,
-    slot_start: Slot,
-    slot_end: Slot,
-) -> AnyResult<Vec<BeaconBlockHeader>> {
-    let batch_size = (slot_end - slot_start) as usize;
-    let mut requests_headers = Vec::with_capacity(batch_size);
-    for i in slot_start..slot_end {
-        requests_headers.push(utils::get_block_header(client_http, beacon_endpoint, i));
-    }
-
-    futures::future::join_all(requests_headers)
-        .await
-        .into_iter()
-        .filter(|maybe_header| !matches!(maybe_header, Err(e) if e.downcast_ref::<ErrorNotFound>().is_some()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            anyhow!("Failed to fetch block headers ([{slot_start}; {slot_end})): {e:?}")
-        })
 }

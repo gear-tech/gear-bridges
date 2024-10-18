@@ -199,6 +199,10 @@ impl EthApi {
         self.contracts.block_number().await
     }
 
+    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
+        self.contracts.finalized_block_number().await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn provide_content_message(
         &self,
@@ -293,6 +297,17 @@ where
 
     pub async fn block_number(&self) -> Result<u64, Error> {
         self.provider.get_block_number().await.map_err(|e| e.into())
+    }
+
+    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
+        self.provider
+            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .await
+            .map_err(|e| Error::ErrorInHTTPTransport(e))?
+            .ok_or(Error::ErrorFetchingBlock)?
+            .header
+            .number
+            .ok_or(Error::ErrorFetchingBlock)
     }
 
     pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {

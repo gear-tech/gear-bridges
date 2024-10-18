@@ -76,10 +76,17 @@ impl MessageSender {
         messages: Receiver<ERC20DepositTx>,
         checkpoints: Receiver<EthereumSlotNumber>,
     ) {
+        let mut error_count = 0;
+
         tokio::task::spawn_blocking(move || loop {
             let res = block_on(self.run_inner(&messages, &checkpoints));
             if let Err(err) = res {
-                log::error!("Ethereum message sender failed: {}", err);
+                log::error!("Gear message sender failed: {}", err);
+                // TODO: Fix an issue with node droppping connection
+                error_count += 1;
+                if error_count > 10 {
+                    break;
+                }
             }
         });
     }
@@ -89,13 +96,13 @@ impl MessageSender {
         messages: &Receiver<ERC20DepositTx>,
         checkpoints: &Receiver<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
+        self.update_balance_metric().await?;
+
         let mut waiting_checkpoint: Vec<ERC20DepositTx> = vec![];
 
         let mut latest_checkpoint_slot = None;
 
         loop {
-            self.update_balance_metric().await?;
-
             for checkpoint in checkpoints.try_iter() {
                 if latest_checkpoint_slot.unwrap_or_default() < checkpoint {
                     latest_checkpoint_slot = Some(checkpoint);
@@ -113,12 +120,17 @@ impl MessageSender {
                 waiting_checkpoint.push(message);
             }
 
+            if waiting_checkpoint.is_empty() {
+                continue;
+            }
             for i in (0..waiting_checkpoint.len()).rev() {
                 if waiting_checkpoint[i].slot_number <= latest_checkpoint_slot.unwrap_or_default() {
                     self.submit_message(&waiting_checkpoint[i]).await?;
                     let _ = waiting_checkpoint.remove(i);
                 }
             }
+
+            self.update_balance_metric().await?;
 
             self.metrics
                 .messages_waiting_checkpoint
@@ -129,6 +141,12 @@ impl MessageSender {
     async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<()> {
         let message =
             compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
+
+        log::info!(
+            "Sending message in gear_message_sender: tx_index={}, slot={}",
+            message.transaction_index,
+            message.proof_block.block.slot
+        );
 
         let gas_limit_block = self.gear_api.block_gas_limit()?;
         // Use 95% of block gas limit for all extrinsics.

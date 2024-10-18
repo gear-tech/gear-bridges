@@ -64,7 +64,7 @@ impl BlockListener {
         self.metrics.latest_block.set(current_block as i64);
 
         loop {
-            let latest = self.eth_api.block_number().await?;
+            let latest = self.eth_api.finalized_block_number().await?;
             if latest >= current_block {
                 for block in current_block..=latest {
                     sender.send(EthereumBlockNumber(block))?;

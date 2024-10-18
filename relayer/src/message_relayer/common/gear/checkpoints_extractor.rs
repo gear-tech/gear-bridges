@@ -52,7 +52,7 @@ impl CheckpointsExtractor {
         tokio::task::spawn_blocking(move || loop {
             let res = block_on(self.run_inner(&sender, &blocks));
             if let Err(err) = res {
-                log::error!("Message paid event extractor failed: {}", err);
+                log::error!("Checkpoints extractor failed: {}", err);
             }
         });
 
@@ -95,8 +95,7 @@ impl CheckpointsExtractor {
             )
             .await?;
 
-        let state = hex::decode(state)?;
-
+        let state = hex::decode(&state[2..])?;
         let state = State::decode(&mut &state[..])?;
 
         assert!(state.checkpoints.len() <= 1);
@@ -116,6 +115,8 @@ impl CheckpointsExtractor {
 
                 self.metrics.latest_checkpoint_slot.set(checkpoint.0 as i64);
 
+                log::info!("First checkpoint discovered: {}", checkpoint.0);
+
                 sender.send(EthereumSlotNumber(checkpoint.0))?;
             }
             (Some(latest), Some(stored)) => {
@@ -125,6 +126,8 @@ impl CheckpointsExtractor {
                     let latest = EthereumSlotNumber(latest.0);
 
                     self.latest_checkpoint = Some(latest);
+
+                    log::info!("New checkpoint discovered: {}", latest.0);
 
                     sender.send(latest)?;
                 }

@@ -57,7 +57,7 @@ impl DepositEventExtractor {
         tokio::task::spawn_blocking(move || loop {
             let res = block_on(self.run_inner(&sender, &blocks));
             if let Err(err) = res {
-                log::error!("Message queued extractor failed: {}", err);
+                log::error!("Deposit event extractor failed: {}", err);
             }
         });
 
@@ -113,6 +113,18 @@ impl DepositEventExtractor {
         self.metrics
             .total_deposits_found
             .inc_by(events.len() as u64);
+
+        for ev in &events {
+            log::info!(
+                "Found deposit event: tx_hash={}, from={}, to={}, token={}, amount={}, slot_number={}",
+                hex::encode(ev.tx_hash.0),
+                hex::encode(ev.from.0),
+                hex::encode(ev.to.0),
+                hex::encode(ev.token.0),
+                ev.amount,
+                slot_number.0,
+            );
+        }
 
         for DepositEventEntry { tx_hash, .. } in events {
             sender.send(ERC20DepositTx {

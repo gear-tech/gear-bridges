@@ -58,7 +58,7 @@ impl Relayer {
             gear_api.block_hash_to_number(block).await?
         };
 
-        let from_eth_block = eth_api.block_number().await?;
+        let from_eth_block = eth_api.finalized_block_number().await?;
 
         log::info!(
             "Starting gear event processing from block #{}",

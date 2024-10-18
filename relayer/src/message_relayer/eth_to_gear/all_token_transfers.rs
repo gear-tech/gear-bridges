@@ -53,7 +53,7 @@ impl Relayer {
         checkpoint_light_client_address: H256,
         ethereum_event_client_address: H256,
     ) -> anyhow::Result<Self> {
-        let from_eth_block = eth_api.block_number().await?;
+        let from_eth_block = eth_api.finalized_block_number().await?;
 
         let from_gear_block = gear_api.latest_finalized_block().await?;
         let from_gear_block = gear_api.block_hash_to_number(from_gear_block).await?;

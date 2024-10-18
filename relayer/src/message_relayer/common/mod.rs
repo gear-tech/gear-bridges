@@ -1,12 +1,9 @@
+use ethereum_client::TxHash;
 use gear_rpc_client::dto::Message;
 use primitive_types::H256;
 
-pub mod ethereum_block_listener;
-pub mod ethereum_message_sender;
-pub mod gear_block_listener;
-pub mod merkle_root_extractor;
-pub mod message_paid_event_extractor;
-pub mod message_queued_event_extractor;
+pub mod ethereum;
+pub mod gear;
 pub mod paid_messages_filter;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
@@ -17,6 +14,11 @@ pub struct GearBlockNumber(pub u32);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
 pub struct EthereumBlockNumber(pub u64);
+
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default, derive_more::Display,
+)]
+pub struct EthereumSlotNumber(pub u64);
 
 #[derive(Clone, Debug)]
 pub struct MessageInBlock {
@@ -34,4 +36,10 @@ pub struct PaidMessage {
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub authority_set_id: AuthoritySetId,
+}
+
+#[derive(Clone, Debug)]
+pub struct ERC20DepositTx {
+    pub slot_number: EthereumSlotNumber,
+    pub tx_hash: TxHash,
 }

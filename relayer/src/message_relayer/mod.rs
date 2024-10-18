@@ -1,4 +1,4 @@
 mod common;
 
-pub mod all_token_transfers;
-pub mod paid_token_transfers;
+pub mod eth_to_gear;
+pub mod gear_to_eth;

@@ -76,17 +76,10 @@ impl MessageSender {
         messages: Receiver<ERC20DepositTx>,
         checkpoints: Receiver<EthereumSlotNumber>,
     ) {
-        let mut error_count = 0;
-
         tokio::task::spawn_blocking(move || loop {
             let res = block_on(self.run_inner(&messages, &checkpoints));
             if let Err(err) = res {
                 log::error!("Gear message sender failed: {}", err);
-                // TODO: Fix an issue with node droppping connection
-                error_count += 1;
-                if error_count > 10 {
-                    break;
-                }
             }
         });
     }

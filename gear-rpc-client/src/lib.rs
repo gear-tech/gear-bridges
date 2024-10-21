@@ -26,8 +26,8 @@ use subxt::{
     blocks::Block as BlockImpl,
     dynamic::DecodedValueThunk,
     rpc_params,
-    storage::{address::Yes, StorageAddress},
-    utils::H256,
+    storage::Address,
+    utils::{H256, Yes},
     OnlineClient,
 };
 use trie_db::{node::NodeHandle, ChildReference};
@@ -523,7 +523,7 @@ impl GearApi {
         address: &A,
     ) -> anyhow::Result<T>
     where
-        A: StorageAddress<IsFetchable = Yes, Target = DecodedValueThunk>,
+        A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
         T: Decode,
     {
         let data = block

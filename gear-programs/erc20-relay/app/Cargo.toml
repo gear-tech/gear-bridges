@@ -8,7 +8,6 @@ alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 checkpoint_light_client-io.workspace = true
 ethereum-common.workspace = true
-gear-wasm-instrument.workspace = true
 sails-rs.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

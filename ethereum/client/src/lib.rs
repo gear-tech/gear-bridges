@@ -303,7 +303,7 @@ where
         self.provider
             .get_block_by_number(BlockNumberOrTag::Finalized, false)
             .await
-            .map_err(|e| Error::ErrorInHTTPTransport(e))?
+            .map_err(Error::ErrorInHTTPTransport)?
             .ok_or(Error::ErrorFetchingBlock)?
             .header
             .number

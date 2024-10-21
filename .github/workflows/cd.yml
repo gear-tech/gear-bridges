@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,6 +27,13 @@ jobs:
         id: docker_meta
         run: |
           echo "DOCKER_TAGS=ghcr.io/gear-tech/bridge-relayer:${{ github.ref_name }}.${{ github.sha }},ghcr.io/gear-tech/bridge-relayer:latest" >> $GITHUB_ENV
+
+      - name: Log in to gchr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6

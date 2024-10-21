@@ -59,9 +59,9 @@ async fn receive(
             .map_err(|e| anyhow!("Failed to deserialize point on G2: {e:?}"))?;
 
     let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
-        ethereum_beacon_client::sync_update_from_update(signature, update)
+        ethereum_beacon_client::utils::sync_update_from_update(signature, update)
     } else {
-        ethereum_beacon_client::sync_update_from_finality(signature, finality_update)
+        ethereum_beacon_client::utils::sync_update_from_finality(signature, finality_update)
     };
 
     if sender.send(sync_update).await.is_err() {

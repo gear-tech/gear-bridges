@@ -99,12 +99,12 @@ async fn init(network: Network) -> Result<()> {
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
     .unwrap();
-    let sync_update = ethereum_beacon_client::sync_update_from_update(signature, update);
+    let sync_update = ethereum_beacon_client::utils::sync_update_from_update(signature, update);
 
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     let pub_keys =
-        ethereum_beacon_client::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
+        ethereum_beacon_client::utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let init = Init {
         network,
         sync_committee_current_pub_keys: pub_keys,
@@ -181,12 +181,12 @@ async fn init_and_updating() -> Result<()> {
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
     .unwrap();
-    let sync_update = ethereum_beacon_client::sync_update_from_update(signature, update);
+    let sync_update = ethereum_beacon_client::utils::sync_update_from_update(signature, update);
 
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
     let pub_keys =
-        ethereum_beacon_client::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
+        ethereum_beacon_client::utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let init = Init {
         network: Network::Holesky,
         sync_committee_current_pub_keys: pub_keys,
@@ -223,10 +223,9 @@ async fn init_and_updating() -> Result<()> {
                         &update.data.sync_aggregate.sync_committee_signature.0 .0[..],
                     )
                     .unwrap();
-                let payload = Handle::SyncUpdate(ethereum_beacon_client::sync_update_from_update(
-                    signature,
-                    update.data,
-                ));
+                let payload = Handle::SyncUpdate(
+                    ethereum_beacon_client::utils::sync_update_from_update(signature, update.data),
+                );
                 let gas_limit = client
                     .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
                     .await?
@@ -259,7 +258,7 @@ async fn init_and_updating() -> Result<()> {
                 };
 
                 let payload = Handle::SyncUpdate(
-                    ethereum_beacon_client::sync_update_from_finality(signature, update),
+                    ethereum_beacon_client::utils::sync_update_from_finality(signature, update),
                 );
 
                 let gas_limit = client
@@ -323,7 +322,7 @@ async fn replaying_back() -> Result<()> {
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
     .unwrap();
-    let sync_update = ethereum_beacon_client::sync_update_from_update(signature, update);
+    let sync_update = ethereum_beacon_client::utils::sync_update_from_update(signature, update);
     let slot_start = sync_update.finalized_header.slot;
     let slot_end = finality_update.finalized_header.slot;
     println!(
@@ -332,7 +331,7 @@ async fn replaying_back() -> Result<()> {
     );
 
     let pub_keys =
-        ethereum_beacon_client::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
+        ethereum_beacon_client::utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let init = Init {
         network: Network::Sepolia,
         sync_committee_current_pub_keys: pub_keys,
@@ -376,7 +375,7 @@ async fn replaying_back() -> Result<()> {
         .unwrap();
 
         let payload = Handle::ReplayBackStart {
-            sync_update: ethereum_beacon_client::sync_update_from_finality(
+            sync_update: ethereum_beacon_client::utils::sync_update_from_finality(
                 signature,
                 finality_update,
             ),
@@ -474,10 +473,10 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
     )
     .unwrap();
-    let sync_update = ethereum_beacon_client::sync_update_from_update(signature, update);
+    let sync_update = ethereum_beacon_client::utils::sync_update_from_update(signature, update);
 
     let pub_keys =
-        ethereum_beacon_client::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
+        ethereum_beacon_client::utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
     let init = Init {
         network: Network::Sepolia,
         sync_committee_current_pub_keys: pub_keys,
@@ -509,7 +508,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     )
     .unwrap();
 
-    let payload = Handle::SyncUpdate(ethereum_beacon_client::sync_update_from_finality(
+    let payload = Handle::SyncUpdate(ethereum_beacon_client::utils::sync_update_from_finality(
         signature,
         finality_update,
     ));

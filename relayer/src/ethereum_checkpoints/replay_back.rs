@@ -53,7 +53,8 @@ pub async fn execute(
         )
         .map_err(|e| anyhow!("Failed to deserialize point on G2 (replay back): {e:?}"))?;
 
-        let sync_update = ethereum_beacon_client::sync_update_from_update(signature, update.data);
+        let sync_update =
+            ethereum_beacon_client::utils::sync_update_from_update(signature, update.data);
         replay_back_slots_start(
             beacon_client,
             client,

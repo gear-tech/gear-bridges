@@ -48,7 +48,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         },
     } = args;
 
-    let program_id = ethereum_beacon_client::try_from_hex_encoded(&program_id)
+    let program_id = ethereum_beacon_client::utils::try_from_hex_encoded(&program_id)
         .expect("Expecting correct ProgramId");
 
     let timeout = Some(Duration::from_secs(beacon_timeout));

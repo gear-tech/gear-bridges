@@ -1,4 +1,4 @@
-use gtest::{Program, WasmProgram};
+use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_treasury_client::{
@@ -6,7 +6,7 @@ use vft_treasury_client::{
     VftTreasuryFactory as VftTreasuryFactoryC,
 };
 
-const ADMIN_ID: u64 = 1000;
+const ADMIN_ID: u64 = 1_000;
 const ETH_CLIENT_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
 
@@ -53,8 +53,12 @@ struct Fixture {
 }
 
 async fn setup_for_test() -> Fixture {
-    let remoting = GTestRemoting::new(ADMIN_ID.into());
-    remoting.system().init_logger();
+    let system = System::new();
+    system.init_logger();
+    system.mint_to(ADMIN_ID, 100_000_000_000_000);
+    system.mint_to(ETH_CLIENT_ID, 100_000_000_000_000);
+
+    let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
     let gear_bridge_builtin =
@@ -126,7 +130,9 @@ async fn test_treasury() {
         .unwrap()
         .unwrap();
 
-    let account_id: ActorId = 100000.into();
+    let account_id: ActorId = 100_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
 
     let mut vft = VftC::new(remoting.clone());
@@ -182,7 +188,9 @@ async fn test_mapping_does_not_exists() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id: ActorId = 100000.into();
+    let account_id: ActorId = 100_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
 
     let ok = VftC::new(remoting.clone())
@@ -252,8 +260,12 @@ async fn test_anyone_can_deposit() {
         .unwrap()
         .unwrap();
 
-    let account0_id: ActorId = 100000.into();
-    let account1_id: ActorId = 100001.into();
+    let account0_id: ActorId = 100_000.into();
+    remoting.system().mint_to(account0_id, 100_000_000_000_000);
+
+    let account1_id: ActorId = 100_001.into();
+    remoting.system().mint_to(account1_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
 
     let mut vft = VftC::new(remoting.clone());

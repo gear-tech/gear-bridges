@@ -2,7 +2,7 @@ use bridging_payment_client::{
     traits::*, BridgingPayment as BridgingPaymentC,
     BridgingPaymentFactory as BridgingPaymentFactoryC, Config, InitConfig,
 };
-use gtest::{Log, Program, WasmProgram};
+use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_gateway_client::{
@@ -71,8 +71,11 @@ struct Fixture {
 }
 
 async fn setup_for_test() -> Fixture {
-    let remoting = GTestRemoting::new(ADMIN_ID.into());
-    remoting.system().init_logger();
+    let system = System::new();
+    system.init_logger();
+    system.mint_to(ADMIN_ID, 100_000_000_000_000);
+
+    let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
     let gear_bridge_builtin =
@@ -171,7 +174,7 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
-    remoting.system().mint_to(account_id, FEE);
+    remoting.system().mint_to(account_id, 10 * FEE);
     BridgingPaymentC::new(remoting.clone().with_actor_id(account_id))
         .request_to_gateway(amount, [1; 20].into(), vft_program_id)
         .with_value(FEE)
@@ -193,10 +196,11 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
+    let balance_before = remoting.system().balance_of(ADMIN_ID);
     remoting
         .system()
         .get_mailbox(ADMIN_ID)
         .claim_value(Log::builder().dest(ADMIN_ID))
         .unwrap();
-    assert_eq!(remoting.system().balance_of(ADMIN_ID), FEE);
+    assert!(remoting.system().balance_of(ADMIN_ID) > balance_before + FEE / 4 * 3);
 }

@@ -9,17 +9,13 @@ use gclient::{Event, EventProcessor, GearApi, GearEvent};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft::vft_gateway;
 
-async fn spin_up_node() -> (GClientRemoting, CodeId, GasUnit) {
+async fn spin_up_node() -> (GClientRemoting, GearApi, CodeId, GasUnit) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
-    let remoting = GClientRemoting::new(api);
-    let (code_id, _) = remoting
-        .api()
-        .upload_code(erc20_relay::WASM_BINARY)
-        .await
-        .unwrap();
+    let remoting = GClientRemoting::new(api.clone());
+    let (code_id, _) = api.upload_code(erc20_relay::WASM_BINARY).await.unwrap();
 
-    (remoting, code_id, gas_limit)
+    (remoting, api, code_id, gas_limit)
 }
 
 #[tokio::test]
@@ -29,8 +25,8 @@ async fn gas_for_reply() {
 
     let route = <vft_gateway::io::MintTokens as ActionIo>::ROUTE;
 
-    let (remoting, code_id, gas_limit) = spin_up_node().await;
-    let account_id: ActorId = <[u8; 32]>::from(remoting.api().account_id().clone()).into();
+    let (remoting, api, code_id, gas_limit) = spin_up_node().await;
+    let account_id: ActorId = <[u8; 32]>::from(api.account_id().clone()).into();
 
     let factory = Erc20RelayFactory::new(remoting.clone());
 
@@ -52,7 +48,7 @@ async fn gas_for_reply() {
     println!("prepared");
 
     for i in 5..10 {
-        let mut listener = remoting.api().subscribe().await.unwrap();
+        let mut listener = api.subscribe().await.unwrap();
 
         client
             .calculate_gas_for_reply(i, i)
@@ -83,8 +79,7 @@ async fn gas_for_reply() {
 
             result
         };
-        let gas_info = remoting
-            .api()
+        let gas_info = api
             .calculate_reply_gas(None, message_id.into(), payload, 0, true)
             .await
             .unwrap();
@@ -98,7 +93,7 @@ async fn gas_for_reply() {
 async fn set_vft_gateway() {
     use erc20_relay_client::Config;
 
-    let (remoting, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -171,7 +166,7 @@ async fn set_vft_gateway() {
 async fn update_config() {
     use erc20_relay_client::Config;
 
-    let (remoting, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 

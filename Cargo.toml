@@ -202,5 +202,5 @@ alloy = { version = "0.2.0", package = "alloy", features = [
     "rpc-types",
 ] }
 
-[patch.crates-io]
-gsys = { git = "https://github.com/gear-tech/gear.git", tag = "v1.5.0" }
+[patch."https://github.com/gear-tech/gear"]
+gsys = "1.6.2"

@@ -142,7 +142,7 @@ where
         self.enusure_admin();
 
         let fee_balance = exec::value_available();
-        msg::send_with_gas(self.data().admin_address, "", 0, fee_balance)
+        msg::send(self.data().admin_address, "", fee_balance)
             .expect("Failed to reclaim fees");
     }
 

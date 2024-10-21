@@ -27,7 +27,7 @@ use subxt::{
     dynamic::DecodedValueThunk,
     rpc_params,
     storage::Address,
-    utils::{H256, Yes},
+    utils::{Yes, H256},
     OnlineClient,
 };
 use trie_db::{node::NodeHandle, ChildReference};

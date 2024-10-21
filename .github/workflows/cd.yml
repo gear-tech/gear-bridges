@@ -1,0 +1,37 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: kuberunner
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare Docker Tags
+        id: docker_meta
+        run: |
+          echo "DOCKER_TAGS=ghcr.io/gear-tech/bridge-relayer:${{ github.ref_name }}.${{ github.sha }},ghcr.io/gear-tech/bridge-relayer:latest" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.DOCKER_TAGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

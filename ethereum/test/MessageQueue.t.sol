@@ -363,7 +363,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    // Test skipped, to enable it remove the skip_ prefix
+    // TODO: Test skipped, to enable it remove the skip_ prefix
     function skip_test_submit_transaction() public {
         WithdrawMessage memory withdraw_msg = WithdrawMessage({
             receiver: ETH_ADDRESS_3,

@@ -8,11 +8,11 @@ contract Relayer is IRelayer {
     IVerifier private _verifier;
     mapping(uint256 => bytes32) private _block_numbers;
     mapping(bytes32 => uint256) private _merkle_roots;
+    bool _emergencyStop = false;
 
     uint256 private constant MASK_32BITS = (2 ** 32) - 1;
     uint256 private constant MASK_64BITS = (2 ** 64) - 1;
     uint256 private constant MASK_192BITS = (2 ** 192) - 1;
-    bool public emergencyStop = false;
 
     address immutable VERIFIER_ADDRESS;
 
@@ -33,7 +33,7 @@ contract Relayer is IRelayer {
         bytes32 merkle_root,
         bytes calldata proof
     ) external {
-        if (emergencyStop) {
+        if (_emergencyStop) {
             revert EmergencyStop();
         }
 
@@ -54,6 +54,13 @@ contract Relayer is IRelayer {
         _merkle_roots[merkle_root] = block_number;
 
         emit MerkleRoot(block_number, bytes32(merkle_root));
+    }
+
+    /**
+     * @dev Returns emergency stop status.
+     */
+    function emergencyStop() external view override returns (bool) {
+        return _emergencyStop;
     }
 
     /**
@@ -129,7 +136,7 @@ contract Relayer is IRelayer {
     ) private returns (bool) {
         bytes32 orig_merkle_root = _block_numbers[block_number];
         if (orig_merkle_root != 0 && orig_merkle_root != merkle_root) {
-            emergencyStop = true;
+            _emergencyStop = true;
             return true;
         }
 

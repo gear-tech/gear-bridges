@@ -27,4 +27,5 @@ interface IRelayer {
         bytes32 merkle_root
     ) external pure returns (uint256[] memory public_inputs);
 
+    function emergencyStop() external view returns (bool);
 }

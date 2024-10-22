@@ -9,12 +9,12 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use message_relayer::{eth_to_gear, gear_to_eth};
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
+use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
 mod ethereum_beacon_client;
 mod ethereum_checkpoints;
-mod genesis_config;
 mod message_relayer;
 mod proof_storage;
 mod prover_interface;
@@ -44,9 +44,6 @@ enum CliCommands {
     RelayMessages(RelayMessagesArgs),
     /// Start service constantly relaying Ethereum checkpoints to the Vara program
     RelayCheckpoints(RelayCheckpointsArgs),
-    /// Fetch authority set hash and id at specified block
-    #[clap(visible_alias("fs"))]
-    FetchAuthoritySetState(FetchAuthoritySetStateArgs),
     /// Relay the ERC20 tokens to the Vara network
     RelayErc20(RelayErc20Args),
 }
@@ -74,20 +71,11 @@ struct RelayMerkleRootsArgs {
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
+    genesis_config_args: GenesisConfigArgs,
+    #[clap(flatten)]
     prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     proof_storage_args: ProofStorageArgs,
-}
-
-#[derive(Args)]
-struct FetchAuthoritySetStateArgs {
-    #[clap(flatten)]
-    vara_endpoint: VaraEndpointArg,
-    /// Block number which contains desired authority set
-    block_number: Option<u32>,
-    /// Wether to write fetched authority set state as genesis config
-    #[clap(long, action)]
-    write_to_file: bool,
 }
 
 // TODO: Separate domain and port.
@@ -153,6 +141,16 @@ struct ProofStorageArgs {
     /// Gear fee payer. If not set, proofs are saved to file system
     #[arg(long = "gear-fee-payer", env = "GEAR_FEE_PAYER")]
     gear_fee_payer: Option<String>,
+}
+
+#[derive(Args)]
+struct GenesisConfigArgs {
+    /// Authority set hash used in genesis config
+    #[arg(long = "authority-set-hash", env = "GENESIS_CONFIG_AUTHORITY_SET_HASH")]
+    authority_set_hash: String,
+    /// Authority set id used in genesis config
+    #[arg(long = "authority-set-id", env = "GENESIS_CONFIG_AUTHORITY_SET_ID")]
+    authority_set_id: u64,
 }
 
 #[derive(Args)]
@@ -270,7 +268,16 @@ async fn main() {
                     Box::from(FileSystemProofStorage::new("./proof_storage".into()))
                 };
 
-            let genesis_config = genesis_config::load_from_file();
+            let authority_set_hash = hex::decode(&args.genesis_config_args.authority_set_hash)
+                .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
+            let authority_set_hash = authority_set_hash
+                .try_into()
+                .expect("Incorrect format for authority set hash: wrong length");
+
+            let genesis_config = GenesisConfig {
+                authority_set_id: args.genesis_config_args.authority_set_id,
+                authority_set_hash,
+            };
 
             let relayer =
                 MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage).await;
@@ -330,12 +337,6 @@ async fn main() {
             }
         }
         CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
-        CliCommands::FetchAuthoritySetState(args) => {
-            let gear_api = create_gear_client(&args.vara_endpoint).await;
-            genesis_config::fetch_from_chain(gear_api, args.block_number, args.write_to_file)
-                .await
-                .expect("Failed to fetch authority set state");
-        }
         CliCommands::RelayErc20(args) => {
             let eth_api = create_eth_client(&args.ethereum_args);
             let beacon_client = create_beacon_client(&args.beacon_rpc).await;

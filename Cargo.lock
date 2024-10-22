@@ -5809,6 +5809,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "genesis-config"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "gear-rpc-client",
+ "hex",
+ "tokio",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10726,7 +10736,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "toml 0.8.19",
  "utils-prometheus",
 ]
 

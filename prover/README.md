@@ -44,7 +44,7 @@ The Authority Set Rotation circuit proves that the validator set has changed. Th
 
 #### Latest Authority Set
 
-The Latest Authority Set circuit is used to prove a chain of authority set changes, demonstrating the transition from the genesis authority set to the most recent one. The genesis authority set means some arbitrarily-selected authority set and stored as a constant within the circuit. When circuits are built it's copied from `/GenesisConfig.toml`
+The Latest Authority Set circuit is used to prove a chain of authority set changes, demonstrating the transition from the genesis authority set to the most recent one. The genesis authority set means some arbitrarily-selected authority set and stored as a constant within the circuit. When circuits are built it's parsed from CLI args.
 
 #### Messages Trie Root Inclusion Into Storage
 

@@ -47,7 +47,6 @@ RUN apt-get update && \
     apt-get install -y ca-certificates
 
 COPY --from=builder /target/release/relayer .
-COPY GenesisConfig.toml .
 
 EXPOSE 9090
 

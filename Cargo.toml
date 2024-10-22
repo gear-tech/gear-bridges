@@ -26,6 +26,7 @@ members = [
     "gear-programs/erc20-relay/client",
     "utils-prometheus",
     "tools/deploy-to-gear",
+    "tools/genesis-config",
 ]
 
 resolver = "2"
@@ -133,7 +134,8 @@ rlp = { version = "0.5.2", default-features = false }
 scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }
-serde = { version = "1.0", default-features = false, features = [
+# Pinned to this specific version because of the issue https://github.com/alloy-rs/core/issues/778 in alloy.
+serde = { version = "=1.0.210", default-features = false, features = [
     "alloc",
     "derive",
 ] }
@@ -143,7 +145,6 @@ static_assertions = "1.1.0"
 thiserror = "1.0.61"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.23.0", features = ["full"] }
-toml = "0.8.19"
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
 unroll = "0.1.5"

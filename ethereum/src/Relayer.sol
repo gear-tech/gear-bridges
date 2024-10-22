@@ -12,6 +12,7 @@ contract Relayer is IRelayer {
     uint256 private constant MASK_32BITS = (2 ** 32) - 1;
     uint256 private constant MASK_64BITS = (2 ** 64) - 1;
     uint256 private constant MASK_192BITS = (2 ** 192) - 1;
+    bool public emergencyStop = false;
 
     address immutable VERIFIER_ADDRESS;
 
@@ -32,12 +33,21 @@ contract Relayer is IRelayer {
         bytes32 merkle_root,
         bytes calldata proof
     ) external {
+        if (emergencyStop) {
+            revert EmergencyStop();
+        }
+
         uint256[] memory public_inputs = _buildPublicInputs(
             block_number,
             merkle_root
         );
         if (!IVerifier(VERIFIER_ADDRESS).verifyProof(proof, public_inputs)) {
             revert InvalidProof();
+        }
+
+        if (_checkEmergencyStopCondition(block_number, merkle_root)) {
+            // Bail out here if emergency stop condition is met.
+            return;
         }
 
         _block_numbers[block_number] = merkle_root;
@@ -104,5 +114,25 @@ contract Relayer is IRelayer {
             ((uint256(merkle_root) & MASK_64BITS) << 128);
 
         return ret;
+    }
+
+    /**
+     * @dev Checks if the merkle root provided is duplicated or not.
+     * If it is duplicated, it sets the emergency mode.
+     *
+     * @param block_number Target block number.
+     * @param merkle_root Target merkle root.
+     */
+    function _checkEmergencyStopCondition(
+        uint256 block_number,
+        bytes32 merkle_root
+    ) private returns (bool) {
+        bytes32 orig_merkle_root = _block_numbers[block_number];
+        if (orig_merkle_root != 0 && orig_merkle_root != merkle_root) {
+            emergencyStop = true;
+            return true;
+        }
+
+        return false;
     }
 }

@@ -4,6 +4,7 @@ interface IRelayer {
     error AlreadyInitialized();
     error InvalidProof();
     error BadInput();
+    error EmergencyStop();
 
     event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
 

@@ -1,6 +1,5 @@
 use clap::{Args, Parser, Subcommand};
 use gear_rpc_client::GearApi;
-use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -33,15 +32,6 @@ struct FetchArgs {
     /// Block number to fetch the genesis config for. If not specified, the latest block will be used
     #[arg(long = "block")]
     block: Option<u32>,
-    /// Whether to write result to a file
-    #[arg(long, action)]
-    write_to_file: bool,
-}
-
-#[derive(Deserialize, Serialize)]
-struct GenesisConfigToml {
-    authority_set_id: u64,
-    authority_set_hash: String,
 }
 
 #[tokio::main]
@@ -73,16 +63,4 @@ async fn main() {
         "Authority set hash: {}",
         hex::encode(state.authority_set_hash)
     );
-
-    if args.write_to_file {
-        let config = GenesisConfigToml {
-            authority_set_id: state.authority_set_id,
-            authority_set_hash: hex::encode(state.authority_set_hash),
-        };
-
-        let data = toml::to_string(&config).expect("Failed to serialize config");
-
-        std::fs::write("./GenesisConfig.toml", data)
-            .expect("Failed to write genesis config to file");
-    }
 }

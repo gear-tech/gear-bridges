@@ -7,6 +7,4 @@ edition.workspace = true
 clap.workspace = true
 gear-rpc-client.workspace = true
 hex.workspace = true
-serde.workspace = true
 tokio.workspace = true
-toml.workspace = true

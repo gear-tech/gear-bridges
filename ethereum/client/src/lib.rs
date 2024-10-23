@@ -5,7 +5,10 @@ use alloy::{
     network::{Ethereum, EthereumWallet},
     primitives::{Address, Bytes, B256, U256},
     providers::{
-        fillers::{ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller, WalletFiller},
+        fillers::{
+            BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
+            WalletFiller,
+        },
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     rpc::types::{BlockId, BlockNumberOrTag, Filter},
@@ -35,7 +38,10 @@ pub use error::Error;
 
 type ProviderType = FillProvider<
     JoinFill<
-        JoinFill<JoinFill<JoinFill<Identity, GasFiller>, NonceFiller>, ChainIdFiller>,
+        JoinFill<
+            Identity,
+            JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>,
+        >,
         WalletFiller<EthereumWallet>,
     >,
     RootProvider<Http<Client>>,
@@ -300,14 +306,14 @@ where
     }
 
     pub async fn finalized_block_number(&self) -> Result<u64, Error> {
-        self.provider
+        Ok(self
+            .provider
             .get_block_by_number(BlockNumberOrTag::Finalized, false)
             .await
             .map_err(Error::ErrorInHTTPTransport)?
             .ok_or(Error::ErrorFetchingBlock)?
             .header
-            .number
-            .ok_or(Error::ErrorFetchingBlock)
+            .number)
     }
 
     pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {
@@ -483,8 +489,7 @@ where
             .map_err(|_| Error::ErrorFetchingBlock)?
             .ok_or(Error::ErrorFetchingBlock)?
             .header
-            .number
-            .ok_or(Error::ErrorFetchingBlock)?;
+            .number;
 
         let status = if latest_finalized >= block {
             TxStatus::Finalized

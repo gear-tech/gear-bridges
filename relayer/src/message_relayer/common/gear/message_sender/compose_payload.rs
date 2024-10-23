@@ -1,7 +1,7 @@
 use crate::ethereum_beacon_client::BeaconClient;
 
 use alloy::{network::primitives::BlockTransactionsKind, primitives::TxHash, providers::Provider};
-use alloy_eips::BlockNumberOrTag;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use sails_rs::prelude::*;
@@ -44,10 +44,7 @@ pub async fn compose(
         .header
         .parent_beacon_block_root
         .ok_or(anyhow!("Unable to determine root of parent beacon block"))?;
-    let block_number = block
-        .header
-        .number
-        .ok_or(anyhow!("Unable to determine Ethereum block number"))?;
+    let block_number = block.header.number;
 
     let proof_block =
         build_inclusion_proof(beacon_client, &beacon_root_parent, block_number).await?;
@@ -57,7 +54,7 @@ pub async fn compose(
         .transaction_index
         .ok_or(anyhow!("Unable to determine transaction index"))?;
     let receipts = provider
-        .get_block_receipts(BlockNumberOrTag::Number(block_number))
+        .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
         .await?
         .unwrap_or_default()
         .iter()

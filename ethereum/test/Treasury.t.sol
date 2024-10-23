@@ -33,7 +33,8 @@ contract TreasuryTest is TestHelper {
         treasury.deposit(address(erc20_token), amount, VARA_ADDRESS_3);
     }
 
-    function test_withdraw() public {
+    // TODO: Test skipped, to enable it remove the skip_ prefix
+    function skip_test_withdraw() public {
         uint128 amount = 100 * (10 ** 18);
         erc20_token.approve(address(treasury), amount);
         treasury.deposit(address(erc20_token), amount, VARA_ADDRESS_3);

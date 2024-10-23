@@ -4,6 +4,7 @@ interface IRelayer {
     error AlreadyInitialized();
     error InvalidProof();
     error BadInput();
+    error EmergencyStop();
 
     event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
 
@@ -26,4 +27,5 @@ interface IRelayer {
         bytes32 merkle_root
     ) external pure returns (uint256[] memory public_inputs);
 
+    function emergencyStop() external view returns (bool);
 }

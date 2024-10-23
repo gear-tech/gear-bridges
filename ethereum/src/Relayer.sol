@@ -8,6 +8,7 @@ contract Relayer is IRelayer {
     IVerifier private _verifier;
     mapping(uint256 => bytes32) private _block_numbers;
     mapping(bytes32 => uint256) private _merkle_roots;
+    bool _emergencyStop = false;
 
     uint256 private constant MASK_32BITS = (2 ** 32) - 1;
     uint256 private constant MASK_64BITS = (2 ** 64) - 1;
@@ -32,6 +33,10 @@ contract Relayer is IRelayer {
         bytes32 merkle_root,
         bytes calldata proof
     ) external {
+        if (_emergencyStop) {
+            revert EmergencyStop();
+        }
+
         uint256[] memory public_inputs = _buildPublicInputs(
             block_number,
             merkle_root
@@ -40,10 +45,22 @@ contract Relayer is IRelayer {
             revert InvalidProof();
         }
 
+        if (_checkEmergencyStopCondition(block_number, merkle_root)) {
+            // Bail out here if emergency stop condition is met.
+            return;
+        }
+
         _block_numbers[block_number] = merkle_root;
         _merkle_roots[merkle_root] = block_number;
 
         emit MerkleRoot(block_number, bytes32(merkle_root));
+    }
+
+    /**
+     * @dev Returns emergency stop status.
+     */
+    function emergencyStop() external view override returns (bool) {
+        return _emergencyStop;
     }
 
     /**
@@ -104,5 +121,25 @@ contract Relayer is IRelayer {
             ((uint256(merkle_root) & MASK_64BITS) << 128);
 
         return ret;
+    }
+
+    /**
+     * @dev Checks if the merkle root provided is duplicated or not.
+     * If it is duplicated, it sets the emergency mode.
+     *
+     * @param block_number Target block number.
+     * @param merkle_root Target merkle root.
+     */
+    function _checkEmergencyStopCondition(
+        uint256 block_number,
+        bytes32 merkle_root
+    ) private returns (bool) {
+        bytes32 orig_merkle_root = _block_numbers[block_number];
+        if (orig_merkle_root != 0 && orig_merkle_root != merkle_root) {
+            _emergencyStop = true;
+            return true;
+        }
+
+        return false;
     }
 }

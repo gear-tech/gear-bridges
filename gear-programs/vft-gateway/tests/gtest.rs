@@ -1,5 +1,5 @@
 use blake2::{digest::typenum::U32, Blake2b, Digest};
-use gtest::{Program, WasmProgram};
+use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_gateway_client::{
@@ -79,8 +79,12 @@ async fn setup_for_test_with_mocks(
     bridge_builtin_mock: BridgeBuiltinMock,
     vft_mock: VftMock,
 ) -> Fixture {
-    let remoting = GTestRemoting::new(ADMIN_ID.into());
-    remoting.system().init_logger();
+    let system = System::new();
+    system.init_logger();
+    system.mint_to(ADMIN_ID, 100_000_000_000_000);
+    system.mint_to(ETH_CLIENT_ID, 100_000_000_000_000);
+
+    let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
     let gear_bridge_builtin_mock = HandleMock::new(match bridge_builtin_mock {
@@ -100,9 +104,9 @@ async fn setup_for_test_with_mocks(
         gear_bridge_builtin_mock,
     );
 
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
+    let msg_id_init = gear_bridge_builtin.send_bytes(ADMIN_ID, b"INIT");
+    let result = remoting.system().run_next_block();
+    assert!(result.succeed.contains(&msg_id_init));
 
     // Gateway
     let gateway_code_id = remoting.system().submit_code(vft_gateway::WASM_BINARY);
@@ -148,7 +152,11 @@ async fn setup_for_test_with_mocks(
             });
 
             let vft = Program::mock_with_id(remoting.system(), TOKEN_ID, vft_mock);
-            assert!(!vft.send_bytes(ADMIN_ID, b"INI").main_failed());
+
+            let msg_id_init = vft.send_bytes(ADMIN_ID, b"INI");
+            let result = remoting.system().run_next_block();
+            assert!(result.succeed.contains(&msg_id_init));
+
             vft.id()
         }
     };
@@ -180,7 +188,9 @@ async fn test_successful_transfer_vara_to_eth() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
     let eth_token_id = [2; 20].into();
@@ -232,7 +242,9 @@ async fn test_transfer_fails_due_to_token_panic() {
         vft_program_id,
     } = setup_for_test_with_mocks(Default::default(), VftMock::FTMockError).await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
     let eth_token_id = [2; 20].into();
@@ -268,7 +280,9 @@ async fn test_transfer_fails_due_to_token_rejecting_request() {
         vft_program_id,
     } = setup_for_test_with_mocks(Default::default(), VftMock::FTMockReturnsFalse).await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
     let eth_token_id = [2; 20].into();
@@ -308,7 +322,9 @@ async fn test_bridge_builtin_panic_with_token_mint() {
     )
     .await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
     let gas = 100_000_000_000;
     let eth_token_id = [2; 20].into();
@@ -369,8 +385,12 @@ async fn test_multiple_transfers() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id1: ActorId = 10001.into();
+    let account_id1: ActorId = 10_001.into();
+    remoting.system().mint_to(account_id1, 100_000_000_000_000);
+
     let account_id2: ActorId = 10002.into();
+    remoting.system().mint_to(account_id2, 100_000_000_000_000);
+
     let amount1 = U256::from(10_000_000_000_u64);
     let amount2 = U256::from(5_000_000_000_u64);
     let gas = 100_000_000_000;
@@ -428,9 +448,12 @@ async fn test_transfer_vara_to_eth_insufficient_balance() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
-    let excessive_amount = U256::from(20_000_000_000_u64); // More than the available balance
+    // More than the available balance
+    let excessive_amount = U256::from(20_000_000_000_u64);
     let gas = 100_000_000_000;
     let eth_token_id = [2; 20].into();
 
@@ -518,6 +541,9 @@ async fn test_mint_tokens_from_arbitrary_address() {
     let receiver: ActorId = 10_000.into();
     let amount = U256::from(10_000_000_000_u64);
     let wrong_address: ActorId = 1_010.into();
+    remoting
+        .system()
+        .mint_to(wrong_address, 100_000_000_000_000);
 
     VftGatewayC::new(remoting.clone())
         .map_vara_to_eth_address(vft_program_id, eth_token_id)
@@ -558,6 +584,9 @@ async fn test_eth_client() {
 
     // anyone is able to get the eth client address
     let wrong_address: ActorId = 1_010.into();
+    remoting
+        .system()
+        .mint_to(wrong_address, 100_000_000_000_000);
     assert_eq!(
         VftGatewayC::new(remoting.clone().with_actor_id(wrong_address))
             .eth_client()

@@ -9,5 +9,4 @@ parity-scale-codec.workspace = true
 scale-info.workspace = true
 gstd = { workspace = true, features = ["debug"] }
 gbuiltin-eth-bridge.workspace = true
-gear-wasm-instrument.workspace = true
 vft-client.workspace = true

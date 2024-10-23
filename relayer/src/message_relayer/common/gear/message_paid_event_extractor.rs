@@ -7,8 +7,9 @@ use prometheus::IntCounter;
 use sails_rs::events::EventIo;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::{GearBlockNumber, PaidMessage};
 use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
+
+use crate::message_relayer::common::{GearBlockNumber, PaidMessage};
 
 pub struct MessagePaidEventExtractor {
     bridging_payment_address: H256,

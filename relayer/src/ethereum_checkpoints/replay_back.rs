@@ -1,9 +1,9 @@
 use super::*;
+use crate::ethereum_beacon_client::{self, BeaconClient};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(
-    client_http: &Client,
-    beacon_endpoint: &str,
+    beacon_client: &BeaconClient,
     client: &GearApi,
     program_id: [u8; 32],
     gas_limit: u64,
@@ -23,8 +23,7 @@ pub async fn execute(
             .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}."))?;
 
         replay_back_slots(
-            client_http,
-            beacon_endpoint,
+            beacon_client,
             client,
             program_id,
             gas_limit,
@@ -36,14 +35,10 @@ pub async fn execute(
     }
 
     let period_start = 1 + eth_utils::calculate_period(slot_start);
-    let updates = utils::get_updates(
-        client_http,
-        beacon_endpoint,
-        period_start,
-        MAX_REQUEST_LIGHT_CLIENT_UPDATES,
-    )
-    .await
-    .map_err(|e| anyhow!("Failed to get updates for period {period_start}: {e:?}"))?;
+    let updates = beacon_client
+        .get_updates(period_start, MAX_REQUEST_LIGHT_CLIENT_UPDATES)
+        .await
+        .map_err(|e| anyhow!("Failed to get updates for period {period_start}: {e:?}"))?;
 
     let slot_last = sync_update.finalized_header.slot;
     for update in updates {
@@ -58,10 +53,10 @@ pub async fn execute(
         )
         .map_err(|e| anyhow!("Failed to deserialize point on G2 (replay back): {e:?}"))?;
 
-        let sync_update = utils::sync_update_from_update(signature, update.data);
+        let sync_update =
+            ethereum_beacon_client::utils::sync_update_from_update(signature, update.data);
         replay_back_slots_start(
-            client_http,
-            beacon_endpoint,
+            beacon_client,
             client,
             program_id,
             gas_limit,
@@ -71,8 +66,7 @@ pub async fn execute(
         .await?;
 
         replay_back_slots(
-            client_http,
-            beacon_endpoint,
+            beacon_client,
             client,
             program_id,
             gas_limit,
@@ -90,8 +84,7 @@ pub async fn execute(
         .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_last = {slot_last}."))?;
 
     replay_back_slots_start(
-        client_http,
-        beacon_endpoint,
+        beacon_client,
         client,
         program_id,
         gas_limit,
@@ -101,8 +94,7 @@ pub async fn execute(
     .await?;
 
     replay_back_slots(
-        client_http,
-        beacon_endpoint,
+        beacon_client,
         client,
         program_id,
         gas_limit,
@@ -116,8 +108,7 @@ pub async fn execute(
 }
 
 async fn replay_back_slots(
-    client_http: &Client,
-    beacon_endpoint: &str,
+    beacon_client: &BeaconClient,
     client: &GearApi,
     program_id: [u8; 32],
     gas_limit: u64,
@@ -126,8 +117,7 @@ async fn replay_back_slots(
     for (slot_start, slot_end) in slots_batch_iter {
         log::debug!("slot_start = {slot_start}, slot_end = {slot_end}");
         replay_back_slots_inner(
-            client_http,
-            beacon_endpoint,
+            beacon_client,
             client,
             program_id,
             slot_start,
@@ -142,17 +132,14 @@ async fn replay_back_slots(
 
 #[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_inner(
-    client_http: &Client,
-    beacon_endpoint: &str,
+    beacon_client: &BeaconClient,
     client: &GearApi,
     program_id: [u8; 32],
     slot_start: Slot,
     slot_end: Slot,
     gas_limit: u64,
 ) -> AnyResult<()> {
-    let payload = Handle::ReplayBack(
-        utils::request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
-    );
+    let payload = Handle::ReplayBack(beacon_client.request_headers(slot_start, slot_end).await?);
 
     let mut listener = client.subscribe().await?;
 
@@ -181,8 +168,7 @@ async fn replay_back_slots_inner(
 
 #[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_start(
-    client_http: &Client,
-    beacon_endpoint: &str,
+    beacon_client: &BeaconClient,
     client: &GearApi,
     program_id: [u8; 32],
     gas_limit: u64,
@@ -195,7 +181,7 @@ async fn replay_back_slots_start(
 
     let payload = Handle::ReplayBackStart {
         sync_update,
-        headers: utils::request_headers(client_http, beacon_endpoint, slot_start, slot_end).await?,
+        headers: beacon_client.request_headers(slot_start, slot_end).await?,
     };
 
     let mut listener = client.subscribe().await?;

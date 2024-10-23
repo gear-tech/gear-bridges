@@ -1,7 +1,5 @@
 use std::{marker::PhantomData, str::FromStr};
 
-use abi::IRelayer::MerkleRoot;
-
 use alloy::{
     contract::Event,
     network::{Ethereum, EthereumWallet},
@@ -21,22 +19,22 @@ use alloy::{
         Transport,
     },
 };
-
+use primitive_types::{H160, H256};
 use reqwest::Url;
 
-pub use error::Error;
-
-use crate::abi::{
-    ContentMessage, IMessageQueue, IMessageQueue::IMessageQueueInstance, IRelayer,
-    IRelayer::IRelayerInstance,
-};
 pub use alloy::primitives::TxHash;
 
 #[cfg(test)]
 mod tests;
 
 mod abi;
+use abi::{
+    ContentMessage, IERC20Treasury, IMessageQueue, IMessageQueue::IMessageQueueInstance, IRelayer,
+    IRelayer::IRelayerInstance, IRelayer::MerkleRoot,
+};
+
 pub mod error;
+pub use error::Error;
 
 type ProviderType = FillProvider<
     JoinFill<
@@ -62,6 +60,16 @@ pub struct Contracts<P, T, N> {
 #[derive(Debug, Clone)]
 pub struct MerkleRootEntry {
     pub block_number: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DepositEventEntry {
+    pub from: H160,
+    pub to: H256,
+    pub token: H160,
+    pub amount: primitive_types::U256,
+
+    pub tx_hash: TxHash,
 }
 
 #[derive(Debug)]
@@ -121,6 +129,11 @@ impl EthApi {
         })
     }
 
+    // TODO: Don't expose provider here.
+    pub fn raw_provider(&self) -> &ProviderType {
+        &self.contracts.provider
+    }
+
     pub async fn get_approx_balance(&self) -> Result<f64, Error> {
         self.contracts.get_approx_balance(self.public_key).await
     }
@@ -158,8 +171,42 @@ impl EthApi {
         self.contracts.fetch_merkle_roots_in_range(from, to).await
     }
 
+    pub async fn fetch_deposit_events(
+        &self,
+        contract_address: H160,
+        block: u64,
+    ) -> Result<Vec<DepositEventEntry>, Error> {
+        Ok(self
+            .contracts
+            .fetch_deposit_events(Address::from_slice(contract_address.as_bytes()), block)
+            .await?
+            .into_iter()
+            .map(
+                |(
+                    IERC20Treasury::Deposit {
+                        from,
+                        to,
+                        token,
+                        amount,
+                    },
+                    tx_hash,
+                )| DepositEventEntry {
+                    from: H160(*from.0),
+                    to: H256(to.0),
+                    token: H160(*token.0),
+                    amount: primitive_types::U256::from_little_endian(&amount.to_le_bytes_vec()),
+                    tx_hash,
+                },
+            )
+            .collect())
+    }
+
     pub async fn block_number(&self) -> Result<u64, Error> {
         self.contracts.block_number().await
+    }
+
+    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
+        self.contracts.finalized_block_number().await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -258,6 +305,17 @@ where
         self.provider.get_block_number().await.map_err(|e| e.into())
     }
 
+    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
+        Ok(self
+            .provider
+            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .await
+            .map_err(Error::ErrorInHTTPTransport)?
+            .ok_or(Error::ErrorFetchingBlock)?
+            .header
+            .number)
+    }
+
     pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {
         let current_block: u64 = self.provider.get_block_number().await?;
 
@@ -289,6 +347,33 @@ where
                 block_number: event.blockNumber.to(),
             })
             .collect())
+    }
+
+    pub async fn fetch_deposit_events(
+        &self,
+        contract_address: Address,
+        block: u64,
+    ) -> Result<Vec<(IERC20Treasury::Deposit, TxHash)>, Error> {
+        let filter = Filter::new()
+            .address(contract_address)
+            .event_signature(IERC20Treasury::Deposit::SIGNATURE_HASH)
+            .from_block(block)
+            .to_block(block);
+
+        let event: Event<T, P, IERC20Treasury::Deposit, Ethereum> =
+            Event::new(self.provider.clone(), filter);
+
+        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
+
+        logs.into_iter()
+            .map(|(event, log)| {
+                Ok((
+                    event,
+                    log.transaction_hash
+                        .ok_or(Error::ErrorFetchingTransaction)?,
+                ))
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]

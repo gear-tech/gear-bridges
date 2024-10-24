@@ -1,6 +1,7 @@
 use collections::HashMap;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
+mod abi;
 mod bridge_builtin_operations;
 pub mod error;
 pub mod msg_tracker;
@@ -147,11 +148,13 @@ where
 
     pub async fn mint_tokens(
         &mut self,
-        eth_token_id: H160,
-        receiver: ActorId,
-        amount: U256,
-    ) -> Result<(), Error> {
-        let vara_token_id = self.get_vara_token_id(&eth_token_id)?;
+        receipt_rlp: Vec<u8>,
+    ) -> Result<(H160, ActorId, U256), Error> {
+        use abi::ERC20_TREASURY;
+        use alloy_rlp::Decodable;
+        use alloy_sol_types::SolEvent;
+        use ethereum_common::utils::ReceiptEnvelope;
+
         let data = self.data();
         let sender = self.exec_context.actor_id();
 
@@ -168,6 +171,29 @@ where
             return Err(Error::NotEnoughGas);
         }
 
+        let receipt =
+            ReceiptEnvelope::decode(&mut &receipt_rlp[..]).map_err(|_| Error::NotSupportedEvent)?;
+
+        if !receipt.is_success() {
+            return Err(Error::NotSupportedEvent);
+        }
+
+        // decode log and check that it is from an allowed address
+        let (vara_token_id, event) = receipt
+            .logs()
+            .iter()
+            .find_map(|log| {
+                let eth_token_id = H160::from(log.address.0 .0);
+                let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
+                let event = ERC20_TREASURY::Deposit::decode_log_data(log, true).ok()?;
+
+                Some((vara_token_id, event))
+            })
+            .ok_or(Error::NotSupportedEvent)?;
+
+        let amount = U256::from_little_endian(event.amount.as_le_slice());
+        let receiver = ActorId::from(event.to.0);
+        let fungible_token = H160::from(event.token.0 .0);
         let msg_id = gstd::msg::id();
         let transaction_details = TxDetails::MintTokens {
             vara_token_id,
@@ -180,7 +206,10 @@ where
             transaction_details,
         );
         utils::set_critical_hook(msg_id);
-        token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
+
+        token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id)
+            .await
+            .map(|_| (fungible_token, receiver, amount))
     }
 
     pub async fn transfer_vara_to_eth(

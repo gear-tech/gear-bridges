@@ -4,8 +4,7 @@ mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
 }
 
-use super::{abi::ERC20_TREASURY, error::Error, BTreeSet, Config, ExecContext, RefCell, State};
-use alloy_sol_types::SolEvent;
+use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -72,11 +71,6 @@ enum Event {
     },
 }
 
-struct CheckedReceipt {
-    envelope: ReceiptEnvelope,
-    event: ERC20_TREASURY::Deposit,
-}
-
 pub struct Erc20Relay<'a, ExecContext> {
     state: &'a RefCell<State>,
     exec_context: ExecContext,
@@ -135,10 +129,7 @@ where
     }
 
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
-        let CheckedReceipt {
-            envelope: receipt,
-            event,
-        } = self.decode_and_check_receipt(&message)?;
+        let receipt = self.decode_and_check_receipt(&message)?;
 
         let EthToVaraEvent {
             proof_block: BlockInclusionProof { block, mut headers },
@@ -189,11 +180,7 @@ where
             _ => return Err(Error::InvalidReceiptProof),
         }
 
-        let amount = U256::from_little_endian(event.amount.as_le_slice());
-        let receiver = ActorId::from(event.to.0);
-        let fungible_token = H160::from(event.token.0 .0);
-        let call_payload =
-            vft_gateway::io::MintTokens::encode_call(fungible_token, receiver, amount);
+        let call_payload = vft_gateway::io::MintTokens::encode_call(message.receipt_rlp);
         let (vft_gateway_id, reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
@@ -203,28 +190,29 @@ where
                 state.config.reply_deposit,
             )
         };
-        gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
-            .map_err(|_| Error::SendFailure)?
-            .up_to(Some(reply_timeout))
-            .map_err(|_| Error::ReplyTimeout)?
-            .handle_reply(move || handle_reply(slot, transaction_index))
-            .map_err(|_| Error::ReplyHook)?
-            .await
-            .map_err(|_| Error::ReplyFailure)?;
+        let (fungible_token, receiver, amount) =
+            gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
+                .map_err(|_| Error::SendFailure)?
+                .up_to(Some(reply_timeout))
+                .map_err(|_| Error::ReplyTimeout)?
+                .handle_reply(move || handle_reply(slot, transaction_index))
+                .map_err(|_| Error::ReplyHook)?
+                .await
+                .map_err(|_| Error::ReplyFailure)?;
 
         let _ = self.notify_on(Event::Relayed {
             slot,
             block_number: block.body.execution_payload.block_number,
             transaction_index: transaction_index as u32,
             fungible_token,
-            to: ActorId::from(event.to.0),
+            to: receiver,
             amount,
         });
 
         Ok(())
     }
 
-    fn decode_and_check_receipt(&self, message: &EthToVaraEvent) -> Result<CheckedReceipt, Error> {
+    fn decode_and_check_receipt(&self, message: &EthToVaraEvent) -> Result<ReceiptEnvelope, Error> {
         use alloy_rlp::Decodable;
 
         let receipt = ReceiptEnvelope::decode(&mut &message.receipt_rlp[..])
@@ -234,23 +222,8 @@ where
             return Err(Error::FailedEthTransaction);
         }
 
-        let slot = message.proof_block.block.slot;
-        let state = self.state.borrow_mut();
-        // decode log and check that it is from an allowed address
-        let event = receipt
-            .logs()
-            .iter()
-            .find_map(|log| {
-                let eth_address = H160::from(log.address.0 .0);
-                let Ok(event) = ERC20_TREASURY::Deposit::decode_log_data(log, true) else {
-                    return None;
-                };
-
-                (eth_address == state.address).then_some(event)
-            })
-            .ok_or(Error::NotSupportedEvent)?;
-
         // check for double spending
+        let slot = message.proof_block.block.slot;
         let transactions = transactions_mut();
         let key = (slot, message.transaction_index);
         if transactions.contains(&key) {
@@ -266,10 +239,7 @@ where
             return Err(Error::TooOldTransaction);
         }
 
-        Ok(CheckedReceipt {
-            envelope: receipt,
-            event,
-        })
+        Ok(receipt)
     }
 
     async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {

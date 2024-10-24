@@ -3774,7 +3774,6 @@ name = "erc20-relay-app"
 version = "0.1.0"
 dependencies = [
  "alloy-rlp",
- "alloy-sol-types",
  "checkpoint_light_client-io",
  "erc20-relay",
  "erc20-relay-client",
@@ -15387,6 +15386,9 @@ dependencies = [
 name = "vft-gateway-app"
 version = "0.1.0"
 dependencies = [
+ "alloy-rlp",
+ "alloy-sol-types",
+ "ethereum-common",
  "gbuiltin-eth-bridge",
  "git-download",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",

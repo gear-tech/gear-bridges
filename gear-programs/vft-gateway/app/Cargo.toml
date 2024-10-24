@@ -8,11 +8,15 @@ sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 alloy-rlp.workspace = true
-alloy-sol-types.workspace = true
+alloy-sol-types = { workspace = true, features = ["json"] }
 ethereum-common.workspace = true
 gstd.workspace = true
 gbuiltin-eth-bridge.workspace = true
 vft-client.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["custom"] }
+lazy_static = { workspace = true, features = ["spin_no_std"] }
 
 [build-dependencies]
 git-download.workspace = true

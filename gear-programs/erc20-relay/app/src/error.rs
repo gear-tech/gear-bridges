@@ -6,7 +6,6 @@ use super::{Decode, Encode, TypeInfo};
 pub enum Error {
     DecodeReceiptEnvelopeFailure,
     FailedEthTransaction,
-    NotSupportedEvent,
     AlreadyProcessed,
     TooOldTransaction,
     SendFailure,

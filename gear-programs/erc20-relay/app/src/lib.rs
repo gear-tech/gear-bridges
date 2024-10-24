@@ -1,6 +1,5 @@
 #![no_std]
 
-pub mod abi;
 pub mod error;
 pub mod service;
 

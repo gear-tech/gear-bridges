@@ -1,7 +1,6 @@
 pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
@@ -10,7 +9,9 @@ import {VFT_TREASURY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
 import {ERC20VaraSupply} from "./ERC20VaraSupply.sol";
 
-contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
+import {BridgingPayment} from "./BridgingPayment.sol";
+
+contract ERC20Gateway is IERC20Gateway, IMessageQueueReceiver {
     address immutable MESSAGE_QUEUE_ADDRESS;
 
     constructor(address message_queue) {
@@ -26,8 +27,8 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
      * @param to destination of transfer on VARA network
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public {
-        ERC20VaraSupply(token).burnFrom(_msgSender(), amount);
-        emit BridgingRequested(_msgSender(), to, token, amount);
+        ERC20VaraSupply(token).burnFrom(tx.origin, amount);
+        emit BridgingRequested(tx.origin, to, token, amount);
     }
 
     /** @dev Accept bridging request made on other side of bridge.
@@ -70,5 +71,26 @@ contract ERC20Gateway is IERC20Gateway, Context, IMessageQueueReceiver {
 
         emit BridgingAccepted(address(receiver), address(token), amount);
         return true;
+    }
+}
+
+contract ERC20GatewayBridgingPayment is BridgingPayment {
+    constructor(
+        address _underlying,
+        address _admin,
+        uint256 _fee
+    ) BridgingPayment(_underlying, _admin, _fee) {}
+
+    /** @dev Call `requestBridging` function from `ERC20Gateway` contract. This function also
+     * deducting some fee in native tokens from such a call. For further info see `ERC20Gateway::requestBridging`.
+     */
+    function requestBridging(
+        address token,
+        uint256 amount,
+        bytes32 to
+    ) public payable {
+        deductFee();
+
+        ERC20Gateway(underlying).requestBridging(token, amount, to);
     }
 }

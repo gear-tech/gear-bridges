@@ -4,16 +4,15 @@ abstract contract BridgingPayment {
     event FeePaid();
 
     error NotAnAdmin();
-    error NotEnoughFunds();
 
     address public underlying;
 
     uint256 fee;
-    address admin;
+    address payable admin;
 
     constructor(address _underlying, address _admin, uint256 _fee) payable {
         underlying = _underlying;
-        admin = _admin;
+        admin = payable(_admin);
         fee = _fee;
     }
 
@@ -21,10 +20,7 @@ abstract contract BridgingPayment {
      *  This function reverts if user don't have enough funds to pay the fee.
      */
     function deductFee() internal {
-        (bool feeTransferSuccess, ) = admin.call{value: fee}("");
-        if (!feeTransferSuccess) {
-            revert NotEnoughFunds();
-        }
+        admin.transfer(fee);
 
         emit FeePaid();
     }
@@ -50,7 +46,7 @@ abstract contract BridgingPayment {
         if (msg.sender != admin) {
             revert NotAnAdmin();
         } else {
-            admin = newAdmin;
+            admin = payable(newAdmin);
         }
     }
 

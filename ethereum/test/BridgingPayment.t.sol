@@ -71,7 +71,7 @@ contract BridgingPaymentTest is Test {
 
         approveTransfer();
 
-        vm.expectRevert(BridgingPayment.NotEnoughFunds.selector);
+        vm.expectRevert();
         bridging_payment.deposit{value: NOT_ENOUGH_FEE}(
             address(erc20_mock),
             TOKEN_TRANSFER_AMOUNT,

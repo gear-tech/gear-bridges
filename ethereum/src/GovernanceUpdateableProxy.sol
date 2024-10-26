@@ -7,11 +7,16 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
     error InvalidDiscriminator(uint8 discriminator);
     error InvalidPayloadLength();
 
-    address impl;
+    address implementation;
     bytes32 governance;
     address messageQueue;
 
-    constructor(address _messageQueue, bytes32 _governance) payable {
+    constructor(
+        address _implementation,
+        address _messageQueue,
+        bytes32 _governance
+    ) payable {
+        implementation = _implementation;
         messageQueue = _messageQueue;
         governance = _governance;
     }
@@ -32,10 +37,10 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
                 revert InvalidPayloadLength();
             }
 
-            address new_impl = abi.decode(payload[1:21], (address));
+            address new_implementation = address(bytes20(payload[1:]));
 
             if (msg.sender == messageQueue && sender == governance) {
-                impl = new_impl;
+                implementation = new_implementation;
                 return true;
             } else {
                 revert ProxyDeniedAdminAccess();
@@ -47,7 +52,7 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
                 revert InvalidPayloadLength();
             }
 
-            bytes32 new_governance = abi.decode(payload[1:33], (bytes32));
+            bytes32 new_governance = bytes32(payload[1:]);
 
             if (msg.sender == messageQueue && sender == governance) {
                 governance = new_governance;
@@ -64,7 +69,7 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         bytes32 sender,
         bytes calldata payload
     ) internal returns (bool) {
-        (bool success, bytes memory data) = impl.delegatecall(
+        (bool success, bytes memory data) = implementation.delegatecall(
             abi.encodeWithSignature(
                 "processVaraMessage(bytes32,bytes)",
                 sender,
@@ -82,7 +87,11 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         return abi.decode(data, (bool));
     }
 
-    function implementation() public view returns (address) {
-        return impl;
+    function getImplementation() public view returns (address) {
+        return implementation;
+    }
+
+    function getGovernance() public view returns (bytes32) {
+        return governance;
     }
 }

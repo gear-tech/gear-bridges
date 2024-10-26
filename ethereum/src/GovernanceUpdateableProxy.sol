@@ -1,16 +1,19 @@
 pragma solidity ^0.8.24;
 
-import {Proxy} from "@openzeppelin/contracts/proxy/Proxy.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-
 import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
 
-contract GovernanceUpdateableProxy is Proxy, IMessageQueueReceiver {
+contract GovernanceUpdateableProxy is IMessageQueueReceiver {
     error ProxyDeniedAdminAccess();
     error InvalidDiscriminator(uint8 discriminator);
+    error InvalidPayloadLength();
 
-    constructor(address messageQueue) payable {
-        ERC1967Utils.changeAdmin(messageQueue);
+    address impl;
+    bytes32 governance;
+    address messageQueue;
+
+    constructor(address _messageQueue, bytes32 _governance) payable {
+        messageQueue = _messageQueue;
+        governance = _governance;
     }
 
     function processVaraMessage(
@@ -19,45 +22,43 @@ contract GovernanceUpdateableProxy is Proxy, IMessageQueueReceiver {
     ) external returns (bool) {
         uint8 discriminator = uint8(payload[0]);
         if (discriminator == 0x00) {
+            // Delegate call.
+
             // TODO: Delegate call trimming the first byte
 
             return true;
         } else if (discriminator == 0x01) {
-            address new_implementation = abi.decode(payload[1:21], (address));
-            bytes calldata data = payload[21:];
+            // Change implementation.
 
-            if (msg.sender != ERC1967Utils.getAdmin()) {
-                revert ProxyDeniedAdminAccess();
+            require(payload.length == 1 + 20, InvalidPayloadLength());
+
+            address new_impl = abi.decode(payload[1:21], (address));
+
+            if (msg.sender == messageQueue && sender == governance) {
+                impl = new_impl;
+                return true;
             } else {
-                ERC1967Utils.upgradeToAndCall(new_implementation, data);
+                revert ProxyDeniedAdminAccess();
             }
+        } else if (discriminator == 0x02) {
+            // Change governance.
 
-            return true;
+            require(payload.length == 1 + 32, InvalidPayloadLength());
+
+            bytes32 new_governance = abi.decode(payload[1:33], (bytes32));
+
+            if (msg.sender == messageQueue && sender == governance) {
+                governance = new_governance;
+                return true;
+            } else {
+                revert ProxyDeniedAdminAccess();
+            }
         } else {
             revert InvalidDiscriminator(discriminator);
         }
     }
 
-    receive() external payable {}
-
-    /**
-     * @dev Returns the current implementation address.
-     *
-     * TIP: To get this value clients can read directly from the storage slot shown below (specified by ERC-1967) using
-     * the https://eth.wiki/json-rpc/API#eth_getstorageat[`eth_getStorageAt`] RPC call.
-     * `0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`
-     */
-    function _implementation()
-        internal
-        view
-        virtual
-        override
-        returns (address)
-    {
-        return ERC1967Utils.getImplementation();
-    }
-
     function implementation() public view returns (address) {
-        return _implementation();
+        return impl;
     }
 }

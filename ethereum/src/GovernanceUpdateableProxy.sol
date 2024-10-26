@@ -28,7 +28,10 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         } else if (discriminator == 0x01) {
             // Change implementation.
 
-            require(payload.length == 1 + 20, InvalidPayloadLength());
+            if (payload.length != 1 + 20) {
+                revert InvalidPayloadLength();
+            }
+
             address new_impl = abi.decode(payload[1:21], (address));
 
             if (msg.sender == messageQueue && sender == governance) {
@@ -40,7 +43,10 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         } else if (discriminator == 0x02) {
             // Change governance.
 
-            require(payload.length == 1 + 32, InvalidPayloadLength());
+            if (payload.length != 1 + 32) {
+                revert InvalidPayloadLength();
+            }
+
             bytes32 new_governance = abi.decode(payload[1:33], (bytes32));
 
             if (msg.sender == messageQueue && sender == governance) {

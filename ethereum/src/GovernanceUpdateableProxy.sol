@@ -24,14 +24,11 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         if (discriminator == 0x00) {
             // Delegate call.
 
-            // TODO: Delegate call trimming the first byte
-
-            return true;
+            return _delegate(sender, payload[1:]);
         } else if (discriminator == 0x01) {
             // Change implementation.
 
             require(payload.length == 1 + 20, InvalidPayloadLength());
-
             address new_impl = abi.decode(payload[1:21], (address));
 
             if (msg.sender == messageQueue && sender == governance) {
@@ -44,7 +41,6 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
             // Change governance.
 
             require(payload.length == 1 + 32, InvalidPayloadLength());
-
             bytes32 new_governance = abi.decode(payload[1:33], (bytes32));
 
             if (msg.sender == messageQueue && sender == governance) {
@@ -56,6 +52,28 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         } else {
             revert InvalidDiscriminator(discriminator);
         }
+    }
+
+    function _delegate(
+        bytes32 sender,
+        bytes calldata payload
+    ) internal returns (bool) {
+        (bool success, bytes memory data) = impl.delegatecall(
+            abi.encodeWithSignature(
+                "processVaraMessage(bytes32,bytes)",
+                sender,
+                payload
+            )
+        );
+
+        if (!success) {
+            assembly {
+                let size := mload(data)
+                revert(add(32, data), size)
+            }
+        }
+
+        return abi.decode(data, (bool));
     }
 
     function implementation() public view returns (address) {

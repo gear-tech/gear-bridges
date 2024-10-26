@@ -1,9 +1,10 @@
 pragma solidity ^0.8.24;
 
 import {Proxy} from "@openzeppelin/contracts/proxy/Proxy.sol";
+import {IProxyContract} from "./interfaces/IProxyContract.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
-contract ProxyContract is Proxy {
+contract ProxyContract is Proxy, IProxyContract {
     error ProxyDeniedAdminAccess();
 
     /**

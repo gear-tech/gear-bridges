@@ -9,14 +9,13 @@ import {IRelayer} from "./interfaces/IRelayer.sol";
 import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 
-
 contract MessageQueue is IMessageQueue {
     using Address for address;
     using Hasher for VaraMessage;
 
     address immutable RELAYER_ADDRESS;
 
-    constructor (address relayer_address){
+    constructor(address relayer_address) {
         RELAYER_ADDRESS = relayer_address;
     }
 
@@ -64,18 +63,17 @@ contract MessageQueue is IMessageQueue {
         if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
 
         if (
-            _calculateMerkleRoot(
-                proof,
-                msg_hash,
-                total_leaves,
-                leaf_index
-            ) != merkle_root
+            _calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) !=
+            merkle_root
         ) revert BadProof();
 
         _processed_messages[message.nonce] = true;
 
         if (
-            !IMessageQueueReceiver(message.receiver).processVaraMessage(message)
+            !IMessageQueueReceiver(message.receiver).processVaraMessage(
+                message.sender,
+                message.data
+            )
         ) {
             revert MessageNotProcessed();
         } else {

@@ -41,14 +41,13 @@ interface IMessageQueue {
 
 interface IMessageQueueReceiver {
     function processVaraMessage(
-        VaraMessage calldata vara_msg
+        bytes32 sender,
+        bytes calldata payload
     ) external returns (bool);
 }
 
 library Hasher {
-    function hash(
-        VaraMessage calldata message
-    ) public pure returns (bytes32) {
+    function hash(VaraMessage calldata message) public pure returns (bytes32) {
         bytes memory data = abi.encodePacked(
             message.nonce,
             message.sender,

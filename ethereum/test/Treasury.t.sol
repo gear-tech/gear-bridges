@@ -53,16 +53,12 @@ contract TreasuryTest is TestHelper {
 
         vm.expectRevert();
 
-        VaraMessage memory vara_msg = VaraMessage({
-            sender: VFT_GATEWAY_ADDRESS,
-            receiver: address(treasury),
-            nonce: bytes32(uint256(10)),
-            data: call_data
-        });
-
-        IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
+        IMessageQueueReceiver(treasury).processVaraMessage(
+            VFT_GATEWAY_ADDRESS,
+            call_data
+        );
 
         vm.prank(address(message_queue));
-        IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
+        IMessageQueueReceiver(treasury).processVaraMessage(VFT_GATEWAY_ADDRESS, call_data);
     }
 }

@@ -41,6 +41,13 @@ pub async fn send_message_to_bridge_builtin(
     msg_tracker_mut().check_bridge_reply(&msg_id)
 }
 
+#[repr(u8)]
+enum Discriminator {
+    SendMessage = 0x00,
+    #[allow(dead_code)]
+    UpdateToAndCall = 0x01,
+}
+
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct Payload {
     pub receiver: H160,
@@ -50,7 +57,9 @@ pub struct Payload {
 
 impl Payload {
     pub fn pack(self) -> Vec<u8> {
-        let mut packed = Vec::with_capacity(20 + 20 + 32); // H160 is 20 bytes, U256 is 32 bytes
+        let mut packed = Vec::with_capacity(1 + 20 + 20 + 32); // H160 is 20 bytes, U256 is 32 bytes
+
+        packed.push(Discriminator::SendMessage as u8);
 
         packed.extend_from_slice(self.receiver.as_bytes());
         packed.extend_from_slice(self.token_id.as_bytes());

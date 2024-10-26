@@ -7,7 +7,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {IERC20Treasury} from "./interfaces/IERC20Treasury.sol";
 import {VFT_GATEWAY_ADDRESS} from "./libraries/Environment.sol";
-import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
+import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
 
 import {BridgingPayment} from "./BridgingPayment.sol";
 

@@ -13,7 +13,6 @@ interface IMessageQueue {
     error MessageNotProcessed();
     error MerkleRootNotSet(uint256 blockNumber);
     error BadProof();
-    error InvalidDiscriminator(uint8 discriminator);
 
     event RelayerAddressUpdated(address relayer);
     event ProoverAddressUpdated(address proover);

@@ -5,7 +5,6 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {IRelayer} from "./interfaces/IRelayer.sol";
-import {IProxyContract} from "./interfaces/IProxyContract.sol";
 
 import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
@@ -70,29 +69,13 @@ contract MessageQueue is IMessageQueue {
 
         _processed_messages[message.nonce] = true;
 
-        uint8 discriminator = uint8(message.data[0]);
-        if (discriminator == 0x00) {
-            bool message_processed = IMessageQueueReceiver(message.receiver)
-                .processVaraMessage(message.sender, message.data[1:]);
+        bool message_processed = IMessageQueueReceiver(message.receiver)
+            .processVaraMessage(message.sender, message.data);
 
-            if (message_processed) {
-                emit MessageProcessed(block_number, msg_hash, message.nonce);
-            } else {
-                revert MessageNotProcessed();
-            }
-        } else if (discriminator == 0x01) {
-            address new_implementation = abi.decode(
-                message.data[1:21],
-                (address)
-            );
-            bytes calldata data = message.data[21:];
-
-            IProxyContract(message.receiver).upgradeToAndCall(
-                new_implementation,
-                data
-            );
+        if (message_processed) {
+            emit MessageProcessed(block_number, msg_hash, message.nonce);
         } else {
-            revert InvalidDiscriminator(discriminator);
+            revert MessageNotProcessed();
         }
     }
 

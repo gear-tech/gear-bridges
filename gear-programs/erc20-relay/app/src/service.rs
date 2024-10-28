@@ -6,6 +6,7 @@ mod vft {
 
 use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
+use collections::HashMap;
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
@@ -22,7 +23,9 @@ use sails_rs::{
     gstd::{self, msg},
     prelude::*,
 };
-use vft::vft_gateway;
+use vft::vft_gateway::io::MintTokens;
+
+type MintTokensReplies = HashMap<MessageId, (H160, ActorId, U256)>;
 
 pub(crate) const CAPACITY: usize = 500_000;
 
@@ -30,13 +33,19 @@ pub(crate) const CAPACITY: usize = 500_000;
 pub(crate) const CAPACITY_STEP_SIZE: usize = 50_000;
 
 pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+pub(crate) static mut MINT_TOKENS_REPLIES: Option<MintTokensReplies> = None;
 
 pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe {
         TRANSACTIONS
             .as_mut()
-            .expect("Program should be constructed")
+            .expect("TRANSACTIONS; Program should be constructed")
     }
+}
+
+pub(crate) fn mint_tokens_replies_mut() -> &'static mut MintTokensReplies {
+    unsafe { MINT_TOKENS_REPLIES.as_mut() }
+        .expect("MINT_TOKENS_REPLIES; Program should be constructed")
 }
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
@@ -180,7 +189,7 @@ where
             _ => return Err(Error::InvalidReceiptProof),
         }
 
-        let call_payload = vft_gateway::io::MintTokens::encode_call(message.receipt_rlp);
+        let call_payload = MintTokens::encode_call(message.receipt_rlp);
         let (vft_gateway_id, reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
@@ -190,22 +199,26 @@ where
                 state.config.reply_deposit,
             )
         };
-        let (fungible_token, receiver, amount) =
-            gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
-                .map_err(|_| Error::SendFailure)?
-                .up_to(Some(reply_timeout))
-                .map_err(|_| Error::ReplyTimeout)?
-                .handle_reply(move || handle_reply(slot, transaction_index))
-                .map_err(|_| Error::ReplyHook)?
-                .await
-                .map_err(|_| Error::ReplyFailure)?;
 
+        let msg_id = gstd::msg::id();
+        gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
+            .map_err(|_| Error::SendFailure)?
+            .up_to(Some(reply_timeout))
+            .map_err(|_| Error::ReplyTimeout)?
+            .handle_reply(move || handle_reply(msg_id, slot, transaction_index))
+            .map_err(|_| Error::ReplyHook)?
+            .await
+            .map_err(|_| Error::ReplyFailure)?;
+
+        let (fungible_token, to, amount) = mint_tokens_replies_mut()
+            .remove(&msg_id)
+            .expect("handle_reply should insert the record");
         let _ = self.notify_on(Event::Relayed {
             slot,
             block_number: block.body.execution_payload.block_number,
             transaction_index: transaction_index as u32,
             fungible_token,
-            to: receiver,
+            to,
             amount,
         });
 
@@ -286,25 +299,26 @@ where
     ) -> Result<(), Error> {
         #[cfg(feature = "gas_calculation")]
         {
-            let call_payload = vft_gateway::io::MintTokens::encode_call(
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            );
+            let call_payload = MintTokens::encode_call(Default::default());
             let (reply_timeout, reply_deposit) = {
                 let state = self.state.borrow();
 
                 (state.config.reply_timeout, state.config.reply_deposit)
             };
             let source = self.exec_context.actor_id();
+            let msg_id = gstd::msg::id();
             gstd::msg::send_bytes_for_reply(source, call_payload, 0, reply_deposit)
                 .map_err(|_| Error::SendFailure)?
                 .up_to(Some(reply_timeout))
                 .map_err(|_| Error::ReplyTimeout)?
-                .handle_reply(move || handle_reply(_slot, _transaction_index))
+                .handle_reply(move || handle_reply(msg_id, _slot, _transaction_index))
                 .map_err(|_| Error::ReplyHook)?
                 .await
                 .map_err(|_| Error::ReplyFailure)?;
+
+            let _reply = mint_tokens_replies_mut()
+                .remove(&msg_id)
+                .expect("handle_reply should insert the record");
 
             Ok(())
         }
@@ -314,13 +328,11 @@ where
     }
 }
 
-fn handle_reply(slot: u64, transaction_index: u64) {
+fn handle_reply(msg_id: MessageId, slot: u64, transaction_index: u64) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
-    let reply = vft_gateway::io::MintTokens::decode_reply(&reply_bytes)
-        .expect("Unable to decode MintTokens reply");
-    if let Err(e) = reply {
-        panic!("Request to mint tokens failed: {e:?}");
-    }
+    let reply = MintTokens::decode_reply(&reply_bytes)
+        .expect("Unable to decode MintTokens reply")
+        .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
 
     let transactions = transactions_mut();
     if CAPACITY <= transactions.len() {
@@ -328,4 +340,5 @@ fn handle_reply(slot: u64, transaction_index: u64) {
     }
 
     transactions.insert((slot, transaction_index));
+    mint_tokens_replies_mut().insert(msg_id, reply);
 }

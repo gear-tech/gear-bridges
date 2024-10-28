@@ -69,3 +69,7 @@ jobs:
           version: nightly
       - name: Run tests
         run: cargo test --release --all-targets
+      - name: Run solidity tests
+        run: |
+          cd ethereum
+          forge test

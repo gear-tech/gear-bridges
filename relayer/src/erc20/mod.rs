@@ -3,7 +3,7 @@ use alloy::{
     network::primitives::BlockTransactionsKind,
     providers::{Provider, ProviderBuilder},
 };
-use alloy_eips::BlockNumberOrTag;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client_io::ethereum_common::{
@@ -70,10 +70,7 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
         .header
         .parent_beacon_block_root
         .ok_or(anyhow!("Unable to determine root of parent beacon block"))?;
-    let block_number = block
-        .header
-        .number
-        .ok_or(anyhow!("Unable to determine Ethereum block number"))?;
+    let block_number = block.header.number;
     let client_http = Client::new();
     let proof_block = build_inclusion_proof(
         &client_http,
@@ -88,7 +85,7 @@ async fn relay_inner(args: RelayErc20Args) -> AnyResult<()> {
         .transaction_index
         .ok_or(anyhow!("Unable to determine transaction index"))?;
     let receipts = provider
-        .get_block_receipts(BlockNumberOrTag::Number(block_number))
+        .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
         .await?
         .unwrap_or_default()
         .iter()

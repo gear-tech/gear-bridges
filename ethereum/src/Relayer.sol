@@ -20,7 +20,6 @@ contract Relayer is IRelayer {
         VERIFIER_ADDRESS = verifier;
     }
 
-
     /**  @dev Verifies and stores a `merkle_root` for specified `block_number`. Calls `verifyProof`
      * in `PlonkVerifier` and reverts if the proof or the public inputs are malformed.
      *
@@ -45,8 +44,12 @@ contract Relayer is IRelayer {
             revert InvalidProof();
         }
 
-        if (_checkEmergencyStopCondition(block_number, merkle_root)) {
-            // Bail out here if emergency stop condition is met.
+        // Check if the provided Merkle root is a duplicate.
+        // If it is a duplicate, set the emergency stop.
+        bytes32 orig_merkle_root = _block_numbers[block_number];
+        _emergencyStop = (orig_merkle_root != 0 &&
+            orig_merkle_root != merkle_root);
+        if (_emergencyStop) {
             return;
         }
 
@@ -121,25 +124,5 @@ contract Relayer is IRelayer {
             ((uint256(merkle_root) & MASK_64BITS) << 128);
 
         return ret;
-    }
-
-    /**
-     * @dev Checks if the merkle root provided is duplicated or not.
-     * If it is duplicated, it sets the emergency mode.
-     *
-     * @param block_number Target block number.
-     * @param merkle_root Target merkle root.
-     */
-    function _checkEmergencyStopCondition(
-        uint256 block_number,
-        bytes32 merkle_root
-    ) private returns (bool) {
-        bytes32 orig_merkle_root = _block_numbers[block_number];
-        if (orig_merkle_root != 0 && orig_merkle_root != merkle_root) {
-            _emergencyStop = true;
-            return true;
-        }
-
-        return false;
     }
 }

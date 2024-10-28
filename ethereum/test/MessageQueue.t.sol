@@ -423,4 +423,22 @@ contract MessageQueueTest is TestHelper {
 
         assertEq(erc20_token.balanceOf(ETH_ADDRESS_3), 10 * (10 ** 18));
     }
+
+    function test_relayer_contract_emergency_mode() public {
+        bytes32 bad_block_merkle_root =
+            bytes32(
+                0xbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadb
+            );
+
+        relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
+        assert(relayer.emergencyStop());
+
+        // Should revert because of emergency stop
+        vm.expectRevert(IRelayer.EmergencyStop.selector);
+        relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
+
+        // Same for getMerkleRoot
+        vm.expectRevert(IRelayer.EmergencyStop.selector);
+        relayer.getMerkleRoot(BLOCK_ID);
+    }
 }

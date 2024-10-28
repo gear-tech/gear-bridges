@@ -8,6 +8,7 @@ contract Relayer is IRelayer {
     IVerifier private _verifier;
     mapping(uint256 => bytes32) private _block_numbers;
     mapping(bytes32 => uint256) private _merkle_roots;
+    bool _emergencyStop = false;
 
     uint256 private constant MASK_32BITS = (2 ** 32) - 1;
     uint256 private constant MASK_64BITS = (2 ** 64) - 1;
@@ -18,7 +19,6 @@ contract Relayer is IRelayer {
     constructor(address verifier) {
         VERIFIER_ADDRESS = verifier;
     }
-
 
     /**  @dev Verifies and stores a `merkle_root` for specified `block_number`. Calls `verifyProof`
      * in `PlonkVerifier` and reverts if the proof or the public inputs are malformed.
@@ -32,6 +32,11 @@ contract Relayer is IRelayer {
         bytes32 merkle_root,
         bytes calldata proof
     ) external {
+        if (_emergencyStop) {
+            // Emergency stop is active, stop processing.
+            revert EmergencyStop();
+        }
+
         uint256[] memory public_inputs = _buildPublicInputs(
             block_number,
             merkle_root
@@ -40,10 +45,26 @@ contract Relayer is IRelayer {
             revert InvalidProof();
         }
 
+        // Check if the provided Merkle root is a duplicate.
+        // If it is a duplicate, set the emergency stop.
+        bytes32 orig_merkle_root = _block_numbers[block_number];
+        _emergencyStop = (orig_merkle_root != 0 &&
+            orig_merkle_root != merkle_root);
+        if (_emergencyStop) {
+            return;
+        }
+
         _block_numbers[block_number] = merkle_root;
         _merkle_roots[merkle_root] = block_number;
 
         emit MerkleRoot(block_number, bytes32(merkle_root));
+    }
+
+    /**
+     * @dev Returns emergency stop status.
+     */
+    function emergencyStop() external view override returns (bool) {
+        return _emergencyStop;
     }
 
     /**
@@ -56,6 +77,10 @@ contract Relayer is IRelayer {
     function getMerkleRoot(
         uint256 block_number
     ) external view returns (bytes32) {
+        if (_emergencyStop) {
+            // Emergency stop is active, stop processing.
+            revert EmergencyStop();
+        }
         return _block_numbers[block_number];
     }
 

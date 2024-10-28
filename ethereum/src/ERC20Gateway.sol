@@ -31,6 +31,20 @@ contract ERC20Gateway is IERC20Gateway, IMessageQueueReceiver {
         emit BridgingRequested(tx.origin, to, token, amount);
     }
 
+    /** @dev Accept bridging request made on other side of bridge.
+     * This request must be sent by `MessageQueue` only. When such a request is accepted, tokens
+     * are minted to the corresponding account address, specified in `payload`.
+     *
+     * Expected `payload` consisits of these:
+     *  - `receiver` - account to mint tokens to
+     *  - `token` - token to mint
+     *  - `amount` - amount of tokens to mint
+     * 
+     * Expected sender should be `vft-treasury` program on gear.
+     * 
+     * @param sender sender of message on the gear side.
+     * @param payload payload of the message.
+     */
     function processVaraMessage(
         bytes32 sender,
         bytes calldata payload

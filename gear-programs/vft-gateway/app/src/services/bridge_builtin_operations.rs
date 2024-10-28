@@ -43,7 +43,9 @@ pub async fn send_message_to_bridge_builtin(
 enum Discriminator {
     SendMessage = 0x00,
     #[allow(dead_code)]
-    UpdateToAndCall = 0x01,
+    ChangeImplementation = 0x01,
+    #[allow(dead_code)]
+    ChangeGovernance = 0x02,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]

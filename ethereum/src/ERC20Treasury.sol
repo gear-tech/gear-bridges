@@ -32,6 +32,18 @@ contract ERC20Treasury is IERC20Treasury, IMessageQueueReceiver {
         emit Deposit(tx.origin, to, token, amount);
     }
 
+    /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only.
+     *
+     * Expected `payload` consisits of these:
+     *  - `receiver` - account to withdraw tokens to
+     *  - `token` - token to withdraw
+     *  - `amount` - amount of tokens to withdraw
+     *
+     * Expected sender should be `vft-gateway` program on gear.
+     *
+     * @param sender sender of message on the gear side.
+     * @param payload payload of the message.
+     */
     function processVaraMessage(
         bytes32 sender,
         bytes calldata payload

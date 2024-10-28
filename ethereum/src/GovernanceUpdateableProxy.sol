@@ -21,6 +21,16 @@ contract GovernanceUpdateableProxy is IMessageQueueReceiver {
         governance = _governance;
     }
 
+    /** @dev Accept request from MessageQueue. Based on the first byte of the payload
+     * make the decision what to do.
+     *
+     * If first byte = `0x00` then delegate call to the implementation (dropping first byte).
+     * If first byte = `0x01` then update implementation address(can be called only by current governance).
+     * If first byte = `0x02` then change governance(can be called only by current governance).
+     *
+     * @param sender sender of message on the gear side.
+     * @param payload payload of the message.
+     */
     function processVaraMessage(
         bytes32 sender,
         bytes calldata payload

@@ -35,6 +35,8 @@ sol! {
         function getMerkleRoot(uint256 block_number) external view returns (bytes32);
 
         function getBlockNumber(bytes32 merkle_root) external view returns (uint256);
+
+        function emergencyStop() external view returns (bool);
     }
 }
 

@@ -52,11 +52,6 @@ contract MessageQueue is IMessageQueue {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) public {
-        if (IRelayer(RELAYER_ADDRESS).emergencyStop()) {
-            // Emergency stop is active, stop processing messages.
-            return;
-        }
-
         if (_processed_messages[message.nonce])
             revert MessageAlreadyProcessed(message.nonce);
 

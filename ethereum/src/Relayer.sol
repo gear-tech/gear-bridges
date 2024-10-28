@@ -33,6 +33,7 @@ contract Relayer is IRelayer {
         bytes calldata proof
     ) external {
         if (_emergencyStop) {
+            // Emergency stop is active, stop processing.
             revert EmergencyStop();
         }
 
@@ -76,6 +77,10 @@ contract Relayer is IRelayer {
     function getMerkleRoot(
         uint256 block_number
     ) external view returns (bytes32) {
+        if (_emergencyStop) {
+            // Emergency stop is active, stop processing.
+            revert EmergencyStop();
+        }
         return _block_numbers[block_number];
     }
 

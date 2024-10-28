@@ -436,5 +436,9 @@ contract MessageQueueTest is TestHelper {
         // Should revert because of emergency stop
         vm.expectRevert(IRelayer.EmergencyStop.selector);
         relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
+
+        // Same for getMerkleRoot
+        vm.expectRevert(IRelayer.EmergencyStop.selector);
+        relayer.getMerkleRoot(BLOCK_ID);
     }
 }

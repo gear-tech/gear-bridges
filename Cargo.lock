@@ -15367,6 +15367,9 @@ dependencies = [
 name = "vft-gateway"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
  "blake2",
  "extended_vft_wasm",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",

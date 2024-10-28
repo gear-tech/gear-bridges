@@ -14,7 +14,6 @@ use service::Erc20Relay as Erc20RelayService;
 pub struct State {
     admin: ActorId,
     checkpoint_light_client_address: ActorId,
-    address: H160,
     vft_gateway: ActorId,
     config: Config,
 }
@@ -31,7 +30,7 @@ pub struct Erc20RelayProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl Erc20RelayProgram {
-    pub fn new(checkpoint_light_client_address: ActorId, address: H160, config: Config) -> Self {
+    pub fn new(checkpoint_light_client_address: ActorId, config: Config) -> Self {
         unsafe {
             service::TRANSACTIONS = Some(BTreeSet::new());
             service::MINT_TOKENS_REPLIES = Some(HashMap::new());
@@ -41,7 +40,6 @@ impl Erc20RelayProgram {
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
             checkpoint_light_client_address,
-            address,
             vft_gateway: Default::default(),
             config,
         }))
@@ -51,7 +49,6 @@ impl Erc20RelayProgram {
         #[cfg(feature = "gas_calculation")]
         {
             let self_ = Self::new(
-                Default::default(),
                 Default::default(),
                 Config {
                     reply_timeout: _reply_timeout,

@@ -1,7 +1,7 @@
 use collections::HashMap;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
-mod abi;
+pub mod abi;
 mod bridge_builtin_operations;
 pub mod error;
 pub mod msg_tracker;
@@ -33,6 +33,7 @@ pub struct VftGatewayData {
     vara_to_eth_token_id: HashMap<ActorId, H160>,
     eth_to_vara_token_id: HashMap<H160, ActorId>,
     eth_client: ActorId,
+    eth_contract_address: Option<H160>,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
@@ -112,6 +113,14 @@ where
         self.data_mut().eth_client = eth_client_new;
     }
 
+    pub fn update_eth_contract_address(&mut self, eth_contract_address_new: Option<H160>) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+
+        self.data_mut().eth_contract_address = eth_contract_address_new;
+    }
+
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
@@ -183,11 +192,15 @@ where
             .logs()
             .iter()
             .find_map(|log| {
-                let eth_token_id = H160::from(log.address.0 .0);
-                let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
+                let address = H160::from(log.address.0 .0);
                 let event = ERC20_TREASURY::Deposit::decode_log_data(log, true).ok()?;
+                let eth_token_id = H160::from(event.token.0 .0);
+                let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
 
-                Some((vara_token_id, event))
+                self.eth_contract_address()
+                    .map(|eth_contract_address| eth_contract_address == address)
+                    .unwrap_or(false)
+                    .then_some((vara_token_id, event))
             })
             .ok_or(Error::NotSupportedEvent)?;
 
@@ -357,6 +370,10 @@ where
 
     pub fn eth_client(&self) -> ActorId {
         self.data().eth_client
+    }
+
+    fn eth_contract_address(&self) -> Option<H160> {
+        self.data().eth_contract_address
     }
 }
 

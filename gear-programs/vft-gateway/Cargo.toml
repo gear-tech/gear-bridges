@@ -16,6 +16,9 @@ vft-gateway = { path = ".", features = ["wasm-binary"] }
 vft-gateway-client = { path = "client" }
 vft-client.workspace = true
 
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 sails-rs = { workspace = true, features = ["gtest"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 blake2.workspace = true

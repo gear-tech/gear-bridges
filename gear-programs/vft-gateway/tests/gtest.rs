@@ -1,7 +1,9 @@
+use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use blake2::{digest::typenum::U32, Blake2b, Digest};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
+use vft_gateway_app::services::abi::ERC20_TREASURY;
 use vft_gateway_client::{
     traits::*, Config, Error, InitConfig, MessageStatus, VftGateway as VftGatewayC,
     VftGatewayFactory as VftGatewayFactoryC,
@@ -503,9 +505,16 @@ async fn test_mint_tokens_from_eth_client() {
     let eth_token_id = H160::default();
     let receiver: ActorId = 10_000.into();
     let amount = U256::from(10_000_000_000_u64);
+    let eth_contract_address = H160::from([1u8; 20]);
 
     VftGatewayC::new(remoting.clone())
         .map_vara_to_eth_address(vft_program_id, eth_token_id)
+        .send_recv(gateway_program_id)
+        .await
+        .unwrap();
+
+    VftGatewayC::new(remoting.clone())
+        .update_eth_contract_address(Some(eth_contract_address))
         .send_recv(gateway_program_id)
         .await
         .unwrap();
@@ -516,8 +525,34 @@ async fn test_mint_tokens_from_eth_client() {
         .await
         .unwrap();
 
+    let event = ERC20_TREASURY::Deposit {
+        from: [2u8; 20].into(),
+        to: receiver.into_bytes().into(),
+        token: eth_token_id.0.into(),
+        amount: {
+            let mut bytes = [0u8; 32];
+            amount.to_little_endian(&mut bytes[..]);
+
+            alloy_primitives::U256::from_le_bytes(bytes)
+        },
+    };
+
+    let receipt = ReceiptWithBloom::from(Receipt {
+        status: true.into(),
+        cumulative_gas_used: 100_000u128,
+        logs: vec![alloy_primitives::Log {
+            address: eth_contract_address.0.into(),
+            data: Into::into(&event),
+        }],
+    });
+
+    let receipt = ReceiptEnvelope::Eip2930(receipt);
+
+    let mut receipt_rlp = vec![];
+    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
+
     VftGatewayC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
-        .mint_tokens(eth_token_id, receiver, amount)
+        .mint_tokens(receipt_rlp)
         .send_recv(gateway_program_id)
         .await
         .unwrap()
@@ -538,8 +573,6 @@ async fn test_mint_tokens_from_arbitrary_address() {
     } = setup_for_test().await;
 
     let eth_token_id = H160::default();
-    let receiver: ActorId = 10_000.into();
-    let amount = U256::from(10_000_000_000_u64);
     let wrong_address: ActorId = 1_010.into();
     remoting
         .system()
@@ -557,8 +590,19 @@ async fn test_mint_tokens_from_arbitrary_address() {
         .await
         .unwrap();
 
+    let receipt = ReceiptWithBloom::from(Receipt {
+        status: true.into(),
+        cumulative_gas_used: 100_000u128,
+        logs: vec![],
+    });
+
+    let receipt = ReceiptEnvelope::Eip2930(receipt);
+
+    let mut receipt_rlp = vec![];
+    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
+
     let reply = VftGatewayC::new(remoting.clone().with_actor_id(wrong_address))
-        .mint_tokens(eth_token_id, receiver, amount)
+        .mint_tokens(receipt_rlp)
         .send_recv(gateway_program_id)
         .await
         .unwrap();

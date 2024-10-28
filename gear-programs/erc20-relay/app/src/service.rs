@@ -133,10 +133,6 @@ where
         self.state.borrow().checkpoint_light_client_address
     }
 
-    pub fn eth_program(&self) -> H160 {
-        self.state.borrow().address
-    }
-
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
         let receipt = self.decode_and_check_receipt(&message)?;
 

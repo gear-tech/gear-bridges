@@ -34,14 +34,14 @@ contract ProxyUpdater is IMessageQueueReceiver {
             revert NotGovernance();
         }
 
-        uint8 discriminator = abi.decode(payload[:1], (uint8));
+        uint8 discriminator = uint8(payload[0]);
 
         if (discriminator == 0x00) {
             if (payload.length < 1 + 20) {
                 revert BadArguments();
             }
 
-            address new_implementation = abi.decode(payload[1:21], (address));
+            address new_implementation = address(bytes20(payload[1:21]));
             bytes calldata data = payload[21:];
 
             proxy.upgradeToAndCall(new_implementation, data);
@@ -50,7 +50,7 @@ contract ProxyUpdater is IMessageQueueReceiver {
                 revert BadArguments();
             }
 
-            address new_admin = abi.decode(payload[1:], (address));
+            address new_admin = address(bytes20(payload[1:]));
 
             proxy.changeProxyAdmin(new_admin);
         } else if (discriminator == 0x02) {
@@ -58,11 +58,15 @@ contract ProxyUpdater is IMessageQueueReceiver {
                 revert BadArguments();
             }
 
-            governance = abi.decode(payload[1:], (bytes32));
+            governance = bytes32(payload[1:]);
         } else {
             revert WrongDiscriminator();
         }
 
         return true;
+    }
+
+    function getGovernance() external view returns (bytes32) {
+        return governance;
     }
 }

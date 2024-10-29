@@ -88,9 +88,11 @@ pub struct Config {
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
     gas_for_transfer_to_eth_msg: u64,
+    gas_for_event_sending: u64,
 }
 
 impl Config {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gas_to_burn_tokens: u64,
         gas_for_reply_deposit: u64,
@@ -99,6 +101,7 @@ impl Config {
         gas_to_send_request_to_builtin: u64,
         reply_timeout: u32,
         gas_for_transfer_to_eth_msg: u64,
+        gas_for_event_sending: u64,
     ) -> Self {
         Self {
             gas_to_burn_tokens,
@@ -108,6 +111,7 @@ impl Config {
             gas_to_send_request_to_builtin,
             reply_timeout,
             gas_for_transfer_to_eth_msg,
+            gas_for_event_sending,
         }
     }
 }
@@ -253,6 +257,7 @@ where
                 + config.gas_to_send_request_to_builtin
                 + config.gas_for_transfer_to_eth_msg
                 + 3 * config.gas_for_reply_deposit
+                + config.gas_for_event_sending
         {
             panic!("Please attach more gas");
         }

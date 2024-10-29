@@ -13,6 +13,27 @@ pub struct VftGateway<ExecContext> {
     exec_context: ExecContext,
 }
 
+#[derive(Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+enum Event {
+    TokenMappingAdded {
+        vara_token_id: ActorId,
+        eth_token_id: H160,
+    },
+    TokenMappingRemoved {
+        vara_token_id: ActorId,
+        eth_token_id: H160,
+    },
+    BridgingRequested {
+        nonce: U256,
+        vara_token_id: ActorId,
+        amount: U256,
+        sender: ActorId,
+        receiver: H160,
+    },
+}
+
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct Request {
     pub receiver: H160,
@@ -91,7 +112,7 @@ impl Config {
     }
 }
 
-#[service]
+#[service(events = Event)]
 impl<T> VftGateway<T>
 where
     T: ExecContext,
@@ -116,12 +137,29 @@ where
             panic!("Not admin")
         }
 
-        self.data_mut()
+        let already_present = self
+            .data_mut()
             .vara_to_eth_token_id
-            .insert(vara_token_id, eth_token_id);
-        self.data_mut()
+            .insert(vara_token_id, eth_token_id)
+            .is_some();
+        if already_present {
+            panic!("Token mapping already exists");
+        }
+
+        let already_present = self
+            .data_mut()
             .eth_to_vara_token_id
-            .insert(eth_token_id, vara_token_id);
+            .insert(eth_token_id, vara_token_id)
+            .is_some();
+        if already_present {
+            panic!("Token mapping already exists");
+        }
+
+        self.notify_on(Event::TokenMappingAdded {
+            vara_token_id,
+            eth_token_id,
+        })
+        .expect("Failed to emit event");
     }
 
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
@@ -129,10 +167,25 @@ where
             panic!("Not admin")
         }
 
-        self.data_mut()
+        let eth_token_id = self
+            .data_mut()
             .vara_to_eth_token_id
             .remove(&vara_token_id)
-            .map(|eth_token_id| self.data_mut().eth_to_vara_token_id.remove(&eth_token_id));
+            .expect("Token mapping not found");
+
+        let _ = self
+            .data_mut()
+            .eth_to_vara_token_id
+            .remove(&eth_token_id)
+            .expect(
+                "Should be present at this point due to the invariant of map_vara_to_eth_address",
+            );
+
+        self.notify_on(Event::TokenMappingRemoved {
+            vara_token_id,
+            eth_token_id,
+        })
+        .expect("Failed to emit event");
     }
 
     pub fn update_config(&mut self, config: Config) {
@@ -225,6 +278,16 @@ where
                 return Err(e);
             }
         };
+
+        self.notify_on(Event::BridgingRequested {
+            nonce,
+            vara_token_id,
+            amount,
+            sender,
+            receiver,
+        })
+        .expect("Failed to emit event");
+
         Ok((nonce, eth_token_id))
     }
 

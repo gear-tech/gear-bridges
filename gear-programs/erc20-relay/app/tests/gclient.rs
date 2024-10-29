@@ -71,7 +71,8 @@ async fn gas_for_reply() {
 
         println!("message_id = {}", hex::encode(message_id.0.as_ref()));
 
-        let reply: <vft_gateway::io::MintTokens as ActionIo>::Reply = Ok(());
+        let reply: <vft_gateway::io::MintTokens as ActionIo>::Reply =
+            Ok((Default::default(), Default::default(), Default::default()));
         let payload = {
             let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
             result.extend_from_slice(route);
@@ -99,7 +100,6 @@ async fn set_vft_gateway() {
 
     let program_id = factory
         .new(
-            Default::default(),
             Default::default(),
             Config {
                 reply_timeout: 10_000,
@@ -171,13 +171,11 @@ async fn update_config() {
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
     let checkpoints = ActorId::from([1u8; 32]);
-    let address = H160::from([2u8; 20]);
     let reply_timeout = 10_000;
     let reply_deposit = 1_000_000_000;
     let program_id = factory
         .new(
             checkpoints,
-            address,
             Config {
                 reply_timeout,
                 reply_deposit,

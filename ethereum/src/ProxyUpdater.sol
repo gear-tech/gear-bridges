@@ -23,6 +23,16 @@ contract ProxyUpdater is IMessageQueueReceiver {
         MESSAGE_QUEUE_ADDRESS = message_queue;
     }
 
+    /** @dev Accept request from MessageQueue. Based on the first byte of the payload
+     * make the decision what to do.
+     *
+     * If first byte = `0x00` then update implementation of underlying proxy.
+     * If first byte = `0x01` then change admin of the underlying proxy.
+     * If first byte = `0x02` then change governance.
+     *
+     * @param sender sender of message on the gear side.
+     * @param payload payload of the message.
+     */
     function processVaraMessage(
         bytes32 sender,
         bytes calldata payload

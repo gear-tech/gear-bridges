@@ -58,9 +58,9 @@ contract ERC20Treasury is IERC20Treasury, IMessageQueueReceiver {
             revert BadVaraAddress();
         }
 
-        address receiver = abi.decode(payload[:20], (address));
-        address token = abi.decode(payload[20:40], (address));
-        uint256 amount = abi.decode(payload[40:], (uint256));
+        address receiver = address(bytes20(payload[:20]));
+        address token = address(bytes20(payload[20:40]));
+        uint256 amount = uint256(bytes32(payload[40:]));
 
         IERC20(token).safeTransfer(receiver, amount);
         emit Withdraw(receiver, token, amount);

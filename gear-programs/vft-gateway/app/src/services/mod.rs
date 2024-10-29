@@ -155,10 +155,7 @@ where
         }
     }
 
-    pub async fn mint_tokens(
-        &mut self,
-        receipt_rlp: Vec<u8>,
-    ) -> Result<(H160, ActorId, U256), Error> {
+    pub async fn mint_tokens(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
         use abi::ERC20_TREASURY;
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
@@ -206,7 +203,6 @@ where
 
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
-        let fungible_token = H160::from(event.token.0 .0);
         let msg_id = gstd::msg::id();
         let transaction_details = TxDetails::MintTokens {
             vara_token_id,
@@ -220,9 +216,7 @@ where
         );
         utils::set_critical_hook(msg_id);
 
-        token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id)
-            .await
-            .map(|_| (fungible_token, receiver, amount))
+        token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
     }
 
     pub async fn transfer_vara_to_eth(

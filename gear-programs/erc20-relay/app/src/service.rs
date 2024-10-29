@@ -6,7 +6,6 @@ mod vft {
 
 use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
-use collections::HashMap;
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
@@ -15,7 +14,7 @@ use ethereum_common::{
     trie_db::{HashDB, Trie},
     utils as eth_utils,
     utils::ReceiptEnvelope,
-    H160, H256, U256,
+    H256,
 };
 use ops::ControlFlow::*;
 use sails_rs::{
@@ -25,27 +24,19 @@ use sails_rs::{
 };
 use vft::vft_gateway::io::MintTokens;
 
-type MintTokensReplies = HashMap<MessageId, (H160, ActorId, U256)>;
-
 pub(crate) const CAPACITY: usize = 500_000;
 
 #[cfg(feature = "gas_calculation")]
 pub(crate) const CAPACITY_STEP_SIZE: usize = 50_000;
 
 pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
-pub(crate) static mut MINT_TOKENS_REPLIES: Option<MintTokensReplies> = None;
 
 pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe {
         TRANSACTIONS
             .as_mut()
-            .expect("TRANSACTIONS; Program should be constructed")
+            .expect("Program should be constructed")
     }
-}
-
-pub(crate) fn mint_tokens_replies_mut() -> &'static mut MintTokensReplies {
-    unsafe { MINT_TOKENS_REPLIES.as_mut() }
-        .expect("MINT_TOKENS_REPLIES; Program should be constructed")
 }
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
@@ -74,9 +65,6 @@ enum Event {
         slot: u64,
         block_number: u64,
         transaction_index: u32,
-        fungible_token: H160,
-        to: ActorId,
-        amount: U256,
     },
 }
 
@@ -196,26 +184,19 @@ where
             )
         };
 
-        let msg_id = gstd::msg::id();
         gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
             .map_err(|_| Error::SendFailure)?
             .up_to(Some(reply_timeout))
             .map_err(|_| Error::ReplyTimeout)?
-            .handle_reply(move || handle_reply(msg_id, slot, transaction_index))
+            .handle_reply(move || handle_reply(slot, transaction_index))
             .map_err(|_| Error::ReplyHook)?
             .await
             .map_err(|_| Error::ReplyFailure)?;
 
-        let (fungible_token, to, amount) = mint_tokens_replies_mut()
-            .remove(&msg_id)
-            .expect("handle_reply should insert the record");
         let _ = self.notify_on(Event::Relayed {
             slot,
             block_number: block.body.execution_payload.block_number,
             transaction_index: transaction_index as u32,
-            fungible_token,
-            to,
-            amount,
         });
 
         Ok(())
@@ -302,19 +283,14 @@ where
                 (state.config.reply_timeout, state.config.reply_deposit)
             };
             let source = self.exec_context.actor_id();
-            let msg_id = gstd::msg::id();
             gstd::msg::send_bytes_for_reply(source, call_payload, 0, reply_deposit)
                 .map_err(|_| Error::SendFailure)?
                 .up_to(Some(reply_timeout))
                 .map_err(|_| Error::ReplyTimeout)?
-                .handle_reply(move || handle_reply(msg_id, _slot, _transaction_index))
+                .handle_reply(move || handle_reply(_slot, _transaction_index))
                 .map_err(|_| Error::ReplyHook)?
                 .await
                 .map_err(|_| Error::ReplyFailure)?;
-
-            let _reply = mint_tokens_replies_mut()
-                .remove(&msg_id)
-                .expect("handle_reply should insert the record");
 
             Ok(())
         }
@@ -324,9 +300,9 @@ where
     }
 }
 
-fn handle_reply(msg_id: MessageId, slot: u64, transaction_index: u64) {
+fn handle_reply(slot: u64, transaction_index: u64) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
-    let reply = MintTokens::decode_reply(&reply_bytes)
+    MintTokens::decode_reply(&reply_bytes)
         .expect("Unable to decode MintTokens reply")
         .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
 
@@ -336,5 +312,4 @@ fn handle_reply(msg_id: MessageId, slot: u64, transaction_index: u64) {
     }
 
     transactions.insert((slot, transaction_index));
-    mint_tokens_replies_mut().insert(msg_id, reply);
 }

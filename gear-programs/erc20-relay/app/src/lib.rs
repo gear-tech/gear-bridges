@@ -4,7 +4,7 @@ pub mod error;
 pub mod service;
 
 use cell::RefCell;
-use collections::{BTreeSet, HashMap};
+use collections::BTreeSet;
 use sails_rs::{
     gstd::{ExecContext, GStdExecContext},
     prelude::*,
@@ -33,7 +33,6 @@ impl Erc20RelayProgram {
     pub fn new(checkpoint_light_client_address: ActorId, config: Config) -> Self {
         unsafe {
             service::TRANSACTIONS = Some(BTreeSet::new());
-            service::MINT_TOKENS_REPLIES = Some(HashMap::new());
         }
 
         let exec_context = GStdExecContext::new();

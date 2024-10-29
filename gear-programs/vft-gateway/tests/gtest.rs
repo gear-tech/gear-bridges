@@ -122,6 +122,7 @@ async fn setup_for_test_with_mocks(
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
             gas_for_transfer_to_eth_msg: 20_000_000_000,
+            gas_for_event_sending: 15_000_000_000,
         },
     };
     let gateway_program_id = VftGatewayFactoryC::new(remoting.clone())
@@ -192,7 +193,7 @@ async fn test_successful_transfer_vara_to_eth() {
     remoting.system().mint_to(account_id, 100_000_000_000_000);
 
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -246,7 +247,7 @@ async fn test_transfer_fails_due_to_token_panic() {
     remoting.system().mint_to(account_id, 100_000_000_000_000);
 
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut gateway = VftGatewayC::new(remoting.clone());
@@ -284,7 +285,7 @@ async fn test_transfer_fails_due_to_token_rejecting_request() {
     remoting.system().mint_to(account_id, 100_000_000_000_000);
 
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut gateway = VftGatewayC::new(remoting.clone());
@@ -326,7 +327,7 @@ async fn test_bridge_builtin_panic_with_token_mint() {
     remoting.system().mint_to(account_id, 100_000_000_000_000);
 
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -393,7 +394,7 @@ async fn test_multiple_transfers() {
 
     let amount1 = U256::from(10_000_000_000_u64);
     let amount2 = U256::from(5_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -454,7 +455,7 @@ async fn test_transfer_vara_to_eth_insufficient_balance() {
     let amount = U256::from(10_000_000_000_u64);
     // More than the available balance
     let excessive_amount = U256::from(20_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());

@@ -71,7 +71,7 @@ async fn gas_for_reply() {
 
         println!("message_id = {}", hex::encode(message_id.0.as_ref()));
 
-        let reply: <vft_gateway::io::MintTokens as ActionIo>::Reply = Ok(Default::default());
+        let reply: <vft_gateway::io::MintTokens as ActionIo>::Reply = Ok(());
         let payload = {
             let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
             result.extend_from_slice(route);

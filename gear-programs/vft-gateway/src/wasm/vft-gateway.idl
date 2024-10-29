@@ -13,6 +13,7 @@ type Config = struct {
   gas_to_send_request_to_builtin: u64,
   reply_timeout: u32,
   gas_for_transfer_to_eth_msg: u64,
+  gas_for_event_sending: u64,
 };
 
 type Error = enum {
@@ -85,5 +86,11 @@ service VftGateway {
   query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
   query ReceiverContractAddress : () -> h160;
   query VaraToEthAddresses : () -> vec struct { actor_id, h160 };
+
+  events {
+    TokenMappingAdded: struct { vara_token_id: actor_id, eth_token_id: h160 };
+    TokenMappingRemoved: struct { vara_token_id: actor_id, eth_token_id: h160 };
+    BridgingRequested: struct { nonce: u256, vara_token_id: actor_id, amount: u256, sender: actor_id, receiver: h160 };
+  }
 };
 

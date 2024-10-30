@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use ethereum_beacon_client::BeaconClient;
-use gclient::{GearApi as GclientGearApi, WSAddress};
+use gclient::{GearApi as GClientGearApi, WSAddress};
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
@@ -382,7 +382,7 @@ async fn main() {
     };
 }
 
-async fn create_gclient_client(args: &VaraEndpointArg, vara_suri: &str) -> GclientGearApi {
+async fn create_gclient_client(args: &VaraEndpointArg, vara_suri: &str) -> GClientGearApi {
     let endpoint_parts: Vec<_> = args.vara_endpoint.split(':').collect();
     let [domain_1, domain_2, port] = endpoint_parts
         .try_into()
@@ -391,7 +391,7 @@ async fn create_gclient_client(args: &VaraEndpointArg, vara_suri: &str) -> Gclie
     let domain = [domain_1, domain_2].join(":");
     let port: u16 = port.parse().expect("Invalid gear endpoint provided");
 
-    GclientGearApi::init_with(WSAddress::new(domain, Some(port)), vara_suri)
+    GClientGearApi::init_with(WSAddress::new(domain, Some(port)), vara_suri)
         .await
         .expect("Failed to create gclient client")
 }

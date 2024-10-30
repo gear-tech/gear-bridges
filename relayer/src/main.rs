@@ -422,7 +422,7 @@ fn create_eth_client(args: &EthereumArgs) -> EthApi {
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
     let timeout = args.beacon_timeout.map(Duration::from_secs);
 
-    BeaconClient::connect(args.beacon_endpoint.clone(), timeout)
+    BeaconClient::new(args.beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
 }

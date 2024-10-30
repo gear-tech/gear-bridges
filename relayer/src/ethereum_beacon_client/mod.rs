@@ -46,31 +46,16 @@ pub struct BeaconClient {
 }
 
 impl BeaconClient {
-    pub async fn connect(rpc_url: String, timeout: Option<Duration>) -> AnyResult<Self> {
+    pub async fn new(rpc_url: String, timeout: Option<Duration>) -> AnyResult<Self> {
         let client = ClientBuilder::new();
-
-        let client = if let Some(timeout) = timeout {
-            client.timeout(timeout)
-        } else {
-            client
+        let client = match timeout {
+            Some(timeout) => client.timeout(timeout),
+            None => client,
         };
 
         let client = client
             .build()
             .expect("Failed to create reqwest http client");
-
-        let health = client
-            .get(format!("{}/eth/v1/node/health", rpc_url))
-            .send()
-            .await?
-            .status();
-
-        if !health.is_success() {
-            bail!(
-                "Tried to connect to unhealthy beacon node. Status code returned: {}",
-                health
-            );
-        }
 
         Ok(Self { client, rpc_url })
     }

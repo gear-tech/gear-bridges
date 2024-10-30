@@ -65,7 +65,7 @@ async fn upload_program(
 }
 
 async fn init(network: Network) -> Result<()> {
-    let beacon_client = BeaconClient::connect(RPC_URL.to_string(), None)
+    let beacon_client = BeaconClient::new(RPC_URL.to_string(), None)
         .await
         .expect("Failed to connect to beacon node");
 
@@ -148,7 +148,7 @@ async fn init_mainnet() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn init_and_updating() -> Result<()> {
-    let beacon_client = BeaconClient::connect(RPC_URL.to_string(), None)
+    let beacon_client = BeaconClient::new(RPC_URL.to_string(), None)
         .await
         .expect("Failed to connect to beacon node");
 
@@ -291,7 +291,7 @@ async fn init_and_updating() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn replaying_back() -> Result<()> {
-    let beacon_client = BeaconClient::connect(RPC_URL.to_string(), None)
+    let beacon_client = BeaconClient::new(RPC_URL.to_string(), None)
         .await
         .expect("Failed to connect to beacon node");
 

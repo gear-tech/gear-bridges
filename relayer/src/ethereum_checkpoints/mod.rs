@@ -52,7 +52,7 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         crate::hex_utils::decode_byte_array(&program_id).expect("Failed to parse ProgramId");
 
     let timeout = Some(Duration::from_secs(beacon_timeout));
-    let beacon_client = BeaconClient::connect(beacon_endpoint.clone(), timeout)
+    let beacon_client = BeaconClient::new(beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to connect to beacon node");
 

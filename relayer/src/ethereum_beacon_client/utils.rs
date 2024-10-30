@@ -78,14 +78,3 @@ pub fn sync_update_from_update(signature: G2, update: Update) -> SyncCommitteeUp
             .collect::<_>(),
     }
 }
-
-pub fn try_from_hex_encoded<T: TryFrom<Vec<u8>>>(hex_encoded: &str) -> Option<T> {
-    let data = match hex_encoded.starts_with("0x") {
-        true => &hex_encoded[2..],
-        false => hex_encoded,
-    };
-
-    hex::decode(data)
-        .ok()
-        .and_then(|bytes| <T as TryFrom<Vec<u8>>>::try_from(bytes).ok())
-}

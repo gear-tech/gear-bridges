@@ -3,7 +3,6 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use ethereum_beacon_client::BeaconClient;
 use gclient::{GearApi as GclientGearApi, WSAddress};
-use primitive_types::{H160, H256};
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
@@ -15,6 +14,7 @@ use utils_prometheus::MetricsBuilder;
 
 mod ethereum_beacon_client;
 mod ethereum_checkpoints;
+mod hex_utils;
 mod message_relayer;
 mod proof_storage;
 mod prover_interface;
@@ -295,7 +295,8 @@ async fn main() {
             let eth_api = create_eth_client(&args.ethereum_args);
 
             if let Some(bridging_payment_address) = args.bridging_payment_address {
-                let bridging_payment_address = decode_h256(&bridging_payment_address);
+                let bridging_payment_address = hex_utils::decode_h256(&bridging_payment_address)
+                    .expect("Failed to parse address");
 
                 let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
                     gear_api,
@@ -344,10 +345,14 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_endpoint).await;
             let gclient_client = create_gclient_client(&args.vara_endpoint, &args.vara_suri).await;
 
-            let erc20_treasury_address = decode_h160(&args.erc20_treasury_address);
+            let erc20_treasury_address = hex_utils::decode_h160(&args.erc20_treasury_address)
+                .expect("Failed to parse address");
             let checkpoint_light_client_address =
-                decode_h256(&args.checkpoint_light_client_address);
-            let ethereum_event_client_address = decode_h256(&args.ethereum_event_client_address);
+                hex_utils::decode_h256(&args.checkpoint_light_client_address)
+                    .expect("Failed to parse address");
+            let ethereum_event_client_address =
+                hex_utils::decode_h256(&args.ethereum_event_client_address)
+                    .expect("Failed to parse address");
 
             let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                 gear_api,
@@ -420,23 +425,4 @@ async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
     BeaconClient::connect(args.beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
-}
-
-fn decode_h256(hex: &str) -> H256 {
-    let data: [u8; 32] = decode_byte_array(hex);
-    data.into()
-}
-
-fn decode_h160(hex: &str) -> H160 {
-    let data: [u8; 20] = decode_byte_array(hex);
-    data.into()
-}
-
-fn decode_byte_array<const LEN: usize>(hex: &str) -> [u8; LEN] {
-    let address = if &hex[..2] == "0x" { &hex[2..] } else { hex };
-
-    hex::decode(address)
-        .unwrap_or_else(|_| panic!("Wrong address format: {}", hex))
-        .try_into()
-        .unwrap_or_else(|_| panic!("Wrong address length: {}", hex))
 }

@@ -48,8 +48,8 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         },
     } = args;
 
-    let program_id = ethereum_beacon_client::utils::try_from_hex_encoded(&program_id)
-        .expect("Expecting correct ProgramId");
+    let program_id =
+        crate::hex_utils::decode_byte_array(&program_id).expect("Failed to parse ProgramId");
 
     let timeout = Some(Duration::from_secs(beacon_timeout));
     let beacon_client = BeaconClient::connect(beacon_endpoint.clone(), timeout)

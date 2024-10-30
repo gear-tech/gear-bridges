@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, bail, Error as AnyError, Result as AnyResult};
+use anyhow::{anyhow, Error as AnyError, Result as AnyResult};
 use checkpoint_light_client_io::{BeaconBlockHeader, Slot};
 use ethereum_common::{
     beacon::Block as BeaconBlock,

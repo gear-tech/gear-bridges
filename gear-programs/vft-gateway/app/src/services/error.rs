@@ -24,4 +24,5 @@ pub enum Error {
     NotEthClient,
     NotEnoughGas,
     NoCorrespondingVaraAddress,
+    NotSupportedEvent,
 }

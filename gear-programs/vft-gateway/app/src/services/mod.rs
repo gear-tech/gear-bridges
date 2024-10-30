@@ -1,6 +1,7 @@
 use collections::HashMap;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
+pub mod abi;
 mod bridge_builtin_operations;
 pub mod error;
 pub mod msg_tracker;
@@ -53,6 +54,7 @@ pub struct VftGatewayData {
     vara_to_eth_token_id: HashMap<ActorId, H160>,
     eth_to_vara_token_id: HashMap<H160, ActorId>,
     eth_client: ActorId,
+    eth_contract_address: Option<H160>,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
@@ -136,6 +138,14 @@ where
         self.data_mut().eth_client = eth_client_new;
     }
 
+    pub fn update_eth_contract_address(&mut self, eth_contract_address_new: Option<H160>) {
+        if self.data().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
+        }
+
+        self.data_mut().eth_contract_address = eth_contract_address_new;
+    }
+
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
         if self.data().admin != self.exec_context.actor_id() {
             panic!("Not admin")
@@ -202,13 +212,12 @@ where
         }
     }
 
-    pub async fn mint_tokens(
-        &mut self,
-        eth_token_id: H160,
-        receiver: ActorId,
-        amount: U256,
-    ) -> Result<(), Error> {
-        let vara_token_id = self.get_vara_token_id(&eth_token_id)?;
+    pub async fn mint_tokens(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
+        use abi::ERC20_TREASURY;
+        use alloy_rlp::Decodable;
+        use alloy_sol_types::SolEvent;
+        use ethereum_common::utils::ReceiptEnvelope;
+
         let data = self.data();
         let sender = self.exec_context.actor_id();
 
@@ -225,6 +234,32 @@ where
             return Err(Error::NotEnoughGas);
         }
 
+        let receipt =
+            ReceiptEnvelope::decode(&mut &receipt_rlp[..]).map_err(|_| Error::NotSupportedEvent)?;
+
+        if !receipt.is_success() {
+            return Err(Error::NotSupportedEvent);
+        }
+
+        // decode log and check that it is from an allowed address
+        let (vara_token_id, event) = receipt
+            .logs()
+            .iter()
+            .find_map(|log| {
+                let address = H160::from(log.address.0 .0);
+                let event = ERC20_TREASURY::Deposit::decode_log_data(log, true).ok()?;
+                let eth_token_id = H160::from(event.token.0 .0);
+                let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
+
+                self.eth_contract_address()
+                    .map(|eth_contract_address| eth_contract_address == address)
+                    .unwrap_or(false)
+                    .then_some((vara_token_id, event))
+            })
+            .ok_or(Error::NotSupportedEvent)?;
+
+        let amount = U256::from_little_endian(event.amount.as_le_slice());
+        let receiver = ActorId::from(event.to.0);
         let msg_id = gstd::msg::id();
         let transaction_details = TxDetails::MintTokens {
             vara_token_id,
@@ -237,6 +272,7 @@ where
             transaction_details,
         );
         utils::set_critical_hook(msg_id);
+
         token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
     }
 
@@ -396,6 +432,10 @@ where
 
     pub fn eth_client(&self) -> ActorId {
         self.data().eth_client
+    }
+
+    fn eth_contract_address(&self) -> Option<H160> {
+        self.data().eth_contract_address
     }
 }
 

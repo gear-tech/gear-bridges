@@ -3774,7 +3774,6 @@ name = "erc20-relay-app"
 version = "0.1.0"
 dependencies = [
  "alloy-rlp",
- "alloy-sol-types",
  "checkpoint_light_client-io",
  "erc20-relay",
  "erc20-relay-client",
@@ -15368,6 +15367,9 @@ dependencies = [
 name = "vft-gateway"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
  "blake2",
  "extended_vft_wasm",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -15387,9 +15389,14 @@ dependencies = [
 name = "vft-gateway-app"
 version = "0.1.0"
 dependencies = [
+ "alloy-rlp",
+ "alloy-sol-types",
+ "ethereum-common",
  "gbuiltin-eth-bridge",
+ "getrandom 0.2.15",
  "git-download",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static",
  "parity-scale-codec",
  "sails-client-gen 0.6.1",
  "sails-rs 0.6.1",

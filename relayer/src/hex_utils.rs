@@ -12,7 +12,7 @@ pub fn decode_h160(hex: &str) -> anyhow::Result<H160> {
 
 pub fn decode_byte_array<const LEN: usize>(hex: &str) -> anyhow::Result<[u8; LEN]> {
     let address = if &hex[..2] == "0x" { &hex[2..] } else { hex };
-    Ok(hex::decode(address)?
+    hex::decode(address)?
         .try_into()
-        .map_err(|_| anyhow::anyhow!("Invalid length"))?)
+        .map_err(|_| anyhow::anyhow!("Invalid length"))
 }

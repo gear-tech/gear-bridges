@@ -40,9 +40,13 @@ pub async fn relay(args: RelayCheckpointsArgs) {
         program_id,
         beacon_endpoint,
         beacon_timeout,
-        vara_domain,
-        vara_port,
-        vara_suri,
+        vara_args:
+            VaraArgs {
+                vara_domain,
+                vara_port,
+                vara_suri,
+                vara_rpc_retries,
+            },
         prometheus_args: PrometheusArgs {
             endpoint: endpoint_prometheus,
         },
@@ -62,7 +66,10 @@ pub async fn relay(args: RelayCheckpointsArgs) {
 
     sync_update::spawn_receiver(beacon_client.clone(), sender);
 
-    let client = GearApi::init_with(WSAddress::new(vara_domain, vara_port), vara_suri)
+    let client = GearApi::builder()
+        .retries(vara_rpc_retries)
+        .suri(vara_suri)
+        .build(WSAddress::new(vara_domain, vara_port))
         .await
         .expect("GearApi client should be created");
 

@@ -91,6 +91,28 @@ struct VaraEndpointArg {
 }
 
 #[derive(Args)]
+struct VaraArgs {
+    /// Domain of the VARA RPC endpoint
+    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
+    vara_domain: String,
+
+    /// Port of the VARA RPC endpoint
+    #[arg(long, default_value = "9944", env = "VARA_PORT")]
+    vara_port: u16,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
+    vara_suri: String,
+
+    /// Set retries of the VARA RPC client
+    #[arg(long, default_value = "3", env = "VARA_RPC_RETRIES")]
+    vara_rpc_retries: u8,
+}
+
+#[derive(Args)]
 struct EthereumArgs {
     /// Address of the ethereum endpoint
     #[arg(
@@ -167,20 +189,8 @@ struct RelayCheckpointsArgs {
     #[arg(long, default_value = "120", env = "BEACON_TIMEOUT")]
     beacon_timeout: u64,
 
-    /// Domain of the VARA RPC endpoint
-    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
-    vara_domain: String,
-
-    /// Port of the VARA RPC endpoint
-    #[arg(long, default_value = "9944", env = "VARA_PORT")]
-    vara_port: u16,
-
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
-    vara_suri: String,
+    #[clap(flatten)]
+    vara_args: VaraArgs,
 
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
@@ -207,14 +217,7 @@ struct RelayErc20Args {
     ethereum_event_client_address: String,
 
     #[clap(flatten)]
-    vara_endpoint: VaraEndpointArg,
-
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, env = "VARA_SURI")]
-    vara_suri: String,
+    vara_args: VaraArgs,
 
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
@@ -342,8 +345,12 @@ async fn main() {
             let eth_api = create_eth_client(&args.ethereum_args);
             let beacon_client = create_beacon_client(&args.beacon_rpc).await;
 
-            let gear_api = create_gear_client(&args.vara_endpoint).await;
-            let gclient_client = create_gclient_client(&args.vara_endpoint, &args.vara_suri).await;
+            let vara_args = &args.vara_args;
+            let gear_api = create_gear_client(&VaraEndpointArg {
+                vara_endpoint: format!("{}:{}", vara_args.vara_domain, vara_args.vara_port),
+            })
+            .await;
+            let gclient_client = create_gclient_client(vara_args).await;
 
             let erc20_treasury_address = hex_utils::decode_h160(&args.erc20_treasury_address)
                 .expect("Failed to parse address");
@@ -382,16 +389,11 @@ async fn main() {
     };
 }
 
-async fn create_gclient_client(args: &VaraEndpointArg, vara_suri: &str) -> GClientGearApi {
-    let endpoint_parts: Vec<_> = args.vara_endpoint.split(':').collect();
-    let [domain_1, domain_2, port] = endpoint_parts
-        .try_into()
-        .expect("Invalid gear endpoint provided");
-
-    let domain = [domain_1, domain_2].join(":");
-    let port: u16 = port.parse().expect("Invalid gear endpoint provided");
-
-    GClientGearApi::init_with(WSAddress::new(domain, Some(port)), vara_suri)
+async fn create_gclient_client(args: &VaraArgs) -> GClientGearApi {
+    GClientGearApi::builder()
+        .retries(args.vara_rpc_retries)
+        .suri(&args.vara_suri)
+        .build(WSAddress::new(&args.vara_domain, args.vara_port))
         .await
         .expect("Failed to create gclient client")
 }

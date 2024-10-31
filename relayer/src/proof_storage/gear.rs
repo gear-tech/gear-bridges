@@ -103,7 +103,6 @@ impl GearProofStorage {
         fee_payer: &str,
         config_folder_path: PathBuf,
     ) -> anyhow::Result<GearProofStorage> {
-        let uri = format!("{domain}:{port}");
         let wrapped_gear_api = WrappedGearApi::new(domain, port, retries).await?;
 
         let address = WSAddress::try_new(domain, port)?;

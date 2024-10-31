@@ -13,6 +13,7 @@ const ADMIN_ID: u64 = 1000;
 const TOKEN_ID: u64 = 200;
 const ETH_CLIENT_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
+const RECEIVER_CONTRACT_ADDRESS: H160 = H160([2u8; 20]);
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub enum Response {
@@ -113,7 +114,7 @@ async fn setup_for_test_with_mocks(
     // Gateway
     let gateway_code_id = remoting.system().submit_code(vft_gateway::WASM_BINARY);
     let init_config = InitConfig {
-        receiver_contract_address: [1; 20].into(),
+        receiver_contract_address: RECEIVER_CONTRACT_ADDRESS,
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         eth_client: ETH_CLIENT_ID.into(),
         config: Config {
@@ -506,16 +507,9 @@ async fn test_mint_tokens_from_eth_client() {
     let eth_token_id = H160::default();
     let receiver: ActorId = 10_000.into();
     let amount = U256::from(10_000_000_000_u64);
-    let eth_contract_address = H160::from([1u8; 20]);
 
     VftGatewayC::new(remoting.clone())
         .map_vara_to_eth_address(vft_program_id, eth_token_id)
-        .send_recv(gateway_program_id)
-        .await
-        .unwrap();
-
-    VftGatewayC::new(remoting.clone())
-        .update_eth_contract_address(Some(eth_contract_address))
         .send_recv(gateway_program_id)
         .await
         .unwrap();
@@ -527,7 +521,7 @@ async fn test_mint_tokens_from_eth_client() {
         .unwrap();
 
     let event = ERC20_TREASURY::Deposit {
-        from: [2u8; 20].into(),
+        from: [3u8; 20].into(),
         to: receiver.into_bytes().into(),
         token: eth_token_id.0.into(),
         amount: {
@@ -542,7 +536,7 @@ async fn test_mint_tokens_from_eth_client() {
         status: true.into(),
         cumulative_gas_used: 100_000u128,
         logs: vec![alloy_primitives::Log {
-            address: eth_contract_address.0.into(),
+            address: RECEIVER_CONTRACT_ADDRESS.0.into(),
             data: Into::into(&event),
         }],
     });

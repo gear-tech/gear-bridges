@@ -29,6 +29,11 @@ struct FetchArgs {
     /// Port of the Gear RPC endpoint
     #[arg(long = "gear-port", default_value = "443", env = "GEAR_PORT")]
     gear_port: u16,
+
+    /// Set retries of the VARA RPC client
+    #[arg(long, default_value = "3", env = "GEAR_RPC_RETRIES")]
+    gear_rpc_retries: u8,
+
     /// Block number to fetch the genesis config for. If not specified, the latest block will be used
     #[arg(long = "block")]
     block: Option<u32>,
@@ -39,7 +44,7 @@ async fn main() {
     let cli = Cli::parse();
     let CliCommands::Fetch(args) = cli.command;
 
-    let gear_api = GearApi::new(&format!("{}:{}", args.gear_endpoint, args.gear_port))
+    let gear_api = GearApi::new(&args.gear_endpoint, args.gear_port, args.gear_rpc_retries)
         .await
         .expect("Failed to create Gear API");
 

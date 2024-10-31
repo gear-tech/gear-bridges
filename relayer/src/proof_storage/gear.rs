@@ -97,18 +97,22 @@ struct UploadedProgramInfo {
 
 impl GearProofStorage {
     pub async fn new(
-        endpoint: &str,
+        domain: &str,
+        port: u16,
+        retries: u8,
         fee_payer: &str,
         config_folder_path: PathBuf,
     ) -> anyhow::Result<GearProofStorage> {
-        let wrapped_gear_api = WrappedGearApi::new(endpoint).await?;
+        let uri = format!("{domain}:{port}");
+        let wrapped_gear_api = WrappedGearApi::new(domain, port, retries).await?;
 
-        let endpoint: Vec<_> = endpoint.split(':').collect();
-        let domain = [endpoint[0], ":", endpoint[1]].concat();
-        let port = endpoint[2].parse::<u16>()?;
         let address = WSAddress::try_new(domain, port)?;
 
-        let gear_api = GearApi::init_with(address, fee_payer).await?;
+        let gear_api = GearApi::builder()
+            .retries(retries)
+            .suri(fee_payer)
+            .build(address)
+            .await?;
 
         let message_channel = run_message_sender(gear_api.clone(), wrapped_gear_api)
             .await

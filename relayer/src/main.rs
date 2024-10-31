@@ -20,7 +20,6 @@ mod proof_storage;
 mod prover_interface;
 mod relay_merkle_roots;
 
-const DEFAULT_VARA_RPC: &str = "ws://localhost:8989";
 const DEFAULT_ETH_BEACON_RPC: &str = "http://localhost:50000";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
@@ -51,7 +50,7 @@ enum CliCommands {
 #[derive(Args)]
 struct RelayMessagesArgs {
     #[clap(flatten)]
-    vara_endpoint: VaraEndpointArg,
+    vara: VaraArgs,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
@@ -67,7 +66,7 @@ struct RelayMessagesArgs {
 #[derive(Args)]
 struct RelayMerkleRootsArgs {
     #[clap(flatten)]
-    vara_endpoint: VaraEndpointArg,
+    vara: VaraArgs,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
@@ -76,18 +75,6 @@ struct RelayMerkleRootsArgs {
     prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     proof_storage_args: ProofStorageArgs,
-}
-
-// TODO: Separate domain and port.
-#[derive(Args)]
-struct VaraEndpointArg {
-    /// Address of the VARA RPC endpoint
-    #[arg(
-        long = "vara-endpoint",
-        default_value = DEFAULT_VARA_RPC,
-        env = "VARA_RPC"
-    )]
-    vara_endpoint: String,
 }
 
 #[derive(Args)]
@@ -248,7 +235,12 @@ async fn main() {
 
     match cli.command {
         CliCommands::RelayMerkleRoots(args) => {
-            let gear_api = create_gear_client(&args.vara_endpoint).await;
+            let gear_api = create_gear_client(
+                &args.vara.vara_domain,
+                args.vara.vara_port,
+                args.vara.vara_rpc_retries,
+            )
+            .await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
             let mut metrics = MetricsBuilder::new();
@@ -256,7 +248,9 @@ async fn main() {
             let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
                     let proof_storage = GearProofStorage::new(
-                        &args.vara_endpoint.vara_endpoint,
+                        &args.vara.vara_domain,
+                        args.vara.vara_port,
+                        args.vara.vara_rpc_retries,
                         &fee_payer,
                         "./onchain_proof_storage_data".into(),
                     )
@@ -294,7 +288,12 @@ async fn main() {
             relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::RelayMessages(args) => {
-            let gear_api = create_gear_client(&args.vara_endpoint).await;
+            let gear_api = create_gear_client(
+                &args.vara.vara_domain,
+                args.vara.vara_port,
+                args.vara.vara_rpc_retries,
+            )
+            .await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
             if let Some(bridging_payment_address) = args.bridging_payment_address {
@@ -346,9 +345,11 @@ async fn main() {
             let beacon_client = create_beacon_client(&args.beacon_rpc).await;
 
             let vara_args = &args.vara_args;
-            let gear_api = create_gear_client(&VaraEndpointArg {
-                vara_endpoint: format!("{}:{}", vara_args.vara_domain, vara_args.vara_port),
-            })
+            let gear_api = create_gear_client(
+                &vara_args.vara_domain,
+                vara_args.vara_port,
+                vara_args.vara_rpc_retries,
+            )
             .await;
             let gclient_client = create_gclient_client(vara_args).await;
 
@@ -398,8 +399,8 @@ async fn create_gclient_client(args: &VaraArgs) -> GClientGearApi {
         .expect("Failed to create gclient client")
 }
 
-async fn create_gear_client(args: &VaraEndpointArg) -> GearApi {
-    GearApi::new(&args.vara_endpoint)
+async fn create_gear_client(domain: &str, port: u16, retries: u8) -> GearApi {
+    GearApi::new(domain, port, retries)
         .await
         .unwrap_or_else(|err| panic!("Error while creating gear client: {}", err))
 }

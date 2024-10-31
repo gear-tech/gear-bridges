@@ -423,5 +423,7 @@ async fn submit_proof_to_ethereum(eth_api: &EthApi, proof: FinalProof) -> anyhow
         .provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
         .await?;
 
+    log::info!("Submitted merkle root to ethereum, tx hash: {}", tx_hash);
+
     Ok(tx_hash)
 }

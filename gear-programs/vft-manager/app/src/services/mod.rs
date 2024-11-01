@@ -181,7 +181,6 @@ where
     }
 
     pub async fn submit_receipt(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
-        use abi::ERC20_TREASURY;
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
         use ethereum_common::utils::ReceiptEnvelope;
@@ -215,7 +214,8 @@ where
             .iter()
             .find_map(|log| {
                 let address = H160::from(log.address.0 .0);
-                let event = ERC20_TREASURY::Deposit::decode_log_data(log, true).ok()?;
+                let event =
+                    abi::ERC20_MANAGER::BridgingRequested::decode_log_data(log, true).ok()?;
                 let eth_token_id = H160::from(event.token.0 .0);
                 let vara_token_id = self
                     .state()

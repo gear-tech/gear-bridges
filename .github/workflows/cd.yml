@@ -26,4 +26,4 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     uses: ./.github/workflows/build-and-publish-relayer.yml
     with: 
-      tags: ghcr.io/gear-tech/bridge-relayer:latest,ghcr.io/gear-tech/bridge-relayer:$GITHUB_REF_NAME
+      tags: ghcr.io/gear-tech/bridge-relayer:latest,ghcr.io/gear-tech/bridge-relayer:${{ github.ref_name }}

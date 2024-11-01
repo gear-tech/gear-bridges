@@ -24,9 +24,6 @@ export const processor = new EvmBatchProcessor()
       transactionHash: true,
     },
   })
-  .setBlockRange({
-    from: config.fromBlock,
-  })
   .addLog({
     address: [config.erc20Treasury],
     topic0: [erc20TreasuryAbi.events.Deposit.topic],
@@ -34,6 +31,10 @@ export const processor = new EvmBatchProcessor()
   .addLog({
     address: [config.msgQ],
     topic0: [messageQueueAbi.events.MessageProcessed.topic],
+  })
+  .setBlockRange({
+    from: config.fromBlock,
+    to: 2643979,
   });
 
 export type Fields = EvmBatchProcessorFields<typeof processor>;

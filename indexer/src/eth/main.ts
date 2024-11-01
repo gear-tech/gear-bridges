@@ -8,7 +8,7 @@ import { processor, Context } from './processor';
 import { ethNonce, gearNonce, TempState } from '../common';
 import { config } from './config';
 
-const tempState = new TempState('eth');
+const tempState = new TempState(Network.Ethereum);
 
 const ERC20_TREASURY = config.erc20Treasury;
 const ERC20_TREASURY_DEPOSIT = erc20TreasuryAbi.events.Deposit.topic;

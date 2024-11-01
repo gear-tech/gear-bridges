@@ -35,4 +35,5 @@ type Pair @entity {
 type CompletedTransfer @entity {
     id: ID!
     nonce: String! @index @unique
+    destNetwork: Network!
 }

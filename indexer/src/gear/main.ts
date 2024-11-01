@@ -8,7 +8,7 @@ import { isUserMessageSent } from './util';
 import { config } from './config';
 import { Codec } from './codec';
 
-const tempState = new TempState('gear');
+const tempState = new TempState(Network.Gear);
 
 let vftGatewayDecoder: Codec;
 let erc20RelayDecoder: Codec;
@@ -53,7 +53,6 @@ const handler = async (ctx: ProcessorContext) => {
                   amount: BigInt(amount),
                 });
                 tempState.transferRequested(transfer);
-                ctx.log.info({ nonce, id }, 'Bridging requested');
                 break;
               }
               case 'TokenMappingAdded': {

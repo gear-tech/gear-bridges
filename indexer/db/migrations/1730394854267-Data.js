@@ -1,5 +1,5 @@
-module.exports = class Data1730290326401 {
-    name = 'Data1730290326401'
+module.exports = class Data1730394854267 {
+    name = 'Data1730394854267'
 
     async up(db) {
         await db.query(`CREATE TABLE "transfer" ("id" character varying NOT NULL, "tx_hash" text NOT NULL, "block_number" text NOT NULL, "timestamp" TIMESTAMP WITH TIME ZONE NOT NULL, "nonce" text NOT NULL, "source_network" character varying(8) NOT NULL, "source" text NOT NULL, "dest_network" character varying(8) NOT NULL, "destination" text NOT NULL, "status" character varying(10) NOT NULL, "sender" text NOT NULL, "receiver" text NOT NULL, "amount" numeric NOT NULL, CONSTRAINT "PK_fd9ddbdd49a17afcbe014401295" PRIMARY KEY ("id"))`)
@@ -10,7 +10,7 @@ module.exports = class Data1730290326401 {
         await db.query(`CREATE INDEX "IDX_9a4ceb5c3899b95c695eb5b112" ON "transfer" ("sender") `)
         await db.query(`CREATE INDEX "IDX_e95f070ab35073a24097069e6d" ON "transfer" ("receiver") `)
         await db.query(`CREATE TABLE "pair" ("id" character varying NOT NULL, "gear_token" text NOT NULL, "eth_token" text NOT NULL, CONSTRAINT "PK_3eaf216329c5c50aedb94fa797e" PRIMARY KEY ("id"))`)
-        await db.query(`CREATE TABLE "completed_transfer" ("id" character varying NOT NULL, "nonce" text NOT NULL, CONSTRAINT "PK_c966d1eba60d5625faf13b457a4" PRIMARY KEY ("id"))`)
+        await db.query(`CREATE TABLE "completed_transfer" ("id" character varying NOT NULL, "nonce" text NOT NULL, "dest_network" character varying(8) NOT NULL, CONSTRAINT "PK_c966d1eba60d5625faf13b457a4" PRIMARY KEY ("id"))`)
         await db.query(`CREATE UNIQUE INDEX "IDX_ab14e0c37eabeb5ba0dc3f2f78" ON "completed_transfer" ("nonce") `)
     }
 

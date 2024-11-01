@@ -15418,6 +15418,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "vft-manager"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "blake2",
+ "extended_vft_wasm",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.6.2",
+ "parity-scale-codec",
+ "sails-idl-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "scale-info",
+ "tokio",
+ "vft-client",
+ "vft-manager",
+ "vft-manager-app",
+ "vft-manager-client",
+]
+
+[[package]]
+name = "vft-manager-app"
+version = "0.1.0"
+dependencies = [
+ "alloy-rlp",
+ "alloy-sol-types",
+ "ethereum-common",
+ "gbuiltin-eth-bridge",
+ "getrandom 0.2.15",
+ "git-download",
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static",
+ "parity-scale-codec",
+ "sails-client-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "scale-info",
+ "vft-client",
+]
+
+[[package]]
+name = "vft-manager-client"
+version = "0.1.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen 0.6.1",
+ "sails-idl-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "vft-manager-app",
+]
+
+[[package]]
 name = "vft-service"
 version = "0.1.0"
 source = "git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0#9f4a39db39dec0c88d12701bee05d5d51cb9147a"

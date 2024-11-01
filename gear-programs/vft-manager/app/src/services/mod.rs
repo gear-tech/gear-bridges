@@ -420,6 +420,7 @@ where
             MSG_TRACKER = Some(MessageTracker::default());
         }
     }
+
     pub fn new(exec_context: T) -> Self {
         Self { exec_context }
     }

@@ -32,41 +32,39 @@ contract ERC20Treasury is IERC20Treasury, IMessageQueueReceiver {
         emit Deposit(tx.origin, to, token, amount);
     }
 
-    /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only. Expected
-     * `payload` in `VaraMessage` consisits of these:
+    /** @dev Request withdraw of tokens. This request must be sent by `MessageQueue` only.
+     *
+     * Expected `payload` consisits of these:
      *  - `receiver` - account to withdraw tokens to
      *  - `token` - token to withdraw
      *  - `amount` - amount of tokens to withdraw
      *
-     * @param vara_msg `VaraMessage` received from MessageQueue.
+     * Expected sender should be `vft-gateway` program on gear.
+     *
+     * @param sender sender of message on the gear side.
+     * @param payload payload of the message.
      */
     function processVaraMessage(
-        VaraMessage calldata vara_msg
+        bytes32 sender,
+        bytes calldata payload
     ) external returns (bool) {
-        uint160 receiver;
-        uint160 token;
-        uint256 amount;
         if (msg.sender != MESSAGE_QUEUE_ADDRESS) {
             revert NotAuthorized();
         }
-
-        if (vara_msg.data.length != 20 + 20 + 32) {
+        if (payload.length != 20 + 20 + 32) {
             revert BadArguments();
         }
-        if (vara_msg.receiver != address(this)) {
-            revert BadEthAddress();
-        }
-        if (vara_msg.sender != VFT_GATEWAY_ADDRESS) {
+        if (sender != VFT_GATEWAY_ADDRESS) {
             revert BadVaraAddress();
         }
 
-        assembly {
-            receiver := shr(96, calldataload(0xC4))
-            token := shr(96, calldataload(0xD8))
-            amount := calldataload(0xEC)
-        }
-        IERC20(address(token)).safeTransfer(address(receiver), amount);
-        emit Withdraw(address(receiver), address(token), amount);
+        address receiver = address(bytes20(payload[:20]));
+        address token = address(bytes20(payload[20:40]));
+        uint256 amount = uint256(bytes32(payload[40:]));
+
+        IERC20(token).safeTransfer(receiver, amount);
+        emit Withdraw(receiver, token, amount);
+
         return true;
     }
 }

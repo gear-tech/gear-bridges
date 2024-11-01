@@ -9,7 +9,6 @@ struct WithdrawMessage {
 interface IERC20Treasury {
     error NotAuthorized();
     error BadArguments();
-    error BadEthAddress();
     error BadVaraAddress();
 
     event Deposit(

@@ -32,44 +32,40 @@ contract ERC20Gateway is IERC20Gateway, IMessageQueueReceiver {
     }
 
     /** @dev Accept bridging request made on other side of bridge.
-     * This request can be sent by `MessageQueue` only. When such a request is accpeted, tokens
-     * are minted to the corresponding account address, specified in `vara_msg`.
+     * This request must be sent by `MessageQueue` only. When such a request is accepted, tokens
+     * are minted to the corresponding account address, specified in `payload`.
      *
-     * Expected `payload` in `VaraMessage` consisits of these:
+     * Expected `payload` consisits of these:
      *  - `receiver` - account to mint tokens to
      *  - `token` - token to mint
      *  - `amount` - amount of tokens to mint
      *
-     * @param vara_msg `VaraMessage` received from MessageQueue.
+     * Expected sender should be `vft-treasury` program on gear.
+     *
+     * @param sender sender of message on the gear side.
+     * @param payload payload of the message.
      */
     function processVaraMessage(
-        VaraMessage calldata vara_msg
+        bytes32 sender,
+        bytes calldata payload
     ) external returns (bool) {
-        uint160 receiver;
-        uint160 token;
-        uint256 amount;
         if (msg.sender != MESSAGE_QUEUE_ADDRESS) {
             revert NotAuthorized();
         }
-        if (vara_msg.data.length != 20 + 20 + 32) {
+        if (payload.length != 20 + 20 + 32) {
             revert BadArguments();
         }
-        if (vara_msg.receiver != address(this)) {
-            revert BadEthAddress();
-        }
-        if (vara_msg.sender != VFT_TREASURY_ADDRESS) {
+        if (sender != VFT_TREASURY_ADDRESS) {
             revert BadVaraAddress();
         }
 
-        assembly {
-            receiver := shr(96, calldataload(0xC4))
-            token := shr(96, calldataload(0xD8))
-            amount := calldataload(0xEC)
-        }
+        address receiver = address(bytes20(payload[:20]));
+        address token = address(bytes20(payload[20:40]));
+        uint256 amount = uint256(bytes32(payload[40:]));
 
-        ERC20VaraSupply(address(token)).mint(address(receiver), amount);
+        ERC20VaraSupply(token).mint(receiver, amount);
+        emit BridgingAccepted(receiver, token, amount);
 
-        emit BridgingAccepted(address(receiver), address(token), amount);
         return true;
     }
 }

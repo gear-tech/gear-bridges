@@ -24,6 +24,7 @@ clap.workspace = true
 derive_more.workspace = true
 dotenv.workspace = true
 erc20-relay-client.workspace = true
+ethereum-common.workspace = true
 futures.workspace = true
 gear-core.workspace = true
 gclient.workspace = true
@@ -43,7 +44,6 @@ sails-rs = { workspace = true, features = ["gclient"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-toml.workspace = true
 tokio.workspace = true
 utils-prometheus.workspace = true
 

@@ -1,6 +1,7 @@
 use collections::HashMap;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
+pub mod abi;
 mod bridge_builtin_operations;
 pub mod error;
 pub mod msg_tracker;
@@ -11,6 +12,27 @@ mod token_operations;
 
 pub struct VftGateway<ExecContext> {
     exec_context: ExecContext,
+}
+
+#[derive(Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+enum Event {
+    TokenMappingAdded {
+        vara_token_id: ActorId,
+        eth_token_id: H160,
+    },
+    TokenMappingRemoved {
+        vara_token_id: ActorId,
+        eth_token_id: H160,
+    },
+    BridgingRequested {
+        nonce: U256,
+        vara_token_id: ActorId,
+        amount: U256,
+        sender: ActorId,
+        receiver: H160,
+    },
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
@@ -67,9 +89,11 @@ pub struct Config {
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
     gas_for_transfer_to_eth_msg: u64,
+    gas_for_event_sending: u64,
 }
 
 impl Config {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gas_to_burn_tokens: u64,
         gas_for_reply_deposit: u64,
@@ -78,6 +102,7 @@ impl Config {
         gas_to_send_request_to_builtin: u64,
         reply_timeout: u32,
         gas_for_transfer_to_eth_msg: u64,
+        gas_for_event_sending: u64,
     ) -> Self {
         Self {
             gas_to_burn_tokens,
@@ -87,11 +112,12 @@ impl Config {
             gas_to_send_request_to_builtin,
             reply_timeout,
             gas_for_transfer_to_eth_msg,
+            gas_for_event_sending,
         }
     }
 }
 
-#[service]
+#[service(events = Event)]
 impl<T> VftGateway<T>
 where
     T: ExecContext,
@@ -116,12 +142,29 @@ where
             panic!("Not admin")
         }
 
-        self.data_mut()
+        let already_present = self
+            .data_mut()
             .vara_to_eth_token_id
-            .insert(vara_token_id, eth_token_id);
-        self.data_mut()
+            .insert(vara_token_id, eth_token_id)
+            .is_some();
+        if already_present {
+            panic!("Token mapping already exists");
+        }
+
+        let already_present = self
+            .data_mut()
             .eth_to_vara_token_id
-            .insert(eth_token_id, vara_token_id);
+            .insert(eth_token_id, vara_token_id)
+            .is_some();
+        if already_present {
+            panic!("Token mapping already exists");
+        }
+
+        self.notify_on(Event::TokenMappingAdded {
+            vara_token_id,
+            eth_token_id,
+        })
+        .expect("Failed to emit event");
     }
 
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
@@ -129,10 +172,25 @@ where
             panic!("Not admin")
         }
 
-        self.data_mut()
+        let eth_token_id = self
+            .data_mut()
             .vara_to_eth_token_id
             .remove(&vara_token_id)
-            .map(|eth_token_id| self.data_mut().eth_to_vara_token_id.remove(&eth_token_id));
+            .expect("Token mapping not found");
+
+        let _ = self
+            .data_mut()
+            .eth_to_vara_token_id
+            .remove(&eth_token_id)
+            .expect(
+                "Should be present at this point due to the invariant of map_vara_to_eth_address",
+            );
+
+        self.notify_on(Event::TokenMappingRemoved {
+            vara_token_id,
+            eth_token_id,
+        })
+        .expect("Failed to emit event");
     }
 
     pub fn update_config(&mut self, config: Config) {
@@ -145,13 +203,12 @@ where
         }
     }
 
-    pub async fn mint_tokens(
-        &mut self,
-        eth_token_id: H160,
-        receiver: ActorId,
-        amount: U256,
-    ) -> Result<(), Error> {
-        let vara_token_id = self.get_vara_token_id(&eth_token_id)?;
+    pub async fn mint_tokens(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
+        use abi::ERC20_TREASURY;
+        use alloy_rlp::Decodable;
+        use alloy_sol_types::SolEvent;
+        use ethereum_common::utils::ReceiptEnvelope;
+
         let data = self.data();
         let sender = self.exec_context.actor_id();
 
@@ -168,6 +225,29 @@ where
             return Err(Error::NotEnoughGas);
         }
 
+        let receipt =
+            ReceiptEnvelope::decode(&mut &receipt_rlp[..]).map_err(|_| Error::NotSupportedEvent)?;
+
+        if !receipt.is_success() {
+            return Err(Error::NotSupportedEvent);
+        }
+
+        // decode log and check that it is from an allowed address
+        let (vara_token_id, event) = receipt
+            .logs()
+            .iter()
+            .find_map(|log| {
+                let address = H160::from(log.address.0 .0);
+                let event = ERC20_TREASURY::Deposit::decode_log_data(log, true).ok()?;
+                let eth_token_id = H160::from(event.token.0 .0);
+                let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
+
+                (self.receiver_contract_address() == address).then_some((vara_token_id, event))
+            })
+            .ok_or(Error::NotSupportedEvent)?;
+
+        let amount = U256::from_little_endian(event.amount.as_le_slice());
+        let receiver = ActorId::from(event.to.0);
         let msg_id = gstd::msg::id();
         let transaction_details = TxDetails::MintTokens {
             vara_token_id,
@@ -180,6 +260,7 @@ where
             transaction_details,
         );
         utils::set_critical_hook(msg_id);
+
         token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
     }
 
@@ -200,6 +281,7 @@ where
                 + config.gas_to_send_request_to_builtin
                 + config.gas_for_transfer_to_eth_msg
                 + 3 * config.gas_for_reply_deposit
+                + config.gas_for_event_sending
         {
             panic!("Please attach more gas");
         }
@@ -225,6 +307,16 @@ where
                 return Err(e);
             }
         };
+
+        self.notify_on(Event::BridgingRequested {
+            nonce,
+            vara_token_id,
+            amount,
+            sender,
+            receiver,
+        })
+        .expect("Failed to emit event");
+
         Ok((nonce, eth_token_id))
     }
 

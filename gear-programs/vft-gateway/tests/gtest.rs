@@ -1,7 +1,9 @@
+use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use blake2::{digest::typenum::U32, Blake2b, Digest};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
+use vft_gateway_app::services::abi::ERC20_TREASURY;
 use vft_gateway_client::{
     traits::*, Config, Error, InitConfig, MessageStatus, VftGateway as VftGatewayC,
     VftGatewayFactory as VftGatewayFactoryC,
@@ -11,6 +13,7 @@ const ADMIN_ID: u64 = 1000;
 const TOKEN_ID: u64 = 200;
 const ETH_CLIENT_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
+const RECEIVER_CONTRACT_ADDRESS: H160 = H160([2u8; 20]);
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub enum Response {
@@ -82,6 +85,8 @@ async fn setup_for_test_with_mocks(
     let system = System::new();
     system.init_logger();
     system.mint_to(ADMIN_ID, 100_000_000_000_000);
+    system.mint_to(ETH_CLIENT_ID, 100_000_000_000_000);
+
     let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
@@ -102,14 +107,14 @@ async fn setup_for_test_with_mocks(
         gear_bridge_builtin_mock,
     );
 
-    assert!(!gear_bridge_builtin
-        .send_bytes(ADMIN_ID, b"INIT")
-        .main_failed());
+    let msg_id_init = gear_bridge_builtin.send_bytes(ADMIN_ID, b"INIT");
+    let result = remoting.system().run_next_block();
+    assert!(result.succeed.contains(&msg_id_init));
 
     // Gateway
     let gateway_code_id = remoting.system().submit_code(vft_gateway::WASM_BINARY);
     let init_config = InitConfig {
-        receiver_contract_address: [1; 20].into(),
+        receiver_contract_address: RECEIVER_CONTRACT_ADDRESS,
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         eth_client: ETH_CLIENT_ID.into(),
         config: Config {
@@ -120,6 +125,7 @@ async fn setup_for_test_with_mocks(
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
             gas_for_transfer_to_eth_msg: 20_000_000_000,
+            gas_for_event_sending: 15_000_000_000,
         },
     };
     let gateway_program_id = VftGatewayFactoryC::new(remoting.clone())
@@ -150,7 +156,11 @@ async fn setup_for_test_with_mocks(
             });
 
             let vft = Program::mock_with_id(remoting.system(), TOKEN_ID, vft_mock);
-            assert!(!vft.send_bytes(ADMIN_ID, b"INI").main_failed());
+
+            let msg_id_init = vft.send_bytes(ADMIN_ID, b"INI");
+            let result = remoting.system().run_next_block();
+            assert!(result.succeed.contains(&msg_id_init));
+
             vft.id()
         }
     };
@@ -182,9 +192,11 @@ async fn test_successful_transfer_vara_to_eth() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -234,9 +246,11 @@ async fn test_transfer_fails_due_to_token_panic() {
         vft_program_id,
     } = setup_for_test_with_mocks(Default::default(), VftMock::FTMockError).await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut gateway = VftGatewayC::new(remoting.clone());
@@ -270,9 +284,11 @@ async fn test_transfer_fails_due_to_token_rejecting_request() {
         vft_program_id,
     } = setup_for_test_with_mocks(Default::default(), VftMock::FTMockReturnsFalse).await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut gateway = VftGatewayC::new(remoting.clone());
@@ -310,9 +326,11 @@ async fn test_bridge_builtin_panic_with_token_mint() {
     )
     .await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -371,11 +389,15 @@ async fn test_multiple_transfers() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id1: ActorId = 10001.into();
+    let account_id1: ActorId = 10_001.into();
+    remoting.system().mint_to(account_id1, 100_000_000_000_000);
+
     let account_id2: ActorId = 10002.into();
+    remoting.system().mint_to(account_id2, 100_000_000_000_000);
+
     let amount1 = U256::from(10_000_000_000_u64);
     let amount2 = U256::from(5_000_000_000_u64);
-    let gas = 100_000_000_000;
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -430,10 +452,13 @@ async fn test_transfer_vara_to_eth_insufficient_balance() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+
     let amount = U256::from(10_000_000_000_u64);
-    let excessive_amount = U256::from(20_000_000_000_u64); // More than the available balance
-    let gas = 100_000_000_000;
+    // More than the available balance
+    let excessive_amount = U256::from(20_000_000_000_u64);
+    let gas = 115_000_000_000;
     let eth_token_id = [2; 20].into();
 
     let mut vft = VftC::new(remoting.clone());
@@ -495,8 +520,34 @@ async fn test_mint_tokens_from_eth_client() {
         .await
         .unwrap();
 
+    let event = ERC20_TREASURY::Deposit {
+        from: [3u8; 20].into(),
+        to: receiver.into_bytes().into(),
+        token: eth_token_id.0.into(),
+        amount: {
+            let mut bytes = [0u8; 32];
+            amount.to_little_endian(&mut bytes[..]);
+
+            alloy_primitives::U256::from_le_bytes(bytes)
+        },
+    };
+
+    let receipt = ReceiptWithBloom::from(Receipt {
+        status: true.into(),
+        cumulative_gas_used: 100_000u128,
+        logs: vec![alloy_primitives::Log {
+            address: RECEIVER_CONTRACT_ADDRESS.0.into(),
+            data: Into::into(&event),
+        }],
+    });
+
+    let receipt = ReceiptEnvelope::Eip2930(receipt);
+
+    let mut receipt_rlp = vec![];
+    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
+
     VftGatewayC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
-        .mint_tokens(eth_token_id, receiver, amount)
+        .mint_tokens(receipt_rlp)
         .send_recv(gateway_program_id)
         .await
         .unwrap()
@@ -517,9 +568,10 @@ async fn test_mint_tokens_from_arbitrary_address() {
     } = setup_for_test().await;
 
     let eth_token_id = H160::default();
-    let receiver: ActorId = 10_000.into();
-    let amount = U256::from(10_000_000_000_u64);
     let wrong_address: ActorId = 1_010.into();
+    remoting
+        .system()
+        .mint_to(wrong_address, 100_000_000_000_000);
 
     VftGatewayC::new(remoting.clone())
         .map_vara_to_eth_address(vft_program_id, eth_token_id)
@@ -533,8 +585,19 @@ async fn test_mint_tokens_from_arbitrary_address() {
         .await
         .unwrap();
 
+    let receipt = ReceiptWithBloom::from(Receipt {
+        status: true.into(),
+        cumulative_gas_used: 100_000u128,
+        logs: vec![],
+    });
+
+    let receipt = ReceiptEnvelope::Eip2930(receipt);
+
+    let mut receipt_rlp = vec![];
+    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
+
     let reply = VftGatewayC::new(remoting.clone().with_actor_id(wrong_address))
-        .mint_tokens(eth_token_id, receiver, amount)
+        .mint_tokens(receipt_rlp)
         .send_recv(gateway_program_id)
         .await
         .unwrap();
@@ -560,6 +623,9 @@ async fn test_eth_client() {
 
     // anyone is able to get the eth client address
     let wrong_address: ActorId = 1_010.into();
+    remoting
+        .system()
+        .mint_to(wrong_address, 100_000_000_000_000);
     assert_eq!(
         VftGatewayC::new(remoting.clone().with_actor_id(wrong_address))
             .eth_client()

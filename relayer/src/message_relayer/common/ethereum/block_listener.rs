@@ -7,18 +7,18 @@ use ethereum_client::EthApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use super::EthereumBlockNumber;
+use crate::message_relayer::common::EthereumBlockNumber;
 
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 
-pub struct EthereumBlockListener {
+pub struct BlockListener {
     eth_api: EthApi,
     from_block: u64,
 
     metrics: Metrics,
 }
 
-impl MeteredService for EthereumBlockListener {
+impl MeteredService for BlockListener {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -33,7 +33,7 @@ impl_metered_service! {
     }
 }
 
-impl EthereumBlockListener {
+impl BlockListener {
     pub fn new(eth_api: EthApi, from_block: u64) -> Self {
         Self {
             eth_api,
@@ -64,7 +64,7 @@ impl EthereumBlockListener {
         self.metrics.latest_block.set(current_block as i64);
 
         loop {
-            let latest = self.eth_api.block_number().await?;
+            let latest = self.eth_api.finalized_block_number().await?;
             if latest >= current_block {
                 for block in current_block..=latest {
                     sender.send(EthereumBlockNumber(block))?;

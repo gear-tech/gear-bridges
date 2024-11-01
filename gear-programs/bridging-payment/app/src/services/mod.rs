@@ -144,8 +144,9 @@ where
         if data.admin_address != self.exec_context.actor_id() {
             panic!("Not admin");
         }
+
         let fee_balance = exec::value_available();
-        msg::send_with_gas(data.admin_address, "", 0, fee_balance).expect("Failed to reclaim fees");
+        msg::send(data.admin_address, "", fee_balance).expect("Failed to reclaim fees");
     }
 
     pub fn update_vft_gateway_address(&mut self, new_vft_gateway_address: ActorId) {

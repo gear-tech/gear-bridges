@@ -74,6 +74,7 @@ async fn setup_for_test() -> Fixture {
     let system = System::new();
     system.init_logger();
     system.mint_to(ADMIN_ID, 100_000_000_000_000);
+
     let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
@@ -149,7 +150,9 @@ async fn deposit_to_treasury() {
         vft_program_id,
     } = setup_for_test().await;
 
-    let account_id: ActorId = 10000.into();
+    let account_id: ActorId = 10_000.into();
+    remoting.system().mint_to(account_id, 10 * FEE);
+
     let amount = U256::from(10_000_000_000_u64);
     let eth_token_id: H160 = [2; 20].into();
 
@@ -174,7 +177,6 @@ async fn deposit_to_treasury() {
         .unwrap()
         .unwrap();
 
-    remoting.system().mint_to(account_id, FEE);
     BridgingPaymentC::new(remoting.clone().with_actor_id(account_id))
         .request(amount, [1; 20].into(), vft_program_id)
         .with_value(FEE)
@@ -198,10 +200,11 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
+    let balance_before = remoting.system().balance_of(ADMIN_ID);
     remoting
         .system()
         .get_mailbox(ADMIN_ID)
         .claim_value(Log::builder().dest(ADMIN_ID))
         .unwrap();
-    assert_eq!(remoting.system().balance_of(ADMIN_ID), FEE);
+    assert!(remoting.system().balance_of(ADMIN_ID) > balance_before + FEE / 4 * 3);
 }

@@ -35,8 +35,16 @@ sol! {
         function getMerkleRoot(uint256 block_number) external view returns (bytes32);
 
         function getBlockNumber(bytes32 merkle_root) external view returns (uint256);
+
+        function emergencyStop() external view returns (bool);
     }
 }
+
+sol!(
+    #[sol(rpc)]
+    IERC20Treasury,
+    "../out/IERC20Treasury.sol/IERC20Treasury.json"
+);
 
 impl ContentMessage {
     pub fn to_bytes(&self) -> Vec<u8> {

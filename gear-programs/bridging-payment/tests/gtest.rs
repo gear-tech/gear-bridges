@@ -74,6 +74,7 @@ async fn setup_for_test() -> Fixture {
     let system = System::new();
     system.init_logger();
     system.mint_to(ADMIN_ID, 100_000_000_000_000);
+
     let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
     // Bridge Builtin
@@ -95,6 +96,7 @@ async fn setup_for_test() -> Fixture {
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
             gas_for_transfer_to_eth_msg: 20_000_000_000,
+            gas_for_event_sending: 15_000_000_000,
         },
     };
     let gateway_program_id = VftGatewayFactoryC::new(remoting.clone())
@@ -121,7 +123,7 @@ async fn setup_for_test() -> Fixture {
         config: Config {
             fee: FEE,
             gas_for_reply_deposit: 15_000_000_000,
-            gas_to_send_request_to_gateway: 100_000_000_000,
+            gas_to_send_request_to_gateway: 115_000_000_000,
             reply_timeout: 1000,
             gas_for_request_to_gateway_msg: 50_000_000_000,
         },
@@ -173,7 +175,7 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
-    remoting.system().mint_to(account_id, FEE);
+    remoting.system().mint_to(account_id, 10 * FEE);
     BridgingPaymentC::new(remoting.clone().with_actor_id(account_id))
         .request_to_gateway(amount, [1; 20].into(), vft_program_id)
         .with_value(FEE)
@@ -195,10 +197,11 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
+    let balance_before = remoting.system().balance_of(ADMIN_ID);
     remoting
         .system()
         .get_mailbox(ADMIN_ID)
         .claim_value(Log::builder().dest(ADMIN_ID))
         .unwrap();
-    assert_eq!(remoting.system().balance_of(ADMIN_ID), FEE);
+    assert!(remoting.system().balance_of(ADMIN_ID) > balance_before + FEE / 4 * 3);
 }

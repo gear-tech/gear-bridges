@@ -25,4 +25,5 @@ pub enum Error {
     NotEnoughGas,
     NoCorrespondingVaraAddress,
     NotSupportedEvent,
+    TokenMappingError,
 }

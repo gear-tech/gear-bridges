@@ -1,5 +1,4 @@
 use bridge_builtin_operations::Payload;
-use collections::HashMap;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
 pub mod abi;
@@ -9,6 +8,8 @@ pub mod msg_tracker;
 mod utils;
 use error::Error;
 use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
+use token_mapping::TokenMap;
+mod token_mapping;
 mod token_operations;
 
 pub struct VftManager<ExecContext> {
@@ -45,8 +46,7 @@ pub struct State {
     gear_bridge_builtin: ActorId,
     admin: ActorId,
     erc20_manager_address: H160,
-    vara_to_eth_token_id: HashMap<ActorId, H160>,
-    eth_to_vara_token_id: HashMap<H160, ActorId>,
+    token_map: TokenMap,
     eth_client: ActorId,
 }
 
@@ -131,23 +131,10 @@ where
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
         self.ensure_admin();
 
-        let already_present = self
-            .state_mut()
-            .vara_to_eth_token_id
+        self.state_mut()
+            .token_map
             .insert(vara_token_id, eth_token_id)
-            .is_some();
-        if already_present {
-            panic!("Token mapping already exists");
-        }
-
-        let already_present = self
-            .state_mut()
-            .eth_to_vara_token_id
-            .insert(eth_token_id, vara_token_id)
-            .is_some();
-        if already_present {
-            panic!("Token mapping already exists");
-        }
+            .expect("Failed to insert token mapping");
 
         self.notify_on(Event::TokenMappingAdded {
             vara_token_id,
@@ -161,17 +148,9 @@ where
 
         let eth_token_id = self
             .state_mut()
-            .vara_to_eth_token_id
-            .remove(&vara_token_id)
-            .expect("Token mapping not found");
-
-        let _ = self
-            .state_mut()
-            .eth_to_vara_token_id
-            .remove(&eth_token_id)
-            .expect(
-                "Should be present at this point due to the invariant of map_vara_to_eth_address",
-            );
+            .token_map
+            .remove(vara_token_id)
+            .expect("Failed to remove token mapping");
 
         self.notify_on(Event::TokenMappingRemoved {
             vara_token_id,
@@ -231,7 +210,11 @@ where
                 let address = H160::from(log.address.0 .0);
                 let event = ERC20_TREASURY::Deposit::decode_log_data(log, true).ok()?;
                 let eth_token_id = H160::from(event.token.0 .0);
-                let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
+                let vara_token_id = self
+                    .state()
+                    .token_map
+                    .get_vara_token_id(&eth_token_id)
+                    .ok()?;
 
                 (self.erc20_manager_address() == address).then_some((vara_token_id, event))
             })
@@ -264,7 +247,7 @@ where
     ) -> Result<(U256, H160), Error> {
         let state = self.state();
         let msg_id = gstd::msg::id();
-        let eth_token_id = self.get_eth_token_id(&vara_token_id)?;
+        let eth_token_id = self.state().token_map.get_eth_token_id(&vara_token_id)?;
         let config = self.config();
 
         if gstd::exec::gas_available()
@@ -339,6 +322,8 @@ where
         };
 
         let eth_token_id = self
+            .state()
+            .token_map
             .get_eth_token_id(&vara_token_id)
             .expect("No corresponding Ethereum address for the specified Vara token address");
 
@@ -394,11 +379,7 @@ where
     }
 
     pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160)> {
-        self.state()
-            .vara_to_eth_token_id
-            .clone()
-            .into_iter()
-            .collect()
+        self.state().token_map.read_state()
     }
 
     pub fn erc20_manager_address(&self) -> H160 {
@@ -457,22 +438,6 @@ where
                 .as_ref()
                 .expect("VftManager::seed() should be called")
         }
-    }
-
-    fn get_eth_token_id(&self, vara_token_id: &ActorId) -> Result<H160, Error> {
-        self.state()
-            .vara_to_eth_token_id
-            .get(vara_token_id)
-            .cloned()
-            .ok_or(Error::NoCorrespondingEthAddress)
-    }
-
-    fn get_vara_token_id(&self, eth_token_id: &H160) -> Result<ActorId, Error> {
-        self.state()
-            .eth_to_vara_token_id
-            .get(eth_token_id)
-            .cloned()
-            .ok_or(Error::NoCorrespondingVaraAddress)
     }
 }
 

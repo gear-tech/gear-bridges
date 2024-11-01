@@ -3981,7 +3981,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.2.1",
  "scale-info",
- "vft-service",
+ "vft-service 0.1.0 (git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0)",
 ]
 
 [[package]]
@@ -15472,6 +15472,18 @@ dependencies = [
 [[package]]
 name = "vft-service"
 version = "0.1.0"
+dependencies = [
+ "env_logger 0.9.3",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.6.2",
+ "log",
+ "sails-rs 0.6.1",
+]
+
+[[package]]
+name = "vft-service"
+version = "0.1.0"
 source = "git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0#9f4a39db39dec0c88d12701bee05d5d51cb9147a"
 dependencies = [
  "gstd 1.5.0",
@@ -16747,6 +16759,41 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wrapped-vara"
+version = "0.1.0"
+dependencies = [
+ "gclient 1.6.2",
+ "gtest 1.6.2",
+ "sails-client-gen 0.6.1",
+ "sails-idl-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "tokio",
+ "wrapped-vara",
+ "wrapped-vara-app",
+ "wrapped-vara-client",
+]
+
+[[package]]
+name = "wrapped-vara-app"
+version = "0.1.0"
+dependencies = [
+ "sails-client-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "vft-service 0.1.0",
+]
+
+[[package]]
+name = "wrapped-vara-client"
+version = "0.1.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen 0.6.1",
+ "sails-idl-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "wrapped-vara-app",
 ]
 
 [[package]]

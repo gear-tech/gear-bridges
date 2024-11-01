@@ -9,7 +9,6 @@ struct BridgingRequest {
 interface IERC20Gateway {
     error NotAuthorized();
     error BadArguments();
-    error BadEthAddress();
     error BadVaraAddress();
 
     event BridgingRequested(

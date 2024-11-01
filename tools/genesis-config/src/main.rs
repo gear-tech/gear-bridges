@@ -1,6 +1,8 @@
 use clap::{Args, Parser, Subcommand};
 use gear_rpc_client::GearApi;
 
+const GEAR_RPC_RETRIES: u8 = 3;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -30,10 +32,6 @@ struct FetchArgs {
     #[arg(long = "gear-port", default_value = "443", env = "GEAR_PORT")]
     gear_port: u16,
 
-    /// Set retries of the VARA RPC client
-    #[arg(long, default_value = "3", env = "GEAR_RPC_RETRIES")]
-    gear_rpc_retries: u8,
-
     /// Block number to fetch the genesis config for. If not specified, the latest block will be used
     #[arg(long = "block")]
     block: Option<u32>,
@@ -44,7 +42,7 @@ async fn main() {
     let cli = Cli::parse();
     let CliCommands::Fetch(args) = cli.command;
 
-    let gear_api = GearApi::new(&args.gear_endpoint, args.gear_port, args.gear_rpc_retries)
+    let gear_api = GearApi::new(&args.gear_endpoint, args.gear_port, GEAR_RPC_RETRIES)
         .await
         .expect("Failed to create Gear API");
 

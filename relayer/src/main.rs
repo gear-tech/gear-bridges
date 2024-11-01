@@ -23,6 +23,7 @@ mod relay_merkle_roots;
 const DEFAULT_ETH_BEACON_RPC: &str = "http://localhost:50000";
 const DEFAULT_ETH_RPC: &str = "http://localhost:8545";
 const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
+const DEFAULT_VARA_SURI: &str = "//Alice";
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -86,13 +87,6 @@ struct VaraArgs {
     /// Port of the VARA RPC endpoint
     #[arg(long, default_value = "9944", env = "VARA_PORT")]
     vara_port: u16,
-
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, default_value = "//Alice", env = "VARA_SURI")]
-    vara_suri: String,
 
     /// Set retries of the VARA RPC client
     #[arg(long, default_value = "3", env = "VARA_RPC_RETRIES")]
@@ -179,6 +173,13 @@ struct RelayCheckpointsArgs {
     #[clap(flatten)]
     vara_args: VaraArgs,
 
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = DEFAULT_VARA_SURI, env = "VARA_SURI")]
+    vara_suri: String,
+
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
 }
@@ -205,6 +206,13 @@ struct RelayErc20Args {
 
     #[clap(flatten)]
     vara_args: VaraArgs,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = DEFAULT_VARA_SURI, env = "VARA_SURI")]
+    vara_suri: String,
 
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
@@ -235,12 +243,7 @@ async fn main() {
 
     match cli.command {
         CliCommands::RelayMerkleRoots(args) => {
-            let gear_api = create_gear_client(
-                &args.vara.vara_domain,
-                args.vara.vara_port,
-                args.vara.vara_rpc_retries,
-            )
-            .await;
+            let gear_api = create_gear_client(&args.vara).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
             let mut metrics = MetricsBuilder::new();
@@ -288,12 +291,7 @@ async fn main() {
             relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::RelayMessages(args) => {
-            let gear_api = create_gear_client(
-                &args.vara.vara_domain,
-                args.vara.vara_port,
-                args.vara.vara_rpc_retries,
-            )
-            .await;
+            let gear_api = create_gear_client(&args.vara).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
             if let Some(bridging_payment_address) = args.bridging_payment_address {
@@ -344,14 +342,8 @@ async fn main() {
             let eth_api = create_eth_client(&args.ethereum_args);
             let beacon_client = create_beacon_client(&args.beacon_rpc).await;
 
-            let vara_args = &args.vara_args;
-            let gear_api = create_gear_client(
-                &vara_args.vara_domain,
-                vara_args.vara_port,
-                vara_args.vara_rpc_retries,
-            )
-            .await;
-            let gclient_client = create_gclient_client(vara_args).await;
+            let gear_api = create_gear_client(&args.vara_args).await;
+            let gclient_client = create_gclient_client(&args.vara_args, &args.vara_suri).await;
 
             let erc20_treasury_address = hex_utils::decode_h160(&args.erc20_treasury_address)
                 .expect("Failed to parse address");
@@ -390,17 +382,17 @@ async fn main() {
     };
 }
 
-async fn create_gclient_client(args: &VaraArgs) -> GClientGearApi {
+async fn create_gclient_client(args: &VaraArgs, suri: &str) -> GClientGearApi {
     GClientGearApi::builder()
         .retries(args.vara_rpc_retries)
-        .suri(&args.vara_suri)
+        .suri(suri)
         .build(WSAddress::new(&args.vara_domain, args.vara_port))
         .await
         .expect("Failed to create gclient client")
 }
 
-async fn create_gear_client(domain: &str, port: u16, retries: u8) -> GearApi {
-    GearApi::new(domain, port, retries)
+async fn create_gear_client(args: &VaraArgs) -> GearApi {
+    GearApi::new(&args.vara_domain, args.vara_port, args.vara_rpc_retries)
         .await
         .unwrap_or_else(|err| panic!("Error while creating gear client: {}", err))
 }

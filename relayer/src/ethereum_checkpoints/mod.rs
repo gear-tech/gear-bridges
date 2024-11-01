@@ -44,9 +44,9 @@ pub async fn relay(args: RelayCheckpointsArgs) {
             VaraArgs {
                 vara_domain,
                 vara_port,
-                vara_suri,
                 vara_rpc_retries,
             },
+        vara_suri,
         prometheus_args: PrometheusArgs {
             endpoint: endpoint_prometheus,
         },

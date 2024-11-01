@@ -16,6 +16,13 @@ pub struct VftManager<ExecContext> {
     exec_context: ExecContext,
 }
 
+#[derive(Debug, Decode, Encode, TypeInfo, Clone)]
+#[repr(u8)]
+pub enum TokenSupply {
+    Ethereum = 0,
+    Gear = 1,
+}
+
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
@@ -128,13 +135,17 @@ where
         self.state_mut().eth_client = eth_client_new;
     }
 
-    pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
+    pub fn map_vara_to_eth_address(
+        &mut self,
+        vara_token_id: ActorId,
+        eth_token_id: H160,
+        supply_type: TokenSupply,
+    ) {
         self.ensure_admin();
 
         self.state_mut()
             .token_map
-            .insert(vara_token_id, eth_token_id)
-            .expect("Failed to insert token mapping");
+            .insert(vara_token_id, eth_token_id, supply_type);
 
         self.notify_on(Event::TokenMappingAdded {
             vara_token_id,
@@ -146,11 +157,7 @@ where
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
 
-        let eth_token_id = self
-            .state_mut()
-            .token_map
-            .remove(vara_token_id)
-            .expect("Failed to remove token mapping");
+        let eth_token_id = self.state_mut().token_map.remove(vara_token_id);
 
         self.notify_on(Event::TokenMappingRemoved {
             vara_token_id,
@@ -235,6 +242,7 @@ where
         );
         utils::set_critical_hook(msg_id);
 
+        // TODO: Or unlock.
         token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
     }
 
@@ -248,6 +256,7 @@ where
         let state = self.state();
         let msg_id = gstd::msg::id();
         let eth_token_id = self.state().token_map.get_eth_token_id(&vara_token_id)?;
+        let supply_type = self.state().token_map.get_supply_type(&vara_token_id)?;
         let config = self.config();
 
         if gstd::exec::gas_available()
@@ -260,10 +269,12 @@ where
             panic!("Please attach more gas");
         }
 
+        // TODO: Or lock.
         token_operations::burn_tokens(vara_token_id, sender, receiver, amount, config, msg_id)
             .await?;
 
         let payload = Payload {
+            supply_type,
             receiver,
             token_id: eth_token_id,
             amount,
@@ -325,11 +336,18 @@ where
             .state()
             .token_map
             .get_eth_token_id(&vara_token_id)
-            .expect("No corresponding Ethereum address for the specified Vara token address");
+            .expect("Failed to get ethereum token id");
+
+        let supply_type = self
+            .state()
+            .token_map
+            .get_supply_type(&vara_token_id)
+            .expect("Failed to get supply type");
 
         match msg_info.status {
             MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
                 let payload = Payload {
+                    supply_type,
                     receiver,
                     token_id: eth_token_id,
                     amount,
@@ -378,7 +396,7 @@ where
         msg_tracker().message_info.clone().into_iter().collect()
     }
 
-    pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160)> {
+    pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160, TokenSupply)> {
         self.state().token_map.read_state()
     }
 

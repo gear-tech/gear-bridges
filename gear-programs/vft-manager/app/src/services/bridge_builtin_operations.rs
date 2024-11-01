@@ -1,4 +1,4 @@
-use super::{msg_tracker_mut, utils, Config, Error, MessageStatus};
+use super::{msg_tracker_mut, utils, Config, Error, MessageStatus, TokenSupply};
 use gstd::MessageId;
 use sails_rs::prelude::*;
 
@@ -34,6 +34,7 @@ pub async fn send_message_to_bridge_builtin(
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct Payload {
+    pub supply_type: TokenSupply,
     pub receiver: H160,
     pub token_id: H160,
     pub amount: U256,
@@ -41,7 +42,9 @@ pub struct Payload {
 
 impl Payload {
     pub fn pack(self) -> Vec<u8> {
-        let mut packed = Vec::with_capacity(20 + 20 + 32); // H160 is 20 bytes, U256 is 32 bytes
+        let mut packed = Vec::with_capacity(1 + 20 + 20 + 32); // H160 is 20 bytes, U256 is 32 bytes
+
+        packed.push(self.supply_type as u8);
 
         packed.extend_from_slice(self.receiver.as_bytes());
         packed.extend_from_slice(self.token_id.as_bytes());

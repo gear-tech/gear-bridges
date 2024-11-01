@@ -1495,15 +1495,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
-name = "awesome-sails-vft-service"
-version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails.git?branch=vo/vft-service#50adf6bdd297134da1c78a304a6896f5a9b43480"
-dependencies = [
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "sails-rs 0.6.1",
-]
-
-[[package]]
 name = "axum"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3949,7 +3940,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.2.1",
  "scale-info",
- "vft-service",
+ "vft-service 0.1.0 (git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0)",
 ]
 
 [[package]]
@@ -15357,6 +15348,18 @@ dependencies = [
 [[package]]
 name = "vft-service"
 version = "0.1.0"
+dependencies = [
+ "env_logger 0.9.3",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.6.2",
+ "log",
+ "sails-rs 0.6.1",
+]
+
+[[package]]
+name = "vft-service"
+version = "0.1.0"
 source = "git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0#9f4a39db39dec0c88d12701bee05d5d51cb9147a"
 dependencies = [
  "gstd 1.5.0",
@@ -16671,9 +16674,9 @@ dependencies = [
 name = "wrapped-vara-app"
 version = "0.1.0"
 dependencies = [
- "awesome-sails-vft-service",
  "sails-client-gen 0.6.1",
  "sails-rs 0.6.1",
+ "vft-service 0.1.0",
 ]
 
 [[package]]

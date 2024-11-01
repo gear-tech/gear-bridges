@@ -20,6 +20,7 @@ members = [
     "gear-programs/vft-treasury/app",
     "gear-programs/vft-treasury/client",
     "gear-programs/vft-client",
+    "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "gear-programs/erc20-relay/app",
@@ -72,7 +73,7 @@ erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
 wrapped-vara = { path = "gear-programs/wrapped-vara" }
 wrapped-vara-app = { path = "gear-programs/wrapped-vara/app" }
 wrapped-vara-client = { path = "gear-programs/wrapped-vara/client" }
-vft-service = { package = "awesome-sails-vft-service", git = "https://github.com/gear-tech/awesome-sails.git", branch = "vo/vft-service" }
+vft-service = { path = "gear-programs/vft-service" }
 
 # Contracts' deps
 extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }

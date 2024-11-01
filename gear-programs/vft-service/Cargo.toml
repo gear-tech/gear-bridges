@@ -9,6 +9,6 @@ log = "*"
 sails-rs.workspace = true
 
 [dev-dependencies]
-env_logger = "*"
+env_logger.workspace = true
 gtest.workspace = true
 gear-core.workspace = true

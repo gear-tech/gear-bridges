@@ -16705,6 +16705,14 @@ version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wrapped-vara"
+version = "0.1.0"
+dependencies = [
  "gclient 1.6.2",
  "gtest 1.6.2",
  "sails-client-gen 0.6.1",

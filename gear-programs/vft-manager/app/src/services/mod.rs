@@ -35,22 +35,15 @@ enum Event {
     },
 }
 
-#[derive(Debug, Decode, Encode, TypeInfo)]
-pub struct Request {
-    pub receiver: H160,
-    pub token_id: H160,
-    pub amount: U256,
-}
-
-static mut DATA: Option<VftManagerData> = None;
+static mut STATE: Option<State> = None;
 static mut CONFIG: Option<Config> = None;
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
 #[derive(Debug, Default)]
-pub struct VftManagerData {
+pub struct State {
     gear_bridge_builtin: ActorId,
     admin: ActorId,
-    receiver_contract_address: H160,
+    erc20_manager_address: H160,
     vara_to_eth_token_id: HashMap<ActorId, H160>,
     eth_to_vara_token_id: HashMap<H160, ActorId>,
     eth_client: ActorId,
@@ -58,7 +51,7 @@ pub struct VftManagerData {
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
-    pub receiver_contract_address: H160,
+    pub erc20_manager_address: H160,
     pub gear_bridge_builtin: ActorId,
     pub eth_client: ActorId,
     pub config: Config,
@@ -66,13 +59,13 @@ pub struct InitConfig {
 
 impl InitConfig {
     pub fn new(
-        receiver_contract_address: H160,
+        erc20_manager_address: H160,
         gear_bridge_builtin: ActorId,
         eth_client: ActorId,
         config: Config,
     ) -> Self {
         Self {
-            receiver_contract_address,
+            erc20_manager_address,
             gear_bridge_builtin,
             eth_client,
             config,
@@ -122,28 +115,23 @@ impl<T> VftManager<T>
 where
     T: ExecContext,
 {
-    pub fn update_receiver_contract_address(&mut self, new_receiver_contract_address: H160) {
-        if self.data().admin != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
-        self.data_mut().receiver_contract_address = new_receiver_contract_address;
+    pub fn update_erc20_manager_address(&mut self, new_erc20_manager_address: H160) {
+        self.ensure_admin();
+
+        self.state_mut().erc20_manager_address = new_erc20_manager_address;
     }
 
     pub fn update_eth_client(&mut self, eth_client_new: ActorId) {
-        if self.data().admin != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
+        self.ensure_admin();
 
-        self.data_mut().eth_client = eth_client_new;
+        self.state_mut().eth_client = eth_client_new;
     }
 
     pub fn map_vara_to_eth_address(&mut self, vara_token_id: ActorId, eth_token_id: H160) {
-        if self.data().admin != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
+        self.ensure_admin();
 
         let already_present = self
-            .data_mut()
+            .state_mut()
             .vara_to_eth_token_id
             .insert(vara_token_id, eth_token_id)
             .is_some();
@@ -152,7 +140,7 @@ where
         }
 
         let already_present = self
-            .data_mut()
+            .state_mut()
             .eth_to_vara_token_id
             .insert(eth_token_id, vara_token_id)
             .is_some();
@@ -168,18 +156,16 @@ where
     }
 
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
-        if self.data().admin != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
+        self.ensure_admin();
 
         let eth_token_id = self
-            .data_mut()
+            .state_mut()
             .vara_to_eth_token_id
             .remove(&vara_token_id)
             .expect("Token mapping not found");
 
         let _ = self
-            .data_mut()
+            .state_mut()
             .eth_to_vara_token_id
             .remove(&eth_token_id)
             .expect(
@@ -194,12 +180,16 @@ where
     }
 
     pub fn update_config(&mut self, config: Config) {
-        if self.data().admin != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
+        self.ensure_admin();
 
         unsafe {
             CONFIG = Some(config);
+        }
+    }
+
+    fn ensure_admin(&self) {
+        if self.state().admin != self.exec_context.actor_id() {
+            panic!("Not admin")
         }
     }
 
@@ -209,10 +199,10 @@ where
         use alloy_sol_types::SolEvent;
         use ethereum_common::utils::ReceiptEnvelope;
 
-        let data = self.data();
+        let state = self.state();
         let sender = self.exec_context.actor_id();
 
-        if sender != data.eth_client {
+        if sender != state.eth_client {
             return Err(Error::NotEthClient);
         }
 
@@ -242,7 +232,7 @@ where
                 let eth_token_id = H160::from(event.token.0 .0);
                 let vara_token_id = self.get_vara_token_id(&eth_token_id).ok()?;
 
-                (self.receiver_contract_address() == address).then_some((vara_token_id, event))
+                (self.erc20_manager_address() == address).then_some((vara_token_id, event))
             })
             .ok_or(Error::NotSupportedEvent)?;
 
@@ -271,7 +261,7 @@ where
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
-        let data = self.data();
+        let state = self.state();
         let msg_id = gstd::msg::id();
         let eth_token_id = self.get_eth_token_id(&vara_token_id)?;
         let config = self.config();
@@ -289,8 +279,8 @@ where
         token_operations::burn_tokens(vara_token_id, sender, receiver, amount, config, msg_id)
             .await?;
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
-            data.gear_bridge_builtin,
-            data.receiver_contract_address,
+            state.gear_bridge_builtin,
+            state.erc20_manager_address,
             receiver,
             eth_token_id,
             amount,
@@ -324,7 +314,7 @@ where
         &mut self,
         msg_id: MessageId,
     ) -> Result<(U256, H160), Error> {
-        let data = self.data();
+        let state = self.state();
 
         let config = self.config();
         let msg_tracker = msg_tracker_mut();
@@ -350,8 +340,8 @@ where
         match msg_info.status {
             MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
                 match bridge_builtin_operations::send_message_to_bridge_builtin(
-                    data.gear_bridge_builtin,
-                    data.receiver_contract_address,
+                    state.gear_bridge_builtin,
+                    state.erc20_manager_address,
                     receiver,
                     eth_token_id,
                     amount,
@@ -395,23 +385,23 @@ where
     }
 
     pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160)> {
-        self.data()
+        self.state()
             .vara_to_eth_token_id
             .clone()
             .into_iter()
             .collect()
     }
 
-    pub fn receiver_contract_address(&self) -> H160 {
-        self.data().receiver_contract_address
+    pub fn erc20_manager_address(&self) -> H160 {
+        self.state().erc20_manager_address
     }
 
     pub fn gear_bridge_builtin(&self) -> ActorId {
-        self.data().gear_bridge_builtin
+        self.state().gear_bridge_builtin
     }
 
     pub fn admin(&self) -> ActorId {
-        self.data().admin
+        self.state().admin
     }
 
     pub fn get_config(&self) -> Config {
@@ -419,7 +409,7 @@ where
     }
 
     pub fn eth_client(&self) -> ActorId {
-        self.data().eth_client
+        self.state().eth_client
     }
 }
 
@@ -429,9 +419,9 @@ where
 {
     pub fn seed(config: InitConfig, exec_context: T) {
         unsafe {
-            DATA = Some(VftManagerData {
+            STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                receiver_contract_address: config.receiver_contract_address,
+                erc20_manager_address: config.erc20_manager_address,
                 admin: exec_context.actor_id(),
                 eth_client: config.eth_client,
                 ..Default::default()
@@ -444,12 +434,12 @@ where
         Self { exec_context }
     }
 
-    fn data(&self) -> &VftManagerData {
-        unsafe { DATA.as_ref().expect("VftManager::seed() should be called") }
+    fn state(&self) -> &State {
+        unsafe { STATE.as_ref().expect("VftManager::seed() should be called") }
     }
 
-    fn data_mut(&mut self) -> &mut VftManagerData {
-        unsafe { DATA.as_mut().expect("VftManager::seed() should be called") }
+    fn state_mut(&mut self) -> &mut State {
+        unsafe { STATE.as_mut().expect("VftManager::seed() should be called") }
     }
 
     fn config(&self) -> &Config {
@@ -461,7 +451,7 @@ where
     }
 
     fn get_eth_token_id(&self, vara_token_id: &ActorId) -> Result<H160, Error> {
-        self.data()
+        self.state()
             .vara_to_eth_token_id
             .get(vara_token_id)
             .cloned()
@@ -469,13 +459,14 @@ where
     }
 
     fn get_vara_token_id(&self, eth_token_id: &H160) -> Result<ActorId, Error> {
-        self.data()
+        self.state()
             .eth_to_vara_token_id
             .get(eth_token_id)
             .cloned()
             .ok_or(Error::NoCorrespondingVaraAddress)
     }
 }
+
 fn msg_tracker() -> &'static MessageTracker {
     unsafe {
         MSG_TRACKER

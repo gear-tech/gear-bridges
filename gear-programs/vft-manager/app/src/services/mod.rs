@@ -1,3 +1,4 @@
+use bridge_builtin_operations::Payload;
 use collections::HashMap;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
@@ -193,7 +194,7 @@ where
         }
     }
 
-    pub async fn mint_tokens(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
+    pub async fn submit_receipt(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
         use abi::ERC20_TREASURY;
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
@@ -239,7 +240,7 @@ where
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
         let msg_id = gstd::msg::id();
-        let transaction_details = TxDetails::MintTokens {
+        let transaction_details = TxDetails::SubmitReceipt {
             vara_token_id,
             receiver,
             amount,
@@ -254,7 +255,7 @@ where
         token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
     }
 
-    pub async fn transfer_vara_to_eth(
+    pub async fn request_bridging(
         &mut self,
         sender: ActorId,
         vara_token_id: ActorId,
@@ -278,12 +279,16 @@ where
 
         token_operations::burn_tokens(vara_token_id, sender, receiver, amount, config, msg_id)
             .await?;
+
+        let payload = Payload {
+            receiver,
+            token_id: eth_token_id,
+            amount,
+        };
         let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
             state.gear_bridge_builtin,
             state.erc20_manager_address,
-            receiver,
-            eth_token_id,
-            amount,
+            payload,
             config,
             msg_id,
         )
@@ -323,7 +328,7 @@ where
             .get_message_info(&msg_id)
             .expect("Unexpected: msg status does not exist");
 
-        let TxDetails::TransferVaraToEth {
+        let TxDetails::RequestBridging {
             vara_token_id,
             sender,
             amount,
@@ -339,12 +344,16 @@ where
 
         match msg_info.status {
             MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
+                let payload = Payload {
+                    receiver,
+                    token_id: eth_token_id,
+                    amount,
+                };
+
                 match bridge_builtin_operations::send_message_to_bridge_builtin(
                     state.gear_bridge_builtin,
                     state.erc20_manager_address,
-                    receiver,
-                    eth_token_id,
-                    amount,
+                    payload,
                     config,
                     msg_id,
                 )

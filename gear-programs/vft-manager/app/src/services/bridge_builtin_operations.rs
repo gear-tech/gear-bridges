@@ -5,20 +5,13 @@ use sails_rs::prelude::*;
 pub async fn send_message_to_bridge_builtin(
     gear_bridge_builtin: ActorId,
     receiver_contract_address: H160,
-    receiver: H160,
-    token_id: H160,
-    amount: U256,
+    payload: Payload,
     config: &Config,
     msg_id: MessageId,
 ) -> Result<U256, Error> {
     msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
 
-    let payload_bytes = Payload {
-        receiver,
-        token_id,
-        amount,
-    }
-    .pack();
+    let payload_bytes = payload.pack();
 
     let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
         destination: receiver_contract_address,

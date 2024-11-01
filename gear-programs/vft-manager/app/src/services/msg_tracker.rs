@@ -15,13 +15,13 @@ pub struct MessageInfo {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub enum TxDetails {
-    TransferVaraToEth {
+    RequestBridging {
         vara_token_id: ActorId,
         sender: ActorId,
         amount: U256,
         receiver: H160,
     },
-    MintTokens {
+    SubmitReceipt {
         vara_token_id: ActorId,
         receiver: ActorId,
         amount: U256,

@@ -14,7 +14,7 @@ pub async fn burn_tokens(
 ) -> Result<(), Error> {
     let bytes: Vec<u8> = vft_io::Burn::encode_call(sender, amount);
 
-    let transaction_details = TxDetails::TransferVaraToEth {
+    let transaction_details = TxDetails::RequestBridging {
         vara_token_id,
         sender,
         amount,

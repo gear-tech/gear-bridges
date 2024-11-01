@@ -51,7 +51,7 @@ enum CliCommands {
 #[derive(Args)]
 struct RelayMessagesArgs {
     #[clap(flatten)]
-    vara: VaraArgs,
+    vara_args: VaraArgs,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
@@ -67,7 +67,7 @@ struct RelayMessagesArgs {
 #[derive(Args)]
 struct RelayMerkleRootsArgs {
     #[clap(flatten)]
-    vara: VaraArgs,
+    vara_args: VaraArgs,
     #[clap(flatten)]
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
@@ -243,7 +243,7 @@ async fn main() {
 
     match cli.command {
         CliCommands::RelayMerkleRoots(args) => {
-            let gear_api = create_gear_client(&args.vara).await;
+            let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
             let mut metrics = MetricsBuilder::new();
@@ -251,9 +251,9 @@ async fn main() {
             let proof_storage: Box<dyn ProofStorage> =
                 if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
                     let proof_storage = GearProofStorage::new(
-                        &args.vara.vara_domain,
-                        args.vara.vara_port,
-                        args.vara.vara_rpc_retries,
+                        &args.vara_args.vara_domain,
+                        args.vara_args.vara_port,
+                        args.vara_args.vara_rpc_retries,
                         &fee_payer,
                         "./onchain_proof_storage_data".into(),
                     )
@@ -291,7 +291,7 @@ async fn main() {
             relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::RelayMessages(args) => {
-            let gear_api = create_gear_client(&args.vara).await;
+            let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
             if let Some(bridging_payment_address) = args.bridging_payment_address {

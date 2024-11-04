@@ -203,6 +203,7 @@ async fn test_mapping_does_not_exists() {
     assert!(ok);
 
     let reply = VftManagerC::new(remoting.clone())
+        .request_bridging(account_id, vft_program_id, amount, [3; 20].into())
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();

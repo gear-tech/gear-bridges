@@ -27,6 +27,7 @@ gtest.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 extended_vft_wasm.workspace = true
+gclient.workspace = true
 
 [features]
 wasm-binary = []

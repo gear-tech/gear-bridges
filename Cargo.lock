@@ -15426,6 +15426,7 @@ dependencies = [
  "alloy-rlp",
  "blake2",
  "extended_vft_wasm",
+ "gclient 1.6.2",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.6.2",
  "parity-scale-codec",

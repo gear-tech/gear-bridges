@@ -14,12 +14,6 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
     address immutable MESSAGE_QUEUE_ADDRESS;
     bytes32 immutable VFT_MANAGER_ADDRESS;
 
-    enum SupplyType {
-        Unknown,
-        Ethereum,
-        Gear
-    }
-
     mapping(address => SupplyType) tokenSupplyType;
 
     constructor(address message_queue, bytes32 vft_manager) {

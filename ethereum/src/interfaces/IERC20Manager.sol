@@ -18,4 +18,10 @@ interface IERC20Manager {
         address indexed token,
         uint256 amount
     );
+
+    enum SupplyType {
+        Unknown,
+        Ethereum,
+        Gear
+    }
 }

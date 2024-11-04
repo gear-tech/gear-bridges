@@ -7,7 +7,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IERC20Gateway} from "./interfaces/IERC20Gateway.sol";
 import {VFT_TREASURY_ADDRESS} from "./libraries/Environment.sol";
 import {IMessageQueue, IMessageQueueReceiver, VaraMessage} from "./interfaces/IMessageQueue.sol";
-import {ERC20GearSupply} from "./ERC20GearSupply.sol";
+import {ERC20VaraSupply} from "./ERC20VaraSupply.sol";
 
 import {BridgingPayment} from "./BridgingPayment.sol";
 
@@ -27,7 +27,7 @@ contract ERC20Gateway is IERC20Gateway, IMessageQueueReceiver {
      * @param to destination of transfer on VARA network
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public {
-        ERC20GearSupply(token).burnFrom(tx.origin, amount);
+        ERC20VaraSupply(token).burnFrom(tx.origin, amount);
         emit BridgingRequested(tx.origin, to, token, amount);
     }
 
@@ -63,7 +63,7 @@ contract ERC20Gateway is IERC20Gateway, IMessageQueueReceiver {
         address token = address(bytes20(payload[20:40]));
         uint256 amount = uint256(bytes32(payload[40:]));
 
-        ERC20GearSupply(token).mint(receiver, amount);
+        ERC20VaraSupply(token).mint(receiver, amount);
         emit BridgingAccepted(receiver, token, amount);
 
         return true;

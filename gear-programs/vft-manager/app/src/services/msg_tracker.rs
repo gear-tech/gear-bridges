@@ -99,16 +99,16 @@ impl MessageTracker {
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
-    // Burn tokens statuses
-    SendingMessageToBurnTokens,
-    TokenBurnCompleted(bool),
-    WaitingReplyFromBurn,
-
     // Send message to bridge builtin
     SendingMessageToBridgeBuiltin,
     BridgeResponseReceived(Option<U256>),
     WaitingReplyFromBuiltin,
     BridgeBuiltinStep,
+
+    // Burn tokens statuses
+    SendingMessageToBurnTokens,
+    TokenBurnCompleted(bool),
+    WaitingReplyFromBurn,
 
     // Mint tokens status
     SendingMessageToMintTokens,

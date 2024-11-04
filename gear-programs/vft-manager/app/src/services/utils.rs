@@ -35,7 +35,14 @@ pub fn set_critical_hook(msg_id: MessageId) {
             MessageStatus::SendingMessageToMintTokens => {
                 msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromMint);
             }
-            _ => {}
+            MessageStatus::WaitingReplyFromBurn
+            | MessageStatus::WaitingReplyFromBuiltin
+            | MessageStatus::BridgeBuiltinStep
+            | MessageStatus::TokenMintCompleted
+            | MessageStatus::WaitingReplyFromMint
+            | MessageStatus::MintTokensStep
+            | MessageStatus::MessageProcessedWithSuccess(_)
+            | MessageStatus::BridgeResponseReceived(Some(_)) => {}
         };
     });
 }

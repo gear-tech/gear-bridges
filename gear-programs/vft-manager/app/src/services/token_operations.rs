@@ -91,7 +91,7 @@ pub async fn lock(
     utils::send_message_with_gas_for_reply(
         vara_token_id,
         bytes,
-        config.gas_to_burn_tokens,
+        config.gas_to_transfer_tokens,
         config.gas_for_reply_deposit,
         config.reply_timeout,
         msg_id,
@@ -115,7 +115,7 @@ pub async fn unlock(
     utils::send_message_with_gas_for_reply(
         vara_token_id,
         bytes,
-        config.gas_to_mint_tokens, // TODO: Introduce separate field
+        config.gas_to_transfer_tokens,
         config.gas_for_reply_deposit,
         config.reply_timeout,
         msg_id,

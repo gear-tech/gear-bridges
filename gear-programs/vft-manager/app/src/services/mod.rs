@@ -86,6 +86,7 @@ pub struct Config {
     gas_to_burn_tokens: u64,
     gas_for_reply_deposit: u64,
     gas_to_mint_tokens: u64,
+    gas_to_transfer_tokens: u64,
     gas_to_process_mint_request: u64,
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
@@ -99,6 +100,7 @@ impl Config {
         gas_to_burn_tokens: u64,
         gas_for_reply_deposit: u64,
         gas_to_mint_tokens: u64,
+        gas_to_transfer_tokens: u64,
         gas_to_process_mint_request: u64,
         gas_to_send_request_to_builtin: u64,
         reply_timeout: u32,
@@ -109,6 +111,7 @@ impl Config {
             gas_to_burn_tokens,
             gas_for_reply_deposit,
             gas_to_mint_tokens,
+            gas_to_transfer_tokens,
             gas_to_process_mint_request,
             gas_to_send_request_to_builtin,
             reply_timeout,
@@ -193,9 +196,8 @@ where
         }
 
         let config = self.config();
-        // TODO: Take into account that tokens may be either minted or unlocked.
         if gstd::exec::gas_available()
-            < config.gas_to_mint_tokens
+            < config.gas_to_mint_tokens.max(config.gas_to_transfer_tokens)
                 + config.gas_to_process_mint_request
                 + config.gas_for_reply_deposit
         {
@@ -268,9 +270,8 @@ where
         let supply_type = self.state().token_map.get_supply_type(&vara_token_id)?;
         let config = self.config();
 
-        // TODO: Take into account that tokens may be either burned or locked.
         if gstd::exec::gas_available()
-            < config.gas_to_burn_tokens
+            < config.gas_to_burn_tokens.max(config.gas_to_transfer_tokens)
                 + config.gas_to_send_request_to_builtin
                 + config.gas_for_transfer_to_eth_msg
                 + 3 * config.gas_for_reply_deposit

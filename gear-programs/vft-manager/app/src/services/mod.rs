@@ -292,7 +292,6 @@ where
         }
 
         let payload = Payload {
-            supply_type,
             receiver,
             token_id: eth_token_id,
             amount,
@@ -355,16 +354,9 @@ where
             .get_eth_token_id(&vara_token_id)
             .expect("Failed to get ethereum token id");
 
-        let supply_type = self
-            .state()
-            .token_map
-            .get_supply_type(&vara_token_id)
-            .expect("Failed to get supply type");
-
         match msg_info.status {
             MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
                 let payload = Payload {
-                    supply_type,
                     receiver,
                     token_id: eth_token_id,
                     amount,

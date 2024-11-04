@@ -193,6 +193,7 @@ where
         }
 
         let config = self.config();
+        // TODO: Take into account that tokens may be either minted or unlocked.
         if gstd::exec::gas_available()
             < config.gas_to_mint_tokens
                 + config.gas_to_process_mint_request
@@ -242,8 +243,16 @@ where
         );
         utils::set_critical_hook(msg_id);
 
-        // TODO: Or unlock.
-        token_operations::mint_tokens(vara_token_id, receiver, amount, config, msg_id).await
+        let supply_type = self.state().token_map.get_supply_type(&vara_token_id)?;
+
+        match supply_type {
+            TokenSupply::Ethereum => {
+                token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await
+            }
+            TokenSupply::Gear => {
+                token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await
+            }
+        }
     }
 
     pub async fn request_bridging(
@@ -259,6 +268,7 @@ where
         let supply_type = self.state().token_map.get_supply_type(&vara_token_id)?;
         let config = self.config();
 
+        // TODO: Take into account that tokens may be either burned or locked.
         if gstd::exec::gas_available()
             < config.gas_to_burn_tokens
                 + config.gas_to_send_request_to_builtin
@@ -269,9 +279,16 @@ where
             panic!("Please attach more gas");
         }
 
-        // TODO: Or lock.
-        token_operations::burn_tokens(vara_token_id, sender, receiver, amount, config, msg_id)
-            .await?;
+        match supply_type {
+            TokenSupply::Ethereum => {
+                token_operations::burn(vara_token_id, sender, receiver, amount, config, msg_id)
+                    .await?;
+            }
+            TokenSupply::Gear => {
+                token_operations::lock(vara_token_id, sender, amount, receiver, config, msg_id)
+                    .await?;
+            }
+        }
 
         let payload = Payload {
             supply_type,
@@ -291,8 +308,7 @@ where
             Ok(nonce) => nonce,
             Err(e) => {
                 // In case of failure, mint tokens back to the sender
-                token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
-                    .await?;
+                token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
                 return Err(e);
             }
         };
@@ -365,14 +381,8 @@ where
                     Ok(nonce) => Ok((nonce, eth_token_id)),
                     Err(_) => {
                         // In case of failure, mint tokens back to the sender
-                        token_operations::mint_tokens(
-                            vara_token_id,
-                            sender,
-                            amount,
-                            config,
-                            msg_id,
-                        )
-                        .await?;
+                        token_operations::mint(vara_token_id, sender, amount, config, msg_id)
+                            .await?;
                         Err(Error::TokensRefunded)
                     }
                 }
@@ -382,8 +392,7 @@ where
                 Ok((nonce, eth_token_id))
             }
             MessageStatus::MintTokensStep => {
-                token_operations::mint_tokens(vara_token_id, sender, amount, config, msg_id)
-                    .await?;
+                token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
                 Err(Error::TokensRefunded)
             }
             _ => {

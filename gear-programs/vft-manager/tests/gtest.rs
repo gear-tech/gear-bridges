@@ -8,15 +8,17 @@ use vft_manager_client::{
     VftManagerFactory as VftManagerFactoryC,
 };
 
-const ADMIN_ID: u64 = 1_000;
+const REMOTING_ACTOR_ID: u64 = 1_000;
 const ETH_CLIENT_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
-const ERC20_MANAGER_ADDRESS: H160 = H160([1; 20]);
 
-#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
-enum Response {
-    MessageSent { nonce: U256, hash: H256 },
-}
+const WRONG_GEAR_SUPPLY_VFT: u64 = 666;
+
+const ERC20_MANAGER_ADDRESS: H160 = H160([1; 20]);
+const ETH_TOKEN_RECEIVER: H160 = H160([6; 20]);
+
+const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
+const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
 
 #[derive(Debug)]
 struct GearBridgeBuiltinMock;
@@ -27,6 +29,11 @@ impl WasmProgram for GearBridgeBuiltinMock {
     }
 
     fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        #[derive(Encode)]
+        enum Response {
+            MessageSent { nonce: U256, hash: H256 },
+        }
+
         Ok(Some(
             Response::MessageSent {
                 nonce: U256::from(1),
@@ -52,21 +59,22 @@ impl WasmProgram for GearBridgeBuiltinMock {
 struct Fixture {
     remoting: GTestRemoting,
     vft_manager_program_id: ActorId,
-    vft_program_id: ActorId,
+    gear_supply_vft: ActorId,
+    eth_supply_vft: ActorId,
 }
 
 async fn setup_for_test() -> Fixture {
     let system = System::new();
     system.init_logger();
-    system.mint_to(ADMIN_ID, 100_000_000_000_000);
+    system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000);
     system.mint_to(ETH_CLIENT_ID, 100_000_000_000_000);
 
-    let remoting = GTestRemoting::new(system, ADMIN_ID.into());
+    let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
 
     // Bridge Builtin
     let gear_bridge_builtin =
         Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    let _ = gear_bridge_builtin.send_bytes(ADMIN_ID, b"INIT");
+    let _ = gear_bridge_builtin.send_bytes(REMOTING_ACTOR_ID, b"INIT");
 
     // Vft Manager
     let vft_manager_code_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
@@ -96,33 +104,62 @@ async fn setup_for_test() -> Fixture {
     let vft_code_id = remoting
         .system()
         .submit_code(extended_vft_wasm::WASM_BINARY);
-    let vft_program_id = VftFactoryC::new(remoting.clone())
+    let gear_supply_vft = VftFactoryC::new(remoting.clone())
         .new("Token".into(), "Token".into(), 18)
         .send_recv(vft_code_id, b"salt")
+        .await
+        .unwrap();
+
+    let eth_supply_vft = VftFactoryC::new(remoting.clone())
+        .new("Token".into(), "Token".into(), 18)
+        .send_recv(vft_code_id, b"salt1")
+        .await
+        .unwrap();
+
+    let mut vft = VftC::new(remoting.clone());
+    vft.grant_minter_role(vft_manager_program_id)
+        .send_recv(eth_supply_vft)
+        .await
+        .unwrap();
+    vft.grant_burner_role(vft_manager_program_id)
+        .send_recv(eth_supply_vft)
+        .await
+        .unwrap();
+
+    // Setup mapping
+    let mut vft_manager = VftManagerC::new(remoting.clone());
+    vft_manager
+        .map_vara_to_eth_address(gear_supply_vft, ERC20_TOKEN_GEAR_SUPPLY, TokenSupply::Gear)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    vft_manager
+        .map_vara_to_eth_address(
+            eth_supply_vft,
+            ERC20_TOKEN_ETH_SUPPLY,
+            TokenSupply::Ethereum,
+        )
+        .send_recv(vft_manager_program_id)
         .await
         .unwrap();
 
     Fixture {
         remoting,
         vft_manager_program_id,
-        vft_program_id,
+        gear_supply_vft,
+        eth_supply_vft,
     }
 }
 
 #[tokio::test]
-async fn test_vft_manager() {
+async fn test_gear_supply_token() {
     let Fixture {
         remoting,
         vft_manager_program_id,
-        vft_program_id,
+        gear_supply_vft,
+        ..
     } = setup_for_test().await;
-
-    let mut vft_manager = VftManagerC::new(remoting.clone());
-    vft_manager
-        .map_vara_to_eth_address(vft_program_id, [2; 20].into(), TokenSupply::Gear)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
 
     let account_id: ActorId = 100_000.into();
     remoting.system().mint_to(account_id, 100_000_000_000_000);
@@ -133,34 +170,35 @@ async fn test_vft_manager() {
 
     let ok = vft
         .mint(account_id, amount)
-        .send_recv(vft_program_id)
+        .send_recv(gear_supply_vft)
         .await
         .unwrap();
     assert!(ok);
 
     let ok = VftC::new(remoting.clone().with_actor_id(account_id))
         .approve(vft_manager_program_id, amount)
-        .send_recv(vft_program_id)
+        .send_recv(gear_supply_vft)
         .await
         .unwrap();
     assert!(ok);
 
+    let mut vft_manager = VftManagerC::new(remoting.clone());
     let reply = vft_manager
-        .request_bridging(account_id, vft_program_id, amount, [3; 20].into())
+        .request_bridging(account_id, gear_supply_vft, amount, ETH_TOKEN_RECEIVER)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
 
-    let expected = Ok((U256::from(1), H160::from([2; 20])));
+    let expected = Ok((U256::from(1), ERC20_TOKEN_GEAR_SUPPLY));
     assert_eq!(reply, expected);
 
-    let account_balance = balance_of(&remoting, vft_program_id, account_id).await;
+    let account_balance = balance_of(&remoting, gear_supply_vft, account_id).await;
     assert!(account_balance.is_zero());
 
-    let vft_manager_balance = balance_of(&remoting, vft_program_id, vft_manager_program_id).await;
+    let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
     assert_eq!(vft_manager_balance, amount);
 
-    let receipt_rlp = create_receipt_rlp(account_id, [2; 20].into(), amount);
+    let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, amount);
     VftManagerC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
         .submit_receipt(receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -168,10 +206,61 @@ async fn test_vft_manager() {
         .unwrap()
         .unwrap();
 
-    let account_balance = balance_of(&remoting, vft_program_id, account_id).await;
+    let account_balance = balance_of(&remoting, gear_supply_vft, account_id).await;
     assert_eq!(account_balance, amount);
 
-    let vft_manager_balance = balance_of(&remoting, vft_program_id, vft_manager_program_id).await;
+    let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
+    assert!(vft_manager_balance.is_zero());
+}
+
+#[tokio::test]
+async fn test_eth_supply_token() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting.system().mint_to(account_id, 100_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+
+    let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
+    VftManagerC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
+        .submit_receipt(receipt_rlp)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert_eq!(account_balance, amount);
+
+    let vft_manager_balance = balance_of(&remoting, eth_supply_vft, vft_manager_program_id).await;
+    assert!(vft_manager_balance.is_zero());
+
+    let ok = VftC::new(remoting.clone().with_actor_id(account_id))
+        .approve(vft_manager_program_id, amount)
+        .send_recv(eth_supply_vft)
+        .await
+        .unwrap();
+    assert!(ok);
+
+    let mut vft_manager = VftManagerC::new(remoting.clone());
+    let reply = vft_manager
+        .request_bridging(account_id, eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    let expected = Ok((U256::from(1), ERC20_TOKEN_ETH_SUPPLY));
+    assert_eq!(reply, expected);
+
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert!(account_balance.is_zero());
+
+    let vft_manager_balance = balance_of(&remoting, eth_supply_vft, vft_manager_program_id).await;
     assert!(vft_manager_balance.is_zero());
 }
 
@@ -180,35 +269,21 @@ async fn test_mapping_does_not_exists() {
     let Fixture {
         remoting,
         vft_manager_program_id,
-        vft_program_id,
+        ..
     } = setup_for_test().await;
 
-    let account_id: ActorId = 100_000.into();
-    remoting.system().mint_to(account_id, 100_000_000_000_000);
-
-    let amount = U256::from(10_000_000_000_u64);
-
-    let ok = VftC::new(remoting.clone())
-        .mint(account_id, amount)
-        .send_recv(vft_program_id)
-        .await
-        .unwrap();
-    assert!(ok);
-
-    let ok = VftC::new(remoting.clone().with_actor_id(account_id))
-        .approve(vft_manager_program_id, amount)
-        .send_recv(vft_program_id)
-        .await
-        .unwrap();
-    assert!(ok);
-
+    let account_id: ActorId = 42.into();
     let reply = VftManagerC::new(remoting.clone())
-        .request_bridging(account_id, vft_program_id, amount, [3; 20].into())
+        .request_bridging(
+            account_id,
+            WRONG_GEAR_SUPPLY_VFT.into(),
+            U256::zero(),
+            ETH_TOKEN_RECEIVER,
+        )
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
 
-    assert!(reply.is_err());
     assert_eq!(reply.unwrap_err(), Error::NoCorrespondingEthAddress);
 }
 
@@ -217,19 +292,13 @@ async fn test_withdraw_fails_with_bad_origin() {
     let Fixture {
         remoting,
         vft_manager_program_id,
-        vft_program_id,
+        ..
     } = setup_for_test().await;
 
     let mut vft_manager = VftManagerC::new(remoting.clone());
-    vft_manager
-        .map_vara_to_eth_address(vft_program_id, [2; 20].into(), TokenSupply::Gear)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
 
-    let account_id: ActorId = 100000.into();
-
-    let receipt_rlp = create_receipt_rlp(account_id, [2; 20].into(), U256::from(42));
+    let account_id: ActorId = 42.into();
+    let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
     let result = vft_manager
         .submit_receipt(receipt_rlp)
         .send_recv(vft_manager_program_id)

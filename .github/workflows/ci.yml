@@ -54,6 +54,8 @@ jobs:
         run: cargo fmt -- --check
   tests:
     runs-on: kuberunner
+    env:
+      NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,3 +75,12 @@ jobs:
         run: |
           cd ethereum
           forge test
+      - name: Pull & run Gear node container
+        run: |
+          docker pull ghcr.io/gear-tech/node:v1.6.2
+          docker run --name $NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external --log gear=debug,pallet_gear=debug,gwasm=debug
+      - name: Run `erc20-relay-app` tests
+        run: cargo test --release --package erc20-relay-app -- --nocapture --ignored || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs --details $NAME; docker stop $NAME; fi; exit $exit_code; }
+      - name: Stop Gear node container (if any)
+        continue-on-error: true
+        run: docker stop $NAME

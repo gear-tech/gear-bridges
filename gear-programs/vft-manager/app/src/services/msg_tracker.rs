@@ -67,11 +67,39 @@ impl MessageTracker {
             Err(Error::MessageNotFound)
         }
     }
+
+    pub fn check_lock_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+        if let Some(info) = self.message_info.get(msg_id) {
+            match info.status {
+                MessageStatus::TokenLockCompleted(true) => Ok(()),
+                MessageStatus::TokenLockCompleted(false) => {
+                    self.message_info.remove(msg_id);
+                    Err(Error::LockTokensFailed)
+                }
+                _ => Err(Error::InvalidMessageStatus),
+            }
+        } else {
+            Err(Error::MessageNotFound)
+        }
+    }
+
     pub fn check_mint_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
                 MessageStatus::TokenMintCompleted => Ok(()),
                 MessageStatus::MintTokensStep => Err(Error::MessageFailed),
+                _ => Err(Error::InvalidMessageStatus),
+            }
+        } else {
+            Err(Error::MessageNotFound)
+        }
+    }
+
+    pub fn check_unlock_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+        if let Some(info) = self.message_info.get(msg_id) {
+            match info.status {
+                MessageStatus::TokenUnlockCompleted => Ok(()),
+                MessageStatus::UnlockTokensStep => Err(Error::MessageFailed),
                 _ => Err(Error::InvalidMessageStatus),
             }
         } else {
@@ -115,6 +143,17 @@ pub enum MessageStatus {
     TokenMintCompleted,
     WaitingReplyFromMint,
     MintTokensStep,
+
+    // Lock tokens statuses
+    SendingMessageToLockTokens,
+    TokenLockCompleted(bool),
+    WaitingReplyFromLock,
+
+    // Unlock tokens status
+    SendingMessageToUnlockTokens,
+    TokenUnlockCompleted,
+    WaitingReplyFromUnlock,
+    UnlockTokensStep,
 
     MessageProcessedWithSuccess(U256),
 }

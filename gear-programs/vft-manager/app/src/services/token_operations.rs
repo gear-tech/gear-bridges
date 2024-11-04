@@ -83,7 +83,7 @@ pub async fn lock(
 
     msg_tracker_mut().insert_message_info(
         msg_id,
-        MessageStatus::SendingMessageToBurnTokens, // TODO: Introduce separate variant.
+        MessageStatus::SendingMessageToLockTokens,
         transaction_details,
     );
 
@@ -98,7 +98,7 @@ pub async fn lock(
     )
     .await?;
 
-    msg_tracker_mut().check_burn_result(&msg_id) // TODO: Introduce separate method.
+    msg_tracker_mut().check_lock_result(&msg_id)
 }
 
 pub async fn unlock(
@@ -108,7 +108,7 @@ pub async fn unlock(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToMintTokens); // TODO: Introduce separate variant.
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToUnlockTokens);
 
     let sender = gstd::exec::program_id();
     let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, recepient, amount);
@@ -122,5 +122,5 @@ pub async fn unlock(
     )
     .await?;
 
-    msg_tracker_mut().check_mint_result(&msg_id) // TODO: Introduce separate method.
+    msg_tracker_mut().check_unlock_result(&msg_id)
 }

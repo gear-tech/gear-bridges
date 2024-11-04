@@ -24,25 +24,38 @@ pub fn set_critical_hook(msg_id: MessageId) {
                 // If the token burn fails, cancel the transaction.
                 msg_tracker.remove_message_info(&msg_id);
             }
+
+            MessageStatus::SendingMessageToLockTokens => {
+                // If still sending, transition to `WaitingReplyFromLock`.
+                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromLock);
+            }
+            MessageStatus::TokenLockCompleted(true) => {
+                // If the token transfer is successful, continue to bridge builtin step.
+                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
+            }
+            MessageStatus::TokenLockCompleted(false) => {
+                // If the token lock fails, cancel the transaction.
+                msg_tracker.remove_message_info(&msg_id);
+            }
+
             MessageStatus::SendingMessageToBridgeBuiltin => {
-                // If still sending, transition to `WaitingReplyFromBurn`.
+                // If still sending, transition to `WaitingReplyFromBuiltin`.
                 msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin);
             }
             MessageStatus::BridgeResponseReceived(None) => {
                 // If error occurs during builtin message, go to mint step
                 msg_tracker.update_message_status(msg_id, MessageStatus::MintTokensStep)
             }
+
             MessageStatus::SendingMessageToMintTokens => {
                 msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromMint);
             }
-            MessageStatus::WaitingReplyFromBurn
-            | MessageStatus::WaitingReplyFromBuiltin
-            | MessageStatus::BridgeBuiltinStep
-            | MessageStatus::TokenMintCompleted
-            | MessageStatus::WaitingReplyFromMint
-            | MessageStatus::MintTokensStep
-            | MessageStatus::MessageProcessedWithSuccess(_)
-            | MessageStatus::BridgeResponseReceived(Some(_)) => {}
+
+            MessageStatus::SendingMessageToUnlockTokens => {
+                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromUnlock);
+            }
+
+            _ => {}
         };
     });
 }
@@ -94,6 +107,27 @@ fn handle_reply_hook(msg_id: MessageId) {
                 msg_tracker.remove_message_info(&msg_id);
             }
         }
+
+        MessageStatus::SendingMessageToLockTokens => {
+            match decode_lock_reply(&reply_bytes) {
+                Ok(reply) => {
+                    msg_tracker
+                        .update_message_status(msg_id, MessageStatus::TokenLockCompleted(reply));
+                }
+                Err(_) => {
+                    msg_tracker.remove_message_info(&msg_id);
+                }
+            };
+        }
+        MessageStatus::WaitingReplyFromLock => {
+            let reply = decode_lock_reply(&reply_bytes).unwrap_or(false);
+            if reply {
+                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
+            } else {
+                msg_tracker.remove_message_info(&msg_id);
+            }
+        }
+
         MessageStatus::SendingMessageToBridgeBuiltin => {
             let reply = decode_bridge_reply(&reply_bytes);
             let result = match reply {
@@ -117,6 +151,7 @@ fn handle_reply_hook(msg_id: MessageId) {
                 }
             };
         }
+
         MessageStatus::WaitingReplyFromMint | MessageStatus::SendingMessageToMintTokens => {
             let reply = decode_mint_reply(&reply_bytes).unwrap_or(false);
             if !reply {
@@ -125,12 +160,25 @@ fn handle_reply_hook(msg_id: MessageId) {
                 msg_tracker.update_message_status(msg_id, MessageStatus::TokenMintCompleted);
             }
         }
+
+        MessageStatus::WaitingReplyFromUnlock | MessageStatus::SendingMessageToUnlockTokens => {
+            let reply = decode_unlock_reply(&reply_bytes).unwrap_or(false);
+            if !reply {
+                msg_tracker.update_message_status(msg_id, MessageStatus::UnlockTokensStep);
+            } else {
+                msg_tracker.update_message_status(msg_id, MessageStatus::TokenUnlockCompleted);
+            }
+        }
         _ => {}
     };
 }
 
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::Burn::decode_reply(bytes).map_err(|_| Error::BurnTokensDecode)
+}
+
+fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
+    vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }
 
 fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<U256>, Error> {
@@ -144,4 +192,8 @@ fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<U256>, Error> {
 
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecode)
+}
+
+fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
+    vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }

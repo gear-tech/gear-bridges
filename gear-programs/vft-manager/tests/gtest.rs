@@ -83,10 +83,8 @@ async fn setup_for_test() -> Fixture {
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         eth_client: ETH_CLIENT_ID.into(),
         config: Config {
-            gas_to_burn_tokens: 15_000_000_000,
+            gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,
-            gas_to_mint_tokens: 15_000_000_000,
-            gas_to_transfer_tokens: 15_000_000_000,
             gas_for_submit_receipt: 15_000_000_000,
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,

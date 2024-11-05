@@ -83,10 +83,8 @@ impl InitConfig {
 
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
-    gas_to_burn_tokens: u64,
+    gas_for_token_ops: u64,
     gas_for_reply_deposit: u64,
-    gas_to_mint_tokens: u64,
-    gas_to_transfer_tokens: u64,
     gas_for_submit_receipt: u64,
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
@@ -172,7 +170,7 @@ where
 
         let config = self.config();
         if gstd::exec::gas_available()
-            < config.gas_to_mint_tokens.max(config.gas_to_transfer_tokens)
+            < config.gas_for_token_ops
                 + config.gas_for_submit_receipt
                 + config.gas_for_reply_deposit
         {
@@ -249,7 +247,7 @@ where
         let config = self.config();
 
         if gstd::exec::gas_available()
-            < config.gas_to_burn_tokens.max(config.gas_to_transfer_tokens)
+            < config.gas_for_token_ops
                 + config.gas_to_send_request_to_builtin
                 + config.gas_for_request_bridging
                 + 3 * config.gas_for_reply_deposit

@@ -13,9 +13,14 @@ use checkpoint_light_client_io::{
 };
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use parity_scale_codec::{Decode, Encode};
-use tokio::time::{self, Duration};
+use tokio::{
+    sync::{Mutex, MutexGuard},
+    time::{self, Duration},
+};
 
-const RPC_URL: &str = "http://127.0.0.1:5052";
+static LOCK: Mutex<()> = Mutex::const_new(());
+
+const RPC_URL: &str = "http://34.159.93.103:50000";
 
 const FINALITY_UPDATE_5_254_112: &[u8; 4_940] =
     include_bytes!("./sepolia-finality-update-5_254_112.json");
@@ -23,6 +28,38 @@ const FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./sepolia-finality-update-5_263_072.json");
 const UPDATE_640: &[u8; 57_202] = include_bytes!("./sepolia-update-640.json");
 const BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./sepolia-bootstrap-640.json");
+
+struct Guard<'a> {
+    _lock: MutexGuard<'a, ()>,
+    pub client: &'a GearApi,
+}
+
+// The struct purpose is to avoid the following error:
+// GearSDK(Subxt(Rpc(ClientError(Call(Custom(ErrorObject { code: ServerError(1014), message: "Priority is too low: (16 vs 16)", data: Some(RawValue("The transaction has too low priority to replace another transaction already in the pool.")) }))))))
+struct NodeClient(GearApi);
+
+impl NodeClient {
+    async fn new() -> Result<Self> {
+        Ok(Self(GearApi::dev().await?))
+    }
+
+    async fn calculate_handle_gas(&self, program_id: [u8; 32], payload: &Handle) -> Result<u64> {
+        Ok(self
+            .0
+            .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
+            .await?
+            .min_limit)
+    }
+
+    async fn lock(&self) -> Guard<'_> {
+        let _lock = LOCK.lock().await;
+
+        Guard {
+            _lock,
+            client: &self.0,
+        }
+    }
+}
 
 async fn common_upload_program(
     client: &GearApi,
@@ -64,8 +101,8 @@ async fn upload_program(
     Ok(program_id)
 }
 
-async fn init(network: Network) -> Result<()> {
-    let beacon_client = BeaconClient::new(RPC_URL.to_string(), None)
+async fn init(network: Network, rpc_url: String) -> Result<()> {
+    let beacon_client = BeaconClient::new(rpc_url, None)
         .await
         .expect("Failed to connect to beacon node");
 
@@ -117,36 +154,42 @@ async fn init(network: Network) -> Result<()> {
         update: sync_update,
     };
 
-    let client = GearApi::dev().await?;
-    let mut listener = client.subscribe().await?;
+    let client = NodeClient::new().await?;
+    let program_id = {
+        let lock = client.lock().await;
 
-    let program_id = upload_program(&client, &mut listener, init).await?;
+        let mut listener = lock.client.subscribe().await?;
+
+        upload_program(lock.client, &mut listener, init).await?
+    };
 
     println!("program_id = {:?}", hex::encode(program_id));
 
     Ok(())
 }
 
-#[ignore]
-#[tokio::test]
+// #[ignore]
+// #[tokio::test]
+#[allow(dead_code)]
 async fn init_sepolia() -> Result<()> {
-    init(Network::Sepolia).await
+    init(Network::Sepolia, RPC_URL.into()).await
 }
 
 #[ignore]
 #[tokio::test]
 async fn init_holesky() -> Result<()> {
-    init(Network::Holesky).await
+    init(Network::Holesky, RPC_URL.into()).await
 }
 
 #[ignore]
 #[tokio::test]
 async fn init_mainnet() -> Result<()> {
-    init(Network::Mainnet).await
+    init(Network::Mainnet, "https://www.lightclientdata.org".into()).await
 }
 
-#[ignore]
-#[tokio::test]
+// #[ignore]
+// #[tokio::test]
+#[allow(dead_code)]
 async fn init_and_updating() -> Result<()> {
     let beacon_client = BeaconClient::new(RPC_URL.to_string(), None)
         .await
@@ -288,8 +331,9 @@ async fn init_and_updating() -> Result<()> {
     Ok(())
 }
 
-#[ignore]
-#[tokio::test]
+// #[ignore]
+// #[tokio::test]
+#[allow(dead_code)]
 async fn replaying_back() -> Result<()> {
     let beacon_client = BeaconClient::new(RPC_URL.to_string(), None)
         .await
@@ -344,17 +388,21 @@ async fn replaying_back() -> Result<()> {
         update: sync_update,
     };
 
-    let client = GearApi::dev().await?;
-    let mut listener = client.subscribe().await?;
+    let client = NodeClient::new().await?;
+    let program_id = {
+        let lock = client.lock().await;
 
-    let program_id = upload_program(&client, &mut listener, init).await?;
+        let mut listener = lock.client.subscribe().await?;
+
+        upload_program(lock.client, &mut listener, init).await?
+    };
 
     println!("program_id = {:?}", hex::encode(program_id));
 
     println!();
     println!();
 
-    let batch_size = 44 * SLOTS_PER_EPOCH;
+    let batch_size = 30 * SLOTS_PER_EPOCH;
     let mut slots_batch_iter = slots_batch::Iter::new(slot_start, slot_end, batch_size).unwrap();
     // start to replay back
     if let Some((slot_start, slot_end)) = slots_batch_iter.next() {
@@ -382,17 +430,22 @@ async fn replaying_back() -> Result<()> {
             headers,
         };
 
-        let gas_limit = client
-            .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
-            .await?
-            .min_limit;
+        let gas_limit = client.calculate_handle_gas(program_id, &payload).await?;
         println!("ReplayBackStart gas_limit {gas_limit:?}");
 
-        let (message_id, _) = client
-            .send_message(program_id.into(), payload, gas_limit, 0)
-            .await?;
+        let (_message_id, payload, _value) = {
+            let lock = client.lock().await;
 
-        let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+            let mut listener = lock.client.subscribe().await?;
+
+            let (message_id, _) = lock
+                .client
+                .send_message(program_id.into(), payload, gas_limit, 0)
+                .await?;
+
+            listener.reply_bytes_on(message_id).await?
+        };
+
         let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
         assert!(matches!(
             result_decoded,
@@ -415,17 +468,22 @@ async fn replaying_back() -> Result<()> {
 
         let payload = Handle::ReplayBack(headers);
 
-        let gas_limit = client
-            .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
-            .await?
-            .min_limit;
+        let gas_limit = client.calculate_handle_gas(program_id, &payload).await?;
         println!("ReplayBack gas_limit {gas_limit:?}");
 
-        let (message_id, _) = client
-            .send_message(program_id.into(), payload, gas_limit, 0)
-            .await?;
+        let (_message_id, payload, _value) = {
+            let lock = client.lock().await;
 
-        let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+            let mut listener = lock.client.subscribe().await?;
+
+            let (message_id, _) = lock
+                .client
+                .send_message(program_id.into(), payload, gas_limit, 0)
+                .await?;
+
+            listener.reply_bytes_on(message_id).await?
+        };
+
         let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
         assert!(matches!(
             result_decoded,
@@ -438,8 +496,8 @@ async fn replaying_back() -> Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test]
-#[ignore = "Fails for now"]
 async fn sync_update_requires_replaying_back() -> Result<()> {
     let finality_update: FinalityUpdateResponse =
         serde_json::from_slice(FINALITY_UPDATE_5_263_072).unwrap();
@@ -489,10 +547,14 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         update: sync_update,
     };
 
-    let client = GearApi::dev().await?;
-    let mut listener = client.subscribe().await?;
+    let client = NodeClient::new().await?;
+    let program_id = {
+        let lock = client.lock().await;
 
-    let program_id = upload_program(&client, &mut listener, init).await?;
+        let mut listener = lock.client.subscribe().await?;
+
+        upload_program(lock.client, &mut listener, init).await?
+    };
 
     println!("program_id = {:?}", hex::encode(program_id));
 
@@ -513,17 +575,21 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         finality_update,
     ));
 
-    let gas_limit = client
-        .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
-        .await?
-        .min_limit;
+    let gas_limit = client.calculate_handle_gas(program_id, &payload).await?;
     println!("finality_update gas_limit {gas_limit:?}");
 
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
-        .await?;
+    let (_message_id, payload, _value) = {
+        let lock = client.lock().await;
 
-    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
+        let mut listener = lock.client.subscribe().await?;
+        let (message_id, _) = lock
+            .client
+            .send_message(program_id.into(), payload, gas_limit, 0)
+            .await?;
+
+        listener.reply_bytes_on(message_id).await?
+    };
+
     let result_decoded = HandleResult::decode(&mut &payload.unwrap()[..]).unwrap();
     assert!(
         matches!(

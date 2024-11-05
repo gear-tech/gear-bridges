@@ -87,38 +87,10 @@ pub struct Config {
     gas_for_reply_deposit: u64,
     gas_to_mint_tokens: u64,
     gas_to_transfer_tokens: u64,
-    gas_to_process_mint_request: u64,
+    gas_for_submit_receipt: u64,
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
-    gas_for_transfer_to_eth_msg: u64,
-    gas_for_event_sending: u64,
-}
-
-impl Config {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        gas_to_burn_tokens: u64,
-        gas_for_reply_deposit: u64,
-        gas_to_mint_tokens: u64,
-        gas_to_transfer_tokens: u64,
-        gas_to_process_mint_request: u64,
-        gas_to_send_request_to_builtin: u64,
-        reply_timeout: u32,
-        gas_for_transfer_to_eth_msg: u64,
-        gas_for_event_sending: u64,
-    ) -> Self {
-        Self {
-            gas_to_burn_tokens,
-            gas_for_reply_deposit,
-            gas_to_mint_tokens,
-            gas_to_transfer_tokens,
-            gas_to_process_mint_request,
-            gas_to_send_request_to_builtin,
-            reply_timeout,
-            gas_for_transfer_to_eth_msg,
-            gas_for_event_sending,
-        }
-    }
+    gas_for_request_bridging: u64,
 }
 
 #[service(events = Event)]
@@ -201,7 +173,7 @@ where
         let config = self.config();
         if gstd::exec::gas_available()
             < config.gas_to_mint_tokens.max(config.gas_to_transfer_tokens)
-                + config.gas_to_process_mint_request
+                + config.gas_for_submit_receipt
                 + config.gas_for_reply_deposit
         {
             return Err(Error::NotEnoughGas);
@@ -279,9 +251,8 @@ where
         if gstd::exec::gas_available()
             < config.gas_to_burn_tokens.max(config.gas_to_transfer_tokens)
                 + config.gas_to_send_request_to_builtin
-                + config.gas_for_transfer_to_eth_msg
+                + config.gas_for_request_bridging
                 + 3 * config.gas_for_reply_deposit
-                + config.gas_for_event_sending
         {
             panic!("Please attach more gas");
         }

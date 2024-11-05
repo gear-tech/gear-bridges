@@ -4,7 +4,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract ERC20VaraSupply is ERC20Burnable, Ownable {
+contract ERC20GearSupply is ERC20Burnable, Ownable {
     constructor(
         address owner,
         string memory _name,

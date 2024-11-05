@@ -59,9 +59,10 @@ pub struct GearApi {
 }
 
 impl GearApi {
-    pub async fn new(endpoint: &str) -> anyhow::Result<GearApi> {
+    pub async fn new(domain: &str, port: u16, retries: u8) -> anyhow::Result<GearApi> {
+        let uri: &str = &format!("{domain}:{port}");
         Ok(GearApi {
-            api: gsdk::Api::new(Some(endpoint)).await?,
+            api: gsdk::Api::builder().retries(retries).build(uri).await?,
         })
     }
 

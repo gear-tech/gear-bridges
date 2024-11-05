@@ -1,10 +1,6 @@
 name: Build and Deploy Indexer Graphql and Processors for Testnet
 
 on:
-  push:
-    branches: ['master']
-    paths:
-      - indexer/**
   workflow_dispatch:
 
 concurrency:

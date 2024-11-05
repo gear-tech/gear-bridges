@@ -413,11 +413,7 @@ where
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
 
         logs.into_iter()
-            .map(|(_, log)| {
-                Ok(log
-                    .transaction_hash
-                    .ok_or(Error::ErrorFetchingTransaction)?)
-            })
+            .map(|(_, log)| log.transaction_hash.ok_or(Error::ErrorFetchingTransaction))
             .collect()
     }
 

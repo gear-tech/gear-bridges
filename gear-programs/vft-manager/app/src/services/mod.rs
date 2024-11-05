@@ -183,6 +183,9 @@ where
         }
     }
 
+    /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
+    /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
+    /// This entrypoint can be called only by `ethereum-event-client`.
     pub async fn submit_receipt(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
@@ -257,6 +260,9 @@ where
         }
     }
 
+    /// Request bridging of tokens from gear to ethereum. It involves locking/burning
+    /// `vft` tokens (specific operation depends on the token supply type) and sending
+    /// request to the bridge built-in actor.
     pub async fn request_bridging(
         &mut self,
         sender: ActorId,

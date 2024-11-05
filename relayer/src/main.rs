@@ -49,15 +49,6 @@ enum CliCommands {
 }
 
 #[derive(Args)]
-struct RelayErc20Args {
-    #[clap(flatten)]
-    common: RelayErc20ArgsCommon,
-
-    #[command(subcommand)]
-    command: RelayErc20Commands,
-}
-
-#[derive(Args)]
 struct RelayMessagesArgs {
     #[clap(flatten)]
     vara_args: VaraArgs,
@@ -191,6 +182,15 @@ struct RelayCheckpointsArgs {
 
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
+}
+
+#[derive(Args)]
+struct RelayErc20Args {
+    #[clap(flatten)]
+    common: RelayErc20ArgsCommon,
+
+    #[command(subcommand)]
+    command: RelayErc20Commands,
 }
 
 #[derive(Subcommand)]

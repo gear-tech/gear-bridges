@@ -29,8 +29,9 @@ mod tests;
 
 mod abi;
 use abi::{
-    ContentMessage, IERC20Treasury, IMessageQueue, IMessageQueue::IMessageQueueInstance, IRelayer,
-    IRelayer::IRelayerInstance, IRelayer::MerkleRoot,
+    BridgingPayment, ContentMessage, IERC20Treasury, IMessageQueue,
+    IMessageQueue::IMessageQueueInstance, IRelayer, IRelayer::IRelayerInstance,
+    IRelayer::MerkleRoot,
 };
 
 pub mod error;
@@ -69,6 +70,11 @@ pub struct DepositEventEntry {
     pub token: H160,
     pub amount: primitive_types::U256,
 
+    pub tx_hash: TxHash,
+}
+
+#[derive(Debug, Clone)]
+pub struct FeePaidEntry {
     pub tx_hash: TxHash,
 }
 
@@ -198,6 +204,20 @@ impl EthApi {
                     tx_hash,
                 },
             )
+            .collect())
+    }
+
+    pub async fn fetch_fee_paid_events(
+        &self,
+        contract_address: H160,
+        block: u64,
+    ) -> Result<Vec<FeePaidEntry>, Error> {
+        Ok(self
+            .contracts
+            .fetch_fee_paid_events(Address::from_slice(contract_address.as_bytes()), block)
+            .await?
+            .into_iter()
+            .map(|tx_hash| FeePaidEntry { tx_hash })
             .collect())
     }
 
@@ -372,6 +392,31 @@ where
                     log.transaction_hash
                         .ok_or(Error::ErrorFetchingTransaction)?,
                 ))
+            })
+            .collect()
+    }
+
+    pub async fn fetch_fee_paid_events(
+        &self,
+        contract_address: Address,
+        block: u64,
+    ) -> Result<Vec<TxHash>, Error> {
+        let filter = Filter::new()
+            .address(contract_address)
+            .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
+            .from_block(block)
+            .to_block(block);
+
+        let event: Event<T, P, BridgingPayment::FeePaid, Ethereum> =
+            Event::new(self.provider.clone(), filter);
+
+        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
+
+        logs.into_iter()
+            .map(|(_, log)| {
+                Ok(log
+                    .transaction_hash
+                    .ok_or(Error::ErrorFetchingTransaction)?)
             })
             .collect()
     }

@@ -1,7 +1,7 @@
-use std::{env::current_dir, process::Command};
+use std::{env, path::PathBuf, process::Command};
 
 fn main() {
-    let mut ethereum_contracts_dir = current_dir().expect("Failed to get current dir");
+    let mut ethereum_contracts_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     ethereum_contracts_dir.pop();
     ethereum_contracts_dir.pop();
     ethereum_contracts_dir.pop();

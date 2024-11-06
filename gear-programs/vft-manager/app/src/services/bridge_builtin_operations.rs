@@ -41,7 +41,8 @@ pub struct Payload {
 
 impl Payload {
     pub fn pack(self) -> Vec<u8> {
-        let mut packed = Vec::with_capacity(20 + 20 + 32); // H160 is 20 bytes, U256 is 32 bytes
+        // H160 is 20 bytes, U256 is 32 bytes
+        let mut packed = Vec::with_capacity(20 + 20 + 32);
 
         packed.extend_from_slice(self.receiver.as_bytes());
         packed.extend_from_slice(self.token_id.as_bytes());

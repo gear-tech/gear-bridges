@@ -3,6 +3,7 @@
 use sails_rs::{gstd::GStdExecContext, prelude::*};
 pub mod services;
 use services::{InitConfig, VftManager};
+
 #[derive(Default)]
 pub struct Program;
 

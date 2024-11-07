@@ -56,7 +56,7 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Run clippy
-        run: __GEAR_WASM_BUILDER_NO_BUILD=1 cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
+        run: __GEAR_WASM_BUILDER_NO_BUILD=1 cargo clippy --release --all-targets -vvvvvv -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
       - name: Run rustfmt
         run: cargo fmt -- --check
   tests:
@@ -84,7 +84,7 @@ jobs:
           docker pull ghcr.io/gear-tech/node:v1.6.2
           docker run --name $NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external --log gear=debug,pallet_gear=debug,gwasm=debug
       - name: Run tests
-        run: cargo test --release --all-targets --exclude erc20-relay-app && __GEAR_WASM_BUILDER_NO_BUILD=1 cargo test --release --package erc20-relay-app -- --nocapture || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs --details $NAME; docker stop $NAME; fi; exit $exit_code; }
+        run: cargo test --release --workspace --exclude erc20-relay-app && __GEAR_WASM_BUILDER_NO_BUILD=1 cargo test --release --package erc20-relay-app -- --nocapture || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs --details $NAME; docker stop $NAME; fi; exit $exit_code; }
       - name: Run solidity tests
         run: |
           cd ethereum

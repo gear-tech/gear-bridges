@@ -1,17 +1,17 @@
 # Rust build directory
 target
 
-# Resource files 
+# Resource files
 audits
 images
 LICENSE
 *.md
 
-# Git 
+# Git
 .git
 .gitignore
 
-# IDE-generated files 
+# IDE-generated files
 .vscode
 .idea
 
@@ -25,3 +25,6 @@ onchain_proof_storage_data
 ethereum/cache
 ethereum/out
 ethereum/broadcast
+
+# Indexer-related
+indexer/

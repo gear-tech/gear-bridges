@@ -96,7 +96,6 @@ async fn spin_up_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit) {
 }
 
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 
@@ -166,7 +165,6 @@ async fn gas_for_reply() {
 }
 
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn set_vft_gateway() {
     use erc20_relay_client::Config;
 
@@ -238,7 +236,6 @@ async fn set_vft_gateway() {
 }
 
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn update_config() {
     use erc20_relay_client::Config;
 

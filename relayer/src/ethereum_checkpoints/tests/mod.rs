@@ -193,19 +193,16 @@ async fn init(network: Network, rpc_url: String) -> Result<()> {
     Ok(())
 }
 
-#[ignore]
 #[tokio::test]
 async fn init_holesky() -> Result<()> {
     init(Network::Holesky, RPC_URL.into()).await
 }
 
-#[ignore]
 #[tokio::test]
 async fn init_mainnet() -> Result<()> {
     init(Network::Mainnet, "https://www.lightclientdata.org".into()).await
 }
 
-#[ignore]
 #[tokio::test]
 async fn replay_back_and_updating() -> Result<()> {
     let beacon_client = BeaconClient::new(RPC_URL.to_string(), Some(Duration::from_secs(120)))
@@ -365,7 +362,6 @@ async fn replay_back_and_updating() -> Result<()> {
     Ok(())
 }
 
-#[ignore]
 #[tokio::test]
 async fn sync_update_requires_replaying_back() -> Result<()> {
     let finality_update: FinalityUpdateResponse =

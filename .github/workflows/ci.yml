@@ -32,6 +32,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+      - name: Build ethereum smart-contracts
+        run: forge build
+        working-directory: ./ethereum
       - name: Build
         run: cargo build --release --all-targets
   lints:
@@ -49,6 +52,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+      - name: Build ethereum smart-contracts
+        run: forge build
+        working-directory: ./ethereum
       - name: Run clippy
         run: __GEAR_WASM_BUILDER_NO_BUILD=1 cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
       - name: Run rustfmt
@@ -70,6 +76,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
+      - name: Build ethereum smart-contracts
+        run: forge build
+        working-directory: ./ethereum
       - name: Pull & run Gear node container
         run: |
           docker pull ghcr.io/gear-tech/node:v1.6.2

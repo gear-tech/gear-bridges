@@ -49,6 +49,9 @@ jobs:
         with:
           version: nightly
       - name: Run clippy
+        env:
+          __GEAR_WASM_BUILDER_NO_BUILD: 1
+          __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: 1
         run: cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
       - name: Run rustfmt
         run: cargo fmt -- --check
@@ -80,8 +83,12 @@ jobs:
           docker pull ghcr.io/gear-tech/node:v1.6.2
           docker run --name $NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external --log gear=debug,pallet_gear=debug,gwasm=debug
       - name: Run `erc20-relay-app` tests
+        env:
+          __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: 1
         run: cargo test --release --package erc20-relay-app -- --nocapture --ignored || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs --details $NAME; docker stop $NAME; fi; exit $exit_code; }
       - name: Run remaining `relayer` tests
+        env:
+          __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: 1
         run: cargo test --release --package relayer -- --nocapture --ignored || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs --details $NAME; docker stop $NAME; fi; exit $exit_code; }
       - name: Stop Gear node container (if any)
         continue-on-error: true

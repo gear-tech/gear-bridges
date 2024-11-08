@@ -14,7 +14,7 @@ use service::Erc20Relay as Erc20RelayService;
 pub struct State {
     admin: ActorId,
     checkpoint_light_client_address: ActorId,
-    vft_gateway: ActorId,
+    vft_manager: ActorId,
     config: Config,
 }
 
@@ -39,7 +39,7 @@ impl Erc20RelayProgram {
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
             checkpoint_light_client_address,
-            vft_gateway: Default::default(),
+            vft_manager: Default::default(),
             config,
         }))
     }

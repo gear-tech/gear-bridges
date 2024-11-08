@@ -53,8 +53,8 @@ sol!(
 
 sol!(
     #[sol(rpc)]
-    ERC20Treasury,
-    "../out/ERC20Treasury.sol/ERC20Treasury.json"
+    ERC20Manager,
+    "../out/ERC20Manager.sol/ERC20Manager.json"
 );
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,10 +71,10 @@ struct DeploymentEnv {
     pub verifier: Address,
     pub message_queue: Address,
     pub relayer: Address,
-    pub erc20_treasury: Address,
+    pub erc20_manager: Address,
     pub message_queue_proxy: Address,
     pub relayer_proxy: Address,
-    pub erc20_treasury_proxy: Address,
+    pub erc20_manager_proxy: Address,
 }
 
 fn build_contracts<P, T>(
@@ -103,7 +103,7 @@ where
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let erc20_treasury_proxy = ProxyContract::deploy(provider.clone())
+    let erc20_manager_proxy = ProxyContract::deploy(provider.clone())
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
@@ -118,9 +118,13 @@ where
         .await
         .map_err(Error::ErrorDuringContractExecution)?;
 
-    let erc20_treasury = ERC20Treasury::deploy(provider.clone(), *message_queue_proxy.address())
-        .await
-        .map_err(Error::ErrorDuringContractExecution)?;
+    let erc20_manager = ERC20Manager::deploy(
+        provider.clone(),
+        *message_queue_proxy.address(),
+        Default::default(),
+    )
+    .await
+    .map_err(Error::ErrorDuringContractExecution)?;
 
     let message_queue = MessageQueue::deploy(provider.clone(), *relayer_proxy.address())
         .await
@@ -131,10 +135,10 @@ where
         verifier: *verifier_mock.address(),
         message_queue: *message_queue.address(),
         relayer: *relayer.address(),
-        erc20_treasury: *erc20_treasury.address(),
+        erc20_manager: *erc20_manager.address(),
         message_queue_proxy: *message_queue_proxy.address(),
         relayer_proxy: *relayer_proxy.address(),
-        erc20_treasury_proxy: *erc20_treasury_proxy.address(),
+        erc20_manager_proxy: *erc20_manager_proxy.address(),
     };
 
     let nonce = provider.get_transaction_count(signer_address).await?;
@@ -173,8 +177,8 @@ where
 
     let nonce = provider.get_transaction_count(signer_address).await?;
 
-    let pending_tx = erc20_treasury_proxy
-        .upgradeToAndCall(deployment.erc20_treasury, Bytes::new())
+    let pending_tx = erc20_manager_proxy
+        .upgradeToAndCall(deployment.erc20_manager, Bytes::new())
         .nonce(nonce);
 
     let pending_tx = pending_tx

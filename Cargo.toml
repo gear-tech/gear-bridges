@@ -16,6 +16,9 @@ members = [
     "gear-programs/vft-gateway",
     "gear-programs/vft-gateway/app",
     "gear-programs/vft-gateway/client",
+    "gear-programs/vft-manager",
+    "gear-programs/vft-manager/app",
+    "gear-programs/vft-manager/client",
     "gear-programs/vft-treasury",
     "gear-programs/vft-treasury/app",
     "gear-programs/vft-treasury/client",
@@ -62,6 +65,9 @@ bridging-payment-vara-supply-client = { path = "gear-programs/bridging-payment-v
 vft-gateway = { path = "gear-programs/vft-gateway" }
 vft-gateway-app = { path = "gear-programs/vft-gateway/app" }
 vft-gateway-client = { path = "gear-programs/vft-gateway/client" }
+vft-manager = { path = "gear-programs/vft-manager" }
+vft-manager-app = { path = "gear-programs/vft-manager/app" }
+vft-manager-client = { path = "gear-programs/vft-manager/client" }
 vft-treasury = { path = "gear-programs/vft-treasury" }
 vft-treasury-app = { path = "gear-programs/vft-treasury/app" }
 vft-treasury-client = { path = "gear-programs/vft-treasury/client" }

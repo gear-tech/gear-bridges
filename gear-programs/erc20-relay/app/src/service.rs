@@ -1,7 +1,7 @@
 // Incorporate code generated based on the IDL file
 #[allow(dead_code)]
 mod vft {
-    include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
+    include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
 
 use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
@@ -22,7 +22,7 @@ use sails_rs::{
     gstd::{self, msg},
     prelude::*,
 };
-use vft::vft_gateway::io::MintTokens;
+use vft::vft_manager::io::SubmitReceipt;
 
 pub(crate) const CAPACITY: usize = 500_000;
 
@@ -173,7 +173,7 @@ where
             _ => return Err(Error::InvalidReceiptProof),
         }
 
-        let call_payload = MintTokens::encode_call(message.receipt_rlp);
+        let call_payload = SubmitReceipt::encode_call(message.receipt_rlp);
         let (vft_gateway_id, reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
@@ -276,7 +276,7 @@ where
     ) -> Result<(), Error> {
         #[cfg(feature = "gas_calculation")]
         {
-            let call_payload = MintTokens::encode_call(Default::default());
+            let call_payload = SubmitReceipt::encode_call(Default::default());
             let (reply_timeout, reply_deposit) = {
                 let state = self.state.borrow();
 
@@ -302,7 +302,7 @@ where
 
 fn handle_reply(slot: u64, transaction_index: u64) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
-    MintTokens::decode_reply(&reply_bytes)
+    SubmitReceipt::decode_reply(&reply_bytes)
         .expect("Unable to decode MintTokens reply")
         .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
 

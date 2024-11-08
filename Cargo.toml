@@ -10,9 +10,6 @@ members = [
     "gear-programs/bridging-payment",
     "gear-programs/bridging-payment/app",
     "gear-programs/bridging-payment/client",
-    "gear-programs/bridging-payment-vara-supply",
-    "gear-programs/bridging-payment-vara-supply/app",
-    "gear-programs/bridging-payment-vara-supply/client",
     "gear-programs/vft-gateway",
     "gear-programs/vft-gateway/app",
     "gear-programs/vft-gateway/client",
@@ -56,9 +53,6 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 bridging-payment = { path = "gear-programs/bridging-payment" }
 bridging-payment-app = { path = "gear-programs/bridging-payment/app" }
 bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
-bridging-payment-vara-supply = { path = "gear-programs/bridging-payment-vara-supply" }
-bridging-payment-vara-supply-app = { path = "gear-programs/bridging-payment-vara-supply/app" }
-bridging-payment-vara-supply-client = { path = "gear-programs/bridging-payment-vara-supply/client" }
 vft-gateway = { path = "gear-programs/vft-gateway" }
 vft-gateway-app = { path = "gear-programs/vft-gateway/app" }
 vft-gateway-client = { path = "gear-programs/vft-gateway/client" }

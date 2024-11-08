@@ -1951,46 +1951,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bridging-payment-vara-supply"
-version = "0.1.0"
-dependencies = [
- "bridging-payment-vara-supply",
- "bridging-payment-vara-supply-app",
- "bridging-payment-vara-supply-client",
- "extended_vft_wasm",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "tokio",
- "vft-client",
- "vft-treasury",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply-app"
-version = "0.1.0"
-dependencies = [
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply-client"
-version = "0.1.0"
-dependencies = [
- "bridging-payment-vara-supply-app",
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
-]
-
-[[package]]
 name = "bs58"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

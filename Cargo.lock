@@ -15455,48 +15455,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vft-treasury"
-version = "0.1.0"
-dependencies = [
- "extended_vft_wasm",
- "gclient 1.6.2",
- "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "scale-info",
- "tokio",
- "vft-client",
- "vft-treasury",
- "vft-treasury-app",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "vft-treasury-app"
-version = "0.1.0"
-dependencies = [
- "gbuiltin-eth-bridge",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-client",
-]
-
-[[package]]
-name = "vft-treasury-client"
-version = "0.1.0"
-dependencies = [
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "vft-treasury-app",
-]
-
-[[package]]
 name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

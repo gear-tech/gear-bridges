@@ -1924,8 +1924,8 @@ dependencies = [
  "sails-rs 0.6.1",
  "tokio",
  "vft-client",
- "vft-gateway",
- "vft-gateway-client",
+ "vft-manager",
+ "vft-manager-client",
 ]
 
 [[package]]
@@ -1936,7 +1936,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.6.1",
  "scale-info",
- "vft-gateway-client",
+ "vft-manager-client",
 ]
 
 [[package]]

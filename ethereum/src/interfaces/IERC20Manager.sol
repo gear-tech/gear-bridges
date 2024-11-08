@@ -25,3 +25,18 @@ interface IERC20Manager {
         Gear
     }
 }
+
+struct WithdrawMessage {
+    address receiver;
+    address token;
+    uint128 amount;
+}
+
+library Packer {
+    function pack(
+        WithdrawMessage calldata message
+    ) external pure returns (bytes memory) {
+        return
+            abi.encodePacked(message.receiver, message.token, message.amount);
+    }
+}

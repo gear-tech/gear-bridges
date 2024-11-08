@@ -6507,7 +6507,9 @@ dependencies = [
 name = "historical-proxy-app"
 version = "0.1.0"
 dependencies = [
+ "parity-scale-codec",
  "sails-rs 0.6.2",
+ "scale-info",
 ]
 
 [[package]]

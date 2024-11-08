@@ -3,7 +3,8 @@
 use sails_rs::prelude::*;
 
 pub mod service;
-
+pub mod error;
+pub mod state;
 pub struct HistoricalProxyProgram(());
 
 #[sails_rs::program]

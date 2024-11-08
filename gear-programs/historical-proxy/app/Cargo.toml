@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 sails-rs.workspace = true
+parity-scale-codec.workspace = true
+scale-info.workspace = true

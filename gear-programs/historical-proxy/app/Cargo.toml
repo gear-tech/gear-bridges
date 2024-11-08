@@ -7,3 +7,7 @@ edition = "2021"
 sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
+
+[dev-dependencies]
+historical-proxy-client.workspace = true
+historical-proxy = { workspace = true, features = ["wasm-binary"] }

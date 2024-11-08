@@ -6,5 +6,5 @@ use scale_info::TypeInfo;
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 pub enum ProxyError {
-    NoEndpoint,
+    NoEndpointForSlot(u64),
 }

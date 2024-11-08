@@ -6507,6 +6507,8 @@ dependencies = [
 name = "historical-proxy-app"
 version = "0.1.0"
 dependencies = [
+ "historical-proxy",
+ "historical-proxy-client",
  "parity-scale-codec",
  "sails-rs 0.6.2",
  "scale-info",
@@ -15473,8 +15475,8 @@ dependencies = [
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.6.2",
  "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
+ "sails-idl-gen 0.6.2",
+ "sails-rs 0.6.2",
  "scale-info",
  "tokio",
  "vft-client",
@@ -15496,8 +15498,8 @@ dependencies = [
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static",
  "parity-scale-codec",
- "sails-client-gen 0.6.1",
- "sails-rs 0.6.1",
+ "sails-client-gen 0.6.2",
+ "sails-rs 0.6.2",
  "scale-info",
  "vft-client",
 ]
@@ -15507,9 +15509,9 @@ name = "vft-manager-client"
 version = "0.1.0"
 dependencies = [
  "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
+ "sails-client-gen 0.6.2",
+ "sails-idl-gen 0.6.2",
+ "sails-rs 0.6.2",
  "vft-manager-app",
 ]
 

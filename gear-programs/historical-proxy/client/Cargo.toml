@@ -12,5 +12,6 @@ historical-proxy-app = { path = "../app" }
 sails-client-gen.workspace = true 
 sails-idl-gen.workspace = true
 
+
 [features]
 mocks = ["sails-rs/mockall", "dep:mockall"]

@@ -6,6 +6,7 @@ use gclient::{GearApi as GClientGearApi, WSAddress};
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
+use kill_switch::KillSwitchRelayer;
 use message_relayer::{eth_to_gear, gear_to_eth};
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
@@ -15,6 +16,7 @@ use utils_prometheus::MetricsBuilder;
 mod ethereum_beacon_client;
 mod ethereum_checkpoints;
 mod hex_utils;
+mod kill_switch;
 mod message_relayer;
 mod proof_storage;
 mod prover_interface;
@@ -46,6 +48,9 @@ enum CliCommands {
     RelayCheckpoints(RelayCheckpointsArgs),
     /// Relay the ERC20 tokens to the Vara network
     RelayErc20(RelayErc20Args),
+    /// Kill switch relayer
+    #[clap(visible_alias("rk"))]
+    RelayKillSwitch(RelayKillSwitchArgs),
 }
 
 #[derive(Args)]
@@ -72,6 +77,23 @@ struct RelayMerkleRootsArgs {
     ethereum_args: EthereumArgs,
     #[clap(flatten)]
     genesis_config_args: GenesisConfigArgs,
+    #[clap(flatten)]
+    prometheus_args: PrometheusArgs,
+    #[clap(flatten)]
+    proof_storage_args: ProofStorageArgs,
+}
+
+#[derive(Args)]
+struct RelayKillSwitchArgs {
+    #[clap(flatten)]
+    vara_args: VaraArgs,
+    #[clap(flatten)]
+    ethereum_args: EthereumArgs,
+    #[clap(flatten)]
+    genesis_config_args: GenesisConfigArgs,
+    /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block
+    #[arg(long = "from-block")]
+    from_block: Option<u64>,
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
     #[clap(flatten)]
@@ -258,7 +280,7 @@ async fn main() {
                         "./onchain_proof_storage_data".into(),
                     )
                     .await
-                    .expect("Failed to initilize proof storage");
+                    .expect("Failed to initialize proof storage");
 
                     metrics = metrics.register_service(&proof_storage);
 
@@ -289,6 +311,57 @@ async fn main() {
                 .await;
 
             relayer.run().await.expect("Merkle root relayer failed");
+        }
+        CliCommands::RelayKillSwitch(args) => {
+            let gear_api = create_gear_client(&args.vara_args).await;
+            let eth_api = create_eth_client(&args.ethereum_args);
+
+            let mut metrics = MetricsBuilder::new();
+
+            let proof_storage: Box<dyn ProofStorage> =
+                if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
+                    let proof_storage = GearProofStorage::new(
+                        &args.vara_args.vara_domain,
+                        args.vara_args.vara_port,
+                        args.vara_args.vara_rpc_retries,
+                        &fee_payer,
+                        "./onchain_proof_storage_data".into(),
+                    )
+                    .await
+                    .expect("Failed to initialize proof storage");
+
+                    metrics = metrics.register_service(&proof_storage);
+
+                    Box::from(proof_storage)
+                } else {
+                    log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
+                    Box::from(FileSystemProofStorage::new("./proof_storage".into()))
+                };
+
+            // TODO: metrics
+            let _metrics = metrics;
+
+            let authority_set_hash = hex::decode(&args.genesis_config_args.authority_set_hash)
+                .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
+            let authority_set_hash = authority_set_hash
+                .try_into()
+                .expect("Incorrect format for authority set hash: wrong length");
+
+            let genesis_config = GenesisConfig {
+                authority_set_id: args.genesis_config_args.authority_set_id,
+                authority_set_hash,
+            };
+
+            let mut relayer = KillSwitchRelayer::new(
+                gear_api,
+                eth_api,
+                genesis_config,
+                proof_storage,
+                args.from_block,
+            )
+            .await;
+
+            relayer.run().await.expect("Kill switch relayer failed");
         }
         CliCommands::RelayMessages(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;

@@ -12,7 +12,7 @@ use gsdk::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-        storage::{GrandpaStorage, SessionStorage},
+        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage},
         vara_runtime::SessionKeys,
     },
     Event as RuntimeEvent, GearConfig,
@@ -567,6 +567,13 @@ impl GearApi {
             num_leaves: proof.number_of_leaves,
             leaf_index: proof.leaf_index,
         })
+    }
+
+    /// Fetch queue merkle root for the given block.
+    pub async fn fetch_queue_merkle_root(&self, block: H256) -> anyhow::Result<H256> {
+        let block = (*self.api).blocks().at(block).await?;
+        let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
+        Self::fetch_from_storage(&block, &set_id_address).await
     }
 
     pub async fn message_queued_events(&self, block: H256) -> anyhow::Result<Vec<dto::Message>> {

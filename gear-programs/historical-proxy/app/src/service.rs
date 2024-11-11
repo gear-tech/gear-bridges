@@ -1,9 +1,6 @@
 use cell::RefCell;
-use ptr::addr_of_mut;
-use sails_rs::{
-    gstd::{self, ExecContext},
-    prelude::*,
-};
+
+use sails_rs::{gstd::ExecContext, prelude::*};
 
 use crate::{
     error::ProxyError,
@@ -70,12 +67,12 @@ where
     pub async fn redirect(
         &mut self,
         slot: Slot,
-        vft_gateway: ActorId,
-        proofs: Vec<u8>,
+        _vft_gateway: ActorId,
+        _proofs: Vec<u8>,
     ) -> Result<Vec<u8>, ProxyError> {
         let state = self.state.borrow();
 
-        let endpoint = state.endpoints.endpoint_for(slot);
+        let _endpoint = state.endpoints.endpoint_for(slot);
         // TODO: Send request to `endpoint` and if proofs are correct then send mesage to `vft_gateway`
         todo!()
     }

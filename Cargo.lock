@@ -6507,11 +6507,16 @@ dependencies = [
 name = "historical-proxy-app"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "gclient 1.6.2",
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.6.2",
  "historical-proxy",
  "historical-proxy-client",
  "parity-scale-codec",
  "sails-rs 0.6.2",
  "scale-info",
+ "tokio",
 ]
 
 [[package]]

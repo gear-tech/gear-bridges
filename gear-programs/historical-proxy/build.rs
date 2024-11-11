@@ -19,5 +19,6 @@ fn main() {
 
     let mut idl_path = PathBuf::from(bin_path);
     idl_path.set_extension("idl");
-    sails_idl_gen::generate_idl_to_file::<historical_proxy_app::HistoricalProxyProgram>(idl_path).unwrap();
+    sails_idl_gen::generate_idl_to_file::<historical_proxy_app::HistoricalProxyProgram>(idl_path)
+        .unwrap();
 }

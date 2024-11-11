@@ -9,5 +9,11 @@ parity-scale-codec.workspace = true
 scale-info.workspace = true
 
 [dev-dependencies]
-historical-proxy-client.workspace = true
+futures.workspace = true
+gclient.workspace = true
+gstd.workspace = true
+gtest.workspace = true
+sails-rs = { workspace = true, features = ["gtest"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
+historical-proxy-client.workspace = true

@@ -1,39 +1,34 @@
 type InitConfig = struct {
-  receiver_contract_address: h160,
+  erc20_manager_address: h160,
   gear_bridge_builtin: actor_id,
   eth_client: actor_id,
   config: Config,
 };
 
 type Config = struct {
-  gas_to_burn_tokens: u64,
+  gas_for_token_ops: u64,
   gas_for_reply_deposit: u64,
-  gas_to_mint_tokens: u64,
-  gas_to_process_mint_request: u64,
+  gas_for_submit_receipt: u64,
   gas_to_send_request_to_builtin: u64,
   reply_timeout: u32,
-  gas_for_transfer_to_eth_msg: u64,
-  gas_for_event_sending: u64,
+  gas_for_request_bridging: u64,
 };
 
 type Error = enum {
   SendFailure,
   ReplyFailure,
   BurnTokensDecode,
-  BurnFailure,
-  RequestToBuiltinSend,
-  RequestToBuiltinReply,
+  TransferFromDecode,
   BuiltinDecode,
-  PayloadSize,
   MintTokensDecode,
   ReplyTimeout,
-  MintFailure,
   NoCorrespondingEthAddress,
   ReplyHook,
   MessageNotFound,
   InvalidMessageStatus,
   MessageFailed,
   BurnTokensFailed,
+  LockTokensFailed,
   BridgeBuiltinMessageFailed,
   TokensRefunded,
   NotEthClient,
@@ -42,52 +37,69 @@ type Error = enum {
   NotSupportedEvent,
 };
 
+type TokenSupply = enum {
+  Ethereum,
+  Gear,
+};
+
 type MessageInfo = struct {
   status: MessageStatus,
   details: TxDetails,
 };
 
 type MessageStatus = enum {
-  SendingMessageToBurnTokens,
-  TokenBurnCompleted: bool,
-  WaitingReplyFromBurn,
   SendingMessageToBridgeBuiltin,
   BridgeResponseReceived: opt u256,
   WaitingReplyFromBuiltin,
   BridgeBuiltinStep,
+  SendingMessageToBurnTokens,
+  TokenBurnCompleted: bool,
+  WaitingReplyFromBurn,
   SendingMessageToMintTokens,
   TokenMintCompleted,
   WaitingReplyFromMint,
   MintTokensStep,
+  SendingMessageToLockTokens,
+  TokenLockCompleted: bool,
+  WaitingReplyFromLock,
+  SendingMessageToUnlockTokens,
+  TokenUnlockCompleted,
+  WaitingReplyFromUnlock,
+  UnlockTokensStep,
   MessageProcessedWithSuccess: u256,
 };
 
 type TxDetails = enum {
-  TransferVaraToEth: struct { vara_token_id: actor_id, sender: actor_id, amount: u256, receiver: h160 },
-  MintTokens: struct { vara_token_id: actor_id, receiver: actor_id, amount: u256 },
+  RequestBridging: struct { vara_token_id: actor_id, sender: actor_id, amount: u256, receiver: h160 },
+  SubmitReceipt: struct { vara_token_id: actor_id, receiver: actor_id, amount: u256 },
 };
 
 constructor {
   New : (init_config: InitConfig);
 };
 
-service VftGateway {
+service VftManager {
   HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
-  MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160) -> null;
-  MintTokens : (receipt_rlp: vec u8) -> result (null, Error);
+  MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
-  TransferVaraToEth : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  /// Request bridging of tokens from gear to ethereum. It involves locking/burning
+  /// `vft` tokens (specific operation depends on the token supply type) and sending
+  /// request to the bridge built-in actor.
+  RequestBridging : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
+  /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
+  /// This entrypoint can be called only by `ethereum-event-client`.
+  SubmitReceipt : (receipt_rlp: vec u8) -> result (null, Error);
   UpdateConfig : (config: Config) -> null;
+  UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
   UpdateEthClient : (eth_client_new: actor_id) -> null;
-  UpdateEthContractAddress : (eth_contract_address_new: opt h160) -> null;
-  UpdateReceiverContractAddress : (new_receiver_contract_address: h160) -> null;
   query Admin : () -> actor_id;
+  query Erc20ManagerAddress : () -> h160;
   query EthClient : () -> actor_id;
   query GearBridgeBuiltin : () -> actor_id;
   query GetConfig : () -> Config;
   query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
-  query ReceiverContractAddress : () -> h160;
-  query VaraToEthAddresses : () -> vec struct { actor_id, h160 };
+  query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
 
   events {
     TokenMappingAdded: struct { vara_token_id: actor_id, eth_token_id: h160 };

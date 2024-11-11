@@ -1,7 +1,7 @@
 // Incorporate code generated based on the IDL file
 #[allow(dead_code)]
 mod vft {
-    include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
+    include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
 
 use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
@@ -22,7 +22,7 @@ use sails_rs::{
     gstd::{self, msg},
     prelude::*,
 };
-use vft::vft_gateway::io::MintTokens;
+use vft::vft_manager::io::SubmitReceipt;
 
 pub(crate) const CAPACITY: usize = 500_000;
 
@@ -85,18 +85,18 @@ where
         }
     }
 
-    pub fn vft_gateway(&self) -> ActorId {
-        self.state.borrow().vft_gateway
+    pub fn vft_manager(&self) -> ActorId {
+        self.state.borrow().vft_manager
     }
 
-    pub fn set_vft_gateway(&mut self, vft_gateway: ActorId) {
+    pub fn set_vft_manager(&mut self, vft_manager: ActorId) {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
             panic!("Not admin");
         }
 
-        state.vft_gateway = vft_gateway;
+        state.vft_manager = vft_manager;
     }
 
     pub fn config(&self) -> Config {
@@ -173,18 +173,18 @@ where
             _ => return Err(Error::InvalidReceiptProof),
         }
 
-        let call_payload = MintTokens::encode_call(message.receipt_rlp);
-        let (vft_gateway_id, reply_timeout, reply_deposit) = {
+        let call_payload = SubmitReceipt::encode_call(message.receipt_rlp);
+        let (vft_manager_id, reply_timeout, reply_deposit) = {
             let state = self.state.borrow();
 
             (
-                state.vft_gateway,
+                state.vft_manager,
                 state.config.reply_timeout,
                 state.config.reply_deposit,
             )
         };
 
-        gstd::msg::send_bytes_for_reply(vft_gateway_id, call_payload, 0, reply_deposit)
+        gstd::msg::send_bytes_for_reply(vft_manager_id, call_payload, 0, reply_deposit)
             .map_err(|_| Error::SendFailure)?
             .up_to(Some(reply_timeout))
             .map_err(|_| Error::ReplyTimeout)?
@@ -276,7 +276,7 @@ where
     ) -> Result<(), Error> {
         #[cfg(feature = "gas_calculation")]
         {
-            let call_payload = MintTokens::encode_call(Default::default());
+            let call_payload = SubmitReceipt::encode_call(Default::default());
             let (reply_timeout, reply_deposit) = {
                 let state = self.state.borrow();
 
@@ -302,7 +302,7 @@ where
 
 fn handle_reply(slot: u64, transaction_index: u64) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
-    MintTokens::decode_reply(&reply_bytes)
+    SubmitReceipt::decode_reply(&reply_bytes)
         .expect("Unable to decode MintTokens reply")
         .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
 

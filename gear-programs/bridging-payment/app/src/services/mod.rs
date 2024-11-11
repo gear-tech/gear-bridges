@@ -6,9 +6,7 @@ use sails_rs::{
 use gstd::exec;
 mod error;
 use error::Error;
-mod utils;
-mod vft_gateway_msg;
-use vft_gateway_msg::send_message_to_gateway;
+mod vft_manager_msg;
 
 pub struct BridgingPayment<ExecContext> {
     exec_context: ExecContext,
@@ -31,21 +29,21 @@ static mut CONFIG: Option<Config> = None;
 #[derive(Debug)]
 pub struct BridgingPaymentData {
     admin_address: ActorId,
-    vft_gateway_address: ActorId,
+    vft_manager_address: ActorId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
     admin_address: ActorId,
-    vft_gateway_address: ActorId,
+    vft_manager_address: ActorId,
     config: Config,
 }
 
 impl InitConfig {
-    pub fn new(admin_address: ActorId, vft_gateway_address: ActorId, config: Config) -> Self {
+    pub fn new(admin_address: ActorId, vft_manager_address: ActorId, config: Config) -> Self {
         Self {
             admin_address,
-            vft_gateway_address,
+            vft_manager_address,
             config,
         }
     }
@@ -55,25 +53,25 @@ impl InitConfig {
 pub struct Config {
     fee: u128,
     gas_for_reply_deposit: u64,
-    gas_to_send_request_to_gateway: u64,
+    gas_to_send_request_to_vft_manager: u64,
     reply_timeout: u32,
-    gas_for_request_to_gateway_msg: u64,
+    gas_for_request_to_vft_manager_msg: u64,
 }
 
 impl Config {
     pub fn new(
         fee: u128,
         gas_for_reply_deposit: u64,
-        gas_to_send_request_to_gateway: u64,
+        gas_to_send_request_to_vft_manager: u64,
         reply_timeout: u32,
-        gas_for_request_to_gateway_msg: u64,
+        gas_for_request_to_vft_manager_msg: u64,
     ) -> Self {
         Self {
             fee,
             gas_for_reply_deposit,
-            gas_to_send_request_to_gateway,
+            gas_to_send_request_to_vft_manager,
             reply_timeout,
-            gas_for_request_to_gateway_msg,
+            gas_for_request_to_vft_manager_msg,
         }
     }
 }
@@ -85,7 +83,7 @@ where
         unsafe {
             DATA = Some(BridgingPaymentData {
                 admin_address: config.admin_address,
-                vft_gateway_address: config.vft_gateway_address,
+                vft_manager_address: config.vft_manager_address,
             });
             CONFIG = Some(config.config);
         }
@@ -149,59 +147,30 @@ where
         msg::send(data.admin_address, "", fee_balance).expect("Failed to reclaim fees");
     }
 
-    pub fn update_vft_gateway_address(&mut self, new_vft_gateway_address: ActorId) {
+    pub fn update_vft_manager_address(&mut self, new_vft_manager_address: ActorId) {
         let data = self.data();
         if data.admin_address != self.exec_context.actor_id() {
             panic!("Not admin");
         }
-        self.data_mut().vft_gateway_address = new_vft_gateway_address;
+        self.data_mut().vft_manager_address = new_vft_manager_address;
     }
 
-    pub fn update_config(
-        &mut self,
-        fee: Option<u128>,
-        gas_for_reply_deposit: Option<u64>,
-        gas_to_send_request_to_gateway: Option<u64>,
-        reply_timeout: Option<u32>,
-        gas_for_request_to_gateway_msg: Option<u64>,
-    ) {
+    pub fn set_config(&mut self, config: Config) {
         if self.data().admin_address != self.exec_context.actor_id() {
             panic!("Not admin")
         }
-        if let Some(fee) = fee {
-            self.config_mut().fee = fee;
-        }
 
-        if let Some(gas_for_reply_deposit) = gas_for_reply_deposit {
-            self.config_mut().gas_for_reply_deposit = gas_for_reply_deposit;
-        }
-
-        if let Some(gas_to_send_request_to_gateway) = gas_to_send_request_to_gateway {
-            self.config_mut().gas_to_send_request_to_gateway = gas_to_send_request_to_gateway;
-        }
-
-        if let Some(reply_timeout) = reply_timeout {
-            self.config_mut().reply_timeout = reply_timeout;
-        }
-
-        if let Some(gas_for_request_to_gateway_msg) = gas_for_request_to_gateway_msg {
-            self.config_mut().gas_for_request_to_gateway_msg = gas_for_request_to_gateway_msg;
-        }
+        *self.config_mut() = config;
     }
 
-    pub async fn request_to_gateway(
-        &mut self,
-        amount: U256,
-        receiver: H160,
-        vara_token_id: ActorId,
-    ) {
-        let vft_gateway_address = self.data().vft_gateway_address;
+    pub async fn make_request(&mut self, amount: U256, receiver: H160, vara_token_id: ActorId) {
+        let vft_manager_address = self.data().vft_manager_address;
         let config = self.config();
         let sender = self.exec_context.actor_id();
 
         if gstd::exec::gas_available()
-            < config.gas_to_send_request_to_gateway
-                + config.gas_for_request_to_gateway_msg
+            < config.gas_to_send_request_to_vft_manager
+                + config.gas_for_request_to_vft_manager_msg
                 + config.gas_for_reply_deposit
         {
             panic!("Please attach more gas");
@@ -216,12 +185,12 @@ where
         // Return surplus of attached value
         refund_surplus(sender, attached_value, config.fee);
 
-        let result = handle_gateway_transaction(
+        let result = handle_vft_manager_transaction(
             sender,
             vara_token_id,
             amount,
             receiver,
-            vft_gateway_address,
+            vft_manager_address,
             config,
         )
         .await;
@@ -242,8 +211,8 @@ where
         self.data().admin_address
     }
 
-    pub fn vft_gateway_address(&self) -> ActorId {
-        self.data().vft_gateway_address
+    pub fn vft_manager_address(&self) -> ActorId {
+        self.data().vft_manager_address
     }
 
     pub fn get_config(&self) -> Config {
@@ -251,16 +220,16 @@ where
     }
 }
 
-async fn handle_gateway_transaction(
+async fn handle_vft_manager_transaction(
     sender: ActorId,
     vara_token_id: ActorId,
     amount: U256,
     receiver: H160,
-    vft_gateway_address: ActorId,
+    vft_manager_address: ActorId,
     config: &Config,
 ) -> Result<BridgingPaymentEvents, Error> {
-    let (nonce, eth_token_id) = send_message_to_gateway(
-        vft_gateway_address,
+    let (nonce, eth_token_id) = vft_manager_msg::send(
+        vft_manager_address,
         sender,
         vara_token_id,
         amount,

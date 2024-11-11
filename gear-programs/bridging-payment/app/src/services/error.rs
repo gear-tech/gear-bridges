@@ -1,17 +1,17 @@
 use sails_rs::prelude::*;
-use vft_gateway_client::Error as VftGatewayError;
+use vft_manager_client::Error as VftManagerError;
 
 #[derive(Debug, Encode, Decode, TypeInfo)]
 pub enum Error {
     SendFailure,
     ReplyFailure,
-    RequestToGateWayDecode,
+    RequestToVftManagerDecode,
     ReplyTimeout,
-    Gateway(VftGatewayError),
+    VftManager(VftManagerError),
 }
 
-impl From<VftGatewayError> for Error {
-    fn from(e: VftGatewayError) -> Self {
-        Self::Gateway(e)
+impl From<VftManagerError> for Error {
+    fn from(e: VftManagerError) -> Self {
+        Self::VftManager(e)
     }
 }

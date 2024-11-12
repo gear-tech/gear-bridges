@@ -1924,8 +1924,8 @@ dependencies = [
  "sails-rs 0.6.1",
  "tokio",
  "vft-client",
- "vft-gateway",
- "vft-gateway-client",
+ "vft-manager",
+ "vft-manager-client",
 ]
 
 [[package]]
@@ -1936,7 +1936,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.6.1",
  "scale-info",
- "vft-gateway-client",
+ "vft-manager-client",
 ]
 
 [[package]]
@@ -1944,46 +1944,6 @@ name = "bridging-payment-client"
 version = "0.1.0"
 dependencies = [
  "bridging-payment-app",
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply"
-version = "0.1.0"
-dependencies = [
- "bridging-payment-vara-supply",
- "bridging-payment-vara-supply-app",
- "bridging-payment-vara-supply-client",
- "extended_vft_wasm",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "tokio",
- "vft-client",
- "vft-treasury",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply-app"
-version = "0.1.0"
-dependencies = [
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply-client"
-version = "0.1.0"
-dependencies = [
- "bridging-payment-vara-supply-app",
  "mockall 0.12.1",
  "sails-client-gen 0.6.1",
  "sails-idl-gen 0.6.1",
@@ -15366,58 +15326,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vft-gateway"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-primitives",
- "alloy-rlp",
- "blake2",
- "extended_vft_wasm",
- "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "scale-info",
- "tokio",
- "vft-client",
- "vft-gateway",
- "vft-gateway-app",
- "vft-gateway-client",
-]
-
-[[package]]
-name = "vft-gateway-app"
-version = "0.1.0"
-dependencies = [
- "alloy-rlp",
- "alloy-sol-types",
- "ethereum-common",
- "gbuiltin-eth-bridge",
- "getrandom 0.2.15",
- "git-download",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "lazy_static",
- "parity-scale-codec",
- "sails-client-gen 0.6.1",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-client",
-]
-
-[[package]]
-name = "vft-gateway-client"
-version = "0.1.0"
-dependencies = [
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "vft-gateway-app",
-]
-
-[[package]]
 name = "vft-manager"
 version = "0.1.0"
 dependencies = [
@@ -15492,48 +15400,6 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.2.1",
  "scale-info",
-]
-
-[[package]]
-name = "vft-treasury"
-version = "0.1.0"
-dependencies = [
- "extended_vft_wasm",
- "gclient 1.6.2",
- "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "scale-info",
- "tokio",
- "vft-client",
- "vft-treasury",
- "vft-treasury-app",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "vft-treasury-app"
-version = "0.1.0"
-dependencies = [
- "gbuiltin-eth-bridge",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-client",
-]
-
-[[package]]
-name = "vft-treasury-client"
-version = "0.1.0"
-dependencies = [
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "vft-treasury-app",
 ]
 
 [[package]]

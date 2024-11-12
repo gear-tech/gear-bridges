@@ -14,8 +14,8 @@ sails-idl-gen.workspace = true
 [dev-dependencies]
 bridging-payment = { path = ".", features = ["wasm-binary"] }
 bridging-payment-client = { path = "client" }
-vft-gateway = { workspace = true, features = ["wasm-binary"] }
-vft-gateway-client.workspace = true
+vft-manager = { workspace = true, features = ["wasm-binary"] }
+vft-manager-client.workspace = true
 extended_vft_wasm.workspace = true
 vft-client.workspace = true
 

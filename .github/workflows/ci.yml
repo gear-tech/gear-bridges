@@ -62,7 +62,7 @@ jobs:
   tests:
     runs-on: kuberunner
     env:
-      NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
+      NODE_CONTAINER_NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,13 +82,13 @@ jobs:
       - name: Pull & run Gear node container
         run: |
           docker pull ghcr.io/gear-tech/node:v1.6.2
-          docker run --name $NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external --log gear=debug,pallet_gear=debug,gwasm=debug
+          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external --log gear=debug,pallet_gear=debug,gwasm=debug
       - name: Run tests
-        run: cargo test --release --workspace --exclude erc20-relay-app --all-targets && cargo test --release --package erc20-relay-app -- --nocapture || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs --details $NAME; docker stop $NAME; fi; exit $exit_code; }
+        run: cargo test --release --workspace --exclude erc20-relay-app --all-targets && cargo test --release --package erc20-relay-app -- --nocapture || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
       - name: Run solidity tests
         run: |
           cd ethereum
           forge test
       - name: Stop Gear node container (if any)
         continue-on-error: true
-        run: docker stop $NAME
+        run: docker stop $NODE_CONTAINER_NAME

@@ -3,10 +3,11 @@ import { useAlert } from '@gear-js/react-hooks';
 import { BaseError, useConfig, useWriteContract } from 'wagmi';
 import { watchContractEvent } from 'wagmi/actions';
 
+import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount, useLoading } from '@/hooks';
 import { logger } from '@/utils';
 
-import { FUNGIBLE_TOKEN_ABI, EVENT_NAME, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
+import { EVENT_NAME, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
 
 function useApprove(address: HexString | undefined) {

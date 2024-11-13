@@ -2,8 +2,7 @@
 .wideCard {
   white-space: nowrap;
 
-  svg,
-  .icons {
+  svg {
     flex-shrink: 0;
   }
 }
@@ -22,7 +21,7 @@
   gap: 48px;
 }
 
-.blockhash {
+.blockNumber {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -33,94 +32,4 @@
   span {
     text-decoration: underline;
   }
-}
-
-.sources {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-
-  &.compact {
-    width: 65%;
-  }
-}
-
-.source {
-  width: calc(50% - 24px);
-
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  > div {
-    overflow: hidden;
-  }
-
-  svg {
-    width: 32px;
-    height: 32px;
-
-    border-radius: 50%;
-
-    &:last-child {
-      margin-left: -12px;
-      box-shadow: -2px 0px 0px 0px rgba(0, 0, 0, 0.1);
-    }
-  }
-}
-
-.amount {
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 150%;
-}
-
-.address,
-.date {
-  color: #838897;
-  line-height: 141.667%;
-  letter-spacing: -0.5px;
-}
-
-.date {
-  text-align: center;
-  font-size: 16px;
-
-  &.compact {
-    font-size: 12px;
-  }
-}
-
-.status {
-  margin-bottom: 4px;
-  padding: 2px 16px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 150%;
-
-  border-radius: 4px;
-
-  &.Completed {
-    color: #13bc9d;
-
-    background-color: rgba(14, 211, 163, 0.07);
-  }
-
-  &.InProgress {
-    color: #838897;
-
-    background-color: rgba(131, 136, 151, 0.07);
-  }
-}
-
-.date {
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }

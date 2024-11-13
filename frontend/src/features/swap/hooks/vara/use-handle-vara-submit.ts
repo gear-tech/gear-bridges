@@ -1,9 +1,9 @@
 import { HexString } from '@gear-js/api';
 import { useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
 
+import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, VftProgram } from '@/consts';
 import { isUndefined, logger } from '@/utils';
 
-import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, VftProgram } from '../../consts';
 import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
 import { FormattedValues } from '../../types';
 

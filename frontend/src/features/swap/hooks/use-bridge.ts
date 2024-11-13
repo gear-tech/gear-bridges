@@ -1,27 +1,25 @@
 import { HexString } from '@gear-js/api';
 import { useMemo, useState } from 'react';
 
+import { useTokens } from '@/hooks';
+
 import { NETWORK_INDEX } from '../consts';
 import { getOptions } from '../utils';
-
-import { useFTSymbols } from './use-ft-symbols';
-import { useFTAddresses } from './vara';
 
 function useBridge(networkIndex: number) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
-  const { data: ftAddresses } = useFTAddresses();
-  const { data: ftSymbols, isPending } = useFTSymbols(ftAddresses);
+  const { addresses, symbols, isLoading } = useTokens();
 
-  const { varaOptions, ethOptions } = useMemo(() => getOptions(ftSymbols), [ftSymbols]);
+  const { varaOptions, ethOptions } = useMemo(() => getOptions(addresses, symbols), [addresses, symbols]);
   const options = { from: isVaraNetwork ? varaOptions : ethOptions, to: isVaraNetwork ? ethOptions : varaOptions };
 
   const [pair, setPair] = useState('0');
   const pairIndex = Number(pair);
-  const address = ftAddresses?.[pairIndex][networkIndex].toString() as HexString | undefined;
-  const symbol = ftSymbols?.[pairIndex][networkIndex];
+  const address = addresses?.[pairIndex][networkIndex].toString() as HexString | undefined;
+  const symbol = address ? symbols?.[address] : undefined;
 
-  return { address, options, symbol, pair: { value: pair, set: setPair }, isLoading: isPending };
+  return { address, options, symbol, pair: { value: pair, set: setPair }, isLoading };
 }
 
 export { useBridge };

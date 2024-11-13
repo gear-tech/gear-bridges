@@ -1,3 +1,5 @@
+import { HexString } from '@gear-js/api';
+import { ActorId, H160 } from 'sails-js';
 import { parseUnits } from 'viem';
 import { z } from 'zod';
 
@@ -22,14 +24,20 @@ const getAmountSchema = (
     .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
 };
 
-const getOptions = (symbols: [string, string][] | undefined) => {
+const getOptions = (addresses: [ActorId, H160][] | undefined, symbols: Record<HexString, string> | undefined) => {
   const varaOptions: { label: string; value: string }[] = [];
   const ethOptions: { label: string; value: string }[] = [];
 
-  if (!symbols) return { varaOptions, ethOptions };
+  if (!addresses || !symbols) return { varaOptions, ethOptions };
 
-  symbols.forEach(([varaSymbol, ethSymbol], index) => {
+  addresses.forEach((pair, index) => {
     const value = index.toString();
+
+    const varaAddress = pair[0].toString() as HexString;
+    const ethAddress = pair[1].toString() as HexString;
+
+    const varaSymbol = symbols[varaAddress];
+    const ethSymbol = symbols[ethAddress];
 
     varaOptions.push({ label: varaSymbol, value });
     ethOptions.push({ label: ethSymbol, value });

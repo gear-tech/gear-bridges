@@ -1,4 +1,4 @@
-import { Teleport, Direction, Status } from './graphql/graphql';
+import { Transfer, Network, Status, TransferWhereInput } from './graphql/graphql';
 
-export { Direction, Status };
-export type { Teleport };
+export { Network, Status };
+export type { Transfer, TransferWhereInput };

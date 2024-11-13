@@ -2,9 +2,10 @@ import { HexString } from '@gear-js/api';
 import { useAccount, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 import { formatUnits } from 'viem';
 
+import { VftProgram } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { BALANCE_REFETCH_INTERVAL, QUERY_NAME, SERVICE_NAME, VftProgram } from '../../consts';
+import { BALANCE_REFETCH_INTERVAL, QUERY_NAME, SERVICE_NAME } from '../../consts';
 
 function useVaraFTBalance(address: HexString | undefined) {
   const { account } = useAccount();

@@ -2,10 +2,11 @@ import { HexString } from '@gear-js/api';
 import { formatUnits } from 'viem';
 import { useReadContracts } from 'wagmi';
 
+import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount } from '@/hooks';
 import { isUndefined } from '@/utils';
 
-import { FUNGIBLE_TOKEN_ABI, BALANCE_REFETCH_INTERVAL } from '../../consts';
+import { BALANCE_REFETCH_INTERVAL } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
 
 const abi = FUNGIBLE_TOKEN_ABI;

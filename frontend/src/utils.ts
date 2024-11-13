@@ -33,4 +33,6 @@ const asOptionalField = <T extends z.ZodTypeAny>(schema: T) => schema.or(z.liter
 
 const isUndefined = (value: unknown): value is undefined => value === undefined;
 
-export { cx, isValidAddress, logger, asOptionalField, isUndefined };
+const isNumeric = (value: string) => /^\d+$/.test(value);
+
+export { cx, isValidAddress, logger, asOptionalField, isUndefined, isNumeric };

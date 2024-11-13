@@ -1,22 +1,16 @@
-import { SPEC, NETWORK_NAME, FEE_DECIMALS, NETWORK_NATIVE_SYMBOL } from './spec';
-
-const VARA_NODE_ADDRESS = import.meta.env.VITE_VARA_NODE_ADDRESS as string;
-const ETH_NODE_ADDRESS = import.meta.env.VITE_ETH_NODE_ADDRESS as string;
-const ETH_CHAIN_ID = Number(import.meta.env.VITE_ETH_CHAIN_ID as string);
-
-const ROUTE = {
-  HOME: '/',
-  TRANSACTIONS: '/transactions',
-  FAQ: '/faq',
-};
+import { FUNGIBLE_TOKEN_ABI } from './abi';
+import { VARA_NODE_ADDRESS, ETH_NODE_ADDRESS, ETH_CHAIN_ID, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from './env';
+import { ROUTE } from './routing';
+import { BridgingPaymentProgram, VftGatewayProgram, VftProgram } from './sails';
 
 export {
+  FUNGIBLE_TOKEN_ABI,
   VARA_NODE_ADDRESS,
   ETH_NODE_ADDRESS,
   ETH_CHAIN_ID,
+  BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   ROUTE,
-  SPEC,
-  NETWORK_NAME,
-  FEE_DECIMALS,
-  NETWORK_NATIVE_SYMBOL,
+  BridgingPaymentProgram,
+  VftGatewayProgram,
+  VftProgram,
 };

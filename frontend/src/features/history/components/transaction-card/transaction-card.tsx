@@ -1,41 +1,56 @@
+import { HexString } from '@gear-js/api';
+
 import { Card, CopyButton, Skeleton, TruncatedText } from '@/components';
 
-import ArrowSVG from '../../assets/arrow.svg?react';
-import { Teleport } from '../../types';
+import { Transfer } from '../../types';
+import { TransactionDate } from '../transaction-date';
+import { TransactionPair } from '../transaction-pair';
+import { TransactionStatus } from '../transaction-status';
 
-import { Sources } from './sources';
-import { Status } from './status';
-import { Time } from './time';
 import styles from './transaction-card.module.scss';
 
-type Props = Pick<Teleport, 'amount' | 'from' | 'to' | 'status' | 'timestamp' | 'direction' | 'blockhash' | 'pair'> & {
-  isCompact?: boolean;
+type Props = Pick<
+  Transfer,
+  | 'amount'
+  | 'destination'
+  | 'source'
+  | 'status'
+  | 'timestamp'
+  | 'sourceNetwork'
+  | 'destNetwork'
+  | 'blockNumber'
+  | 'sender'
+  | 'receiver'
+> & {
+  decimals: Record<HexString, number>;
+  symbols: Record<HexString, string>;
 };
 
-function TransactionCard({ amount, from, to, status, timestamp, direction, blockhash, pair, isCompact }: Props) {
-  if (isCompact)
-    return (
-      <Card className={styles.compactCard}>
-        <Sources direction={direction} from={from} to={to} amount={amount} pair={pair} isCompact />
-
-        <div>
-          <Status status={status} />
-          <Time timestamp={timestamp} isCompact />
-        </div>
-      </Card>
-    );
-
+function TransactionCard({ status, timestamp, blockNumber, ...props }: Props) {
   return (
     <Card className={styles.wideCard}>
-      <Time timestamp={timestamp} />
+      <TransactionDate timestamp={timestamp} />
 
-      <p className={styles.blockhash}>
-        <TruncatedText value={blockhash} />
-        <CopyButton value={blockhash} />
+      <p className={styles.blockNumber}>
+        <TruncatedText value={blockNumber} />
+        <CopyButton value={blockNumber} />
       </p>
 
-      <Sources direction={direction} from={from} to={to} pair={pair} amount={amount} />
-      <Status status={status} />
+      <TransactionPair {...props} />
+      <TransactionStatus status={status} />
+    </Card>
+  );
+}
+
+function TransactionCardCompact({ status, timestamp, ...props }: Props) {
+  return (
+    <Card className={styles.compactCard}>
+      <TransactionPair {...props} isCompact />
+
+      <div>
+        <TransactionStatus status={status} />
+        <TransactionDate timestamp={timestamp} isCompact />
+      </div>
     </Card>
   );
 }
@@ -45,40 +60,11 @@ function TransactionCardSkeleton() {
     // TODO: make detailed
     <Skeleton>
       <Card className={styles.compactCard}>
-        <div className={styles.sources}>
-          <div className={styles.source}>
-            <div className={styles.icons}>
-              <ArrowSVG />
-              <ArrowSVG />
-            </div>
-
-            <div>
-              <p className={styles.amount}>0.0000 Unit</p>
-              <TruncatedText value="0x00" className={styles.address} />
-            </div>
-          </div>
-
-          <ArrowSVG />
-
-          <div className={styles.source}>
-            <div className={styles.icons}>
-              <ArrowSVG />
-              <ArrowSVG />
-            </div>
-
-            <div>
-              <p className={styles.amount}>0.0000 Unit</p>
-              <TruncatedText value="0x00" className={styles.address} />
-            </div>
-          </div>
-        </div>
+        <TransactionPair.Skeleton />
 
         <div>
-          <div className={styles.status}>Status</div>
-
-          <p className={styles.date}>
-            <ArrowSVG /> 01.01.1970 00:00:00
-          </p>
+          <TransactionStatus.Skeleton />
+          <TransactionDate.Skeleton />
         </div>
       </Card>
     </Skeleton>
@@ -86,5 +72,6 @@ function TransactionCardSkeleton() {
 }
 
 TransactionCard.Skeleton = TransactionCardSkeleton;
+TransactionCard.Compact = TransactionCardCompact;
 
 export { TransactionCard };

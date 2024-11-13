@@ -20,37 +20,48 @@ export type Scalars = {
   DateTime: { input: string; output: string; }
 };
 
-export enum Direction {
-  EthToVara = 'EthToVara',
-  VaraToEth = 'VaraToEth'
-}
-
-export type NotUpdatedCompleted = {
-  __typename?: 'NotUpdatedCompleted';
+export type CompletedTransfer = {
+  __typename?: 'CompletedTransfer';
+  destNetwork: Network;
   id: Scalars['String']['output'];
-  side: Side;
+  nonce: Scalars['String']['output'];
 };
 
-export type NotUpdatedCompletedEdge = {
-  __typename?: 'NotUpdatedCompletedEdge';
+export type CompletedTransferEdge = {
+  __typename?: 'CompletedTransferEdge';
   cursor: Scalars['String']['output'];
-  node: NotUpdatedCompleted;
+  node: CompletedTransfer;
 };
 
-export enum NotUpdatedCompletedOrderByInput {
+export enum CompletedTransferOrderByInput {
+  DestNetworkAsc = 'destNetwork_ASC',
+  DestNetworkAscNullsFirst = 'destNetwork_ASC_NULLS_FIRST',
+  DestNetworkAscNullsLast = 'destNetwork_ASC_NULLS_LAST',
+  DestNetworkDesc = 'destNetwork_DESC',
+  DestNetworkDescNullsFirst = 'destNetwork_DESC_NULLS_FIRST',
+  DestNetworkDescNullsLast = 'destNetwork_DESC_NULLS_LAST',
   IdAsc = 'id_ASC',
   IdAscNullsFirst = 'id_ASC_NULLS_FIRST',
+  IdAscNullsLast = 'id_ASC_NULLS_LAST',
   IdDesc = 'id_DESC',
+  IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
   IdDescNullsLast = 'id_DESC_NULLS_LAST',
-  SideAsc = 'side_ASC',
-  SideAscNullsFirst = 'side_ASC_NULLS_FIRST',
-  SideDesc = 'side_DESC',
-  SideDescNullsLast = 'side_DESC_NULLS_LAST'
+  NonceAsc = 'nonce_ASC',
+  NonceAscNullsFirst = 'nonce_ASC_NULLS_FIRST',
+  NonceAscNullsLast = 'nonce_ASC_NULLS_LAST',
+  NonceDesc = 'nonce_DESC',
+  NonceDescNullsFirst = 'nonce_DESC_NULLS_FIRST',
+  NonceDescNullsLast = 'nonce_DESC_NULLS_LAST'
 }
 
-export type NotUpdatedCompletedWhereInput = {
-  AND: InputMaybe<Array<NotUpdatedCompletedWhereInput>>;
-  OR: InputMaybe<Array<NotUpdatedCompletedWhereInput>>;
+export type CompletedTransferWhereInput = {
+  AND: InputMaybe<Array<CompletedTransferWhereInput>>;
+  OR: InputMaybe<Array<CompletedTransferWhereInput>>;
+  destNetwork_eq: InputMaybe<Network>;
+  destNetwork_in: InputMaybe<Array<Network>>;
+  destNetwork_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  destNetwork_not_eq: InputMaybe<Network>;
+  destNetwork_not_in: InputMaybe<Array<Network>>;
   id_contains: InputMaybe<Scalars['String']['input']>;
   id_containsInsensitive: InputMaybe<Scalars['String']['input']>;
   id_endsWith: InputMaybe<Scalars['String']['input']>;
@@ -68,19 +79,36 @@ export type NotUpdatedCompletedWhereInput = {
   id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   id_not_startsWith: InputMaybe<Scalars['String']['input']>;
   id_startsWith: InputMaybe<Scalars['String']['input']>;
-  side_eq: InputMaybe<Side>;
-  side_in: InputMaybe<Array<Side>>;
-  side_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  side_not_eq: InputMaybe<Side>;
-  side_not_in: InputMaybe<Array<Side>>;
+  nonce_contains: InputMaybe<Scalars['String']['input']>;
+  nonce_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  nonce_endsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_eq: InputMaybe<Scalars['String']['input']>;
+  nonce_gt: InputMaybe<Scalars['String']['input']>;
+  nonce_gte: InputMaybe<Scalars['String']['input']>;
+  nonce_in: InputMaybe<Array<Scalars['String']['input']>>;
+  nonce_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  nonce_lt: InputMaybe<Scalars['String']['input']>;
+  nonce_lte: InputMaybe<Scalars['String']['input']>;
+  nonce_not_contains: InputMaybe<Scalars['String']['input']>;
+  nonce_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  nonce_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_not_eq: InputMaybe<Scalars['String']['input']>;
+  nonce_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  nonce_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_startsWith: InputMaybe<Scalars['String']['input']>;
 };
 
-export type NotUpdatedCompletedsConnection = {
-  __typename?: 'NotUpdatedCompletedsConnection';
-  edges: Array<NotUpdatedCompletedEdge>;
+export type CompletedTransfersConnection = {
+  __typename?: 'CompletedTransfersConnection';
+  edges: Array<CompletedTransferEdge>;
   pageInfo: PageInfo;
   totalCount: Scalars['Int']['output'];
 };
+
+export enum Network {
+  Ethereum = 'Ethereum',
+  Gear = 'Gear'
+}
 
 export type PageInfo = {
   __typename?: 'PageInfo';
@@ -90,224 +118,77 @@ export type PageInfo = {
   startCursor: Scalars['String']['output'];
 };
 
-export enum Pair {
-  EthWrappedEth = 'EthWrappedEth',
-  UsdcWrappedUsdc = 'USDCWrappedUSDC',
-  UsdtWrappedUsdt = 'USDTWrappedUSDT',
-  VaraWrappedVara = 'VaraWrappedVara'
-}
-
-export type Query = {
-  __typename?: 'Query';
-  notUpdatedCompletedById: Maybe<NotUpdatedCompleted>;
-  /** @deprecated Use notUpdatedCompletedById */
-  notUpdatedCompletedByUniqueInput: Maybe<NotUpdatedCompleted>;
-  notUpdatedCompleteds: Array<NotUpdatedCompleted>;
-  notUpdatedCompletedsConnection: NotUpdatedCompletedsConnection;
-  squidStatus: Maybe<SquidStatus>;
-  teleportById: Maybe<Teleport>;
-  /** @deprecated Use teleportById */
-  teleportByUniqueInput: Maybe<Teleport>;
-  teleports: Array<Teleport>;
-  teleportsConnection: TeleportsConnection;
-};
-
-
-export type QueryNotUpdatedCompletedByIdArgs = {
-  id: Scalars['String']['input'];
-};
-
-
-export type QueryNotUpdatedCompletedByUniqueInputArgs = {
-  where: WhereIdInput;
-};
-
-
-export type QueryNotUpdatedCompletedsArgs = {
-  limit: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy: InputMaybe<Array<NotUpdatedCompletedOrderByInput>>;
-  where: InputMaybe<NotUpdatedCompletedWhereInput>;
-};
-
-
-export type QueryNotUpdatedCompletedsConnectionArgs = {
-  after: InputMaybe<Scalars['String']['input']>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  orderBy: Array<NotUpdatedCompletedOrderByInput>;
-  where: InputMaybe<NotUpdatedCompletedWhereInput>;
-};
-
-
-export type QueryTeleportByIdArgs = {
-  id: Scalars['String']['input'];
-};
-
-
-export type QueryTeleportByUniqueInputArgs = {
-  where: WhereIdInput;
-};
-
-
-export type QueryTeleportsArgs = {
-  limit: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy: InputMaybe<Array<TeleportOrderByInput>>;
-  where: InputMaybe<TeleportWhereInput>;
-};
-
-
-export type QueryTeleportsConnectionArgs = {
-  after: InputMaybe<Scalars['String']['input']>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  orderBy: Array<TeleportOrderByInput>;
-  where: InputMaybe<TeleportWhereInput>;
-};
-
-export enum Side {
-  Eth = 'Eth',
-  Vara = 'Vara'
-}
-
-export type SquidStatus = {
-  __typename?: 'SquidStatus';
-  /** The height of the processed part of the chain */
-  height: Maybe<Scalars['Int']['output']>;
-};
-
-export enum Status {
-  Completed = 'Completed',
-  InProgress = 'InProgress'
-}
-
-export type Teleport = {
-  __typename?: 'Teleport';
-  amount: Scalars['BigInt']['output'];
-  block: Scalars['BigInt']['output'];
-  blockhash: Scalars['String']['output'];
-  direction: Direction;
-  from: Scalars['String']['output'];
+export type Pair = {
+  __typename?: 'Pair';
+  ethToken: Scalars['String']['output'];
+  gearToken: Scalars['String']['output'];
   id: Scalars['String']['output'];
-  nonce: Scalars['BigInt']['output'];
-  pair: Pair;
-  status: Status;
-  timestamp: Scalars['DateTime']['output'];
-  to: Scalars['String']['output'];
 };
 
-export type TeleportEdge = {
-  __typename?: 'TeleportEdge';
+export type PairEdge = {
+  __typename?: 'PairEdge';
   cursor: Scalars['String']['output'];
-  node: Teleport;
+  node: Pair;
 };
 
-export enum TeleportOrderByInput {
-  AmountAsc = 'amount_ASC',
-  AmountAscNullsFirst = 'amount_ASC_NULLS_FIRST',
-  AmountDesc = 'amount_DESC',
-  AmountDescNullsLast = 'amount_DESC_NULLS_LAST',
-  BlockAsc = 'block_ASC',
-  BlockAscNullsFirst = 'block_ASC_NULLS_FIRST',
-  BlockDesc = 'block_DESC',
-  BlockDescNullsLast = 'block_DESC_NULLS_LAST',
-  BlockhashAsc = 'blockhash_ASC',
-  BlockhashAscNullsFirst = 'blockhash_ASC_NULLS_FIRST',
-  BlockhashDesc = 'blockhash_DESC',
-  BlockhashDescNullsLast = 'blockhash_DESC_NULLS_LAST',
-  DirectionAsc = 'direction_ASC',
-  DirectionAscNullsFirst = 'direction_ASC_NULLS_FIRST',
-  DirectionDesc = 'direction_DESC',
-  DirectionDescNullsLast = 'direction_DESC_NULLS_LAST',
-  FromAsc = 'from_ASC',
-  FromAscNullsFirst = 'from_ASC_NULLS_FIRST',
-  FromDesc = 'from_DESC',
-  FromDescNullsLast = 'from_DESC_NULLS_LAST',
+export enum PairOrderByInput {
+  EthTokenAsc = 'ethToken_ASC',
+  EthTokenAscNullsFirst = 'ethToken_ASC_NULLS_FIRST',
+  EthTokenAscNullsLast = 'ethToken_ASC_NULLS_LAST',
+  EthTokenDesc = 'ethToken_DESC',
+  EthTokenDescNullsFirst = 'ethToken_DESC_NULLS_FIRST',
+  EthTokenDescNullsLast = 'ethToken_DESC_NULLS_LAST',
+  GearTokenAsc = 'gearToken_ASC',
+  GearTokenAscNullsFirst = 'gearToken_ASC_NULLS_FIRST',
+  GearTokenAscNullsLast = 'gearToken_ASC_NULLS_LAST',
+  GearTokenDesc = 'gearToken_DESC',
+  GearTokenDescNullsFirst = 'gearToken_DESC_NULLS_FIRST',
+  GearTokenDescNullsLast = 'gearToken_DESC_NULLS_LAST',
   IdAsc = 'id_ASC',
   IdAscNullsFirst = 'id_ASC_NULLS_FIRST',
+  IdAscNullsLast = 'id_ASC_NULLS_LAST',
   IdDesc = 'id_DESC',
-  IdDescNullsLast = 'id_DESC_NULLS_LAST',
-  NonceAsc = 'nonce_ASC',
-  NonceAscNullsFirst = 'nonce_ASC_NULLS_FIRST',
-  NonceDesc = 'nonce_DESC',
-  NonceDescNullsLast = 'nonce_DESC_NULLS_LAST',
-  PairAsc = 'pair_ASC',
-  PairAscNullsFirst = 'pair_ASC_NULLS_FIRST',
-  PairDesc = 'pair_DESC',
-  PairDescNullsLast = 'pair_DESC_NULLS_LAST',
-  StatusAsc = 'status_ASC',
-  StatusAscNullsFirst = 'status_ASC_NULLS_FIRST',
-  StatusDesc = 'status_DESC',
-  StatusDescNullsLast = 'status_DESC_NULLS_LAST',
-  TimestampAsc = 'timestamp_ASC',
-  TimestampAscNullsFirst = 'timestamp_ASC_NULLS_FIRST',
-  TimestampDesc = 'timestamp_DESC',
-  TimestampDescNullsLast = 'timestamp_DESC_NULLS_LAST',
-  ToAsc = 'to_ASC',
-  ToAscNullsFirst = 'to_ASC_NULLS_FIRST',
-  ToDesc = 'to_DESC',
-  ToDescNullsLast = 'to_DESC_NULLS_LAST'
+  IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
+  IdDescNullsLast = 'id_DESC_NULLS_LAST'
 }
 
-export type TeleportWhereInput = {
-  AND: InputMaybe<Array<TeleportWhereInput>>;
-  OR: InputMaybe<Array<TeleportWhereInput>>;
-  amount_eq: InputMaybe<Scalars['BigInt']['input']>;
-  amount_gt: InputMaybe<Scalars['BigInt']['input']>;
-  amount_gte: InputMaybe<Scalars['BigInt']['input']>;
-  amount_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
-  amount_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  amount_lt: InputMaybe<Scalars['BigInt']['input']>;
-  amount_lte: InputMaybe<Scalars['BigInt']['input']>;
-  amount_not_eq: InputMaybe<Scalars['BigInt']['input']>;
-  amount_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
-  block_eq: InputMaybe<Scalars['BigInt']['input']>;
-  block_gt: InputMaybe<Scalars['BigInt']['input']>;
-  block_gte: InputMaybe<Scalars['BigInt']['input']>;
-  block_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
-  block_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  block_lt: InputMaybe<Scalars['BigInt']['input']>;
-  block_lte: InputMaybe<Scalars['BigInt']['input']>;
-  block_not_eq: InputMaybe<Scalars['BigInt']['input']>;
-  block_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
-  blockhash_contains: InputMaybe<Scalars['String']['input']>;
-  blockhash_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  blockhash_endsWith: InputMaybe<Scalars['String']['input']>;
-  blockhash_eq: InputMaybe<Scalars['String']['input']>;
-  blockhash_gt: InputMaybe<Scalars['String']['input']>;
-  blockhash_gte: InputMaybe<Scalars['String']['input']>;
-  blockhash_in: InputMaybe<Array<Scalars['String']['input']>>;
-  blockhash_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  blockhash_lt: InputMaybe<Scalars['String']['input']>;
-  blockhash_lte: InputMaybe<Scalars['String']['input']>;
-  blockhash_not_contains: InputMaybe<Scalars['String']['input']>;
-  blockhash_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  blockhash_not_endsWith: InputMaybe<Scalars['String']['input']>;
-  blockhash_not_eq: InputMaybe<Scalars['String']['input']>;
-  blockhash_not_in: InputMaybe<Array<Scalars['String']['input']>>;
-  blockhash_not_startsWith: InputMaybe<Scalars['String']['input']>;
-  blockhash_startsWith: InputMaybe<Scalars['String']['input']>;
-  direction_eq: InputMaybe<Direction>;
-  direction_in: InputMaybe<Array<Direction>>;
-  direction_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  direction_not_eq: InputMaybe<Direction>;
-  direction_not_in: InputMaybe<Array<Direction>>;
-  from_contains: InputMaybe<Scalars['String']['input']>;
-  from_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  from_endsWith: InputMaybe<Scalars['String']['input']>;
-  from_eq: InputMaybe<Scalars['String']['input']>;
-  from_gt: InputMaybe<Scalars['String']['input']>;
-  from_gte: InputMaybe<Scalars['String']['input']>;
-  from_in: InputMaybe<Array<Scalars['String']['input']>>;
-  from_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  from_lt: InputMaybe<Scalars['String']['input']>;
-  from_lte: InputMaybe<Scalars['String']['input']>;
-  from_not_contains: InputMaybe<Scalars['String']['input']>;
-  from_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  from_not_endsWith: InputMaybe<Scalars['String']['input']>;
-  from_not_eq: InputMaybe<Scalars['String']['input']>;
-  from_not_in: InputMaybe<Array<Scalars['String']['input']>>;
-  from_not_startsWith: InputMaybe<Scalars['String']['input']>;
-  from_startsWith: InputMaybe<Scalars['String']['input']>;
+export type PairWhereInput = {
+  AND: InputMaybe<Array<PairWhereInput>>;
+  OR: InputMaybe<Array<PairWhereInput>>;
+  ethToken_contains: InputMaybe<Scalars['String']['input']>;
+  ethToken_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  ethToken_endsWith: InputMaybe<Scalars['String']['input']>;
+  ethToken_eq: InputMaybe<Scalars['String']['input']>;
+  ethToken_gt: InputMaybe<Scalars['String']['input']>;
+  ethToken_gte: InputMaybe<Scalars['String']['input']>;
+  ethToken_in: InputMaybe<Array<Scalars['String']['input']>>;
+  ethToken_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  ethToken_lt: InputMaybe<Scalars['String']['input']>;
+  ethToken_lte: InputMaybe<Scalars['String']['input']>;
+  ethToken_not_contains: InputMaybe<Scalars['String']['input']>;
+  ethToken_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  ethToken_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  ethToken_not_eq: InputMaybe<Scalars['String']['input']>;
+  ethToken_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  ethToken_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  ethToken_startsWith: InputMaybe<Scalars['String']['input']>;
+  gearToken_contains: InputMaybe<Scalars['String']['input']>;
+  gearToken_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  gearToken_endsWith: InputMaybe<Scalars['String']['input']>;
+  gearToken_eq: InputMaybe<Scalars['String']['input']>;
+  gearToken_gt: InputMaybe<Scalars['String']['input']>;
+  gearToken_gte: InputMaybe<Scalars['String']['input']>;
+  gearToken_in: InputMaybe<Array<Scalars['String']['input']>>;
+  gearToken_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  gearToken_lt: InputMaybe<Scalars['String']['input']>;
+  gearToken_lte: InputMaybe<Scalars['String']['input']>;
+  gearToken_not_contains: InputMaybe<Scalars['String']['input']>;
+  gearToken_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  gearToken_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  gearToken_not_eq: InputMaybe<Scalars['String']['input']>;
+  gearToken_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  gearToken_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  gearToken_startsWith: InputMaybe<Scalars['String']['input']>;
   id_contains: InputMaybe<Scalars['String']['input']>;
   id_containsInsensitive: InputMaybe<Scalars['String']['input']>;
   id_endsWith: InputMaybe<Scalars['String']['input']>;
@@ -325,20 +206,356 @@ export type TeleportWhereInput = {
   id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   id_not_startsWith: InputMaybe<Scalars['String']['input']>;
   id_startsWith: InputMaybe<Scalars['String']['input']>;
-  nonce_eq: InputMaybe<Scalars['BigInt']['input']>;
-  nonce_gt: InputMaybe<Scalars['BigInt']['input']>;
-  nonce_gte: InputMaybe<Scalars['BigInt']['input']>;
-  nonce_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
+};
+
+export type PairsConnection = {
+  __typename?: 'PairsConnection';
+  edges: Array<PairEdge>;
+  pageInfo: PageInfo;
+  totalCount: Scalars['Int']['output'];
+};
+
+export type Query = {
+  __typename?: 'Query';
+  completedTransferById: Maybe<CompletedTransfer>;
+  completedTransfers: Array<CompletedTransfer>;
+  completedTransfersConnection: CompletedTransfersConnection;
+  pairById: Maybe<Pair>;
+  pairs: Array<Pair>;
+  pairsConnection: PairsConnection;
+  squidStatus: Maybe<SquidStatus>;
+  transferById: Maybe<Transfer>;
+  transfers: Array<Transfer>;
+  transfersConnection: TransfersConnection;
+};
+
+
+export type QueryCompletedTransferByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type QueryCompletedTransfersArgs = {
+  limit: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy: InputMaybe<Array<CompletedTransferOrderByInput>>;
+  where: InputMaybe<CompletedTransferWhereInput>;
+};
+
+
+export type QueryCompletedTransfersConnectionArgs = {
+  after: InputMaybe<Scalars['String']['input']>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  orderBy: Array<CompletedTransferOrderByInput>;
+  where: InputMaybe<CompletedTransferWhereInput>;
+};
+
+
+export type QueryPairByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type QueryPairsArgs = {
+  limit: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy: InputMaybe<Array<PairOrderByInput>>;
+  where: InputMaybe<PairWhereInput>;
+};
+
+
+export type QueryPairsConnectionArgs = {
+  after: InputMaybe<Scalars['String']['input']>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  orderBy: Array<PairOrderByInput>;
+  where: InputMaybe<PairWhereInput>;
+};
+
+
+export type QueryTransferByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+export type QueryTransfersArgs = {
+  limit: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy: InputMaybe<Array<TransferOrderByInput>>;
+  where: InputMaybe<TransferWhereInput>;
+};
+
+
+export type QueryTransfersConnectionArgs = {
+  after: InputMaybe<Scalars['String']['input']>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  orderBy: Array<TransferOrderByInput>;
+  where: InputMaybe<TransferWhereInput>;
+};
+
+export type SquidStatus = {
+  __typename?: 'SquidStatus';
+  /** The hash of the last processed finalized block */
+  finalizedHash: Maybe<Scalars['String']['output']>;
+  /** The height of the last processed finalized block */
+  finalizedHeight: Maybe<Scalars['Int']['output']>;
+  /** The hash of the last processed block */
+  hash: Maybe<Scalars['String']['output']>;
+  /** The height of the last processed block */
+  height: Maybe<Scalars['Int']['output']>;
+};
+
+export enum Status {
+  Completed = 'Completed',
+  Failed = 'Failed',
+  InProgress = 'InProgress',
+  Pending = 'Pending'
+}
+
+export type Transfer = {
+  __typename?: 'Transfer';
+  amount: Scalars['BigInt']['output'];
+  blockNumber: Scalars['String']['output'];
+  destNetwork: Network;
+  destination: Scalars['String']['output'];
+  id: Scalars['String']['output'];
+  nonce: Scalars['String']['output'];
+  receiver: Scalars['String']['output'];
+  sender: Scalars['String']['output'];
+  source: Scalars['String']['output'];
+  sourceNetwork: Network;
+  status: Status;
+  timestamp: Scalars['DateTime']['output'];
+  txHash: Scalars['String']['output'];
+};
+
+export type TransferEdge = {
+  __typename?: 'TransferEdge';
+  cursor: Scalars['String']['output'];
+  node: Transfer;
+};
+
+export enum TransferOrderByInput {
+  AmountAsc = 'amount_ASC',
+  AmountAscNullsFirst = 'amount_ASC_NULLS_FIRST',
+  AmountAscNullsLast = 'amount_ASC_NULLS_LAST',
+  AmountDesc = 'amount_DESC',
+  AmountDescNullsFirst = 'amount_DESC_NULLS_FIRST',
+  AmountDescNullsLast = 'amount_DESC_NULLS_LAST',
+  BlockNumberAsc = 'blockNumber_ASC',
+  BlockNumberAscNullsFirst = 'blockNumber_ASC_NULLS_FIRST',
+  BlockNumberAscNullsLast = 'blockNumber_ASC_NULLS_LAST',
+  BlockNumberDesc = 'blockNumber_DESC',
+  BlockNumberDescNullsFirst = 'blockNumber_DESC_NULLS_FIRST',
+  BlockNumberDescNullsLast = 'blockNumber_DESC_NULLS_LAST',
+  DestNetworkAsc = 'destNetwork_ASC',
+  DestNetworkAscNullsFirst = 'destNetwork_ASC_NULLS_FIRST',
+  DestNetworkAscNullsLast = 'destNetwork_ASC_NULLS_LAST',
+  DestNetworkDesc = 'destNetwork_DESC',
+  DestNetworkDescNullsFirst = 'destNetwork_DESC_NULLS_FIRST',
+  DestNetworkDescNullsLast = 'destNetwork_DESC_NULLS_LAST',
+  DestinationAsc = 'destination_ASC',
+  DestinationAscNullsFirst = 'destination_ASC_NULLS_FIRST',
+  DestinationAscNullsLast = 'destination_ASC_NULLS_LAST',
+  DestinationDesc = 'destination_DESC',
+  DestinationDescNullsFirst = 'destination_DESC_NULLS_FIRST',
+  DestinationDescNullsLast = 'destination_DESC_NULLS_LAST',
+  IdAsc = 'id_ASC',
+  IdAscNullsFirst = 'id_ASC_NULLS_FIRST',
+  IdAscNullsLast = 'id_ASC_NULLS_LAST',
+  IdDesc = 'id_DESC',
+  IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
+  IdDescNullsLast = 'id_DESC_NULLS_LAST',
+  NonceAsc = 'nonce_ASC',
+  NonceAscNullsFirst = 'nonce_ASC_NULLS_FIRST',
+  NonceAscNullsLast = 'nonce_ASC_NULLS_LAST',
+  NonceDesc = 'nonce_DESC',
+  NonceDescNullsFirst = 'nonce_DESC_NULLS_FIRST',
+  NonceDescNullsLast = 'nonce_DESC_NULLS_LAST',
+  ReceiverAsc = 'receiver_ASC',
+  ReceiverAscNullsFirst = 'receiver_ASC_NULLS_FIRST',
+  ReceiverAscNullsLast = 'receiver_ASC_NULLS_LAST',
+  ReceiverDesc = 'receiver_DESC',
+  ReceiverDescNullsFirst = 'receiver_DESC_NULLS_FIRST',
+  ReceiverDescNullsLast = 'receiver_DESC_NULLS_LAST',
+  SenderAsc = 'sender_ASC',
+  SenderAscNullsFirst = 'sender_ASC_NULLS_FIRST',
+  SenderAscNullsLast = 'sender_ASC_NULLS_LAST',
+  SenderDesc = 'sender_DESC',
+  SenderDescNullsFirst = 'sender_DESC_NULLS_FIRST',
+  SenderDescNullsLast = 'sender_DESC_NULLS_LAST',
+  SourceNetworkAsc = 'sourceNetwork_ASC',
+  SourceNetworkAscNullsFirst = 'sourceNetwork_ASC_NULLS_FIRST',
+  SourceNetworkAscNullsLast = 'sourceNetwork_ASC_NULLS_LAST',
+  SourceNetworkDesc = 'sourceNetwork_DESC',
+  SourceNetworkDescNullsFirst = 'sourceNetwork_DESC_NULLS_FIRST',
+  SourceNetworkDescNullsLast = 'sourceNetwork_DESC_NULLS_LAST',
+  SourceAsc = 'source_ASC',
+  SourceAscNullsFirst = 'source_ASC_NULLS_FIRST',
+  SourceAscNullsLast = 'source_ASC_NULLS_LAST',
+  SourceDesc = 'source_DESC',
+  SourceDescNullsFirst = 'source_DESC_NULLS_FIRST',
+  SourceDescNullsLast = 'source_DESC_NULLS_LAST',
+  StatusAsc = 'status_ASC',
+  StatusAscNullsFirst = 'status_ASC_NULLS_FIRST',
+  StatusAscNullsLast = 'status_ASC_NULLS_LAST',
+  StatusDesc = 'status_DESC',
+  StatusDescNullsFirst = 'status_DESC_NULLS_FIRST',
+  StatusDescNullsLast = 'status_DESC_NULLS_LAST',
+  TimestampAsc = 'timestamp_ASC',
+  TimestampAscNullsFirst = 'timestamp_ASC_NULLS_FIRST',
+  TimestampAscNullsLast = 'timestamp_ASC_NULLS_LAST',
+  TimestampDesc = 'timestamp_DESC',
+  TimestampDescNullsFirst = 'timestamp_DESC_NULLS_FIRST',
+  TimestampDescNullsLast = 'timestamp_DESC_NULLS_LAST',
+  TxHashAsc = 'txHash_ASC',
+  TxHashAscNullsFirst = 'txHash_ASC_NULLS_FIRST',
+  TxHashAscNullsLast = 'txHash_ASC_NULLS_LAST',
+  TxHashDesc = 'txHash_DESC',
+  TxHashDescNullsFirst = 'txHash_DESC_NULLS_FIRST',
+  TxHashDescNullsLast = 'txHash_DESC_NULLS_LAST'
+}
+
+export type TransferWhereInput = {
+  AND: InputMaybe<Array<TransferWhereInput>>;
+  OR: InputMaybe<Array<TransferWhereInput>>;
+  amount_eq: InputMaybe<Scalars['BigInt']['input']>;
+  amount_gt: InputMaybe<Scalars['BigInt']['input']>;
+  amount_gte: InputMaybe<Scalars['BigInt']['input']>;
+  amount_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
+  amount_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  amount_lt: InputMaybe<Scalars['BigInt']['input']>;
+  amount_lte: InputMaybe<Scalars['BigInt']['input']>;
+  amount_not_eq: InputMaybe<Scalars['BigInt']['input']>;
+  amount_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
+  blockNumber_contains: InputMaybe<Scalars['String']['input']>;
+  blockNumber_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  blockNumber_endsWith: InputMaybe<Scalars['String']['input']>;
+  blockNumber_eq: InputMaybe<Scalars['String']['input']>;
+  blockNumber_gt: InputMaybe<Scalars['String']['input']>;
+  blockNumber_gte: InputMaybe<Scalars['String']['input']>;
+  blockNumber_in: InputMaybe<Array<Scalars['String']['input']>>;
+  blockNumber_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  blockNumber_lt: InputMaybe<Scalars['String']['input']>;
+  blockNumber_lte: InputMaybe<Scalars['String']['input']>;
+  blockNumber_not_contains: InputMaybe<Scalars['String']['input']>;
+  blockNumber_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  blockNumber_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  blockNumber_not_eq: InputMaybe<Scalars['String']['input']>;
+  blockNumber_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  blockNumber_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  blockNumber_startsWith: InputMaybe<Scalars['String']['input']>;
+  destNetwork_eq: InputMaybe<Network>;
+  destNetwork_in: InputMaybe<Array<Network>>;
+  destNetwork_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  destNetwork_not_eq: InputMaybe<Network>;
+  destNetwork_not_in: InputMaybe<Array<Network>>;
+  destination_contains: InputMaybe<Scalars['String']['input']>;
+  destination_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  destination_endsWith: InputMaybe<Scalars['String']['input']>;
+  destination_eq: InputMaybe<Scalars['String']['input']>;
+  destination_gt: InputMaybe<Scalars['String']['input']>;
+  destination_gte: InputMaybe<Scalars['String']['input']>;
+  destination_in: InputMaybe<Array<Scalars['String']['input']>>;
+  destination_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  destination_lt: InputMaybe<Scalars['String']['input']>;
+  destination_lte: InputMaybe<Scalars['String']['input']>;
+  destination_not_contains: InputMaybe<Scalars['String']['input']>;
+  destination_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  destination_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  destination_not_eq: InputMaybe<Scalars['String']['input']>;
+  destination_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  destination_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  destination_startsWith: InputMaybe<Scalars['String']['input']>;
+  id_contains: InputMaybe<Scalars['String']['input']>;
+  id_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  id_endsWith: InputMaybe<Scalars['String']['input']>;
+  id_eq: InputMaybe<Scalars['String']['input']>;
+  id_gt: InputMaybe<Scalars['String']['input']>;
+  id_gte: InputMaybe<Scalars['String']['input']>;
+  id_in: InputMaybe<Array<Scalars['String']['input']>>;
+  id_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  id_lt: InputMaybe<Scalars['String']['input']>;
+  id_lte: InputMaybe<Scalars['String']['input']>;
+  id_not_contains: InputMaybe<Scalars['String']['input']>;
+  id_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  id_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  id_not_eq: InputMaybe<Scalars['String']['input']>;
+  id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  id_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  id_startsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_contains: InputMaybe<Scalars['String']['input']>;
+  nonce_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  nonce_endsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_eq: InputMaybe<Scalars['String']['input']>;
+  nonce_gt: InputMaybe<Scalars['String']['input']>;
+  nonce_gte: InputMaybe<Scalars['String']['input']>;
+  nonce_in: InputMaybe<Array<Scalars['String']['input']>>;
   nonce_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  nonce_lt: InputMaybe<Scalars['BigInt']['input']>;
-  nonce_lte: InputMaybe<Scalars['BigInt']['input']>;
-  nonce_not_eq: InputMaybe<Scalars['BigInt']['input']>;
-  nonce_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
-  pair_eq: InputMaybe<Pair>;
-  pair_in: InputMaybe<Array<Pair>>;
-  pair_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  pair_not_eq: InputMaybe<Pair>;
-  pair_not_in: InputMaybe<Array<Pair>>;
+  nonce_lt: InputMaybe<Scalars['String']['input']>;
+  nonce_lte: InputMaybe<Scalars['String']['input']>;
+  nonce_not_contains: InputMaybe<Scalars['String']['input']>;
+  nonce_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  nonce_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_not_eq: InputMaybe<Scalars['String']['input']>;
+  nonce_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  nonce_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  nonce_startsWith: InputMaybe<Scalars['String']['input']>;
+  receiver_contains: InputMaybe<Scalars['String']['input']>;
+  receiver_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  receiver_endsWith: InputMaybe<Scalars['String']['input']>;
+  receiver_eq: InputMaybe<Scalars['String']['input']>;
+  receiver_gt: InputMaybe<Scalars['String']['input']>;
+  receiver_gte: InputMaybe<Scalars['String']['input']>;
+  receiver_in: InputMaybe<Array<Scalars['String']['input']>>;
+  receiver_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  receiver_lt: InputMaybe<Scalars['String']['input']>;
+  receiver_lte: InputMaybe<Scalars['String']['input']>;
+  receiver_not_contains: InputMaybe<Scalars['String']['input']>;
+  receiver_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  receiver_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  receiver_not_eq: InputMaybe<Scalars['String']['input']>;
+  receiver_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  receiver_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  receiver_startsWith: InputMaybe<Scalars['String']['input']>;
+  sender_contains: InputMaybe<Scalars['String']['input']>;
+  sender_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  sender_endsWith: InputMaybe<Scalars['String']['input']>;
+  sender_eq: InputMaybe<Scalars['String']['input']>;
+  sender_gt: InputMaybe<Scalars['String']['input']>;
+  sender_gte: InputMaybe<Scalars['String']['input']>;
+  sender_in: InputMaybe<Array<Scalars['String']['input']>>;
+  sender_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  sender_lt: InputMaybe<Scalars['String']['input']>;
+  sender_lte: InputMaybe<Scalars['String']['input']>;
+  sender_not_contains: InputMaybe<Scalars['String']['input']>;
+  sender_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  sender_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  sender_not_eq: InputMaybe<Scalars['String']['input']>;
+  sender_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  sender_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  sender_startsWith: InputMaybe<Scalars['String']['input']>;
+  sourceNetwork_eq: InputMaybe<Network>;
+  sourceNetwork_in: InputMaybe<Array<Network>>;
+  sourceNetwork_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  sourceNetwork_not_eq: InputMaybe<Network>;
+  sourceNetwork_not_in: InputMaybe<Array<Network>>;
+  source_contains: InputMaybe<Scalars['String']['input']>;
+  source_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  source_endsWith: InputMaybe<Scalars['String']['input']>;
+  source_eq: InputMaybe<Scalars['String']['input']>;
+  source_gt: InputMaybe<Scalars['String']['input']>;
+  source_gte: InputMaybe<Scalars['String']['input']>;
+  source_in: InputMaybe<Array<Scalars['String']['input']>>;
+  source_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  source_lt: InputMaybe<Scalars['String']['input']>;
+  source_lte: InputMaybe<Scalars['String']['input']>;
+  source_not_contains: InputMaybe<Scalars['String']['input']>;
+  source_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  source_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  source_not_eq: InputMaybe<Scalars['String']['input']>;
+  source_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  source_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  source_startsWith: InputMaybe<Scalars['String']['input']>;
   status_eq: InputMaybe<Status>;
   status_in: InputMaybe<Array<Status>>;
   status_isNull: InputMaybe<Scalars['Boolean']['input']>;
@@ -353,52 +570,48 @@ export type TeleportWhereInput = {
   timestamp_lte: InputMaybe<Scalars['DateTime']['input']>;
   timestamp_not_eq: InputMaybe<Scalars['DateTime']['input']>;
   timestamp_not_in: InputMaybe<Array<Scalars['DateTime']['input']>>;
-  to_contains: InputMaybe<Scalars['String']['input']>;
-  to_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  to_endsWith: InputMaybe<Scalars['String']['input']>;
-  to_eq: InputMaybe<Scalars['String']['input']>;
-  to_gt: InputMaybe<Scalars['String']['input']>;
-  to_gte: InputMaybe<Scalars['String']['input']>;
-  to_in: InputMaybe<Array<Scalars['String']['input']>>;
-  to_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  to_lt: InputMaybe<Scalars['String']['input']>;
-  to_lte: InputMaybe<Scalars['String']['input']>;
-  to_not_contains: InputMaybe<Scalars['String']['input']>;
-  to_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  to_not_endsWith: InputMaybe<Scalars['String']['input']>;
-  to_not_eq: InputMaybe<Scalars['String']['input']>;
-  to_not_in: InputMaybe<Array<Scalars['String']['input']>>;
-  to_not_startsWith: InputMaybe<Scalars['String']['input']>;
-  to_startsWith: InputMaybe<Scalars['String']['input']>;
+  txHash_contains: InputMaybe<Scalars['String']['input']>;
+  txHash_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  txHash_endsWith: InputMaybe<Scalars['String']['input']>;
+  txHash_eq: InputMaybe<Scalars['String']['input']>;
+  txHash_gt: InputMaybe<Scalars['String']['input']>;
+  txHash_gte: InputMaybe<Scalars['String']['input']>;
+  txHash_in: InputMaybe<Array<Scalars['String']['input']>>;
+  txHash_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  txHash_lt: InputMaybe<Scalars['String']['input']>;
+  txHash_lte: InputMaybe<Scalars['String']['input']>;
+  txHash_not_contains: InputMaybe<Scalars['String']['input']>;
+  txHash_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  txHash_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  txHash_not_eq: InputMaybe<Scalars['String']['input']>;
+  txHash_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  txHash_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  txHash_startsWith: InputMaybe<Scalars['String']['input']>;
 };
 
-export type TeleportsConnection = {
-  __typename?: 'TeleportsConnection';
-  edges: Array<TeleportEdge>;
+export type TransfersConnection = {
+  __typename?: 'TransfersConnection';
+  edges: Array<TransferEdge>;
   pageInfo: PageInfo;
   totalCount: Scalars['Int']['output'];
 };
 
-export type WhereIdInput = {
-  id: Scalars['String']['input'];
-};
-
-export type TeleportsQueryQueryVariables = Exact<{
+export type TransfersQueryQueryVariables = Exact<{
   limit: Scalars['Int']['input'];
   offset: Scalars['Int']['input'];
-  where: InputMaybe<TeleportWhereInput>;
+  where: InputMaybe<TransferWhereInput>;
 }>;
 
 
-export type TeleportsQueryQuery = { __typename?: 'Query', teleports: Array<{ __typename?: 'Teleport', amount: string, blockhash: string, direction: Direction, from: string, id: string, status: Status, timestamp: string, to: string, pair: Pair }> };
+export type TransfersQueryQuery = { __typename?: 'Query', transfers: Array<{ __typename?: 'Transfer', amount: string, blockNumber: string, destNetwork: Network, destination: string, id: string, receiver: string, sender: string, source: string, sourceNetwork: Network, status: Status, timestamp: string }> };
 
-export type TeleportsConnectionQueryQueryVariables = Exact<{
-  where: InputMaybe<TeleportWhereInput>;
+export type TransfersConnectionQueryQueryVariables = Exact<{
+  where: InputMaybe<TransferWhereInput>;
 }>;
 
 
-export type TeleportsConnectionQueryQuery = { __typename?: 'Query', teleportsConnection: { __typename?: 'TeleportsConnection', totalCount: number } };
+export type TransfersConnectionQueryQuery = { __typename?: 'Query', transfersConnection: { __typename?: 'TransfersConnection', totalCount: number } };
 
 
-export const TeleportsQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TeleportsQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"limit"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"offset"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TeleportWhereInput"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"teleports"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"limit"},"value":{"kind":"Variable","name":{"kind":"Name","value":"limit"}}},{"kind":"Argument","name":{"kind":"Name","value":"offset"},"value":{"kind":"Variable","name":{"kind":"Name","value":"offset"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"timestamp_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"amount"}},{"kind":"Field","name":{"kind":"Name","value":"blockhash"}},{"kind":"Field","name":{"kind":"Name","value":"direction"}},{"kind":"Field","name":{"kind":"Name","value":"from"}},{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"timestamp"}},{"kind":"Field","name":{"kind":"Name","value":"to"}},{"kind":"Field","name":{"kind":"Name","value":"pair"}}]}}]}}]} as unknown as DocumentNode<TeleportsQueryQuery, TeleportsQueryQueryVariables>;
-export const TeleportsConnectionQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TeleportsConnectionQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TeleportWhereInput"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"teleportsConnection"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"timestamp_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}}]}}]}}]} as unknown as DocumentNode<TeleportsConnectionQueryQuery, TeleportsConnectionQueryQueryVariables>;
+export const TransfersQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransfersQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"limit"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"offset"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TransferWhereInput"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"transfers"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"limit"},"value":{"kind":"Variable","name":{"kind":"Name","value":"limit"}}},{"kind":"Argument","name":{"kind":"Name","value":"offset"},"value":{"kind":"Variable","name":{"kind":"Name","value":"offset"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"timestamp_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"amount"}},{"kind":"Field","name":{"kind":"Name","value":"blockNumber"}},{"kind":"Field","name":{"kind":"Name","value":"destNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"destination"}},{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"receiver"}},{"kind":"Field","name":{"kind":"Name","value":"sender"}},{"kind":"Field","name":{"kind":"Name","value":"source"}},{"kind":"Field","name":{"kind":"Name","value":"sourceNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"timestamp"}}]}}]}}]} as unknown as DocumentNode<TransfersQueryQuery, TransfersQueryQueryVariables>;
+export const TransfersConnectionQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransfersConnectionQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TransferWhereInput"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"transfersConnection"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"timestamp_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}}]}}]}}]} as unknown as DocumentNode<TransfersConnectionQueryQuery, TransfersConnectionQueryQueryVariables>;

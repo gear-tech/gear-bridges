@@ -1,27 +1,33 @@
 import { graphql } from '../graphql';
 
-const TELEPORTS_QUERY = graphql(`
-  query TeleportsQuery($limit: Int!, $offset: Int!, $where: TeleportWhereInput) {
-    teleports(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {
+const REFETCH_INTERVAL = 10000;
+const LATEST_TRANSACTIONS_LIMIT = 5;
+const TRANSACTIONS_LIMIT = 12;
+
+const TRANSFERS_QUERY = graphql(`
+  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {
+    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {
       amount
-      blockhash
-      direction
-      from
+      blockNumber
+      destNetwork
+      destination
       id
+      receiver
+      sender
+      source
+      sourceNetwork
       status
       timestamp
-      to
-      pair
     }
   }
 `);
 
-const TELEPORTS_CONNECTION_QUERY = graphql(`
-  query TeleportsConnectionQuery($where: TeleportWhereInput) {
-    teleportsConnection(orderBy: timestamp_DESC, where: $where) {
+const TRANSFERS_CONNECTION_QUERY = graphql(`
+  query TransfersConnectionQuery($where: TransferWhereInput) {
+    transfersConnection(orderBy: timestamp_DESC, where: $where) {
       totalCount
     }
   }
 `);
 
-export { TELEPORTS_QUERY, TELEPORTS_CONNECTION_QUERY };
+export { REFETCH_INTERVAL, TRANSACTIONS_LIMIT, LATEST_TRANSACTIONS_LIMIT, TRANSFERS_QUERY, TRANSFERS_CONNECTION_QUERY };

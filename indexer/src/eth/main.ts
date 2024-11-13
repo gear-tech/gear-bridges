@@ -10,8 +10,8 @@ import { config } from './config';
 
 const tempState = new TempState(Network.Ethereum);
 
-const ERC20_TREASURY = config.erc20Treasury;
-const ERC20_TREASURY_DEPOSIT = erc20TreasuryAbi.events.Deposit.topic;
+const ERC20_MANAGER = config.erc20Manager;
+const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequested.topic;
 const MSGQ = config.msgQ;
 const MSGQ_MESSAGE_PROCESSED = messageQueueAbi.events.MessageProcessed.topic;
 
@@ -24,8 +24,8 @@ const handler = async (ctx: Context) => {
     for (let log of block.logs) {
       const address = log.address.toLowerCase();
       const topic = log.topics[0].toLowerCase();
-      if (address === ERC20_TREASURY && topic === ERC20_TREASURY_DEPOSIT) {
-        const [from, to, token, amount] = erc20TreasuryAbi.events.Deposit.decode(log);
+      if (address === ERC20_MANAGER && topic === ERC20_MANAGER_BRIDGING_REQUESTED) {
+        const [from, to, token, amount] = erc20TreasuryAbi.events.BridgingRequested.decode(log);
 
         tempState.transferRequested(
           new Transfer({

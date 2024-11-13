@@ -10,7 +10,7 @@ import { Codec } from './codec';
 
 const tempState = new TempState(Network.Gear);
 
-let vftGatewayDecoder: Codec;
+let vftManagerDecoder: Codec;
 let erc20RelayDecoder: Codec;
 
 const handler = async (ctx: ProcessorContext) => {
@@ -26,15 +26,15 @@ const handler = async (ctx: ProcessorContext) => {
       if (isUserMessageSent(event)) {
         const msg = event.args.message;
         switch (msg.source) {
-          case config.vftGateway: {
-            const service = vftGatewayDecoder.service(msg.payload);
-            if (service !== 'VftGateway') continue;
-            const method = vftGatewayDecoder.method(msg.payload);
+          case config.vftManager: {
+            const service = vftManagerDecoder.service(msg.payload);
+            if (service !== 'VftManager') continue;
+            const method = vftManagerDecoder.method(msg.payload);
 
             switch (method) {
               case 'BridgingRequested': {
                 const { nonce, vara_token_id, sender, receiver, amount } =
-                  vftGatewayDecoder.decodeEvent<BridgingRequested>(service, method, msg.payload);
+                  vftManagerDecoder.decodeEvent<BridgingRequested>(service, method, msg.payload);
                 const id = randomUUID();
 
                 const transfer = new Transfer({
@@ -56,8 +56,7 @@ const handler = async (ctx: ProcessorContext) => {
                 break;
               }
               case 'TokenMappingAdded': {
-                // TODO: consider how to handle the case when this event got later than token transfers started on the eth side
-                const { vara_token_id, eth_token_id } = vftGatewayDecoder.decodeEvent<TokenMapping>(
+                const { vara_token_id, eth_token_id } = vftManagerDecoder.decodeEvent<TokenMapping>(
                   service,
                   method,
                   msg.payload,
@@ -66,7 +65,7 @@ const handler = async (ctx: ProcessorContext) => {
                 break;
               }
               case 'TokenMappingRemoved': {
-                const { vara_token_id, eth_token_id } = vftGatewayDecoder.decodeEvent<TokenMapping>(
+                const { vara_token_id, eth_token_id } = vftManagerDecoder.decodeEvent<TokenMapping>(
                   service,
                   method,
                   msg.payload,
@@ -106,7 +105,7 @@ const handler = async (ctx: ProcessorContext) => {
 };
 
 export const runProcessor = async () => {
-  vftGatewayDecoder = await Codec.create('./assets/vft_gateway.idl');
+  vftManagerDecoder = await Codec.create('./assets/vft_manager.idl');
   erc20RelayDecoder = await Codec.create('./assets/erc20_relay.idl');
 
   processor.run(

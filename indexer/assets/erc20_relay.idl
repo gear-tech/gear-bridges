@@ -116,12 +116,12 @@ service Erc20Relay {
   CalculateGasForReply : (_slot: u64, _transaction_index: u64) -> result (null, Error);
   FillTransactions : () -> bool;
   Relay : (message: EthToVaraEvent) -> result (null, Error);
-  SetVftGateway : (vft_gateway: actor_id) -> null;
+  SetVftManager : (vft_manager: actor_id) -> null;
   UpdateConfig : (config_new: Config) -> null;
   query Admin : () -> actor_id;
   query CheckpointLightClientAddress : () -> actor_id;
   query Config : () -> Config;
-  query VftGateway : () -> actor_id;
+  query VftManager : () -> actor_id;
 
   events {
     Relayed: struct { slot: u64, block_number: u64, transaction_index: u32 };

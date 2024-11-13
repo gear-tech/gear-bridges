@@ -9,7 +9,7 @@ export const events = {
     [blockNumber: bigint, messageHash: string, messageNonce: string] & {
       blockNumber: bigint;
       messageHash: string;
-      nonce: bigint;
+      nonce: string;
     }
   >(abi, abi.getEvent('MessageProcessed')!.topicHash),
 };

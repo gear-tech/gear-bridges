@@ -61,7 +61,7 @@ export class TempState {
 
     if (this._transfers.size > 0 || this._addedTokens.length > 0 || this._completed.size > 0) {
       this._ctx.log.info(
-        `Saved: ${this._transfers.size} transfers, ${this._completed.size} completed, ${this._addedTokens.length} new pairs`,
+        `Saved: ${this._transfers.size} transfers, ${this._completed.size} completed, ${this._addedTokens.length} pairs`,
       );
     }
   }

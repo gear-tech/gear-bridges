@@ -6,8 +6,8 @@ import {Test, console} from "forge-std/Test.sol";
 import {Verifier} from "../src/Verifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 
-import {ERC20Treasury} from "../src/ERC20Treasury.sol";
-import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
+import {ERC20Manager} from "../src/ERC20Manager.sol";
+import {IERC20Manager} from "../src/interfaces/IERC20Manager.sol";
 
 import {IMessageQueue, VaraMessage, IMessageQueueReceiver} from "../src/interfaces/IMessageQueue.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
@@ -15,8 +15,7 @@ import {ProxyContract} from "../src/ProxyContract.sol";
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
-import {TestHelper, VARA_ADDRESS_3, VARA_ADDRESS_7, USER, OWNER} from "./TestHelper.t.sol";
-import {VFT_GATEWAY_ADDRESS} from "../src/libraries/Environment.sol";
+import {TestHelper, VARA_ADDRESS_3, VARA_ADDRESS_7, USER, OWNER, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
 
 contract TreasuryTest is TestHelper {
     using Address for address;
@@ -31,8 +30,12 @@ contract TreasuryTest is TestHelper {
         vm.startPrank(USER, USER);
 
         uint256 amount = 100 * (10 ** 18);
-        erc20_token.approve(address(treasury), amount);
-        treasury.deposit(address(erc20_token), amount, VARA_ADDRESS_3);
+        erc20_token.approve(address(erc20_manager), amount);
+        erc20_manager.requestBridging(
+            address(erc20_token),
+            amount,
+            VARA_ADDRESS_3
+        );
 
         vm.stopPrank();
     }
@@ -40,8 +43,12 @@ contract TreasuryTest is TestHelper {
     // TODO: Test skipped, to enable it remove the skip_ prefix
     function skip_test_withdraw() public {
         uint128 amount = 100 * (10 ** 18);
-        erc20_token.approve(address(treasury), amount);
-        treasury.deposit(address(erc20_token), amount, VARA_ADDRESS_3);
+        erc20_token.approve(address(erc20_manager), amount);
+        erc20_manager.requestBridging(
+            address(erc20_token),
+            amount,
+            VARA_ADDRESS_3
+        );
 
         bytes memory call_data = abi.encodePacked(
             address(this),
@@ -53,16 +60,15 @@ contract TreasuryTest is TestHelper {
 
         vm.expectRevert();
 
-        VaraMessage memory vara_msg = VaraMessage({
-            sender: VFT_GATEWAY_ADDRESS,
-            receiver: address(treasury),
-            nonce: bytes32(uint256(10)),
-            data: call_data
-        });
-
-        IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
+        IMessageQueueReceiver(erc20_manager).processVaraMessage(
+            VFT_MANAGER_ADDRESS,
+            call_data
+        );
 
         vm.prank(address(message_queue));
-        IMessageQueueReceiver(treasury).processVaraMessage(vara_msg);
+        IMessageQueueReceiver(erc20_manager).processVaraMessage(
+            VFT_MANAGER_ADDRESS,
+            call_data
+        );
     }
 }

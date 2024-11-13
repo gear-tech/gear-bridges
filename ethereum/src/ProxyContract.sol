@@ -32,7 +32,6 @@ contract ProxyContract is Proxy {
      *
      * - If `data` is empty, `msg.value` must be zero.
      */
-
     function upgradeToAndCall(
         address newImplementation,
         bytes calldata data

@@ -1924,8 +1924,8 @@ dependencies = [
  "sails-rs 0.6.1",
  "tokio",
  "vft-client",
- "vft-gateway",
- "vft-gateway-client",
+ "vft-manager",
+ "vft-manager-client",
 ]
 
 [[package]]
@@ -1936,7 +1936,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.6.1",
  "scale-info",
- "vft-gateway-client",
+ "vft-manager-client",
 ]
 
 [[package]]
@@ -1944,46 +1944,6 @@ name = "bridging-payment-client"
 version = "0.1.0"
 dependencies = [
  "bridging-payment-app",
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply"
-version = "0.1.0"
-dependencies = [
- "bridging-payment-vara-supply",
- "bridging-payment-vara-supply-app",
- "bridging-payment-vara-supply-client",
- "extended_vft_wasm",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "tokio",
- "vft-client",
- "vft-treasury",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply-app"
-version = "0.1.0"
-dependencies = [
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "bridging-payment-vara-supply-client"
-version = "0.1.0"
-dependencies = [
- "bridging-payment-vara-supply-app",
  "mockall 0.12.1",
  "sails-client-gen 0.6.1",
  "sails-idl-gen 0.6.1",
@@ -3981,7 +3941,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.2.1",
  "scale-info",
- "vft-service",
+ "vft-service 0.1.0 (git+https://github.com/gear-foundation/standards/?branch=gstd-pinned-v1.5.0)",
 ]
 
 [[package]]
@@ -15366,7 +15326,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vft-gateway"
+name = "vft-manager"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
@@ -15374,6 +15334,7 @@ dependencies = [
  "alloy-rlp",
  "blake2",
  "extended_vft_wasm",
+ "gclient 1.6.2",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest 1.6.2",
  "parity-scale-codec",
@@ -15382,13 +15343,13 @@ dependencies = [
  "scale-info",
  "tokio",
  "vft-client",
- "vft-gateway",
- "vft-gateway-app",
- "vft-gateway-client",
+ "vft-manager",
+ "vft-manager-app",
+ "vft-manager-client",
 ]
 
 [[package]]
-name = "vft-gateway-app"
+name = "vft-manager-app"
 version = "0.1.0"
 dependencies = [
  "alloy-rlp",
@@ -15407,14 +15368,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "vft-gateway-client"
+name = "vft-manager-client"
 version = "0.1.0"
 dependencies = [
  "mockall 0.12.1",
  "sails-client-gen 0.6.1",
  "sails-idl-gen 0.6.1",
  "sails-rs 0.6.1",
- "vft-gateway-app",
+ "vft-manager-app",
+]
+
+[[package]]
+name = "vft-service"
+version = "0.1.0"
+dependencies = [
+ "env_logger 0.9.3",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest 1.6.2",
+ "log",
+ "sails-rs 0.6.1",
 ]
 
 [[package]]
@@ -15427,48 +15400,6 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs 0.2.1",
  "scale-info",
-]
-
-[[package]]
-name = "vft-treasury"
-version = "0.1.0"
-dependencies = [
- "extended_vft_wasm",
- "gclient 1.6.2",
- "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest 1.6.2",
- "parity-scale-codec",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "scale-info",
- "tokio",
- "vft-client",
- "vft-treasury",
- "vft-treasury-app",
- "vft-treasury-client",
-]
-
-[[package]]
-name = "vft-treasury-app"
-version = "0.1.0"
-dependencies = [
- "gbuiltin-eth-bridge",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "sails-rs 0.6.1",
- "scale-info",
- "vft-client",
-]
-
-[[package]]
-name = "vft-treasury-client"
-version = "0.1.0"
-dependencies = [
- "mockall 0.12.1",
- "sails-client-gen 0.6.1",
- "sails-idl-gen 0.6.1",
- "sails-rs 0.6.1",
- "vft-treasury-app",
 ]
 
 [[package]]
@@ -16695,6 +16626,41 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wrapped-vara"
+version = "0.1.0"
+dependencies = [
+ "gclient 1.6.2",
+ "gtest 1.6.2",
+ "sails-client-gen 0.6.1",
+ "sails-idl-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "tokio",
+ "wrapped-vara",
+ "wrapped-vara-app",
+ "wrapped-vara-client",
+]
+
+[[package]]
+name = "wrapped-vara-app"
+version = "0.1.0"
+dependencies = [
+ "sails-client-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "vft-service 0.1.0",
+]
+
+[[package]]
+name = "wrapped-vara-client"
+version = "0.1.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen 0.6.1",
+ "sails-idl-gen 0.6.1",
+ "sails-rs 0.6.1",
+ "wrapped-vara-app",
 ]
 
 [[package]]

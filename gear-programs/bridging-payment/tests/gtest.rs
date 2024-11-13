@@ -5,9 +5,9 @@ use bridging_payment_client::{
 use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
-use vft_gateway_client::{
-    traits::*, Config as VftGatewayConfig, InitConfig as VftGatewayInitConfig,
-    VftGateway as VftGatewayC, VftGatewayFactory as VftGatewayFactoryC,
+use vft_manager_client::{
+    traits::*, Config as VftManagerConfig, InitConfig as VftManagerInitConfig, TokenSupply,
+    VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
 };
 
 const ADMIN_ID: u64 = 1000;
@@ -66,7 +66,7 @@ async fn balance_of(
 struct Fixture {
     remoting: GTestRemoting,
     bridging_payment_program_id: ActorId,
-    gateway_program_id: ActorId,
+    vft_manager_program_id: ActorId,
     vft_program_id: ActorId,
 }
 
@@ -82,24 +82,22 @@ async fn setup_for_test() -> Fixture {
         Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
     let _ = gear_bridge_builtin.send_bytes(ADMIN_ID, b"INIT");
 
-    // Gateway
-    let treasury_code_id = remoting.system().submit_code(vft_gateway::WASM_BINARY);
-    let init_config = VftGatewayInitConfig {
-        receiver_contract_address: [1; 20].into(),
+    // Vft-manager
+    let treasury_code_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
+    let init_config = VftManagerInitConfig {
+        erc20_manager_address: [1; 20].into(),
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         eth_client: ETH_CLIENT_ID.into(),
-        config: VftGatewayConfig {
-            gas_to_burn_tokens: 15_000_000_000,
+        config: VftManagerConfig {
+            gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,
-            gas_to_mint_tokens: 15_000_000_000,
-            gas_to_process_mint_request: 15_000_000_000,
+            gas_for_submit_receipt: 20_000_000_000,
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
-            gas_for_transfer_to_eth_msg: 20_000_000_000,
-            gas_for_event_sending: 15_000_000_000,
+            gas_for_request_bridging: 20_000_000_000,
         },
     };
-    let gateway_program_id = VftGatewayFactoryC::new(remoting.clone())
+    let vft_manager_program_id = VftManagerFactoryC::new(remoting.clone())
         .new(init_config)
         .send_recv(treasury_code_id, b"salt")
         .await
@@ -119,13 +117,13 @@ async fn setup_for_test() -> Fixture {
     let bridging_payment_code_id = remoting.system().submit_code(bridging_payment::WASM_BINARY);
     let init_config = InitConfig {
         admin_address: ADMIN_ID.into(),
-        vft_gateway_address: gateway_program_id,
+        vft_manager_address: vft_manager_program_id,
         config: Config {
             fee: FEE,
             gas_for_reply_deposit: 15_000_000_000,
-            gas_to_send_request_to_gateway: 115_000_000_000,
+            gas_to_send_request_to_vft_manager: 115_000_000_000,
             reply_timeout: 1000,
-            gas_for_request_to_gateway_msg: 50_000_000_000,
+            gas_for_request_to_vft_manager_msg: 50_000_000_000,
         },
     };
     let bridging_payment_program_id = BridgingPaymentFactoryC::new(remoting.clone())
@@ -137,7 +135,7 @@ async fn setup_for_test() -> Fixture {
     Fixture {
         remoting,
         bridging_payment_program_id,
-        gateway_program_id,
+        vft_manager_program_id,
         vft_program_id,
     }
 }
@@ -147,7 +145,7 @@ async fn deposit_to_treasury() {
     let Fixture {
         remoting,
         bridging_payment_program_id,
-        gateway_program_id,
+        vft_manager_program_id,
         vft_program_id,
     } = setup_for_test().await;
 
@@ -164,20 +162,20 @@ async fn deposit_to_treasury() {
         .unwrap();
     assert!(ok);
 
-    vft.grant_burner_role(gateway_program_id)
+    vft.grant_burner_role(vft_manager_program_id)
         .send_recv(vft_program_id)
         .await
         .unwrap();
 
-    VftGatewayC::new(remoting.clone())
-        .map_vara_to_eth_address(vft_program_id, eth_token_id)
-        .send_recv(gateway_program_id)
+    VftManagerC::new(remoting.clone())
+        .map_vara_to_eth_address(vft_program_id, eth_token_id, TokenSupply::Ethereum)
+        .send_recv(vft_manager_program_id)
         .await
         .unwrap();
 
     remoting.system().mint_to(account_id, 10 * FEE);
     BridgingPaymentC::new(remoting.clone().with_actor_id(account_id))
-        .request_to_gateway(amount, [1; 20].into(), vft_program_id)
+        .make_request(amount, [1; 20].into(), vft_program_id)
         .with_value(FEE)
         .send_recv(bridging_payment_program_id)
         .await
@@ -186,9 +184,11 @@ async fn deposit_to_treasury() {
     assert!(balance_of(&remoting, vft_program_id, account_id)
         .await
         .is_zero(),);
-    assert!(balance_of(&remoting, vft_program_id, gateway_program_id)
-        .await
-        .is_zero());
+    assert!(
+        balance_of(&remoting, vft_program_id, vft_manager_program_id)
+            .await
+            .is_zero()
+    );
 
     // Claim fee
     BridgingPaymentC::new(remoting.clone())

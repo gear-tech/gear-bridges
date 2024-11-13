@@ -7,8 +7,8 @@ import {Test, console} from "forge-std/Test.sol";
 
 import {ProxyContract} from "../src/ProxyContract.sol";
 
-import {ERC20Treasury} from "../src/ERC20Treasury.sol";
-import {IERC20Treasury} from "../src/interfaces/IERC20Treasury.sol";
+import {ERC20Manager} from "../src/ERC20Manager.sol";
+import {IERC20Manager} from "../src/interfaces/IERC20Manager.sol";
 
 contract UpdateTreasuryScript is Script {
     using Address for address;
@@ -22,11 +22,13 @@ contract UpdateTreasuryScript is Script {
         address payable treasury_proxy_address = payable(
             vm.envAddress("TREASURY_PROXY")
         );
+        bytes32 vft_manager = vm.envBytes32("VFT_MANAGER");
 
         ProxyContract treasury_proxy = ProxyContract(treasury_proxy_address);
 
-        ERC20Treasury treasury = new ERC20Treasury(
-            address(message_queue_proxy_address)
+        ERC20Manager treasury = new ERC20Manager(
+            address(message_queue_proxy_address),
+            vft_manager
         );
 
         treasury_proxy.upgradeToAndCall(address(treasury), "");

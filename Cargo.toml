@@ -10,20 +10,18 @@ members = [
     "gear-programs/bridging-payment",
     "gear-programs/bridging-payment/app",
     "gear-programs/bridging-payment/client",
-    "gear-programs/bridging-payment-vara-supply",
-    "gear-programs/bridging-payment-vara-supply/app",
-    "gear-programs/bridging-payment-vara-supply/client",
-    "gear-programs/vft-gateway",
-    "gear-programs/vft-gateway/app",
-    "gear-programs/vft-gateway/client",
-    "gear-programs/vft-treasury",
-    "gear-programs/vft-treasury/app",
-    "gear-programs/vft-treasury/client",
+    "gear-programs/vft-manager",
+    "gear-programs/vft-manager/app",
+    "gear-programs/vft-manager/client",
     "gear-programs/vft-client",
+    "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
     "gear-programs/erc20-relay/app",
     "gear-programs/erc20-relay/client",
+    "gear-programs/wrapped-vara",
+    "gear-programs/wrapped-vara/app",
+    "gear-programs/wrapped-vara/client",
     "utils-prometheus",
     "tools/deploy-to-gear",
     "tools/genesis-config",
@@ -49,15 +47,9 @@ ethereum-common = { path = "ethereum-common", default-features = false }
 bridging-payment = { path = "gear-programs/bridging-payment" }
 bridging-payment-app = { path = "gear-programs/bridging-payment/app" }
 bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
-bridging-payment-vara-supply = { path = "gear-programs/bridging-payment-vara-supply" }
-bridging-payment-vara-supply-app = { path = "gear-programs/bridging-payment-vara-supply/app" }
-bridging-payment-vara-supply-client = { path = "gear-programs/bridging-payment-vara-supply/client" }
-vft-gateway = { path = "gear-programs/vft-gateway" }
-vft-gateway-app = { path = "gear-programs/vft-gateway/app" }
-vft-gateway-client = { path = "gear-programs/vft-gateway/client" }
-vft-treasury = { path = "gear-programs/vft-treasury" }
-vft-treasury-app = { path = "gear-programs/vft-treasury/app" }
-vft-treasury-client = { path = "gear-programs/vft-treasury/client" }
+vft-manager = { path = "gear-programs/vft-manager" }
+vft-manager-app = { path = "gear-programs/vft-manager/app" }
+vft-manager-client = { path = "gear-programs/vft-manager/client" }
 vft-client = { path = "gear-programs/vft-client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
@@ -66,6 +58,11 @@ checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", defa
 erc20-relay = { path = "gear-programs/erc20-relay" }
 erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
 erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
+
+wrapped-vara = { path = "gear-programs/wrapped-vara" }
+wrapped-vara-app = { path = "gear-programs/wrapped-vara/app" }
+wrapped-vara-client = { path = "gear-programs/wrapped-vara/client" }
+vft-service = { path = "gear-programs/vft-service" }
 
 # Contracts' deps
 extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }

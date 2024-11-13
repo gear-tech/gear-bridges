@@ -34,7 +34,6 @@ export const processor = new EvmBatchProcessor()
   })
   .setBlockRange({
     from: config.fromBlock,
-    to: 2643979,
   });
 
 export type Fields = EvmBatchProcessorFields<typeof processor>;

@@ -25,8 +25,8 @@ export const processor = new EvmBatchProcessor()
     },
   })
   .addLog({
-    address: [config.erc20Treasury],
-    topic0: [erc20TreasuryAbi.events.Deposit.topic],
+    address: [config.erc20Manager],
+    topic0: [erc20TreasuryAbi.events.BridgingRequested.topic],
   })
   .addLog({
     address: [config.msgQ],

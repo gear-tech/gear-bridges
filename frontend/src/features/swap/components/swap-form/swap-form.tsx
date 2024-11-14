@@ -5,8 +5,8 @@ import { Input } from '@/components';
 
 import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
-import { useSwapForm, useBridge, useVaraConfig } from '../../hooks';
-import { UseHandleSubmit, UseAccountBalance, UseFTBalance } from '../../types';
+import { useSwapForm, useBridge } from '../../hooks';
+import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee } from '../../types';
 import { Balance } from '../balance';
 import { Network } from '../network';
 
@@ -18,6 +18,7 @@ type Props = {
   useAccountBalance: UseAccountBalance;
   useFTBalance: UseFTBalance;
   useHandleSubmit: UseHandleSubmit;
+  useFee: UseFee;
   renderSwapNetworkButton: () => JSX.Element;
 };
 
@@ -27,17 +28,18 @@ function SwapForm({
   useHandleSubmit,
   useAccountBalance,
   useFTBalance,
+  useFee,
   renderSwapNetworkButton,
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair,  ...bridge } = useBridge(networkIndex);
-  const { fee, ...config } = useVaraConfig(isVaraNetwork);
+  const { address, options, symbol, pair, ...bridge } = useBridge(networkIndex);
+  const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(address);
-  const { onSubmit, isSubmitting } = useHandleSubmit(address, fee.value);
+  const { onSubmit, isSubmitting, ...submit } = useHandleSubmit(address, fee.value);
 
   const { form, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
@@ -99,7 +101,12 @@ function SwapForm({
             text="Swap"
             disabled={disabled}
             isLoading={
-              isSubmitting || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || bridge.isLoading
+              isSubmitting ||
+              accountBalance.isLoading ||
+              ftBalance.isLoading ||
+              config.isLoading ||
+              bridge.isLoading ||
+              submit.isLoading
             }
           />
         </footer>

@@ -1,14 +1,15 @@
-import { useEthFTBalance, useEthAccountBalance, useHandleEthSubmit } from './eth';
+import { useEthFTBalance, useEthAccountBalance, useHandleEthSubmit, useEthFee } from './eth';
 import { useBridge } from './use-bridge';
 import { useSwapForm } from './use-swap-form';
-import { useVaraConfig, useVaraAccountBalance, useVaraFTBalance, useHandleVaraSubmit } from './vara';
+import { useVaraFee, useVaraAccountBalance, useVaraFTBalance, useHandleVaraSubmit } from './vara';
 
 export {
   useEthFTBalance,
   useEthAccountBalance,
   useHandleEthSubmit,
+  useEthFee,
   useSwapForm,
-  useVaraConfig,
+  useVaraFee,
   useVaraAccountBalance,
   useVaraFTBalance,
   useHandleVaraSubmit,

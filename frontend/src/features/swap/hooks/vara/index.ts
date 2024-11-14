@@ -1,6 +1,6 @@
 import { useHandleVaraSubmit } from './use-handle-vara-submit';
 import { useVaraAccountBalance } from './use-vara-account-balance';
-import { useVaraConfig } from './use-vara-config';
+import { useVaraFee } from './use-vara-fee';
 import { useVaraFTBalance } from './use-vara-ft-balance';
 
-export { useVaraConfig, useVaraFTBalance, useHandleVaraSubmit, useVaraAccountBalance };
+export { useVaraFee, useVaraFTBalance, useHandleVaraSubmit, useVaraAccountBalance };

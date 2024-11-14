@@ -6,16 +6,16 @@ import { WriteContractErrorType } from 'wagmi/actions';
 
 import { logger } from '@/utils';
 
-import { ERC20_TREASURY_ABI, ERC20_TREASURY_CONTRACT_ADDRESS } from '../../consts';
+import { BRIDGING_PAYMENT_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
-function useHandleEthSubmit(ftAddress: HexString | undefined) {
-  const alert = useAlert();
+function useHandleEthSubmit(ftAddress: HexString | undefined, fee: bigint | undefined) {
   const { writeContract, isPending } = useWriteContract();
   const approve = useApprove(ftAddress);
+  const alert = useAlert();
 
   const onError = (error: WriteContractErrorType) => {
     const errorMessage = (error as BaseError).shortMessage || error.message;
@@ -26,32 +26,27 @@ function useHandleEthSubmit(ftAddress: HexString | undefined) {
 
   const onSubmit = ({ amount, accountAddress }: FormattedValues, onSuccess: () => void) => {
     if (!ftAddress) throw new Error('Fungible token address is not defined');
+    if (!fee) throw new Error('Fee is not defined');
 
-    const address = ERC20_TREASURY_CONTRACT_ADDRESS;
-
-    const deposit = () => {
-      logger.info(
-        FUNCTION_NAME.DEPOSIT,
-        `\naddress: ${address}\nargs: [ftAddress: ${ftAddress}, amount: ${amount}, accountAddress: ${accountAddress}]`,
-      );
-
+    const requestBridging = () =>
       writeContract(
         {
-          abi: ERC20_TREASURY_ABI,
-          address,
-          functionName: FUNCTION_NAME.DEPOSIT,
+          abi: BRIDGING_PAYMENT_ABI,
+          address: ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+          functionName: 'requestBridging',
           args: [ftAddress, amount, accountAddress],
+          value: fee,
         },
         { onSuccess, onError },
       );
-    };
 
-    approve.write(amount, deposit);
+    approve.write(amount, requestBridging);
   };
 
+  const { isLoading } = approve;
   const isSubmitting = approve.isPending || isPending;
 
-  return { onSubmit, isSubmitting };
+  return { onSubmit, isSubmitting, isLoading };
 }
 
 export { useHandleEthSubmit };

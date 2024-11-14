@@ -1,3 +1,3 @@
-import { ERC20_TREASURY_ABI } from './erc20-treasury-abi';
+import { BRIDGING_PAYMENT_ABI } from './bridging-payment-abi';
 
-export { ERC20_TREASURY_ABI };
+export { BRIDGING_PAYMENT_ABI };

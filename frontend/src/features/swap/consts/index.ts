@@ -1,11 +1,8 @@
-import { HexString } from '@gear-js/api';
-
-import { ERC20_TREASURY_ABI } from './abi';
+import { BRIDGING_PAYMENT_ABI } from './abi';
+import { ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from './env';
 import { EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE } from './form';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
-
-const ERC20_TREASURY_CONTRACT_ADDRESS = import.meta.env.VITE_ERC20_TREASURY_CONTRACT_ADDRESS as HexString;
 
 const NETWORK_INDEX = {
   VARA: 0,
@@ -15,8 +12,8 @@ const NETWORK_INDEX = {
 const BALANCE_REFETCH_INTERVAL = 10000;
 
 export {
-  ERC20_TREASURY_CONTRACT_ADDRESS,
-  ERC20_TREASURY_ABI,
+  ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+  BRIDGING_PAYMENT_ABI,
   FIELD_NAME,
   DEFAULT_VALUES,
   ADDRESS_SCHEMA,

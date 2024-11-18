@@ -18,6 +18,13 @@ pub struct Config {
 
 pub struct EndpointList(Vec<(Slot, ActorId)>);
 
+
+impl Default for EndpointList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EndpointList {
     pub fn new() -> Self {
         Self(Vec::with_capacity(2))
@@ -36,7 +43,7 @@ impl EndpointList {
     }
 
     pub fn endpoint_for(&self, slot: Slot) -> Result<ActorId, ProxyError> {
-        match self.0.binary_search_by(|&(ref s, _)| s.cmp(&slot)) {
+        match self.0.binary_search_by(|(s, _)| s.cmp(&slot)) {
             Ok(i) => Ok(self.0[i].1),
             Err(next) => match self.0.get(next) {
                 Some(result) => Ok(result.1),

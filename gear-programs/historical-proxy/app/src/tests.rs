@@ -105,3 +105,6 @@ async fn test_utility_functions() {
 
     assert_eq!(endpoint_for_slot_1, Ok(ActorId::from(0x800)));
 }
+
+#[tokio::test]
+fn test_redirect() {}

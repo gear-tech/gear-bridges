@@ -12,8 +12,7 @@ pub mod service;
 pub mod state;
 
 #[cfg(test)]
-pub mod tests; 
-
+pub mod tests;
 
 pub struct HistoricalProxyProgram(RefCell<state::ProxyState>);
 

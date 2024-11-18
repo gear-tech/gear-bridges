@@ -12,8 +12,7 @@ use ethereum_common::{
     patricia_trie::TrieDB,
     tree_hash::TreeHash,
     trie_db::{HashDB, Trie},
-    utils as eth_utils,
-    utils::ReceiptEnvelope,
+    utils::{self as eth_utils, ReceiptEnvelope},
     H256,
 };
 use ops::ControlFlow::*;
@@ -119,6 +118,61 @@ where
 
     pub fn checkpoint_light_client_address(&self) -> ActorId {
         self.state.borrow().checkpoint_light_client_address
+    }
+
+    /// Check proofs and return receipt if successfull, error otherwise.
+    pub async fn check_proofs(&mut self, message: EthToVaraEvent) -> Result<Vec<u8>, Error> {
+        let receipt = self.decode_and_check_receipt(&message)?;
+
+        let EthToVaraEvent {
+            proof_block: BlockInclusionProof { block, mut headers },
+            proof,
+            transaction_index,
+            ..
+        } = message;
+
+        // verify the proof of block inclusion
+        let checkpoints = self.state.borrow().checkpoint_light_client_address;
+        let slot = block.slot;
+        let checkpoint = Self::request_checkpoint(checkpoints, slot).await?;
+
+        headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
+        let Continue(block_root_parent) =
+            headers
+                .iter()
+                .rev()
+                .try_fold(checkpoint, |block_root_parent, header| {
+                    let block_root = header.tree_hash_root();
+                    match block_root == block_root_parent {
+                        true => Continue(header.parent_root),
+                        false => Break(()),
+                    }
+                })
+        else {
+            return Err(Error::InvalidBlockProof);
+        };
+
+        let block_root = block.tree_hash_root();
+        if block_root != block_root_parent {
+            return Err(Error::InvalidBlockProof);
+        }
+
+        // verify Merkle-PATRICIA proof
+        let receipts_root = H256::from(block.body.execution_payload.receipts_root.0 .0);
+        let mut memory_db = memory_db::new();
+        for proof_node in &proof {
+            memory_db.insert(hash_db::EMPTY_PREFIX, proof_node);
+        }
+
+        let trie = TrieDB::new(&memory_db, &receipts_root).map_err(|_| Error::TrieDbFailure)?;
+
+        let (key_db, value_db) =
+            eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
+        match trie.get(&key_db) {
+            Ok(Some(found_value)) if found_value == value_db => (),
+            _ => return Err(Error::InvalidReceiptProof),
+        }
+        Ok(message.receipt_rlp)
     }
 
     pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {

@@ -1,11 +1,12 @@
 import { HexString } from '@gear-js/api';
-import { useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { useMutation } from '@tanstack/react-query';
 
 import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, VftProgram } from '@/consts';
-import { isUndefined, logger } from '@/utils';
+import { isUndefined } from '@/utils';
 
 import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
-import { FormattedValues } from '../../types';
+import { FormattedValues, UseFTAllowance } from '../../types';
 
 function useSendBridgingPaymentRequest() {
   const { data: program } = useProgram({
@@ -24,7 +25,6 @@ function useSendVftApprove(ftAddress: HexString | undefined) {
   const { data: program } = useProgram({
     library: VftProgram,
     id: ftAddress,
-    query: { enabled: Boolean(ftAddress) },
   });
 
   return useSendProgramTransaction({
@@ -34,42 +34,39 @@ function useSendVftApprove(ftAddress: HexString | undefined) {
   });
 }
 
-function useHandleVaraSubmit(ftAddress: HexString | undefined, feeValue: bigint | undefined) {
-  const alert = useAlert();
-
+function useHandleVaraSubmit(
+  ftAddress: HexString | undefined,
+  feeValue: bigint | undefined,
+  allowance: ReturnType<UseFTAllowance>,
+) {
   const bridgingPaymentRequest = useSendBridgingPaymentRequest();
   const vftApprove = useSendVftApprove(ftAddress);
 
-  const onSubmit = async ({ amount, accountAddress }: FormattedValues, onSuccess: () => void) => {
-    if (isUndefined(feeValue)) throw new Error('Fee is not found');
+  const sendBridgingPaymentRequest = (amount: bigint, accountAddress: HexString) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
 
-    const recipient = accountAddress;
-    const value = feeValue;
-
-    logger.info(
-      'TransitVaraToEth',
-      `\nprogramId:${ftAddress}\namount: ${amount}\nrecipient: ${recipient}\nvalue: ${value}\nfee: ${feeValue}`,
-    );
-
-    try {
-      await vftApprove.sendTransactionAsync({ args: [BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] });
-
-      await bridgingPaymentRequest.sendTransactionAsync({
-        args: [amount, recipient, ftAddress],
-        gasLimit: BigInt(350000000000),
-        value,
-      });
-
-      onSuccess();
-    } catch (error) {
-      alert.error(error instanceof Error ? error.message : String(error));
-    }
+    return bridgingPaymentRequest.sendTransactionAsync({
+      gasLimit: BigInt(350000000000),
+      args: [amount, accountAddress, ftAddress],
+      value: feeValue,
+    });
   };
 
-  const isSubmitting = bridgingPaymentRequest.isPending || vftApprove.isPending;
+  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
+    if (isUndefined(feeValue)) throw new Error('Fee is not found');
+    if (isUndefined(allowance.data)) throw new Error('Allowance is not found');
 
-  return { onSubmit, isSubmitting };
+    if (amount > allowance.data) {
+      await vftApprove.sendTransactionAsync({ args: [BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] });
+      await allowance.refetch(); // TODO: replace with queryClient.setQueryData after @gear-js/react-hooks update to return QueryKey
+    }
+
+    return sendBridgingPaymentRequest(amount, accountAddress);
+  };
+
+  const submit = useMutation({ mutationFn: onSubmit });
+
+  return [submit, vftApprove] as const;
 }
 
 export { useHandleVaraSubmit };

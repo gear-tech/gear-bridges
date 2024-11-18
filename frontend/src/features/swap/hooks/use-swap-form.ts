@@ -2,7 +2,11 @@ import { useAlert } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import { BaseError } from 'wagmi';
+import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
+
+import { logger } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { FormattedValues } from '../types';
@@ -19,7 +23,7 @@ function useSwapForm(
   ftBalance: Values & { decimals: number | undefined },
   fee: bigint | undefined,
   disabled: boolean,
-  onSubmit: (values: FormattedValues, reset: () => void) => void,
+  onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
   const alert = useAlert();
 
@@ -40,6 +44,7 @@ function useSwapForm(
 
   const { setValue, reset, formState } = form;
   const shouldValidate = formState.isSubmitted; // validating only if validation was already fired
+  const amount = form.watch(FIELD_NAME.VALUE);
 
   const setOriginalValue = (value: string) => setValue(FIELD_NAME.VALUE, value, { shouldValidate });
   const setExpectedValue = (value: string) => setValue(FIELD_NAME.EXPECTED_VALUE, value, { shouldValidate });
@@ -53,7 +58,14 @@ function useSwapForm(
       alert.success('Successful transaction');
     };
 
-    onSubmit(values, onSuccess);
+    const onError = (error: WriteContractErrorType) => {
+      const errorMessage = (error as BaseError).shortMessage || error.message;
+
+      logger.error('Transfer Error', error);
+      alert.error(errorMessage);
+    };
+
+    onSubmit(values).then(onSuccess).catch(onError);
   });
 
   useEffect(() => {
@@ -70,6 +82,7 @@ function useSwapForm(
 
   return {
     form,
+    amount,
     onValueChange,
     onExpectedValueChange,
     handleSubmit,

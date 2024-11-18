@@ -1,90 +1,62 @@
 import { HexString } from '@gear-js/api';
-import { useAlert } from '@gear-js/react-hooks';
-import { BaseError, useConfig, useReadContract, useWriteContract } from 'wagmi';
+import { useMutation } from '@tanstack/react-query';
+import { WatchContractEventOnLogsParameter } from 'viem';
+import { useConfig, useWriteContract } from 'wagmi';
 import { watchContractEvent } from 'wagmi/actions';
 
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
-import { useEthAccount, useLoading } from '@/hooks';
-import { logger } from '@/utils';
+import { useEthAccount } from '@/hooks';
 
-import { EVENT_NAME, BRIDGING_PAYMENT_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { EVENT_NAME } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
+
+import { useERC20ManagerAddress } from './use-erc20-manager-address';
 
 const abi = FUNGIBLE_TOKEN_ABI;
 
-function useERC20ManagerAddress() {
-  return useReadContract({
-    abi: BRIDGING_PAYMENT_ABI,
-    address: ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-    functionName: 'getUnderlyingAddress',
-  });
-}
-
 function useApprove(address: HexString | undefined) {
-  const { data: erc20ManagerAddress, isLoading } = useERC20ManagerAddress();
-  const { writeContract } = useWriteContract();
-  const alert = useAlert();
   const ethAccount = useEthAccount();
   const config = useConfig();
-  const [isPending, enablePending, disablePending] = useLoading();
+  const { data: erc20ManagerAddress, isLoading } = useERC20ManagerAddress();
+  const { writeContractAsync } = useWriteContract();
 
-  const handleError = (message: string) => {
-    disablePending();
+  // maybe better to use waitForTransactionReceipt,
+  // but feels like it's getting fired before approval in contract
+  const watch = (amount: bigint) =>
+    new Promise<bigint>((resolve, reject) => {
+      const eventName = EVENT_NAME.APPROVAL;
+      const args = { owner: ethAccount.address, spender: erc20ManagerAddress };
 
-    logger.error(FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE, new Error(message));
-    alert.error(message);
-  };
-
-  const watch = (amount: bigint, onSuccess: () => void) => {
-    const owner = ethAccount.address;
-    const spender = erc20ManagerAddress;
-
-    // maybe better to use waitForTransactionReceipt,
-    // but feels like it's getting fired before approval in contract
-    const unwatch = watchContractEvent(config, {
-      address,
-      abi,
-      eventName: EVENT_NAME.APPROVAL,
-      args: { owner, spender },
-
-      onLogs: (logs) =>
-        logs.forEach(({ args: { value } }) => {
-          disablePending();
+      const onLogs = (logs: WatchContractEventOnLogsParameter<typeof abi, typeof EVENT_NAME.APPROVAL>) =>
+        logs.forEach(({ args: { value = 0n } }) => {
           unwatch();
 
-          if (!value || value < amount) return handleError('Approved value is less than the required amount');
+          if (value < amount) return reject(new Error('Approved value is less than the required amount'));
 
-          onSuccess();
-        }),
+          resolve(value);
+        });
 
-      onError: ({ message }) => {
+      const onError = (error: Error) => {
         unwatch();
-        handleError(message);
-      },
-    });
-  };
+        reject(error);
+      };
 
-  const write = (amount: bigint, onSuccess: () => void) => {
+      const unwatch = watchContractEvent(config, { address, abi, eventName, args, onLogs, onError });
+    });
+
+  const approve = async (amount: bigint) => {
     if (!address) throw new Error('Fungible token address is not defined');
     if (!erc20ManagerAddress) throw new Error('ERC20 Manager address is not defined');
 
-    enablePending();
+    const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
+    const args = [erc20ManagerAddress, amount] as const;
 
-    writeContract(
-      {
-        address,
-        abi,
-        functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE,
-        args: [erc20ManagerAddress, amount],
-      },
-      {
-        onSuccess: () => watch(amount, onSuccess),
-        onError: (error) => handleError((error as BaseError).shortMessage || error.message),
-      },
-    );
+    return writeContractAsync({ address, abi, functionName, args }).then(() => watch(amount));
   };
 
-  return { write, isPending, isLoading };
+  const mutation = useMutation({ mutationFn: approve });
+
+  return { ...mutation, isLoading };
 }
 
 export { useApprove };

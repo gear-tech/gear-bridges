@@ -6,8 +6,9 @@ import { Input } from '@/components';
 import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useBridge } from '../../hooks';
-import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee } from '../../types';
+import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { Balance } from '../balance';
+import { FTAllowanceTip } from '../ft-allowance-tip';
 import { Network } from '../network';
 
 import styles from './swap-form.module.scss';
@@ -17,6 +18,7 @@ type Props = {
   disabled: boolean;
   useAccountBalance: UseAccountBalance;
   useFTBalance: UseFTBalance;
+  useFTAllowance: UseFTAllowance;
   useHandleSubmit: UseHandleSubmit;
   useFee: UseFee;
   renderSwapNetworkButton: () => JSX.Element;
@@ -28,6 +30,7 @@ function SwapForm({
   useHandleSubmit,
   useAccountBalance,
   useFTBalance,
+  useFTAllowance,
   useFee,
   renderSwapNetworkButton,
 }: Props) {
@@ -39,9 +42,10 @@ function SwapForm({
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(address);
-  const { onSubmit, isSubmitting, ...submit } = useHandleSubmit(address, fee.value);
+  const allowance = useFTAllowance(address);
+  const [{ mutateAsync: onSubmit, ...submit }, approve] = useHandleSubmit(address, fee.value, allowance);
 
-  const { form, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
+  const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     accountBalance,
     ftBalance,
@@ -58,6 +62,13 @@ function SwapForm({
       onMaxButtonClick={setMaxBalance}
     />
   );
+
+  const getButtonText = () => {
+    if (approve.isPending) return 'Approving...';
+    if (submit.isPending) return 'Swapping...';
+
+    return 'Swap';
+  };
 
   return (
     <FormProvider {...form}>
@@ -96,19 +107,31 @@ function SwapForm({
             unit={isVaraNetwork ? 'VARA' : 'ETH'}
           />
 
-          <Button
-            type="submit"
-            text="Swap"
-            disabled={disabled}
-            isLoading={
-              isSubmitting ||
-              accountBalance.isLoading ||
-              ftBalance.isLoading ||
-              config.isLoading ||
-              bridge.isLoading ||
-              submit.isLoading
-            }
-          />
+          <div className={styles.submitContainer}>
+            <Button
+              type="submit"
+              text={getButtonText()}
+              disabled={disabled}
+              isLoading={
+                approve.isLoading ||
+                submit.isPending ||
+                accountBalance.isLoading ||
+                ftBalance.isLoading ||
+                config.isLoading ||
+                bridge.isLoading ||
+                allowance.isLoading
+              }
+              block
+            />
+
+            <FTAllowanceTip
+              allowance={allowance.data}
+              decimals={ftBalance.decimals}
+              symbol={symbol}
+              amount={amount}
+              isVaraNetwork={isVaraNetwork}
+            />
+          </div>
         </footer>
       </form>
     </FormProvider>

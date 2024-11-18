@@ -23,11 +23,25 @@ type UseFee = () => {
 
 type UseHandleSubmit = (
   ftAddress: HexString | undefined,
-  feeValue?: bigint | undefined,
-) => {
-  onSubmit: (values: FormattedValues, reset: () => void) => void;
-  isSubmitting: boolean;
-  isLoading?: boolean;
+  feeValue: bigint | undefined,
+  allowance: ReturnType<UseFTAllowance>,
+) => Readonly<
+  [
+    {
+      mutateAsync: (values: FormattedValues) => Promise<unknown>;
+      isPending: boolean;
+    },
+    {
+      isPending: boolean;
+      isLoading?: boolean;
+    },
+  ]
+>;
+
+type UseFTAllowance = (address: HexString | undefined) => {
+  data: bigint | undefined;
+  isLoading: boolean;
+  refetch: () => Promise<unknown>;
 };
 
-export type { UseAccountBalance, UseFTBalance, UseHandleSubmit, UseFee };
+export type { UseAccountBalance, UseFTBalance, UseHandleSubmit, UseFee, UseFTAllowance };

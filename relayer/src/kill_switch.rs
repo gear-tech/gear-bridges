@@ -18,8 +18,8 @@ pub struct KillSwitchRelayer {
     genesis_config: GenesisConfig,
     proof_storage: Box<dyn ProofStorage>,
 
-    from_block: Option<u64>,
-    last_processed_eth_block_num: u64,
+    from_eth_block: Option<u64>,
+    last_processed_eth_block: u64,
 }
 
 impl KillSwitchRelayer {
@@ -28,15 +28,15 @@ impl KillSwitchRelayer {
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
-        from_block: Option<u64>,
+        from_eth_block: Option<u64>,
     ) -> Self {
         Self {
             gear_api,
             eth_api,
             genesis_config,
             proof_storage,
-            from_block,
-            last_processed_eth_block_num: 0,
+            from_eth_block,
+            last_processed_eth_block: Default::default(),
         }
     }
 
@@ -75,17 +75,23 @@ impl KillSwitchRelayer {
             }
         }
 
-        let last_fin_block = self.eth_api.finalized_block_number().await?;
-        if last_fin_block == self.last_processed_eth_block_num {
-            log::info!("No new Eth block, skipping..");
+        let last_finalized_block = self.eth_api.finalized_block_number().await?;
+
+        // Set the initial value for `from_eth_block` if it's not set yet.
+        if self.from_eth_block.is_none() {
+            self.from_eth_block = Some(last_finalized_block);
+        }
+
+        if last_finalized_block == self.last_processed_eth_block {
+            log::info!("No new eth block, skipping..");
             return Ok(());
         }
 
-        let block_from = self.from_block.unwrap_or(last_fin_block);
+        let from_eth_block = self.from_eth_block.expect("should be set above");
 
         let events = self
             .eth_api
-            .fetch_merkle_roots_in_range(block_from, last_fin_block)
+            .fetch_merkle_roots_in_range(from_eth_block, last_finalized_block)
             .await?;
 
         for event in events {
@@ -109,7 +115,7 @@ impl KillSwitchRelayer {
             }
         }
 
-        self.last_processed_eth_block_num = last_fin_block;
+        self.last_processed_eth_block = last_finalized_block;
 
         Ok(())
     }

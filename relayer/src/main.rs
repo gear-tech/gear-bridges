@@ -93,7 +93,7 @@ struct RelayKillSwitchArgs {
     genesis_config_args: GenesisConfigArgs,
     /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block
     #[arg(long = "from-block")]
-    from_block: Option<u64>,
+    from_eth_block: Option<u64>,
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
     #[clap(flatten)]
@@ -357,7 +357,7 @@ async fn main() {
                 eth_api,
                 genesis_config,
                 proof_storage,
-                args.from_block,
+                args.from_eth_block,
             )
             .await;
 

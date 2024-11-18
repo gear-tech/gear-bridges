@@ -1,5 +1,6 @@
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
+    thread,
     time::Duration,
 };
 
@@ -7,12 +8,12 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::GearBlockNumber;
+use crate::message_relayer::common::{self, GSdkArgs, GearBlockNumber};
 
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 pub struct BlockListener {
-    gear_api: GearApi,
+    args: GSdkArgs,
     from_block: u32,
 
     metrics: Metrics,
@@ -34,9 +35,9 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(gear_api: GearApi, from_block: u32) -> Self {
+    pub fn new(args: GSdkArgs, from_block: u32) -> Self {
         Self {
-            gear_api,
+            args,
             from_block,
 
             metrics: Metrics::new(),
@@ -47,11 +48,15 @@ impl BlockListener {
         let (senders, receivers): (Vec<_>, Vec<_>) = (0..RECEIVER_COUNT).map(|_| channel()).unzip();
 
         tokio::spawn(async move {
+            let mut error_index = 0;
             loop {
                 let res = self.run_inner(&senders).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {}", err);
                 }
+
+                thread::sleep(common::get_delay(error_index));
+                error_index += 1;
             }
         });
 
@@ -65,9 +70,16 @@ impl BlockListener {
 
         self.metrics.latest_block.set(current_block as i64);
 
+        let gear_api = GearApi::new(
+            &self.args.vara_domain,
+            self.args.vara_port,
+            self.args.vara_rpc_retries,
+        )
+        .await?;
+
         loop {
-            let finalized_head = self.gear_api.latest_finalized_block().await?;
-            let finalized_head = self.gear_api.block_hash_to_number(finalized_head).await?;
+            let finalized_head = gear_api.latest_finalized_block().await?;
+            let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;
 
             if finalized_head >= current_block {
                 for block in current_block..=finalized_head {

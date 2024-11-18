@@ -16,6 +16,7 @@ use crate::message_relayer::common::{
         message_queued_event_extractor::MessageQueuedEventExtractor,
     },
     paid_messages_filter::PaidMessagesFilter,
+    GSdkArgs,
 };
 
 pub struct Relayer {
@@ -47,6 +48,7 @@ impl MeteredService for Relayer {
 impl Relayer {
     pub async fn new(
         gear_api: GearApi,
+        args: GSdkArgs,
         eth_api: EthApi,
         from_block: Option<u32>,
         bridging_payment_address: H256,
@@ -66,7 +68,7 @@ impl Relayer {
         );
         log::info!("Starting ethereum listener from block #{}", from_eth_block);
 
-        let gear_block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
+        let gear_block_listener = GearBlockListener::new(args, from_gear_block);
 
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 

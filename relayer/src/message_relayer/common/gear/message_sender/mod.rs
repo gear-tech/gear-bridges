@@ -1,8 +1,9 @@
-use std::sync::mpsc::Receiver;
+use std::{sync::mpsc::Receiver, thread};
 
+use anyhow::anyhow;
 use ethereum_client::EthApi;
 use futures::executor::block_on;
-use gclient::GearApi;
+use gclient::{GearApi, WSAddress};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
@@ -15,13 +16,23 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     ethereum_beacon_client::BeaconClient,
-    message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
+    message_relayer::common::{self, EthereumSlotNumber, TxHashWithSlot, GSdkArgs},
 };
 
 mod compose_payload;
 
+async fn create_gclient_client(args: &GSdkArgs, suri: &str) -> anyhow::Result<GearApi> {
+    GearApi::builder()
+        .retries(args.vara_rpc_retries)
+        .suri(suri)
+        .build(WSAddress::new(&args.vara_domain, args.vara_port))
+        .await
+        .map_err(|e| anyhow!("Failed to build GearApi: {e:?}"))
+}
+
 pub struct MessageSender {
-    gear_api: GearApi,
+    args: GSdkArgs,
+    suri: String,
     eth_api: EthApi,
     beacon_client: BeaconClient,
 
@@ -55,13 +66,15 @@ impl_metered_service! {
 
 impl MessageSender {
     pub fn new(
-        gear_api: GearApi,
+        args: GSdkArgs,
+        suri: String,
         eth_api: EthApi,
         beacon_client: BeaconClient,
         ethereum_event_client_address: H256,
     ) -> Self {
         Self {
-            gear_api,
+            args,
+            suri,
             eth_api,
             beacon_client,
 
@@ -76,10 +89,16 @@ impl MessageSender {
         messages: Receiver<TxHashWithSlot>,
         checkpoints: Receiver<EthereumSlotNumber>,
     ) {
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&messages, &checkpoints));
-            if let Err(err) = res {
-                log::error!("Gear message sender failed: {}", err);
+        tokio::task::spawn_blocking(move || {
+            let mut error_index = 0;
+            loop {
+                let res = block_on(self.run_inner(&messages, &checkpoints));
+                if let Err(err) = res {
+                    log::error!("Gear message sender failed: {}", err);
+                }
+
+                thread::sleep(common::get_delay(error_index));
+                error_index += 1;
             }
         });
     }
@@ -89,8 +108,6 @@ impl MessageSender {
         messages: &Receiver<TxHashWithSlot>,
         checkpoints: &Receiver<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
-        self.update_balance_metric().await?;
-
         let mut waiting_checkpoint: Vec<TxHashWithSlot> = vec![];
 
         let mut latest_checkpoint_slot = None;
@@ -116,14 +133,17 @@ impl MessageSender {
             if waiting_checkpoint.is_empty() {
                 continue;
             }
+
+            let gear_api = create_gclient_client(&self.args, &self.suri).await?;
             for i in (0..waiting_checkpoint.len()).rev() {
                 if waiting_checkpoint[i].slot_number <= latest_checkpoint_slot.unwrap_or_default() {
-                    self.submit_message(&waiting_checkpoint[i]).await?;
+                    self.submit_message(&waiting_checkpoint[i], &gear_api)
+                        .await?;
                     let _ = waiting_checkpoint.remove(i);
                 }
             }
 
-            self.update_balance_metric().await?;
+            self.update_balance_metric(&gear_api).await?;
 
             self.metrics
                 .messages_waiting_checkpoint
@@ -131,7 +151,11 @@ impl MessageSender {
         }
     }
 
-    async fn submit_message(&self, message: &TxHashWithSlot) -> anyhow::Result<()> {
+    async fn submit_message(
+        &self,
+        message: &TxHashWithSlot,
+        gear_api: &GearApi,
+    ) -> anyhow::Result<()> {
         let message =
             compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
 
@@ -141,11 +165,11 @@ impl MessageSender {
             message.proof_block.block.slot
         );
 
-        let gas_limit_block = self.gear_api.block_gas_limit()?;
+        let gas_limit_block = gear_api.block_gas_limit()?;
         // Use 95% of block gas limit for all extrinsics.
         let gas_limit = gas_limit_block / 100 * 95;
 
-        let remoting = GClientRemoting::new(self.gear_api.clone());
+        let remoting = GClientRemoting::new(gear_api.clone());
 
         let mut erc20_service = Erc20Relay::new(remoting.clone());
 
@@ -160,11 +184,8 @@ impl MessageSender {
         Ok(())
     }
 
-    async fn update_balance_metric(&self) -> anyhow::Result<()> {
-        let balance = self
-            .gear_api
-            .total_balance(self.gear_api.account_id())
-            .await?;
+    async fn update_balance_metric(&self, gear_api: &GearApi) -> anyhow::Result<()> {
+        let balance = gear_api.total_balance(gear_api.account_id()).await?;
 
         let balance = balance / 1_000_000_000_000;
         let balance: i64 = balance.try_into().unwrap_or(i64::MAX);

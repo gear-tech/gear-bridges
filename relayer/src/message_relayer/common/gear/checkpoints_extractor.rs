@@ -1,4 +1,7 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::{
+    sync::mpsc::{channel, Receiver, Sender},
+    thread,
+};
 
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
@@ -9,12 +12,14 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 
-use crate::message_relayer::common::{EthereumSlotNumber, GearBlockNumber};
+use crate::message_relayer::common::{
+    self, {EthereumSlotNumber, GSdkArgs, GearBlockNumber},
+};
 
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
 
-    gear_api: GearApi,
+    args: GSdkArgs,
 
     latest_checkpoint: Option<EthereumSlotNumber>,
 
@@ -37,10 +42,10 @@ impl_metered_service! {
 }
 
 impl CheckpointsExtractor {
-    pub fn new(gear_api: GearApi, checkpoint_light_client_address: H256) -> Self {
+    pub fn new(args: GSdkArgs, checkpoint_light_client_address: H256) -> Self {
         Self {
             checkpoint_light_client_address,
-            gear_api,
+            args,
             latest_checkpoint: None,
             metrics: Metrics::new(),
         }
@@ -49,10 +54,16 @@ impl CheckpointsExtractor {
     pub fn run(mut self, blocks: Receiver<GearBlockNumber>) -> Receiver<EthereumSlotNumber> {
         let (sender, receiver) = channel();
 
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&sender, &blocks));
-            if let Err(err) = res {
-                log::error!("Checkpoints extractor failed: {}", err);
+        tokio::task::spawn_blocking(move || {
+            let mut error_index = 0;
+            loop {
+                let res = block_on(self.run_inner(&sender, &blocks));
+                if let Err(err) = res {
+                    log::error!("Checkpoints extractor failed: {}", err);
+                }
+
+                thread::sleep(common::get_delay(error_index));
+                error_index += 1;
             }
         });
 
@@ -64,19 +75,28 @@ impl CheckpointsExtractor {
         sender: &Sender<EthereumSlotNumber>,
         blocks: &Receiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
+        let gear_api = GearApi::new(
+            &self.args.vara_domain,
+            self.args.vara_port,
+            self.args.vara_rpc_retries,
+        )
+        .await?;
+
         loop {
             for block in blocks.try_iter() {
-                self.process_block_events(block.0, sender).await?;
+                self.process_block_events(&gear_api, block.0, sender)
+                    .await?;
             }
         }
     }
 
     async fn process_block_events(
         &mut self,
+        gear_api: &GearApi,
         block: u32,
         sender: &Sender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
-        let block_hash = self.gear_api.block_number_to_hash(block).await?;
+        let block_hash = gear_api.block_number_to_hash(block).await?;
 
         let request = StateRequest {
             order: Order::Reverse,
@@ -85,8 +105,7 @@ impl CheckpointsExtractor {
         }
         .encode();
 
-        let state = self
-            .gear_api
+        let state = gear_api
             .api
             .read_state(
                 self.checkpoint_light_client_address,

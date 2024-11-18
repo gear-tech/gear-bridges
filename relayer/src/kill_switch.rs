@@ -20,6 +20,7 @@ pub struct KillSwitchRelayer {
 
     from_eth_block: Option<u64>,
     last_processed_eth_block: u64,
+    emergency_stop: bool,
 }
 
 impl KillSwitchRelayer {
@@ -37,6 +38,7 @@ impl KillSwitchRelayer {
             proof_storage,
             from_eth_block,
             last_processed_eth_block: Default::default(),
+            emergency_stop: false,
         }
     }
 
@@ -59,6 +61,11 @@ impl KillSwitchRelayer {
     }
 
     async fn main_loop(&mut self) -> anyhow::Result<()> {
+        if self.emergency_stop {
+            log::info!("Emergency stop triggered, skipping..");
+            return Ok(());
+        }
+
         log::info!("Syncing authority set id");
         loop {
             let sync_steps = sync_authority_set_id(
@@ -111,6 +118,7 @@ impl KillSwitchRelayer {
                 // Resubmitting the correct proof instead of the incorrect one
                 // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.
                 // After that, there's no point in continuing because the relayer will be stopped/in emergency mode.
+                self.emergency_stop = true;
                 return Ok(());
             }
         }

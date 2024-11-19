@@ -146,7 +146,7 @@ impl MerkleRootRelayer {
         let finalized_block_number = self.gear_api.block_hash_to_number(finalized_head).await?;
 
         log::info!(
-            "Proving merkle root presense in block #{} with hash {}",
+            "Proving merkle root presence in block #{} with hash {}",
             finalized_block_number,
             finalized_head
         );

@@ -90,7 +90,7 @@ impl KillSwitchRelayer {
         }
 
         if last_finalized_block == self.last_processed_eth_block {
-            log::info!("No new eth block, skipping..");
+            log::info!("No new eth block, skipping.. last_processed_eth_block={}, last_finalized_block={last_finalized_block}", self.last_processed_eth_block);
             return Ok(());
         }
 
@@ -123,6 +123,7 @@ impl KillSwitchRelayer {
             }
         }
 
+        self.from_eth_block = Some(last_finalized_block.saturating_add(1));
         self.last_processed_eth_block = last_finalized_block;
 
         Ok(())
@@ -139,10 +140,10 @@ impl KillSwitchRelayer {
 
         if !is_matches {
             log::info!(
-                "Merkle root mismatch for block number: {}, expected: {}, got: {}",
+                "Merkle root mismatch for block #{}, expected: {}, got: {}",
                 event.block_number,
+                merkle_root,
                 event.merkle_root,
-                merkle_root
             );
         }
 
@@ -156,7 +157,7 @@ impl KillSwitchRelayer {
             .await?;
 
         log::info!(
-            "Proving merkle root presense in block #{} with hash {}",
+            "Proving merkle root presence in block #{} with hash {}",
             block_number,
             block_hash,
         );

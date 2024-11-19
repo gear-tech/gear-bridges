@@ -8,6 +8,8 @@ sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 ethereum-common.workspace = true
+erc20-relay-client.workspace = true
+
 
 [dev-dependencies]
 futures.workspace = true
@@ -18,6 +20,9 @@ sails-rs = { workspace = true, features = ["gtest"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
+erc20-relay = { workspace = true, features = ["wasm-binary"] }
+vft-manager = { workspace = true, features = ["wasm-binary"] }
+vft-manager-client.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }

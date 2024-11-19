@@ -4,7 +4,7 @@ mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
 
-use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
+use super::{error::Error, Config, ExecContext, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -22,21 +22,6 @@ use sails_rs::{
     prelude::*,
 };
 use vft::vft_manager::io::SubmitReceipt;
-
-pub(crate) const CAPACITY: usize = 500_000;
-
-#[cfg(feature = "gas_calculation")]
-pub(crate) const CAPACITY_STEP_SIZE: usize = 50_000;
-
-pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
-
-pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
-    unsafe {
-        TRANSACTIONS
-            .as_mut()
-            .expect("Program should be constructed")
-    }
-}
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -266,23 +251,6 @@ where
             return Err(Error::FailedEthTransaction);
         }
 
-        // check for double spending
-        let slot = message.proof_block.block.slot;
-        let transactions = transactions_mut();
-        let key = (slot, message.transaction_index);
-        if transactions.contains(&key) {
-            return Err(Error::AlreadyProcessed);
-        }
-
-        if CAPACITY <= transactions.len()
-            && transactions
-                .first()
-                .map(|first| &key < first)
-                .unwrap_or(false)
-        {
-            return Err(Error::TooOldTransaction);
-        }
-
         Ok(receipt)
     }
 
@@ -300,27 +268,6 @@ where
             HandleResult::Checkpoint(Err(_)) => Err(Error::MissingCheckpoint),
             _ => panic!("Unexpected result to `GetCheckpointFor` request"),
         }
-    }
-
-    pub fn fill_transactions(&mut self) -> bool {
-        #[cfg(feature = "gas_calculation")]
-        {
-            let transactions = transactions_mut();
-            if CAPACITY == transactions.len() {
-                return false;
-            }
-
-            let count = cmp::min(CAPACITY - transactions.len(), CAPACITY_STEP_SIZE);
-            let (last, _) = transactions.last().copied().unwrap();
-            for i in 0..count {
-                transactions.insert((last + 1, i as u64));
-            }
-
-            true
-        }
-
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
     }
 
     pub async fn calculate_gas_for_reply(
@@ -359,11 +306,6 @@ fn handle_reply(slot: u64, transaction_index: u64) {
     SubmitReceipt::decode_reply(&reply_bytes)
         .expect("Unable to decode MintTokens reply")
         .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
-
-    let transactions = transactions_mut();
-    if CAPACITY <= transactions.len() {
-        transactions.pop_first();
-    }
-
-    transactions.insert((slot, transaction_index));
+    let _ = transaction_index;
+    let _ = slot;
 }

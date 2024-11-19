@@ -4,7 +4,6 @@ pub mod error;
 pub mod service;
 
 use cell::RefCell;
-use collections::BTreeSet;
 use sails_rs::{
     gstd::{ExecContext, GStdExecContext},
     prelude::*,
@@ -31,10 +30,6 @@ pub struct Erc20RelayProgram(RefCell<State>);
 #[sails_rs::program]
 impl Erc20RelayProgram {
     pub fn new(checkpoint_light_client_address: ActorId, config: Config) -> Self {
-        unsafe {
-            service::TRANSACTIONS = Some(BTreeSet::new());
-        }
-
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
@@ -54,11 +49,6 @@ impl Erc20RelayProgram {
                     reply_deposit: _reply_deposit,
                 },
             );
-
-            let transactions = service::transactions_mut();
-            for i in 0..service::CAPACITY_STEP_SIZE {
-                transactions.insert((0, i as u64));
-            }
 
             self_
         }

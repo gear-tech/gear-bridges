@@ -1,17 +1,12 @@
 // Incorporate code generated based on the IDL file
-#[allow(dead_code)]
-pub(crate) mod erc20_relay {
-    include!(concat!(env!("OUT_DIR"), "/erc20_relay.rs"));
-}
+
 
 #[allow(dead_code)]
 pub(crate) mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
-
+use erc20_relay_client::Error as ERC20Error;
 use vft::vft_manager::io::SubmitReceipt;
-
-use erc20_relay::{erc_20_relay::io as erc20_relay_io, EthToVaraEvent};
 use sails_rs::gstd;
 
 use cell::RefCell;
@@ -80,42 +75,41 @@ where
     /// If message is relayed successfully then reply from relay service is sent to
     /// `vft_gateway` address and proofs are returned.
     ///
+    /// # Parameters
+    ///
+    /// - `slot`: slot for which message is relayed
+    /// - `vft_manager`: a Vft manager address to submit receipt to if erc20-relay confirms proofs are correct
+    /// - `proofs`: raw SCALE-encoded call to `CheckProofs` of erc20-relay.
+    ///
     /// TODO(Adel):
-    /// - Accept `Vec<u8>` as `proofs` instead of concrete structure in case erc20-relay changes
-    ///   structure of params
+    /// - ~~Accept `Vec<u8>` as `proofs` instead of concrete structure in case erc20-relay changes
+    ///   structure of params~~
     /// - Concrete receipt type instead of `Vec<u8>`?
     pub async fn redirect(
         &mut self,
         slot: Slot,
         vft_manager: ActorId,
-        proofs: EthToVaraEvent,
+        proofs: Vec<u8>,
     ) -> Result<Vec<u8>, ProxyError> {
         let state = self.state.borrow();
 
         let endpoint = state.endpoints.endpoint_for(slot)?;
 
-        let check_proofs = erc20_relay_io::CheckProofs::encode_call(proofs);
-
-        let receipt = Result::<Vec<u8>, erc20_relay::Error>::decode(
-            &mut gstd::msg::send_bytes_for_reply(
-                endpoint,
-                check_proofs,
-                0,
-                state.config.reply_deposit,
-            )
-            .map_err(|_| ProxyError::SendFailure)?
-            .up_to(Some(state.config.reply_timeout))
-            .map_err(|_| ProxyError::ReplyTimeout)?
-            .await
-            .map_err(|_| ProxyError::ReplyFailure)?
-            .as_slice(),
+        let receipt = Result::<Vec<u8>, ERC20Error>::decode(
+            &mut gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, state.config.reply_deposit)
+                .map_err(|_| ProxyError::SendFailure)?
+                .up_to(Some(state.config.reply_timeout))
+                .map_err(|_| ProxyError::ReplyTimeout)?
+                .await
+                .map_err(|_| ProxyError::ReplyFailure)?
+                .as_slice(),
         )
         .map_err(|_| ProxyError::DecodeFailure)?
         .map_err(ProxyError::ERC20Relay)?;
         let state = self.state.borrow();
 
         let submit_receipt = SubmitReceipt::encode_call(receipt.clone());
-        
+
         let _: () = Result::<(), vft::Error>::decode(
             &mut gstd::msg::send_bytes_for_reply(
                 vft_manager,
@@ -132,7 +126,7 @@ where
         )
         .map_err(|_| ProxyError::DecodeFailure)?
         .map_err(ProxyError::VftManager)?;
-        
+
         Ok(receipt)
     }
 }

@@ -1,7 +1,7 @@
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
-use crate::service::{erc20_relay, vft};
+use crate::service::vft;
 
 #[derive(Debug, Clone, Decode, Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -13,6 +13,6 @@ pub enum ProxyError {
     ReplyHook,
     ReplyFailure,
     DecodeFailure,
-    ERC20Relay(erc20_relay::Error),
+    ERC20Relay(erc20_relay_client::Error),
     VftManager(vft::Error),
 }

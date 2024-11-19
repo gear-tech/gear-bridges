@@ -6467,6 +6467,8 @@ dependencies = [
 name = "historical-proxy-app"
 version = "0.1.0"
 dependencies = [
+ "erc20-relay",
+ "erc20-relay-client",
  "ethereum-common",
  "futures",
  "gclient 1.6.2",
@@ -6481,6 +6483,8 @@ dependencies = [
  "sails-rs 0.6.3",
  "scale-info",
  "tokio",
+ "vft-manager",
+ "vft-manager-client",
 ]
 
 [[package]]

@@ -18,8 +18,8 @@ pub struct KillSwitchRelayer {
     genesis_config: GenesisConfig,
     proof_storage: Box<dyn ProofStorage>,
 
+    // Next eth block to process.
     from_eth_block: Option<u64>,
-    last_processed_eth_block: u64,
     emergency_stop: bool,
 }
 
@@ -37,7 +37,6 @@ impl KillSwitchRelayer {
             genesis_config,
             proof_storage,
             from_eth_block,
-            last_processed_eth_block: Default::default(),
             emergency_stop: false,
         }
     }
@@ -89,12 +88,15 @@ impl KillSwitchRelayer {
             self.from_eth_block = Some(last_finalized_block);
         }
 
-        if last_finalized_block == self.last_processed_eth_block {
-            log::info!("No new eth block, skipping.. last_processed_eth_block={}, last_finalized_block={last_finalized_block}", self.last_processed_eth_block);
+        let from_eth_block = self.from_eth_block.expect("should be set above");
+        if last_finalized_block < from_eth_block {
+            log::info!(
+                "No new eth block, skipping.. last_processed_eth_block={}, last_finalized_block={}",
+                from_eth_block.saturating_sub(1),
+                last_finalized_block,
+            );
             return Ok(());
         }
-
-        let from_eth_block = self.from_eth_block.expect("should be set above");
 
         let events = self
             .eth_api
@@ -123,8 +125,9 @@ impl KillSwitchRelayer {
             }
         }
 
+        // After processing all events, `last_finalized_block` is the last block we've processed.
+        // So, we need to increment it by 1 to set the next block to process.
         self.from_eth_block = Some(last_finalized_block.saturating_add(1));
-        self.last_processed_eth_block = last_finalized_block;
 
         Ok(())
     }

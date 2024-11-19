@@ -8,6 +8,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { NetworkCard } from '@/components';
 import { SVGComponent } from '@/types';
+import { cx } from '@/utils';
 
 import { FIELD_NAME } from '../../consts';
 
@@ -35,7 +36,7 @@ function Network({
   renderBalance = () => <></>,
 }: Props) {
   return (
-    <div className={styles.network}>
+    <div className={cx(styles.network, styles[inputName])}>
       <NetworkCard SVG={SVG} name={name} />
 
       <div className={styles.inputs}>

@@ -14,6 +14,7 @@
   position: absolute;
   bottom: 0;
   right: 32px;
+  z-index: 1; // to be above the swap form during it's animation
 
   transform: translateY(50%);
 

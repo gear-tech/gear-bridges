@@ -29,7 +29,12 @@
   font-size: 16px;
   line-height: 150%;
 
-  span {
+  a {
     text-decoration: underline;
+    transition: 0.25s color;
+
+    &:hover {
+      color: #13bc9d;
+    }
   }
 }

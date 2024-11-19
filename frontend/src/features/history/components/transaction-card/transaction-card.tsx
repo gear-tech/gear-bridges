@@ -1,8 +1,8 @@
 import { HexString } from '@gear-js/api';
 
-import { Card, CopyButton, Skeleton, TruncatedText } from '@/components';
+import { Card, CopyButton, Skeleton } from '@/components';
 
-import { Transfer } from '../../types';
+import { Network, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
 import { TransactionPair } from '../transaction-pair';
 import { TransactionStatus } from '../transaction-status';
@@ -27,12 +27,18 @@ type Props = Pick<
 };
 
 function TransactionCard({ status, timestamp, blockNumber, ...props }: Props) {
+  const explorerUrl =
+    props.sourceNetwork === Network.Gear ? 'https://vara.subscan.io/block' : 'https://etherscan.io/block';
+
   return (
     <Card className={styles.wideCard}>
       <TransactionDate timestamp={timestamp} />
 
       <p className={styles.blockNumber}>
-        <TruncatedText value={blockNumber} />
+        <a href={`${explorerUrl}/${blockNumber}`} target="_blank" rel="noreferrer">
+          {blockNumber}
+        </a>
+
         <CopyButton value={blockNumber} />
       </p>
 

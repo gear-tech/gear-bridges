@@ -1,3 +1,4 @@
+import { Skeleton } from '@/components';
 import { cx } from '@/utils';
 
 import CheckSVG from '../../assets/check.svg?react';
@@ -26,7 +27,7 @@ function TransactionStatus({ status }: Pick<Transfer, 'status'>) {
 }
 
 function TransactionStatusSkeleton() {
-  return <div className={styles.status}>Status</div>;
+  return <Skeleton className={styles.status} />;
 }
 
 TransactionStatus.Skeleton = TransactionStatusSkeleton;

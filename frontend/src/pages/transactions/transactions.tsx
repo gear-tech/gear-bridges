@@ -45,11 +45,9 @@ function Transactions() {
       </header>
 
       <List
-        items={transactions}
+        items={symbols && decimals ? transactions : undefined}
         hasMore={hasNextPage}
-        renderItem={(transaction) =>
-          symbols && decimals && <TransactionCard {...transaction} symbols={symbols} decimals={decimals} />
-        }
+        renderItem={(transaction) => <TransactionCard {...transaction} symbols={symbols!} decimals={decimals!} />}
         fetchMore={fetchNextPage}
         skeleton={{
           rowsCount: TRANSACTIONS_LIMIT,

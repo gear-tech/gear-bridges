@@ -55,19 +55,36 @@ function TransactionCardCompact({ status, timestamp, ...props }: Props) {
   );
 }
 
-function TransactionCardSkeleton() {
-  return (
-    // TODO: make detailed
-    <Skeleton>
+function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
+  if (isCompact)
+    return (
       <Card className={styles.compactCard}>
-        <TransactionPair.Skeleton />
+        <TransactionPair.Skeleton isCompact />
 
         <div>
           <TransactionStatus.Skeleton />
-          <TransactionDate.Skeleton />
+          <TransactionDate.Skeleton isCompact />
         </div>
       </Card>
-    </Skeleton>
+    );
+
+  return (
+    <Card className={styles.wideCard}>
+      <TransactionDate.Skeleton />
+
+      <p className={styles.blockNumber}>
+        <Skeleton>
+          <span>0x000000000</span>
+        </Skeleton>
+
+        <Skeleton>
+          <CopyButton value="" />
+        </Skeleton>
+      </p>
+
+      <TransactionPair.Skeleton />
+      <TransactionStatus.Skeleton />
+    </Card>
   );
 }
 

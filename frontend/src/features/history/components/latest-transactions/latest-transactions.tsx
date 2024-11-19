@@ -32,7 +32,7 @@ function LatestTransactions() {
   const renderSkeletons = () =>
     new Array(LATEST_TRANSACTIONS_LIMIT).fill(null).map((_, index) => (
       <li key={index}>
-        <TransactionCard.Skeleton />
+        <TransactionCard.Skeleton isCompact />
       </li>
     ));
 

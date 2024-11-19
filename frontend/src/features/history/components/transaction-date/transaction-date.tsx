@@ -1,3 +1,4 @@
+import { Skeleton } from '@/components';
 import { cx } from '@/utils';
 
 import ClockSVG from '../../assets/clock.svg?react';
@@ -19,8 +20,18 @@ function TransactionDate({ timestamp, isCompact }: Props) {
   );
 }
 
-function TransactionDateSkeleton() {
-  return <p className={styles.date}>Date</p>;
+function TransactionDateSkeleton({ isCompact }: Pick<Props, 'isCompact'>) {
+  return (
+    <p className={cx(styles.date, isCompact && styles.compact)}>
+      <Skeleton>
+        <ClockSVG />
+      </Skeleton>
+
+      <Skeleton>
+        <span>{new Date().toLocaleString()}</span>
+      </Skeleton>
+    </p>
+  );
 }
 
 TransactionDate.Skeleton = TransactionDateSkeleton;

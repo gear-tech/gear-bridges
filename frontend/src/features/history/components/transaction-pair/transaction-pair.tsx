@@ -4,7 +4,7 @@ import { formatUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { TruncatedText } from '@/components';
+import { Skeleton, TruncatedText } from '@/components';
 import { SVGComponent } from '@/types';
 import { cx } from '@/utils';
 
@@ -92,32 +92,54 @@ function TransactionPair(props: Props) {
   );
 }
 
-function TransactionPairSkeleton() {
+function TransactionPairSkeleton({ isCompact }: Pick<Props, 'isCompact'>) {
   return (
-    <div className={styles.pair}>
+    <div className={cx(styles.pair, isCompact && styles.compact)}>
       <div className={styles.tx}>
         <div className={styles.icons}>
-          <ArrowSVG />
-          <ArrowSVG />
+          <Skeleton>
+            <VaraSVG />
+          </Skeleton>
+
+          <Skeleton>
+            <VaraSVG />
+          </Skeleton>
         </div>
 
         <div>
-          <p className={styles.amount}>0.0000 Unit</p>
-          <TruncatedText value="0x00" className={styles.address} />
+          <p className={styles.amount}>
+            <Skeleton width="50%" />
+          </p>
+
+          <Skeleton>
+            <span>0x000000000000</span>
+          </Skeleton>
         </div>
       </div>
 
-      <ArrowSVG />
+      <Skeleton>
+        <ArrowSVG />
+      </Skeleton>
 
       <div className={styles.tx}>
         <div className={styles.icons}>
-          <ArrowSVG />
-          <ArrowSVG />
+          <Skeleton>
+            <VaraSVG />
+          </Skeleton>
+
+          <Skeleton>
+            <VaraSVG />
+          </Skeleton>
         </div>
 
         <div>
-          <p className={styles.amount}>0.0000 Unit</p>
-          <TruncatedText value="0x00" className={styles.address} />
+          <p className={styles.amount}>
+            <Skeleton width="50%" />
+          </p>
+
+          <Skeleton>
+            <span>0x000000000000</span>
+          </Skeleton>
         </div>
       </div>
     </div>

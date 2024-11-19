@@ -65,7 +65,7 @@ wrapped-vara-client = { path = "gear-programs/wrapped-vara/client" }
 vft-service = { path = "gear-programs/vft-service" }
 
 # Contracts' deps
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", branch = "gstd-pinned-v1.5.0" }
+extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", rev = "673218fcae1dd7540e21b650eea675af0650385e" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }

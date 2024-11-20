@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-extended_vft_wasm.workspace = true
-vft-client.workspace = true
+extended-vft = { workspace = true, features = ["wasm-binary"] }
+extended-vft-client.workspace = true
 
 clap.workspace = true
 dotenv.workspace = true

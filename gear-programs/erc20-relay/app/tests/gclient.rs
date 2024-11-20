@@ -1,13 +1,13 @@
 // Incorporate code generated based on the IDL file
 #[allow(dead_code)]
 mod vft {
-    include!(concat!(env!("OUT_DIR"), "/vft-gateway.rs"));
+    include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
 
 use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
 use gclient::{Event, EventProcessor, GearApi, GearEvent};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use vft::vft_gateway;
+use vft::vft_manager;
 
 async fn spin_up_node() -> (GClientRemoting, GearApi, CodeId, GasUnit) {
     let api = GearApi::dev().await.unwrap();
@@ -23,7 +23,7 @@ async fn spin_up_node() -> (GClientRemoting, GearApi, CodeId, GasUnit) {
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 
-    let route = <vft_gateway::io::MintTokens as ActionIo>::ROUTE;
+    let route = <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE;
 
     let (remoting, api, code_id, gas_limit) = spin_up_node().await;
     let account_id: ActorId = <[u8; 32]>::from(api.account_id().clone()).into();
@@ -71,7 +71,7 @@ async fn gas_for_reply() {
 
         println!("message_id = {}", hex::encode(message_id.0.as_ref()));
 
-        let reply: <vft_gateway::io::MintTokens as ActionIo>::Reply = Ok(());
+        let reply: <vft_manager::io::SubmitReceipt as ActionIo>::Reply = Ok(());
         let payload = {
             let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
             result.extend_from_slice(route);
@@ -90,7 +90,7 @@ async fn gas_for_reply() {
 
 #[tokio::test]
 #[ignore = "Requires running node"]
-async fn set_vft_gateway() {
+async fn set_vft_manager() {
     use erc20_relay_client::Config;
 
     let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
@@ -112,52 +112,52 @@ async fn set_vft_gateway() {
 
     let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
 
-    // by default address of the VFT gateway is not set
-    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert_eq!(vft_gateway, Default::default());
+    // by default address of the VFT manager is not set
+    let vft_manager = client.vft_manager().recv(program_id).await.unwrap();
+    assert_eq!(vft_manager, Default::default());
 
-    let vft_gateway_new = ActorId::from([1u8; 32]);
+    let vft_manager_new = ActorId::from([1u8; 32]);
 
-    // admin should be able to set the VFT gateway address
+    // admin should be able to set the VFT manager address
     client
-        .set_vft_gateway(vft_gateway_new)
+        .set_vft_manager(vft_manager_new)
         .send_recv(program_id)
         .await
         .unwrap();
 
-    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert_eq!(vft_gateway, vft_gateway_new);
+    let vft_manager = client.vft_manager().recv(program_id).await.unwrap();
+    assert_eq!(vft_manager, vft_manager_new);
 
     // and reset it
     client
-        .set_vft_gateway(Default::default())
+        .set_vft_manager(Default::default())
         .send_recv(program_id)
         .await
         .unwrap();
 
-    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert_eq!(vft_gateway, Default::default());
+    let vft_manager = client.vft_manager().recv(program_id).await.unwrap();
+    assert_eq!(vft_manager, Default::default());
 
-    // another account isn't permitted to change the VFT gateway address
+    // another account isn't permitted to change the VFT manager address
     let api = GearApi::dev().await.unwrap().with("//Bob").unwrap();
     let remoting = GClientRemoting::new(api);
 
     let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
     let result = client
-        .set_vft_gateway(Default::default())
+        .set_vft_manager(Default::default())
         .send_recv(program_id)
         .await;
     assert!(result.is_err());
 
     let result = client
-        .set_vft_gateway(vft_gateway_new)
+        .set_vft_manager(vft_manager_new)
         .send_recv(program_id)
         .await;
     assert!(result.is_err());
 
     // anyone should be able to read the address
-    let vft_gateway = client.vft_gateway().recv(program_id).await.unwrap();
-    assert_eq!(vft_gateway, Default::default());
+    let vft_manager = client.vft_manager().recv(program_id).await.unwrap();
+    assert_eq!(vft_manager, Default::default());
 }
 
 #[tokio::test]

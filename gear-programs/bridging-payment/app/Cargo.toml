@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-vft-gateway-client.workspace = true
+vft-manager-client.workspace = true
 sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true

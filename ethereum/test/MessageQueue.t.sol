@@ -9,17 +9,16 @@ import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 import {IRelayer} from "../src/interfaces/IRelayer.sol";
 
-import {ERC20Treasury} from "../src/ERC20Treasury.sol";
-import {IERC20Treasury, Packer, WithdrawMessage} from "../src/interfaces/IERC20Treasury.sol";
+import {ERC20Manager} from "../src/ERC20Manager.sol";
+import {IERC20Manager, Packer, WithdrawMessage} from "../src/interfaces/IERC20Manager.sol";
 
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {IMessageQueue, VaraMessage, Hasher} from "../src/interfaces/IMessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 
-import {TestHelper, OWNER, USER, VARA_ADDRESS_3, VARA_ADDRESS_7, ETH_ADDRESS_3, ETH_ADDRESS_5} from "./TestHelper.t.sol";
+import {TestHelper, OWNER, USER, VARA_ADDRESS_3, VARA_ADDRESS_7, ETH_ADDRESS_3, ETH_ADDRESS_5, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
 
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
-import {VFT_GATEWAY_ADDRESS} from "../src/libraries/Environment.sol";
 
 contract MessageQueueTest is TestHelper {
     using Address for address;
@@ -35,7 +34,7 @@ contract MessageQueueTest is TestHelper {
     function setUp() public override {
         super.setUp();
         vm.startPrank(OWNER, OWNER);
-        erc20_token.transfer(address(treasury), 100 * (10 ** 18));
+        erc20_token.transfer(address(erc20_manager), 100 * (10 ** 18));
 
         vm.stopPrank();
 
@@ -372,8 +371,8 @@ contract MessageQueueTest is TestHelper {
         });
 
         VaraMessage memory vara_message = VaraMessage({
-            sender: VFT_GATEWAY_ADDRESS,
-            receiver: address(treasury),
+            sender: VFT_MANAGER_ADDRESS,
+            receiver: address(erc20_manager),
             nonce: bytes32(uint256(10)),
             data: withdraw_msg.pack()
         });
@@ -425,17 +424,24 @@ contract MessageQueueTest is TestHelper {
     }
 
     function test_relayer_contract_emergency_mode() public {
-        bytes32 bad_block_merkle_root =
-            bytes32(
-                0xbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadb
-            );
+        bytes32 bad_block_merkle_root = bytes32(
+            0xbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadb
+        );
 
-        relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
+        relayer.submitMerkleRoot(
+            BLOCK_ID,
+            bad_block_merkle_root,
+            bytes(hex"baad")
+        );
         assert(relayer.emergencyStop());
 
         // Should revert because of emergency stop
         vm.expectRevert(IRelayer.EmergencyStop.selector);
-        relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
+        relayer.submitMerkleRoot(
+            BLOCK_ID,
+            bad_block_merkle_root,
+            bytes(hex"baad")
+        );
 
         // Same for getMerkleRoot
         vm.expectRevert(IRelayer.EmergencyStop.selector);

@@ -42,8 +42,8 @@ sol! {
 
 sol!(
     #[sol(rpc)]
-    IERC20Treasury,
-    "../out/IERC20Treasury.sol/IERC20Treasury.json"
+    IERC20Manager,
+    "../out/IERC20Manager.sol/IERC20Manager.json"
 );
 
 sol!(

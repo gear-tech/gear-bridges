@@ -1,28 +1,33 @@
 [package]
-name = "bridging-payment"
+name = "vft-manager"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bridging-payment-app = { path = "app" }
+vft-manager-app = { path = "app" }
 
 [build-dependencies]
-bridging-payment-app = { path = "app" }
+vft-manager-app = { path = "app" }
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-idl-gen.workspace = true
 
 [dev-dependencies]
-bridging-payment = { path = ".", features = ["wasm-binary"] }
-bridging-payment-client = { path = "client" }
-vft-manager = { workspace = true, features = ["wasm-binary"] }
-vft-manager-client.workspace = true
-extended_vft_wasm.workspace = true
+vft-manager = { path = ".", features = ["wasm-binary"] }
+vft-manager-client = { path = "client" }
 vft-client.workspace = true
 
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 sails-rs = { workspace = true, features = ["gtest"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+blake2.workspace = true
+gear-core.workspace = true
 gtest.workspace = true
 parity-scale-codec.workspace = true
+scale-info.workspace = true
+extended_vft_wasm.workspace = true
+gclient.workspace = true
 
 [features]
 wasm-binary = []

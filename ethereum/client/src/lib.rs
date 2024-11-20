@@ -189,7 +189,7 @@ impl EthApi {
             .into_iter()
             .map(
                 |(
-                    IERC20Treasury::Deposit {
+                    IERC20Manager::BridgingRequested {
                         from,
                         to,
                         token,
@@ -373,14 +373,14 @@ where
         &self,
         contract_address: Address,
         block: u64,
-    ) -> Result<Vec<(IERC20Treasury::Deposit, TxHash)>, Error> {
+    ) -> Result<Vec<(IERC20Manager::BridgingRequested, TxHash)>, Error> {
         let filter = Filter::new()
             .address(contract_address)
-            .event_signature(IERC20Treasury::Deposit::SIGNATURE_HASH)
+            .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
             .from_block(block)
             .to_block(block);
 
-        let event: Event<T, P, IERC20Treasury::Deposit, Ethereum> =
+        let event: Event<T, P, IERC20Manager::BridgingRequested, Ethereum> =
             Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;

@@ -1,6 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
-import { useWriteContract } from 'wagmi';
+import { useConfig, useWriteContract } from 'wagmi';
+import { watchContractEvent } from 'wagmi/actions';
 
 import { isUndefined } from '@/utils';
 
@@ -16,6 +17,7 @@ function useHandleEthSubmit(
 ) {
   const { writeContractAsync } = useWriteContract();
   const approve = useApprove(ftAddress);
+  const config = useConfig();
 
   const requestBridging = (amount: bigint, accountAddress: HexString) => {
     if (!ftAddress) throw new Error('Fungible token address is not defined');
@@ -30,6 +32,24 @@ function useHandleEthSubmit(
     });
   };
 
+  const watch = () =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        unwatch();
+        reject(error);
+      };
+
+      const onLogs = () => {
+        unwatch();
+        resolve();
+      };
+
+      const address = ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS;
+      const abi = BRIDGING_PAYMENT_ABI;
+
+      const unwatch = watchContractEvent(config, { address, abi, eventName: 'FeePaid', onLogs, onError });
+    });
+
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
     if (isUndefined(allowance.data)) throw new Error('Allowance is not defined');
 
@@ -38,7 +58,7 @@ function useHandleEthSubmit(
       await allowance.refetch(); // TODO: replace with queryClient.setQueryData after @gear-js/react-hooks update to return QueryKey
     }
 
-    return requestBridging(amount, accountAddress);
+    return requestBridging(amount, accountAddress).then(() => watch());
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

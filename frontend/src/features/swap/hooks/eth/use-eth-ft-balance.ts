@@ -1,6 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { formatUnits } from 'viem';
-import { useReadContracts } from 'wagmi';
+import { useReadContract } from 'wagmi';
 
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount } from '@/hooks';
@@ -11,21 +11,15 @@ import { FUNCTION_NAME } from '../../consts/eth';
 
 const abi = FUNGIBLE_TOKEN_ABI;
 
-function useEthFTBalance(address: HexString | undefined) {
+function useEthFTBalance(address: HexString | undefined, decimals: number | undefined) {
   const ethAccount = useEthAccount();
 
   // TODO: logger
-  const { data, isPending } = useReadContracts({
-    contracts: [
-      {
-        address,
-        abi,
-        functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_BALANCE,
-        args: ethAccount.address ? [ethAccount.address] : undefined,
-      },
-
-      { address, abi, functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_DECIMALS },
-    ],
+  const { data, isPending } = useReadContract({
+    address,
+    abi,
+    functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_BALANCE,
+    args: ethAccount.address ? [ethAccount.address] : undefined,
 
     query: {
       refetchInterval: BALANCE_REFETCH_INTERVAL,
@@ -33,11 +27,8 @@ function useEthFTBalance(address: HexString | undefined) {
     },
   });
 
-  const value = data?.[0].result;
-  const decimals = data?.[1].result;
-
+  const value = data;
   const formattedValue = !isUndefined(value) && !isUndefined(decimals) ? formatUnits(value, decimals) : undefined;
-
   const isLoading = ethAccount.isConnected && isPending;
 
   return { value, formattedValue, decimals, isLoading };

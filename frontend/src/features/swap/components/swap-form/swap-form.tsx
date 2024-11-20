@@ -38,10 +38,10 @@ function SwapForm({
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair, ...bridge } = useBridge(networkIndex);
+  const { address, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
-  const ftBalance = useFTBalance(address);
+  const ftBalance = useFTBalance(address, decimals);
   const allowance = useFTAllowance(address);
   const [{ mutateAsync: onSubmit, ...submit }, approve] = useHandleSubmit(address, fee.value, allowance);
 
@@ -49,6 +49,7 @@ function SwapForm({
     isVaraNetwork,
     accountBalance,
     ftBalance,
+    decimals,
     fee.value,
     disabled,
     onSubmit,
@@ -126,7 +127,7 @@ function SwapForm({
 
             <FTAllowanceTip
               allowance={allowance.data}
-              decimals={ftBalance.decimals}
+              decimals={decimals}
               symbol={symbol}
               amount={amount}
               isVaraNetwork={isVaraNetwork}

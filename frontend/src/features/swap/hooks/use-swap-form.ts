@@ -20,15 +20,16 @@ type Values = {
 function useSwapForm(
   isVaraNetwork: boolean,
   accountBalance: Values,
-  ftBalance: Values & { decimals: number | undefined },
+  ftBalance: Values,
+  decimals: number | undefined,
   fee: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(accountBalance.value, ftBalance.value, fee, ftBalance.decimals);
-  const expectedValueSchema = getAmountSchema(accountBalance.value, ftBalance.value, BigInt(0), ftBalance.decimals);
+  const valueSchema = getAmountSchema(accountBalance.value, ftBalance.value, fee, decimals);
+  const expectedValueSchema = getAmountSchema(accountBalance.value, ftBalance.value, BigInt(0), decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({

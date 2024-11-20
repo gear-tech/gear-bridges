@@ -11,8 +11,10 @@ type UseAccountBalance = () => BalanceValues & {
   isLoading: boolean;
 };
 
-type UseFTBalance = (ftAddress: HexString | undefined) => BalanceValues & {
-  decimals: number | undefined;
+type UseFTBalance = (
+  ftAddress: HexString | undefined,
+  decimals: number | undefined,
+) => BalanceValues & {
   isLoading: boolean;
 };
 

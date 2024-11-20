@@ -7,7 +7,7 @@ import { isUndefined } from '@/utils';
 
 import { BALANCE_REFETCH_INTERVAL, QUERY_NAME, SERVICE_NAME } from '../../consts';
 
-function useVaraFTBalance(address: HexString | undefined) {
+function useVaraFTBalance(address: HexString | undefined, decimals: number | undefined) {
   const { account } = useAccount();
 
   const { data: program } = useProgram({
@@ -15,7 +15,7 @@ function useVaraFTBalance(address: HexString | undefined) {
     id: address,
   });
 
-  const { data: balance, isPending: isBalancePending } = useProgramQuery({
+  const { data, isPending } = useProgramQuery({
     program,
     serviceName: SERVICE_NAME.VFT,
     functionName: QUERY_NAME.BALANCE,
@@ -23,17 +23,9 @@ function useVaraFTBalance(address: HexString | undefined) {
     query: { enabled: Boolean(account), refetchInterval: BALANCE_REFETCH_INTERVAL },
   });
 
-  const { data: decimals, isPending: isDecimalsPending } = useProgramQuery({
-    program,
-    serviceName: SERVICE_NAME.VFT,
-    functionName: QUERY_NAME.DECIMALS,
-    args: [],
-  });
-
-  const value = balance;
-  const formattedValue = !isUndefined(balance) && !isUndefined(decimals) ? formatUnits(balance, decimals) : undefined;
-
-  const isLoading = isBalancePending || isDecimalsPending;
+  const value = data;
+  const formattedValue = !isUndefined(value) && !isUndefined(decimals) ? formatUnits(value, decimals) : undefined;
+  const isLoading = isPending;
 
   return { value, formattedValue, decimals, isLoading };
 }

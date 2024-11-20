@@ -15,7 +15,7 @@ function useEthFTBalance(address: HexString | undefined, decimals: number | unde
   const ethAccount = useEthAccount();
 
   // TODO: logger
-  const { data, isPending } = useReadContract({
+  const { data, isLoading } = useReadContract({
     address,
     abi,
     functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_BALANCE,
@@ -29,7 +29,6 @@ function useEthFTBalance(address: HexString | undefined, decimals: number | unde
 
   const value = data;
   const formattedValue = !isUndefined(value) && !isUndefined(decimals) ? formatUnits(value, decimals) : undefined;
-  const isLoading = ethAccount.isConnected && isPending;
 
   return { value, formattedValue, decimals, isLoading };
 }

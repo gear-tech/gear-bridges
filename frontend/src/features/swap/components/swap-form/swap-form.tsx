@@ -131,6 +131,7 @@ function SwapForm({
               symbol={symbol}
               amount={amount}
               isVaraNetwork={isVaraNetwork}
+              isLoading={bridge.isLoading || allowance.isLoading}
             />
           </div>
         </footer>

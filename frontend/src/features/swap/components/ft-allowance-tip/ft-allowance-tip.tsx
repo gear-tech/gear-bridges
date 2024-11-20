@@ -13,11 +13,22 @@ type Props = {
   symbol: string | undefined;
   amount: string;
   isVaraNetwork: boolean;
+  isLoading: boolean;
 };
 
-function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork }: Props) {
-  const isLoading = isUndefined(allowance) || !decimals || !symbol;
-  if (isLoading) return <Skeleton width="14px" height="14px" borderRadius="50%" className={styles.skeleton} />;
+function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork, isLoading }: Props) {
+  const isEmpty = isUndefined(allowance) || !decimals || !symbol;
+
+  if (isLoading || isEmpty)
+    return (
+      <Skeleton
+        width="14px"
+        height="14px"
+        borderRadius="50%"
+        className={styles.skeleton}
+        disabled={!isLoading && isEmpty}
+      />
+    );
 
   const formattedAllowance = formatUnits(allowance, decimals);
   const contractName = isVaraNetwork ? 'VFT' : 'ERC20';

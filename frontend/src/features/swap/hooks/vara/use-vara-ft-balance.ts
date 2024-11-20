@@ -15,7 +15,7 @@ function useVaraFTBalance(address: HexString | undefined, decimals: number | und
     id: address,
   });
 
-  const { data, isPending } = useProgramQuery({
+  const { data, isLoading } = useProgramQuery({
     program,
     serviceName: SERVICE_NAME.VFT,
     functionName: QUERY_NAME.BALANCE,
@@ -25,7 +25,6 @@ function useVaraFTBalance(address: HexString | undefined, decimals: number | und
 
   const value = data;
   const formattedValue = !isUndefined(value) && !isUndefined(decimals) ? formatUnits(value, decimals) : undefined;
-  const isLoading = isPending;
 
   return { value, formattedValue, decimals, isLoading };
 }

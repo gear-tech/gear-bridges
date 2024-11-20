@@ -3,6 +3,8 @@ import { useAccount, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 
 import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, VftProgram } from '@/consts';
 
+import { ALLOWANCE_REFETCH_INTERVAL } from '../../consts';
+
 function useVaraFTAllowance(address: HexString | undefined) {
   const { account } = useAccount();
 
@@ -17,7 +19,7 @@ function useVaraFTAllowance(address: HexString | undefined) {
     functionName: 'allowance',
     // TODO: remove assertion after @gear-js/react-hooks update to support empty args
     args: [account?.decodedAddress as HexString, BRIDGING_PAYMENT_CONTRACT_ADDRESS],
-    query: { enabled: Boolean(account) },
+    query: { enabled: Boolean(account), refetchInterval: ALLOWANCE_REFETCH_INTERVAL },
   });
 }
 

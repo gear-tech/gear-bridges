@@ -58,7 +58,9 @@ function useHandleEthSubmit(
       await allowance.refetch(); // TODO: replace with queryClient.setQueryData after @gear-js/react-hooks update to return QueryKey
     }
 
-    return requestBridging(amount, accountAddress).then(() => watch());
+    return requestBridging(amount, accountAddress)
+      .then(() => watch())
+      .then(() => allowance.refetch());
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

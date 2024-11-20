@@ -61,7 +61,7 @@ function useHandleVaraSubmit(
       await allowance.refetch(); // TODO: replace with queryClient.setQueryData after @gear-js/react-hooks update to return QueryKey
     }
 
-    return sendBridgingPaymentRequest(amount, accountAddress);
+    return sendBridgingPaymentRequest(amount, accountAddress).then(() => allowance.refetch());
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

@@ -26,7 +26,7 @@ type UseFee = () => {
 type UseHandleSubmit = (
   ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
-  allowance: ReturnType<UseFTAllowance>,
+  allowance: bigint | undefined,
 ) => Readonly<
   [
     {

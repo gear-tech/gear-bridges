@@ -6,7 +6,7 @@ import { BRIDGING_PAYMENT_CONTRACT_ADDRESS, BridgingPaymentProgram, VftProgram }
 import { isUndefined } from '@/utils';
 
 import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
-import { FormattedValues, UseFTAllowance } from '../../types';
+import { FormattedValues } from '../../types';
 
 function useSendBridgingPaymentRequest() {
   const { data: program } = useProgram({
@@ -37,7 +37,7 @@ function useSendVftApprove(ftAddress: HexString | undefined) {
 function useHandleVaraSubmit(
   ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
-  allowance: ReturnType<UseFTAllowance>,
+  allowance: bigint | undefined,
 ) {
   const bridgingPaymentRequest = useSendBridgingPaymentRequest();
   const vftApprove = useSendVftApprove(ftAddress);
@@ -54,14 +54,12 @@ function useHandleVaraSubmit(
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
-    if (isUndefined(allowance.data)) throw new Error('Allowance is not found');
+    if (isUndefined(allowance)) throw new Error('Allowance is not found');
 
-    if (amount > allowance.data) {
+    if (amount > allowance)
       await vftApprove.sendTransactionAsync({ args: [BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] });
-      await allowance.refetch(); // TODO: replace with queryClient.setQueryData after @gear-js/react-hooks update to return QueryKey
-    }
 
-    return sendBridgingPaymentRequest(amount, accountAddress).then(() => allowance.refetch());
+    return sendBridgingPaymentRequest(amount, accountAddress);
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

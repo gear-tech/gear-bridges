@@ -6,15 +6,11 @@ import { watchContractEvent } from 'wagmi/actions';
 import { isUndefined } from '@/utils';
 
 import { BRIDGING_PAYMENT_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
-import { FormattedValues, UseFTAllowance } from '../../types';
+import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
-function useHandleEthSubmit(
-  ftAddress: HexString | undefined,
-  fee: bigint | undefined,
-  allowance: ReturnType<UseFTAllowance>,
-) {
+function useHandleEthSubmit(ftAddress: HexString | undefined, fee: bigint | undefined, allowance: bigint | undefined) {
   const { writeContractAsync } = useWriteContract();
   const approve = useApprove(ftAddress);
   const config = useConfig();
@@ -51,16 +47,11 @@ function useHandleEthSubmit(
     });
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    if (isUndefined(allowance.data)) throw new Error('Allowance is not defined');
+    if (isUndefined(allowance)) throw new Error('Allowance is not defined');
 
-    if (amount > allowance.data) {
-      await approve.mutateAsync(amount);
-      await allowance.refetch(); // TODO: replace with queryClient.setQueryData after @gear-js/react-hooks update to return QueryKey
-    }
+    if (amount > allowance) await approve.mutateAsync(amount);
 
-    return requestBridging(amount, accountAddress)
-      .then(() => watch())
-      .then(() => allowance.refetch());
+    return requestBridging(amount, accountAddress).then(() => watch());
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

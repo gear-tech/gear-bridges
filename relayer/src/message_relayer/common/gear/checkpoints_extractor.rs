@@ -1,6 +1,7 @@
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
     thread,
+    time::Instant,
 };
 
 use futures::executor::block_on;
@@ -13,7 +14,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 
 use crate::message_relayer::common::{
-    self, {EthereumSlotNumber, GSdkArgs, GearBlockNumber},
+    self, EthereumSlotNumber, GSdkArgs, GearBlockNumber, DELAY_MAX,
 };
 
 pub struct CheckpointsExtractor {
@@ -57,13 +58,19 @@ impl CheckpointsExtractor {
         tokio::task::spawn_blocking(move || {
             let mut error_index = 0;
             loop {
+                let timer = Instant::now();
                 let res = block_on(self.run_inner(&sender, &blocks));
+                let elapsed = timer.elapsed();
                 if let Err(err) = res {
                     log::error!("Checkpoints extractor failed: {}", err);
-                }
 
-                thread::sleep(common::get_delay(error_index));
-                error_index += 1;
+                    if elapsed > 2 * DELAY_MAX {
+                        error_index = 0;
+                    }
+
+                    thread::sleep(common::get_delay(error_index));
+                    error_index += 1;
+                }
             }
         });
 

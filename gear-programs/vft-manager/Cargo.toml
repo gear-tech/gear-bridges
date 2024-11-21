@@ -14,7 +14,7 @@ sails-idl-gen.workspace = true
 [dev-dependencies]
 vft-manager = { path = ".", features = ["wasm-binary"] }
 vft-manager-client = { path = "client" }
-vft-client.workspace = true
+extended-vft-client.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
@@ -26,7 +26,7 @@ gear-core.workspace = true
 gtest.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
-extended_vft_wasm.workspace = true
+extended-vft.workspace = true
 gclient.workspace = true
 
 [features]

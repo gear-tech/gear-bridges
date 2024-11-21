@@ -1843,13 +1843,13 @@ dependencies = [
  "bridging-payment",
  "bridging-payment-app",
  "bridging-payment-client",
- "extended_vft_wasm",
+ "extended-vft",
+ "extended-vft-client",
  "gtest",
  "parity-scale-codec",
  "sails-idl-gen",
  "sails-rs",
  "tokio",
- "vft-client",
  "vft-manager",
  "vft-manager-client",
 ]
@@ -3046,13 +3046,13 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "dotenv",
- "extended_vft_wasm",
+ "extended-vft",
+ "extended-vft-client",
  "gclient",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "sails-rs",
  "tokio",
- "vft-client",
 ]
 
 [[package]]
@@ -3813,23 +3813,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "extended-vft-app"
-version = "0.1.0"
-source = "git+https://github.com/gear-foundation/standards/?rev=673218fcae1dd7540e21b650eea675af0650385e#673218fcae1dd7540e21b650eea675af0650385e"
+name = "extended-vft"
+version = "1.1.0"
+source = "git+https://github.com/gear-foundation/standards/?rev=a59ecb537ee3bb394baf18a720c5bb20c5c3afd1#a59ecb537ee3bb394baf18a720c5bb20c5c3afd1"
 dependencies = [
- "gear-wasm-builder 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "log",
- "parity-scale-codec",
+ "extended-vft-app",
+ "sails-idl-gen",
  "sails-rs",
- "scale-info",
- "vft-service 0.1.0 (git+https://github.com/gear-foundation/standards)",
 ]
 
 [[package]]
-name = "extended_vft_wasm"
+name = "extended-vft-app"
 version = "0.1.0"
-source = "git+https://github.com/gear-foundation/standards/?rev=673218fcae1dd7540e21b650eea675af0650385e#673218fcae1dd7540e21b650eea675af0650385e"
+source = "git+https://github.com/gear-foundation/standards/?rev=a59ecb537ee3bb394baf18a720c5bb20c5c3afd1#a59ecb537ee3bb394baf18a720c5bb20c5c3afd1"
+dependencies = [
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sails-rs",
+ "vft-service 1.1.0",
+]
+
+[[package]]
+name = "extended-vft-client"
+version = "0.1.0"
+source = "git+https://github.com/gear-foundation/standards/?rev=a59ecb537ee3bb394baf18a720c5bb20c5c3afd1#a59ecb537ee3bb394baf18a720c5bb20c5c3afd1"
 dependencies = [
  "extended-vft-app",
  "sails-client-gen",
@@ -14165,16 +14171,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vft-client"
-version = "0.1.0"
-dependencies = [
- "git-download",
- "mockall 0.12.1",
- "sails-client-gen",
- "sails-rs",
-]
-
-[[package]]
 name = "vft-manager"
 version = "0.1.0"
 dependencies = [
@@ -14182,7 +14178,8 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "blake2",
- "extended_vft_wasm",
+ "extended-vft",
+ "extended-vft-client",
  "gclient",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest",
@@ -14191,7 +14188,6 @@ dependencies = [
  "sails-rs",
  "scale-info",
  "tokio",
- "vft-client",
  "vft-manager",
  "vft-manager-app",
  "vft-manager-client",
@@ -14204,6 +14200,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
  "ethereum-common",
+ "extended-vft-client",
  "gbuiltin-eth-bridge",
  "getrandom 0.2.15",
  "git-download",
@@ -14213,7 +14210,6 @@ dependencies = [
  "sails-client-gen",
  "sails-rs",
  "scale-info",
- "vft-client",
 ]
 
 [[package]]
@@ -14241,8 +14237,8 @@ dependencies = [
 
 [[package]]
 name = "vft-service"
-version = "0.1.0"
-source = "git+https://github.com/gear-foundation/standards#673218fcae1dd7540e21b650eea675af0650385e"
+version = "1.1.0"
+source = "git+https://github.com/gear-foundation/standards/?rev=a59ecb537ee3bb394baf18a720c5bb20c5c3afd1#a59ecb537ee3bb394baf18a720c5bb20c5c3afd1"
 dependencies = [
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",

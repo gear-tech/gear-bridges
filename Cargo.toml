@@ -13,7 +13,6 @@ members = [
     "gear-programs/vft-manager",
     "gear-programs/vft-manager/app",
     "gear-programs/vft-manager/client",
-    "gear-programs/vft-client",
     "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
@@ -50,7 +49,6 @@ bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
 vft-manager = { path = "gear-programs/vft-manager" }
 vft-manager-app = { path = "gear-programs/vft-manager/app" }
 vft-manager-client = { path = "gear-programs/vft-manager/client" }
-vft-client = { path = "gear-programs/vft-client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
@@ -65,7 +63,10 @@ wrapped-vara-client = { path = "gear-programs/wrapped-vara/client" }
 vft-service = { path = "gear-programs/vft-service" }
 
 # Contracts' deps
-extended_vft_wasm = { git = "https://github.com/gear-foundation/standards/", rev = "673218fcae1dd7540e21b650eea675af0650385e" }
+
+# Provides wasm binary
+extended-vft = { git = "https://github.com/gear-foundation/standards/", rev = "a59ecb537ee3bb394baf18a720c5bb20c5c3afd1" }
+extended-vft-client = { git = "https://github.com/gear-foundation/standards/", rev = "a59ecb537ee3bb394baf18a720c5bb20c5c3afd1" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }

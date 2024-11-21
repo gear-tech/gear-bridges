@@ -12,7 +12,7 @@ alloy-sol-types = { workspace = true, features = ["json"] }
 ethereum-common.workspace = true
 gstd.workspace = true
 gbuiltin-eth-bridge.workspace = true
-vft-client.workspace = true
+extended-vft-client.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }

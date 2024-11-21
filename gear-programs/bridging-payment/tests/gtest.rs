@@ -2,9 +2,9 @@ use bridging_payment_client::{
     traits::*, BridgingPayment as BridgingPaymentC,
     BridgingPaymentFactory as BridgingPaymentFactoryC, Config, InitConfig,
 };
+use extended_vft_client::{traits::*, ExtendedVftFactory as VftFactoryC, Vft as VftC};
 use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_manager_client::{
     traits::*, Config as VftManagerConfig, InitConfig as VftManagerInitConfig, TokenSupply,
     VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
@@ -104,9 +104,7 @@ async fn setup_for_test() -> Fixture {
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting
-        .system()
-        .submit_code(extended_vft_wasm::WASM_BINARY_OPT);
+    let vft_code_id = remoting.system().submit_code(extended_vft::WASM_BINARY);
     let vft_program_id = VftFactoryC::new(remoting.clone())
         .new("Token".into(), "Token".into(), 18)
         .send_recv(vft_code_id, b"salt")

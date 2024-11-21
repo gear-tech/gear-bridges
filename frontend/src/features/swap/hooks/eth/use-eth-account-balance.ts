@@ -1,7 +1,7 @@
 import { formatEther } from 'viem';
 import { useBalance } from 'wagmi';
 
-import { useEthAccount } from '@/hooks';
+import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
 
 const withPrecision = (value: string) => {
   // simplest solution without rounding for now
@@ -13,9 +13,11 @@ const withPrecision = (value: string) => {
 function useEthAccountBalance() {
   const ethAccount = useEthAccount();
 
-  const { data, isPending } = useBalance({
+  const { data, isPending, queryKey } = useBalance({
     address: ethAccount?.address,
   });
+
+  useInvalidateOnBlock({ queryKey });
 
   const { value } = data || {};
   const formattedValue = data ? withPrecision(formatEther(data.value)) : undefined;

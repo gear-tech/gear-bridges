@@ -5,7 +5,7 @@ import { formatUnits } from 'viem';
 import { VftProgram } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { BALANCE_REFETCH_INTERVAL, QUERY_NAME, SERVICE_NAME } from '../../consts';
+import { QUERY_NAME, SERVICE_NAME } from '../../consts';
 
 function useVaraFTBalance(address: HexString | undefined, decimals: number | undefined) {
   const { account } = useAccount();
@@ -20,7 +20,8 @@ function useVaraFTBalance(address: HexString | undefined, decimals: number | und
     serviceName: SERVICE_NAME.VFT,
     functionName: QUERY_NAME.BALANCE,
     args: [account?.decodedAddress || '0x00'],
-    query: { enabled: Boolean(account), refetchInterval: BALANCE_REFETCH_INTERVAL },
+    query: { enabled: Boolean(account) },
+    watch: true,
   });
 
   const value = data;

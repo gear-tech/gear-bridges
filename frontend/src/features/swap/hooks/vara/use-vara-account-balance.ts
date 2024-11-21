@@ -1,13 +1,11 @@
-import { useAccount, useBalanceFormat } from '@gear-js/react-hooks';
+import { useAccount, useBalanceFormat, useDeriveBalancesAll } from '@gear-js/react-hooks';
 import { useMemo } from 'react';
-
-import { useDeriveBalancesAll } from './use-derive-balances-all';
 
 function useVaraAccountBalance() {
   const { account, isAccountReady } = useAccount();
   const { getFormattedBalance } = useBalanceFormat();
 
-  const { data, isPending } = useDeriveBalancesAll(account?.address);
+  const data = useDeriveBalancesAll(account?.address);
   const { freeBalance } = data || {};
   const value = freeBalance?.toBigInt();
   const formattedValue = value !== undefined ? getFormattedBalance(value).value : undefined;
@@ -17,8 +15,8 @@ function useVaraAccountBalance() {
     if (!isAccountReady) return true;
     if (!account) return false;
 
-    return isPending;
-  }, [account, isAccountReady, isPending]);
+    return !data;
+  }, [account, isAccountReady, data]);
 
   return { value, formattedValue, isLoading };
 }

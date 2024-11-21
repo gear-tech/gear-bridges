@@ -16,7 +16,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     ethereum_beacon_client::BeaconClient,
-    message_relayer::common::{self, EthereumSlotNumber, TxHashWithSlot, GSdkArgs},
+    message_relayer::common::{self, EthereumSlotNumber, GSdkArgs, TxHashWithSlot},
 };
 
 mod compose_payload;

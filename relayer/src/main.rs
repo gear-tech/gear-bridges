@@ -392,8 +392,6 @@ async fn main() {
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                         gsdk_args,
                         common.vara_suri,
-                        gear_api,
-                        gclient_client,
                         eth_api,
                         beacon_client,
                         erc20_treasury_address,

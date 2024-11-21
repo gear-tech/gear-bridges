@@ -29,7 +29,7 @@ mod tests;
 
 mod abi;
 use abi::{
-    BridgingPayment, ContentMessage, IERC20Treasury, IMessageQueue,
+    BridgingPayment, ContentMessage, IERC20Manager, IMessageQueue,
     IMessageQueue::IMessageQueueInstance, IRelayer, IRelayer::IRelayerInstance,
     IRelayer::MerkleRoot,
 };

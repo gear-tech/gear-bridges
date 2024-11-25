@@ -32,13 +32,14 @@ jobs:
         with:
           version: nightly-4923529c743f25a0f37503a7bcf7c68caa6901f1
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force --no-cache
         working-directory: ./ethereum
       - name: Build gear programs
         run: cargo build --release -p bridging-payment -p erc20-relay -p vft-manager -p wrapped-vara
       - name: Check that files match
         run: |
           stored=(
+            "./api/ethereum/ERC20ManagerBridgingPayment.json"
             "./api/ethereum/IERC20Manager.json"
             "./api/ethereum/IMessageQueue.json"
 
@@ -49,6 +50,7 @@ jobs:
           )
 
           generated=(
+            "./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json"
             "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
 

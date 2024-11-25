@@ -6,6 +6,7 @@ pub(crate) mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
 use erc20_relay_client::Error as ERC20Error;
+use self::gstd::debug;
 use vft::vft_manager::io::SubmitReceipt;
 use sails_rs::gstd;
 
@@ -94,7 +95,7 @@ where
         let state = self.state.borrow();
 
         let endpoint = state.endpoints.endpoint_for(slot)?;
-
+        debug!("Sending message to ERC20 Relay");
         let receipt = Result::<Vec<u8>, ERC20Error>::decode(
             &mut gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, state.config.reply_deposit)
                 .map_err(|_| ProxyError::SendFailure)?
@@ -106,6 +107,7 @@ where
         )
         .map_err(|_| ProxyError::DecodeFailure)?
         .map_err(ProxyError::ERC20Relay)?;
+        debug!("Got receipt: {:?}", receipt);
         let state = self.state.borrow();
 
         let submit_receipt = SubmitReceipt::encode_call(receipt.clone());

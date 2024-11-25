@@ -16,8 +16,8 @@ sails-idl-gen.workspace = true
 [dev-dependencies]
 historical-proxy = { path = ".", features = ["wasm-binary"] }
 historical-proxy-client = { path = "client" }
-sails-rs = { version = "0.6.2", features = ["gtest"] }
-tokio = { version = "1.41", features = ["rt", "macros"] }
+sails-rs = { workspace = true, features = ["gtest"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [features]
 wasm-binary = []

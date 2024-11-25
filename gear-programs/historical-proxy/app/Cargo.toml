@@ -16,14 +16,20 @@ futures.workspace = true
 gclient.workspace = true
 gstd.workspace = true
 gtest.workspace = true
-sails-rs = { workspace = true, features = ["gtest"] }
+sails-rs = { workspace = true, features = ["gtest", "gclient"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
 erc20-relay = { workspace = true, features = ["wasm-binary"] }
 vft-manager = { workspace = true, features = ["wasm-binary"] }
 vft-manager-client.workspace = true
-
+serde_json = { workspace = true }
+serde = { workspace = true }
+alloy = { workspace = true }
+alloy-rlp = { workspace = true }
+ethereum-common =  { workspace = true, features = ["std"] }
+checkpoint_light_client-io = { workspace = true }
+hex-literal = { workspace = true }
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }
 lazy_static = { workspace = true, features = ["spin_no_std"] }

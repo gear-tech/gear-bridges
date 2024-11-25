@@ -3,7 +3,7 @@ use scale_info::TypeInfo;
 
 use crate::service::vft;
 
-#[derive(Debug, Clone, Decode, Encode, TypeInfo)]
+#[derive(Debug, Decode, Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 pub enum ProxyError {

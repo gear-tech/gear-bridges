@@ -1,6 +1,9 @@
-use std::time::{Duration, Instant};
+use std::{
+    process,
+    time::{Duration, Instant},
+};
 
-use ethereum_client::{EthApi, MerkleRootEntry};
+use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
 use prover::proving::GenesisConfig;
 
@@ -12,6 +15,12 @@ use crate::{
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(12);
 
+enum State {
+    Normal,
+    // Before exit we need to wait for the kill switch transaction to be finalized.
+    WaitingForKillSwitchTxFin { tx_hash: TxHash, proof: FinalProof },
+}
+
 pub struct KillSwitchRelayer {
     gear_api: GearApi,
     eth_api: EthApi,
@@ -20,7 +29,7 @@ pub struct KillSwitchRelayer {
 
     // Next eth block to process.
     from_eth_block: Option<u64>,
-    emergency_stop: bool,
+    state: State,
 }
 
 impl KillSwitchRelayer {
@@ -37,7 +46,7 @@ impl KillSwitchRelayer {
             genesis_config,
             proof_storage,
             from_eth_block,
-            emergency_stop: false,
+            state: State::Normal,
         }
     }
 
@@ -46,7 +55,12 @@ impl KillSwitchRelayer {
 
         loop {
             let now = Instant::now();
-            let res = self.main_loop().await;
+            let res = match &self.state {
+                State::Normal => self.main_loop().await,
+                State::WaitingForKillSwitchTxFin { tx_hash, .. } => {
+                    self.check_kill_switch_tx_finalized(*tx_hash).await
+                }
+            };
 
             if let Err(err) = res {
                 log::error!("{}", err);
@@ -60,11 +74,6 @@ impl KillSwitchRelayer {
     }
 
     async fn main_loop(&mut self) -> anyhow::Result<()> {
-        if self.emergency_stop {
-            log::info!("Emergency stop triggered, skipping..");
-            return Ok(());
-        }
-
         log::info!("Syncing authority set id");
         loop {
             let sync_steps = sync_authority_set_id(
@@ -114,13 +123,14 @@ impl KillSwitchRelayer {
                 log::info!("Proven merkle root presence");
 
                 log::info!("Submitting new proof to ethereum");
-                submit_proof_to_ethereum(&self.eth_api, proof).await?;
+                let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
                 log::info!("New proof submitted to ethereum");
 
                 // Resubmitting the correct proof instead of the incorrect one
                 // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.
                 // After that, there's no point in continuing because the relayer will be stopped/in emergency mode.
-                self.emergency_stop = true;
+                // Though, we need to wait for the kill switch transaction to be finalized.
+                self.state = State::WaitingForKillSwitchTxFin { tx_hash, proof };
                 return Ok(());
             }
         }
@@ -128,6 +138,33 @@ impl KillSwitchRelayer {
         // After processing all events, `last_finalized_block` is the last block we've processed.
         // So, we need to increment it by 1 to set the next block to process.
         self.from_eth_block = Some(last_finalized_block.saturating_add(1));
+
+        Ok(())
+    }
+
+    async fn check_kill_switch_tx_finalized(&mut self, tx_hash: TxHash) -> anyhow::Result<()> {
+        log::info!("Checking for kill switch tx to be finalized");
+
+        let tx_status = self.eth_api.get_tx_status(tx_hash).await?;
+
+        match tx_status {
+            TxStatus::Finalized => {
+                log::info!("Kill switch tx finalized, exiting ..");
+                process::exit(0);
+            }
+            TxStatus::Pending => (),
+            TxStatus::Failed => {
+                log::warn!("Re-trying kill switch tx #{} finalization", tx_hash);
+
+                let State::WaitingForKillSwitchTxFin { tx_hash, proof } = &mut self.state else {
+                    unreachable!("Invalid state");
+                };
+
+                let new_tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
+                // Update hash of the new kill switch transaction
+                *tx_hash = new_tx_hash;
+            }
+        }
 
         Ok(())
     }

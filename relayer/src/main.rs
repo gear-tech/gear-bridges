@@ -49,8 +49,8 @@ enum CliCommands {
     /// Relay the ERC20 tokens to the Vara network
     RelayErc20(RelayErc20Args),
     /// Kill switch relayer
-    #[clap(visible_alias("rk"))]
-    RelayKillSwitch(RelayKillSwitchArgs),
+    #[clap(visible_alias("ks"))]
+    KillSwitch(KillSwitchArgs),
 }
 
 #[derive(Args)]
@@ -84,7 +84,7 @@ struct RelayMerkleRootsArgs {
 }
 
 #[derive(Args)]
-struct RelayKillSwitchArgs {
+struct KillSwitchArgs {
     #[clap(flatten)]
     vara_args: VaraArgs,
     #[clap(flatten)]
@@ -92,7 +92,7 @@ struct RelayKillSwitchArgs {
     #[clap(flatten)]
     genesis_config_args: GenesisConfigArgs,
     /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block
-    #[arg(long = "from-block")]
+    #[arg(long = "from-eth-block")]
     from_eth_block: Option<u64>,
     #[clap(flatten)]
     prometheus_args: PrometheusArgs,
@@ -312,7 +312,7 @@ async fn main() {
 
             relayer.run().await.expect("Merkle root relayer failed");
         }
-        CliCommands::RelayKillSwitch(args) => {
+        CliCommands::KillSwitch(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 

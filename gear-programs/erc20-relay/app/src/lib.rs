@@ -42,15 +42,13 @@ impl Erc20RelayProgram {
     pub fn gas_calculation(_reply_timeout: u32, _reply_deposit: u64) -> Self {
         #[cfg(feature = "gas_calculation")]
         {
-            let self_ = Self::new(
+            Self::new(
                 Default::default(),
                 Config {
                     reply_timeout: _reply_timeout,
                     reply_deposit: _reply_deposit,
                 },
-            );
-
-            self_
+            )
         }
 
         #[cfg(not(feature = "gas_calculation"))]

@@ -15,7 +15,7 @@ use ethereum_common::{
 use gclient::{Event, EventListener, EventProcessor, GearApi, GearEvent};
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
-use sails_rs::{calls::*, events::Listener, gclient::calls::*, prelude::*};
+use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use serde::Deserialize;
 use vft::vft_manager;
 
@@ -258,7 +258,7 @@ fn proxy() {
                 .unwrap();
 
             // wait for SubmitReceipt request and reply to it
-            let (source, message_id) = listener
+            let (source, _message_id) = listener
                 .proc(|e| match e {
                     Event::Gear(GearEvent::UserMessageSent { message, .. })
                         if message.destination == admin.into() && message.details.is_none() =>
@@ -295,7 +295,7 @@ fn proxy() {
                 .await
                 .unwrap();
 
-            let result = result.recv().await.unwrap();
+            let _result = result.recv().await.unwrap();
             println!("wohoo");
         });
 }

@@ -18,7 +18,6 @@ pub struct Config {
 
 pub struct EndpointList(Vec<(Slot, ActorId)>);
 
-
 impl Default for EndpointList {
     fn default() -> Self {
         Self::new()

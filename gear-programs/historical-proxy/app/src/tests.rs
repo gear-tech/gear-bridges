@@ -1,14 +1,13 @@
 use erc20_relay_client::{
-    traits::*, BlockInclusionProof, Config as Erc20RelayConfig, Erc20Relay as Erc20RelayC, Erc20RelayFactory as Erc20RelayFactoryC, Error as Erc20Error, EthToVaraEvent
+    traits::*, Config as Erc20RelayConfig, Erc20RelayFactory as Erc20RelayFactoryC,
 };
-use ethereum_common::beacon::light::{Block, BlockBody};
+//use ethereum_common::beacon::light::{Block, BlockBody};
 use historical_proxy_client::{
     traits::*, Config, HistoricalProxy as HistoricalProxyC,
     HistoricalProxyFactory as HistoricalProxyFactoryC, ProxyError,
 };
 use vft_manager_client::{
-    traits::*, Config as VftManagerConfig, VftManager as VftManagerC, VftManagerError,
-    VftManagerFactory as VftManagerFactoryC,
+    traits::*, Config as VftManagerConfig, InitConfig, VftManagerFactory as VftManagerFactoryC,
 };
 
 use gtest::System;
@@ -18,6 +17,7 @@ struct Fixture {
     remoting: GTestRemoting,
     proxy: ActorId,
     erc20_relay: ActorId,
+    #[allow(dead_code)]
     vft_manager: ActorId,
 }
 
@@ -50,7 +50,7 @@ async fn setup_for_test() -> Fixture {
     let erc20_relay = Erc20RelayFactoryC::new(remoting.clone())
         .new(
             Default::default(),
-            Erc20Config {
+            Erc20RelayConfig {
                 reply_timeout: 10_000,
                 reply_deposit: 0,
             },
@@ -61,13 +61,18 @@ async fn setup_for_test() -> Fixture {
 
     let vft_manager_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
     let vft_manager = VftManagerFactoryC::new(remoting.clone())
-        .new(VftManagerConfig {
-            gas_for_token_ops: 15_000_000_000,
-            gas_for_reply_deposit: 15_000_000_000,
-            gas_for_submit_receipt: 20_000_000_000,
-            gas_to_send_request_to_builtin: 15_000_000_000,
-            reply_timeout: 100,
-            gas_for_request_bridging: 20_000_000_000,
+        .new(InitConfig {
+            config: VftManagerConfig {
+                gas_for_token_ops: 15_000_000_000,
+                gas_for_reply_deposit: 15_000_000_000,
+                gas_for_submit_receipt: 20_000_000_000,
+                gas_to_send_request_to_builtin: 15_000_000_000,
+                reply_timeout: 100,
+                gas_for_request_bridging: 20_000_000_000,
+            },
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            eth_client: Default::default(),
         })
         .send_recv(vft_manager_id, b"salt")
         .await
@@ -93,9 +98,9 @@ fn test_utility_functions() {
         .block_on(async {
             let Fixture {
                 remoting,
-                proxy: proxy_progam_rid,
-                erc20_relay,
-                vft_manager,
+                proxy: proxy_program_id,
+                erc20_relay: _,
+                vft_manager: _,
             } = setup_for_test().await;
 
             let admin_id = HistoricalProxyC::new(remoting.clone())
@@ -173,9 +178,9 @@ fn test_proxy() {
         .block_on(async {
             let Fixture {
                 remoting,
-                proxy: proxy_progam_rid,
+                proxy: proxy_program_id,
                 erc20_relay,
-                vft_manager,
+                vft_manager: _,
             } = setup_for_test().await;
 
             let admin_id = HistoricalProxyC::new(remoting.clone())
@@ -187,8 +192,8 @@ fn test_proxy() {
             assert_eq!(admin_id, ActorId::from(ADMIN_ID));
 
             HistoricalProxyC::new(remoting.clone())
-                .add_endpoint(0, erc20_relay.clone())
-                .send_recv(proxy_progam_rid)
+                .add_endpoint(0, erc20_relay)
+                .send_recv(proxy_program_id)
                 .await
                 .unwrap();
 

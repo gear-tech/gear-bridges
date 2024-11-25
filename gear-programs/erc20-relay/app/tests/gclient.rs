@@ -38,12 +38,6 @@ async fn gas_for_reply() {
         .unwrap();
 
     let mut client = Erc20Relay::new(remoting.clone());
-    while client
-        .fill_transactions()
-        .send_recv(program_id)
-        .await
-        .unwrap()
-    {}
 
     println!("prepared");
 

@@ -1,14 +1,13 @@
 // Incorporate code generated based on the IDL file
 
-
 #[allow(dead_code)]
 pub(crate) mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
-use erc20_relay_client::Error as ERC20Error;
 use self::gstd::debug;
-use vft::vft_manager::io::SubmitReceipt;
+use erc20_relay_client::Error as ERC20Error;
 use sails_rs::gstd;
+use vft::vft_manager::io::SubmitReceipt;
 
 use cell::RefCell;
 use sails_rs::{gstd::ExecContext, prelude::*};
@@ -81,11 +80,7 @@ where
     /// - `slot`: slot for which message is relayed
     /// - `vft_manager`: a Vft manager address to submit receipt to if erc20-relay confirms proofs are correct
     /// - `proofs`: raw SCALE-encoded call to `CheckProofs` of erc20-relay.
-    ///
-    /// TODO(Adel):
-    /// - ~~Accept `Vec<u8>` as `proofs` instead of concrete structure in case erc20-relay changes
-    ///   structure of params~~
-    /// - Concrete receipt type instead of `Vec<u8>`?
+    #[allow(clippy::await_holding_refcell_ref)] // there's no refcell across await points but clippy still says it? 
     pub async fn redirect(
         &mut self,
         slot: Slot,
@@ -96,11 +91,16 @@ where
 
         let endpoint = state.endpoints.endpoint_for(slot)?;
         debug!("Sending message to ERC20 Relay");
-        let receipt = Result::<Vec<u8>, ERC20Error>::decode(
-            &mut gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, state.config.reply_deposit)
+
+        let reply =
+            gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, state.config.reply_deposit)
                 .map_err(|_| ProxyError::SendFailure)?
                 .up_to(Some(state.config.reply_timeout))
-                .map_err(|_| ProxyError::ReplyTimeout)?
+                .map_err(|_| ProxyError::ReplyTimeout)?;
+        drop(state);
+
+        let receipt = Result::<Vec<u8>, ERC20Error>::decode(
+            &mut reply
                 .await
                 .map_err(|_| ProxyError::ReplyFailure)?
                 .as_slice(),
@@ -112,19 +112,21 @@ where
 
         let submit_receipt = SubmitReceipt::encode_call(receipt.clone());
 
+        let reply = gstd::msg::send_bytes_for_reply(
+            vft_manager,
+            submit_receipt,
+            0,
+            state.config.reply_deposit,
+        )
+        .map_err(|_| ProxyError::SendFailure)?
+        .up_to(Some(state.config.reply_timeout))
+        .map_err(|_| ProxyError::ReplyTimeout)?;
+        drop(state);
         let _: () = Result::<(), vft::Error>::decode(
-            &mut gstd::msg::send_bytes_for_reply(
-                vft_manager,
-                submit_receipt,
-                0,
-                state.config.reply_deposit,
-            )
-            .map_err(|_| ProxyError::SendFailure)?
-            .up_to(Some(state.config.reply_timeout))
-            .map_err(|_| ProxyError::ReplyTimeout)?
-            .await
-            .map_err(|_| ProxyError::ReplyFailure)?
-            .as_slice(),
+            &mut reply
+                .await
+                .map_err(|_| ProxyError::ReplyFailure)?
+                .as_slice(),
         )
         .map_err(|_| ProxyError::DecodeFailure)?
         .map_err(ProxyError::VftManager)?;

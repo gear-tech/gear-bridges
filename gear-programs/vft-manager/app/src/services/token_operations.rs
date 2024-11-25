@@ -1,6 +1,6 @@
 use super::msg_tracker::TxDetails;
 use super::{msg_tracker_mut, utils, Config, Error, MessageStatus};
-use vft_client::vft::io as vft_io;
+use extended_vft_client::vft::io as vft_io;
 
 use sails_rs::prelude::*;
 

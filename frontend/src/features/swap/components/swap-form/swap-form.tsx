@@ -4,7 +4,7 @@ import { FormProvider } from 'react-hook-form';
 import { Input } from '@/components';
 
 import GasSVG from '../../assets/gas.svg?react';
-import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
+import { FIELD_NAME, NETWORK_INDEX, WRAPPED_VARA_CONTRACT_ADDRESS } from '../../consts';
 import { useSwapForm, useBridge } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { Balance } from '../balance';
@@ -55,14 +55,18 @@ function SwapForm({
     onSubmit,
   );
 
-  const renderFromBalance = () => (
-    <Balance
-      value={ftBalance.formattedValue}
-      unit={symbol}
-      isLoading={ftBalance.isLoading || bridge.isLoading}
-      onMaxButtonClick={setMaxBalance}
-    />
-  );
+  const renderFromBalance = () => {
+    const balance = address === WRAPPED_VARA_CONTRACT_ADDRESS ? accountBalance : ftBalance;
+
+    return (
+      <Balance
+        value={balance.formattedValue}
+        unit={symbol}
+        isLoading={balance.isLoading || bridge.isLoading}
+        onMaxButtonClick={setMaxBalance}
+      />
+    );
+  };
 
   const getButtonText = () => {
     if (mint?.isPending) return 'Minting...';

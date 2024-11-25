@@ -43,7 +43,7 @@ function SwapForm({
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(address, decimals);
   const allowance = useFTAllowance(address);
-  const [{ mutateAsync: onSubmit, ...submit }, approve] = useHandleSubmit(address, fee.value, allowance.data);
+  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(address, fee.value, allowance.data);
 
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
@@ -65,6 +65,7 @@ function SwapForm({
   );
 
   const getButtonText = () => {
+    if (mint?.isPending) return 'Minting...';
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Swapping...';
 

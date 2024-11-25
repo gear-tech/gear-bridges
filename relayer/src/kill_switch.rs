@@ -8,9 +8,9 @@ use gear_rpc_client::GearApi;
 use prover::proving::GenesisConfig;
 
 use crate::{
+    common::{submit_proof_to_ethereum, sync_authority_set_id},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
-    relay_merkle_roots::{submit_proof_to_ethereum, sync_authority_set_id},
 };
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(12);

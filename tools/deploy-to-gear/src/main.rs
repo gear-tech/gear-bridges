@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand};
+use extended_vft_client::{traits::Vft, Vft as VftClient};
 use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
 use gear_core::ids::ProgramId;
 use sails_rs::{calls::Call, gclient::calls::GClientRemoting, prelude::*};
-use vft_client::{traits::Vft, Vft as VftClient};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -113,7 +113,7 @@ async fn upload_extended_vft(params: ExtendedVftParams, api: GearApi, mut listen
     let gas_limit = api
         .calculate_upload_gas(
             None,
-            extended_vft_wasm::WASM_BINARY_OPT.to_vec(),
+            extended_vft::WASM_BINARY.to_vec(),
             payload.clone(),
             0,
             true,
@@ -124,7 +124,7 @@ async fn upload_extended_vft(params: ExtendedVftParams, api: GearApi, mut listen
 
     let (message_id, program_id, _) = api
         .upload_program_bytes(
-            extended_vft_wasm::WASM_BINARY_OPT,
+            extended_vft::WASM_BINARY,
             gclient::now_micros().to_le_bytes(),
             payload,
             gas_limit,

@@ -1,7 +1,7 @@
 use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
+use extended_vft_client::{traits::*, ExtendedVftFactory as VftFactoryC, Vft as VftC};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_client::{traits::*, Vft as VftC, VftFactory as VftFactoryC};
 use vft_manager_app::services::abi::ERC20_MANAGER;
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
@@ -98,9 +98,7 @@ async fn setup_for_test() -> Fixture {
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting
-        .system()
-        .submit_code(extended_vft_wasm::WASM_BINARY);
+    let vft_code_id = remoting.system().submit_code(extended_vft::WASM_BINARY);
     let gear_supply_vft = VftFactoryC::new(remoting.clone())
         .new("Token".into(), "Token".into(), 18)
         .send_recv(vft_code_id, b"salt")

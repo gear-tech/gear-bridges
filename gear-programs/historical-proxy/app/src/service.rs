@@ -80,7 +80,7 @@ where
     /// - `slot`: slot for which message is relayed
     /// - `vft_manager`: a Vft manager address to submit receipt to if erc20-relay confirms proofs are correct
     /// - `proofs`: raw SCALE-encoded call to `CheckProofs` of erc20-relay.
-    #[allow(clippy::await_holding_refcell_ref)] // there's no refcell across await points but clippy still says it? 
+    #[allow(clippy::await_holding_refcell_ref)]
     pub async fn redirect(
         &mut self,
         slot: Slot,

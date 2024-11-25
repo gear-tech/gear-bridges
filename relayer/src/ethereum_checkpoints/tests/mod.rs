@@ -1,4 +1,4 @@
-use crate::ethereum_beacon_client::{slots_batch, utils, BeaconClient};
+use crate::ethereum_beacon_client::{utils, BeaconClient};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
@@ -8,25 +8,37 @@ use checkpoint_light_client_io::{
         utils::{self as eth_utils, BootstrapResponse, FinalityUpdateResponse, UpdateData},
         SLOTS_PER_EPOCH,
     },
+    replay_back::Status,
     sync_update,
     tree_hash::TreeHash,
     Handle, HandleResult, Init, G2,
 };
+use ethereum_common::utils::{BeaconBlockHeaderResponse, Bootstrap, Update};
 use gclient::{EventListener, EventProcessor, GearApi, Result};
 use parity_scale_codec::{Decode, Encode};
+use ruzstd::StreamingDecoder;
+use std::io::Read;
 use tokio::{
     sync::{Mutex, MutexGuard},
-    time::{self, Duration},
+    time::Duration,
 };
 
 static LOCK: Mutex<()> = Mutex::const_new(());
 
-const RPC_URL: &str = "http://34.159.93.103:50000";
-
-const FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
+const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./sepolia-finality-update-5_263_072.json");
-const UPDATE_640: &[u8; 57_202] = include_bytes!("./sepolia-update-640.json");
-const BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./sepolia-bootstrap-640.json");
+const SEPOLIA_UPDATE_640: &[u8; 57_202] = include_bytes!("./sepolia-update-640.json");
+const SEPOLIA_BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./sepolia-bootstrap-640.json");
+
+const HOLESKY_UPDATE_368: &[u8; 30_468] = include_bytes!("./holesky-update-368.json.zst");
+const HOLESKY_BOOTSTRAP_368: &[u8; 29_297] = include_bytes!("./holesky-bootstrap-368.json.zst");
+const HOLESKY_HEADERS: &[u8; 452_109] = include_bytes!("./headers.json.zst");
+const HOLESKY_FINALITY_UPDATE_3_014_736: &[u8; 4_893] =
+    include_bytes!("./holesky-finality-update-3_016_736.json");
+const HOLESKY_FINALITY_UPDATE_3_014_768: &[u8; 4_932] =
+    include_bytes!("./holesky-finality-update-3_016_768.json");
+const HOLESKY_FINALITY_UPDATE_3_014_799: &[u8; 4_980] =
+    include_bytes!("./holesky-finality-update-3_016_799.json");
 
 struct Guard<'a> {
     _lock: MutexGuard<'a, ()>,
@@ -132,14 +144,55 @@ async fn calculate_gas_and_send(
     Ok((gas_limit, HandleResult::decode(&mut &payload[..])?))
 }
 
-async fn init(network: Network, rpc_url: String) -> Result<()> {
-    let beacon_client = BeaconClient::new(rpc_url, None)
+fn get_bootstrap_and_update() -> (Bootstrap, Update) {
+    let mut decoder = StreamingDecoder::new(&HOLESKY_BOOTSTRAP_368[..]).unwrap();
+    let mut bootstrap = Vec::new();
+    decoder.read_to_end(&mut bootstrap).unwrap();
+    let BootstrapResponse { data: bootstrap } = serde_json::from_slice(&bootstrap[..]).unwrap();
+
+    let mut decoder = StreamingDecoder::new(&HOLESKY_UPDATE_368[..]).unwrap();
+    let mut update = Vec::new();
+    decoder.read_to_end(&mut update).unwrap();
+    let mut updates: Vec<UpdateData> = serde_json::from_slice(&update[..]).unwrap();
+
+    (bootstrap, updates.pop().map(|u| u.data).unwrap())
+}
+
+fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Init {
+    let checkpoint_update = update.finalized_header.tree_hash_root();
+    let checkpoint_bootstrap = bootstrap.header.tree_hash_root();
+    assert_eq!(
+        checkpoint_update,
+        checkpoint_bootstrap,
+        "checkpoint_update = {}, checkpoint_bootstrap = {}",
+        hex::encode(checkpoint_update),
+        hex::encode(checkpoint_bootstrap)
+    );
+
+    let sync_update = utils::sync_update_from_update(decode(&update.sync_aggregate), update);
+    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
+
+    Init {
+        network,
+        sync_committee_current_pub_keys: pub_keys,
+        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
+        sync_committee_current_branch: bootstrap
+            .current_sync_committee_branch
+            .into_iter()
+            .map(|BytesFixed(bytes)| bytes.0)
+            .collect(),
+        update: sync_update,
+    }
+}
+
+async fn live_init(network: Network, rpc_url: String) -> Result<()> {
+    let beacon_client = BeaconClient::new(rpc_url, Some(Duration::from_secs(120)))
         .await
         .expect("Failed to connect to beacon node");
 
-    // use the latest finality header as a checkpoint for bootstrapping
-    let finality_update = beacon_client.get_finality_update().await?;
-    let slot = finality_update.finalized_header.slot;
+    // use the latest finalized block as a checkpoint for bootstrapping
+    let finalized_block = beacon_client.get_block_finalized().await?;
+    let slot = finalized_block.slot;
     let current_period = eth_utils::calculate_period(slot);
     let mut updates = beacon_client.get_updates(current_period, 1).await?;
 
@@ -162,23 +215,9 @@ async fn init(network: Network, rpc_url: String) -> Result<()> {
     );
 
     let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
-    let sync_update = utils::sync_update_from_update(decode(&update.sync_aggregate), update);
-
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
-    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
-    let init = Init {
-        network,
-        sync_committee_current_pub_keys: pub_keys,
-        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
-        sync_committee_current_branch: bootstrap
-            .current_sync_committee_branch
-            .into_iter()
-            .map(|BytesFixed(bytes)| bytes.0)
-            .collect(),
-        update: sync_update,
-    };
-
+    let init = construct_init(network, update, bootstrap);
     let client = NodeClient::new().await?;
     let program_id = {
         let lock = client.lock().await;
@@ -195,61 +234,43 @@ async fn init(network: Network, rpc_url: String) -> Result<()> {
 
 #[tokio::test]
 async fn init_holesky() -> Result<()> {
-    init(Network::Holesky, RPC_URL.into()).await
+    let (bootstrap, update) = get_bootstrap_and_update();
+    let init = construct_init(Network::Holesky, update, bootstrap);
+
+    let client = NodeClient::new().await?;
+    let program_id = {
+        let lock = client.lock().await;
+
+        let mut listener = lock.client.subscribe().await?;
+
+        upload_program(lock.client, &mut listener, init).await?
+    };
+
+    println!("program_id = {:?}", hex::encode(program_id));
+
+    Ok(())
 }
 
+#[ignore]
 #[tokio::test]
-async fn init_mainnet() -> Result<()> {
-    init(Network::Mainnet, "https://www.lightclientdata.org".into()).await
+async fn live_init_holesky() -> Result<()> {
+    live_init(Network::Holesky, "http://34.159.93.103:50000".to_string()).await
+}
+
+#[ignore]
+#[tokio::test]
+async fn live_init_mainnet() -> Result<()> {
+    live_init(
+        Network::Mainnet,
+        "https://www.lightclientdata.org".to_string(),
+    )
+    .await
 }
 
 #[tokio::test]
 async fn replay_back_and_updating() -> Result<()> {
-    let beacon_client = BeaconClient::new(RPC_URL.to_string(), Some(Duration::from_secs(120)))
-        .await
-        .expect("Failed to connect to beacon node");
-
-    // use the latest finality header as a checkpoint for bootstrapping
-    let mut finality_update = beacon_client.get_finality_update().await?;
-    let current_period = eth_utils::calculate_period(finality_update.finalized_header.slot);
-    let mut updates = beacon_client.get_updates(current_period, 1).await?;
-
-    println!(
-        "finality_update slot = {}, period = {}",
-        finality_update.finalized_header.slot, current_period
-    );
-
-    let update = match updates.pop() {
-        Some(update) if updates.is_empty() => update.data,
-        _ => unreachable!("Requested single update"),
-    };
-
-    let checkpoint = update.finalized_header.tree_hash_root();
-    let checkpoint_hex = hex::encode(checkpoint);
-
-    println!(
-        "checkpoint slot = {}, hash = {}",
-        update.finalized_header.slot, checkpoint_hex
-    );
-
-    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
-    let sync_update = utils::sync_update_from_update(decode(&update.sync_aggregate), update);
-    let slot_start = sync_update.finalized_header.slot;
-
-    println!("bootstrap slot = {}", bootstrap.header.slot);
-
-    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
-    let init = Init {
-        network: Network::Holesky,
-        sync_committee_current_pub_keys: pub_keys,
-        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
-        sync_committee_current_branch: bootstrap
-            .current_sync_committee_branch
-            .into_iter()
-            .map(|BytesFixed(bytes)| bytes.0)
-            .collect(),
-        update: sync_update,
-    };
+    let (bootstrap, update) = get_bootstrap_and_update();
+    let init = construct_init(Network::Holesky, update, bootstrap);
 
     let client = NodeClient::new().await?;
     let program_id = {
@@ -265,84 +286,81 @@ async fn replay_back_and_updating() -> Result<()> {
     println!();
     println!();
 
-    // ensure finality update is different from the sync update
-    loop {
-        if finality_update.finalized_header.slot != slot_start {
-            break;
-        }
+    let finality_update: FinalityUpdateResponse =
+        serde_json::from_slice(HOLESKY_FINALITY_UPDATE_3_014_736).unwrap();
+    let finality_update = finality_update.data;
 
-        time::sleep(Duration::from_secs(6)).await;
-        finality_update = beacon_client.get_finality_update().await?;
-    }
+    let mut decoder = StreamingDecoder::new(&HOLESKY_HEADERS[..]).unwrap();
+    let mut headers = Vec::new();
+    decoder.read_to_end(&mut headers).unwrap();
+
+    let headers: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
 
     // start to replay back
-    let mut slot_last = finality_update.finalized_header.slot;
-    let mut slots_batch_iter =
-        slots_batch::Iter::new(slot_start, slot_last, 30 * SLOTS_PER_EPOCH).unwrap();
-    if let Some((slot_start, slot_end)) = slots_batch_iter.next() {
-        let payload = Handle::ReplayBackStart {
-            sync_update: utils::sync_update_from_finality(
-                decode(&finality_update.sync_aggregate),
-                finality_update,
-            ),
-            headers: beacon_client.request_headers(slot_start, slot_end).await?,
-        };
+    let size_batch = 40 * SLOTS_PER_EPOCH as usize;
+    let payload = Handle::ReplayBackStart {
+        sync_update: utils::sync_update_from_finality(
+            decode(&finality_update.sync_aggregate),
+            finality_update,
+        ),
+        headers: headers
+            .iter()
+            .rev()
+            .take(size_batch)
+            .map(|r| r.data.header.message.clone())
+            .collect(),
+    };
 
-        let (gas_limit, result) = calculate_gas_and_send(program_id, payload, &client).await?;
-        println!("ReplayBackStart gas_limit {gas_limit:?}");
+    let (gas_limit, result) = calculate_gas_and_send(program_id, payload, &client).await?;
+    println!("ReplayBackStart gas_limit {gas_limit:?}");
 
-        assert!(
-            matches!(result, HandleResult::ReplayBackStart(Ok(_))),
-            "result = {result:?}"
-        );
-    }
+    assert!(
+        matches!(result, HandleResult::ReplayBackStart(Ok(_))),
+        "result = {result:?}"
+    );
 
     // replaying the blocks back
-    for (slot_start, slot_end) in slots_batch_iter {
-        let payload =
-            Handle::ReplayBack(beacon_client.request_headers(slot_start, slot_end).await?);
-        let (gas_limit, result) = calculate_gas_and_send(program_id, payload, &client).await?;
-        println!("ReplayBack gas_limit {gas_limit:?}");
+    let payload = Handle::ReplayBack(
+        headers
+            .iter()
+            .rev()
+            .skip(size_batch)
+            .map(|r| r.data.header.message.clone())
+            .collect(),
+    );
+    let (gas_limit, result) = calculate_gas_and_send(program_id, payload, &client).await?;
+    println!("ReplayBack gas_limit {gas_limit:?}");
 
-        assert!(
-            matches!(result, HandleResult::ReplayBack(Some(_))),
-            "result = {result:?}"
-        );
-    }
+    assert!(
+        matches!(result, HandleResult::ReplayBack(Some(Status::Finished))),
+        "result = {result:?}"
+    );
 
     // updating
-    const COUNT: usize = 1;
-    let mut processed = 0;
-    while processed < COUNT {
-        time::sleep(Duration::from_secs(6)).await;
+    let finality_updates = vec![
+        {
+            let finality_update: FinalityUpdateResponse =
+                serde_json::from_slice(HOLESKY_FINALITY_UPDATE_3_014_768).unwrap();
 
-        let update = beacon_client.get_finality_update().await?;
-        let slot: u64 = update.finalized_header.slot;
-        if slot == slot_last {
-            continue;
-        }
+            finality_update.data
+        },
+        {
+            let finality_update: FinalityUpdateResponse =
+                serde_json::from_slice(HOLESKY_FINALITY_UPDATE_3_014_799).unwrap();
 
-        slot_last = slot;
-        processed += 1;
+            finality_update.data
+        },
+    ];
+    for update in finality_updates {
+        println!(
+            "slot = {:?}, attested slot = {:?}, signature slot = {:?}",
+            update.finalized_header.slot, update.attested_header.slot, update.signature_slot
+        );
 
-        let current_period = eth_utils::calculate_period(slot);
-        let mut updates = beacon_client.get_updates(current_period, 1).await?;
-        let payload = Handle::SyncUpdate(match updates.pop() {
-            Some(update) if updates.is_empty() && update.data.finalized_header.slot >= slot => {
-                println!("update sync committee");
-
-                utils::sync_update_from_update(decode(&update.data.sync_aggregate), update.data)
-            }
-
-            _ => {
-                println!(
-                    "slot = {slot:?}, attested slot = {:?}, signature slot = {:?}",
-                    update.attested_header.slot, update.signature_slot
-                );
-
-                utils::sync_update_from_finality(decode(&update.sync_aggregate), update)
-            }
-        });
+        let payload = Handle::SyncUpdate(utils::sync_update_from_finality(
+            decode(&update.sync_aggregate),
+            update,
+        ));
 
         let (gas_limit, result) = calculate_gas_and_send(program_id, payload, &client).await?;
         println!("gas_limit {gas_limit:?}");
@@ -365,7 +383,7 @@ async fn replay_back_and_updating() -> Result<()> {
 #[tokio::test]
 async fn sync_update_requires_replaying_back() -> Result<()> {
     let finality_update: FinalityUpdateResponse =
-        serde_json::from_slice(FINALITY_UPDATE_5_263_072).unwrap();
+        serde_json::from_slice(SEPOLIA_FINALITY_UPDATE_5_263_072).unwrap();
     let finality_update = finality_update.data;
     println!(
         "finality_update slot = {}",
@@ -373,39 +391,16 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     );
 
     let slot = finality_update.finalized_header.slot;
-    let mut updates: Vec<UpdateData> = serde_json::from_slice(UPDATE_640).unwrap();
 
+    let BootstrapResponse { data: bootstrap } =
+        serde_json::from_slice(SEPOLIA_BOOTSTRAP_640).unwrap();
+    let mut updates: Vec<UpdateData> = serde_json::from_slice(SEPOLIA_UPDATE_640).unwrap();
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
         _ => unreachable!("Requested single update"),
     };
 
-    let BootstrapResponse { data: bootstrap } = serde_json::from_slice(BOOTSTRAP_640).unwrap();
-
-    let checkpoint_update = update.finalized_header.tree_hash_root();
-    let checkpoint_bootstrap = bootstrap.header.tree_hash_root();
-    assert_eq!(
-        checkpoint_update,
-        checkpoint_bootstrap,
-        "checkpoint_update = {}, checkpoint_bootstrap = {}",
-        hex::encode(checkpoint_update),
-        hex::encode(checkpoint_bootstrap)
-    );
-
-    let sync_update = utils::sync_update_from_update(decode(&update.sync_aggregate), update);
-
-    let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
-    let init = Init {
-        network: Network::Sepolia,
-        sync_committee_current_pub_keys: pub_keys,
-        sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
-        sync_committee_current_branch: bootstrap
-            .current_sync_committee_branch
-            .into_iter()
-            .map(|BytesFixed(bytes)| bytes.0)
-            .collect(),
-        update: sync_update,
-    };
+    let init = construct_init(Network::Sepolia, update, bootstrap);
 
     let client = NodeClient::new().await?;
     let program_id = {

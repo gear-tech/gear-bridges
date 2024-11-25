@@ -49,3 +49,6 @@ utils-prometheus.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true
+
+[dev-dependencies]
+ruzstd.workspace = true

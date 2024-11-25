@@ -4,7 +4,7 @@ use futures::executor::block_on;
 use prometheus::IntCounter;
 use sails_rs::H160;
 
-use ethereum_client::{DepositEventEntry, EthApi};
+use ethereum_client::{EthApi, FeePaidEntry};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
@@ -14,16 +14,16 @@ use crate::{
 
 use super::find_slot_by_block_number;
 
-pub struct DepositEventExtractor {
+pub struct MessagePaidEventExtractor {
     eth_api: EthApi,
     beacon_client: BeaconClient,
 
-    erc20_treasury_address: H160,
+    bridging_payment_address: H160,
 
     metrics: Metrics,
 }
 
-impl MeteredService for DepositEventExtractor {
+impl MeteredService for MessagePaidEventExtractor {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics.get_sources()
     }
@@ -31,20 +31,24 @@ impl MeteredService for DepositEventExtractor {
 
 impl_metered_service! {
     struct Metrics {
-        total_deposits_found: IntCounter = IntCounter::new(
-            "deposit_event_extractor_total_deposits_found",
-            "Total amount of deposit events discovered",
+        total_paid_messages_found: IntCounter = IntCounter::new(
+            "message_paid_event_extractor_total_paid_messages_found",
+            "Total amount of paid messages discovered",
         ),
     }
 }
 
-impl DepositEventExtractor {
-    pub fn new(eth_api: EthApi, beacon_client: BeaconClient, erc20_treasury_address: H160) -> Self {
+impl MessagePaidEventExtractor {
+    pub fn new(
+        eth_api: EthApi,
+        beacon_client: BeaconClient,
+        bridging_payment_address: H160,
+    ) -> Self {
         Self {
             eth_api,
             beacon_client,
 
-            erc20_treasury_address,
+            bridging_payment_address,
 
             metrics: Metrics::new(),
         }
@@ -82,7 +86,7 @@ impl DepositEventExtractor {
     ) -> anyhow::Result<()> {
         let events = self
             .eth_api
-            .fetch_deposit_events(self.erc20_treasury_address, block.0)
+            .fetch_fee_paid_events(self.bridging_payment_address, block.0)
             .await?;
 
         if events.is_empty() {
@@ -93,22 +97,18 @@ impl DepositEventExtractor {
             find_slot_by_block_number(&self.eth_api, &self.beacon_client, block).await?;
 
         self.metrics
-            .total_deposits_found
+            .total_paid_messages_found
             .inc_by(events.len() as u64);
 
         for ev in &events {
             log::info!(
-                "Found deposit event: tx_hash={}, from={}, to={}, token={}, amount={}, slot_number={}",
+                "Found fee paid event: tx_hash={}, slot_number={}",
                 hex::encode(ev.tx_hash.0),
-                hex::encode(ev.from.0),
-                hex::encode(ev.to.0),
-                hex::encode(ev.token.0),
-                ev.amount,
                 slot_number.0,
             );
         }
 
-        for DepositEventEntry { tx_hash, .. } in events {
+        for FeePaidEntry { tx_hash } in events {
             sender.send(TxHashWithSlot {
                 slot_number,
                 tx_hash,

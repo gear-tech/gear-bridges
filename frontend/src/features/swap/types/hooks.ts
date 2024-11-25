@@ -27,6 +27,7 @@ type UseHandleSubmit = (
   ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
   allowance: bigint | undefined,
+  ftBalance: bigint | undefined,
 ) => Readonly<
   [
     {

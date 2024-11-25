@@ -52,6 +52,7 @@ function useHandleVaraSubmit(
   ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
   allowance: bigint | undefined,
+  ftBalance: bigint | undefined,
 ) {
   const mint = useMint();
   const vftApprove = useApprove(ftAddress);
@@ -71,8 +72,10 @@ function useHandleVaraSubmit(
     if (!ftAddress) throw new Error('Fungible token address is not found');
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
     if (isUndefined(allowance)) throw new Error('Allowance is not found');
+    if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
 
-    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS) await mint.sendTransactionAsync({ args: [], value: amount });
+    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && ftBalance < amount)
+      await mint.sendTransactionAsync({ args: [], value: amount - ftBalance });
 
     if (amount > allowance)
       await vftApprove.sendTransactionAsync({ args: [BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] });

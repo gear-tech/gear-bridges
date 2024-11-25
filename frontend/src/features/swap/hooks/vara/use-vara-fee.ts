@@ -6,7 +6,7 @@ import { isUndefined } from '@/utils';
 import { QUERY_NAME, SERVICE_NAME } from '../../consts';
 
 function useVaraFee() {
-  const { getFormattedBalance } = useBalanceFormat();
+  const { getFormattedBalanceValue } = useBalanceFormat();
 
   const { data: program } = useProgram({
     library: BridgingPaymentProgram,
@@ -22,7 +22,7 @@ function useVaraFee() {
 
   const fee = {
     value: !isUndefined(config?.fee) ? BigInt(config.fee) : undefined,
-    formattedValue: !isUndefined(config?.fee) ? getFormattedBalance(config.fee).value : undefined,
+    formattedValue: !isUndefined(config?.fee) ? getFormattedBalanceValue(config.fee.toString()).toFixed() : undefined,
   };
 
   const isLoading = isPending;

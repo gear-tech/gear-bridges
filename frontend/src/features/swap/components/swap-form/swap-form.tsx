@@ -43,7 +43,13 @@ function SwapForm({
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(address, decimals);
   const allowance = useFTAllowance(address);
-  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(address, fee.value, allowance.data);
+
+  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
+    address,
+    fee.value,
+    allowance.data,
+    ftBalance.value,
+  );
 
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,

@@ -1,4 +1,4 @@
-name: Check API is up to date
+name: Check API files are up to date
 
 on:
   push:
@@ -16,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  check:
     runs-on: kuberunner
     steps:
       - name: Checkout
@@ -44,6 +44,7 @@ jobs:
           for i in "${!stored[@]}"; do
             if ! cmp -s "${stored[$i]}" "${generated[$i]}"; then
               echo "API files ${stored[$i]} and ${generated[$i]} don't match."
+              diff "${stored[$i]}" "${generated[$i]}"
               exit 1
             fi
           done

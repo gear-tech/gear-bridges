@@ -30,7 +30,7 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: nightly-4923529c743f25a0f37503a7bcf7c68caa6901f1
       - name: Build ethereum smart-contracts
         run: forge build
         working-directory: ./ethereum
@@ -48,6 +48,7 @@ jobs:
             "./api/gear/vft_manager.idl"
             "./api/gear/wrapped_vara.idl"
           )
+
           generated=(
             "./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json"
             "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"

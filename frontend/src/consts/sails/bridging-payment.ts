@@ -1,63 +1,22 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { GearApi, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import {
-  ActorId,
-  H160,
-  TransactionBuilder,
-  MessageId,
-  getServiceNamePrefix,
-  getFnNamePrefix,
-  ZERO_ADDRESS,
-} from 'sails-js';
+import { TransactionBuilder, H160, ActorId, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 
 export interface InitConfig {
   admin_address: ActorId;
-  vft_gateway_address: ActorId;
+  vft_manager_address: ActorId;
   config: Config;
 }
 
 export interface Config {
   fee: number | string | bigint;
   gas_for_reply_deposit: number | string | bigint;
-  gas_to_send_request_to_gateway: number | string | bigint;
-  gas_to_transfer_tokens: number | string | bigint;
+  gas_to_send_request_to_vft_manager: number | string | bigint;
   reply_timeout: number;
-  gas_for_request_to_gateway_msg: number | string | bigint;
+  gas_for_request_to_vft_manager_msg: number | string | bigint;
 }
-
-export interface MessageInfo {
-  status: MessageStatus;
-  details: TransactionDetails;
-}
-
-export type MessageStatus =
-  | { sendingMessageToTransferTokens: null }
-  | { tokenTransferCompleted: boolean }
-  | { waitingReplyFromTokenTransfer: null }
-  | { sendingMessageToGateway: null }
-  | { gatewayMessageProcessingCompleted: [number | string | bigint, H160] }
-  | { waitingReplyFromGateway: null }
-  | { messageToGatewayStep: null }
-  | { returnTokensBackStep: null }
-  | { sendingMessageToTransferTokensBack: null }
-  | { waitingReplyFromTokenTransferBack: null }
-  | { tokenTransferBackCompleted: null }
-  | { messageProcessedWithSuccess: [number | string | bigint, H160] };
-
-export type TransactionDetails =
-  | { transfer: { sender: ActorId; receiver: ActorId; amount: number | string | bigint; token_id: ActorId } }
-  | {
-      sendMessageToGateway: {
-        sender: ActorId;
-        vara_token_id: ActorId;
-        amount: number | string | bigint;
-        receiver: H160;
-        attached_value: number | string | bigint;
-      };
-    };
 
 export class Program {
   public readonly registry: TypeRegistry;
@@ -65,43 +24,13 @@ export class Program {
 
   constructor(public api: GearApi, public programId?: `0x${string}`) {
     const types: Record<string, any> = {
-      InitConfig: { admin_address: '[u8;32]', vft_gateway_address: '[u8;32]', config: 'Config' },
+      InitConfig: { admin_address: '[u8;32]', vft_manager_address: '[u8;32]', config: 'Config' },
       Config: {
         fee: 'u128',
         gas_for_reply_deposit: 'u64',
-        gas_to_send_request_to_gateway: 'u64',
-        gas_to_transfer_tokens: 'u64',
+        gas_to_send_request_to_vft_manager: 'u64',
         reply_timeout: 'u32',
-        gas_for_request_to_gateway_msg: 'u64',
-      },
-      MessageInfo: { status: 'MessageStatus', details: 'TransactionDetails' },
-      MessageStatus: {
-        _enum: {
-          SendingMessageToTransferTokens: 'Null',
-          TokenTransferCompleted: 'bool',
-          WaitingReplyFromTokenTransfer: 'Null',
-          SendingMessageToGateway: 'Null',
-          GatewayMessageProcessingCompleted: '(U256, H160)',
-          WaitingReplyFromGateway: 'Null',
-          MessageToGatewayStep: 'Null',
-          ReturnTokensBackStep: 'Null',
-          SendingMessageToTransferTokensBack: 'Null',
-          WaitingReplyFromTokenTransferBack: 'Null',
-          TokenTransferBackCompleted: 'Null',
-          MessageProcessedWithSuccess: '(U256, H160)',
-        },
-      },
-      TransactionDetails: {
-        _enum: {
-          Transfer: { sender: '[u8;32]', receiver: '[u8;32]', amount: 'U256', token_id: '[u8;32]' },
-          SendMessageToGateway: {
-            sender: '[u8;32]',
-            vara_token_id: '[u8;32]',
-            amount: 'U256',
-            receiver: 'H160',
-            attached_value: 'u128',
-          },
-        },
+        gas_for_request_to_vft_manager_msg: 'u64',
       },
     };
 
@@ -146,14 +75,18 @@ export class Program {
 export class BridgingPayment {
   constructor(private _program: Program) {}
 
-  public continueTransaction(msg_id: MessageId): TransactionBuilder<null> {
+  public makeRequest(
+    amount: number | string | bigint,
+    receiver: H160,
+    vara_token_id: ActorId,
+  ): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'ContinueTransaction', msg_id],
-      '(String, String, [u8;32])',
+      ['BridgingPayment', 'MakeRequest', amount, receiver, vara_token_id],
+      '(String, String, U256, H160, [u8;32])',
       'Null',
       this._program.programId,
     );
@@ -172,31 +105,14 @@ export class BridgingPayment {
     );
   }
 
-  public requestToGateway(
-    amount: number | string | bigint,
-    receiver: H160,
-    vara_token_id: ActorId,
-  ): TransactionBuilder<null> {
+  public setConfig(config: Config): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'RequestToGateway', amount, receiver, vara_token_id],
-      '(String, String, U256, H160, [u8;32])',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public returnTokens(msg_id: MessageId): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      ['BridgingPayment', 'ReturnTokens', msg_id],
-      '(String, String, [u8;32])',
+      ['BridgingPayment', 'SetConfig', config],
+      '(String, String, Config)',
       'Null',
       this._program.programId,
     );
@@ -215,42 +131,13 @@ export class BridgingPayment {
     );
   }
 
-  public updateConfig(
-    fee: number | string | bigint | null,
-    gas_for_reply_deposit: number | string | bigint | null,
-    gas_to_send_request_to_gateway: number | string | bigint | null,
-    gas_to_transfer_tokens: number | string | bigint | null,
-    reply_timeout: number | null,
-    gas_for_request_to_gateway_msg: number | string | bigint | null,
-  ): TransactionBuilder<null> {
+  public updateVftManagerAddress(new_vft_manager_address: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
       this._program.registry,
       'send_message',
-      [
-        'BridgingPayment',
-        'UpdateConfig',
-        fee,
-        gas_for_reply_deposit,
-        gas_to_send_request_to_gateway,
-        gas_to_transfer_tokens,
-        reply_timeout,
-        gas_for_request_to_gateway_msg,
-      ],
-      '(String, String, Option<u128>, Option<u64>, Option<u64>, Option<u64>, Option<u32>, Option<u64>)',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public updateVftGatewayAddress(new_vft_gateway_address: ActorId): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      ['BridgingPayment', 'UpdateVftGatewayAddress', new_vft_gateway_address],
+      ['BridgingPayment', 'UpdateVftManagerAddress', new_vft_manager_address],
       '(String, String, [u8;32])',
       'Null',
       this._program.programId,
@@ -295,34 +182,13 @@ export class BridgingPayment {
     return result[2].toJSON() as unknown as Config;
   }
 
-  public async msgTrackerState(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Array<[MessageId, MessageInfo]>> {
-    const payload = this._program.registry
-      .createType('(String, String)', ['BridgingPayment', 'MsgTrackerState'])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId!,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
-    const result = this._program.registry.createType('(String, String, Vec<([u8;32], MessageInfo)>)', reply.payload);
-    return result[2].toJSON() as unknown as Array<[MessageId, MessageInfo]>;
-  }
-
-  public async vftGatewayAddress(
+  public async vftManagerAddress(
     originAddress?: string,
     value?: number | string | bigint,
     atBlock?: `0x${string}`,
   ): Promise<ActorId> {
     const payload = this._program.registry
-      .createType('(String, String)', ['BridgingPayment', 'VftGatewayAddress'])
+      .createType('(String, String)', ['BridgingPayment', 'VftManagerAddress'])
       .toHex();
     const reply = await this._program.api.message.calculateReply({
       destination: this._program.programId!,

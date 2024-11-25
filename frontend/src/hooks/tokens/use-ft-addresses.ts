@@ -1,7 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { useProgram, useProgramQuery } from '@gear-js/react-hooks';
 
-import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS, VftGatewayProgram } from '@/consts';
+import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS, VftManagerProgram } from '@/consts';
 
 function useFTAddresses() {
   const { data: program } = useProgram({
@@ -9,21 +9,21 @@ function useFTAddresses() {
     id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   });
 
-  const { data: vftGatewayAddress } = useProgramQuery({
+  const { data: vftManagerAddress } = useProgramQuery({
     program,
     serviceName: 'bridgingPayment',
-    functionName: 'vftGatewayAddress',
+    functionName: 'vftManagerAddress',
     args: [],
   });
 
-  const { data: vftGatewayProgram } = useProgram({
-    library: VftGatewayProgram,
-    id: vftGatewayAddress?.toString() as HexString,
+  const { data: vftManagerProgram } = useProgram({
+    library: VftManagerProgram,
+    id: vftManagerAddress?.toString() as HexString,
   });
 
   return useProgramQuery({
-    program: vftGatewayProgram,
-    serviceName: 'vftGateway',
+    program: vftManagerProgram,
+    serviceName: 'vftManager',
     functionName: 'varaToEthAddresses',
     args: [],
   });

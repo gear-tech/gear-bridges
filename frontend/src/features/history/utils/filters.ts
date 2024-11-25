@@ -4,7 +4,7 @@ import { ActorId, H160 } from 'sails-js';
 const getLastDaysISOTimestamp = (daysCount: number) =>
   new Date(Date.now() - daysCount * 24 * 60 * 60 * 1000).toISOString();
 
-const getAssetOptions = (addresses: [ActorId, H160][], symbols: Record<HexString, string>) => {
+const getAssetOptions = (addresses: [ActorId, H160, 'ethereum' | 'gear'][], symbols: Record<HexString, string>) => {
   const options = [] as { label: string; value: string }[];
 
   for (const pair of addresses) {

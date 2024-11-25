@@ -17,7 +17,7 @@ function useSendBridgingPaymentRequest() {
   return useSendProgramTransaction({
     program,
     serviceName: SERVICE_NAME.BRIDGING_PAYMENT,
-    functionName: FUNCTION_NAME.REQUEST_TO_GATEWAY,
+    functionName: 'makeRequest',
   });
 }
 

@@ -24,7 +24,10 @@ const getAmountSchema = (
     .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
 };
 
-const getOptions = (addresses: [ActorId, H160][] | undefined, symbols: Record<HexString, string> | undefined) => {
+const getOptions = (
+  addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undefined,
+  symbols: Record<HexString, string> | undefined,
+) => {
   const varaOptions: { label: string; value: string }[] = [];
   const ethOptions: { label: string; value: string }[] = [];
 

@@ -7,7 +7,7 @@ import { readContract } from 'wagmi/actions';
 
 import { VftProgram, FUNGIBLE_TOKEN_ABI } from '@/consts';
 
-function useFTDecimals(addresses: [ActorId, H160][] | undefined) {
+function useFTDecimals(addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undefined) {
   const { api, isApiReady } = useApi();
   const wagmiConfig = useConfig();
 

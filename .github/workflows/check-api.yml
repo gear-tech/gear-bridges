@@ -39,12 +39,20 @@ jobs:
       - name: Check that files match
         run: |
           stored=(
+            "./api/ethereum/ERC20ManagerBridgingPayment.json"
+            "./api/ethereum/IERC20Manager.json"
+            "./api/ethereum/IMessageQueue.json"
+
             "./api/gear/bridging_payment.idl"
             "./api/gear/erc20_relay.idl"
             "./api/gear/vft_manager.idl"
             "./api/gear/wrapped_vara.idl"
           )
           generated=(
+            "./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json"
+            "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
+            "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
+
             "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
             "./target/wasm32-unknown-unknown/release/erc20_relay.idl"
             "./target/wasm32-unknown-unknown/release/vft_manager.idl"

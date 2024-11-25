@@ -39,7 +39,6 @@ jobs:
       - name: Check that files match
         run: |
           stored=(
-            "./api/ethereum/ERC20ManagerBridgingPayment.json"
             "./api/ethereum/IERC20Manager.json"
             "./api/ethereum/IMessageQueue.json"
 
@@ -50,7 +49,6 @@ jobs:
           )
 
           generated=(
-            "./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json"
             "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
 

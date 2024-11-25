@@ -1,0 +1,49 @@
+name: Check API is up to date
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: kuberunner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20.1'
+      - name: Install foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: Build ethereum smart-contracts
+        run: forge build
+        working-directory: ./ethereum
+      - name: Build gear programs
+        run: cargo build --release -p bridging-payment -p erc20-relay -p vft-manager -p wrapped-vara
+      - name: Check that files match
+        run: |
+          stored=("./api/ethereum/ERC20ManagerBridgingPayment.json")
+          generated=("./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json")
+
+          for i in "${!stored[@]}"; do
+            if ! cmp -s "${stored[$i]}" "${generated[$i]}"; then
+              echo "API files ${stored[$i]} and ${generated[$i]} don't match."
+              exit 1
+            fi
+          done

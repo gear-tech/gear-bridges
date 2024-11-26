@@ -1,0 +1,29 @@
+.section,
+.footer {
+  padding: 24px 32px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  &:first-child {
+    border-bottom: 1px solid #e8e8ef;
+
+    position: relative; // for swap network button
+  }
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 2.5fr 7.5fr;
+  align-items: center;
+  gap: 32px;
+}
+
+.submitContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

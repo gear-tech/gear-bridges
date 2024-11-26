@@ -6,10 +6,12 @@ audits
 images
 LICENSE
 *.md
+api
 
 # Git 
 .git
 .gitignore
+.github
 
 # IDE-generated files 
 .vscode
@@ -25,3 +27,6 @@ onchain_proof_storage_data
 ethereum/cache
 ethereum/out
 ethereum/broadcast
+
+# Frontend
+frontend

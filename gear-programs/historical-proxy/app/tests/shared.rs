@@ -1,36 +1,34 @@
 use alloy::rpc::types::TransactionReceipt;
-
 use alloy_rlp::Encodable;
-use serde::Deserialize;
-use erc20_relay_client::{traits::*, BlockInclusionProof, Config, EthToVaraEvent};
+use erc20_relay_client::{BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::light::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
-pub const  HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
+use serde::Deserialize;
+pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
     include_bytes!("./holesky-receipts-2_498_456.json");
-pub const  HOLESKY_BLOCK_2_498_456: &[u8; 235_397] = include_bytes!("./holesky-block-2_498_456.json");
-pub const  HOLESKY_HEADER_2_498_457: &[u8; 670] = include_bytes!("./holesky-header-2_498_457.json");
-pub const  HOLESKY_HEADER_2_498_458: &[u8; 669] = include_bytes!("./holesky-header-2_498_458.json");
-pub const  HOLESKY_HEADER_2_498_459: &[u8; 670] = include_bytes!("./holesky-header-2_498_459.json");
-pub const  HOLESKY_HEADER_2_498_460: &[u8; 670] = include_bytes!("./holesky-header-2_498_460.json");
-pub const  HOLESKY_HEADER_2_498_461: &[u8; 670] = include_bytes!("./holesky-header-2_498_461.json");
-pub const  HOLESKY_HEADER_2_498_462: &[u8; 669] = include_bytes!("./holesky-header-2_498_462.json");
-pub const  HOLESKY_HEADER_2_498_463: &[u8; 670] = include_bytes!("./holesky-header-2_498_463.json");
-pub const  HOLESKY_HEADER_2_498_464: &[u8; 669] = include_bytes!("./holesky-header-2_498_464.json");
+pub const HOLESKY_BLOCK_2_498_456: &[u8; 235_397] =
+    include_bytes!("./holesky-block-2_498_456.json");
+pub const HOLESKY_HEADER_2_498_457: &[u8; 670] = include_bytes!("./holesky-header-2_498_457.json");
+pub const HOLESKY_HEADER_2_498_458: &[u8; 669] = include_bytes!("./holesky-header-2_498_458.json");
+pub const HOLESKY_HEADER_2_498_459: &[u8; 670] = include_bytes!("./holesky-header-2_498_459.json");
+pub const HOLESKY_HEADER_2_498_460: &[u8; 670] = include_bytes!("./holesky-header-2_498_460.json");
+pub const HOLESKY_HEADER_2_498_461: &[u8; 670] = include_bytes!("./holesky-header-2_498_461.json");
+pub const HOLESKY_HEADER_2_498_462: &[u8; 669] = include_bytes!("./holesky-header-2_498_462.json");
+pub const HOLESKY_HEADER_2_498_463: &[u8; 670] = include_bytes!("./holesky-header-2_498_463.json");
+pub const HOLESKY_HEADER_2_498_464: &[u8; 669] = include_bytes!("./holesky-header-2_498_464.json");
 
 #[derive(Deserialize)]
 pub struct Receipts {
     result: Vec<TransactionReceipt>,
 }
 
-
 pub fn event() -> EthToVaraEvent {
     // tx 0x180cd2328df9c4356adc77e19e33c5aa2d5395f1b52e70d22c25070a04f16691
     let tx_index = 15;
 
-    let receipts: Receipts =
-        serde_json::from_slice(HOLESKY_RECEIPTS_2_498_456.as_ref()).unwrap();
+    let receipts: Receipts = serde_json::from_slice(HOLESKY_RECEIPTS_2_498_456.as_ref()).unwrap();
     let receipts = receipts
         .result
         .iter()
@@ -106,7 +104,7 @@ pub fn event() -> EthToVaraEvent {
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
     Encodable::encode(&receipt, &mut receipt_rlp);
-    let message = EthToVaraEvent {
+    EthToVaraEvent {
         proof_block: BlockInclusionProof {
             block: block.clone(),
             headers: headers.clone(),
@@ -114,8 +112,5 @@ pub fn event() -> EthToVaraEvent {
         proof: proof.clone(),
         transaction_index: tx_index,
         receipt_rlp,
-    };  
-
-    message
-
-}   
+    }
+}

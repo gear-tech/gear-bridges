@@ -107,7 +107,6 @@ where
 
     /// Check proofs and return receipt if successfull, error otherwise.
     pub async fn check_proofs(&mut self, message: EthToVaraEvent) -> Result<Vec<u8>, Error> {
-        gstd::debug!("check_proofs for {:?}", message);
         let receipt = self.decode_and_check_receipt(&message)?;
 
         let EthToVaraEvent {
@@ -121,7 +120,7 @@ where
         let checkpoints = self.state.borrow().checkpoint_light_client_address;
         let slot = block.slot;
         let checkpoint = Self::request_checkpoint(checkpoints, slot).await?;
-        gstd::debug!("checkpoint={:?}", checkpoint);
+
         headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
         let Continue(block_root_parent) =
             headers
@@ -158,6 +157,7 @@ where
             Ok(Some(found_value)) if found_value == value_db => (),
             _ => return Err(Error::InvalidReceiptProof),
         }
+
         Ok(message.receipt_rlp)
     }
 

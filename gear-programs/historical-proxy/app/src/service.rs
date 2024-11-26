@@ -4,9 +4,13 @@
 pub(crate) mod vft {
     include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
 }
-use self::gstd::debug;
-use erc20_relay_client::Error as ERC20Error;
-use sails_rs::gstd;
+
+#[allow(dead_code)]
+pub(crate) mod erc20_relay {
+    include!(concat!(env!("OUT_DIR"), "/erc20_relay.rs"));
+}
+
+use sails_rs::{calls::ActionIo, gstd};
 use vft::vft_manager::io::SubmitReceipt;
 
 use cell::RefCell;
@@ -38,14 +42,15 @@ where
         self.state.borrow().config
     }
 
-    pub fn update_config(&mut self, config_new: Config) {
+    pub fn update_config(&mut self, config_new: Config) -> Result<(), ProxyError> {
         let source = self.exec_context.actor_id();
         let mut state = self.state.borrow_mut();
         if source != state.admin {
-            panic!("Not admin");
+            return Err(ProxyError::NotAdmin);
         }
 
         state.config = config_new;
+        Ok(())
     }
 
     pub fn admin(&self) -> ActorId {
@@ -56,15 +61,16 @@ where
         self.state.borrow().endpoints.endpoint_for(slot)
     }
 
-    pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
+    pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) -> Result<(), ProxyError> {
         let source = self.exec_context.actor_id();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
-            panic!("Not admin");
+            return Err(ProxyError::NotAdmin);
         }
 
         state.endpoints.push(slot, endpoint);
+        Ok(())
     }
 
     pub fn endpoints(&self) -> Vec<(Slot, ActorId)> {
@@ -92,40 +98,32 @@ where
         let endpoint = state.endpoints.endpoint_for(slot)?;
         let reply_deposit = state.config.reply_deposit;
         let reply_timeout = state.config.reply_timeout;
-        debug!("Sending message to ERC20 Relay");
+        let mut check_proofs =
+            <erc20_relay::erc_20_relay::io::CheckProofs as ActionIo>::ROUTE.to_vec();
+        check_proofs.extend_from_slice(&proofs);
+        let reply = gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
+            .map_err(|_| ProxyError::SendFailure)?
+            .up_to(Some(reply_timeout))
+            .map_err(|_| ProxyError::ReplyTimeout)?
+            .await
+            .map_err(|_| ProxyError::ReplyFailure)?;
 
-        let receipt = Result::<Vec<u8>, ERC20Error>::decode(
-            &mut gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, reply_deposit)
-                .map_err(|_| ProxyError::SendFailure)?
-                .up_to(Some(reply_timeout))
-                .map_err(|_| ProxyError::ReplyTimeout)?
-                .handle_reply(move || {
-                    debug!("got reply{:?}", gstd::msg::load_bytes().unwrap());
-                })
-                .unwrap()
-                .await
-                .map_err(|_| ProxyError::ReplyFailure)?
-                .as_slice(),
-        )
-        .map_err(|_| ProxyError::DecodeFailure)?
-        .map_err(ProxyError::ERC20Relay)?;
-        debug!("Got receipt: {:?}", receipt);
+        let receipt = <erc20_relay::erc_20_relay::io::CheckProofs as ActionIo>::decode_reply(reply)
+            .map_err(|_| ProxyError::DecodeFailure)?
+            .map_err(ProxyError::ERC20Relay)?;
 
         let submit_receipt = SubmitReceipt::encode_call(receipt.clone());
 
         let reply = gstd::msg::send_bytes_for_reply(vft_manager, submit_receipt, 0, reply_deposit)
             .map_err(|_| ProxyError::SendFailure)?
             .up_to(Some(reply_timeout))
-            .map_err(|_| ProxyError::ReplyTimeout)?;
-
-        let _: () = Result::<(), vft::Error>::decode(
-            &mut reply
-                .await
-                .map_err(|_| ProxyError::ReplyFailure)?
-                .as_slice(),
-        )
-        .map_err(|_| ProxyError::DecodeFailure)?
-        .map_err(ProxyError::VftManager)?;
+            .map_err(|_| ProxyError::ReplyTimeout)?
+            .await
+            .unwrap();
+        // return error if we cannot submit receipt.
+        SubmitReceipt::decode_reply(&reply)
+            .map_err(|_| ProxyError::DecodeFailure)?
+            .map_err(ProxyError::VftManager)?;
 
         Ok(receipt)
     }

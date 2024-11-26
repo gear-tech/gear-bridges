@@ -209,3 +209,8 @@ alloy = { version = "0.5.2", package = "alloy", features = [
 
 [patch."https://github.com/gear-tech/gear"]
 gsys = "1.6.2"
+
+[profile.release]
+opt-level = 1
+lto = false
+codegen-units = 16

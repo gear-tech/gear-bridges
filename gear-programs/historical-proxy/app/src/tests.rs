@@ -1,13 +1,6 @@
-use erc20_relay_client::{
-    traits::*, Config as Erc20RelayConfig, Erc20RelayFactory as Erc20RelayFactoryC,
-};
-//use ethereum_common::beacon::light::{Block, BlockBody};
 use historical_proxy_client::{
     traits::*, Config, HistoricalProxy as HistoricalProxyC,
     HistoricalProxyFactory as HistoricalProxyFactoryC, ProxyError,
-};
-use vft_manager_client::{
-    traits::*, Config as VftManagerConfig, InitConfig, VftManagerFactory as VftManagerFactoryC,
 };
 
 use gtest::System;
@@ -16,12 +9,10 @@ use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 struct Fixture {
     remoting: GTestRemoting,
     proxy: ActorId,
-    erc20_relay: ActorId,
-    #[allow(dead_code)]
-    vft_manager: ActorId,
 }
 
 const ADMIN_ID: u64 = 1_000;
+const USER_ID: u64 = 500;
 const PROXY_ID: u64 = 1_001;
 const ERC20_RELAY_ID: u64 = 1_002;
 const VFT_MANAGER_ID: u64 = 1_003;
@@ -33,6 +24,7 @@ async fn setup_for_test() -> Fixture {
     system.mint_to(PROXY_ID, 100_000_000_000_000);
     system.mint_to(ERC20_RELAY_ID, 100_000_000_000_000);
     system.mint_to(VFT_MANAGER_ID, 100_000_000_000_000);
+    system.mint_to(USER_ID, 100_000_000_000_000);
 
     let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 
@@ -46,157 +38,79 @@ async fn setup_for_test() -> Fixture {
         .await
         .unwrap();
 
-    let erc20_id = remoting.system().submit_code(erc20_relay::WASM_BINARY);
-    let erc20_relay = Erc20RelayFactoryC::new(remoting.clone())
-        .new(
-            Default::default(),
-            Erc20RelayConfig {
-                reply_timeout: 10_000,
-                reply_deposit: 0,
-            },
-        )
-        .send_recv(erc20_id, b"salt")
-        .await
-        .unwrap();
+    Fixture { remoting, proxy }
+}
 
-    let vft_manager_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
-    let vft_manager = VftManagerFactoryC::new(remoting.clone())
-        .new(InitConfig {
-            config: VftManagerConfig {
-                gas_for_token_ops: 15_000_000_000,
-                gas_for_reply_deposit: 15_000_000_000,
-                gas_for_submit_receipt: 20_000_000_000,
-                gas_to_send_request_to_builtin: 15_000_000_000,
-                reply_timeout: 100,
-                gas_for_request_bridging: 20_000_000_000,
-            },
-            erc20_manager_address: Default::default(),
-            gear_bridge_builtin: Default::default(),
-            eth_client: Default::default(),
-        })
-        .send_recv(vft_manager_id, b"salt")
-        .await
-        .unwrap();
-
-    Fixture {
+#[tokio::test]
+async fn test_utility_functions() {
+    let Fixture {
         remoting,
-        proxy,
-        erc20_relay,
-        vft_manager,
-    }
-}
+        proxy: proxy_program_id,
+    } = setup_for_test().await;
 
-#[test]
-fn test_utility_functions() {
-    /*  #[tokio::test] proc macro panics in rust-analyzer, use this locally for ease of use.
-       will update once ready for merge
-    */
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    let admin_id = HistoricalProxyC::new(remoting.clone())
+        .admin()
+        .recv(proxy_program_id)
+        .await
+        .unwrap();
+
+    assert_eq!(admin_id, ActorId::from(ADMIN_ID));
+
+    let endpoint1 = (0, ActorId::from(0x42));
+
+    HistoricalProxyC::new(remoting.clone())
+        .add_endpoint(0, ActorId::from(0x42))
+        .send_recv(proxy_program_id)
+        .await
         .unwrap()
-        .block_on(async {
-            let Fixture {
-                remoting,
-                proxy: proxy_program_id,
-                erc20_relay: _,
-                vft_manager: _,
-            } = setup_for_test().await;
+        .unwrap();
 
-            let admin_id = HistoricalProxyC::new(remoting.clone())
-                .admin()
-                .recv(proxy_program_id)
-                .await
-                .unwrap();
+    let recv_endpoint = HistoricalProxyC::new(remoting.clone())
+        .endpoint_for(0)
+        .send_recv(proxy_program_id)
+        .await
+        .unwrap();
 
-            assert_eq!(admin_id, ActorId::from(ADMIN_ID));
+    assert_eq!(recv_endpoint, Ok(endpoint1.1));
 
-            let endpoint1 = (0, ActorId::from(0x42));
+    let recv_endpoint = HistoricalProxyC::new(remoting.clone())
+        .endpoint_for(42)
+        .send_recv(proxy_program_id)
+        .await
+        .unwrap();
 
-            HistoricalProxyC::new(remoting.clone())
-                .add_endpoint(0, ActorId::from(0x42))
-                .send(proxy_program_id)
-                .await
-                .unwrap();
+    assert_eq!(recv_endpoint, Err(ProxyError::NoEndpointForSlot(42)));
 
-            let recv_endpoint = HistoricalProxyC::new(remoting.clone())
-                .endpoint_for(0)
-                .send_recv(proxy_program_id)
-                .await
-                .unwrap();
+    let endpoints = HistoricalProxyC::new(remoting.clone())
+        .endpoints()
+        .recv(proxy_program_id)
+        .await
+        .unwrap();
 
-            assert_eq!(recv_endpoint, Ok(endpoint1.1));
+    assert!(!endpoints.is_empty());
+    assert_eq!(endpoints[0], endpoint1);
 
-            let recv_endpoint = HistoricalProxyC::new(remoting.clone())
-                .endpoint_for(42)
-                .send_recv(proxy_program_id)
-                .await
-                .unwrap();
+    let _endpoint2 = (10, ActorId::from(0x800));
 
-            assert_eq!(recv_endpoint, Err(ProxyError::NoEndpointForSlot(42)));
-
-            let endpoints = HistoricalProxyC::new(remoting.clone())
-                .endpoints()
-                .recv(proxy_program_id)
-                .await
-                .unwrap();
-
-            assert!(!endpoints.is_empty());
-            assert_eq!(endpoints[0], endpoint1);
-
-            let _endpoint2 = (10, ActorId::from(0x800));
-
-            HistoricalProxyC::new(remoting.clone())
-                .add_endpoint(10, ActorId::from(0x800))
-                .send_recv(proxy_program_id)
-                .await
-                .unwrap();
-
-            let endpoint_for_slot_0 = HistoricalProxyC::new(remoting.clone())
-                .endpoint_for(0)
-                .send_recv(proxy_program_id)
-                .await
-                .unwrap();
-            assert_eq!(endpoint_for_slot_0, Ok(ActorId::from(0x42)));
-
-            let endpoint_for_slot_1 = HistoricalProxyC::new(remoting.clone())
-                .endpoint_for(1)
-                .send_recv(proxy_program_id)
-                .await
-                .unwrap();
-
-            assert_eq!(endpoint_for_slot_1, Ok(ActorId::from(0x800)));
-        });
-}
-
-#[test]
-fn test_proxy() {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    HistoricalProxyC::new(remoting.clone())
+        .add_endpoint(10, ActorId::from(0x800))
+        .send_recv(proxy_program_id)
+        .await
         .unwrap()
-        .block_on(async {
-            let Fixture {
-                remoting,
-                proxy: proxy_program_id,
-                erc20_relay,
-                vft_manager: _,
-            } = setup_for_test().await;
+        .unwrap();
 
-            let admin_id = HistoricalProxyC::new(remoting.clone())
-                .admin()
-                .recv(proxy_program_id)
-                .await
-                .unwrap();
+    let endpoint_for_slot_0 = HistoricalProxyC::new(remoting.clone())
+        .endpoint_for(0)
+        .send_recv(proxy_program_id)
+        .await
+        .unwrap();
+    assert_eq!(endpoint_for_slot_0, Ok(ActorId::from(0x42)));
 
-            assert_eq!(admin_id, ActorId::from(ADMIN_ID));
+    let endpoint_for_slot_1 = HistoricalProxyC::new(remoting.clone())
+        .endpoint_for(1)
+        .send_recv(proxy_program_id)
+        .await
+        .unwrap();
 
-            HistoricalProxyC::new(remoting.clone())
-                .add_endpoint(0, erc20_relay)
-                .send_recv(proxy_program_id)
-                .await
-                .unwrap();
-
-            // TODO
-        });
+    assert_eq!(endpoint_for_slot_1, Ok(ActorId::from(0x800)));
 }

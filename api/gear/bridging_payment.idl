@@ -1,0 +1,33 @@
+type InitConfig = struct {
+  admin_address: actor_id,
+  vft_manager_address: actor_id,
+  config: Config,
+};
+
+type Config = struct {
+  fee: u128,
+  gas_for_reply_deposit: u64,
+  gas_to_send_request_to_vft_manager: u64,
+  reply_timeout: u32,
+  gas_for_request_to_vft_manager_msg: u64,
+};
+
+constructor {
+  New : (init_config: InitConfig);
+};
+
+service BridgingPayment {
+  MakeRequest : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
+  ReclaimFee : () -> null;
+  SetConfig : (config: Config) -> null;
+  SetFee : (fee: u128) -> null;
+  UpdateVftManagerAddress : (new_vft_manager_address: actor_id) -> null;
+  query AdminAddress : () -> actor_id;
+  query GetConfig : () -> Config;
+  query VftManagerAddress : () -> actor_id;
+
+  events {
+    TeleportVaraToEth: struct { nonce: u256, sender: actor_id, amount: u256, receiver: h160, eth_token_id: h160 };
+  }
+};
+

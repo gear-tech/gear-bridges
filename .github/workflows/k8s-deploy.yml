@@ -1,4 +1,4 @@
-name: Build and Deploy ZK Bridge
+name: Frontend
 on:
   workflow_dispatch:
   push:

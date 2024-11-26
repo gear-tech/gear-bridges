@@ -68,7 +68,7 @@ impl NodeClient {
 }
 
 #[track_caller]
-fn decode(sync_aggregate: &SyncAggregate) -> G2 {
+fn decode_signature(sync_aggregate: &SyncAggregate) -> G2 {
     <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &sync_aggregate.sync_committee_signature.0 .0[..],
     )
@@ -159,7 +159,8 @@ fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Ini
         hex::encode(checkpoint_bootstrap)
     );
 
-    let sync_update = utils::sync_update_from_update(decode(&update.sync_aggregate), update);
+    let sync_update =
+        utils::sync_update_from_update(decode_signature(&update.sync_aggregate), update);
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
 
     Init {
@@ -273,7 +274,7 @@ async fn replay_back_and_updating() -> Result<()> {
     let size_batch = 40 * SLOTS_PER_EPOCH as usize;
     let payload = Handle::ReplayBackStart {
         sync_update: utils::sync_update_from_finality(
-            decode(&finality_update.sync_aggregate),
+            decode_signature(&finality_update.sync_aggregate),
             finality_update,
         ),
         headers: headers
@@ -331,7 +332,7 @@ async fn replay_back_and_updating() -> Result<()> {
         );
 
         let payload = Handle::SyncUpdate(utils::sync_update_from_finality(
-            decode(&update.sync_aggregate),
+            decode_signature(&update.sync_aggregate),
             update,
         ));
 
@@ -389,7 +390,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     );
 
     let payload = Handle::SyncUpdate(utils::sync_update_from_finality(
-        decode(&finality_update.sync_aggregate),
+        decode_signature(&finality_update.sync_aggregate),
         finality_update,
     ));
     let (gas_limit, result) = calculate_gas_and_send(program_id, payload, &client).await?;

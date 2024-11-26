@@ -1,4 +1,4 @@
-name: Build and Deploy ZK Bridge
+name: Frontend
 on:
   workflow_dispatch:
   push:
@@ -69,7 +69,6 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
-          context: frontend
           file: frontend/Dockerfile
           push: true
           tags: ${{ needs.prepair.outputs.image_name }}
@@ -80,7 +79,7 @@ jobs:
             VITE_WALLET_CONNECT_PROJECT_ID=${{ secrets.VITE_WALLET_CONNECT_PROJECT_ID }}
             VITE_INDEXER_ADDRESS=${{ secrets.VITE_INDEXER_ADDRESS }}
             VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS=${{ secrets.VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS }}
-            VITE_ERC20_TREASURY_CONTRACT_ADDRESS=${{ secrets.VITE_ERC20_TREASURY_CONTRACT_ADDRESS }}
+            VITE_ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS=${{ secrets.VITE_ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS }}
 
   deploy-to-k8s:
     needs: [prepair, build-and-push-image]

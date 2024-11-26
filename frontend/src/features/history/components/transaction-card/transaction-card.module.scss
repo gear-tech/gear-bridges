@@ -1,0 +1,40 @@
+.compactCard,
+.wideCard {
+  white-space: nowrap;
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.compactCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wideCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 3fr) minmax(0, 1.5fr);
+  align-items: center;
+  gap: 48px;
+}
+
+.blockNumber {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  font-size: 16px;
+  line-height: 150%;
+
+  a {
+    text-decoration: underline;
+    transition: 0.25s color;
+
+    &:hover {
+      color: #13bc9d;
+    }
+  }
+}

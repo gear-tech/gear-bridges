@@ -186,10 +186,31 @@ struct RelayCheckpointsArgs {
 
 #[derive(Args)]
 struct RelayErc20Args {
-    /// Address of the ERC20Treasury contract on ethereum
-    #[arg(long = "erc20-treasury-address", env = "ERC20_TREASURY_ADDRESS")]
-    erc20_treasury_address: String,
+    #[clap(flatten)]
+    common: RelayErc20ArgsCommon,
 
+    #[command(subcommand)]
+    command: RelayErc20Commands,
+}
+
+#[derive(Subcommand)]
+enum RelayErc20Commands {
+    /// Relay all the transactions
+    AllTokenTransfers {
+        /// Address of the ERC20Treasury contract on ethereum
+        #[arg(long = "erc20-treasury-address", env = "ERC20_TREASURY_ADDRESS")]
+        erc20_treasury_address: String,
+    },
+    /// Relay only transactions sent to BridgingPayment
+    PaidTokenTransfers {
+        /// Address of the BridgingPayment contract on ethereum
+        #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
+        bridging_payment_address: String,
+    },
+}
+
+#[derive(Args)]
+struct RelayErc20ArgsCommon {
     /// Address of the checkpoint-light-client program on gear
     #[arg(
         long = "checkpoint-light-client-address",
@@ -338,41 +359,75 @@ async fn main() {
             }
         }
         CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
-        CliCommands::RelayErc20(args) => {
-            let eth_api = create_eth_client(&args.ethereum_args);
-            let beacon_client = create_beacon_client(&args.beacon_rpc).await;
+        CliCommands::RelayErc20(RelayErc20Args { common, command }) => {
+            let eth_api = create_eth_client(&common.ethereum_args);
+            let beacon_client = create_beacon_client(&common.beacon_rpc).await;
 
-            let gear_api = create_gear_client(&args.vara_args).await;
-            let gclient_client = create_gclient_client(&args.vara_args, &args.vara_suri).await;
+            let gear_api = create_gear_client(&common.vara_args).await;
+            let gclient_client = create_gclient_client(&common.vara_args, &common.vara_suri).await;
 
-            let erc20_treasury_address = hex_utils::decode_h160(&args.erc20_treasury_address)
-                .expect("Failed to parse address");
             let checkpoint_light_client_address =
-                hex_utils::decode_h256(&args.checkpoint_light_client_address)
+                hex_utils::decode_h256(&common.checkpoint_light_client_address)
                     .expect("Failed to parse address");
             let ethereum_event_client_address =
-                hex_utils::decode_h256(&args.ethereum_event_client_address)
+                hex_utils::decode_h256(&common.ethereum_event_client_address)
                     .expect("Failed to parse address");
 
-            let relayer = eth_to_gear::all_token_transfers::Relayer::new(
-                gear_api,
-                gclient_client,
-                eth_api,
-                beacon_client,
-                erc20_treasury_address,
-                checkpoint_light_client_address,
-                ethereum_event_client_address,
-            )
-            .await
-            .expect("Failed to create relayer");
+            match command {
+                RelayErc20Commands::AllTokenTransfers {
+                    erc20_treasury_address,
+                } => {
+                    let erc20_treasury_address = hex_utils::decode_h160(&erc20_treasury_address)
+                        .expect("Failed to parse address");
 
-            MetricsBuilder::new()
-                .register_service(&relayer)
-                .build()
-                .run(args.prometheus_args.endpoint)
-                .await;
+                    let relayer = eth_to_gear::all_token_transfers::Relayer::new(
+                        gear_api,
+                        gclient_client,
+                        eth_api,
+                        beacon_client,
+                        erc20_treasury_address,
+                        checkpoint_light_client_address,
+                        ethereum_event_client_address,
+                    )
+                    .await
+                    .expect("Failed to create relayer");
 
-            relayer.run();
+                    MetricsBuilder::new()
+                        .register_service(&relayer)
+                        .build()
+                        .run(common.prometheus_args.endpoint)
+                        .await;
+
+                    relayer.run();
+                }
+                RelayErc20Commands::PaidTokenTransfers {
+                    bridging_payment_address,
+                } => {
+                    let bridging_payment_address =
+                        hex_utils::decode_h160(&bridging_payment_address)
+                            .expect("Failed to parse address");
+
+                    let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
+                        gear_api,
+                        gclient_client,
+                        eth_api,
+                        beacon_client,
+                        bridging_payment_address,
+                        checkpoint_light_client_address,
+                        ethereum_event_client_address,
+                    )
+                    .await
+                    .expect("Failed to create relayer");
+
+                    MetricsBuilder::new()
+                        .register_service(&relayer)
+                        .build()
+                        .run(common.prometheus_args.endpoint)
+                        .await;
+
+                    relayer.run();
+                }
+            }
 
             loop {
                 // relayer.run() spawns thread and exits, so we need to add this loop after calling run.

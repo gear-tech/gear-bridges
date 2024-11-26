@@ -39,7 +39,7 @@ pub struct RelayedMerkleRoot {
 }
 
 #[derive(Clone, Debug)]
-pub struct ERC20DepositTx {
+pub struct TxHashWithSlot {
     pub slot_number: EthereumSlotNumber,
     pub tx_hash: TxHash,
 }

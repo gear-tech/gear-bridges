@@ -6,10 +6,12 @@ audits
 images
 LICENSE
 *.md
+api
 
 # Git
 .git
 .gitignore
+.github
 
 # IDE-generated files
 .vscode
@@ -28,3 +30,6 @@ ethereum/broadcast
 
 # Indexer-related
 indexer/
+
+# Frontend
+frontend/

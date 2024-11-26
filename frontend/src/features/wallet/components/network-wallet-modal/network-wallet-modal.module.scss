@@ -1,0 +1,10 @@
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  button svg {
+    width: 32px;
+    height: 32px;
+  }
+}

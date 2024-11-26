@@ -52,3 +52,4 @@ cgo_oligami.workspace = true
 
 [dev-dependencies]
 ruzstd.workspace = true
+sp-core = { workspace = true, features = ["std"] }

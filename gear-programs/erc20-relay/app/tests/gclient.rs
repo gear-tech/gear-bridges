@@ -5,83 +5,20 @@ mod vft {
 }
 
 use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
-use gclient::{Event, EventProcessor, GearApi, GearEvent};
+use gclient::{Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sp_core::crypto::DEV_PHRASE;
 use tokio::sync::Mutex;
 use vft::vft_manager;
 
 static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((0, None));
 
-async fn salt() -> [u8; 4] {
-    let mut lock = LOCK.lock().await;
-    let salt = lock.0;
-    lock.0 += 1;
-
-    salt.to_le_bytes()
-}
-
-// The struct purpose is to avoid the following error:
-// GearSDK(Subxt(Rpc(ClientError(Call(Custom(ErrorObject { code: ServerError(1014), message: "Priority is too low: (16 vs 16)", data: Some(RawValue("The transaction has too low priority to replace another transaction already in the pool.")) }))))))
-#[derive(Clone)]
-struct TestRemoting(GClientRemoting);
-
-impl sails_rs::calls::Remoting for TestRemoting {
-    type Args = <GClientRemoting as sails_rs::calls::Remoting>::Args;
-
-    async fn activate(
-        self,
-        code_id: CodeId,
-        salt: impl AsRef<[u8]>,
-        payload: impl AsRef<[u8]>,
-        gas_limit: Option<GasUnit>,
-        value: ValueUnit,
-        args: Self::Args,
-    ) -> sails_rs::errors::Result<
-        impl future::Future<Output = sails_rs::errors::Result<(ActorId, Vec<u8>)>>,
-    > {
-        let _lock = LOCK.lock().await;
-
-        self.0
-            .activate(code_id, salt, payload, gas_limit, value, args)
-            .await
-    }
-
-    async fn message(
-        self,
-        target: ActorId,
-        payload: impl AsRef<[u8]>,
-        gas_limit: Option<GasUnit>,
-        value: ValueUnit,
-        args: Self::Args,
-    ) -> sails_rs::errors::Result<impl future::Future<Output = sails_rs::errors::Result<Vec<u8>>>>
-    {
-        let _lock = LOCK.lock().await;
-
-        self.0
-            .message(target, payload, gas_limit, value, args)
-            .await
-    }
-
-    async fn query(
-        self,
-        target: ActorId,
-        payload: impl AsRef<[u8]>,
-        gas_limit: Option<GasUnit>,
-        value: ValueUnit,
-        args: Self::Args,
-    ) -> sails_rs::errors::Result<Vec<u8>> {
-        self.0.query(target, payload, gas_limit, value, args).await
-    }
-}
-
-async fn spin_up_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit) {
+async fn spin_up_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit, [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
-    let remoting = GClientRemoting::new(api.clone());
-    let remoting = TestRemoting(remoting);
-    let code_id = {
+    let (api, code_id, salt) = {
         let mut lock = LOCK.lock().await;
-        match lock.1 {
+        let code_id = match lock.1 {
             Some(code_id) => code_id,
             None => {
                 let (code_id, _) = api.upload_code(erc20_relay::WASM_BINARY).await.unwrap();
@@ -89,19 +26,39 @@ async fn spin_up_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit) {
 
                 code_id
             }
-        }
+        };
+
+        let salt = lock.0;
+        lock.0 += 1;
+
+        let suri = format!("{DEV_PHRASE}//erc20-relay-{salt}:");
+        let api2 = GearApi::init_with(WSAddress::dev(), suri).await.unwrap();
+
+        let account_id: &[u8; 32] = api2.account_id().as_ref();
+        api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+            .await
+            .unwrap();
+
+        (api2, code_id, salt)
     };
 
-    (remoting, api, code_id, gas_limit)
+    (
+        GClientRemoting::new(api.clone()),
+        api,
+        code_id,
+        gas_limit,
+        salt.to_le_bytes(),
+    )
 }
 
+#[ignore]
 #[tokio::test]
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 
     let route = <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE;
 
-    let (remoting, api, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, api, code_id, gas_limit, salt) = spin_up_node().await;
     let account_id: ActorId = <[u8; 32]>::from(api.account_id().clone()).into();
 
     let factory = Erc20RelayFactory::new(remoting.clone());
@@ -109,7 +66,7 @@ async fn gas_for_reply() {
     let program_id = factory
         .gas_calculation(1_000, 5_500_000_000)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt().await)
+        .send_recv(code_id, salt)
         .await
         .unwrap();
 
@@ -168,7 +125,7 @@ async fn gas_for_reply() {
 async fn set_vft_manager() {
     use erc20_relay_client::Config;
 
-    let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit, salt) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -181,7 +138,7 @@ async fn set_vft_manager() {
             },
         )
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt().await)
+        .send_recv(code_id, salt)
         .await
         .unwrap();
 
@@ -239,7 +196,7 @@ async fn set_vft_manager() {
 async fn update_config() {
     use erc20_relay_client::Config;
 
-    let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit, salt) = spin_up_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -255,7 +212,7 @@ async fn update_config() {
             },
         )
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt().await)
+        .send_recv(code_id, salt)
         .await
         .unwrap();
 

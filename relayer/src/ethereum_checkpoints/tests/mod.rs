@@ -14,16 +14,14 @@ use checkpoint_light_client_io::{
     Handle, HandleResult, Init, G2,
 };
 use ethereum_common::utils::{BeaconBlockHeaderResponse, Bootstrap, Update};
-use gclient::{EventListener, EventProcessor, GearApi, Result};
+use gclient::{EventListener, EventProcessor, GearApi, Result, WSAddress};
 use parity_scale_codec::{Decode, Encode};
 use ruzstd::StreamingDecoder;
+use sp_core::crypto::DEV_PHRASE;
 use std::io::Read;
-use tokio::{
-    sync::{Mutex, MutexGuard},
-    time::Duration,
-};
+use tokio::{sync::Mutex, time::Duration};
 
-static LOCK: Mutex<()> = Mutex::const_new(());
+static LOCK: Mutex<u32> = Mutex::const_new(0);
 
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./sepolia-finality-update-5_263_072.json");
@@ -40,18 +38,24 @@ const HOLESKY_FINALITY_UPDATE_3_014_768: &[u8; 4_932] =
 const HOLESKY_FINALITY_UPDATE_3_014_799: &[u8; 4_980] =
     include_bytes!("./holesky-finality-update-3_016_799.json");
 
-struct Guard<'a> {
-    _lock: MutexGuard<'a, ()>,
-    pub client: &'a GearApi,
-}
-
-// The struct purpose is to avoid the following error:
-// GearSDK(Subxt(Rpc(ClientError(Call(Custom(ErrorObject { code: ServerError(1014), message: "Priority is too low: (16 vs 16)", data: Some(RawValue("The transaction has too low priority to replace another transaction already in the pool.")) }))))))
-struct NodeClient(GearApi);
+struct NodeClient(pub GearApi);
 
 impl NodeClient {
     async fn new() -> Result<Self> {
-        Ok(Self(GearApi::dev().await?))
+        let api = GearApi::dev().await?;
+        let mut lock = LOCK.lock().await;
+
+        let salt = *lock;
+        *lock += 1;
+
+        let suri = format!("{DEV_PHRASE}//ethereum_checkpoints{salt}:");
+        let api2 = GearApi::init_with(WSAddress::dev(), suri).await?;
+
+        let account_id: &[u8; 32] = api2.account_id().as_ref();
+        api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+            .await?;
+
+        Ok(Self(api2))
     }
 
     async fn calculate_handle_gas(&self, program_id: [u8; 32], payload: &Handle) -> Result<u64> {
@@ -60,15 +64,6 @@ impl NodeClient {
             .calculate_handle_gas(None, program_id.into(), payload.encode(), 0, true)
             .await?
             .min_limit)
-    }
-
-    async fn lock(&self) -> Guard<'_> {
-        let _lock = LOCK.lock().await;
-
-        Guard {
-            _lock,
-            client: &self.0,
-        }
     }
 }
 
@@ -127,20 +122,15 @@ async fn calculate_gas_and_send(
 ) -> Result<(u64, HandleResult)> {
     let gas_limit = client.calculate_handle_gas(program_id, &payload).await?;
 
-    let (_message_id, payload, _value) = {
-        let lock = client.lock().await;
+    let mut listener = client.0.subscribe().await?;
+    let (message_id, _) = client
+        .0
+        .send_message(program_id.into(), payload, gas_limit, 0)
+        .await?;
 
-        let mut listener = lock.client.subscribe().await?;
-
-        let (message_id, _) = lock
-            .client
-            .send_message(program_id.into(), payload, gas_limit, 0)
-            .await?;
-
-        listener.reply_bytes_on(message_id).await?
-    };
-
+    let (_message_id, payload, _value) = listener.reply_bytes_on(message_id).await?;
     let payload = payload.map_err(|e| anyhow::anyhow!("No payload: {e:?}"))?;
+
     Ok((gas_limit, HandleResult::decode(&mut &payload[..])?))
 }
 
@@ -217,34 +207,10 @@ async fn live_init(network: Network, rpc_url: String) -> Result<()> {
     let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
     println!("bootstrap slot = {}", bootstrap.header.slot);
 
+    let client = NodeClient::new().await?;
+    let mut listener = client.0.subscribe().await?;
     let init = construct_init(network, update, bootstrap);
-    let client = NodeClient::new().await?;
-    let program_id = {
-        let lock = client.lock().await;
-
-        let mut listener = lock.client.subscribe().await?;
-
-        upload_program(lock.client, &mut listener, init).await?
-    };
-
-    println!("program_id = {:?}", hex::encode(program_id));
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn init_holesky() -> Result<()> {
-    let (bootstrap, update) = get_bootstrap_and_update();
-    let init = construct_init(Network::Holesky, update, bootstrap);
-
-    let client = NodeClient::new().await?;
-    let program_id = {
-        let lock = client.lock().await;
-
-        let mut listener = lock.client.subscribe().await?;
-
-        upload_program(lock.client, &mut listener, init).await?
-    };
+    let program_id = upload_program(&client.0, &mut listener, init).await?;
 
     println!("program_id = {:?}", hex::encode(program_id));
 
@@ -268,18 +234,25 @@ async fn live_init_mainnet() -> Result<()> {
 }
 
 #[tokio::test]
+async fn init_holesky() -> Result<()> {
+    let (bootstrap, update) = get_bootstrap_and_update();
+    let client = NodeClient::new().await?;
+    let mut listener = client.0.subscribe().await?;
+    let init = construct_init(Network::Holesky, update, bootstrap);
+    let program_id = upload_program(&client.0, &mut listener, init).await?;
+
+    println!("program_id = {:?}", hex::encode(program_id));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn replay_back_and_updating() -> Result<()> {
+    let client = NodeClient::new().await?;
+    let mut listener = client.0.subscribe().await?;
     let (bootstrap, update) = get_bootstrap_and_update();
     let init = construct_init(Network::Holesky, update, bootstrap);
-
-    let client = NodeClient::new().await?;
-    let program_id = {
-        let lock = client.lock().await;
-
-        let mut listener = lock.client.subscribe().await?;
-
-        upload_program(lock.client, &mut listener, init).await?
-    };
+    let program_id = upload_program(&client.0, &mut listener, init).await?;
 
     println!("program_id = {:?}", hex::encode(program_id));
 
@@ -400,16 +373,10 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         _ => unreachable!("Requested single update"),
     };
 
-    let init = construct_init(Network::Sepolia, update, bootstrap);
-
     let client = NodeClient::new().await?;
-    let program_id = {
-        let lock = client.lock().await;
-
-        let mut listener = lock.client.subscribe().await?;
-
-        upload_program(lock.client, &mut listener, init).await?
-    };
+    let mut listener = client.0.subscribe().await?;
+    let init = construct_init(Network::Sepolia, update, bootstrap);
+    let program_id = upload_program(&client.0, &mut listener, init).await?;
 
     println!("program_id = {:?}", hex::encode(program_id));
 

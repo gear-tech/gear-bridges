@@ -3641,6 +3641,7 @@ dependencies = [
  "lazy_static",
  "sails-client-gen",
  "sails-rs",
+ "sp-core 21.0.0",
  "tokio",
 ]
 
@@ -9994,6 +9995,7 @@ dependencies = [
  "sails-rs",
  "serde",
  "serde_json",
+ "sp-core 21.0.0",
  "thiserror",
  "tokio",
  "utils-prometheus",

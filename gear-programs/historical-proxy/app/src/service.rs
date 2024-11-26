@@ -90,17 +90,19 @@ where
         let state = self.state.borrow();
 
         let endpoint = state.endpoints.endpoint_for(slot)?;
+        let reply_deposit = state.config.reply_deposit;
+        let reply_timeout = state.config.reply_timeout;
         debug!("Sending message to ERC20 Relay");
 
-        let reply =
-            gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, state.config.reply_deposit)
-                .map_err(|_| ProxyError::SendFailure)?
-                .up_to(Some(state.config.reply_timeout))
-                .map_err(|_| ProxyError::ReplyTimeout)?;
-        drop(state);
-
         let receipt = Result::<Vec<u8>, ERC20Error>::decode(
-            &mut reply
+            &mut gstd::msg::send_bytes_for_reply(endpoint, proofs, 0, reply_deposit)
+                .map_err(|_| ProxyError::SendFailure)?
+                .up_to(Some(reply_timeout))
+                .map_err(|_| ProxyError::ReplyTimeout)?
+                .handle_reply(move || {
+                    debug!("got reply{:?}", gstd::msg::load_bytes().unwrap());
+                })
+                .unwrap()
                 .await
                 .map_err(|_| ProxyError::ReplyFailure)?
                 .as_slice(),
@@ -108,20 +110,14 @@ where
         .map_err(|_| ProxyError::DecodeFailure)?
         .map_err(ProxyError::ERC20Relay)?;
         debug!("Got receipt: {:?}", receipt);
-        let state = self.state.borrow();
 
         let submit_receipt = SubmitReceipt::encode_call(receipt.clone());
 
-        let reply = gstd::msg::send_bytes_for_reply(
-            vft_manager,
-            submit_receipt,
-            0,
-            state.config.reply_deposit,
-        )
-        .map_err(|_| ProxyError::SendFailure)?
-        .up_to(Some(state.config.reply_timeout))
-        .map_err(|_| ProxyError::ReplyTimeout)?;
-        drop(state);
+        let reply = gstd::msg::send_bytes_for_reply(vft_manager, submit_receipt, 0, reply_deposit)
+            .map_err(|_| ProxyError::SendFailure)?
+            .up_to(Some(reply_timeout))
+            .map_err(|_| ProxyError::ReplyTimeout)?;
+
         let _: () = Result::<(), vft::Error>::decode(
             &mut reply
                 .await

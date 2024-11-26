@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sails-rs.workspace = true
+sails-rs = { workspace = true, features = ["debug"] }
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 ethereum-common.workspace = true
@@ -14,9 +14,9 @@ erc20-relay-client.workspace = true
 [dev-dependencies]
 futures.workspace = true
 gclient.workspace = true
-gstd.workspace = true
+gstd = { workspace = true, features = ["debug"] }
 gtest.workspace = true
-sails-rs = { workspace = true, features = ["gtest", "gclient"] }
+sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true

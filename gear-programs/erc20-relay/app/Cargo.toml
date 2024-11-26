@@ -7,7 +7,7 @@ edition.workspace = true
 alloy-rlp.workspace = true
 checkpoint_light_client-io.workspace = true
 ethereum-common.workspace = true
-sails-rs.workspace = true
+sails-rs = { workspace = true, features = ["debug"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }
@@ -18,7 +18,7 @@ erc20-relay-client.workspace = true
 erc20-relay = { workspace = true, features = ["wasm-binary", "gas_calculation"] }
 futures.workspace = true
 gclient.workspace = true
-gstd.workspace = true
+gstd = { workspace = true, features = ["debug"] }
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 hex-literal.workspace = true

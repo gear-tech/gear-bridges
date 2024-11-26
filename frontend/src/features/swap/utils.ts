@@ -1,13 +1,15 @@
 import { HexString } from '@gear-js/api';
 import { ActorId, H160 } from 'sails-js';
-import { parseUnits } from 'viem';
+import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 
 import { isUndefined } from '@/utils';
 
 import { ERROR_MESSAGE } from './consts';
+import { UseAccountBalance } from './types';
 
 const getAmountSchema = (
+  isNativeToken: boolean,
   accountBalanceValue: bigint | undefined,
   ftBalanceValue: bigint | undefined,
   feeValue: bigint | undefined,
@@ -16,12 +18,25 @@ const getAmountSchema = (
   if (isUndefined(accountBalanceValue) || isUndefined(ftBalanceValue) || isUndefined(feeValue) || isUndefined(decimals))
     return z.bigint();
 
-  return z
+  const schema = z
     .string()
     .trim() // TODO: required field check
-    .transform((value) => parseUnits(value, decimals)) // if fraction is > decimals, value will be rounded
-    .refine((value) => value <= ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE })
-    .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
+    .transform((value) => parseUnits(value, decimals)); // if fraction is > decimals, value will be rounded
+
+  if (!isNativeToken)
+    return schema
+      .refine((value) => value <= ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE })
+      .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
+
+  return schema.refine(
+    (value) => {
+      const isMintRequired = value > ftBalanceValue;
+      const valueToMint = isMintRequired ? value - ftBalanceValue : BigInt(0);
+
+      return valueToMint <= accountBalanceValue;
+    },
+    { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE },
+  );
 };
 
 const getOptions = (
@@ -49,4 +64,26 @@ const getOptions = (
   return { varaOptions, ethOptions };
 };
 
-export { getAmountSchema, getOptions };
+const getMergedBalance = (
+  accountBalance: ReturnType<UseAccountBalance>,
+  ftBalance: ReturnType<UseAccountBalance>,
+  decimals: number | undefined,
+) => {
+  const isLoading = accountBalance.isLoading || ftBalance.isLoading;
+
+  if (
+    isUndefined(accountBalance.value) ||
+    isUndefined(ftBalance.value) ||
+    isUndefined(decimals) ||
+    !accountBalance.formattedValue ||
+    !ftBalance.formattedValue
+  )
+    return { value: undefined, formattedValue: undefined, isLoading };
+
+  const value = accountBalance.value + ftBalance.value;
+  const formattedValue = formatUnits(value, decimals);
+
+  return { value, formattedValue, isLoading };
+};
+
+export { getAmountSchema, getOptions, getMergedBalance };

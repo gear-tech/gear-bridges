@@ -19,6 +19,7 @@ const DEFAULT_VALUES = {
 const ERROR_MESSAGE = {
   NO_FT_BALANCE: 'Insufficient token balance',
   NO_ACCOUNT_BALANCE: 'Insufficient account balance to pay fee',
+  NO_BALANCE: 'Insufficient balance',
   INVALID_ADDRESS: 'Invalid address',
 } as const;
 

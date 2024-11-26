@@ -7,6 +7,7 @@ import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME, NETWORK_INDEX, WRAPPED_VARA_CONTRACT_ADDRESS } from '../../consts';
 import { useSwapForm, useBridge } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
+import { getMergedBalance } from '../../utils';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { Network } from '../network';
@@ -39,6 +40,8 @@ function SwapForm({
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
   const { address, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
+  const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
+
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(address, decimals);
@@ -53,6 +56,7 @@ function SwapForm({
 
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
+    isNativeToken,
     accountBalance,
     ftBalance,
     decimals,
@@ -62,7 +66,7 @@ function SwapForm({
   );
 
   const renderFromBalance = () => {
-    const balance = address === WRAPPED_VARA_CONTRACT_ADDRESS ? accountBalance : ftBalance;
+    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance, decimals) : ftBalance;
 
     return (
       <Balance

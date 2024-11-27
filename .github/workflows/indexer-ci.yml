@@ -28,6 +28,11 @@ jobs:
         working-directory: indexer
         run: npm install
 
+      - name: Copy api files
+        run: |
+          mkdir -p indexer/assets
+          cp api/ethereum/IERC20Manager.json api/ethereum/IMessageQueue.json indexer/assets
+
       - name: Build
         working-directory: indexer
         run: npm run build

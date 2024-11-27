@@ -18,8 +18,7 @@ COPY indexer/package.json .
 COPY indexer/package-lock.json .
 COPY indexer/db db
 COPY indexer/schema.graphql .
-RUN npm i -g @subsquid/cli
-RUN npm ci
+RUN npm i -g @subsquid/cli && npm ci
 COPY indexer/tsconfig.json .
 COPY indexer/src src
 COPY --from=api /assets assets

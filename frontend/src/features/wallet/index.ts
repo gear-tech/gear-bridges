@@ -1,3 +1,3 @@
-import { Wallet, NetworkWalletField, SwapNetworkButton } from './components';
+import { NetworkWalletField, SwapNetworkButton } from './components';
 
-export { Wallet, NetworkWalletField, SwapNetworkButton };
+export { NetworkWalletField, SwapNetworkButton };

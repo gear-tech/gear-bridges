@@ -28,15 +28,18 @@ const getAmountSchema = (
       .refine((value) => value <= ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE })
       .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
 
-  return schema.refine(
-    (value) => {
-      const isMintRequired = value > ftBalanceValue;
-      const valueToMint = isMintRequired ? value - ftBalanceValue : BigInt(0);
+  return schema
+    .refine((value) => value >= feeValue, { message: ERROR_MESSAGE.MIN_AMOUNT })
+    .refine(
+      (value) => {
+        const expectedValue = value - feeValue;
+        const isMintRequired = expectedValue > ftBalanceValue;
+        const valueToMint = isMintRequired ? expectedValue - ftBalanceValue : BigInt(0);
 
-      return valueToMint <= accountBalanceValue;
-    },
-    { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE },
-  );
+        return valueToMint + feeValue <= accountBalanceValue;
+      },
+      { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE },
+    );
 };
 
 const getOptions = (

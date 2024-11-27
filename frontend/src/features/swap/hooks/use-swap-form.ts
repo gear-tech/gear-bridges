@@ -32,15 +32,7 @@ function useSwapForm(
   const alert = useAlert();
 
   const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, fee, decimals);
-
-  const expectedValueSchema = getAmountSchema(
-    isNativeToken,
-    accountBalance.value,
-    ftBalance.value,
-    BigInt(0),
-    decimals,
-  );
-
+  const expectedValueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, 0n, decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({

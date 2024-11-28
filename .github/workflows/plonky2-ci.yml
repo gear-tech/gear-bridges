@@ -1,0 +1,39 @@
+name: Plonky2 CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - circuits/**
+      - prover/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - circuits/**
+      - prover/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    runs-on: kuberunner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Run tests
+        run: cargo test --release 
+          -p prover
+          -p plonky2_blake2b256 
+          -p plonky2_ecdsa 
+          -p plonky2_ed25519 
+          -p plonky2_sha512 
+          -p plonky2_u32

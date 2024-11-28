@@ -77,7 +77,13 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Run tests
-        run: cargo test --release --all-targets
+        run: cargo test --release --workspace 
+          --exclude prover
+          --exclude plonky2_blake2b256 
+          --exclude plonky2_ecdsa 
+          --exclude plonky2_ed25519 
+          --exclude plonky2_sha512 
+          --exclude plonky2_u32
       - name: Run solidity tests
         run: |
           cd ethereum

@@ -108,18 +108,10 @@ jobs:
   zk-tests:
     runs-on: kuberunner
     needs: check-zk-circuits-changed
-    if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed}} || ${{needs.check-zk-circuits-changed.outputs.prover_changed}}
+    if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - name: Filter files
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            circuits:
-              - 'circuits/**'
-            prover:
-              - 'prover/**'  
+        uses: actions/checkout@v4 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Run tests

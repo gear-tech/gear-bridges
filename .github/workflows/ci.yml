@@ -88,14 +88,32 @@ jobs:
         run: |
           cd ethereum
           forge test
+  check-zk-circuits-changed:
+    runs-on: kuberunner
+    outputs: 
+      circuits_changed: ${{ steps.filter.outputs.circuits }}
+      prover_changed: ${{ steps.filter.outputs.prover }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Filter files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            circuits:
+              - 'circuits/**'
+            prover:
+              - 'prover/**'
   zk-tests:
     runs-on: kuberunner
+    needs: check-zk-circuits-changed
+    if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed}} || ${{needs.check-zk-circuits-changed.outputs.prover_changed}}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Filter files
         uses: dorny/paths-filter@v3
-        id: filter
         with:
           filters: |
             circuits:

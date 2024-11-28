@@ -35,7 +35,7 @@ impl_target_set! {
         /// Blake2 hash of concatenated validator public keys.
         pub validator_set_hash: Blake2Target,
         /// GRANDPA message.
-        pub message: GrandpaVoteTarget,
+        pub message: GrandpaMessageTarget,
     }
 }
 
@@ -45,10 +45,9 @@ impl_target_set! {
 // - block number                           (4 bytes)
 // - round number                           (8 bytes)
 // - authority set id                       (8 bytes)
-// TODO: Rename to GrandpaMessageTarget
 impl_parsable_target_set! {
     /// Target that reflects the way GRANDPA vote is implemented in substrate.
-    pub struct GrandpaVoteTarget {
+    pub struct GrandpaMessageTarget {
         /// Discriminant determining sub-round of voting. 1 here stands for pre-commit.
         pub discriminant: BitArrayTarget<8>,
         /// Block hash that's being finalized.

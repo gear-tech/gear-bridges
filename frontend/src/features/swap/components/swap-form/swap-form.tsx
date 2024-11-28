@@ -4,9 +4,10 @@ import { FormProvider } from 'react-hook-form';
 import { Input } from '@/components';
 
 import GasSVG from '../../assets/gas.svg?react';
-import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
+import { FIELD_NAME, NETWORK_INDEX, WRAPPED_VARA_CONTRACT_ADDRESS } from '../../consts';
 import { useSwapForm, useBridge } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
+import { getMergedBalance } from '../../utils';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { Network } from '../network';
@@ -39,14 +40,23 @@ function SwapForm({
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
   const { address, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
+  const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
+
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(address, decimals);
   const allowance = useFTAllowance(address);
-  const [{ mutateAsync: onSubmit, ...submit }, approve] = useHandleSubmit(address, fee.value, allowance.data);
+
+  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
+    address,
+    fee.value,
+    allowance.data,
+    ftBalance.value,
+  );
 
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
+    isNativeToken,
     accountBalance,
     ftBalance,
     decimals,
@@ -55,16 +65,21 @@ function SwapForm({
     onSubmit,
   );
 
-  const renderFromBalance = () => (
-    <Balance
-      value={ftBalance.formattedValue}
-      unit={symbol}
-      isLoading={ftBalance.isLoading || bridge.isLoading}
-      onMaxButtonClick={setMaxBalance}
-    />
-  );
+  const renderFromBalance = () => {
+    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance, decimals) : ftBalance;
+
+    return (
+      <Balance
+        value={balance.formattedValue}
+        unit={symbol}
+        isLoading={balance.isLoading || bridge.isLoading}
+        onMaxButtonClick={setMaxBalance}
+      />
+    );
+  };
 
   const getButtonText = () => {
+    if (mint?.isPending) return 'Minting...';
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Swapping...';
 

@@ -11,7 +11,7 @@ use plonky2::{
 
 use plonky2_field::types::Field;
 
-use super::{single_validator_sign::SingleValidatorSign, GrandpaVoteTarget};
+use super::{single_validator_sign::SingleValidatorSign, GrandpaMessageTarget};
 use crate::{
     block_finality::validator_set_hash::ValidatorSetHashTarget,
     common::{
@@ -32,7 +32,7 @@ impl_target_set! {
         /// Validator index that have signed GRANDPA message.
         pub validator_idx: Target,
         /// GRANDPA message.
-        pub message: GrandpaVoteTarget,
+        pub message: GrandpaMessageTarget,
     }
 }
 

@@ -77,11 +77,51 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Run tests
-        run: cargo test --release --all-targets
+        run: cargo test --release --workspace 
+          --exclude prover
+          --exclude plonky2_blake2b256 
+          --exclude plonky2_ecdsa 
+          --exclude plonky2_ed25519 
+          --exclude plonky2_sha512 
+          --exclude plonky2_u32
       - name: Run solidity tests
         run: |
           cd ethereum
           forge test
+  check-zk-circuits-changed:
+    runs-on: kuberunner
+    outputs: 
+      circuits_changed: ${{ steps.filter.outputs.circuits }}
+      prover_changed: ${{ steps.filter.outputs.prover }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Filter files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            circuits:
+              - 'circuits/**'
+            prover:
+              - 'prover/**'
+  zk-tests:
+    runs-on: kuberunner
+    needs: check-zk-circuits-changed
+    if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Run tests
+        run: cargo test --release 
+          -p prover
+          -p plonky2_blake2b256 
+          -p plonky2_ecdsa 
+          -p plonky2_ed25519 
+          -p plonky2_sha512 
+          -p plonky2_u32
   check-api-files:
     runs-on: kuberunner
     steps:

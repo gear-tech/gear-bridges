@@ -2,23 +2,26 @@ import { useAlert } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import { formatUnits, parseUnits } from 'viem';
 import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import { logger } from '@/utils';
+import { isUndefined, logger } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { FormattedValues } from '../types';
-import { getAmountSchema } from '../utils';
+import { getAmountSchema, getMergedBalance } from '../utils';
 
 type Values = {
   value: bigint | undefined;
   formattedValue: string | undefined;
+  isLoading: boolean;
 };
 
 function useSwapForm(
   isVaraNetwork: boolean,
+  isNativeToken: boolean,
   accountBalance: Values,
   ftBalance: Values,
   decimals: number | undefined,
@@ -28,8 +31,8 @@ function useSwapForm(
 ) {
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(accountBalance.value, ftBalance.value, fee, decimals);
-  const expectedValueSchema = getAmountSchema(accountBalance.value, ftBalance.value, BigInt(0), decimals);
+  const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, fee, decimals);
+  const expectedValueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, 0n, decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({
@@ -50,8 +53,19 @@ function useSwapForm(
   const setOriginalValue = (value: string) => setValue(FIELD_NAME.VALUE, value, { shouldValidate });
   const setExpectedValue = (value: string) => setValue(FIELD_NAME.EXPECTED_VALUE, value, { shouldValidate });
 
-  const onValueChange = (value: string) => setExpectedValue(value);
-  const onExpectedValueChange = (value: string) => setOriginalValue(value);
+  const getValueWithFee = (value: string, operator: '+' | '-' = '+') => {
+    if (isUndefined(fee)) throw new Error('Fee is not defined');
+    if (isUndefined(decimals)) throw new Error('Decimals is not defined');
+    if (!value) return value;
+
+    const chainValue = parseUnits(value, decimals);
+    const valueWithFee = operator === '+' ? chainValue + fee : chainValue - fee;
+
+    return valueWithFee < 0 ? '0' : formatUnits(valueWithFee, decimals);
+  };
+
+  const onValueChange = (value: string) => setExpectedValue(isNativeToken ? getValueWithFee(value, '-') : value);
+  const onExpectedValueChange = (value: string) => setOriginalValue(isNativeToken ? getValueWithFee(value) : value);
 
   const handleSubmit = form.handleSubmit((values) => {
     const onSuccess = () => {
@@ -75,10 +89,11 @@ function useSwapForm(
   }, [disabled]);
 
   const setMaxBalance = () => {
-    if (!ftBalance.formattedValue) throw new Error('Balance is not defined');
+    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance, decimals) : ftBalance;
+    if (!balance.formattedValue) throw new Error('Balance is not defined');
 
-    setOriginalValue(ftBalance.formattedValue);
-    onValueChange(ftBalance.formattedValue);
+    setOriginalValue(balance.formattedValue);
+    onValueChange(balance.formattedValue);
   };
 
   return {

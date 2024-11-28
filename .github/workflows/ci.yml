@@ -84,7 +84,13 @@ jobs:
           docker pull ghcr.io/gear-tech/node:v1.6.2
           docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external
       - name: Run tests
-        run: cargo test --release --workspace --all-targets || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
+        run: cargo test --release --workspace 
+          --exclude prover
+          --exclude plonky2_blake2b256 
+          --exclude plonky2_ecdsa 
+          --exclude plonky2_ed25519 
+          --exclude plonky2_sha512 
+          --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
       - name: Run solidity tests
         run: |
           cd ethereum
@@ -92,6 +98,40 @@ jobs:
       - name: Stop Gear node container (if any)
         continue-on-error: true
         run: docker stop $NODE_CONTAINER_NAME
+  check-zk-circuits-changed:
+    runs-on: kuberunner
+    outputs: 
+      circuits_changed: ${{ steps.filter.outputs.circuits }}
+      prover_changed: ${{ steps.filter.outputs.prover }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Filter files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            circuits:
+              - 'circuits/**'
+            prover:
+              - 'prover/**'
+  zk-tests:
+    runs-on: kuberunner
+    needs: check-zk-circuits-changed
+    if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Run tests
+        run: cargo test --release 
+          -p prover
+          -p plonky2_blake2b256 
+          -p plonky2_ecdsa 
+          -p plonky2_ed25519 
+          -p plonky2_sha512 
+          -p plonky2_u32
   check-api-files:
     runs-on: kuberunner
     steps:

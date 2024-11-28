@@ -1,19 +1,19 @@
 # Rust build directory
 target
 
-# Resource files 
+# Resource files
 audits
 images
 LICENSE
 *.md
 api
 
-# Git 
+# Git
 .git
 .gitignore
 .github
 
-# IDE-generated files 
+# IDE-generated files
 .vscode
 .idea
 
@@ -28,5 +28,8 @@ ethereum/cache
 ethereum/out
 ethereum/broadcast
 
+# Indexer-related
+indexer/
+
 # Frontend
-frontend
+frontend/

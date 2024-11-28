@@ -1,0 +1,21 @@
+manifestVersion: subsquid.io/v0.1
+name: bridge
+version: 1
+description: A squid that indexes transfers between ETH and GEAR
+build:
+deploy:
+  addons:
+    postgres:
+  processor:
+    - name: eth-processor
+      cmd:
+        - sqd
+        - process:prod:eth
+    - name: gear-processor
+      cmd:
+        - sqd
+        - process:prod:gear
+  api:
+    cmd:
+      - sqd
+      - serve:prod

@@ -9,6 +9,8 @@ import { WrappedVaraProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '../../consts'
 import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
 import { FormattedValues } from '../../types';
 
+import { useVFTManagerAddress } from './use-vft-manager-address';
+
 function useMint() {
   const { data: program } = useProgram({
     library: WrappedVaraProgram,
@@ -57,6 +59,7 @@ function useHandleVaraSubmit(
   const mint = useMint();
   const vftApprove = useApprove(ftAddress);
   const bridgingPaymentRequest = useRequestBridging();
+  const { data: vftManagerAddress, isLoading } = useVFTManagerAddress();
 
   const sendBridgingPaymentRequest = (amount: bigint, accountAddress: HexString) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
@@ -70,6 +73,7 @@ function useHandleVaraSubmit(
 
   const onSubmit = async ({ expectedAmount, accountAddress }: FormattedValues) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
+    if (!vftManagerAddress) throw new Error('VFT manager address is not found');
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
     if (isUndefined(allowance)) throw new Error('Allowance is not found');
     if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
@@ -78,14 +82,14 @@ function useHandleVaraSubmit(
       await mint.sendTransactionAsync({ args: [], value: expectedAmount - ftBalance });
 
     if (expectedAmount > allowance)
-      await vftApprove.sendTransactionAsync({ args: [BRIDGING_PAYMENT_CONTRACT_ADDRESS, expectedAmount] });
+      await vftApprove.sendTransactionAsync({ args: [vftManagerAddress, expectedAmount] });
 
     return sendBridgingPaymentRequest(expectedAmount, accountAddress);
   };
 
   const submit = useMutation({ mutationFn: onSubmit });
 
-  return [submit, vftApprove, mint] as const;
+  return [submit, { ...vftApprove, isLoading }, mint] as const;
 }
 
 export { useHandleVaraSubmit };

@@ -1,8 +1,12 @@
 import { BRIDGING_PAYMENT_ABI } from './abi';
-import { WRAPPED_VARA_CONTRACT_ADDRESS, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from './env';
+import {
+  BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+  WRAPPED_VARA_CONTRACT_ADDRESS,
+  ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+} from './env';
 import { EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE } from './form';
-import { WrappedVaraProgram } from './sails';
+import { BridgingPaymentProgram, WrappedVaraProgram } from './sails';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
 
 const NETWORK_INDEX = {
@@ -11,6 +15,7 @@ const NETWORK_INDEX = {
 };
 
 export {
+  BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   WRAPPED_VARA_CONTRACT_ADDRESS,
   ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   BRIDGING_PAYMENT_ABI,
@@ -22,5 +27,6 @@ export {
   NETWORK_INDEX,
   SERVICE_NAME,
   QUERY_NAME,
+  BridgingPaymentProgram,
   WrappedVaraProgram,
 };

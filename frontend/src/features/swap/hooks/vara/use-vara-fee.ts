@@ -1,9 +1,8 @@
 import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 
-import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { QUERY_NAME, SERVICE_NAME } from '../../consts';
+import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS, QUERY_NAME, SERVICE_NAME } from '../../consts';
 
 function useVaraFee() {
   const { getFormattedBalanceValue } = useBalanceFormat();

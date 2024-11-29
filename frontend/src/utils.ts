@@ -1,4 +1,4 @@
-import { decodeAddress } from '@gear-js/api';
+import { decodeAddress, encodeAddress } from '@gear-js/api';
 import { z } from 'zod';
 
 const cx = (...args: unknown[]) =>
@@ -9,7 +9,7 @@ const cx = (...args: unknown[]) =>
 
 const isValidAddress = (address: string) => {
   try {
-    decodeAddress(address);
+    encodeAddress(decodeAddress(address));
     return true;
   } catch {
     return false;

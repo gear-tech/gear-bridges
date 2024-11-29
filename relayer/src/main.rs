@@ -441,7 +441,10 @@ async fn create_gclient_client(args: &VaraArgs, suri: &str) -> GClientGearApi {
     GClientGearApi::builder()
         .retries(args.vara_rpc_retries)
         .suri(suri)
-        .build(WSAddress::new(&args.vara_domain, args.vara_port))
+        .build(WSAddress::new(
+            &"wss://testnet.vara.network",
+            args.vara_port,
+        ))
         .await
         .expect("Failed to create gclient client")
 }

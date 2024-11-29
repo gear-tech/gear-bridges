@@ -173,15 +173,15 @@ impl MessageSender {
     }
 
     async fn update_balance_metric(&self) -> anyhow::Result<()> {
-        let balance = self
-            .gear_api
-            .total_balance(self.gear_api.account_id())
-            .await?;
+        // let balance = self
+        //     .gear_api
+        //     .total_balance(self.gear_api.account_id())
+        //     .await?;
 
-        let balance = balance / 1_000_000_000_000;
-        let balance: i64 = balance.try_into().unwrap_or(i64::MAX);
+        // let balance = balance / 1_000_000_000_000;
+        // let balance: i64 = balance.try_into().unwrap_or(i64::MAX);
 
-        self.metrics.fee_payer_balance.set(balance);
+        // self.metrics.fee_payer_balance.set(balance);
 
         Ok(())
     }

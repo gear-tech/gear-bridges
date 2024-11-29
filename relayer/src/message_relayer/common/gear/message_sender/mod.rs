@@ -2,11 +2,12 @@ use std::sync::mpsc::Receiver;
 
 use ethereum_client::EthApi;
 use futures::executor::block_on;
+use gclient::EventProcessor;
 use gclient::GearApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
-    calls::{Action, Call},
+    calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
 };
 
@@ -145,17 +146,28 @@ impl MessageSender {
         // Use 95% of block gas limit for all extrinsics.
         let gas_limit = gas_limit_block / 100 * 95;
 
-        let remoting = GClientRemoting::new(self.gear_api.clone());
+        let mut listener = self.gear_api.subscribe().await?;
 
-        let mut erc20_service = Erc20Relay::new(remoting.clone());
+        let encoded = erc20_relay_client::erc_20_relay::io::Relay::encode_call(message);
 
-        erc20_service
-            .relay(message)
-            .with_gas_limit(gas_limit)
-            .send_recv(self.ethereum_event_client_address.into())
+        let (message_id, _) = self
+            .gear_api
+            .send_message_bytes(
+                self.ethereum_event_client_address.into(),
+                encoded,
+                gas_limit,
+                0,
+            )
+            .await?;
+
+        let (_message_id, payload, _value) = listener
+            .reply_bytes_on(message_id)
             .await
-            .map_err(|_| anyhow::anyhow!("Failed to send message to ethereum event client"))?
-            .map_err(|_| anyhow::anyhow!("Internal ethereum event clint error"))?;
+            .map_err(|e| anyhow::anyhow!("Failed to get reply: {e:?}"))?;
+        let payload = payload.map_err(|e| anyhow::anyhow!("Failed to get reply payload: {e:?}"))?;
+        let _ = erc20_relay_client::erc_20_relay::io::Relay::decode_reply(&mut &payload[..])
+            .map_err(|e| anyhow::anyhow!("Failed to decode result: {e:?}"))?
+            .map_err(|e| anyhow::anyhow!("Error result returned: {e:?}"))?;
 
         Ok(())
     }

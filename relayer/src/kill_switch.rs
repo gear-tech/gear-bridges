@@ -1,10 +1,13 @@
 use std::{
+    path::Path,
     process,
     time::{Duration, Instant},
 };
 
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
-use gear_rpc_client::GearApi;
+use gear_rpc_client::{dto, GearApi};
+use parity_scale_codec::Decode as _;
+use primitive_types::H256;
 use prover::proving::GenesisConfig;
 
 use crate::{
@@ -12,6 +15,8 @@ use crate::{
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
+
+mod block_finality_archiver;
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(12);
 
@@ -30,6 +35,7 @@ pub struct KillSwitchRelayer {
     // Next eth block to process.
     from_eth_block: Option<u64>,
     state: State,
+    block_finality_storage: sled::Db,
 }
 
 impl KillSwitchRelayer {
@@ -39,6 +45,7 @@ impl KillSwitchRelayer {
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
         from_eth_block: Option<u64>,
+        block_finality_storage_path: impl AsRef<Path>,
     ) -> Self {
         Self {
             gear_api,
@@ -47,12 +54,15 @@ impl KillSwitchRelayer {
             proof_storage,
             from_eth_block,
             state: State::Normal,
+            block_finality_storage: sled::open(block_finality_storage_path)
+                .expect("DB not corrupted"),
         }
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        log::info!("Starting kill switch relayer");
+        self.spawn_block_finality_saver()?;
 
+        log::info!("Starting kill switch relayer");
         loop {
             let now = Instant::now();
             let res = match &self.state {
@@ -71,6 +81,19 @@ impl KillSwitchRelayer {
                 tokio::time::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration).await;
             }
         }
+    }
+
+    fn spawn_block_finality_saver(&self) -> anyhow::Result<()> {
+        log::info!("Spawning block finality saver");
+        let mut block_finality_saver = block_finality_archiver::BlockFinalityArchiver::new(
+            self.gear_api.clone(),
+            self.block_finality_storage.clone(),
+        );
+        tokio::spawn(async move {
+            block_finality_saver.run().await;
+        });
+
+        Ok(())
     }
 
     async fn main_loop(&mut self) -> anyhow::Result<()> {
@@ -118,8 +141,21 @@ impl KillSwitchRelayer {
                 // that means for some reason the proof with incorrect merkle root was submitted to relayer contract.
                 // We need to generate the correct proof and submit it to the relayer contract.
 
+                let Some(block_finality) = self
+                    .get_block_finality_from_storage(event.block_number)
+                    .await?
+                else {
+                    log::error!(
+                        "Block finality proof not found for block #{}",
+                        event.block_number
+                    );
+                    continue;
+                };
+
                 log::info!("Proving merkle root presence");
-                let proof = self.generate_proof(event.block_number).await?;
+                let proof = self
+                    .generate_proof(event.block_number, block_finality)
+                    .await?;
                 log::info!("Proven merkle root presence");
 
                 log::info!("Submitting new proof to ethereum");
@@ -169,6 +205,27 @@ impl KillSwitchRelayer {
         Ok(())
     }
 
+    async fn get_block_finality_from_storage(
+        &mut self,
+        block_number: u64,
+    ) -> anyhow::Result<Option<(H256, dto::BlockFinalityProof)>> {
+        let block_hash = self
+            .gear_api
+            .block_number_to_hash(block_number as u32)
+            .await?;
+
+        Ok(
+            if let Some(bytes) = self.block_finality_storage.get(block_hash.as_bytes())? {
+                Some((
+                    block_hash,
+                    dto::BlockFinalityProof::decode(&mut &bytes[..])?,
+                ))
+            } else {
+                None
+            },
+        )
+    }
+
     async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> anyhow::Result<bool> {
         let block_hash = self
             .gear_api
@@ -190,12 +247,11 @@ impl KillSwitchRelayer {
         Ok(is_matches)
     }
 
-    async fn generate_proof(&self, block_number: u64) -> anyhow::Result<FinalProof> {
-        let block_hash = self
-            .gear_api
-            .block_number_to_hash(block_number as u32)
-            .await?;
-
+    async fn generate_proof(
+        &self,
+        block_number: u64,
+        (block_hash, block_finality): (H256, dto::BlockFinalityProof),
+    ) -> anyhow::Result<FinalProof> {
         log::info!(
             "Proving merkle root presence in block #{} with hash {}",
             block_number,
@@ -207,7 +263,12 @@ impl KillSwitchRelayer {
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
 
-        prover_interface::prove_final(&self.gear_api, inner_proof, self.genesis_config, block_hash)
-            .await
+        prover_interface::prove_final_with_block_finality(
+            &self.gear_api,
+            inner_proof,
+            self.genesis_config,
+            (block_hash, block_finality),
+        )
+        .await
     }
 }

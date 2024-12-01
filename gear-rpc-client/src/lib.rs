@@ -1,12 +1,13 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use blake2::{
     digest::{Update, VariableOutput},
     Blake2bVar,
 };
 use dto::{AuthoritySetState, BranchNodeData};
+use futures_util::{Stream, StreamExt};
 use gsdk::{
     metadata::{
         gear::Event as GearEvent,
@@ -194,14 +195,46 @@ impl GearApi {
         self.fetch_finality_proof(block).await
     }
 
+    /// Subscribes to GRANDPA justifications stream and returns it.
+    pub async fn subscribe_grandpa_justifications(
+        &self,
+    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<GrandpaJustification<GearHeader>>>> {
+        let stream = self
+            .api
+            .rpc()
+            .client()
+            .subscribe(
+                "grandpa_subscribeJustifications",
+                rpc_params![],
+                "grandpa_unsubscribeJustifications",
+            )
+            .await?;
+
+        let stream = stream.map(|res: Result<String, _>| -> anyhow::Result<_, _> {
+            let hex_string = res?;
+            let bytes = hex::decode(&hex_string[2..]).context("failed to decoded hex")?;
+            let justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..])?;
+
+            for pc in &justification.commit.precommits {
+                assert_eq!(pc.precommit.target_hash, justification.commit.target_hash);
+                assert_eq!(
+                    pc.precommit.target_number,
+                    justification.commit.target_number
+                );
+            }
+
+            Ok(justification)
+        });
+
+        Ok(stream)
+    }
+
     /// Returns finality proof for block not earlier `after_block`
     /// and not later the end of session this block belongs to.
     pub async fn fetch_finality_proof(
         &self,
         after_block: H256,
     ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
-        let required_authority_set_id = self.signed_by_authority_set_id(after_block).await?;
-
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
             .api
@@ -222,12 +255,25 @@ impl GearApi {
             assert_eq!(pc.precommit.target_number, fetched_block_number);
         }
 
+        self.produce_finality_proof(justification).await
+    }
+
+    // Produces block finality proof for the given justification.
+    pub async fn produce_finality_proof(
+        &self,
+        justification: GrandpaJustification<GearHeader>,
+    ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
+        let block_number = justification.commit.target_number;
+        let block_hash = justification.commit.target_hash;
+
+        let required_authority_set_id = self.signed_by_authority_set_id(block_hash).await?;
+
         let signed_data = sp_consensus_grandpa::localized_payload(
             justification.round,
             required_authority_set_id,
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(Precommit::<GearHeader>::new(
-                finality.block,
-                fetched_block_number,
+                block_hash,
+                block_number,
             )),
         );
         assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
@@ -249,7 +295,7 @@ impl GearApi {
             .collect();
 
         Ok((
-            finality.block,
+            block_hash,
             dto::BlockFinalityProof {
                 validator_set,
                 message: signed_data,

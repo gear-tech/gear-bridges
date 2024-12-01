@@ -359,6 +359,7 @@ async fn main() {
                 genesis_config,
                 proof_storage,
                 args.from_eth_block,
+                "./block_finality_storage",
             )
             .await;
 

@@ -4,10 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use block_finality_archiver::BlockFinalityProofWithHash;
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
-use gear_rpc_client::{dto, GearApi};
-use parity_scale_codec::Decode as _;
-use primitive_types::H256;
+use gear_rpc_client::GearApi;
+use parity_scale_codec::Decode;
 use prover::proving::GenesisConfig;
 
 use crate::{
@@ -208,22 +208,34 @@ impl KillSwitchRelayer {
     async fn get_block_finality_from_storage(
         &mut self,
         block_number: u64,
-    ) -> anyhow::Result<Option<(H256, dto::BlockFinalityProof)>> {
-        let block_hash = self
-            .gear_api
-            .block_number_to_hash(block_number as u32)
-            .await?;
+    ) -> anyhow::Result<Option<BlockFinalityProofWithHash>> {
+        let key_bytes = block_number.to_be_bytes();
 
-        Ok(
-            if let Some(bytes) = self.block_finality_storage.get(block_hash.as_bytes())? {
-                Some((
-                    block_hash,
-                    dto::BlockFinalityProof::decode(&mut &bytes[..])?,
-                ))
-            } else {
-                None
-            },
-        )
+        let value_bytes = match self.block_finality_storage.get(key_bytes)? {
+            Some(bytes) => bytes,
+            None => {
+                // Block finality proof generated for series of block,
+                // for example:
+                //  ```text
+                //          Round 1: finality proof for block #2 (transitively for 2,1 blocks)
+                //           |
+                //           |           Round 2: finality proof for block #5 (transitively for 5,4,3.. blocks)
+                //           |           |
+                //           v           v
+                //      [1] [2] [3] [4] [5] [6] [7] [8] [9] [10]
+                //  ```
+                // Some if we don't have the proof for block #3 or #4, we can try to get the proof for block #5.
+                let res = self.block_finality_storage.get_gt(key_bytes)?;
+                let Some((_key, val)) = res else {
+                    return Ok(None);
+                };
+                val
+            }
+        };
+
+        Ok(Some(BlockFinalityProofWithHash::decode(
+            &mut &value_bytes[..],
+        )?))
     }
 
     async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> anyhow::Result<bool> {
@@ -250,7 +262,10 @@ impl KillSwitchRelayer {
     async fn generate_proof(
         &self,
         block_number: u64,
-        (block_hash, block_finality): (H256, dto::BlockFinalityProof),
+        BlockFinalityProofWithHash {
+            hash: block_hash,
+            proof: block_finality,
+        }: BlockFinalityProofWithHash,
     ) -> anyhow::Result<FinalProof> {
         log::info!(
             "Proving merkle root presence in block #{} with hash {}",

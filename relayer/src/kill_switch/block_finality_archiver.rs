@@ -53,7 +53,6 @@ impl BlockFinalityArchiver {
             let (hash, finality_proof) =
                 self.gear_api.produce_finality_proof(justification).await?;
 
-            log::info!("saving finality proof for block {:#?}", hash);
             self.storage.insert(
                 block_number.to_be_bytes(),
                 BlockFinalityProofWithHash {

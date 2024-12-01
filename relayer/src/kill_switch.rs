@@ -60,7 +60,7 @@ impl KillSwitchRelayer {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        self.spawn_block_finality_saver()?;
+        self.spawn_block_finality_archiver()?;
 
         log::info!("Starting kill switch relayer");
         loop {
@@ -83,8 +83,8 @@ impl KillSwitchRelayer {
         }
     }
 
-    fn spawn_block_finality_saver(&self) -> anyhow::Result<()> {
-        log::info!("Spawning block finality saver");
+    fn spawn_block_finality_archiver(&self) -> anyhow::Result<()> {
+        log::info!("Spawning block finality archiver");
         let mut block_finality_saver = block_finality_archiver::BlockFinalityArchiver::new(
             self.gear_api.clone(),
             self.block_finality_storage.clone(),
@@ -160,7 +160,7 @@ impl KillSwitchRelayer {
 
                 log::info!("Submitting new proof to ethereum");
                 let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
-                log::info!("New proof submitted to ethereum");
+                log::info!("New proof submitted to ethereum, tx hash: 0x{:X?}", &tx_hash);
 
                 // Resubmitting the correct proof instead of the incorrect one
                 // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.

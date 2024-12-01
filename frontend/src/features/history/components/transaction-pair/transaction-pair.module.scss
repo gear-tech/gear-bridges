@@ -1,0 +1,52 @@
+.pair {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+
+  &.compact {
+    width: 65%;
+  }
+}
+
+.tx {
+  width: calc(50% - 24px);
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  > div {
+    overflow: hidden;
+  }
+}
+
+.icons {
+  flex-shrink: 0;
+
+  display: flex;
+
+  svg,
+  span {
+    width: 32px;
+    height: 32px;
+
+    border-radius: 50%;
+
+    &:last-child {
+      margin-left: -12px;
+      box-shadow: -2px 0px 0px 0px rgba(0, 0, 0, 0.1);
+    }
+  }
+}
+
+.amount {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 150%;
+}
+
+.address {
+  color: #838897;
+  line-height: 141.667%;
+  letter-spacing: -0.5px;
+}

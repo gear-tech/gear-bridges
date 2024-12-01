@@ -15,7 +15,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     ethereum_beacon_client::BeaconClient,
-    message_relayer::common::{ERC20DepositTx, EthereumSlotNumber},
+    message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
 };
 
 mod compose_payload;
@@ -73,7 +73,7 @@ impl MessageSender {
 
     pub fn run(
         self,
-        messages: Receiver<ERC20DepositTx>,
+        messages: Receiver<TxHashWithSlot>,
         checkpoints: Receiver<EthereumSlotNumber>,
     ) {
         tokio::task::spawn_blocking(move || loop {
@@ -86,12 +86,12 @@ impl MessageSender {
 
     async fn run_inner(
         &self,
-        messages: &Receiver<ERC20DepositTx>,
+        messages: &Receiver<TxHashWithSlot>,
         checkpoints: &Receiver<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
         self.update_balance_metric().await?;
 
-        let mut waiting_checkpoint: Vec<ERC20DepositTx> = vec![];
+        let mut waiting_checkpoint: Vec<TxHashWithSlot> = vec![];
 
         let mut latest_checkpoint_slot = None;
 
@@ -131,7 +131,7 @@ impl MessageSender {
         }
     }
 
-    async fn submit_message(&self, message: &ERC20DepositTx) -> anyhow::Result<()> {
+    async fn submit_message(&self, message: &TxHashWithSlot) -> anyhow::Result<()> {
         let message =
             compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
 

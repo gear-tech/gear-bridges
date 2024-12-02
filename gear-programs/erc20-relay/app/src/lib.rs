@@ -39,22 +39,6 @@ impl Erc20RelayProgram {
         }))
     }
 
-    pub fn gas_calculation(_reply_timeout: u32, _reply_deposit: u64) -> Self {
-        #[cfg(feature = "gas_calculation")]
-        {
-            Self::new(
-                Default::default(),
-                Config {
-                    reply_timeout: _reply_timeout,
-                    reply_deposit: _reply_deposit,
-                },
-            )
-        }
-
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
-    }
-
     pub fn erc20_relay(&self) -> Erc20RelayService<GStdExecContext> {
         Erc20RelayService::new(&self.0, GStdExecContext::new())
     }

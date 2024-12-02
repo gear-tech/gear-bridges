@@ -2,7 +2,17 @@ use sails_client_gen::ClientGenerator;
 use std::{env, path::PathBuf};
 
 fn main() {
-    let idl_file_path = PathBuf::from("erc20_relay.idl");
+    let idl_file_path = {
+        let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+        path.pop();
+        path.pop();
+        path.pop();
+
+        path.push("api/gear/");
+        path.push("erc20_relay.idl");
+
+        path
+    };
 
     // Generate client code from IDL file
     ClientGenerator::from_idl_path(&idl_file_path)
@@ -14,21 +24,5 @@ fn main() {
             "ethereum_common::beacon::light::ExecutionPayload",
         )
         .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("erc20_relay.rs"))
-        .unwrap();
-
-    let idl_file_path = {
-        let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-        path.pop();
-        path.pop();
-
-        path.push("vft-manager");
-        path.push("vft_manager.idl");
-
-        path
-    };
-
-    // Generate client code from IDL file
-    ClientGenerator::from_idl_path(&idl_file_path)
-        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("vft-manager.rs"))
         .unwrap();
 }

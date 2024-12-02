@@ -15,7 +15,7 @@ lazy_static = { workspace = true, features = ["spin_no_std"] }
 
 [dev-dependencies]
 erc20-relay-client.workspace = true
-erc20-relay = { workspace = true, features = ["wasm-binary", "gas_calculation"] }
+erc20-relay = { workspace = true, features = ["wasm-binary"] }
 futures.workspace = true
 gclient.workspace = true
 gstd.workspace = true
@@ -28,5 +28,4 @@ hex.workspace = true
 sails-client-gen.workspace = true
 
 [features]
-gas_calculation = []
 mocks = []

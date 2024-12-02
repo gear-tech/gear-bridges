@@ -1,8 +1,4 @@
 // Incorporate code generated based on the IDL file
-#[allow(dead_code)]
-mod vft {
-    include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
-}
 
 use super::{error::Error, Config, ExecContext, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
@@ -16,12 +12,7 @@ use ethereum_common::{
     H256,
 };
 use ops::ControlFlow::*;
-use sails_rs::{
-    calls::ActionIo,
-    gstd::{self, msg},
-    prelude::*,
-};
-use vft::vft_manager::io::SubmitReceipt;
+use sails_rs::{gstd::msg, prelude::*};
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -40,8 +31,6 @@ pub struct EthToVaraEvent {
     pub transaction_index: u64,
     pub receipt_rlp: Vec<u8>,
 }
-
-
 
 pub struct Erc20Relay<'a, ExecContext> {
     state: &'a RefCell<State>,
@@ -180,43 +169,4 @@ where
             _ => panic!("Unexpected result to `GetCheckpointFor` request"),
         }
     }
-
-    pub async fn calculate_gas_for_reply(
-        &mut self,
-        _slot: u64,
-        _transaction_index: u64,
-    ) -> Result<(), Error> {
-        #[cfg(feature = "gas_calculation")]
-        {
-            let call_payload = SubmitReceipt::encode_call(Default::default());
-            let (reply_timeout, reply_deposit) = {
-                let state = self.state.borrow();
-
-                (state.config.reply_timeout, state.config.reply_deposit)
-            };
-            let source = self.exec_context.actor_id();
-            gstd::msg::send_bytes_for_reply(source, call_payload, 0, reply_deposit)
-                .map_err(|_| Error::SendFailure)?
-                .up_to(Some(reply_timeout))
-                .map_err(|_| Error::ReplyTimeout)?
-                .handle_reply(move || handle_reply(_slot, _transaction_index))
-                .map_err(|_| Error::ReplyHook)?
-                .await
-                .map_err(|_| Error::ReplyFailure)?;
-
-            Ok(())
-        }
-
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
-    }
-}
-
-fn handle_reply(slot: u64, transaction_index: u64) {
-    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
-    SubmitReceipt::decode_reply(&reply_bytes)
-        .expect("Unable to decode MintTokens reply")
-        .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
-    let _ = transaction_index;
-    let _ = slot;
 }

@@ -1,8 +1,4 @@
 // Incorporate code generated based on the IDL file
-#[allow(dead_code)]
-mod vft {
-    include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
-}
 
 use checkpoint_light_client_io::{Handle, HandleResult};
 use erc20_relay_client::{traits::*, Config};
@@ -10,8 +6,7 @@ use gclient::{Event, EventProcessor, GearApi, GearEvent};
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-
-use vft::vft_manager;
+use vft_manager_client::vft_manager;
 
 mod shared;
 

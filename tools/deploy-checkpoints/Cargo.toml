@@ -12,6 +12,6 @@ clap.workspace = true
 dotenv.workspace = true
 ethereum_beacon_client.workspace = true
 gclient.workspace = true
-hex.workspace = true
-parity-scale-codec.workspace = true
+hex = { workspace = true, features = ["std"] }
+parity-scale-codec = { workspace = true, features = ["std"] }
 tokio.workspace = true

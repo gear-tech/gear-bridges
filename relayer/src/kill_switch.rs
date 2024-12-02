@@ -1,5 +1,4 @@
 use std::{
-    path::Path,
     process,
     time::{Duration, Instant},
 };
@@ -8,10 +7,12 @@ use block_finality_archiver::BlockFinalityProofWithHash;
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
+use prometheus::{Gauge, IntCounter, IntGauge};
 use prover::proving::GenesisConfig;
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_proof_to_ethereum, sync_authority_set_id},
+    common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -19,6 +20,43 @@ use crate::{
 mod block_finality_archiver;
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(12);
+
+impl_metered_service! {
+    struct Metrics {
+        latest_proven_era: IntGauge = IntGauge::new(
+            "kill_switch_latest_proven_era",
+            "Latest proven era number",
+        ),
+        latest_observed_gear_era: IntGauge = IntGauge::new(
+            "kill_switch_latest_observed_gear_era",
+            "Latest era number observed by relayer",
+        ),
+        fee_payer_balance: Gauge = Gauge::new(
+            "kill_switch_fee_payer_balance",
+            "Transaction fee payer balance",
+        ),
+        latest_eth_block: IntGauge = IntGauge::new(
+            "kill_switch_latest_eth_block",
+            "Latest block number observed",
+        ),
+        merkle_roots_discovered_cnt: IntCounter = IntCounter::new(
+            "kill_switch_merkle_roots_discovered_cnt",
+            "Amount of merkle root events discovered",
+        ),
+        merkle_root_mismatch_cnt: IntCounter = IntCounter::new(
+            "kill_switch_merkle_root_mismatch_cnt",
+            "Amount of merkle root mismatches found",
+        ),
+        latest_stored_finality_proof: IntGauge = IntGauge::new(
+            "kill_switch_latest_stored_finality_proof",
+            "Latest stored finality proof",
+        ),
+        finality_proof_not_found_cnt: IntCounter = IntCounter::new(
+            "kill_switch_finality_proof_not_found_cnt",
+            "Amount of not found finality proofs",
+        ),
+    }
+}
 
 enum State {
     Normal,
@@ -32,10 +70,20 @@ pub struct KillSwitchRelayer {
     genesis_config: GenesisConfig,
     proof_storage: Box<dyn ProofStorage>,
 
-    // Next eth block to process.
-    from_eth_block: Option<u64>,
+    start_from_eth_block: Option<u64>,
     state: State,
     block_finality_storage: sled::Db,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for KillSwitchRelayer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics
+            .get_sources()
+            .into_iter()
+            .chain(prover_interface::Metrics.get_sources())
+    }
 }
 
 impl KillSwitchRelayer {
@@ -45,17 +93,17 @@ impl KillSwitchRelayer {
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
         from_eth_block: Option<u64>,
-        block_finality_storage_path: impl AsRef<Path>,
+        block_finality_storage: sled::Db,
     ) -> Self {
         Self {
             gear_api,
             eth_api,
             genesis_config,
             proof_storage,
-            from_eth_block,
+            start_from_eth_block: from_eth_block,
             state: State::Normal,
-            block_finality_storage: sled::open(block_finality_storage_path)
-                .expect("DB not corrupted"),
+            block_finality_storage,
+            metrics: Metrics::new(),
         }
     }
 
@@ -88,6 +136,7 @@ impl KillSwitchRelayer {
         let mut block_finality_saver = block_finality_archiver::BlockFinalityArchiver::new(
             self.gear_api.clone(),
             self.block_finality_storage.clone(),
+            self.metrics.clone(),
         );
         tokio::spawn(async move {
             block_finality_saver.run().await;
@@ -97,15 +146,12 @@ impl KillSwitchRelayer {
     }
 
     async fn main_loop(&mut self) -> anyhow::Result<()> {
+        let balance = self.eth_api.get_approx_balance().await?;
+        self.metrics.fee_payer_balance.set(balance);
+
         log::info!("Syncing authority set id");
         loop {
-            let sync_steps = sync_authority_set_id(
-                &self.gear_api,
-                self.proof_storage.as_mut(),
-                self.genesis_config,
-                None,
-            )
-            .await?;
+            let sync_steps = self.sync_authority_set_id().await?;
             if sync_steps == 0 {
                 break;
             } else {
@@ -116,24 +162,34 @@ impl KillSwitchRelayer {
         let last_finalized_block = self.eth_api.finalized_block_number().await?;
 
         // Set the initial value for `from_eth_block` if it's not set yet.
-        if self.from_eth_block.is_none() {
-            self.from_eth_block = Some(last_finalized_block);
+        if self.start_from_eth_block.is_none() {
+            self.start_from_eth_block = Some(last_finalized_block);
         }
 
-        let from_eth_block = self.from_eth_block.expect("should be set above");
-        if last_finalized_block < from_eth_block {
+        let start_from_eth_block = self.start_from_eth_block.expect("should be set above");
+        if last_finalized_block < start_from_eth_block {
             log::info!(
                 "No new eth block, skipping.. last_processed_eth_block={}, last_finalized_block={}",
-                from_eth_block.saturating_sub(1),
+                start_from_eth_block.saturating_sub(1),
                 last_finalized_block,
             );
             return Ok(());
+        } else {
+            self.metrics
+                .latest_eth_block
+                .set(last_finalized_block as i64);
         }
 
         let events = self
             .eth_api
-            .fetch_merkle_roots_in_range(from_eth_block, last_finalized_block)
+            .fetch_merkle_roots_in_range(start_from_eth_block, last_finalized_block)
             .await?;
+
+        if !events.is_empty() {
+            self.metrics
+                .merkle_roots_discovered_cnt
+                .inc_by(events.len() as u64);
+        }
 
         for event in events {
             if !self.compare_merkle_roots(&event).await? {
@@ -150,6 +206,7 @@ impl KillSwitchRelayer {
                         "Block finality proof not found for block #{}",
                         event.block_number
                     );
+                    self.metrics.finality_proof_not_found_cnt.inc();
                     continue;
                 };
 
@@ -160,7 +217,7 @@ impl KillSwitchRelayer {
                 log::info!("Proven merkle root presence");
 
                 log::info!("Submitting new proof to ethereum");
-                let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
+                let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
                 log::info!("New proof submitted to ethereum, tx hash: {:X?}", &tx_hash);
 
                 // Resubmitting the correct proof instead of the incorrect one
@@ -174,9 +231,41 @@ impl KillSwitchRelayer {
 
         // After processing all events, `last_finalized_block` is the last block we've processed.
         // So, we need to increment it by 1 to set the next block to process.
-        self.from_eth_block = Some(last_finalized_block.saturating_add(1));
+        self.start_from_eth_block = Some(last_finalized_block.saturating_add(1));
 
         Ok(())
+    }
+
+    async fn sync_authority_set_id(&mut self) -> anyhow::Result<SyncStepCount> {
+        let finalized_head = self
+            .gear_api
+            .latest_finalized_block()
+            .await
+            .expect("should not fail");
+        let latest_authority_set_id = self
+            .gear_api
+            .authority_set_id(finalized_head)
+            .await
+            .expect("should not fail");
+
+        self.metrics
+            .latest_observed_gear_era
+            .set(latest_authority_set_id as i64);
+
+        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id();
+
+        if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
+            self.metrics.latest_proven_era.set(latest_proven as i64);
+        }
+
+        sync_authority_set_id(
+            &self.gear_api,
+            self.proof_storage.as_mut(),
+            self.genesis_config,
+            latest_authority_set_id,
+            latest_proven_authority_set_id,
+        )
+        .await
     }
 
     async fn check_kill_switch_tx_finalized(&mut self, tx_hash: TxHash) -> anyhow::Result<()> {
@@ -197,7 +286,8 @@ impl KillSwitchRelayer {
                     unreachable!("Invalid state");
                 };
 
-                let new_tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
+                let new_tx_hash =
+                    submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
                 // Update hash of the new kill switch transaction
                 *tx_hash = new_tx_hash;
             }
@@ -210,43 +300,24 @@ impl KillSwitchRelayer {
         &mut self,
         block_number: u64,
     ) -> anyhow::Result<Option<BlockFinalityProofWithHash>> {
-        // NOTE: we use 32bits BE keys for block finality storage.
+        // NOTE: we use 32-bit BE keys for block finality storage.
         let key_bytes = (block_number as u32).to_be_bytes();
 
-        let value_bytes = match self.block_finality_storage.get(key_bytes)? {
-            Some(bytes) => bytes,
-            None => {
-                // Block finality proof generated for series of block,
-                // for example:
-                //  ```text
-                //          Round 1: finality proof for block #2 (transitively for 2,1 blocks)
-                //           |
-                //           |           Round 2: finality proof for block #5 (transitively for 5,4,3.. blocks)
-                //           |           |
-                //           v           v
-                //      [1] [2] [3] [4] [5] [6] [7] [8] [9] [10]
-                //  ```
-                // Some if we don't have the proof for block #3 or #4, we can try to get the proof for block #5.
-                let res = self.block_finality_storage.get_gt(key_bytes)?;
-                let Some((_key, val)) = res else {
-                    return Ok(None);
-                };
-                log::info!(
-                    "Failed to find finality for block #{block_number}, using finality for greater block #{}",
-                    u32::from_be_bytes((*_key).try_into().expect("key is 4 bytes long"))
-                );
-                val
-            }
-        };
+        let block_finality = self
+            .block_finality_storage
+            .get(key_bytes)?
+            .map(|value_bytes| BlockFinalityProofWithHash::decode(&mut &value_bytes[..]))
+            .inspect(|block_finality| {
+                if let Ok(block_finality) = block_finality {
+                    log::debug!(
+                        "Block finality proof found with block hash {:X?}",
+                        block_finality.hash
+                    );
+                }
+            })
+            .transpose();
 
-        let block_finality = BlockFinalityProofWithHash::decode(&mut &value_bytes[..])?;
-
-        log::debug!(
-            "Block finality proof found with block hash {:X?}",
-            block_finality.hash
-        );
-
-        Ok(Some(block_finality))
+        Ok(block_finality?)
     }
 
     async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> anyhow::Result<bool> {
@@ -266,6 +337,7 @@ impl KillSwitchRelayer {
                 merkle_root,
                 event.merkle_root,
             );
+            self.metrics.merkle_root_mismatch_cnt.inc();
         }
 
         Ok(is_matches)

@@ -4,6 +4,8 @@ use primitive_types::H256;
 
 use gear_rpc_client::{dto, GearApi};
 
+use super::Metrics;
+
 #[derive(Encode, Decode)]
 pub struct BlockFinalityProofWithHash {
     pub hash: H256,
@@ -13,11 +15,16 @@ pub struct BlockFinalityProofWithHash {
 pub struct BlockFinalityArchiver {
     gear_api: GearApi,
     storage: sled::Db,
+    metrics: Metrics,
 }
 
 impl BlockFinalityArchiver {
-    pub fn new(gear_api: GearApi, storage: sled::Db) -> Self {
-        Self { gear_api, storage }
+    pub fn new(gear_api: GearApi, storage: sled::Db, metrics: Metrics) -> Self {
+        Self {
+            gear_api,
+            storage,
+            metrics,
+        }
     }
 
     pub async fn run(&mut self) {
@@ -61,7 +68,11 @@ impl BlockFinalityArchiver {
                 }
                 .encode(),
             )?;
-            self.storage.flush()?;
+            self.metrics
+                .latest_stored_finality_proof
+                .set(block_number.into());
+
+            self.storage.flush_async().await?;
         }
     }
 }

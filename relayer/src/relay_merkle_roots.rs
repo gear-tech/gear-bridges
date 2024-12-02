@@ -1,9 +1,9 @@
-use prometheus::IntGauge;
+use prometheus::{Gauge, IntGauge};
 use prover::proving::GenesisConfig;
 use std::time::{Duration, Instant};
 
 use crate::{
-    common::{submit_proof_to_ethereum, sync_authority_set_id, Metrics, SyncStepCount},
+    common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -14,6 +14,23 @@ use gear_rpc_client::GearApi;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
+
+impl_metered_service! {
+    struct Metrics {
+        latest_proven_era: IntGauge = IntGauge::new(
+            "merkle_root_relayer_latest_proven_era",
+            "Latest proven era number",
+        ),
+        latest_observed_gear_era: IntGauge = IntGauge::new(
+            "merkle_root_relayer_latest_observed_gear_era",
+            "Latest era number observed by relayer",
+        ),
+        fee_payer_balance: Gauge = Gauge::new(
+            "merkle_root_relayer_fee_payer_balance",
+            "Transaction fee payer balance",
+        )
+    }
+}
 
 pub struct MerkleRootRelayer {
     gear_api: GearApi,
@@ -106,18 +123,40 @@ impl MerkleRootRelayer {
         log::info!("Proven merkle root presence");
 
         log::info!("Submitting proof to ethereum");
-        submit_proof_to_ethereum(&self.eth_api, proof).await?;
+        submit_merkle_root_to_ethereum(&self.eth_api, proof).await?;
         log::info!("Proof submitted to ethereum");
 
         Ok(())
     }
 
     async fn sync_authority_set_id(&mut self) -> anyhow::Result<SyncStepCount> {
+        let finalized_head = self
+            .gear_api
+            .latest_finalized_block()
+            .await
+            .expect("should not fail");
+        let latest_authority_set_id = self
+            .gear_api
+            .authority_set_id(finalized_head)
+            .await
+            .expect("should not fail");
+
+        self.metrics
+            .latest_observed_gear_era
+            .set(latest_authority_set_id as i64);
+
+        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id();
+
+        if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
+            self.metrics.latest_proven_era.set(latest_proven as i64);
+        }
+
         sync_authority_set_id(
             &self.gear_api,
             self.proof_storage.as_mut(),
             self.genesis_config,
-            Some(&self.metrics),
+            latest_authority_set_id,
+            latest_proven_authority_set_id,
         )
         .await
     }
@@ -264,7 +303,7 @@ impl Eras {
             return Ok(());
         }
 
-        let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
+        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
 
         self.sealed_not_finalized.push(SealedNotFinalizedEra {
             era: authority_set_id,
@@ -321,7 +360,7 @@ impl SealedNotFinalizedEra {
 
                 log::warn!("Re-trying era #{} finalization", self.era);
 
-                self.tx_hash = submit_proof_to_ethereum(eth_api, self.proof.clone()).await?;
+                self.tx_hash = submit_merkle_root_to_ethereum(eth_api, self.proof.clone()).await?;
                 Ok(false)
             }
         }

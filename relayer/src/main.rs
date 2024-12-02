@@ -290,38 +290,12 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let mut metrics = MetricsBuilder::new();
+            let metrics = MetricsBuilder::new();
 
-            let proof_storage: Box<dyn ProofStorage> =
-                if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
-                    let proof_storage = GearProofStorage::new(
-                        &args.vara_args.vara_domain,
-                        args.vara_args.vara_port,
-                        args.vara_args.vara_rpc_retries,
-                        &fee_payer,
-                        "./onchain_proof_storage_data".into(),
-                    )
-                    .await
-                    .expect("Failed to initialize proof storage");
+            let (proof_storage, metrics) =
+                create_proof_storage(&args.proof_storage_args, &args.vara_args, metrics).await;
 
-                    metrics = metrics.register_service(&proof_storage);
-
-                    Box::from(proof_storage)
-                } else {
-                    log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-                    Box::from(FileSystemProofStorage::new("./proof_storage".into()))
-                };
-
-            let authority_set_hash = hex::decode(&args.genesis_config_args.authority_set_hash)
-                .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-            let authority_set_hash = authority_set_hash
-                .try_into()
-                .expect("Incorrect format for authority set hash: wrong length");
-
-            let genesis_config = GenesisConfig {
-                authority_set_id: args.genesis_config_args.authority_set_id,
-                authority_set_hash,
-            };
+            let genesis_config = create_genesis_config(&args.genesis_config_args);
 
             let relayer =
                 MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage).await;
@@ -338,53 +312,33 @@ async fn main() {
             let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
-            let mut metrics = MetricsBuilder::new();
+            let metrics = MetricsBuilder::new();
 
-            let proof_storage: Box<dyn ProofStorage> =
-                if let Some(fee_payer) = args.proof_storage_args.gear_fee_payer {
-                    let proof_storage = GearProofStorage::new(
-                        &args.vara_args.vara_domain,
-                        args.vara_args.vara_port,
-                        args.vara_args.vara_rpc_retries,
-                        &fee_payer,
-                        "./onchain_proof_storage_data".into(),
-                    )
-                    .await
-                    .expect("Failed to initialize proof storage");
+            let (proof_storage, metrics) =
+                create_proof_storage(&args.proof_storage_args, &args.vara_args, metrics).await;
 
-                    metrics = metrics.register_service(&proof_storage);
+            let genesis_config = create_genesis_config(&args.genesis_config_args);
 
-                    Box::from(proof_storage)
-                } else {
-                    log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-                    Box::from(FileSystemProofStorage::new("./proof_storage".into()))
-                };
+            let block_finality_storage =
+                sled::open("./block_finality_storage").expect("Db not corrupted");
 
-            // TODO: metrics
-            let _metrics = metrics;
-
-            let authority_set_hash = hex::decode(&args.genesis_config_args.authority_set_hash)
-                .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-            let authority_set_hash = authority_set_hash
-                .try_into()
-                .expect("Incorrect format for authority set hash: wrong length");
-
-            let genesis_config = GenesisConfig {
-                authority_set_id: args.genesis_config_args.authority_set_id,
-                authority_set_hash,
-            };
-
-            let mut relayer = KillSwitchRelayer::new(
+            let mut kill_switch = KillSwitchRelayer::new(
                 gear_api,
                 eth_api,
                 genesis_config,
                 proof_storage,
                 args.from_eth_block,
-                "./block_finality_storage",
+                block_finality_storage,
             )
             .await;
 
-            relayer.run().await.expect("Kill switch relayer failed");
+            metrics
+                .register_service(&kill_switch)
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
+
+            kill_switch.run().await.expect("Kill switch relayer failed");
         }
         CliCommands::RelayMessages(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
@@ -550,4 +504,45 @@ async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
     BeaconClient::new(args.beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
+}
+
+async fn create_proof_storage(
+    proof_storage_args: &ProofStorageArgs,
+    vara_args: &VaraArgs,
+    mut metrics: MetricsBuilder,
+) -> (Box<dyn ProofStorage>, MetricsBuilder) {
+    let proof_storage: Box<dyn ProofStorage> =
+        if let Some(fee_payer) = proof_storage_args.gear_fee_payer.as_ref() {
+            let proof_storage = GearProofStorage::new(
+                &vara_args.vara_domain,
+                vara_args.vara_port,
+                vara_args.vara_rpc_retries,
+                fee_payer,
+                "./onchain_proof_storage_data".into(),
+            )
+            .await
+            .expect("Failed to initialize proof storage");
+
+            metrics = metrics.register_service(&proof_storage);
+
+            Box::from(proof_storage)
+        } else {
+            log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
+            Box::from(FileSystemProofStorage::new("./proof_storage".into()))
+        };
+
+    (proof_storage, metrics)
+}
+
+fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
+    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
+        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
+    let authority_set_hash = authority_set_hash
+        .try_into()
+        .expect("Incorrect format for authority set hash: wrong length");
+
+    GenesisConfig {
+        authority_set_id: genesis_config_args.authority_set_id,
+        authority_set_hash,
+    }
 }

@@ -1,6 +1,4 @@
-use prometheus::{Gauge, IntGauge};
 use prover::proving::GenesisConfig;
-use utils_prometheus::impl_metered_service;
 
 use crate::{
     proof_storage::ProofStorage,
@@ -10,48 +8,15 @@ use crate::{
 use ethereum_client::{EthApi, TxHash};
 use gear_rpc_client::GearApi;
 
-impl_metered_service! {
-    pub(crate) struct Metrics {
-        pub latest_proven_era: IntGauge = IntGauge::new(
-            "merkle_root_relayer_latest_proven_era",
-            "Latest proven era number",
-        ),
-        pub latest_observed_gear_era: IntGauge = IntGauge::new(
-            "merkle_root_relayer_latest_observed_gear_era",
-            "Latest era number observed by relayer",
-        ),
-        pub fee_payer_balance: Gauge = Gauge::new(
-            "merkle_root_relayer_fee_payer_balance",
-            "Transaction fee payer balance",
-        )
-    }
-}
-
 pub(crate) type SyncStepCount = usize;
 
 pub(crate) async fn sync_authority_set_id(
     gear_api: &GearApi,
     proof_storage: &mut dyn ProofStorage,
     genesis_config: GenesisConfig,
-    metrics: Option<&Metrics>,
+    latest_authority_set_id: u64,
+    latest_proven_authority_set_id: Option<u64>,
 ) -> anyhow::Result<SyncStepCount> {
-    let finalized_head = gear_api.latest_finalized_block().await.unwrap();
-    let latest_authority_set_id = gear_api.authority_set_id(finalized_head).await.unwrap();
-
-    if let Some(metrics) = metrics {
-        metrics
-            .latest_observed_gear_era
-            .set(latest_authority_set_id as i64);
-    }
-
-    let latest_proven_authority_set_id = proof_storage.get_latest_authority_set_id();
-
-    if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
-        if let Some(metrics) = metrics {
-            metrics.latest_proven_era.set(latest_proven as i64);
-        }
-    }
-
     let Some(latest_proven) = latest_proven_authority_set_id else {
         if latest_authority_set_id <= genesis_config.authority_set_id {
             log::warn!(
@@ -106,7 +71,7 @@ pub(crate) async fn sync_authority_set_id(
     )
 }
 
-pub(crate) async fn submit_proof_to_ethereum(
+pub(crate) async fn submit_merkle_root_to_ethereum(
     eth_api: &EthApi,
     proof: FinalProof,
 ) -> anyhow::Result<TxHash> {

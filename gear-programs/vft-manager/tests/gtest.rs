@@ -195,7 +195,7 @@ async fn test_gear_supply_token() {
 
     let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, amount);
     VftManagerC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
-        .submit_receipt(receipt_rlp)
+        .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap()
@@ -223,7 +223,7 @@ async fn test_eth_supply_token() {
 
     let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
     VftManagerC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
-        .submit_receipt(receipt_rlp)
+        .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap()
@@ -295,7 +295,7 @@ async fn test_withdraw_fails_with_bad_origin() {
     let account_id: ActorId = 42.into();
     let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
     let result = vft_manager
-        .submit_receipt(receipt_rlp)
+        .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();

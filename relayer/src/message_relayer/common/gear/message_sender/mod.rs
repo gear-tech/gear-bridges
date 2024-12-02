@@ -1,17 +1,17 @@
-use std::sync::mpsc::Receiver;
-
 use ethereum_client::EthApi;
 use futures::executor::block_on;
 use gclient::GearApi;
+use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
-    calls::{Action, Call},
+    calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
+    Encode,
 };
-
-use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay};
+use std::sync::mpsc::Receiver;
 use utils_prometheus::{impl_metered_service, MeteredService};
+use vft_manager_client::vft_manager::io::SubmitReceipt;
 
 use crate::{
     ethereum_beacon_client::BeaconClient,
@@ -24,8 +24,8 @@ pub struct MessageSender {
     gear_api: GearApi,
     eth_api: EthApi,
     beacon_client: BeaconClient,
-
-    ethereum_event_client_address: H256,
+    historical_proxy_address: H256,
+    vft_manager_address: H256,
 
     metrics: Metrics,
 }
@@ -58,14 +58,16 @@ impl MessageSender {
         gear_api: GearApi,
         eth_api: EthApi,
         beacon_client: BeaconClient,
-        ethereum_event_client_address: H256,
+        historical_proxy_address: H256,
+        vft_manager_address: H256,
     ) -> Self {
         Self {
             gear_api,
             eth_api,
             beacon_client,
 
-            ethereum_event_client_address,
+            historical_proxy_address,
+            vft_manager_address,
 
             metrics: Metrics::new(),
         }
@@ -147,15 +149,27 @@ impl MessageSender {
 
         let remoting = GClientRemoting::new(self.gear_api.clone());
 
-        let mut erc20_service = Erc20Relay::new(remoting.clone());
+        let mut proxy_service = HistoricalProxy::new(remoting.clone());
 
-        erc20_service
-            .relay(message)
+        let (_, vft_manager_reply) = proxy_service
+            .redirect(
+                message.proof_block.block.slot,
+                message.transaction_index,
+                message.encode(),
+                self.vft_manager_address.into(),
+                <SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+            )
             .with_gas_limit(gas_limit)
-            .send_recv(self.ethereum_event_client_address.into())
+            .send_recv(self.historical_proxy_address.into())
             .await
-            .map_err(|_| anyhow::anyhow!("Failed to send message to ethereum event client"))?
-            .map_err(|_| anyhow::anyhow!("Internal ethereum event clint error"))?;
+            .map_err(|_| anyhow::anyhow!("Failed to send message to historical proxy address"))?
+            .map_err(|_| anyhow::anyhow!("Internal historical proxy error"))?;
+
+        let reply = SubmitReceipt::decode_reply(&mut &vft_manager_reply);
+
+        reply
+            .map_err(|_| anyhow::anyhow!("Failed to decode vft-manager reply"))?
+            .map_err(|_| anyhow::anyhow!("Internal vft-manager error"))?;
 
         Ok(())
     }

@@ -5,7 +5,7 @@ use alloy_eips::BlockNumberOrTag;
 use anyhow::anyhow;
 use ethereum_client::EthApi;
 
-use crate::ethereum_beacon_client::BeaconClient;
+use ethereum_beacon_client::BeaconClient;
 
 use super::{EthereumBlockNumber, EthereumSlotNumber};
 

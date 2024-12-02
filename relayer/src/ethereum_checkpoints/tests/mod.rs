@@ -1,4 +1,3 @@
-use crate::ethereum_beacon_client::{utils, BeaconClient};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_io::{
     ethereum_common::{
@@ -13,6 +12,7 @@ use checkpoint_light_client_io::{
     tree_hash::TreeHash,
     Handle, HandleResult, Init, G2,
 };
+use ethereum_beacon_client::{utils, BeaconClient};
 use ethereum_common::utils::{BeaconBlockHeaderResponse, Bootstrap, Update};
 use gclient::{EventListener, EventProcessor, GearApi, Result, WSAddress};
 use parity_scale_codec::{Decode, Encode};
@@ -26,10 +26,13 @@ static LOCK: Mutex<u32> = Mutex::const_new(0);
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./chain-data/sepolia-finality-update-5_263_072.json");
 const SEPOLIA_UPDATE_640: &[u8; 57_202] = include_bytes!("./chain-data/sepolia-update-640.json");
-const SEPOLIA_BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./chain-data/sepolia-bootstrap-640.json");
+const SEPOLIA_BOOTSTRAP_640: &[u8; 54_328] =
+    include_bytes!("./chain-data/sepolia-bootstrap-640.json");
 
-const HOLESKY_UPDATE_368: &[u8; 30_468] = include_bytes!("./chain-data/holesky-update-368.json.zst");
-const HOLESKY_BOOTSTRAP_368: &[u8; 29_297] = include_bytes!("./chain-data/holesky-bootstrap-368.json.zst");
+const HOLESKY_UPDATE_368: &[u8; 30_468] =
+    include_bytes!("./chain-data/holesky-update-368.json.zst");
+const HOLESKY_BOOTSTRAP_368: &[u8; 29_297] =
+    include_bytes!("./chain-data/holesky-bootstrap-368.json.zst");
 const HOLESKY_HEADERS: &[u8; 452_109] = include_bytes!("./chain-data/headers.json.zst");
 const HOLESKY_FINALITY_UPDATE_3_014_736: &[u8; 4_893] =
     include_bytes!("./chain-data/holesky-finality-update-3_016_736.json");
@@ -174,64 +177,6 @@ fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Ini
             .collect(),
         update: sync_update,
     }
-}
-
-async fn live_init(network: Network, rpc_url: String) -> Result<()> {
-    let beacon_client = BeaconClient::new(rpc_url, Some(Duration::from_secs(120)))
-        .await
-        .expect("Failed to connect to beacon node");
-
-    // use the latest finalized block as a checkpoint for bootstrapping
-    let finalized_block = beacon_client.get_block_finalized().await?;
-    let slot = finalized_block.slot;
-    let current_period = eth_utils::calculate_period(slot);
-    let mut updates = beacon_client.get_updates(current_period, 1).await?;
-
-    println!(
-        "finality_update slot = {}, period = {}",
-        slot, current_period
-    );
-
-    let update = match updates.pop() {
-        Some(update) if updates.is_empty() => update.data,
-        _ => unreachable!("Requested single update"),
-    };
-
-    let checkpoint = update.finalized_header.tree_hash_root();
-    let checkpoint_hex = hex::encode(checkpoint);
-
-    println!(
-        "checkpoint slot = {}, hash = {}",
-        update.finalized_header.slot, checkpoint_hex
-    );
-
-    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
-    println!("bootstrap slot = {}", bootstrap.header.slot);
-
-    let client = NodeClient::new().await?;
-    let mut listener = client.0.subscribe().await?;
-    let init = construct_init(network, update, bootstrap);
-    let program_id = upload_program(&client.0, &mut listener, init).await?;
-
-    println!("program_id = {:?}", hex::encode(program_id));
-
-    Ok(())
-}
-
-#[ignore]
-#[tokio::test]
-async fn live_init_holesky() -> Result<()> {
-    live_init(Network::Holesky, "http://34.159.93.103:50000".to_string()).await
-}
-
-#[ignore]
-#[tokio::test]
-async fn live_init_mainnet() -> Result<()> {
-    live_init(
-        Network::Mainnet,
-        "https://www.lightclientdata.org".to_string(),
-    )
-    .await
 }
 
 #[tokio::test]

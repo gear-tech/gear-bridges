@@ -1,0 +1,15 @@
+[package]
+name = "ethereum_beacon_client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ark-serialize.workspace = true
+checkpoint_light_client-io.workspace = true
+ethereum-common.workspace = true
+futures.workspace = true
+hex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true

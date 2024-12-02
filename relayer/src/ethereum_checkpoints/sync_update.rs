@@ -1,6 +1,6 @@
 use super::*;
-use crate::ethereum_beacon_client::{self, BeaconClient};
 pub use checkpoint_light_client_io::sync_update::Error;
+use ethereum_beacon_client::{self, BeaconClient};
 use std::ops::ControlFlow::{self, *};
 
 pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncCommitteeUpdate>) {

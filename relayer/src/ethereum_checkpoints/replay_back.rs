@@ -1,5 +1,5 @@
 use super::*;
-use crate::ethereum_beacon_client::{self, BeaconClient};
+use ethereum_beacon_client::{self, BeaconClient};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(

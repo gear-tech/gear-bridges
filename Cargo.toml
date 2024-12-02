@@ -138,8 +138,8 @@ rlp = { version = "0.5.2", default-features = false }
 scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }
-# Pinned to this specific version because of the issue https://github.com/alloy-rs/core/issues/778 in alloy.
-serde = { version = "=1.0.215", default-features = false, features = [
+
+serde = { version = "1.0.215", default-features = false, features = [
     "alloc",
     "derive",
 ] }

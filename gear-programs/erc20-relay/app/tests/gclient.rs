@@ -13,7 +13,7 @@ use vft::vft_manager;
 
 static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((0, None));
 
-async fn spin_up_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit, [u8; 4]) {
+async fn connect_to_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit, [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
     let (api, code_id, salt) = {
@@ -58,7 +58,7 @@ async fn gas_for_reply() {
 
     let route = <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE;
 
-    let (remoting, api, code_id, gas_limit, salt) = spin_up_node().await;
+    let (remoting, api, code_id, gas_limit, salt) = connect_to_node().await;
     let account_id: ActorId = <[u8; 32]>::from(api.account_id().clone()).into();
 
     let factory = Erc20RelayFactory::new(remoting.clone());
@@ -125,7 +125,7 @@ async fn gas_for_reply() {
 async fn set_vft_manager() {
     use erc20_relay_client::Config;
 
-    let (remoting, _api, code_id, gas_limit, salt) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit, salt) = connect_to_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -196,7 +196,7 @@ async fn set_vft_manager() {
 async fn update_config() {
     use erc20_relay_client::Config;
 
-    let (remoting, _api, code_id, gas_limit, salt) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit, salt) = connect_to_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 

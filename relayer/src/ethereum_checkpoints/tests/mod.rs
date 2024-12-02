@@ -24,19 +24,19 @@ use tokio::{sync::Mutex, time::Duration};
 static LOCK: Mutex<u32> = Mutex::const_new(0);
 
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
-    include_bytes!("./sepolia-finality-update-5_263_072.json");
-const SEPOLIA_UPDATE_640: &[u8; 57_202] = include_bytes!("./sepolia-update-640.json");
-const SEPOLIA_BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./sepolia-bootstrap-640.json");
+    include_bytes!("./chain-data/sepolia-finality-update-5_263_072.json");
+const SEPOLIA_UPDATE_640: &[u8; 57_202] = include_bytes!("./chain-data/sepolia-update-640.json");
+const SEPOLIA_BOOTSTRAP_640: &[u8; 54_328] = include_bytes!("./chain-data/sepolia-bootstrap-640.json");
 
-const HOLESKY_UPDATE_368: &[u8; 30_468] = include_bytes!("./holesky-update-368.json.zst");
-const HOLESKY_BOOTSTRAP_368: &[u8; 29_297] = include_bytes!("./holesky-bootstrap-368.json.zst");
-const HOLESKY_HEADERS: &[u8; 452_109] = include_bytes!("./headers.json.zst");
+const HOLESKY_UPDATE_368: &[u8; 30_468] = include_bytes!("./chain-data/holesky-update-368.json.zst");
+const HOLESKY_BOOTSTRAP_368: &[u8; 29_297] = include_bytes!("./chain-data/holesky-bootstrap-368.json.zst");
+const HOLESKY_HEADERS: &[u8; 452_109] = include_bytes!("./chain-data/headers.json.zst");
 const HOLESKY_FINALITY_UPDATE_3_014_736: &[u8; 4_893] =
-    include_bytes!("./holesky-finality-update-3_016_736.json");
+    include_bytes!("./chain-data/holesky-finality-update-3_016_736.json");
 const HOLESKY_FINALITY_UPDATE_3_014_768: &[u8; 4_932] =
-    include_bytes!("./holesky-finality-update-3_016_768.json");
+    include_bytes!("./chain-data/holesky-finality-update-3_016_768.json");
 const HOLESKY_FINALITY_UPDATE_3_014_799: &[u8; 4_980] =
-    include_bytes!("./holesky-finality-update-3_016_799.json");
+    include_bytes!("./chain-data/holesky-finality-update-3_016_799.json");
 
 struct NodeClient(pub GearApi);
 

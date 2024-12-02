@@ -165,7 +165,7 @@ impl MessageSender {
             .map_err(|_| anyhow::anyhow!("Failed to send message to historical proxy address"))?
             .map_err(|_| anyhow::anyhow!("Internal historical proxy error"))?;
 
-        let reply = SubmitReceipt::decode_reply(&mut &vft_manager_reply);
+        let reply = SubmitReceipt::decode_reply(&vft_manager_reply);
 
         reply
             .map_err(|_| anyhow::anyhow!("Failed to decode vft-manager reply"))?

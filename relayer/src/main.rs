@@ -218,13 +218,6 @@ struct RelayErc20ArgsCommon {
     )]
     checkpoint_light_client_address: String,
 
-    /// Address of the ethereum-event-client program on gear
-    #[arg(
-        long = "ethereum-event-client-address",
-        env = "ETHEREUM_EVENT_CLIENT_ADDRESS"
-    )]
-    ethereum_event_client_address: String,
-
     #[arg(long = "historical-proxy-address", env = "HISTORICAL_PROXY_ADDRESS")]
     historical_proxy_address: String,
     #[arg(long = "vft-manager-address", env = "VFT_MANAGER_ADDRESS")]
@@ -372,9 +365,6 @@ async fn main() {
 
             let checkpoint_light_client_address =
                 hex_utils::decode_h256(&common.checkpoint_light_client_address)
-                    .expect("Failed to parse address");
-            let _ethereum_event_client_address =
-                hex_utils::decode_h256(&common.ethereum_event_client_address)
                     .expect("Failed to parse address");
             let historical_proxy_address = hex_utils::decode_h256(&common.historical_proxy_address)
                 .expect("Failed to parse address");

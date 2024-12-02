@@ -77,7 +77,7 @@ impl Relayer {
             eth_api,
             beacon_client,
             historical_proxy_address,
-            vft_manager_address
+            vft_manager_address,
         );
 
         Ok(Self {

@@ -23,5 +23,5 @@ pub enum Error {
     NoCorrespondingVaraAddress,
     NotSupportedEvent,
     AlreadyProcessed,
-    TransactionTooOld
+    TransactionTooOld,
 }

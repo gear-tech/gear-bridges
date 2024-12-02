@@ -8,7 +8,6 @@ use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
 use gclient::GearApi;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 
-
 async fn spin_up_node() -> (GClientRemoting, GearApi, CodeId, GasUnit) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();

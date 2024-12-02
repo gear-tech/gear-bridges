@@ -162,7 +162,12 @@ impl MessageSender {
             .with_gas_limit(gas_limit)
             .send_recv(self.historical_proxy_address.into())
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to send message to historical proxy address: {:?}", e))?
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to send message to historical proxy address: {:?}",
+                    e
+                )
+            })?
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
         let reply = SubmitReceipt::decode_reply(&vft_manager_reply);

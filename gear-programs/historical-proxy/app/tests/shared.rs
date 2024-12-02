@@ -10,14 +10,22 @@ pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
     include_bytes!("./headers/holesky-receipts-2_498_456.json");
 pub const HOLESKY_BLOCK_2_498_456: &[u8; 235_397] =
     include_bytes!("./headers/holesky-block-2_498_456.json");
-pub const HOLESKY_HEADER_2_498_457: &[u8; 670] = include_bytes!("./headers/holesky-header-2_498_457.json");
-pub const HOLESKY_HEADER_2_498_458: &[u8; 669] = include_bytes!("./headers/holesky-header-2_498_458.json");
-pub const HOLESKY_HEADER_2_498_459: &[u8; 670] = include_bytes!("./headers/holesky-header-2_498_459.json");
-pub const HOLESKY_HEADER_2_498_460: &[u8; 670] = include_bytes!("./headers/holesky-header-2_498_460.json");
-pub const HOLESKY_HEADER_2_498_461: &[u8; 670] = include_bytes!("./headers/holesky-header-2_498_461.json");
-pub const HOLESKY_HEADER_2_498_462: &[u8; 669] = include_bytes!("./headers/holesky-header-2_498_462.json");
-pub const HOLESKY_HEADER_2_498_463: &[u8; 670] = include_bytes!("./headers/holesky-header-2_498_463.json");
-pub const HOLESKY_HEADER_2_498_464: &[u8; 669] = include_bytes!("./headers/holesky-header-2_498_464.json");
+pub const HOLESKY_HEADER_2_498_457: &[u8; 670] =
+    include_bytes!("./headers/holesky-header-2_498_457.json");
+pub const HOLESKY_HEADER_2_498_458: &[u8; 669] =
+    include_bytes!("./headers/holesky-header-2_498_458.json");
+pub const HOLESKY_HEADER_2_498_459: &[u8; 670] =
+    include_bytes!("./headers/holesky-header-2_498_459.json");
+pub const HOLESKY_HEADER_2_498_460: &[u8; 670] =
+    include_bytes!("./headers/holesky-header-2_498_460.json");
+pub const HOLESKY_HEADER_2_498_461: &[u8; 670] =
+    include_bytes!("./headers/holesky-header-2_498_461.json");
+pub const HOLESKY_HEADER_2_498_462: &[u8; 669] =
+    include_bytes!("./headers/holesky-header-2_498_462.json");
+pub const HOLESKY_HEADER_2_498_463: &[u8; 670] =
+    include_bytes!("./headers/holesky-header-2_498_463.json");
+pub const HOLESKY_HEADER_2_498_464: &[u8; 669] =
+    include_bytes!("./headers/holesky-header-2_498_464.json");
 
 #[derive(Deserialize)]
 pub struct Receipts {

@@ -154,6 +154,7 @@ jobs:
             "./api/gear/vft_manager.idl"
             "./api/gear/wrapped_vara.idl"
             "./api/gear/extended_vft.idl"
+            "./api/gear/historical_proxy.idl"
           )
 
           generated=(

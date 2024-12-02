@@ -89,7 +89,7 @@ contract BridgingPaymentTest is Test {
 
     function approveTransfer() public {
         bool approved = erc20_mock.approve(
-            address(erc20_manager),
+            address(bridging_payment),
             TOKEN_TRANSFER_AMOUNT
         );
         assertEq(approved, true);

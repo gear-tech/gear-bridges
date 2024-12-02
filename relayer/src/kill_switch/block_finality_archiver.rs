@@ -43,7 +43,7 @@ impl BlockFinalityArchiver {
                 .ok_or_else(|| anyhow::anyhow!("justifications stream ended unexpectedly"))??;
             let block_number = justification.commit.target_number;
 
-            log::info!(
+            log::debug!(
                 "received GRANDPA justification: #{}, {} , {}",
                 justification.commit.target_number,
                 justification.commit.target_hash,

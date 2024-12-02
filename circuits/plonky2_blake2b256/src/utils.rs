@@ -214,7 +214,7 @@ mod tests {
         }
 
         let data = builder.build::<C>();
-        let proof = data.prove(pw).expect("Proven succesfully");
+        let proof = data.prove(pw).expect("Proven successfully");
 
         let a_rotate_res_bits = &proof.public_inputs[WORD_BITS..WORD_BITS * 2];
 
@@ -261,7 +261,7 @@ mod tests {
         }
 
         let data = builder.build::<C>();
-        let proof = data.prove(pw).expect("Proven succesfully");
+        let proof = data.prove(pw).expect("Proven successfully");
 
         let result_bits = &proof.public_inputs[WORD_BITS * 2..WORD_BITS * 3];
         let c_bits = word_to_bits_le(c);

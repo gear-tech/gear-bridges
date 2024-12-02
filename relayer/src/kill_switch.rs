@@ -140,6 +140,7 @@ impl KillSwitchRelayer {
                 // Okay, we have a mismatch,
                 // that means for some reason the proof with incorrect merkle root was submitted to relayer contract.
                 // We need to generate the correct proof and submit it to the relayer contract.
+                log::debug!("Got event with mismatched merkle root: {:?}", &event);
 
                 let Some(block_finality) = self
                     .get_block_finality_from_storage(event.block_number)
@@ -160,7 +161,7 @@ impl KillSwitchRelayer {
 
                 log::info!("Submitting new proof to ethereum");
                 let tx_hash = submit_proof_to_ethereum(&self.eth_api, proof.clone()).await?;
-                log::info!("New proof submitted to ethereum, tx hash: 0x{:X?}", &tx_hash);
+                log::info!("New proof submitted to ethereum, tx hash: {:X?}", &tx_hash);
 
                 // Resubmitting the correct proof instead of the incorrect one
                 // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.
@@ -209,7 +210,8 @@ impl KillSwitchRelayer {
         &mut self,
         block_number: u64,
     ) -> anyhow::Result<Option<BlockFinalityProofWithHash>> {
-        let key_bytes = block_number.to_be_bytes();
+        // NOTE: we use 32bits BE keys for block finality storage.
+        let key_bytes = (block_number as u32).to_be_bytes();
 
         let value_bytes = match self.block_finality_storage.get(key_bytes)? {
             Some(bytes) => bytes,
@@ -229,13 +231,22 @@ impl KillSwitchRelayer {
                 let Some((_key, val)) = res else {
                     return Ok(None);
                 };
+                log::info!(
+                    "Failed to find finality for block #{block_number}, using finality for greater block #{}",
+                    u32::from_be_bytes((*_key).try_into().expect("key is 4 bytes long"))
+                );
                 val
             }
         };
 
-        Ok(Some(BlockFinalityProofWithHash::decode(
-            &mut &value_bytes[..],
-        )?))
+        let block_finality = BlockFinalityProofWithHash::decode(&mut &value_bytes[..])?;
+
+        log::debug!(
+            "Block finality proof found with block hash {:X?}",
+            block_finality.hash
+        );
+
+        Ok(Some(block_finality))
     }
 
     async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> anyhow::Result<bool> {
@@ -249,8 +260,9 @@ impl KillSwitchRelayer {
 
         if !is_matches {
             log::info!(
-                "Merkle root mismatch for block #{}, expected: {}, got: {}",
+                "Merkle root mismatch for block #{}, hash {:X?}, expected: {}, got: {}",
                 event.block_number,
+                block_hash,
                 merkle_root,
                 event.merkle_root,
             );

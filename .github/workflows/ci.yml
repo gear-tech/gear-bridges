@@ -167,6 +167,7 @@ jobs:
             "./target/wasm32-unknown-unknown/release/vft_manager.idl"
             "./target/wasm32-unknown-unknown/release/wrapped_vara.idl"
             "./target/wasm32-unknown-unknown/release/extended_vft.idl"
+            "./target/wasm32-unknown-unknown/release/historical_proxy.idl"
           )
 
           for i in "${!stored[@]}"; do

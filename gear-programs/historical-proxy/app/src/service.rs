@@ -15,12 +15,23 @@ use crate::{
     state::{Config, ProxyState, Slot},
 };
 
+#[derive(Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+enum Event {
+    Relayed {
+        slot: u64,
+        block_number: u64,
+        transaction_index: u32,
+    },
+}
+
 pub struct HistoricalProxyService<'a, ExecContext> {
     state: &'a RefCell<ProxyState>,
     exec_context: ExecContext,
 }
 
-#[sails_rs::service]
+#[sails_rs::service(events = Event)]
 impl<'a, T> HistoricalProxyService<'a, T>
 where
     T: ExecContext,
@@ -100,15 +111,21 @@ where
         let reply_timeout = state.config.reply_timeout;
         let endpoint = state.endpoints.endpoint_for(slot)?;
         drop(state);
+        let event = EthToVaraEvent::decode(&mut proofs.as_slice()).map_err(|e| {
+            ProxyError::DecodeFailure(format!("failed to decode erc20-relay event: {:?}", e))
+        })?;
+        let block_number = event.proof_block.block.body.execution_payload.block_number;
         // 1) Check if proofs are correct in erc20-relay
         let receipt = erc20_relay::Erc20Relay::new(GStdRemoting)
-            .check_proofs(
-                EthToVaraEvent::decode(&mut proofs.as_slice())
-                    .map_err(|_| ProxyError::DecodeFailure)?,
-            )
+            .check_proofs(event)
             .send_recv(endpoint)
             .await
-            .map_err(|_| ProxyError::ReplyFailure)?
+            .map_err(|e| {
+                ProxyError::ReplyFailure(format!(
+                    "failed to receive reply from erc20-relay: {:?}",
+                    e
+                ))
+            })?
             .map_err(ProxyError::ERC20Relay)?;
 
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
@@ -121,11 +138,21 @@ where
         };
 
         let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, reply_deposit)
-            .map_err(|_| ProxyError::SendFailure)?
+            .map_err(|e| {
+                ProxyError::SendFailure(format!("failed to send message to client: {:?}", e))
+            })?
             .up_to(Some(reply_timeout))
-            .map_err(|_| ProxyError::ReplyTimeout)?
+            .map_err(|e| ProxyError::ReplyTimeout(format!("failed to set reply timeout: {:?}", e)))?
             .await
-            .map_err(|_| ProxyError::ReplyFailure)?;
+            .map_err(|e| {
+                ProxyError::ReplyFailure(format!("failed to receive reply from client: {:?}", e))
+            })?;
+
+        let _ = self.notify_on(Event::Relayed {
+            slot,
+            block_number,
+            transaction_index: tx_index as u32,
+        });
 
         Ok((receipt, reply))
     }

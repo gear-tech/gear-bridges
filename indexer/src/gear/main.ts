@@ -11,7 +11,6 @@ import { Codec } from './codec';
 const tempState = new TempState(Network.Gear);
 
 let vftManagerDecoder: Codec;
-let erc20RelayDecoder: Codec;
 let historicalProxyDecoder: Codec;
 
 const handler = async (ctx: ProcessorContext) => {
@@ -95,9 +94,6 @@ const handler = async (ctx: ProcessorContext) => {
             promises.push(tempState.transferCompleted(nonce));
             break;
           }
-          case config.erc20Relay: {
-            break;
-          }
         }
       }
     }
@@ -110,7 +106,6 @@ const handler = async (ctx: ProcessorContext) => {
 
 export const runProcessor = async () => {
   vftManagerDecoder = await Codec.create('./assets/vft_manager.idl');
-  erc20RelayDecoder = await Codec.create('./assets/erc20_relay.idl');
   historicalProxyDecoder = await Codec.create('./assets/historical_proxy.idl');
 
   processor.run(

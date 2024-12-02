@@ -5,7 +5,7 @@ mod vft {
 }
 
 use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
-use gclient::{Event, EventProcessor, GearApi, GearEvent};
+use gclient::GearApi;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft::vft_manager;
 

@@ -86,6 +86,7 @@ where
     /// - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
     /// - `ProxyError`: if redirect failed
     ///
+    #[allow(clippy::await_holding_refcell_ref)]
     pub async fn redirect(
         &mut self,
         slot: Slot,
@@ -95,8 +96,10 @@ where
         client_route: Vec<u8>,
     ) -> Result<(Vec<u8>, Vec<u8>), ProxyError> {
         let state = self.state.borrow();
-
+        let reply_deposit = state.config.reply_deposit;
+        let reply_timeout = state.config.reply_timeout;
         let endpoint = state.endpoints.endpoint_for(slot)?;
+        drop(state);
         // 1) Check if proofs are correct in erc20-relay
         let receipt = erc20_relay::Erc20Relay::new(GStdRemoting)
             .check_proofs(
@@ -116,11 +119,10 @@ where
             params.encode_to(&mut payload);
             payload
         };
-        let state = self.state.borrow();
 
-        let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, state.config.reply_deposit)
+        let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, reply_deposit)
             .map_err(|_| ProxyError::SendFailure)?
-            .up_to(Some(state.config.reply_timeout))
+            .up_to(Some(reply_timeout))
             .map_err(|_| ProxyError::ReplyTimeout)?
             .await
             .map_err(|_| ProxyError::ReplyFailure)?;

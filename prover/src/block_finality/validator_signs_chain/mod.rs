@@ -42,7 +42,7 @@ use self::indexed_validator_sign::IndexedValidatorSignTarget;
 
 use indexed_validator_sign::IndexedValidatorSign;
 
-use super::{validator_set_hash::ValidatorSetHash, GrandpaVoteTarget, ProcessedPreCommit};
+use super::{validator_set_hash::ValidatorSetHash, GrandpaMessageTarget, ProcessedPreCommit};
 
 const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
 
@@ -52,7 +52,7 @@ impl_target_set! {
         /// Blake2 hash of concatenated validator public keys.
         pub validator_set_hash: Blake2Target,
         /// GRANDPA message.
-        pub message: GrandpaVoteTarget,
+        pub message: GrandpaMessageTarget,
     }
 }
 
@@ -159,7 +159,7 @@ impl_target_set! {
         validator_set_hash: Blake2Target,
         validator_count: Target,
 
-        message: GrandpaVoteTarget,
+        message: GrandpaMessageTarget,
 
         latest_validator_idx: Target,
         sign_count: Target,
@@ -173,7 +173,7 @@ impl_parsable_target_set! {
         validator_set_hash: Blake2Target,
         validator_set_count: Target,
 
-        message: GrandpaVoteTarget,
+        message: GrandpaMessageTarget,
 
         latest_validator_idx: Target,
         sign_count: Target,

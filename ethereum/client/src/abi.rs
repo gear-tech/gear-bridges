@@ -46,6 +46,12 @@ sol!(
     "../out/IERC20Manager.sol/IERC20Manager.json"
 );
 
+sol!(
+    #[sol(rpc)]
+    BridgingPayment,
+    "../out/BridgingPayment.sol/BridgingPayment.json"
+);
+
 impl ContentMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut ret: Vec<u8> = Vec::with_capacity(32 + 32 + 20 + self.data.len());

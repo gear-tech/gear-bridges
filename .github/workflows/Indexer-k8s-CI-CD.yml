@@ -1,4 +1,4 @@
-name: Build and Deploy Indexer Graphql and Processors for Testnet
+name: Indexer
 
 on:
   workflow_dispatch:

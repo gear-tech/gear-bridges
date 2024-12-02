@@ -13,3 +13,8 @@ out/
 ethereum/broadcast
 
 .env
+.DS_Store
+
+node_modules/
+indexer/lib/
+indexer/assets/

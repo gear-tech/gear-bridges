@@ -10,7 +10,7 @@ use plonky2::{
 
 use plonky2_ed25519::gadgets::eddsa::make_verify_circuits as ed25519_circuit;
 
-use super::GrandpaVoteTarget;
+use super::GrandpaMessageTarget;
 use crate::{
     common::{
         array_to_bits,
@@ -30,7 +30,7 @@ impl_target_set! {
     /// Public inputs for `SingleValidatorSign`.
     pub struct PublicInputsTarget {
         /// GRANDPA message.
-        pub message: GrandpaVoteTarget,
+        pub message: GrandpaMessageTarget,
         /// Validator public key.
         pub public_key: Ed25519PublicKeyTarget,
     }

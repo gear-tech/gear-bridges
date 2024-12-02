@@ -12,6 +12,7 @@ const tempState = new TempState(Network.Gear);
 
 let vftManagerDecoder: Codec;
 let erc20RelayDecoder: Codec;
+let historicalProxyDecoder: Codec;
 
 const handler = async (ctx: ProcessorContext) => {
   await tempState.new(ctx);
@@ -78,20 +79,23 @@ const handler = async (ctx: ProcessorContext) => {
               }
             }
           }
-          case config.erc20Relay: {
-            const service = erc20RelayDecoder.service(msg.payload);
-            if (service !== 'Erc20Relay') continue;
-            const method = erc20RelayDecoder.method(msg.payload);
-            if (method !== 'Relayed') continue;
+          case config.historicalProxy: {
+            const service = historicalProxyDecoder.service(msg.payload);
+            if (service !== 'HistoricalProxy') continue;
+            const method = historicalProxyDecoder.method(msg.payload);
+            if (method !== 'Redirect') continue;
 
-            const { block_number, transaction_index } = erc20RelayDecoder.decodeEvent<Relayed>(
+            const { block_number, transaction_index } = historicalProxyDecoder.decodeEvent<Relayed>(
               service,
               method,
-              msg.payload,
+              msg.payload
             );
 
             const nonce = ethNonce(`${block_number}${transaction_index}`);
             promises.push(tempState.transferCompleted(nonce));
+            break;
+          }
+          case config.erc20Relay: {
             break;
           }
         }
@@ -107,6 +111,7 @@ const handler = async (ctx: ProcessorContext) => {
 export const runProcessor = async () => {
   vftManagerDecoder = await Codec.create('./assets/vft_manager.idl');
   erc20RelayDecoder = await Codec.create('./assets/erc20_relay.idl');
+  historicalProxyDecoder = await Codec.create('./assets/historical_proxy.idl');
 
   processor.run(
     new TypeormDatabase({

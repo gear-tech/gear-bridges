@@ -5,11 +5,10 @@ type Config = struct {
 
 type ProxyError = enum {
   NoEndpointForSlot: u64,
-  SendFailure,
-  ReplyTimeout,
-  ReplyHook,
-  ReplyFailure,
-  DecodeFailure,
+  SendFailure: str,
+  ReplyTimeout: str,
+  ReplyFailure: str,
+  DecodeFailure: str,
   NotAdmin,
   ERC20Relay: Error,
 };
@@ -58,5 +57,9 @@ service HistoricalProxy {
   query Admin : () -> actor_id;
   query Config : () -> Config;
   query Endpoints : () -> vec struct { u64, actor_id };
+
+  events {
+    Relayed: struct { slot: u64, block_number: u64, transaction_index: u32 };
+  }
 };
 

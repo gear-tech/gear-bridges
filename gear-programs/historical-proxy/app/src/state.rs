@@ -1,5 +1,5 @@
 use super::error::ProxyError;
-use super::*;
+use super::{ActorId, Decode, Encode, TypeInfo, Vec};
 pub type Slot = u64;
 
 pub struct ProxyState {
@@ -44,7 +44,7 @@ impl EndpointList {
     pub fn endpoint_for(&self, slot: Slot) -> Result<ActorId, ProxyError> {
         match self.0.binary_search_by(|(s, _)| s.cmp(&slot)) {
             Ok(i) => Ok(self.0[i].1),
-            Err(next) => match self.0.get(next) {
+            Err(next) => match self.0.get(next - 1) {
                 Some(result) => Ok(result.1),
                 None => Err(ProxyError::NoEndpointForSlot(slot)),
             },

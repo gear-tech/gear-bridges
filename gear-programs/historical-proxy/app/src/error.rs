@@ -1,5 +1,4 @@
 use super::service::erc20_relay;
-use crate::service::vft;
 use parity_scale_codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
@@ -15,5 +14,4 @@ pub enum ProxyError {
     DecodeFailure,
     NotAdmin,
     ERC20Relay(erc20_relay::Error),
-    VftManager(vft::Error),
 }

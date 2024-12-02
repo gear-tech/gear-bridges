@@ -1,4 +1,5 @@
 use bridge_builtin_operations::Payload;
+use collections::btree_set::BTreeSet;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
 pub mod abi;
@@ -11,6 +12,17 @@ use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
 use token_mapping::TokenMap;
 mod token_mapping;
 mod token_operations;
+
+pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+const CAPACITY: usize = 500_000;
+
+pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
+    unsafe {
+        TRANSACTIONS
+            .as_mut()
+            .expect("Program should be constructed")
+    }
+}
 
 pub struct VftManager<ExecContext> {
     exec_context: ExecContext,
@@ -156,7 +168,12 @@ where
     /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
     /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
     /// This entrypoint can be called only by `ethereum-event-client`.
-    pub async fn submit_receipt(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
+    pub async fn submit_receipt(
+        &mut self,
+        slot: u64,
+        transaction_index: u64,
+        receipt_rlp: Vec<u8>,
+    ) -> Result<(), Error> {
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
         use ethereum_common::utils::ReceiptEnvelope;
@@ -203,6 +220,21 @@ where
             })
             .ok_or(Error::NotSupportedEvent)?;
 
+        let transactions = transactions_mut();
+        let key = (slot, transaction_index);
+        if transactions.contains(&key) {
+            return Err(Error::AlreadyProcessed);
+        }
+
+        if CAPACITY <= transactions.len()
+            && transactions
+                .first()
+                .map(|first| &key < first)
+                .unwrap_or(false)
+        {
+            return Err(Error::TransactionTooOld);
+        }
+
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
         let msg_id = gstd::msg::id();
@@ -222,12 +254,18 @@ where
 
         match supply_type {
             TokenSupply::Ethereum => {
-                token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await
+                token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await?;
             }
             TokenSupply::Gear => {
-                token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await
+                token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await?;
             }
         }
+
+        if CAPACITY <= transactions.len() {
+            transactions.pop_first();
+        }
+        transactions.insert((slot, transaction_index));
+        Ok(())
     }
 
     /// Request bridging of tokens from gear to ethereum. It involves locking/burning

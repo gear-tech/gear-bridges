@@ -105,7 +105,13 @@ async fn proxy() {
 
     let gas_limit = api.block_gas_limit().unwrap();
     let result = proxy_client
-        .redirect(message.proof_block.block.slot, admin, message.encode())
+        .redirect(
+            message.proof_block.block.slot,
+            message.transaction_index,
+            message.encode(),
+            admin,
+            <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+        )
         .with_gas_limit(gas_limit / 100 * 95)
         .send(proxy_program_id)
         .await
@@ -194,5 +200,5 @@ async fn proxy() {
         .unwrap();
 
     let result = result.recv().await.unwrap().expect("proxy failed");
-    assert_eq!(result, message.receipt_rlp);
+    assert_eq!(result.0, message.receipt_rlp);
 }

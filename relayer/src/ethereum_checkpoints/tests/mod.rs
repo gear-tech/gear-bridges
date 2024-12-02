@@ -4,7 +4,7 @@ use checkpoint_light_client_io::{
         base_types::BytesFixed,
         beacon::SyncAggregate,
         network::Network,
-        utils::{self as eth_utils, BootstrapResponse, FinalityUpdateResponse, UpdateData},
+        utils::{BootstrapResponse, FinalityUpdateResponse, UpdateData},
         SLOTS_PER_EPOCH,
     },
     replay_back::Status,
@@ -12,14 +12,14 @@ use checkpoint_light_client_io::{
     tree_hash::TreeHash,
     Handle, HandleResult, Init, G2,
 };
-use ethereum_beacon_client::{utils, BeaconClient};
+use ethereum_beacon_client::utils;
 use ethereum_common::utils::{BeaconBlockHeaderResponse, Bootstrap, Update};
 use gclient::{EventListener, EventProcessor, GearApi, Result, WSAddress};
 use parity_scale_codec::{Decode, Encode};
 use ruzstd::StreamingDecoder;
 use sp_core::crypto::DEV_PHRASE;
 use std::io::Read;
-use tokio::{sync::Mutex, time::Duration};
+use tokio::sync::Mutex;
 
 static LOCK: Mutex<u32> = Mutex::const_new(0);
 

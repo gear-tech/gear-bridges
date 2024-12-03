@@ -48,9 +48,7 @@ async fn connect_to_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit, 
     )
 }
 
-#[ignore]
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn set_vft_manager() {
     use erc20_relay_client::Config;
 

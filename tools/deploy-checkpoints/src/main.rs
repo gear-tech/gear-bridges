@@ -11,6 +11,8 @@ use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
 use parity_scale_codec::Encode;
 use std::time::Duration;
 
+const GEAR_API_RETRIES: u8 = 3;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -121,7 +123,7 @@ async fn main() -> AnyResult<()> {
     };
 
     let client = GearApi::builder()
-        .retries(3)
+        .retries(GEAR_API_RETRIES)
         .suri(cli.gear_suri)
         .build(WSAddress::new(&cli.gear_endpoint, cli.gear_port))
         .await?;

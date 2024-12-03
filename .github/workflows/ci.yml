@@ -56,7 +56,7 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Run clippy
-        run: cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
+        run: cargo clippy --release --all-targets --package vft-manager -- -D warnings && cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
       - name: Run rustfmt
         run: cargo fmt -- --check
   tests:
@@ -84,7 +84,7 @@ jobs:
           docker pull ghcr.io/gear-tech/node:v1.6.2
           docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external
       - name: Run tests
-        run: cargo test --release --workspace 
+        run: cargo test --release --no-run --package vft-manager && cargo test --release --workspace
           --exclude prover
           --exclude plonky2_blake2b256 
           --exclude plonky2_ecdsa 
@@ -151,7 +151,7 @@ jobs:
         run: forge build --force --no-cache
         working-directory: ./ethereum
       - name: Build workspace
-        run: cargo build --release --all-targets
+        run: cargo build --package vft-manager --release --all-targets && cargo build --release --all-targets
       - name: Check that files match
         run: |
           stored=(

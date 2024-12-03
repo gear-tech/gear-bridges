@@ -161,7 +161,21 @@ pub async fn prove_final(
     at_block: H256,
 ) -> anyhow::Result<FinalProof> {
     let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
+    prove_final_with_block_finality(
+        gear_api,
+        previous_proof,
+        genesis_config,
+        (block, block_finality),
+    )
+    .await
+}
 
+pub async fn prove_final_with_block_finality(
+    gear_api: &GearApi,
+    previous_proof: ProofWithCircuitData,
+    genesis_config: GenesisConfig,
+    (block, block_finality): (H256, dto::BlockFinalityProof),
+) -> anyhow::Result<FinalProof> {
     let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();

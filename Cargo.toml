@@ -6,6 +6,7 @@ members = [
     "prover",
     "relayer",
     "circuits/*",
+    "ethereum_beacon_client",
     "ethereum-common",
     "gear-programs/bridging-payment",
     "gear-programs/bridging-payment/app",
@@ -25,6 +26,7 @@ members = [
     "gear-programs/historical-proxy/app",
     "gear-programs/historical-proxy/client",
     "utils-prometheus",
+    "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
     "tools/genesis-config",
 ]
@@ -44,6 +46,7 @@ plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
 plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
 plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
+ethereum_beacon_client = { path = "ethereum_beacon_client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 
 bridging-payment = { path = "gear-programs/bridging-payment" }
@@ -135,6 +138,7 @@ ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8",
     "alloc",
 ] }
 rlp = { version = "0.5.2", default-features = false }
+ruzstd = "0.5.0"
 scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }

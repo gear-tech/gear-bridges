@@ -20,6 +20,7 @@ futures.workspace = true
 gclient.workspace = true
 gstd.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
+sp-core = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 hex-literal.workspace = true
 hex.workspace = true

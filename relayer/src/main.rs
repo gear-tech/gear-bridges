@@ -12,7 +12,6 @@ use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
-mod ethereum_beacon_client;
 mod ethereum_checkpoints;
 mod hex_utils;
 mod message_relayer;

@@ -5,27 +5,60 @@ mod vft {
 }
 
 use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
-use gclient::{Event, EventProcessor, GearApi, GearEvent};
+use gclient::{Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sp_core::crypto::DEV_PHRASE;
+use tokio::sync::Mutex;
 use vft::vft_manager;
 
-async fn spin_up_node() -> (GClientRemoting, GearApi, CodeId, GasUnit) {
+static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((0, None));
+
+async fn connect_to_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit, [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
-    let remoting = GClientRemoting::new(api.clone());
-    let (code_id, _) = api.upload_code(erc20_relay::WASM_BINARY).await.unwrap();
+    let (api, code_id, salt) = {
+        let mut lock = LOCK.lock().await;
+        let code_id = match lock.1 {
+            Some(code_id) => code_id,
+            None => {
+                let (code_id, _) = api.upload_code(erc20_relay::WASM_BINARY).await.unwrap();
+                lock.1 = Some(code_id);
 
-    (remoting, api, code_id, gas_limit)
+                code_id
+            }
+        };
+
+        let salt = lock.0;
+        lock.0 += 1;
+
+        let suri = format!("{DEV_PHRASE}//erc20-relay-{salt}:");
+        let api2 = GearApi::init_with(WSAddress::dev(), suri).await.unwrap();
+
+        let account_id: &[u8; 32] = api2.account_id().as_ref();
+        api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+            .await
+            .unwrap();
+
+        (api2, code_id, salt)
+    };
+
+    (
+        GClientRemoting::new(api.clone()),
+        api,
+        code_id,
+        gas_limit,
+        salt.to_le_bytes(),
+    )
 }
 
+#[ignore]
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn gas_for_reply() {
     use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay, Erc20RelayFactory};
 
     let route = <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE;
 
-    let (remoting, api, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, api, code_id, gas_limit, salt) = connect_to_node().await;
     let account_id: ActorId = <[u8; 32]>::from(api.account_id().clone()).into();
 
     let factory = Erc20RelayFactory::new(remoting.clone());
@@ -33,7 +66,7 @@ async fn gas_for_reply() {
     let program_id = factory
         .gas_calculation(1_000, 5_500_000_000)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, [])
+        .send_recv(code_id, salt)
         .await
         .unwrap();
 
@@ -89,11 +122,10 @@ async fn gas_for_reply() {
 }
 
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn set_vft_manager() {
     use erc20_relay_client::Config;
 
-    let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit, salt) = connect_to_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -106,7 +138,7 @@ async fn set_vft_manager() {
             },
         )
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, [])
+        .send_recv(code_id, salt)
         .await
         .unwrap();
 
@@ -161,11 +193,10 @@ async fn set_vft_manager() {
 }
 
 #[tokio::test]
-#[ignore = "Requires running node"]
 async fn update_config() {
     use erc20_relay_client::Config;
 
-    let (remoting, _api, code_id, gas_limit) = spin_up_node().await;
+    let (remoting, _api, code_id, gas_limit, salt) = connect_to_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
@@ -181,7 +212,7 @@ async fn update_config() {
             },
         )
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, [])
+        .send_recv(code_id, salt)
         .await
         .unwrap();
 

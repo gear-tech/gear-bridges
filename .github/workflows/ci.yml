@@ -14,6 +14,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: 1
 
 jobs:
   build:
@@ -35,7 +36,7 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Build
-        run: cargo build --release --all-targets
+        run: cargo build --package vft-manager --release --all-targets && cargo build --release --all-targets
   lints:
     runs-on: kuberunner
     steps:
@@ -55,11 +56,13 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Run clippy
-        run: cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
+        run: cargo clippy --release --all-targets --package vft-manager -- -D warnings && cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
       - name: Run rustfmt
         run: cargo fmt -- --check
   tests:
     runs-on: kuberunner
+    env:
+      NODE_CONTAINER_NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,18 +79,25 @@ jobs:
       - name: Build ethereum smart-contracts
         run: forge build
         working-directory: ./ethereum
+      - name: Pull & run Gear node container
+        run: |
+          docker pull ghcr.io/gear-tech/node:v1.6.2
+          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.6.2 gear --dev --tmp --rpc-external
       - name: Run tests
-        run: cargo test --release --workspace 
+        run: cargo test --release --no-run --package vft-manager && cargo test --release --workspace
           --exclude prover
           --exclude plonky2_blake2b256 
           --exclude plonky2_ecdsa 
           --exclude plonky2_ed25519 
           --exclude plonky2_sha512 
-          --exclude plonky2_u32
+          --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
       - name: Run solidity tests
         run: |
           cd ethereum
           forge test
+      - name: Stop Gear node container (if any)
+        continue-on-error: true
+        run: docker stop $NODE_CONTAINER_NAME
   check-zk-circuits-changed:
     runs-on: kuberunner
     outputs: 
@@ -141,7 +151,7 @@ jobs:
         run: forge build --force --no-cache
         working-directory: ./ethereum
       - name: Build workspace
-        run: cargo build --release --all-targets
+        run: cargo build --package vft-manager --release --all-targets && cargo build --release --all-targets
       - name: Check that files match
         run: |
           stored=(

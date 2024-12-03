@@ -24,6 +24,7 @@ clap.workspace = true
 derive_more.workspace = true
 dotenv.workspace = true
 erc20-relay-client.workspace = true
+ethereum_beacon_client.workspace = true
 ethereum-common.workspace = true
 futures.workspace = true
 gear-core.workspace = true
@@ -49,3 +50,7 @@ utils-prometheus.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true
+
+[dev-dependencies]
+ruzstd.workspace = true
+sp-core = { workspace = true, features = ["std"] }

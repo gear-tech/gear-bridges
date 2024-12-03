@@ -51,8 +51,8 @@ impl_metered_service! {
             "kill_switch_latest_stored_finality_proof",
             "Latest stored finality proof",
         ),
-        finality_proof_not_found_cnt: IntCounter = IntCounter::new(
-            "kill_switch_finality_proof_not_found_cnt",
+        finality_proof_for_mismatched_root_not_found_cnt: IntCounter = IntCounter::new(
+            "kill_switch_finality_proof_for_mismatched_root_not_found_cnt",
             "Amount of not found finality proofs",
         ),
     }
@@ -206,7 +206,9 @@ impl KillSwitchRelayer {
                         "Block finality proof not found for block #{}",
                         event.block_number
                     );
-                    self.metrics.finality_proof_not_found_cnt.inc();
+                    self.metrics
+                        .finality_proof_for_mismatched_root_not_found_cnt
+                        .inc();
                     continue;
                 };
 

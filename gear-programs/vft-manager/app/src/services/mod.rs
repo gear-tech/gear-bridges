@@ -66,14 +66,14 @@ pub struct State {
     admin: ActorId,
     erc20_manager_address: H160,
     token_map: TokenMap,
-    eth_client: ActorId,
+    historical_proxy_address: ActorId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
     pub erc20_manager_address: H160,
     pub gear_bridge_builtin: ActorId,
-    pub eth_client: ActorId,
+    pub historical_proxy_address: ActorId,
     pub config: Config,
 }
 
@@ -81,13 +81,13 @@ impl InitConfig {
     pub fn new(
         erc20_manager_address: H160,
         gear_bridge_builtin: ActorId,
-        eth_client: ActorId,
+        historical_proxy_address: ActorId,
         config: Config,
     ) -> Self {
         Self {
             erc20_manager_address,
             gear_bridge_builtin,
-            eth_client,
+            historical_proxy_address,
             config,
         }
     }
@@ -114,10 +114,10 @@ where
         self.state_mut().erc20_manager_address = new_erc20_manager_address;
     }
 
-    pub fn update_eth_client(&mut self, eth_client_new: ActorId) {
+    pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
 
-        self.state_mut().eth_client = eth_client_new;
+        self.state_mut().historical_proxy_address = historical_proxy_address_new;
     }
 
     pub fn map_vara_to_eth_address(
@@ -181,7 +181,7 @@ where
         let state = self.state();
         let sender = self.exec_context.actor_id();
 
-        if sender != state.eth_client {
+        if sender != state.historical_proxy_address {
             return Err(Error::NotEthClient);
         }
 
@@ -431,8 +431,8 @@ where
         self.config().clone()
     }
 
-    pub fn eth_client(&self) -> ActorId {
-        self.state().eth_client
+    pub fn historical_proxy_address(&self) -> ActorId {
+        self.state().historical_proxy_address
     }
 }
 
@@ -446,7 +446,7 @@ where
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 erc20_manager_address: config.erc20_manager_address,
                 admin: exec_context.actor_id(),
-                eth_client: config.eth_client,
+                historical_proxy_address: config.historical_proxy_address,
                 ..Default::default()
             });
             CONFIG = Some(config.config);

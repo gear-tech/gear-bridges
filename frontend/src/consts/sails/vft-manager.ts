@@ -15,7 +15,7 @@ import {
 export interface InitConfig {
   erc20_manager_address: H160;
   gear_bridge_builtin: ActorId;
-  eth_client: ActorId;
+  historical_proxy_address: ActorId;
   config: Config;
 }
 
@@ -91,7 +91,7 @@ export class Program {
       InitConfig: {
         erc20_manager_address: 'H160',
         gear_bridge_builtin: '[u8;32]',
-        eth_client: '[u8;32]',
+        historical_proxy_address: '[u8;32]',
         config: 'Config',
       },
       Config: {

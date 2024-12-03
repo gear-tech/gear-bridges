@@ -9,7 +9,7 @@ use vft_manager_client::{
 };
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
-const ETH_CLIENT_ID: u64 = 500;
+const HISTORICAL_PROXY_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
 
 const WRONG_GEAR_SUPPLY_VFT: u64 = 666;
@@ -67,7 +67,7 @@ async fn setup_for_test() -> Fixture {
     let system = System::new();
     system.init_logger();
     system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000);
-    system.mint_to(ETH_CLIENT_ID, 100_000_000_000_000);
+    system.mint_to(HISTORICAL_PROXY_ID, 100_000_000_000_000);
 
     let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
 
@@ -81,7 +81,7 @@ async fn setup_for_test() -> Fixture {
     let init_config = InitConfig {
         erc20_manager_address: ERC20_MANAGER_ADDRESS,
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
-        eth_client: ETH_CLIENT_ID.into(),
+        historical_proxy_address: HISTORICAL_PROXY_ID.into(),
         config: Config {
             gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,
@@ -194,7 +194,7 @@ async fn test_gear_supply_token() {
     assert_eq!(vft_manager_balance, amount);
 
     let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, amount);
-    VftManagerC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
+    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
@@ -222,7 +222,7 @@ async fn test_eth_supply_token() {
     let amount = U256::from(10_000_000_000_u64);
 
     let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
-    VftManagerC::new(remoting.clone().with_actor_id(ETH_CLIENT_ID.into()))
+    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await

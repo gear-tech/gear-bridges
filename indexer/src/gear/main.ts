@@ -82,7 +82,7 @@ const handler = async (ctx: ProcessorContext) => {
             const service = historicalProxyDecoder.service(msg.payload);
             if (service !== 'HistoricalProxy') continue;
             const method = historicalProxyDecoder.method(msg.payload);
-            if (method !== 'Redirect') continue;
+            if (method !== 'Relayed') continue;
 
             const { block_number, transaction_index } = historicalProxyDecoder.decodeEvent<Relayed>(
               service,

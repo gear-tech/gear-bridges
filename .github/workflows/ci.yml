@@ -36,7 +36,12 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Build
-        run: cargo build --package vft-manager --release --all-targets && cargo build --release --all-targets
+        run: |
+          git diff
+          rm -rf ./target
+          cargo build --package vft-manager --release --all-targets
+          rm -rf ./target
+          cargo build --release --all-targets
   lints:
     runs-on: kuberunner
     steps:

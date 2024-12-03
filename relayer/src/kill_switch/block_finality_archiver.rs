@@ -3,8 +3,17 @@ use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
 
 use gear_rpc_client::{dto, GearApi};
+use prometheus::IntGauge;
+use utils_prometheus::impl_metered_service;
 
-use super::Metrics;
+impl_metered_service! {
+    pub(crate) struct Metrics {
+        latest_stored_finality_proof: IntGauge = IntGauge::new(
+            "kill_switch_latest_stored_finality_proof",
+            "Latest stored finality proof",
+        ),
+    }
+}
 
 #[derive(Encode, Decode)]
 pub struct BlockFinalityProofWithHash {

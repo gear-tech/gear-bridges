@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use block_finality_archiver::BlockFinalityProofWithHash;
+use block_finality_archiver::{BlockFinalityArchiver, BlockFinalityProofWithHash};
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
@@ -16,6 +16,7 @@ use crate::{
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
+use block_finality_archiver::Metrics as BlockFinalityArchiverMetrics;
 
 mod block_finality_archiver;
 
@@ -47,10 +48,6 @@ impl_metered_service! {
             "kill_switch_merkle_root_mismatch_cnt",
             "Amount of merkle root mismatches found",
         ),
-        latest_stored_finality_proof: IntGauge = IntGauge::new(
-            "kill_switch_latest_stored_finality_proof",
-            "Latest stored finality proof",
-        ),
         finality_proof_for_mismatched_root_not_found_cnt: IntCounter = IntCounter::new(
             "kill_switch_finality_proof_for_mismatched_root_not_found_cnt",
             "Amount of not found finality proofs",
@@ -75,6 +72,7 @@ pub struct KillSwitchRelayer {
     block_finality_storage: sled::Db,
 
     metrics: Metrics,
+    block_finality_metrics: BlockFinalityArchiverMetrics,
 }
 
 impl MeteredService for KillSwitchRelayer {
@@ -82,6 +80,7 @@ impl MeteredService for KillSwitchRelayer {
         self.metrics
             .get_sources()
             .into_iter()
+            .chain(self.block_finality_metrics.get_sources())
             .chain(prover_interface::Metrics.get_sources())
     }
 }
@@ -104,6 +103,7 @@ impl KillSwitchRelayer {
             state: State::Normal,
             block_finality_storage,
             metrics: Metrics::new(),
+            block_finality_metrics: BlockFinalityArchiverMetrics::new(),
         }
     }
 
@@ -133,10 +133,10 @@ impl KillSwitchRelayer {
 
     fn spawn_block_finality_archiver(&self) -> anyhow::Result<()> {
         log::info!("Spawning block finality archiver");
-        let mut block_finality_saver = block_finality_archiver::BlockFinalityArchiver::new(
+        let mut block_finality_saver = BlockFinalityArchiver::new(
             self.gear_api.clone(),
             self.block_finality_storage.clone(),
-            self.metrics.clone(),
+            self.block_finality_metrics.clone(),
         );
         tokio::spawn(async move {
             block_finality_saver.run().await;

@@ -36,7 +36,7 @@ jobs:
         run: forge build
         working-directory: ./ethereum
       - name: Build
-        run: cargo build --release --all-targets -vvvvvvv || { echo; echo; env }
+        run: cargo build --release --all-targets -vvvvvvv || { echo; echo; env; }
   lints:
     runs-on: kuberunner
     steps:

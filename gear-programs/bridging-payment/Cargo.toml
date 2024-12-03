@@ -16,7 +16,7 @@ bridging-payment = { path = ".", features = ["wasm-binary"] }
 bridging-payment-client = { path = "client" }
 vft-manager = { workspace = true, features = ["wasm-binary"] }
 vft-manager-client.workspace = true
-extended-vft.workspace = true
+extended-vft = { workspace = true, features = ["wasm-binary"] }
 extended-vft-client.workspace = true
 
 sails-rs = { workspace = true, features = ["gtest"] }

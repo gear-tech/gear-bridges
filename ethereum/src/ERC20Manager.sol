@@ -33,16 +33,16 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         SupplyType supply_type = tokenSupplyType[token];
 
         if (supply_type == SupplyType.Gear) {
-            ERC20GearSupply(token).burnFrom(tx.origin, amount);
+            ERC20GearSupply(token).burnFrom(msg.sender, amount);
         } else {
             if (supply_type == SupplyType.Unknown) {
                 tokenSupplyType[token] = SupplyType.Ethereum;
             }
 
-            IERC20(token).safeTransferFrom(tx.origin, address(this), amount);
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         }
 
-        emit BridgingRequested(tx.origin, to, token, amount);
+        emit BridgingRequested(msg.sender, to, token, amount);
     }
 
     /** @dev Accept bridging request made on other side of bridge.
@@ -102,6 +102,8 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
 }
 
 contract ERC20ManagerBridgingPayment is BridgingPayment {
+    using SafeERC20 for IERC20;
+
     constructor(
         address _underlying,
         address _admin,
@@ -117,6 +119,9 @@ contract ERC20ManagerBridgingPayment is BridgingPayment {
         bytes32 to
     ) public payable {
         deductFee();
+
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(token).approve(underlying, amount);
 
         ERC20Manager(underlying).requestBridging(token, amount, to);
     }

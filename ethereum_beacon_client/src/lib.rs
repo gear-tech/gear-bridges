@@ -175,7 +175,6 @@ impl BeaconClient {
         Err(anyhow!("Block was not found"))
     }
 
-    #[cfg(test)]
     pub async fn get_bootstrap(
         &self,
         checkpoint: &str,

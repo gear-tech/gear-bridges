@@ -3041,6 +3041,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "deploy-checkpoints"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-serialize 0.4.2",
+ "checkpoint_light_client",
+ "checkpoint_light_client-io",
+ "clap",
+ "dotenv",
+ "ethereum_beacon_client",
+ "gclient",
+ "hex",
+ "parity-scale-codec",
+ "tokio",
+]
+
+[[package]]
 name = "deploy-to-gear"
 version = "0.1.0"
 dependencies = [
@@ -3641,6 +3658,7 @@ dependencies = [
  "lazy_static",
  "sails-client-gen",
  "sails-rs",
+ "sp-core 21.0.0",
  "tokio",
 ]
 
@@ -3748,6 +3766,21 @@ dependencies = [
  "primitive-types 0.12.2",
  "scale-info",
  "uint 0.9.5",
+]
+
+[[package]]
+name = "ethereum_beacon_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-serialize 0.4.2",
+ "checkpoint_light_client-io",
+ "ethereum-common",
+ "futures",
+ "hex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -9983,6 +10016,7 @@ dependencies = [
  "erc20-relay-client",
  "ethereum-client",
  "ethereum-common",
+ "ethereum_beacon_client",
  "futures",
  "gclient",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -10001,10 +10035,12 @@ dependencies = [
  "prover",
  "rand 0.8.5",
  "reqwest 0.11.27",
+ "ruzstd",
  "sails-rs",
  "serde",
  "serde_json",
  "sled",
+ "sp-core 21.0.0",
  "thiserror",
  "tokio",
  "utils-prometheus",

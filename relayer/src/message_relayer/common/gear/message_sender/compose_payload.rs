@@ -1,4 +1,4 @@
-use crate::ethereum_beacon_client::BeaconClient;
+use ethereum_beacon_client::BeaconClient;
 
 use alloy::{network::primitives::BlockTransactionsKind, primitives::TxHash, providers::Provider};
 use alloy_eips::{BlockId, BlockNumberOrTag};

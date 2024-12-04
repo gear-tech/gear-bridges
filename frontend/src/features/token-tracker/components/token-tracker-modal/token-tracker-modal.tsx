@@ -12,14 +12,14 @@ import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks'
 import { useVaraFTBalances, useEthFTBalances } from '../../hooks';
 import { BalanceCard } from '../card';
 
-import styles from './mini-wallet-modal.module.scss';
+import styles from './token-tracker-modal.module.scss';
 
 type Props = {
   lockedBalance: { value: bigint | undefined; formattedValue: string | undefined };
   close: () => void;
 };
 
-function MiniWalletModal({ lockedBalance, close }: Props) {
+function TokenTrackerModal({ lockedBalance, close }: Props) {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
 
@@ -53,7 +53,7 @@ function MiniWalletModal({ lockedBalance, close }: Props) {
         .map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
     return getTypedEntries(ftBalances).map(([address, balance]) => (
-      <li key={address} className={styles.card}>
+      <li key={address}>
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
           value={formatUnits(balance, decimals[address] ?? 0)}
@@ -82,21 +82,19 @@ function MiniWalletModal({ lockedBalance, close }: Props) {
       </ul>
 
       {lockedBalance.formattedValue && symbols && (
-        <div className={styles.locked}>
+        <>
           <h4 className={styles.heading}>Locked Tokens</h4>
 
-          <div className={styles.card}>
-            <BalanceCard
-              value={lockedBalance.formattedValue}
-              SVG={TOKEN_SVG[WRAPPED_VARA_CONTRACT_ADDRESS] ?? TokenPlaceholderSVG}
-              symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
-              locked
-            />
-          </div>
-        </div>
+          <BalanceCard
+            value={lockedBalance.formattedValue}
+            SVG={TOKEN_SVG[WRAPPED_VARA_CONTRACT_ADDRESS] ?? TokenPlaceholderSVG}
+            symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
+            locked
+          />
+        </>
       )}
     </Modal>
   );
 }
 
-export { MiniWalletModal };
+export { TokenTrackerModal };

@@ -3,9 +3,9 @@ import { useAccount } from '@gear-js/react-hooks';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraFTBalance, useEthAccount, useModal, useTokens } from '@/hooks';
 
-import { MiniWalletModal } from '../mini-wallet-modal';
+import { TokenTrackerModal } from '../token-tracker-modal';
 
-function MiniWallet() {
+function TokenTracker() {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const { decimals } = useTokens();
@@ -25,10 +25,10 @@ function MiniWallet() {
       {isOpen && (
         // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
         // fast fix for now, cuz major font update was made without a fallback,
-        <MiniWalletModal lockedBalance={varaLockedBalance} close={close} />
+        <TokenTrackerModal lockedBalance={varaLockedBalance} close={close} />
       )}
     </>
   );
 }
 
-export { MiniWallet };
+export { TokenTracker };

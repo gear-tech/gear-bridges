@@ -46,12 +46,9 @@ pub struct Erc20Relay<'a> {
 }
 
 #[sails_rs::service]
-impl<'a> Erc20Relay<'a>
-{
+impl<'a> Erc20Relay<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
-        Self {
-            state,
-        }
+        Self { state }
     }
 
     pub fn admin(&self) -> ActorId {

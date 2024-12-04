@@ -10,7 +10,6 @@ import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
 
 import { useVaraFTBalances, useEthFTBalances } from '../../hooks';
-import { Balance } from '../balance';
 import { BalanceCard } from '../card';
 
 import styles from './mini-wallet-modal.module.scss';
@@ -40,12 +39,18 @@ function MiniWalletModal({ lockedBalance, close }: Props) {
   const renderHeading = () => (
     <>
       My Tokens
-      <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
+      <span className={styles.network}>
+        {account ? <VaraSVG /> : <EthSVG />}
+        {account ? 'Vara' : 'Ethereum'}
+      </span>
     </>
   );
 
   const renderBalances = () => {
-    if (!ftBalances || !decimals || !symbols) return;
+    if (!ftBalances || !decimals || !symbols)
+      return new Array(Object.keys(TOKEN_SVG).length)
+        .fill(null)
+        .map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
     return getTypedEntries(ftBalances).map(([address, balance]) => (
       <li key={address} className={styles.card}>

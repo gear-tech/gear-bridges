@@ -1,3 +1,18 @@
+.network {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 16px;
+
+  svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
 .list {
   display: flex;
   flex-direction: column;

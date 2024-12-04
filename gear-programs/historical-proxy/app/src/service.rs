@@ -4,11 +4,14 @@
 pub(crate) mod erc20_relay {
     include!(concat!(env!("OUT_DIR"), "/erc20_relay.rs"));
 }
-use erc20_relay::{traits::*, EthToVaraEvent};
-use sails_rs::gstd::{self, calls::GStdRemoting};
+
+use sails_rs::{
+    calls::ActionIo,
+    gstd,
+};
 
 use cell::RefCell;
-use sails_rs::{calls::Call, gstd::ExecContext, prelude::*};
+use sails_rs::{gstd::ExecContext, prelude::*};
 
 use crate::{
     error::ProxyError,
@@ -101,7 +104,6 @@ where
     pub async fn redirect(
         &mut self,
         slot: Slot,
-        tx_index: u64,
         proofs: Vec<u8>,
         client: ActorId,
         client_route: Vec<u8>,
@@ -111,26 +113,40 @@ where
         let reply_timeout = state.config.reply_timeout;
         let endpoint = state.endpoints.endpoint_for(slot)?;
         drop(state);
-        let event = EthToVaraEvent::decode(&mut proofs.as_slice()).map_err(|e| {
-            ProxyError::DecodeFailure(format!("failed to decode erc20-relay event: {:?}", e))
-        })?;
-        let block_number = event.proof_block.block.body.execution_payload.block_number;
-        // 1) Check if proofs are correct in erc20-relay
-        let receipt = erc20_relay::Erc20Relay::new(GStdRemoting)
-            .check_proofs(event)
-            .send_recv(endpoint)
-            .await
-            .map_err(|e| {
-                ProxyError::ReplyFailure(format!(
-                    "failed to receive reply from erc20-relay: {:?}",
-                    e
-                ))
-            })?
-            .map_err(ProxyError::ERC20Relay)?;
+        // 1) check if proofs are correct and receive data for further processing
+        let check_proofs = {
+            let mut payload = erc20_relay::erc_20_relay::io::CheckProofs::ROUTE.to_vec();
+            payload.extend_from_slice(&proofs);
+            payload
+        };
 
+        let erc20_relay::CheckedProofs {
+            receipt_rlp,
+            transaction_index,
+            block_number,
+        } = erc20_relay::erc_20_relay::io::CheckProofs::decode_reply(
+            gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
+                .map_err(|e| {
+                    ProxyError::SendFailure(format!(
+                        "failed to send message to erc20-relay: {:?}",
+                        e
+                    ))
+                })?
+                .await
+                .map_err(|e| {
+                    ProxyError::ReplyFailure(format!(
+                        "failed to receive reply from erc20-relay: {:?}",
+                        e
+                    ))
+                })?,
+        )
+        .map_err(|e| {
+            ProxyError::DecodeFailure(format!("failed to decode reply from erc20-relay: {:?}", e))
+        })?
+        .map_err(ProxyError::ERC20Relay)?;
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
         let submit_receipt = {
-            let params = (slot, tx_index, receipt.clone());
+            let params = (slot, transaction_index, receipt_rlp.clone());
             let mut payload = Vec::with_capacity(params.encoded_size() + client_route.len());
             payload.extend_from_slice(&client_route);
             params.encode_to(&mut payload);
@@ -151,9 +167,9 @@ where
         let _ = self.notify_on(Event::Relayed {
             slot,
             block_number,
-            transaction_index: tx_index as u32,
+            transaction_index: transaction_index as u32,
         });
 
-        Ok((receipt, reply))
+        Ok((receipt_rlp, reply))
     }
 }

@@ -152,7 +152,6 @@ impl MessageSender {
         let (_, vft_manager_reply) = proxy_service
             .redirect(
                 message.proof_block.block.slot,
-                message.transaction_index,
                 message.encode(),
                 self.vft_manager_address.into(),
                 <SubmitReceipt as ActionIo>::ROUTE.to_vec(),

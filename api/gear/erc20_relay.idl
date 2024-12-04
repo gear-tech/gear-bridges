@@ -91,11 +91,16 @@ type BlockHeader = struct {
   body_root: h256,
 };
 
+type CheckedProofs = struct {
+  receipt_rlp: vec u8,
+  transaction_index: u64,
+  block_number: u64,
+};
+
 type Error = enum {
   DecodeReceiptEnvelopeFailure,
   FailedEthTransaction,
   AlreadyProcessed,
-  TooOldTransaction,
   SendFailure,
   ReplyFailure,
   HandleResultDecodeFailure,
@@ -114,7 +119,7 @@ constructor {
 
 service Erc20Relay {
   /// Check proofs and return receipt if successfull, error otherwise.
-  CheckProofs : (message: EthToVaraEvent) -> result (vec u8, Error);
+  CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
   SetVftManager : (vft_manager: actor_id) -> null;
   UpdateConfig : (config_new: Config) -> null;
   query Admin : () -> actor_id;

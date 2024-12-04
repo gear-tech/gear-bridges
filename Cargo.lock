@@ -5940,6 +5940,7 @@ dependencies = [
  "scale-info",
  "serde",
  "serde_json",
+ "sp-core 21.0.0",
  "tokio",
  "vft-manager",
  "vft-manager-client",

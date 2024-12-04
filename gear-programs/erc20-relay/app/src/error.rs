@@ -7,7 +7,6 @@ pub enum Error {
     DecodeReceiptEnvelopeFailure,
     FailedEthTransaction,
     AlreadyProcessed,
-    TooOldTransaction,
     SendFailure,
     ReplyFailure,
     HandleResultDecodeFailure,

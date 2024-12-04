@@ -44,10 +44,11 @@ impl EndpointList {
     pub fn endpoint_for(&self, slot: Slot) -> Result<ActorId, ProxyError> {
         match self.0.binary_search_by(|(s, _)| s.cmp(&slot)) {
             Ok(i) => Ok(self.0[i].1),
-            Err(next) => match self.0.get(next - 1) {
+            Err(next) if next != 0 => match self.0.get(next - 1) {
                 Some(result) => Ok(result.1),
                 None => Err(ProxyError::NoEndpointForSlot(slot)),
             },
+            Err(_) => Err(ProxyError::NoEndpointForSlot(slot)),
         }
     }
 }

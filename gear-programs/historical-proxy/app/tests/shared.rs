@@ -6,6 +6,8 @@ use ethereum_common::{
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
 use serde::Deserialize;
+
+
 pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
     include_bytes!("./headers/holesky-receipts-2_498_456.json");
 pub const HOLESKY_BLOCK_2_498_456: &[u8; 235_397] =

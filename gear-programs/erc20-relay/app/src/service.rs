@@ -32,6 +32,15 @@ pub struct EthToVaraEvent {
     pub receipt_rlp: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Encode, Decode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct CheckedProofs {
+    pub receipt_rlp: Vec<u8>,
+    pub transaction_index: u64,
+    pub block_number: u64,
+}
+
 pub struct Erc20Relay<'a, ExecContext> {
     state: &'a RefCell<State>,
     exec_context: ExecContext,
@@ -86,7 +95,7 @@ where
     }
 
     /// Check proofs and return receipt if successfull, error otherwise.
-    pub async fn check_proofs(&mut self, message: EthToVaraEvent) -> Result<Vec<u8>, Error> {
+    pub async fn check_proofs(&mut self, message: EthToVaraEvent) -> Result<CheckedProofs, Error> {
         let receipt = self.decode_and_check_receipt(&message)?;
 
         let EthToVaraEvent {
@@ -138,7 +147,12 @@ where
             _ => return Err(Error::InvalidReceiptProof),
         }
 
-        Ok(message.receipt_rlp)
+        Ok(CheckedProofs {
+            receipt_rlp: message.receipt_rlp,
+            transaction_index,
+            block_number: block.body.execution_payload.block_number
+        })
+        
     }
 
     fn decode_and_check_receipt(&self, message: &EthToVaraEvent) -> Result<ReceiptEnvelope, Error> {

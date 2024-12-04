@@ -2,14 +2,17 @@ import { HexString } from '@gear-js/api';
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
 import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { formatUnits } from 'viem';
+import { useReadContracts } from 'wagmi';
 
 import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { TOKEN_SVG, VftProgram } from '@/consts';
+import { FUNGIBLE_TOKEN_ABI, TOKEN_SVG, VftProgram } from '@/consts';
 import { useEthAccount, useModal, useTokens } from '@/hooks';
 import { SVGComponent } from '@/types';
+import { isUndefined } from '@/utils';
 
 import styles from './mini-wallet.module.scss';
 
@@ -38,9 +41,46 @@ function useVaraFTBalances() {
   };
 
   return useQuery({
-    queryKey: ['vara-ft-balances'],
+    queryKey: ['vara-ft-balances', account?.decodedAddress, addresses, symbols, decimals],
     queryFn: getBalances,
-    enabled: isApiReady && Boolean(account && addresses),
+    enabled: isApiReady && Boolean(account && addresses && symbols && decimals),
+  });
+}
+
+function useEthFTBalances() {
+  const ethAccount = useEthAccount();
+  const { addresses, symbols, decimals } = useTokens();
+
+  const contracts = useMemo(
+    () =>
+      addresses?.map(([, address]) => ({
+        address: address.toString() as HexString,
+        abi: FUNGIBLE_TOKEN_ABI,
+        functionName: 'balanceOf',
+        args: [ethAccount.address],
+      })),
+    [addresses, ethAccount.address],
+  );
+
+  return useReadContracts({
+    contracts,
+    query: {
+      enabled: ethAccount.isConnected,
+      select: (data) =>
+        addresses &&
+        symbols &&
+        decimals &&
+        data.map(({ result }, index) => {
+          const address = addresses?.[index]?.[1].toString() as HexString;
+
+          return {
+            address,
+            balance: isUndefined(result) ? 0n : BigInt(result),
+            symbol: symbols[address],
+            decimals: decimals[address],
+          };
+        }),
+    },
   });
 }
 
@@ -56,11 +96,13 @@ function Balance({ value, SVG, symbol }: { value: string; symbol: string; SVG: S
 function MiniWallet() {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
-  const { data: ftBalances } = useVaraFTBalances();
+  const { data: varaFtBalances } = useVaraFTBalances();
+  const { data: ethFfBalances } = useEthFTBalances();
 
   const [isOpen, open, close] = useModal();
 
   if (!account && !ethAccount.isConnected) return;
+  const ftBalances = varaFtBalances || ethFfBalances;
 
   const renderBalances = () =>
     ftBalances?.map(({ address, balance, decimals, symbol }) => (

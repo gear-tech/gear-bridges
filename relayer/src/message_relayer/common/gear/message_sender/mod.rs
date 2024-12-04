@@ -1,4 +1,4 @@
-use std::{sync::mpsc::Receiver, thread, time::Instant};
+use std::sync::mpsc::Receiver;
 
 use anyhow::anyhow;
 use ethereum_client::EthApi;
@@ -15,9 +15,7 @@ use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay};
 use ethereum_beacon_client::BeaconClient;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{
-    self, EthereumSlotNumber, GSdkArgs, TxHashWithSlot, DELAY_MAX,
-};
+use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot};
 
 mod compose_payload;
 
@@ -89,22 +87,10 @@ impl MessageSender {
         messages: Receiver<TxHashWithSlot>,
         checkpoints: Receiver<EthereumSlotNumber>,
     ) {
-        tokio::task::spawn_blocking(move || {
-            let mut error_index = 0;
-            loop {
-                let timer = Instant::now();
-                let res = block_on(self.run_inner(&messages, &checkpoints));
-                let elapsed = timer.elapsed();
-                if let Err(err) = res {
-                    log::error!("Gear message sender failed: {}", err);
-
-                    if elapsed > 2 * DELAY_MAX {
-                        error_index = 0;
-                    }
-
-                    thread::sleep(common::get_delay(error_index));
-                    error_index += 1;
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&messages, &checkpoints));
+            if let Err(err) = res {
+                log::error!("Gear message sender failed: {}", err);
             }
         });
     }

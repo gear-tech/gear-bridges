@@ -1,8 +1,4 @@
-use std::{
-    sync::mpsc::{channel, Receiver, Sender},
-    thread,
-    time::Instant,
-};
+use std::sync::mpsc::{channel, Receiver, Sender};
 
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
@@ -13,9 +9,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 
-use crate::message_relayer::common::{
-    self, EthereumSlotNumber, GSdkArgs, GearBlockNumber, DELAY_MAX,
-};
+use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
 
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
@@ -55,22 +49,10 @@ impl CheckpointsExtractor {
     pub fn run(mut self, blocks: Receiver<GearBlockNumber>) -> Receiver<EthereumSlotNumber> {
         let (sender, receiver) = channel();
 
-        tokio::task::spawn_blocking(move || {
-            let mut error_index = 0;
-            loop {
-                let timer = Instant::now();
-                let res = block_on(self.run_inner(&sender, &blocks));
-                let elapsed = timer.elapsed();
-                if let Err(err) = res {
-                    log::error!("Checkpoints extractor failed: {}", err);
-
-                    if elapsed > 2 * DELAY_MAX {
-                        error_index = 0;
-                    }
-
-                    thread::sleep(common::get_delay(error_index));
-                    error_index += 1;
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&sender, &blocks));
+            if let Err(err) = res {
+                log::error!("Checkpoints extractor failed: {}", err);
             }
         });
 

@@ -1,7 +1,6 @@
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use futures::executor::block_on;
@@ -9,7 +8,7 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{self, GSdkArgs, GearBlockNumber, DELAY_MAX};
+use crate::message_relayer::common::{GSdkArgs, GearBlockNumber};
 
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
@@ -48,22 +47,10 @@ impl BlockListener {
     pub fn run<const RECEIVER_COUNT: usize>(self) -> [Receiver<GearBlockNumber>; RECEIVER_COUNT] {
         let (senders, receivers): (Vec<_>, Vec<_>) = (0..RECEIVER_COUNT).map(|_| channel()).unzip();
 
-        tokio::task::spawn_blocking(move || {
-            let mut error_index = 0;
-            loop {
-                let timer = Instant::now();
-                let res = block_on(self.run_inner(&senders));
-                let elapsed = timer.elapsed();
-                if let Err(err) = res {
-                    log::error!("Gear block listener failed: {}", err);
-
-                    if elapsed > 2 * DELAY_MAX {
-                        error_index = 0;
-                    }
-
-                    thread::sleep(common::get_delay(error_index));
-                    error_index += 1;
-                }
+        tokio::task::spawn_blocking(move || loop {
+            let res = block_on(self.run_inner(&senders));
+            if let Err(err) = res {
+                log::error!("Gear block listener failed: {}", err);
             }
         });
 

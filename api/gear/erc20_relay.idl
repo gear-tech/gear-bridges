@@ -115,9 +115,7 @@ constructor {
 service Erc20Relay {
   /// Check proofs and return receipt if successfull, error otherwise.
   CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
-  SetVftManager : (vft_manager: actor_id) -> null;
   query Admin : () -> actor_id;
   query CheckpointLightClientAddress : () -> actor_id;
-  query VftManager : () -> actor_id;
 };
 

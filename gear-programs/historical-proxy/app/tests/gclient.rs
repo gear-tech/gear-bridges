@@ -82,14 +82,6 @@ async fn proxy() {
         .send_recv(relay_code_id, salt)
         .await
         .unwrap();
-    let mut erc20_relay_client =
-        erc20_relay_client::Erc20Relay::new(GClientRemoting::new(api.clone()));
-    erc20_relay_client
-        .set_vft_manager(admin)
-        .with_gas_limit(5_500_000_000)
-        .send_recv(erc20_relay_program_id)
-        .await
-        .unwrap();
 
     let proxy_program_id =
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))

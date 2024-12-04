@@ -1,6 +1,6 @@
 // Incorporate code generated based on the IDL file
 
-use super::{error::Error, ExecContext, RefCell, State};
+use super::{error::Error, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -41,35 +41,17 @@ pub struct CheckedProofs {
     pub block_number: u64,
 }
 
-pub struct Erc20Relay<'a, ExecContext> {
+pub struct Erc20Relay<'a> {
     state: &'a RefCell<State>,
-    exec_context: ExecContext,
 }
 
 #[sails_rs::service]
-impl<'a, T> Erc20Relay<'a, T>
-where
-    T: ExecContext,
+impl<'a> Erc20Relay<'a>
 {
-    pub fn new(state: &'a RefCell<State>, exec_context: T) -> Self {
+    pub fn new(state: &'a RefCell<State>) -> Self {
         Self {
             state,
-            exec_context,
         }
-    }
-
-    pub fn vft_manager(&self) -> ActorId {
-        self.state.borrow().vft_manager
-    }
-
-    pub fn set_vft_manager(&mut self, vft_manager: ActorId) {
-        let source = self.exec_context.actor_id();
-        let mut state = self.state.borrow_mut();
-        if source != state.admin {
-            panic!("Not admin");
-        }
-
-        state.vft_manager = vft_manager;
     }
 
     pub fn admin(&self) -> ActorId {

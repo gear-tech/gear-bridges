@@ -13,7 +13,6 @@ use service::Erc20Relay as Erc20RelayService;
 pub struct State {
     admin: ActorId,
     checkpoint_light_client_address: ActorId,
-    vft_manager: ActorId,
 }
 
 pub struct Erc20RelayProgram(RefCell<State>);
@@ -25,11 +24,10 @@ impl Erc20RelayProgram {
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
             checkpoint_light_client_address,
-            vft_manager: Default::default(),
         }))
     }
 
-    pub fn erc20_relay(&self) -> Erc20RelayService<GStdExecContext> {
-        Erc20RelayService::new(&self.0, GStdExecContext::new())
+    pub fn erc20_relay(&self) -> Erc20RelayService {
+        Erc20RelayService::new(&self.0)
     }
 }

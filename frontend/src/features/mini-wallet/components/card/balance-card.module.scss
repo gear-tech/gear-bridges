@@ -1,0 +1,10 @@
+.card {
+  padding: 16px;
+
+  border: 1px solid rgba(#e1e1e3, 0.6);
+  border-radius: 6px;
+
+  &.locked {
+    background-color: rgba(#e1e1e3, 0.2);
+  }
+}

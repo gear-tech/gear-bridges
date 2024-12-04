@@ -4,24 +4,12 @@
   gap: 8px;
 }
 
-.card {
-  padding: 16px;
-
-  border: 1px solid rgba(#e1e1e3, 0.6);
-  border-radius: 6px;
-}
-
 .heading {
-  margin-bottom: 16px;
+  margin: 32px 0 16px;
 
   font-size: 16px;
   font-weight: 600;
   line-height: 16px;
-}
-
-.footer {
-  display: flex;
-  justify-content: flex-end;
 }
 
 // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
@@ -31,13 +19,5 @@
     display: flex;
     align-items: center;
     gap: 24px;
-  }
-}
-
-.locked {
-  margin-top: 32px;
-
-  .card {
-    background-color: rgba(#e1e1e3, 0.2);
   }
 }

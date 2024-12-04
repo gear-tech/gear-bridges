@@ -1,8 +1,7 @@
 import { useAccount } from '@gear-js/react-hooks';
 
-import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/features/swap/consts';
-import { useVaraFTBalance } from '@/features/swap/hooks';
-import { useEthAccount, useModal, useTokens } from '@/hooks';
+import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { useVaraFTBalance, useEthAccount, useModal, useTokens } from '@/hooks';
 
 import { MiniWalletModal } from '../mini-wallet-modal';
 

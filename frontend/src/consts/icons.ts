@@ -8,8 +8,10 @@ import WrappedEthSVG from '@/assets/wrapped-eth.svg?react';
 import WrappedVaraSVG from '@/assets/wrapped-vara.svg?react';
 import { SVGComponent } from '@/types';
 
+import { WRAPPED_VARA_CONTRACT_ADDRESS } from './env';
+
 const TOKEN_SVG: Record<HexString, SVGComponent> = {
-  '0x00': VaraSVG,
+  [WRAPPED_VARA_CONTRACT_ADDRESS]: VaraSVG,
   '0x01': EthSVG,
   '0x02': WrappedVaraSVG,
   '0x03': WrappedEthSVG,

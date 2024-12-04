@@ -1,7 +1,8 @@
 import { formatEther } from 'viem';
 import { useBalance } from 'wagmi';
 
-import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
+import { useInvalidateOnBlock } from './common';
+import { useEthAccount } from './use-eth-account';
 
 const withPrecision = (value: string) => {
   // simplest solution without rounding for now

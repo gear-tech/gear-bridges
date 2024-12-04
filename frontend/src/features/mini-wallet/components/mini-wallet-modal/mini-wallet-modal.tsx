@@ -6,10 +6,8 @@ import { formatUnits } from 'viem';
 import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { TOKEN_SVG } from '@/consts';
-import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/features/swap/consts';
-import { useVaraAccountBalance, useEthAccountBalance } from '@/features/swap/hooks';
-import { useTokens } from '@/hooks';
+import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
 
 import { useVaraFTBalances, useEthFTBalances } from '../../hooks';
 import { Balance } from '../balance';
@@ -33,18 +31,23 @@ function MiniWalletModal({ lockedBalance, close }: Props) {
 
   const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
   const { data: ethFtBalances } = useEthFTBalances(nonNativeAddresses);
+  const ftBalances = varaFtBalances || ethFtBalances;
 
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
-
   const accountBalance = account ? varaAccountBalance : ethAccountBalance;
-  const ftBalances = varaFtBalances || ethFtBalances;
 
-  const renderBalances = () =>
-    ftBalances &&
-    decimals &&
-    symbols &&
-    getTypedEntries(ftBalances).map(([address, balance]) => (
+  const renderHeading = () => (
+    <>
+      My Tokens
+      <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
+    </>
+  );
+
+  const renderBalances = () => {
+    if (!ftBalances || !decimals || !symbols) return;
+
+    return getTypedEntries(ftBalances).map(([address, balance]) => (
       <li key={address} className={styles.card}>
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
@@ -53,13 +56,7 @@ function MiniWalletModal({ lockedBalance, close }: Props) {
         />
       </li>
     ));
-
-  const renderHeading = () => (
-    <>
-      My Tokens
-      <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
-    </>
-  );
+  };
 
   return (
     // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
@@ -79,15 +76,15 @@ function MiniWalletModal({ lockedBalance, close }: Props) {
         {renderBalances()}
       </ul>
 
-      {!!lockedBalance.value && lockedBalance.formattedValue && (
+      {lockedBalance.formattedValue && symbols && (
         <div className={styles.locked}>
           <h4 className={styles.heading}>Locked Tokens</h4>
 
           <div className={styles.card}>
             <BalanceCard
               value={lockedBalance.formattedValue}
-              SVG={account ? VaraSVG : EthSVG}
-              symbol={account ? 'VARA' : 'ETH'}
+              SVG={TOKEN_SVG[WRAPPED_VARA_CONTRACT_ADDRESS] ?? TokenPlaceholderSVG}
+              symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
               locked
             />
           </div>

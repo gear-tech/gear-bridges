@@ -5,8 +5,6 @@ import { formatUnits } from 'viem';
 import { VftProgram } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { QUERY_NAME, SERVICE_NAME } from '../../consts';
-
 function useVaraFTBalance(address: HexString | undefined, decimals: number | undefined) {
   const { account } = useAccount();
 
@@ -17,8 +15,8 @@ function useVaraFTBalance(address: HexString | undefined, decimals: number | und
 
   const { data, isLoading } = useProgramQuery({
     program,
-    serviceName: SERVICE_NAME.VFT,
-    functionName: QUERY_NAME.BALANCE,
+    serviceName: 'vft',
+    functionName: 'balanceOf',
     args: [account?.decodedAddress || '0x00'],
     query: { enabled: Boolean(account) },
     watch: true,

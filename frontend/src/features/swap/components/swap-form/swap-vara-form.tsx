@@ -1,13 +1,9 @@
 import { useAccount } from '@gear-js/react-hooks';
 
+import { useVaraFTBalance, useVaraAccountBalance } from '@/hooks';
+
 import { NETWORK_INDEX } from '../../consts';
-import {
-  useHandleVaraSubmit,
-  useVaraFTBalance,
-  useVaraAccountBalance,
-  useVaraFee,
-  useVaraFTAllowance,
-} from '../../hooks';
+import { useHandleVaraSubmit, useVaraFee, useVaraFTAllowance } from '../../hooks';
 
 import { SwapForm } from './swap-form';
 

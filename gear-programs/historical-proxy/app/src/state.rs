@@ -7,7 +7,6 @@ pub struct ProxyState {
     pub endpoints: EndpointList,
 }
 
-
 pub struct EndpointList(Vec<(Slot, ActorId)>);
 
 impl Default for EndpointList {

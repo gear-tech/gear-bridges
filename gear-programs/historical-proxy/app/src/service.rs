@@ -137,7 +137,6 @@ where
             .map_err(|e| {
                 ProxyError::SendFailure(format!("failed to send message to client: {:?}", e))
             })?
-
             .await
             .map_err(|e| {
                 ProxyError::ReplyFailure(format!("failed to receive reply from client: {:?}", e))

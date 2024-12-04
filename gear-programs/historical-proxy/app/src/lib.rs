@@ -19,6 +19,7 @@ pub struct HistoricalProxyProgram(RefCell<state::ProxyState>);
 #[sails_rs::program]
 impl HistoricalProxyProgram {
     // Program's constructor
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(state::ProxyState {

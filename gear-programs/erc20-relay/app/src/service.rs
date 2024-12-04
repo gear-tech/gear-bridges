@@ -134,7 +134,7 @@ where
                 transaction_index,
                 block_number: block.body.execution_payload.block_number,
             }),
-            _ => return Err(Error::InvalidReceiptProof),
+            _ => Err(Error::InvalidReceiptProof),
         }
     }
 

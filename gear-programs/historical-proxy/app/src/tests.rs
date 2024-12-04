@@ -1,5 +1,5 @@
 use historical_proxy_client::{
-    traits::*, Config, HistoricalProxy as HistoricalProxyC,
+    traits::*, HistoricalProxy as HistoricalProxyC,
     HistoricalProxyFactory as HistoricalProxyFactoryC, ProxyError,
 };
 

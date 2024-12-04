@@ -1,20 +1,12 @@
 use super::error::ProxyError;
-use super::{ActorId, Decode, Encode, TypeInfo, Vec};
+use super::{ActorId, Vec};
 pub type Slot = u64;
 
 pub struct ProxyState {
     pub admin: ActorId,
     pub endpoints: EndpointList,
-    pub config: Config,
 }
 
-#[derive(Clone, Copy, Debug, Encode, Decode, TypeInfo)]
-#[codec(crate = sails_rs::scale_codec)]
-#[scale_info(crate = sails_rs::scale_info)]
-pub struct Config {
-    pub reply_timeout: u32,
-    pub reply_deposit: u64,
-}
 
 pub struct EndpointList(Vec<(Slot, ActorId)>);
 

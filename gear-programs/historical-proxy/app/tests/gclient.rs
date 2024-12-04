@@ -90,10 +90,7 @@ async fn proxy() {
 
     let proxy_program_id =
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
-            .new(historical_proxy_client::Config {
-                reply_timeout: 1000,
-                reply_deposit: 5_500_000_000,
-            })
+            .new()
             .with_gas_limit(5_500_000_000)
             .send_recv(proxy_code_id, salt)
             .await

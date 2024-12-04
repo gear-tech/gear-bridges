@@ -5,7 +5,7 @@ use sails_rs::{
     gstd::{ExecContext, GStdExecContext},
     prelude::*,
 };
-use state::{Config, EndpointList};
+use state::EndpointList;
 
 pub mod error;
 pub mod service;
@@ -19,12 +19,11 @@ pub struct HistoricalProxyProgram(RefCell<state::ProxyState>);
 #[sails_rs::program]
 impl HistoricalProxyProgram {
     // Program's constructor
-    pub fn new(config: Config) -> Self {
+    pub fn new() -> Self {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(state::ProxyState {
             admin: exec_context.actor_id(),
             endpoints: EndpointList::new(),
-            config,
         }))
     }
 

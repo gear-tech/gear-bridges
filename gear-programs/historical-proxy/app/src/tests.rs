@@ -30,10 +30,7 @@ async fn setup_for_test() -> Fixture {
 
     let proxy_id = remoting.system().submit_code(historical_proxy::WASM_BINARY);
     let proxy = HistoricalProxyFactoryC::new(remoting.clone())
-        .new(Config {
-            reply_timeout: 100,
-            reply_deposit: 0,
-        })
+        .new()
         .send_recv(proxy_id, b"salt")
         .await
         .unwrap();

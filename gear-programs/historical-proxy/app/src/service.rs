@@ -12,7 +12,7 @@ use sails_rs::{gstd::ExecContext, prelude::*};
 
 use crate::{
     error::ProxyError,
-    state::{Config, ProxyState, Slot},
+    state::{ProxyState, Slot},
 };
 
 #[derive(Encode, TypeInfo)]
@@ -41,21 +41,6 @@ where
             state,
             exec_context,
         }
-    }
-
-    pub fn config(&self) -> Config {
-        self.state.borrow().config
-    }
-
-    pub fn update_config(&mut self, config_new: Config) -> Result<(), ProxyError> {
-        let source = self.exec_context.actor_id();
-        let mut state = self.state.borrow_mut();
-        if source != state.admin {
-            return Err(ProxyError::NotAdmin);
-        }
-
-        state.config = config_new;
-        Ok(())
     }
 
     pub fn admin(&self) -> ActorId {
@@ -106,8 +91,6 @@ where
         client_route: Vec<u8>,
     ) -> Result<(Vec<u8>, Vec<u8>), ProxyError> {
         let state = self.state.borrow();
-        let reply_deposit = state.config.reply_deposit;
-        let reply_timeout = state.config.reply_timeout;
         let endpoint = state.endpoints.endpoint_for(slot)?;
         drop(state);
         // 1) check if proofs are correct and receive data for further processing
@@ -150,12 +133,11 @@ where
             payload
         };
 
-        let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, reply_deposit)
+        let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, 0)
             .map_err(|e| {
                 ProxyError::SendFailure(format!("failed to send message to client: {:?}", e))
             })?
-            .up_to(Some(reply_timeout))
-            .map_err(|e| ProxyError::ReplyTimeout(format!("failed to set reply timeout: {:?}", e)))?
+
             .await
             .map_err(|e| {
                 ProxyError::ReplyFailure(format!("failed to receive reply from client: {:?}", e))

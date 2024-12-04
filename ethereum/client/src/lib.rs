@@ -61,6 +61,7 @@ pub struct Contracts<P, T, N> {
 #[derive(Debug, Clone)]
 pub struct MerkleRootEntry {
     pub block_number: u64,
+    pub merkle_root: H256,
 }
 
 #[derive(Debug, Clone)]
@@ -365,6 +366,7 @@ where
             .iter()
             .map(|(event, _)| MerkleRootEntry {
                 block_number: event.blockNumber.to(),
+                merkle_root: event.merkleRoot.0.into(),
             })
             .collect())
     }

@@ -59,7 +59,7 @@ impl FileSystemProofStorage {
         };
 
         if storage.load_state().is_ok() {
-            log::info!("Proof storage state loaded succesfully");
+            log::info!("Proof storage state loaded successfully");
         } else {
             log::info!("Proof storage state not found. Waiting for initialization");
         }

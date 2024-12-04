@@ -70,7 +70,7 @@ pub struct MessageSent {
 
 impl MessageSent {
     pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
-        log::debug!("Proving message presense in finalized block...");
+        log::debug!("Proving message presence in finalized block...");
 
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();

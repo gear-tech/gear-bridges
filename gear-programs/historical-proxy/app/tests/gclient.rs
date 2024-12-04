@@ -15,7 +15,7 @@ static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((
     None, None,
 ));
 
-async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4], [u8; 4]) {
+async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
 
@@ -65,7 +65,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         proxy_code_id,
         erc20_relay_code_id,
         gas_limit,
-        salt,
+        salt.to_le_bytes(),
     )
 }
 

@@ -13,8 +13,9 @@ import { FUNGIBLE_TOKEN_ABI, TOKEN_SVG, VftProgram } from '@/consts';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthAccountBalance, useVaraAccountBalance } from '@/features/swap/hooks';
 import { useEthAccount, useModal, useTokens } from '@/hooks';
-import { SVGComponent } from '@/types';
 import { isUndefined } from '@/utils';
+
+import { Balance } from '../balance';
 
 import styles from './mini-wallet.module.scss';
 
@@ -84,15 +85,6 @@ function useEthFTBalances() {
         }),
     },
   });
-}
-
-function Balance({ value, SVG, symbol }: { value: string; symbol: string; SVG: SVGComponent }) {
-  return (
-    <span className={styles.balance}>
-      <SVG />
-      {value} {symbol}
-    </span>
-  );
 }
 
 function MiniWallet() {

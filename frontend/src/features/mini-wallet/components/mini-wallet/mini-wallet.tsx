@@ -10,6 +10,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FUNGIBLE_TOKEN_ABI, TOKEN_SVG, VftProgram } from '@/consts';
+import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthAccountBalance, useVaraAccountBalance } from '@/features/swap/hooks';
 import { useEthAccount, useModal, useTokens } from '@/hooks';
 import { SVGComponent } from '@/types';
@@ -106,7 +107,15 @@ function MiniWallet() {
   const [isOpen, open, close] = useModal();
 
   if (!account && !ethAccount.isConnected) return;
-  const ftBalances = varaFtBalances || ethFfBalances;
+
+  const ftBalances = (varaFtBalances || ethFfBalances)?.filter(
+    ({ address }) => address !== WRAPPED_VARA_CONTRACT_ADDRESS,
+  );
+
+  const lockedBalance = (varaFtBalances || ethFfBalances)?.filter(
+    ({ address }) => address === WRAPPED_VARA_CONTRACT_ADDRESS,
+  )[0];
+
   const accBalance = account ? varaAccountBalance : ethAccountBalance;
 
   const renderBalances = () =>
@@ -127,9 +136,14 @@ function MiniWallet() {
       </button>
 
       {isOpen && (
-        <Modal heading="My Tokens" close={close}>
-          <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
-
+        <Modal
+          heading="My Tokens"
+          footer={
+            <div className={styles.footer}>
+              <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
+            </div>
+          }
+          close={close}>
           <ul className={styles.list}>
             {accBalance.formattedValue && (
               <li className={styles.card}>
@@ -143,6 +157,20 @@ function MiniWallet() {
 
             {renderBalances()}
           </ul>
+
+          {!!lockedBalance?.balance && (
+            <div className={styles.locked}>
+              <h4 className={styles.heading}>Locked Tokens</h4>
+
+              <div className={styles.card}>
+                <Balance
+                  value={formatUnits(lockedBalance.balance, account ? 12 : 18)}
+                  SVG={account ? VaraSVG : EthSVG}
+                  symbol={account ? 'VARA' : 'ETH'}
+                />
+              </div>
+            </div>
+          )}
         </Modal>
       )}
     </>

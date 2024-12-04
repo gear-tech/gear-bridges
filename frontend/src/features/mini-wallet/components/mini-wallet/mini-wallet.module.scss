@@ -25,3 +25,24 @@
   border: 1px solid rgba(#e1e1e3, 0.6);
   border-radius: 6px;
 }
+
+.heading {
+  margin-bottom: 16px;
+
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.locked {
+  margin-top: 32px;
+
+  .card {
+    background-color: rgba(#e1e1e3, 0.2);
+  }
+}

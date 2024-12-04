@@ -7,17 +7,14 @@ import { watchContractEvent } from 'wagmi/actions';
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount } from '@/hooks';
 
-import { EVENT_NAME } from '../../consts';
+import { ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS, EVENT_NAME } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
-
-import { useERC20ManagerAddress } from './use-erc20-manager-address';
 
 const abi = FUNGIBLE_TOKEN_ABI;
 
 function useApprove(address: HexString | undefined) {
   const ethAccount = useEthAccount();
   const config = useConfig();
-  const { data: erc20ManagerAddress, isLoading } = useERC20ManagerAddress();
   const { writeContractAsync } = useWriteContract();
 
   // maybe better to use waitForTransactionReceipt,
@@ -25,7 +22,7 @@ function useApprove(address: HexString | undefined) {
   const watch = (amount: bigint) =>
     new Promise<bigint>((resolve, reject) => {
       const eventName = EVENT_NAME.APPROVAL;
-      const args = { owner: ethAccount.address, spender: erc20ManagerAddress };
+      const args = { owner: ethAccount.address, spender: ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS };
 
       const onLogs = (logs: WatchContractEventOnLogsParameter<typeof abi, typeof EVENT_NAME.APPROVAL>) =>
         logs.forEach(({ args: { value = 0n } }) => {
@@ -46,17 +43,14 @@ function useApprove(address: HexString | undefined) {
 
   const approve = async (amount: bigint) => {
     if (!address) throw new Error('Fungible token address is not defined');
-    if (!erc20ManagerAddress) throw new Error('ERC20 Manager address is not defined');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
-    const args = [erc20ManagerAddress, amount] as const;
+    const args = [ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] as const;
 
     return writeContractAsync({ address, abi, functionName, args }).then(() => watch(amount));
   };
 
-  const mutation = useMutation({ mutationFn: approve });
-
-  return { ...mutation, isLoading };
+  return useMutation({ mutationFn: approve });
 }
 
 export { useApprove };

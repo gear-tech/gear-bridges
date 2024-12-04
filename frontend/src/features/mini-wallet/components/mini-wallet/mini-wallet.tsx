@@ -1,91 +1,19 @@
-import { HexString } from '@gear-js/api';
-import { useAccount, useApi } from '@gear-js/react-hooks';
+import { useAccount } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
-import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
 import { formatUnits } from 'viem';
-import { useReadContracts } from 'wagmi';
 
 import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FUNGIBLE_TOKEN_ABI, TOKEN_SVG, VftProgram } from '@/consts';
+import { TOKEN_SVG } from '@/consts';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthAccountBalance, useVaraAccountBalance } from '@/features/swap/hooks';
-import { useEthAccount, useModal, useTokens } from '@/hooks';
-import { isUndefined } from '@/utils';
+import { useEthAccount, useModal } from '@/hooks';
 
+import { useVaraFTBalances, useEthFTBalances } from '../../hooks';
 import { Balance } from '../balance';
 
 import styles from './mini-wallet.module.scss';
-
-function useVaraFTBalances() {
-  const { api, isApiReady } = useApi();
-  const { account } = useAccount();
-  const { addresses, decimals, symbols } = useTokens();
-
-  const getBalances = async () => {
-    if (!api) throw new Error('API not initialized');
-    if (!account) throw new Error('Account not found');
-    if (!addresses || !symbols || !decimals) throw new Error('Fungible tokens are not found');
-
-    const balancePromises = addresses.map(async ([_address]) => {
-      const address = _address.toString() as HexString;
-
-      return {
-        address,
-        balance: await new VftProgram(api, address).vft.balanceOf(account.decodedAddress),
-        symbol: symbols[address],
-        decimals: decimals[address],
-      };
-    });
-
-    return Promise.all(balancePromises);
-  };
-
-  return useQuery({
-    queryKey: ['vara-ft-balances', account?.decodedAddress, addresses, symbols, decimals],
-    queryFn: getBalances,
-    enabled: isApiReady && Boolean(account && addresses && symbols && decimals),
-  });
-}
-
-function useEthFTBalances() {
-  const ethAccount = useEthAccount();
-  const { addresses, symbols, decimals } = useTokens();
-
-  const contracts = useMemo(
-    () =>
-      addresses?.map(([, address]) => ({
-        address: address.toString() as HexString,
-        abi: FUNGIBLE_TOKEN_ABI,
-        functionName: 'balanceOf',
-        args: [ethAccount.address],
-      })),
-    [addresses, ethAccount.address],
-  );
-
-  return useReadContracts({
-    contracts,
-    query: {
-      enabled: ethAccount.isConnected,
-      select: (data) =>
-        addresses &&
-        symbols &&
-        decimals &&
-        data.map(({ result }, index) => {
-          const address = addresses?.[index]?.[1].toString() as HexString;
-
-          return {
-            address,
-            balance: isUndefined(result) ? 0n : BigInt(result),
-            symbol: symbols[address],
-            decimals: decimals[address],
-          };
-        }),
-    },
-  });
-}
 
 function MiniWallet() {
   const { account } = useAccount();
@@ -94,17 +22,17 @@ function MiniWallet() {
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
   const { data: varaFtBalances } = useVaraFTBalances();
-  const { data: ethFfBalances } = useEthFTBalances();
+  const { data: ethFtBalances } = useEthFTBalances();
 
   const [isOpen, open, close] = useModal();
 
   if (!account && !ethAccount.isConnected) return;
 
-  const ftBalances = (varaFtBalances || ethFfBalances)?.filter(
+  const ftBalances = (varaFtBalances || ethFtBalances)?.filter(
     ({ address }) => address !== WRAPPED_VARA_CONTRACT_ADDRESS,
   );
 
-  const lockedBalance = (varaFtBalances || ethFfBalances)?.filter(
+  const lockedBalance = (varaFtBalances || ethFtBalances)?.filter(
     ({ address }) => address === WRAPPED_VARA_CONTRACT_ADDRESS,
   )[0];
 

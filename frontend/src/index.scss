@@ -13,6 +13,12 @@ body {
   flex-direction: column;
 }
 
+#modal-root {
+  > div > div {
+    max-width: 680px;
+  }
+}
+
 main {
   flex: 1;
   padding: 50px 0;
@@ -34,6 +40,7 @@ button {
   padding: 0;
   border: none;
   outline: none;
+  background-color: transparent;
 
   &:not(:disabled) {
     cursor: pointer;

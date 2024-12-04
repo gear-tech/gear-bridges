@@ -3,17 +3,13 @@ import { getVaraAddress } from '@gear-js/react-hooks';
 import { formatUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
+import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Skeleton, TruncatedText } from '@/components';
-import { SVGComponent } from '@/types';
+import { TOKEN_SVG } from '@/consts';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import TokenPlaceholderSVG from '../../assets/token-placeholder.svg?react';
-import UsdcSVG from '../../assets/usdc.svg?react';
-import VaraUsdcSVG from '../../assets/vara-usdc.svg?react';
-import WrappedEthSVG from '../../assets/wrapped-eth.svg?react';
-import WrappedVaraSVG from '../../assets/wrapped-vara.svg?react';
 import { Network, Transfer } from '../../types';
 
 import styles from './transaction-pair.module.scss';
@@ -22,15 +18,6 @@ const NETWORK_SVG = {
   [Network.Gear]: VaraSVG,
   [Network.Ethereum]: EthSVG,
 } as const;
-
-const TOKEN_SVG: Record<HexString, SVGComponent> = {
-  '0x00': VaraSVG,
-  '0x01': EthSVG,
-  '0x02': WrappedVaraSVG,
-  '0x03': WrappedEthSVG,
-  '0x05': VaraUsdcSVG,
-  '0x04': UsdcSVG,
-};
 
 type Props = Pick<
   Transfer,

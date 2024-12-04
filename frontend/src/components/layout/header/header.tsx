@@ -3,6 +3,7 @@ import { Link, NavLink } from 'react-router-dom';
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
 import { TransactionsCounter } from '@/features/history';
+import { MiniWallet } from '@/features/mini-wallet';
 
 import { Container } from '../container';
 
@@ -21,6 +22,7 @@ function Header() {
         <nav className={styles.nav}>
           <NavLink to={ROUTE.HOME}>Home</NavLink>
           <NavLink to={ROUTE.TRANSACTIONS}>Transactions</NavLink>
+          <MiniWallet />
           <NavLink to={ROUTE.FAQ}>FAQ</NavLink>
         </nav>
       </Container>

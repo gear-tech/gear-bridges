@@ -10,13 +10,16 @@ use vft_manager_client::vft_manager;
 
 mod shared;
 
-static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((0, None, None));
+static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((
+    42_42_42, /* random number choosen by fair random */
+    None, None,
+));
 
 async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4], [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
 
-    let (api, proxy_code_id, erc20_relay_code_id, salt1, salt2) = {
+    let (api, proxy_code_id, erc20_relay_code_id, salt) = {
         let mut lock = LOCK.lock().await;
         let proxy_code_id = match lock.1 {
             Some(code_id) => code_id,
@@ -30,9 +33,6 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
             }
         };
 
-        let salt1 = lock.0;
-        lock.0 += 1;
-
         let erc20_relay_code_id = match lock.2 {
             Some(code_id) => code_id,
             None => {
@@ -42,7 +42,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
             }
         };
 
-        let salt2 = lock.0;
+        let salt = lock.0;
         lock.0 += 1;
 
         let suri = format!("{DEV_PHRASE}//historical-proxy-{salt}:");
@@ -65,8 +65,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         proxy_code_id,
         erc20_relay_code_id,
         gas_limit,
-        salt1.to_le_bytes(),
-        salt2.to_le_bytes(),
+        salt,
     )
 }
 
@@ -74,14 +73,13 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
 async fn proxy() {
     let message = shared::event();
 
-    let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt1, salt2) =
-        connect_to_node().await;
+    let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt) = connect_to_node().await;
     println!("node spun up, code uploaded, gas_limit={}", gas_limit);
     let factory = erc20_relay_client::Erc20RelayFactory::new(GClientRemoting::new(api.clone()));
     let erc20_relay_program_id = factory
         .new(admin)
         .with_gas_limit(gas_limit)
-        .send_recv(relay_code_id, salt2)
+        .send_recv(relay_code_id, salt)
         .await
         .unwrap();
     let mut erc20_relay_client =
@@ -97,7 +95,7 @@ async fn proxy() {
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
             .new()
             .with_gas_limit(5_500_000_000)
-            .send_recv(proxy_code_id, salt1)
+            .send_recv(proxy_code_id, salt)
             .await
             .unwrap();
     println!("relay and proxy programs created");

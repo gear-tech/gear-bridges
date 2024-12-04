@@ -2,23 +2,21 @@ use std::iter;
 
 use primitive_types::{H160, H256};
 
+use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
-use crate::{
-    ethereum_beacon_client::BeaconClient,
-    message_relayer::common::{
-        ethereum::{
-            block_listener::BlockListener as EthereumBlockListener,
-            message_paid_event_extractor::MessagePaidEventExtractor,
-        },
-        gear::{
-            block_listener::BlockListener as GearBlockListener,
-            checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
-        },
-        GSdkArgs,
+use crate::message_relayer::common::{
+    ethereum::{
+        block_listener::BlockListener as EthereumBlockListener,
+        message_paid_event_extractor::MessagePaidEventExtractor,
     },
+    gear::{
+        block_listener::BlockListener as GearBlockListener,
+        checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
+    },
+    GSdkArgs,
 };
 
 pub struct Relayer {

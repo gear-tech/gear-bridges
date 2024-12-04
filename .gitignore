@@ -3,12 +3,14 @@ target/
 .idea
 data/
 /proof_storage
+/block_finality_storage
 /onchain_proof_storage_data
 _obj
 .binpath
 
 cache/
 out/
+tmp/
 
 ethereum/broadcast
 

@@ -4,13 +4,11 @@ use futures::executor::block_on;
 use prometheus::IntCounter;
 use sails_rs::H160;
 
+use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{DepositEventEntry, EthApi};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::{
-    ethereum_beacon_client::BeaconClient,
-    message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
-};
+use crate::message_relayer::common::{EthereumBlockNumber, TxHashWithSlot};
 
 use super::find_slot_by_block_number;
 

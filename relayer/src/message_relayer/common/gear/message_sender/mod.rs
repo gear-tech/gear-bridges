@@ -12,11 +12,11 @@ use sails_rs::{
 };
 
 use erc20_relay_client::{traits::Erc20Relay as _, Erc20Relay};
+use ethereum_beacon_client::BeaconClient;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::{
-    ethereum_beacon_client::BeaconClient,
-    message_relayer::common::{self, EthereumSlotNumber, GSdkArgs, TxHashWithSlot, DELAY_MAX},
+use crate::message_relayer::common::{
+    self, EthereumSlotNumber, GSdkArgs, TxHashWithSlot, DELAY_MAX,
 };
 
 mod compose_payload;

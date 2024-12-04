@@ -31,7 +31,7 @@ function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork, is
     );
 
   const formattedAllowance = formatUnits(allowance, decimals);
-  const contractName = isVaraNetwork ? 'VFT' : 'ERC20';
+  const contractName = isVaraNetwork ? 'VFT Manager' : 'ETH Bridging Payment';
 
   const getSubheading = () => {
     if (!allowance) return `Tokens will be approved first, followed by a transfer message.`;
@@ -52,8 +52,8 @@ function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork, is
       <div className={styles.tooltip}>
         <p className={styles.heading}>
           {allowance > 0
-            ? `You have already approved ${formattedAllowance} ${symbol} to the ${contractName} Manager contract.`
-            : `You don't have any approved tokens to the ${contractName} Manager contract yet.`}
+            ? `You have already approved ${formattedAllowance} ${symbol} to the ${contractName} contract.`
+            : `You don't have any approved tokens to the ${contractName} contract yet.`}
         </p>
 
         <p className={styles.subheading}>{getSubheading()}</p>

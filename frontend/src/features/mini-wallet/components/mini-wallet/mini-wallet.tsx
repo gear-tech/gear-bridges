@@ -10,6 +10,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FUNGIBLE_TOKEN_ABI, TOKEN_SVG, VftProgram } from '@/consts';
+import { useEthAccountBalance, useVaraAccountBalance } from '@/features/swap/hooks';
 import { useEthAccount, useModal, useTokens } from '@/hooks';
 import { SVGComponent } from '@/types';
 import { isUndefined } from '@/utils';
@@ -96,6 +97,9 @@ function Balance({ value, SVG, symbol }: { value: string; symbol: string; SVG: S
 function MiniWallet() {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
+
+  const varaAccountBalance = useVaraAccountBalance();
+  const ethAccountBalance = useEthAccountBalance();
   const { data: varaFtBalances } = useVaraFTBalances();
   const { data: ethFfBalances } = useEthFTBalances();
 
@@ -103,10 +107,11 @@ function MiniWallet() {
 
   if (!account && !ethAccount.isConnected) return;
   const ftBalances = varaFtBalances || ethFfBalances;
+  const accBalance = account ? varaAccountBalance : ethAccountBalance;
 
   const renderBalances = () =>
     ftBalances?.map(({ address, balance, decimals, symbol }) => (
-      <li key={address}>
+      <li key={address} className={styles.card}>
         <Balance
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
           value={formatUnits(balance, decimals)}
@@ -125,7 +130,19 @@ function MiniWallet() {
         <Modal heading="My Tokens" close={close}>
           <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
 
-          {ftBalances?.length && <ul className={styles.list}>{renderBalances()}</ul>}
+          <ul className={styles.list}>
+            {accBalance.formattedValue && (
+              <li className={styles.card}>
+                <Balance
+                  SVG={account ? VaraSVG : EthSVG}
+                  value={accBalance.formattedValue}
+                  symbol={account ? 'VARA' : 'ETH'}
+                />
+              </li>
+            )}
+
+            {renderBalances()}
+          </ul>
         </Modal>
       )}
     </>

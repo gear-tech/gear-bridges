@@ -1,6 +1,6 @@
 // Incorporate code generated based on the IDL file
 
-use super::{error::Error, Config, ExecContext, RefCell, State};
+use super::{error::Error, ExecContext, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -72,20 +72,6 @@ where
         state.vft_manager = vft_manager;
     }
 
-    pub fn config(&self) -> Config {
-        self.state.borrow().config
-    }
-
-    pub fn update_config(&mut self, config_new: Config) {
-        let source = self.exec_context.actor_id();
-        let mut state = self.state.borrow_mut();
-        if source != state.admin {
-            panic!("Not admin");
-        }
-
-        state.config = config_new;
-    }
-
     pub fn admin(&self) -> ActorId {
         self.state.borrow().admin
     }
@@ -143,16 +129,13 @@ where
         let (key_db, value_db) =
             eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
         match trie.get(&key_db) {
-            Ok(Some(found_value)) if found_value == value_db => (),
+            Ok(Some(found_value)) if found_value == value_db => Ok(CheckedProofs {
+                receipt_rlp: message.receipt_rlp,
+                transaction_index,
+                block_number: block.body.execution_payload.block_number,
+            }),
             _ => return Err(Error::InvalidReceiptProof),
         }
-
-        Ok(CheckedProofs {
-            receipt_rlp: message.receipt_rlp,
-            transaction_index,
-            block_number: block.body.execution_payload.block_number
-        })
-        
     }
 
     fn decode_and_check_receipt(&self, message: &EthToVaraEvent) -> Result<ReceiptEnvelope, Error> {

@@ -14,28 +14,18 @@ pub struct State {
     admin: ActorId,
     checkpoint_light_client_address: ActorId,
     vft_manager: ActorId,
-    config: Config,
-}
-
-#[derive(Clone, Copy, Debug, Encode, Decode, TypeInfo)]
-#[codec(crate = sails_rs::scale_codec)]
-#[scale_info(crate = sails_rs::scale_info)]
-pub struct Config {
-    reply_timeout: u32,
-    reply_deposit: u64,
 }
 
 pub struct Erc20RelayProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl Erc20RelayProgram {
-    pub fn new(checkpoint_light_client_address: ActorId, config: Config) -> Self {
+    pub fn new(checkpoint_light_client_address: ActorId) -> Self {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
             admin: exec_context.actor_id(),
             checkpoint_light_client_address,
             vft_manager: Default::default(),
-            config,
         }))
     }
 

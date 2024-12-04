@@ -1,5 +1,5 @@
 use checkpoint_light_client_io::{Handle, HandleResult};
-use erc20_relay_client::{traits::*, Config};
+use erc20_relay_client::traits::*;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
@@ -56,7 +56,6 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
     let admin = <[u8; 32]>::from(id.clone());
     let admin = ActorId::from(admin);
 
-
     (
         api,
         admin,
@@ -75,18 +74,13 @@ async fn proxy() {
     println!("node spun up, code uploaded, gas_limit={}", gas_limit);
     let factory = erc20_relay_client::Erc20RelayFactory::new(GClientRemoting::new(api.clone()));
     let erc20_relay_program_id = factory
-        .new(
-            admin,
-            Config {
-                reply_timeout: 1_000,
-                reply_deposit: 5_500_000_000,
-            },
-        )
+        .new(admin)
         .with_gas_limit(gas_limit)
         .send_recv(relay_code_id, salt)
         .await
         .unwrap();
-    let mut erc20_relay_client = erc20_relay_client::Erc20Relay::new(GClientRemoting::new(api.clone()));
+    let mut erc20_relay_client =
+        erc20_relay_client::Erc20Relay::new(GClientRemoting::new(api.clone()));
     erc20_relay_client
         .set_vft_manager(admin)
         .with_gas_limit(5_500_000_000)
@@ -94,17 +88,19 @@ async fn proxy() {
         .await
         .unwrap();
 
-    let proxy_program_id = historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
-        .new(historical_proxy_client::Config {
-            reply_timeout: 1000,
-            reply_deposit: 5_500_000_000,
-        })
-        .with_gas_limit(5_500_000_000)
-        .send_recv(proxy_code_id, salt)
-        .await
-        .unwrap();
+    let proxy_program_id =
+        historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
+            .new(historical_proxy_client::Config {
+                reply_timeout: 1000,
+                reply_deposit: 5_500_000_000,
+            })
+            .with_gas_limit(5_500_000_000)
+            .send_recv(proxy_code_id, salt)
+            .await
+            .unwrap();
     println!("relay and proxy programs created");
-    let mut proxy_client = historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
+    let mut proxy_client =
+        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
 
     proxy_client
         .add_endpoint(message.proof_block.block.slot, erc20_relay_program_id)
@@ -160,25 +156,28 @@ async fn proxy() {
         })
         .await
         .unwrap();
-    
+
     let reply = HandleResult::Checkpoint(Ok((
         2_496_464,
         hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
     )));
-   
+
     let (message_id, _, _) = match api
         .send_reply(message_id.into(), reply, gas_limit / 100 * 95, 0)
         .await
-        {
-            Ok(reply) => reply,
-            Err(err) => {
-                let block = api.last_block_number().await.unwrap();
-                println!("failed to send reply to {:?}: {:?}, block={}", message_id, err, block);
-                let result = result.recv().await.unwrap().unwrap();
-                println!("{:?}", result);
-                crate::panic!("{:?}", err);
-            }
-        };
+    {
+        Ok(reply) => reply,
+        Err(err) => {
+            let block = api.last_block_number().await.unwrap();
+            println!(
+                "failed to send reply to {:?}: {:?}, block={}",
+                message_id, err, block
+            );
+            let result = result.recv().await.unwrap().unwrap();
+            println!("{:?}", result);
+            crate::panic!("{:?}", err);
+        }
+    };
     println!("Checkpoint reply with ID #{:?}", message_id);
     assert!(listener
         .message_processed(message_id)

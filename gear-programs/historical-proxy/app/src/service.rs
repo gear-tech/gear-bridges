@@ -5,10 +5,7 @@ pub(crate) mod erc20_relay {
     include!(concat!(env!("OUT_DIR"), "/erc20_relay.rs"));
 }
 
-use sails_rs::{
-    calls::ActionIo,
-    gstd,
-};
+use sails_rs::{calls::ActionIo, gstd};
 
 use cell::RefCell;
 use sails_rs::{gstd::ExecContext, prelude::*};
@@ -87,7 +84,7 @@ where
 
     /// Redirect message to ERC20 Relay service which is valid for `slot`.
     /// If message is relayed successfully then reply from relay service is sent to
-    /// `vft_gateway` address and proofs are returned.
+    /// `client` address and proofs are returned.
     ///
     /// # Parameters
     ///

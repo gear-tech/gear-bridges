@@ -1,4 +1,5 @@
-
+use crate::message_relayer::common::{EthereumSlotNumber, TxHashWithSlot};
+use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use futures::executor::block_on;
 use gclient::GearApi;
@@ -10,11 +11,9 @@ use sails_rs::{
     gclient::calls::GClientRemoting,
     Encode,
 };
-use vft_manager_client::vft_manager::io::SubmitReceipt;
-use utils_prometheus::{impl_metered_service, MeteredService};
 use std::sync::mpsc::Receiver;
-use ethereum_beacon_client::BeaconClient;
-use crate::message_relayer::common::{EthereumSlotNumber, TxHashWithSlot};
+use utils_prometheus::{impl_metered_service, MeteredService};
+use vft_manager_client::vft_manager::io::SubmitReceipt;
 
 mod compose_payload;
 

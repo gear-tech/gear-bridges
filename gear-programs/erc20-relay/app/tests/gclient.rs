@@ -5,8 +5,10 @@ mod vft {
 }
 
 use erc20_relay_client::traits::{Erc20Relay, Erc20RelayFactory};
-use gclient::GearApi;
+use gclient::{GearApi, WSAddress};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sp_core::crypto::DEV_PHRASE;
+use tokio::sync::Mutex;
 
 static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((0, None));
 
@@ -50,20 +52,12 @@ async fn connect_to_node() -> (impl Remoting + Clone, GearApi, CodeId, GasUnit, 
 
 #[tokio::test]
 async fn set_vft_manager() {
-    use erc20_relay_client::Config;
-
     let (remoting, _api, code_id, gas_limit, salt) = connect_to_node().await;
 
     let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
 
     let program_id = factory
-        .new(
-            Default::default(),
-            Config {
-                reply_timeout: 10_000,
-                reply_deposit: 1_000_000_000,
-            },
-        )
+        .new(Default::default())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -117,81 +111,4 @@ async fn set_vft_manager() {
     // anyone should be able to read the address
     let vft_manager = client.vft_manager().recv(program_id).await.unwrap();
     assert_eq!(vft_manager, Default::default());
-}
-
-#[tokio::test]
-async fn update_config() {
-    use erc20_relay_client::Config;
-
-    let (remoting, _api, code_id, gas_limit, salt) = connect_to_node().await;
-
-    let factory = erc20_relay_client::Erc20RelayFactory::new(remoting.clone());
-
-    let checkpoints = ActorId::from([1u8; 32]);
-    let reply_timeout = 10_000;
-    let reply_deposit = 1_000_000_000;
-    let program_id = factory
-        .new(
-            checkpoints,
-            Config {
-                reply_timeout,
-                reply_deposit,
-            },
-        )
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt)
-        .await
-        .unwrap();
-
-    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
-
-    assert_eq!(
-        Config {
-            reply_timeout,
-            reply_deposit,
-        },
-        client.config().recv(program_id).await.unwrap()
-    );
-
-    let reply_timeout = 4_000;
-    let reply_deposit = 1_222_000_000;
-    client
-        .update_config(Config {
-            reply_timeout,
-            reply_deposit,
-        })
-        .send_recv(program_id)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        Config {
-            reply_timeout,
-            reply_deposit,
-        },
-        client.config().recv(program_id).await.unwrap()
-    );
-
-    // another account isn't permitted to update the config
-    let api = GearApi::dev().await.unwrap().with("//Bob").unwrap();
-    let remoting = GClientRemoting::new(api);
-
-    let mut client = erc20_relay_client::Erc20Relay::new(remoting.clone());
-    let result = client
-        .update_config(Config {
-            reply_timeout: 111,
-            reply_deposit: 222,
-        })
-        .send_recv(program_id)
-        .await;
-    assert!(result.is_err());
-
-    // anyone is able to get the config
-    assert_eq!(
-        Config {
-            reply_timeout,
-            reply_deposit,
-        },
-        client.config().recv(program_id).await.unwrap()
-    );
 }

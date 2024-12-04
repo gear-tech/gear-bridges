@@ -1,8 +1,3 @@
-type Config = struct {
-  reply_timeout: u32,
-  reply_deposit: u64,
-};
-
 type EthToVaraEvent = struct {
   proof_block: BlockInclusionProof,
   proof: vec vec u8,
@@ -114,17 +109,15 @@ type Error = enum {
 };
 
 constructor {
-  New : (checkpoint_light_client_address: actor_id, config: Config);
+  New : (checkpoint_light_client_address: actor_id);
 };
 
 service Erc20Relay {
   /// Check proofs and return receipt if successfull, error otherwise.
   CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
   SetVftManager : (vft_manager: actor_id) -> null;
-  UpdateConfig : (config_new: Config) -> null;
   query Admin : () -> actor_id;
   query CheckpointLightClientAddress : () -> actor_id;
-  query Config : () -> Config;
   query VftManager : () -> actor_id;
 };
 

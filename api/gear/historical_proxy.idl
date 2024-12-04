@@ -17,7 +17,6 @@ type Error = enum {
   DecodeReceiptEnvelopeFailure,
   FailedEthTransaction,
   AlreadyProcessed,
-  TooOldTransaction,
   SendFailure,
   ReplyFailure,
   HandleResultDecodeFailure,
@@ -39,7 +38,7 @@ service HistoricalProxy {
   EndpointFor : (slot: u64) -> result (actor_id, ProxyError);
   /// Redirect message to ERC20 Relay service which is valid for `slot`.
   /// If message is relayed successfully then reply from relay service is sent to
-  /// `vft_gateway` address and proofs are returned.
+  /// `client` address and proofs are returned.
   /// 
   /// # Parameters
   /// 
@@ -52,7 +51,7 @@ service HistoricalProxy {
   /// - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
   /// - `ProxyError`: if redirect failed
   /// 
-  Redirect : (slot: u64, tx_index: u64, proofs: vec u8, client: actor_id, client_route: vec u8) -> result (struct { vec u8, vec u8 }, ProxyError);
+  Redirect : (slot: u64, proofs: vec u8, client: actor_id, client_route: vec u8) -> result (struct { vec u8, vec u8 }, ProxyError);
   UpdateConfig : (config_new: Config) -> result (null, ProxyError);
   query Admin : () -> actor_id;
   query Config : () -> Config;

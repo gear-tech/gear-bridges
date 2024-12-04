@@ -129,6 +129,13 @@ function MiniWallet() {
       </li>
     ));
 
+  const renderHeading = () => (
+    <>
+      My Tokens
+      <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
+    </>
+  );
+
   return (
     <>
       <button type="button" onClick={open}>
@@ -136,14 +143,9 @@ function MiniWallet() {
       </button>
 
       {isOpen && (
-        <Modal
-          heading="My Tokens"
-          footer={
-            <div className={styles.footer}>
-              <Balance SVG={account ? VaraSVG : EthSVG} value={account ? 'Vara' : 'Ethereum'} symbol="" />
-            </div>
-          }
-          close={close}>
+        // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
+        // fast fix for now, cuz major font update was made without a fallback,
+        <Modal heading={renderHeading() as unknown as string} close={close}>
           <ul className={styles.list}>
             {accBalance.formattedValue && (
               <li className={styles.card}>
@@ -164,7 +166,7 @@ function MiniWallet() {
 
               <div className={styles.card}>
                 <Balance
-                  value={formatUnits(lockedBalance.balance, account ? 12 : 18)}
+                  value={formatUnits(lockedBalance.balance, lockedBalance.decimals)}
                   SVG={account ? VaraSVG : EthSVG}
                   symbol={account ? 'VARA' : 'ETH'}
                 />

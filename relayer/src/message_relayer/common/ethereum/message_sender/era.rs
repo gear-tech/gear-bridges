@@ -155,14 +155,7 @@ impl Era {
                 );
                 Ok(true)
             }
-            TxStatus::Pending => {
-                log::info!(
-                    "Tx for message at block #{} with nonce {} is waiting for finalization",
-                    tx.message_block,
-                    nonce
-                );
-                Ok(false)
-            }
+            TxStatus::Pending => Ok(false),
             TxStatus::Failed => {
                 self.metrics.total_failed_txs.inc();
 

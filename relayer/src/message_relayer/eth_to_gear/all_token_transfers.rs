@@ -1,6 +1,5 @@
 use std::iter;
 
-use gclient::GearApi as GclientGearApi;
 use primitive_types::{H160, H256};
 
 use ethereum_beacon_client::BeaconClient;
@@ -17,6 +16,7 @@ use crate::message_relayer::common::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
     },
+    GSdkArgs,
 };
 
 pub struct Relayer {
@@ -43,8 +43,8 @@ impl MeteredService for Relayer {
 impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        gear_api: GearApi,
-        gclient_gear_api: GclientGearApi,
+        args: GSdkArgs,
+        suri: String,
         eth_api: EthApi,
         beacon_client: BeaconClient,
         erc20_treasury_address: H160,
@@ -52,13 +52,16 @@ impl Relayer {
         historical_proxy_address: H256,
         vft_manager_address: H256,
     ) -> anyhow::Result<Self> {
+        let from_gear_block = {
+            let gear_api =
+                GearApi::new(&args.vara_domain, args.vara_port, args.vara_rpc_retries).await?;
+            let from_gear_block = gear_api.latest_finalized_block().await?;
+
+            gear_api.block_hash_to_number(from_gear_block).await?
+        };
+        let gear_block_listener = GearBlockListener::new(args.clone(), from_gear_block);
+
         let from_eth_block = eth_api.finalized_block_number().await?;
-
-        let from_gear_block = gear_api.latest_finalized_block().await?;
-        let from_gear_block = gear_api.block_hash_to_number(from_gear_block).await?;
-
-        let gear_block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
-
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let deposit_event_extractor = DepositEventExtractor::new(
@@ -68,10 +71,11 @@ impl Relayer {
         );
 
         let checkpoints_extractor =
-            CheckpointsExtractor::new(gear_api.clone(), checkpoint_light_client_address);
+            CheckpointsExtractor::new(args.clone(), checkpoint_light_client_address);
 
         let gear_message_sender = MessageSender::new(
-            gclient_gear_api,
+            args,
+            suri,
             eth_api,
             beacon_client,
             historical_proxy_address,

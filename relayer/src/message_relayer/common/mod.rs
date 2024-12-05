@@ -43,3 +43,10 @@ pub struct TxHashWithSlot {
     pub slot_number: EthereumSlotNumber,
     pub tx_hash: TxHash,
 }
+
+#[derive(Clone, Debug)]
+pub struct GSdkArgs {
+    pub vara_domain: String,
+    pub vara_port: u16,
+    pub vara_rpc_retries: u8,
+}

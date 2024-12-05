@@ -13,6 +13,7 @@ use crate::message_relayer::common::{
         block_listener::BlockListener as GearBlockListener,
         message_queued_event_extractor::MessageQueuedEventExtractor,
     },
+    GSdkArgs,
 };
 
 pub struct Relayer {
@@ -39,6 +40,7 @@ impl MeteredService for Relayer {
 impl Relayer {
     pub async fn new(
         gear_api: GearApi,
+        args: GSdkArgs,
         eth_api: EthApi,
         from_block: Option<u32>,
     ) -> anyhow::Result<Self> {
@@ -51,7 +53,7 @@ impl Relayer {
 
         let from_eth_block = eth_api.finalized_block_number().await?;
 
-        let gear_block_listener = GearBlockListener::new(gear_api.clone(), from_gear_block);
+        let gear_block_listener = GearBlockListener::new(args, from_gear_block);
 
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 

@@ -2,9 +2,10 @@ import { Button } from '@gear-js/vara-ui';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
+import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 
 import GasSVG from '../../assets/gas.svg?react';
-import { FIELD_NAME, NETWORK_INDEX, WRAPPED_VARA_CONTRACT_ADDRESS } from '../../consts';
+import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useBridge } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';

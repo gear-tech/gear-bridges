@@ -3,8 +3,9 @@ import { useAccount, useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
 
 import { VftProgram } from '@/consts';
+import { FTAddressPair } from '@/types';
 
-function useVaraFTBalances(addresses: HexString[][] | undefined) {
+function useVaraFTBalances(addresses: FTAddressPair[] | undefined) {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
 

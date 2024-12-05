@@ -5,8 +5,9 @@ import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
 import { VftProgram, FUNGIBLE_TOKEN_ABI } from '@/consts';
+import { FTAddressPair } from '@/types';
 
-function useFTSymbols(addresses: HexString[][] | undefined) {
+function useFTSymbols(addresses: FTAddressPair[] | undefined) {
   const { api, isApiReady } = useApi();
   const wagmiConfig = useConfig();
 

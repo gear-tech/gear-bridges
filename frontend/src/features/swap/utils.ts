@@ -2,6 +2,7 @@ import { HexString } from '@gear-js/api';
 import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 
+import { FTAddressPair } from '@/types';
 import { isUndefined } from '@/utils';
 
 import { ERROR_MESSAGE } from './consts';
@@ -41,7 +42,7 @@ const getAmountSchema = (
     );
 };
 
-const getOptions = (addresses: HexString[][] | undefined, symbols: Record<HexString, string> | undefined) => {
+const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexString, string> | undefined) => {
   const varaOptions: { label: string; value: string }[] = [];
   const ethOptions: { label: string; value: string }[] = [];
 

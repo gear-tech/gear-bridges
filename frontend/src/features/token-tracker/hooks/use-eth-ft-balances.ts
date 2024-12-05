@@ -1,12 +1,12 @@
-import { HexString } from '@gear-js/api';
 import { useMemo } from 'react';
 import { useReadContracts } from 'wagmi';
 
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount } from '@/hooks';
+import { FTAddressPair } from '@/types';
 import { isUndefined } from '@/utils';
 
-function useEthFTBalances(addresses: HexString[][] | undefined) {
+function useEthFTBalances(addresses: FTAddressPair[] | undefined) {
   const ethAccount = useEthAccount();
 
   const contracts = useMemo(

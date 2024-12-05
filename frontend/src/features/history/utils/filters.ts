@@ -1,9 +1,11 @@
 import { HexString } from '@gear-js/api';
 
+import { FTAddressPair } from '@/types';
+
 const getLastDaysISOTimestamp = (daysCount: number) =>
   new Date(Date.now() - daysCount * 24 * 60 * 60 * 1000).toISOString();
 
-const getAssetOptions = (addresses: HexString[][], symbols: Record<HexString, string>) => {
+const getAssetOptions = (addresses: FTAddressPair[], symbols: Record<HexString, string>) => {
   const options = [] as { label: string; value: string }[];
 
   for (const [varaAddress, ethAddress] of addresses) {

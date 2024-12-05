@@ -1,7 +1,11 @@
+.container,
+.skeleton {
+  flex-shrink: 0;
+}
+
 .container {
   display: flex;
 
-  flex-shrink: 0;
   position: relative;
 
   svg {
@@ -46,7 +50,7 @@
 .top {
   bottom: calc(100% + 8px);
   left: 50%;
-  transform: translateY(-50%);
+  transform: translateX(-50%);
 }
 
 .bottom-end {

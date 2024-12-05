@@ -1,0 +1,55 @@
+.container {
+  display: flex;
+
+  flex-shrink: 0;
+  position: relative;
+
+  svg {
+    transition: 0.25s opacity;
+
+    &:hover {
+      opacity: 0.75;
+    }
+  }
+
+  &:hover {
+    .tooltip {
+      opacity: 1;
+    }
+  }
+}
+
+.tooltip {
+  position: absolute;
+
+  padding: 10px 16px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  color: #fff;
+  white-space: nowrap;
+
+  background-color: #000;
+  border-radius: 4px;
+  box-shadow: 0px 8px 16px 0px rgba(#000, 0.24);
+
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.25s opacity;
+}
+
+.top {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateY(-50%);
+}
+
+.bottom-end {
+  top: calc(100% + 8px);
+  right: 0;
+}

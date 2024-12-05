@@ -1,5 +1,4 @@
 import { HexString } from '@gear-js/api';
-import { ActorId, H160 } from 'sails-js';
 import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 
@@ -42,20 +41,14 @@ const getAmountSchema = (
     );
 };
 
-const getOptions = (
-  addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undefined,
-  symbols: Record<HexString, string> | undefined,
-) => {
+const getOptions = (addresses: HexString[][] | undefined, symbols: Record<HexString, string> | undefined) => {
   const varaOptions: { label: string; value: string }[] = [];
   const ethOptions: { label: string; value: string }[] = [];
 
   if (!addresses || !symbols) return { varaOptions, ethOptions };
 
-  addresses.forEach((pair, index) => {
+  addresses.forEach(([varaAddress, ethAddress], index) => {
     const value = index.toString();
-
-    const varaAddress = pair[0].toString() as HexString;
-    const ethAddress = pair[1].toString() as HexString;
 
     const varaSymbol = symbols[varaAddress];
     const ethSymbol = symbols[ethAddress];

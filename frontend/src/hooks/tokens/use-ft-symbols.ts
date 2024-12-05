@@ -1,13 +1,12 @@
 import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
-import { ActorId, H160 } from 'sails-js';
 import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
 import { VftProgram, FUNGIBLE_TOKEN_ABI } from '@/consts';
 
-function useFTSymbols(addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undefined) {
+function useFTSymbols(addresses: HexString[][] | undefined) {
   const { api, isApiReady } = useApi();
   const wagmiConfig = useConfig();
 
@@ -25,10 +24,7 @@ function useFTSymbols(addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undefi
 
     const result: Record<HexString, string> = {};
 
-    for (const pair of addresses) {
-      const varaAddress = pair[0].toString() as HexString;
-      const ethAddress = pair[1].toString() as HexString;
-
+    for (const [varaAddress, ethAddress] of addresses) {
       const [varaSymbol, ethSymbol] = await Promise.all([readVaraSymbol(varaAddress), readEthSymbol(ethAddress)]);
 
       result[varaAddress] = varaSymbol;

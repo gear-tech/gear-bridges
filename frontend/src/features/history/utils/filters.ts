@@ -1,16 +1,12 @@
 import { HexString } from '@gear-js/api';
-import { ActorId, H160 } from 'sails-js';
 
 const getLastDaysISOTimestamp = (daysCount: number) =>
   new Date(Date.now() - daysCount * 24 * 60 * 60 * 1000).toISOString();
 
-const getAssetOptions = (addresses: [ActorId, H160, 'ethereum' | 'gear'][], symbols: Record<HexString, string>) => {
+const getAssetOptions = (addresses: HexString[][], symbols: Record<HexString, string>) => {
   const options = [] as { label: string; value: string }[];
 
-  for (const pair of addresses) {
-    const varaAddress = pair[0].toString() as HexString;
-    const ethAddress = pair[1].toString() as HexString;
-
+  for (const [varaAddress, ethAddress] of addresses) {
     const varaSymbol = symbols[varaAddress];
     const ethSymbol = symbols[ethAddress];
 

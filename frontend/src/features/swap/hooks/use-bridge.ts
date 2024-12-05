@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { useMemo, useState } from 'react';
 
 import { useTokens } from '@/hooks';
@@ -16,7 +15,7 @@ function useBridge(networkIndex: number) {
 
   const [pair, setPair] = useState('0');
   const pairIndex = Number(pair);
-  const address = addresses?.[pairIndex][networkIndex].toString() as HexString | undefined;
+  const address = addresses?.[pairIndex][networkIndex];
   const symbol = address ? symbols?.[address] : undefined;
   const decimals = address ? tokenDecimals?.[address] : undefined;
 

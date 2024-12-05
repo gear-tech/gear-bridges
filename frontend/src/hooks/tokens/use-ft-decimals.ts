@@ -1,13 +1,12 @@
 import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
-import { ActorId, H160 } from 'sails-js';
 import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
 import { VftProgram, FUNGIBLE_TOKEN_ABI } from '@/consts';
 
-function useFTDecimals(addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undefined) {
+function useFTDecimals(addresses: HexString[][] | undefined) {
   const { api, isApiReady } = useApi();
   const wagmiConfig = useConfig();
 
@@ -25,10 +24,7 @@ function useFTDecimals(addresses: [ActorId, H160, 'ethereum' | 'gear'][] | undef
 
     const result: Record<HexString, number> = {};
 
-    for (const pair of addresses) {
-      const varaAddress = pair[0].toString() as HexString;
-      const ethAddress = pair[1].toString() as HexString;
-
+    for (const [varaAddress, ethAddress] of addresses) {
       const [varaDecimals, ethDecimals] = await Promise.all([
         readVaraDecimals(varaAddress),
         readEthDecimals(ethAddress),

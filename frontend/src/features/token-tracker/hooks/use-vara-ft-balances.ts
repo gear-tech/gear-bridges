@@ -1,12 +1,10 @@
 import { HexString } from '@gear-js/api';
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
-import { ActorId, H160 } from 'sails-js';
 
 import { VftProgram } from '@/consts';
-import { TokenSupply } from '@/consts/sails/vft-manager';
 
-function useVaraFTBalances(addresses: [ActorId, H160, TokenSupply][] | undefined) {
+function useVaraFTBalances(addresses: HexString[][] | undefined) {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
 
@@ -17,8 +15,7 @@ function useVaraFTBalances(addresses: [ActorId, H160, TokenSupply][] | undefined
 
     const result: Record<HexString, bigint> = {};
 
-    for (const pair of addresses) {
-      const address = pair[0].toString() as HexString;
+    for (const [address] of addresses) {
       const balance = await new VftProgram(api, address).vft.balanceOf(account.decodedAddress);
 
       result[address] = balance;

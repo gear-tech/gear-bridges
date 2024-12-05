@@ -1,8 +1,8 @@
 import { ETH_CHAIN_ID } from '@/consts';
-import { useEthAccount } from '@/hooks';
+import { useEthAccount, useEthAccountBalance } from '@/hooks';
 
 import { NETWORK_INDEX } from '../../consts';
-import { useEthFTBalance, useHandleEthSubmit, useEthAccountBalance, useEthFee, useEthFTAllowance } from '../../hooks';
+import { useEthFTBalance, useHandleEthSubmit, useEthFee, useEthFTAllowance } from '../../hooks';
 
 import { SwapForm } from './swap-form';
 

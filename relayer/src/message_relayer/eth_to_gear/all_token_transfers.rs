@@ -49,7 +49,8 @@ impl Relayer {
         beacon_client: BeaconClient,
         erc20_treasury_address: H160,
         checkpoint_light_client_address: H256,
-        ethereum_event_client_address: H256,
+        historical_proxy_address: H256,
+        vft_manager_address: H256,
     ) -> anyhow::Result<Self> {
         let from_gear_block = {
             let gear_api =
@@ -77,7 +78,8 @@ impl Relayer {
             suri,
             eth_api,
             beacon_client,
-            ethereum_event_client_address,
+            historical_proxy_address,
+            vft_manager_address,
         );
 
         Ok(Self {

@@ -1,7 +1,7 @@
 type InitConfig = struct {
   erc20_manager_address: h160,
   gear_bridge_builtin: actor_id,
-  eth_client: actor_id,
+  historical_proxy_address: actor_id,
   config: Config,
 };
 
@@ -35,6 +35,8 @@ type Error = enum {
   NotEnoughGas,
   NoCorrespondingVaraAddress,
   NotSupportedEvent,
+  AlreadyProcessed,
+  TransactionTooOld,
 };
 
 type TokenSupply = enum {
@@ -89,15 +91,15 @@ service VftManager {
   /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
   /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
   /// This entrypoint can be called only by `ethereum-event-client`.
-  SubmitReceipt : (receipt_rlp: vec u8) -> result (null, Error);
+  SubmitReceipt : (slot: u64, transaction_index: u64, receipt_rlp: vec u8) -> result (null, Error);
   UpdateConfig : (config: Config) -> null;
   UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
-  UpdateEthClient : (eth_client_new: actor_id) -> null;
+  UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
   query Admin : () -> actor_id;
   query Erc20ManagerAddress : () -> h160;
-  query EthClient : () -> actor_id;
   query GearBridgeBuiltin : () -> actor_id;
   query GetConfig : () -> Config;
+  query HistoricalProxyAddress : () -> actor_id;
   query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
   query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
 

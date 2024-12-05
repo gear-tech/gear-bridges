@@ -1,0 +1,17 @@
+[package]
+name = "historical-proxy-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mockall = { workspace = true, optional = true }
+sails-rs.workspace = true
+
+[build-dependencies]
+historical-proxy-app = { path = "../app" }
+sails-client-gen.workspace = true 
+sails-idl-gen.workspace = true
+
+
+[features]
+mocks = ["sails-rs/mockall", "dep:mockall"]

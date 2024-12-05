@@ -1,4 +1,5 @@
 use bridge_builtin_operations::Payload;
+use collections::btree_set::BTreeSet;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
 pub mod abi;
@@ -11,6 +12,17 @@ use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
 use token_mapping::TokenMap;
 mod token_mapping;
 mod token_operations;
+
+pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+const CAPACITY: usize = 500_000;
+
+pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
+    unsafe {
+        TRANSACTIONS
+            .as_mut()
+            .expect("Program should be constructed")
+    }
+}
 
 pub struct VftManager<ExecContext> {
     exec_context: ExecContext,
@@ -54,14 +66,14 @@ pub struct State {
     admin: ActorId,
     erc20_manager_address: H160,
     token_map: TokenMap,
-    eth_client: ActorId,
+    historical_proxy_address: ActorId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
     pub erc20_manager_address: H160,
     pub gear_bridge_builtin: ActorId,
-    pub eth_client: ActorId,
+    pub historical_proxy_address: ActorId,
     pub config: Config,
 }
 
@@ -69,13 +81,13 @@ impl InitConfig {
     pub fn new(
         erc20_manager_address: H160,
         gear_bridge_builtin: ActorId,
-        eth_client: ActorId,
+        historical_proxy_address: ActorId,
         config: Config,
     ) -> Self {
         Self {
             erc20_manager_address,
             gear_bridge_builtin,
-            eth_client,
+            historical_proxy_address,
             config,
         }
     }
@@ -102,10 +114,10 @@ where
         self.state_mut().erc20_manager_address = new_erc20_manager_address;
     }
 
-    pub fn update_eth_client(&mut self, eth_client_new: ActorId) {
+    pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
 
-        self.state_mut().eth_client = eth_client_new;
+        self.state_mut().historical_proxy_address = historical_proxy_address_new;
     }
 
     pub fn map_vara_to_eth_address(
@@ -156,7 +168,12 @@ where
     /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
     /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
     /// This entrypoint can be called only by `ethereum-event-client`.
-    pub async fn submit_receipt(&mut self, receipt_rlp: Vec<u8>) -> Result<(), Error> {
+    pub async fn submit_receipt(
+        &mut self,
+        slot: u64,
+        transaction_index: u64,
+        receipt_rlp: Vec<u8>,
+    ) -> Result<(), Error> {
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
         use ethereum_common::utils::ReceiptEnvelope;
@@ -164,7 +181,7 @@ where
         let state = self.state();
         let sender = self.exec_context.actor_id();
 
-        if sender != state.eth_client {
+        if sender != state.historical_proxy_address {
             return Err(Error::NotEthClient);
         }
 
@@ -203,6 +220,21 @@ where
             })
             .ok_or(Error::NotSupportedEvent)?;
 
+        let transactions = transactions_mut();
+        let key = (slot, transaction_index);
+        if transactions.contains(&key) {
+            return Err(Error::AlreadyProcessed);
+        }
+
+        if CAPACITY <= transactions.len()
+            && transactions
+                .first()
+                .map(|first| &key < first)
+                .unwrap_or(false)
+        {
+            return Err(Error::TransactionTooOld);
+        }
+
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
         let msg_id = gstd::msg::id();
@@ -222,12 +254,18 @@ where
 
         match supply_type {
             TokenSupply::Ethereum => {
-                token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await
+                token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await?;
             }
             TokenSupply::Gear => {
-                token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await
+                token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await?;
             }
         }
+
+        if CAPACITY <= transactions.len() {
+            transactions.pop_first();
+        }
+        transactions.insert((slot, transaction_index));
+        Ok(())
     }
 
     /// Request bridging of tokens from gear to ethereum. It involves locking/burning
@@ -393,8 +431,8 @@ where
         self.config().clone()
     }
 
-    pub fn eth_client(&self) -> ActorId {
-        self.state().eth_client
+    pub fn historical_proxy_address(&self) -> ActorId {
+        self.state().historical_proxy_address
     }
 }
 
@@ -408,7 +446,7 @@ where
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 erc20_manager_address: config.erc20_manager_address,
                 admin: exec_context.actor_id(),
-                eth_client: config.eth_client,
+                historical_proxy_address: config.historical_proxy_address,
                 ..Default::default()
             });
             CONFIG = Some(config.config);

@@ -2,10 +2,10 @@ import { HexString } from '@gear-js/api';
 import { useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 
-import { VftProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { VftProgram, WrappedVaraProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, WrappedVaraProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
 import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
 import { FormattedValues } from '../../types';
 

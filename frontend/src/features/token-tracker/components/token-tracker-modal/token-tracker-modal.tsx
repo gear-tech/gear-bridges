@@ -1,5 +1,5 @@
-import { getTypedEntries, useAccount } from '@gear-js/react-hooks';
-import { Modal } from '@gear-js/vara-ui';
+import { getTypedEntries, useAccount, useAlert } from '@gear-js/react-hooks';
+import { Modal, Button } from '@gear-js/vara-ui';
 import { formatUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -8,7 +8,7 @@ import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
 
-import { useVaraFTBalances, useEthFTBalances } from '../../hooks';
+import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../card';
 
 import styles from './token-tracker-modal.module.scss';
@@ -21,6 +21,8 @@ type Props = {
 function TokenTrackerModal({ lockedBalance, close }: Props) {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
+  const burn = useBurnVaraTokens();
+  const alert = useAlert();
 
   const networkIndex = account ? 0 : 1;
   const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
@@ -60,6 +62,15 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
     ));
   };
 
+  const handleUnlockBalanceClick = () => {
+    if (!lockedBalance.value) throw new Error('Locked balance is not found');
+
+    burn
+      .sendTransactionAsync({ args: [lockedBalance.value] })
+      .then(() => alert.success('Tokens unlocked successfully'))
+      .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
+  };
+
   return (
     // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
     // fast fix for now, cuz major font update was made without a fallback,
@@ -86,8 +97,11 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
             value={lockedBalance.formattedValue}
             SVG={TOKEN_SVG[WRAPPED_VARA_CONTRACT_ADDRESS] ?? TokenPlaceholderSVG}
             symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
-            locked
-          />
+            locked>
+            {Boolean(lockedBalance.value) && (
+              <Button text="Unlock" size="small" onClick={handleUnlockBalanceClick} isLoading={burn.isPending} />
+            )}
+          </BalanceCard>
         </>
       )}
     </Modal>

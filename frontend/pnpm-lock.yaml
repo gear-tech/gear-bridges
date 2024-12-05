@@ -12,8 +12,8 @@ importers:
         specifier: 0.39.0
         version: 0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1)
       '@gear-js/react-hooks':
-        specifier: 0.14.1
-        version: 0.14.1(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@tanstack/react-query@5.61.5(react@18.3.1))(bufferutil@4.0.8)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sails-js-types@0.0.1)(sails-js@0.3.0(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/types@14.3.1)(sails-js-types@0.0.1)(sails-js-util@0.0.1))(utf-8-validate@5.0.10)
+        specifier: 0.14.2
+        version: 0.14.2(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@tanstack/react-query@5.61.5(react@18.3.1))(bufferutil@4.0.8)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sails-js-types@0.0.1)(sails-js@0.3.0(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/types@14.3.1)(sails-js-types@0.0.1)(sails-js-util@0.0.1))(utf-8-validate@5.0.10)
       '@gear-js/vara-ui':
         specifier: 0.0.10
         version: 0.0.10(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1151,8 +1151,8 @@ packages:
       '@polkadot/wasm-crypto': 7.4.1
       rxjs: 7.8.1
 
-  '@gear-js/react-hooks@0.14.1':
-    resolution: {integrity: sha512-gXaHr0VPD9flfffJ6LOP1wEZbi6k1bGbMAO/c9oIcSHCxUUmEqF1CFva/TLK9Y5a3egXzO4UCXp77L+z+nR3Iw==}
+  '@gear-js/react-hooks@0.14.2':
+    resolution: {integrity: sha512-lOVNDCcR0L1ggfe0nCmP70KpHYNlFkKpSyHHSM/TMgbiXyAXcFMYolX8rcF7I3CfNGTfsL/0YpnRggye3GuHXA==}
     peerDependencies:
       '@gear-js/api': 0.39.0
       '@polkadot/api': 14.3.1
@@ -8160,7 +8160,7 @@ snapshots:
       '@polkadot/wasm-crypto': 7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3)))
       rxjs: 7.8.1
 
-  '@gear-js/react-hooks@0.14.1(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@tanstack/react-query@5.61.5(react@18.3.1))(bufferutil@4.0.8)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sails-js-types@0.0.1)(sails-js@0.3.0(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/types@14.3.1)(sails-js-types@0.0.1)(sails-js-util@0.0.1))(utf-8-validate@5.0.10)':
+  '@gear-js/react-hooks@0.14.2(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@tanstack/react-query@5.61.5(react@18.3.1))(bufferutil@4.0.8)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(sails-js-types@0.0.1)(sails-js@0.3.0(@gear-js/api@0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1))(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/types@14.3.1)(sails-js-types@0.0.1)(sails-js-util@0.0.1))(utf-8-validate@5.0.10)':
     dependencies:
       '@gear-js/api': 0.39.0(@polkadot/api@14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10))(@polkadot/wasm-crypto@7.4.1(@polkadot/util@13.2.3)(@polkadot/x-randomvalues@13.2.3(@polkadot/util@13.2.3)(@polkadot/wasm-util@7.4.1(@polkadot/util@13.2.3))))(rxjs@7.8.1)
       '@polkadot/api': 14.3.1(bufferutil@4.0.8)(utf-8-validate@5.0.10)

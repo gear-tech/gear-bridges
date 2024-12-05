@@ -13,4 +13,3 @@ sails-idl-gen.workspace = true
 
 [features]
 wasm-binary = []
-gas_calculation = ["erc20-relay-app/gas_calculation"]

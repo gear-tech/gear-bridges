@@ -12,7 +12,7 @@ use vft_manager_client::{
 
 const ADMIN_ID: u64 = 1000;
 const FEE: u128 = 10_000_000_000_000;
-const ETH_CLIENT_ID: u64 = 500;
+const HISTORICAL_PROXY_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
@@ -87,7 +87,7 @@ async fn setup_for_test() -> Fixture {
     let init_config = VftManagerInitConfig {
         erc20_manager_address: [1; 20].into(),
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
-        eth_client: ETH_CLIENT_ID.into(),
+        historical_proxy_address: HISTORICAL_PROXY_ID.into(),
         config: VftManagerConfig {
             gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,

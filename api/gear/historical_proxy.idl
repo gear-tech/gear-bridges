@@ -1,0 +1,57 @@
+type ProxyError = enum {
+  NoEndpointForSlot: u64,
+  SendFailure: str,
+  ReplyTimeout: str,
+  ReplyFailure: str,
+  DecodeFailure: str,
+  NotAdmin,
+  ERC20Relay: Error,
+};
+
+type Error = enum {
+  DecodeReceiptEnvelopeFailure,
+  FailedEthTransaction,
+  AlreadyProcessed,
+  SendFailure,
+  ReplyFailure,
+  HandleResultDecodeFailure,
+  MissingCheckpoint,
+  InvalidBlockProof,
+  TrieDbFailure,
+  InvalidReceiptProof,
+  ReplyTimeout,
+  ReplyHook,
+  InvalidMessage,
+};
+
+constructor {
+  New : ();
+};
+
+service HistoricalProxy {
+  AddEndpoint : (slot: u64, endpoint: actor_id) -> result (null, ProxyError);
+  EndpointFor : (slot: u64) -> result (actor_id, ProxyError);
+  /// Redirect message to ERC20 Relay service which is valid for `slot`.
+  /// If message is relayed successfully then reply from relay service is sent to
+  /// `client` address and proofs are returned.
+  /// 
+  /// # Parameters
+  /// 
+  /// - `slot`: slot for which message is relayed.
+  /// - `tx_index`: transaction index for message.
+  /// - `proofs`: SCALE encoded `EthToVaraEvent`.
+  /// - `client`: client address to send receipt to on success.
+  /// - `client_route`: route to send receipt to on success.
+  /// # Returns
+  /// - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
+  /// - `ProxyError`: if redirect failed
+  /// 
+  Redirect : (slot: u64, proofs: vec u8, client: actor_id, client_route: vec u8) -> result (struct { vec u8, vec u8 }, ProxyError);
+  query Admin : () -> actor_id;
+  query Endpoints : () -> vec struct { u64, actor_id };
+
+  events {
+    Relayed: struct { slot: u64, block_number: u64, transaction_index: u32 };
+  }
+};
+

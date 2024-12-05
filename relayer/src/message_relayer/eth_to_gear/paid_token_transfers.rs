@@ -49,7 +49,8 @@ impl Relayer {
         beacon_client: BeaconClient,
         bridging_payment_address: H160,
         checkpoint_light_client_address: H256,
-        ethereum_event_client_address: H256,
+        historical_proxy_address: H256,
+        vft_manager_address: H256,
     ) -> anyhow::Result<Self> {
         let from_eth_block = eth_api.finalized_block_number().await?;
 
@@ -73,7 +74,8 @@ impl Relayer {
             gclient_gear_api,
             eth_api,
             beacon_client,
-            ethereum_event_client_address,
+            historical_proxy_address,
+            vft_manager_address,
         );
 
         Ok(Self {

@@ -240,13 +240,10 @@ struct RelayErc20ArgsCommon {
     )]
     checkpoint_light_client_address: String,
 
-    /// Address of the ethereum-event-client program on gear
-    #[arg(
-        long = "ethereum-event-client-address",
-        env = "ETHEREUM_EVENT_CLIENT_ADDRESS"
-    )]
-    ethereum_event_client_address: String,
-
+    #[arg(long = "historical-proxy-address", env = "HISTORICAL_PROXY_ADDRESS")]
+    historical_proxy_address: String,
+    #[arg(long = "vft-manager-address", env = "VFT_MANAGER_ADDRESS")]
+    vft_manager_address: String,
     #[clap(flatten)]
     vara_args: VaraArgs,
 
@@ -397,9 +394,10 @@ async fn main() {
             let checkpoint_light_client_address =
                 hex_utils::decode_h256(&common.checkpoint_light_client_address)
                     .expect("Failed to parse address");
-            let ethereum_event_client_address =
-                hex_utils::decode_h256(&common.ethereum_event_client_address)
-                    .expect("Failed to parse address");
+            let historical_proxy_address = hex_utils::decode_h256(&common.historical_proxy_address)
+                .expect("Failed to parse address");
+            let vft_manager_address = hex_utils::decode_h256(&common.vft_manager_address)
+                .expect("Failed to parse address");
 
             match command {
                 RelayErc20Commands::AllTokenTransfers {
@@ -415,7 +413,8 @@ async fn main() {
                         beacon_client,
                         erc20_treasury_address,
                         checkpoint_light_client_address,
-                        ethereum_event_client_address,
+                        historical_proxy_address,
+                        vft_manager_address,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -442,7 +441,8 @@ async fn main() {
                         beacon_client,
                         bridging_payment_address,
                         checkpoint_light_client_address,
-                        ethereum_event_client_address,
+                        historical_proxy_address,
+                        vft_manager_address,
                     )
                     .await
                     .expect("Failed to create relayer");

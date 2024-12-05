@@ -22,4 +22,6 @@ pub enum Error {
     NotEnoughGas,
     NoCorrespondingVaraAddress,
     NotSupportedEvent,
+    AlreadyProcessed,
+    TransactionTooOld,
 }

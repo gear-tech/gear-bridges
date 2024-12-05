@@ -1,10 +1,6 @@
 // Incorporate code generated based on the IDL file
-#[allow(dead_code)]
-mod vft {
-    include!(concat!(env!("OUT_DIR"), "/vft-manager.rs"));
-}
 
-use super::{error::Error, BTreeSet, Config, ExecContext, RefCell, State};
+use super::{error::Error, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
@@ -12,32 +8,11 @@ use ethereum_common::{
     patricia_trie::TrieDB,
     tree_hash::TreeHash,
     trie_db::{HashDB, Trie},
-    utils as eth_utils,
-    utils::ReceiptEnvelope,
+    utils::{self as eth_utils, ReceiptEnvelope},
     H256,
 };
 use ops::ControlFlow::*;
-use sails_rs::{
-    calls::ActionIo,
-    gstd::{self, msg},
-    prelude::*,
-};
-use vft::vft_manager::io::SubmitReceipt;
-
-pub(crate) const CAPACITY: usize = 500_000;
-
-#[cfg(feature = "gas_calculation")]
-pub(crate) const CAPACITY_STEP_SIZE: usize = 50_000;
-
-pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
-
-pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
-    unsafe {
-        TRANSACTIONS
-            .as_mut()
-            .expect("Program should be constructed")
-    }
-}
+use sails_rs::{gstd::msg, prelude::*};
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -57,60 +32,23 @@ pub struct EthToVaraEvent {
     pub receipt_rlp: Vec<u8>,
 }
 
-#[derive(Encode, TypeInfo)]
+#[derive(Clone, Debug, Encode, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
-enum Event {
-    Relayed {
-        slot: u64,
-        block_number: u64,
-        transaction_index: u32,
-    },
+pub struct CheckedProofs {
+    pub receipt_rlp: Vec<u8>,
+    pub transaction_index: u64,
+    pub block_number: u64,
 }
 
-pub struct Erc20Relay<'a, ExecContext> {
+pub struct Erc20Relay<'a> {
     state: &'a RefCell<State>,
-    exec_context: ExecContext,
 }
 
-#[sails_rs::service(events = Event)]
-impl<'a, T> Erc20Relay<'a, T>
-where
-    T: ExecContext,
-{
-    pub fn new(state: &'a RefCell<State>, exec_context: T) -> Self {
-        Self {
-            state,
-            exec_context,
-        }
-    }
-
-    pub fn vft_manager(&self) -> ActorId {
-        self.state.borrow().vft_manager
-    }
-
-    pub fn set_vft_manager(&mut self, vft_manager: ActorId) {
-        let source = self.exec_context.actor_id();
-        let mut state = self.state.borrow_mut();
-        if source != state.admin {
-            panic!("Not admin");
-        }
-
-        state.vft_manager = vft_manager;
-    }
-
-    pub fn config(&self) -> Config {
-        self.state.borrow().config
-    }
-
-    pub fn update_config(&mut self, config_new: Config) {
-        let source = self.exec_context.actor_id();
-        let mut state = self.state.borrow_mut();
-        if source != state.admin {
-            panic!("Not admin");
-        }
-
-        state.config = config_new;
+#[sails_rs::service]
+impl<'a> Erc20Relay<'a> {
+    pub fn new(state: &'a RefCell<State>) -> Self {
+        Self { state }
     }
 
     pub fn admin(&self) -> ActorId {
@@ -121,7 +59,8 @@ where
         self.state.borrow().checkpoint_light_client_address
     }
 
-    pub async fn relay(&mut self, message: EthToVaraEvent) -> Result<(), Error> {
+    /// Check proofs and return receipt if successfull, error otherwise.
+    pub async fn check_proofs(&mut self, message: EthToVaraEvent) -> Result<CheckedProofs, Error> {
         let receipt = self.decode_and_check_receipt(&message)?;
 
         let EthToVaraEvent {
@@ -169,37 +108,13 @@ where
         let (key_db, value_db) =
             eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
         match trie.get(&key_db) {
-            Ok(Some(found_value)) if found_value == value_db => (),
-            _ => return Err(Error::InvalidReceiptProof),
+            Ok(Some(found_value)) if found_value == value_db => Ok(CheckedProofs {
+                receipt_rlp: message.receipt_rlp,
+                transaction_index,
+                block_number: block.body.execution_payload.block_number,
+            }),
+            _ => Err(Error::InvalidReceiptProof),
         }
-
-        let call_payload = SubmitReceipt::encode_call(message.receipt_rlp);
-        let (vft_manager_id, reply_timeout, reply_deposit) = {
-            let state = self.state.borrow();
-
-            (
-                state.vft_manager,
-                state.config.reply_timeout,
-                state.config.reply_deposit,
-            )
-        };
-
-        gstd::msg::send_bytes_for_reply(vft_manager_id, call_payload, 0, reply_deposit)
-            .map_err(|_| Error::SendFailure)?
-            .up_to(Some(reply_timeout))
-            .map_err(|_| Error::ReplyTimeout)?
-            .handle_reply(move || handle_reply(slot, transaction_index))
-            .map_err(|_| Error::ReplyHook)?
-            .await
-            .map_err(|_| Error::ReplyFailure)?;
-
-        let _ = self.notify_on(Event::Relayed {
-            slot,
-            block_number: block.body.execution_payload.block_number,
-            transaction_index: transaction_index as u32,
-        });
-
-        Ok(())
     }
 
     fn decode_and_check_receipt(&self, message: &EthToVaraEvent) -> Result<ReceiptEnvelope, Error> {
@@ -210,23 +125,6 @@ where
 
         if !receipt.is_success() {
             return Err(Error::FailedEthTransaction);
-        }
-
-        // check for double spending
-        let slot = message.proof_block.block.slot;
-        let transactions = transactions_mut();
-        let key = (slot, message.transaction_index);
-        if transactions.contains(&key) {
-            return Err(Error::AlreadyProcessed);
-        }
-
-        if CAPACITY <= transactions.len()
-            && transactions
-                .first()
-                .map(|first| &key < first)
-                .unwrap_or(false)
-        {
-            return Err(Error::TooOldTransaction);
         }
 
         Ok(receipt)
@@ -247,69 +145,4 @@ where
             _ => panic!("Unexpected result to `GetCheckpointFor` request"),
         }
     }
-
-    pub fn fill_transactions(&mut self) -> bool {
-        #[cfg(feature = "gas_calculation")]
-        {
-            let transactions = transactions_mut();
-            if CAPACITY == transactions.len() {
-                return false;
-            }
-
-            let count = cmp::min(CAPACITY - transactions.len(), CAPACITY_STEP_SIZE);
-            let (last, _) = transactions.last().copied().unwrap();
-            for i in 0..count {
-                transactions.insert((last + 1, i as u64));
-            }
-
-            true
-        }
-
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
-    }
-
-    pub async fn calculate_gas_for_reply(
-        &mut self,
-        _slot: u64,
-        _transaction_index: u64,
-    ) -> Result<(), Error> {
-        #[cfg(feature = "gas_calculation")]
-        {
-            let call_payload = SubmitReceipt::encode_call(Default::default());
-            let (reply_timeout, reply_deposit) = {
-                let state = self.state.borrow();
-
-                (state.config.reply_timeout, state.config.reply_deposit)
-            };
-            let source = self.exec_context.actor_id();
-            gstd::msg::send_bytes_for_reply(source, call_payload, 0, reply_deposit)
-                .map_err(|_| Error::SendFailure)?
-                .up_to(Some(reply_timeout))
-                .map_err(|_| Error::ReplyTimeout)?
-                .handle_reply(move || handle_reply(_slot, _transaction_index))
-                .map_err(|_| Error::ReplyHook)?
-                .await
-                .map_err(|_| Error::ReplyFailure)?;
-
-            Ok(())
-        }
-
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
-    }
-}
-
-fn handle_reply(slot: u64, transaction_index: u64) {
-    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
-    SubmitReceipt::decode_reply(&reply_bytes)
-        .expect("Unable to decode MintTokens reply")
-        .unwrap_or_else(|e| panic!("Request to mint tokens failed: {e:?}"));
-
-    let transactions = transactions_mut();
-    if CAPACITY <= transactions.len() {
-        transactions.pop_first();
-    }
-
-    transactions.insert((slot, transaction_index));
 }

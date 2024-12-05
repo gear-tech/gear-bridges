@@ -1,24 +1,3 @@
-type Config = struct {
-  reply_timeout: u32,
-  reply_deposit: u64,
-};
-
-type Error = enum {
-  DecodeReceiptEnvelopeFailure,
-  FailedEthTransaction,
-  AlreadyProcessed,
-  TooOldTransaction,
-  SendFailure,
-  ReplyFailure,
-  HandleResultDecodeFailure,
-  MissingCheckpoint,
-  InvalidBlockProof,
-  TrieDbFailure,
-  InvalidReceiptProof,
-  ReplyTimeout,
-  ReplyHook,
-};
-
 type EthToVaraEvent = struct {
   proof_block: BlockInclusionProof,
   proof: vec vec u8,
@@ -107,24 +86,36 @@ type BlockHeader = struct {
   body_root: h256,
 };
 
+type CheckedProofs = struct {
+  receipt_rlp: vec u8,
+  transaction_index: u64,
+  block_number: u64,
+};
+
+type Error = enum {
+  DecodeReceiptEnvelopeFailure,
+  FailedEthTransaction,
+  AlreadyProcessed,
+  SendFailure,
+  ReplyFailure,
+  HandleResultDecodeFailure,
+  MissingCheckpoint,
+  InvalidBlockProof,
+  TrieDbFailure,
+  InvalidReceiptProof,
+  ReplyTimeout,
+  ReplyHook,
+  InvalidMessage,
+};
+
 constructor {
-  GasCalculation : (_reply_timeout: u32, _reply_deposit: u64);
-  New : (checkpoint_light_client_address: actor_id, config: Config);
+  New : (checkpoint_light_client_address: actor_id);
 };
 
 service Erc20Relay {
-  CalculateGasForReply : (_slot: u64, _transaction_index: u64) -> result (null, Error);
-  FillTransactions : () -> bool;
-  Relay : (message: EthToVaraEvent) -> result (null, Error);
-  SetVftManager : (vft_manager: actor_id) -> null;
-  UpdateConfig : (config_new: Config) -> null;
+  /// Check proofs and return receipt if successfull, error otherwise.
+  CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
   query Admin : () -> actor_id;
   query CheckpointLightClientAddress : () -> actor_id;
-  query Config : () -> Config;
-  query VftManager : () -> actor_id;
-
-  events {
-    Relayed: struct { slot: u64, block_number: u64, transaction_index: u32 };
-  }
 };
 

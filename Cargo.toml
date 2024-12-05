@@ -22,6 +22,9 @@ members = [
     "gear-programs/wrapped-vara",
     "gear-programs/wrapped-vara/app",
     "gear-programs/wrapped-vara/client",
+    "gear-programs/historical-proxy",
+    "gear-programs/historical-proxy/app",
+    "gear-programs/historical-proxy/client",
     "utils-prometheus",
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
@@ -59,6 +62,9 @@ checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", defa
 erc20-relay = { path = "gear-programs/erc20-relay" }
 erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
 erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
+historical-proxy-app = { path = "gear-programs/historical-proxy/app" }
+historical-proxy-client = { path = "gear-programs/historical-proxy/client" }
+historical-proxy = { path = "gear-programs/historical-proxy" }
 
 wrapped-vara = { path = "gear-programs/wrapped-vara" }
 wrapped-vara-app = { path = "gear-programs/wrapped-vara/app" }
@@ -136,8 +142,8 @@ ruzstd = "0.5.0"
 scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }
-# Pinned to this specific version because of the issue https://github.com/alloy-rs/core/issues/778 in alloy.
-serde = { version = "=1.0.210", default-features = false, features = [
+
+serde = { version = "1.0.215", default-features = false, features = [
     "alloc",
     "derive",
 ] }

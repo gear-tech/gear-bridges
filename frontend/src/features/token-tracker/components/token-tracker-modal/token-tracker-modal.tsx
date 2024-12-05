@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { getTypedEntries, useAccount } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
 import { formatUnits } from 'viem';
@@ -24,9 +23,7 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   const { addresses, decimals, symbols } = useTokens();
 
   const networkIndex = account ? 0 : 1;
-  const nonNativeAddresses = addresses?.filter(
-    (pair) => (pair[networkIndex].toString() as HexString) !== WRAPPED_VARA_CONTRACT_ADDRESS,
-  );
+  const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
 
   const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
   const { data: ethFtBalances } = useEthFTBalances(nonNativeAddresses);

@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { FunctionComponent, SVGProps } from 'react';
 
 type SVGComponent = FunctionComponent<
@@ -6,4 +7,8 @@ type SVGComponent = FunctionComponent<
   }
 >;
 
-export type { SVGComponent };
+type VaraAddress = HexString;
+type EthAddress = HexString;
+type FTAddressPair = [VaraAddress, EthAddress];
+
+export type { SVGComponent, FTAddressPair };

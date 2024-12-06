@@ -1,4 +1,4 @@
-use super::service::ethereum_event_client;
+use super::service::ethereum_event_client_;
 use parity_scale_codec::{Decode, Encode};
 use sails_rs::prelude::String;
 use scale_info::TypeInfo;
@@ -13,5 +13,5 @@ pub enum ProxyError {
     ReplyFailure(String),
     DecodeFailure(String),
     NotAdmin,
-    EthereumEventClient(ethereum_event_client::Error),
+    EthereumEventClient(ethereum_event_client_::Error),
 }

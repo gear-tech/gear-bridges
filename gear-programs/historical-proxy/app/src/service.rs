@@ -95,7 +95,8 @@ where
         drop(state);
         // 1) check if proofs are correct and receive data for further processing
         let check_proofs = {
-            let mut payload = ethereum_event_client_::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
+            let mut payload =
+                ethereum_event_client_::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
             payload.extend_from_slice(&proofs);
             payload
         };
@@ -121,7 +122,10 @@ where
                 })?,
         )
         .map_err(|e| {
-            ProxyError::DecodeFailure(format!("failed to decode reply from ethereum-event-client: {:?}", e))
+            ProxyError::DecodeFailure(format!(
+                "failed to decode reply from ethereum-event-client: {:?}",
+                e
+            ))
         })?
         .map_err(ProxyError::EthereumEventClient)?;
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.

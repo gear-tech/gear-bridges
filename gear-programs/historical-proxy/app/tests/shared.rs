@@ -1,10 +1,10 @@
 use alloy::rpc::types::TransactionReceipt;
 use alloy_rlp::Encodable;
-use ethereum_event_client_client::{BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::light::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
+use ethereum_event_client_client::{BlockInclusionProof, EthToVaraEvent};
 use serde::Deserialize;
 
 pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =

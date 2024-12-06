@@ -36,7 +36,10 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         let ethereum_event_client_code_id = match lock.2 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api.upload_code(ethereum_event_client::WASM_BINARY).await.unwrap();
+                let (code_id, _) = api
+                    .upload_code(ethereum_event_client::WASM_BINARY)
+                    .await
+                    .unwrap();
                 lock.2 = Some(code_id);
                 code_id
             }
@@ -75,7 +78,9 @@ async fn proxy() {
 
     let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt) = connect_to_node().await;
     println!("node spun up, code uploaded, gas_limit={}", gas_limit);
-    let factory = ethereum_event_client_client::EthereumEventClientFactory::new(GClientRemoting::new(api.clone()));
+    let factory = ethereum_event_client_client::EthereumEventClientFactory::new(
+        GClientRemoting::new(api.clone()),
+    );
     let ethereum_event_client_program_id = factory
         .new(admin)
         .with_gas_limit(gas_limit)
@@ -95,7 +100,10 @@ async fn proxy() {
         historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
 
     proxy_client
-        .add_endpoint(message.proof_block.block.slot, ethereum_event_client_program_id)
+        .add_endpoint(
+            message.proof_block.block.slot,
+            ethereum_event_client_program_id,
+        )
         .send_recv(proxy_program_id)
         .await
         .unwrap()

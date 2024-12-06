@@ -6,8 +6,10 @@ fn main() {
     let idl_file_path = out_dir_path.join("ethereum_event_client.idl");
 
     // Generate IDL file for the program
-    sails_idl_gen::generate_idl_to_file::<ethereum_event_client_app::EthereumEventClientProgram>(&idl_file_path)
-        .unwrap();
+    sails_idl_gen::generate_idl_to_file::<ethereum_event_client_app::EthereumEventClientProgram>(
+        &idl_file_path,
+    )
+    .unwrap();
 
     // Generate client code from IDL file
     ClientGenerator::from_idl_path(&idl_file_path)
@@ -19,6 +21,8 @@ fn main() {
             "ExecutionPayload",
             "ethereum_common::beacon::light::ExecutionPayload",
         )
-        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("ethereum_event_client_client.rs"))
+        .generate_to(
+            PathBuf::from(env::var("OUT_DIR").unwrap()).join("ethereum_event_client_client.rs"),
+        )
         .unwrap();
 }

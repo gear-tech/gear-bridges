@@ -1,5 +1,5 @@
 [package]
-name = "erc20-relay-app"
+name = "ethereum-event-client-app"
 version.workspace = true
 edition.workspace = true
 
@@ -14,8 +14,8 @@ getrandom = { workspace = true, features = ["custom"] }
 lazy_static = { workspace = true, features = ["spin_no_std"] }
 
 [dev-dependencies]
-erc20-relay-client.workspace = true
-erc20-relay = { workspace = true, features = ["wasm-binary"] }
+ethereum-event-client-client.workspace = true
+ethereum-event-client = { workspace = true, features = ["wasm-binary"] }
 futures.workspace = true
 gclient.workspace = true
 gstd.workspace = true

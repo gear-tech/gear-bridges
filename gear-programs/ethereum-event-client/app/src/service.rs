@@ -41,12 +41,12 @@ pub struct CheckedProofs {
     pub block_number: u64,
 }
 
-pub struct Erc20Relay<'a> {
+pub struct EthereumEventClient<'a> {
     state: &'a RefCell<State>,
 }
 
 #[sails_rs::service]
-impl<'a> Erc20Relay<'a> {
+impl<'a> EthereumEventClient<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
     }

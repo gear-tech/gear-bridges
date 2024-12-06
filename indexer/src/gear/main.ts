@@ -11,7 +11,7 @@ import { Codec } from './codec';
 const tempState = new TempState(Network.Gear);
 
 let vftManagerDecoder: Codec;
-let erc20RelayDecoder: Codec;
+let EthereumEventClientDecoder: Codec;
 
 const handler = async (ctx: ProcessorContext) => {
   await tempState.new(ctx);
@@ -78,13 +78,13 @@ const handler = async (ctx: ProcessorContext) => {
               }
             }
           }
-          case config.erc20Relay: {
-            const service = erc20RelayDecoder.service(msg.payload);
-            if (service !== 'Erc20Relay') continue;
-            const method = erc20RelayDecoder.method(msg.payload);
+          case config.EthereumEventClient: {
+            const service = EthereumEventClientDecoder.service(msg.payload);
+            if (service !== 'EthereumEventClient') continue;
+            const method = EthereumEventClientDecoder.method(msg.payload);
             if (method !== 'Relayed') continue;
 
-            const { block_number, transaction_index } = erc20RelayDecoder.decodeEvent<Relayed>(
+            const { block_number, transaction_index } = EthereumEventClientDecoder.decodeEvent<Relayed>(
               service,
               method,
               msg.payload,
@@ -106,7 +106,7 @@ const handler = async (ctx: ProcessorContext) => {
 
 export const runProcessor = async () => {
   vftManagerDecoder = await Codec.create('./assets/vft_manager.idl');
-  erc20RelayDecoder = await Codec.create('./assets/erc20_relay.idl');
+  EthereumEventClientDecoder = await Codec.create('./assets/ethereum_event_client.idl');
 
   processor.run(
     new TypeormDatabase({

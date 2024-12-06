@@ -28,7 +28,7 @@ export const processor = new SubstrateBatchProcessor()
       timestamp: true,
     },
   })
-  .addGearUserMessageSent({ programId: [config.vftManager, config.erc20Relay], extrinsic: true, call: true })
+  .addGearUserMessageSent({ programId: [config.vftManager, config.EthereumEventClient], extrinsic: true, call: true })
   .setBlockRange({
     from: config.fromBlock,
   });

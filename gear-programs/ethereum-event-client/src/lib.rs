@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 
 #[cfg(target_arch = "wasm32")]
-pub use erc20_relay_app::wasm::*;
+pub use ethereum_event_client_app::wasm::*;
 
 #[cfg(feature = "wasm-binary")]
 #[cfg(not(target_arch = "wasm32"))]

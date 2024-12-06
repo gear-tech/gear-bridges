@@ -8,17 +8,17 @@ use sails_rs::{
     gstd::{ExecContext, GStdExecContext},
     prelude::*,
 };
-use service::Erc20Relay as Erc20RelayService;
+use service::EthereumEventClient as EthereumEventClientService;
 
 pub struct State {
     admin: ActorId,
     checkpoint_light_client_address: ActorId,
 }
 
-pub struct Erc20RelayProgram(RefCell<State>);
+pub struct EthereumEventClientProgram(RefCell<State>);
 
 #[sails_rs::program]
-impl Erc20RelayProgram {
+impl EthereumEventClientProgram {
     pub fn new(checkpoint_light_client_address: ActorId) -> Self {
         let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
@@ -27,7 +27,7 @@ impl Erc20RelayProgram {
         }))
     }
 
-    pub fn erc20_relay(&self) -> Erc20RelayService {
-        Erc20RelayService::new(&self.0)
+    pub fn ethereum_event_client(&self) -> EthereumEventClientService {
+        EthereumEventClientService::new(&self.0)
     }
 }

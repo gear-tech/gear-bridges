@@ -170,7 +170,7 @@ jobs:
             "./api/ethereum/IMessageQueue.json"
 
             "./api/gear/bridging_payment.idl"
-            "./api/gear/erc20_relay.idl"
+            "./api/gear/ethereum_event_client.idl"
             "./api/gear/vft_manager.idl"
             "./api/gear/wrapped_vara.idl"
             "./api/gear/extended_vft.idl"
@@ -183,7 +183,7 @@ jobs:
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
 
             "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
-            "./target/wasm32-unknown-unknown/release/erc20_relay.idl"
+            "./target/wasm32-unknown-unknown/release/ethereum_event_client.idl"
             "./target/wasm32-unknown-unknown/release/vft_manager.idl"
             "./target/wasm32-unknown-unknown/release/wrapped_vara.idl"
             "./target/wasm32-unknown-unknown/release/extended_vft.idl"

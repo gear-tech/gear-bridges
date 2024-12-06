@@ -66,7 +66,7 @@ function TransactionCardCompact(props: Props) {
       <Card as="button" className={cx(styles.compactCard, styles.button)} onClick={openModal}>
         <TransactionPair {...props} isCompact />
 
-        <div>
+        <div className={styles.status}>
           <TransactionStatus status={status} />
           <TransactionDate timestamp={timestamp} isCompact />
         </div>

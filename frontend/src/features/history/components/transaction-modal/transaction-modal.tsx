@@ -14,23 +14,19 @@ import ClockSVG from '../../assets/clock.svg?react';
 import { NETWORK_SVG } from '../../consts';
 import { Network, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
+import { TransactionLoadingBar } from '../transaction-loading-bar';
 import { TransactionStatus } from '../transaction-status';
 
 import styles from './transaction-modal.module.scss';
 
 type Props = Pick<
   Transfer,
-  | 'amount'
-  | 'destination'
-  | 'source'
-  | 'status'
-  | 'timestamp'
-  | 'txHash'
-  | 'sourceNetwork'
-  | 'destNetwork'
-  | 'sender'
-  | 'receiver'
+  'amount' | 'destination' | 'source' | 'sourceNetwork' | 'destNetwork' | 'sender' | 'receiver'
 > & {
+  txHash?: Transfer['txHash'];
+  timestamp?: Transfer['timestamp'];
+  status?: Transfer['status'];
+  loadingStatus?: 'mint' | 'approve' | 'transfer';
   close: () => void;
 };
 
@@ -45,6 +41,7 @@ function TransactionModal({
   destination,
   sender,
   receiver,
+  loadingStatus,
   close,
 }: Props) {
   const { decimals, symbols } = useTokens();
@@ -78,24 +75,28 @@ function TransactionModal({
   const renderHeading = () => (
     <>
       Transaction Details
-      <TransactionStatus status={status} />
+      {status && <TransactionStatus status={status} />}
     </>
   );
 
   return (
     // TODO: remove assertion after @gear-js/vara-ui update
     <Modal heading={renderHeading() as unknown as string} close={close}>
-      <header className={styles.header}>
-        <p className={styles.transactionHash}>
-          <a href={explorerUrl} target="_blank" rel="noreferrer">
-            <TruncatedText value={txHash} />
-          </a>
+      {(txHash || timestamp) && (
+        <header className={styles.header}>
+          {txHash && (
+            <p className={styles.transactionHash}>
+              <a href={explorerUrl} target="_blank" rel="noreferrer">
+                <TruncatedText value={txHash} />
+              </a>
 
-          <CopyButton value={txHash} />
-        </p>
+              <CopyButton value={txHash} />
+            </p>
+          )}
 
-        <TransactionDate timestamp={timestamp} isCompact />
-      </header>
+          {timestamp && <TransactionDate timestamp={timestamp} />}
+        </header>
+      )}
 
       <p className={styles.pairs}>
         <span className={styles.tx}>
@@ -139,29 +140,31 @@ function TransactionModal({
         </span>
       </p>
 
-      <footer>
-        <div className={styles.stats}>
-          <p className={styles.stat}>
-            <span>Paid Fee:</span>
+      {loadingStatus && <TransactionLoadingBar status={loadingStatus} />}
 
-            <span className={styles.value}>
-              <GasSVG />
-              {`${fee.formattedValue} ${isGearNetwork ? 'VARA' : 'ETH'}`}
-            </span>
-          </p>
+      <div className={styles.stats}>
+        <p className={styles.stat}>
+          <span>Paid Fee:</span>
 
-          <p className={styles.stat}>
-            <span>Bridge Time:</span>
+          <span className={styles.value}>
+            <GasSVG />
+            {`${fee.formattedValue} ${isGearNetwork ? 'VARA' : 'ETH'}`}
+          </span>
+        </p>
 
-            <span className={styles.value}>
-              <ClockSVG />
-              ~30 mins
-            </span>
-          </p>
-        </div>
+        <p className={styles.stat}>
+          <span>Bridge Time:</span>
 
+          <span className={styles.value}>
+            <ClockSVG />
+            ~30 mins
+          </span>
+        </p>
+      </div>
+
+      {txHash && (
         <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
-      </footer>
+      )}
     </Modal>
   );
 }

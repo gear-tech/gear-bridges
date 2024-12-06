@@ -1,7 +1,7 @@
 // Incorporate code generated based on the IDL file
 
 #[allow(dead_code)]
-pub(crate) mod ethereum_event_client {
+pub(crate) mod ethereum_event_client_ {
     include!(concat!(env!("OUT_DIR"), "/ethereum_event_client.rs"));
 }
 
@@ -95,16 +95,16 @@ where
         drop(state);
         // 1) check if proofs are correct and receive data for further processing
         let check_proofs = {
-            let mut payload = ethereum_event_client::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
+            let mut payload = ethereum_event_client_::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
             payload.extend_from_slice(&proofs);
             payload
         };
 
-        let ethereum_event_client::CheckedProofs {
+        let ethereum_event_client_::CheckedProofs {
             receipt_rlp,
             transaction_index,
             block_number,
-        } = ethereum_event_client::ethereum_event_client::io::CheckProofs::decode_reply(
+        } = ethereum_event_client_::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
                 .map_err(|e| {
                     ProxyError::SendFailure(format!(

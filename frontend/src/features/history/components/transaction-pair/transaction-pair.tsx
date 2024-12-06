@@ -2,7 +2,6 @@ import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { formatUnits } from 'viem';
 
-import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Skeleton, TruncatedText } from '@/components';
@@ -10,14 +9,10 @@ import { TOKEN_SVG } from '@/consts';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
+import { NETWORK_SVG } from '../../consts';
 import { Network, Transfer } from '../../types';
 
 import styles from './transaction-pair.module.scss';
-
-const NETWORK_SVG = {
-  [Network.Gear]: VaraSVG,
-  [Network.Ethereum]: EthSVG,
-} as const;
 
 type Props = Pick<
   Transfer,

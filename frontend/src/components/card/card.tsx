@@ -1,16 +1,19 @@
-import { ReactNode } from 'react';
+import { ComponentPropsWithoutRef, ElementType, PropsWithChildren } from 'react';
 
 import { cx } from '@/utils';
 
 import styles from './card.module.scss';
 
-type Props = {
-  children: ReactNode;
-  className?: string;
-};
+type Props<T extends ElementType> = PropsWithChildren &
+  ComponentPropsWithoutRef<T> & {
+    as?: T;
+    className?: string;
+  };
 
-function Card({ children, className }: Props) {
-  return <div className={cx(styles.card, className)}>{children}</div>;
+function Card<T extends ElementType = 'div'>({ as, className, ...props }: Props<T>) {
+  const Element = as || 'div';
+
+  return <Element className={cx(styles.card, className)} {...props} />;
 }
 
 export { Card };

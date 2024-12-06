@@ -28,6 +28,8 @@ function useSwapForm(
   fee: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
+  openTransactionModal: (amount: string, receiver: string) => void,
+  closeTransactionModal: () => void,
 ) {
   const alert = useAlert();
 
@@ -74,11 +76,12 @@ function useSwapForm(
     };
 
     const onError = (error: WriteContractErrorType) => {
-      const errorMessage = (error as BaseError).shortMessage || error.message;
-
+      closeTransactionModal();
       logger.error('Transfer Error', error);
-      alert.error(errorMessage);
+      alert.error((error as BaseError).shortMessage || error.message);
     };
+
+    openTransactionModal(values[FIELD_NAME.EXPECTED_VALUE].toString(), values[FIELD_NAME.ADDRESS]);
 
     onSubmit(values).then(onSuccess).catch(onError);
   });

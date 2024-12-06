@@ -87,8 +87,6 @@
 }
 
 .stats {
-  margin-bottom: 32px;
-
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -106,5 +104,9 @@
     font-size: 14px;
     font-weight: 500;
     opacity: 0.7;
+  }
+
+  &:not(:last-child) {
+    margin-bottom: 32px;
   }
 }

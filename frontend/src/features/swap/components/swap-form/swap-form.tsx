@@ -1,8 +1,13 @@
+import { useAccount } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
+import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { TransactionModal } from '@/features/history/components/transaction-modal';
+import { Network as TransferNetwork } from '@/features/history/types';
+import { useEthAccount } from '@/hooks';
 
 import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
@@ -40,7 +45,7 @@ function SwapForm({
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
+  const { address, destinationAddress, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
   const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
@@ -55,6 +60,32 @@ function SwapForm({
     ftBalance.value,
   );
 
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
+  const [transactionModal, setTransactionModal] = useState<
+    Omit<ComponentProps<typeof TransactionModal>, 'close'> | undefined
+  >();
+
+  const getSubmitStatus = () => {
+    if (mint?.isPending) return 'mint';
+    if (approve.isPending) return 'approve';
+    if (submit.isPending) return 'transfer';
+  };
+
+  const openTransacionModal = (amount: string, receiver: string) => {
+    if (!address || !destinationAddress) throw new Error('Address is not defined');
+
+    const source = address;
+    const destination = destinationAddress;
+    const sourceNetwork = isVaraNetwork ? TransferNetwork.Gear : TransferNetwork.Ethereum;
+    const destNetwork = isVaraNetwork ? TransferNetwork.Ethereum : TransferNetwork.Gear;
+    const sender = isVaraNetwork ? account!.decodedAddress : ethAccount.address!;
+
+    setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver });
+  };
+
+  const closeTransactionModal = () => setTransactionModal(undefined);
+
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     isNativeToken,
@@ -64,6 +95,8 @@ function SwapForm({
     fee.value,
     disabled,
     onSubmit,
+    openTransacionModal,
+    closeTransactionModal,
   );
 
   const renderFromBalance = () => {
@@ -77,14 +110,6 @@ function SwapForm({
         onMaxButtonClick={setMaxBalance}
       />
     );
-  };
-
-  const getButtonText = () => {
-    if (mint?.isPending) return 'Minting...';
-    if (approve.isPending) return 'Approving...';
-    if (submit.isPending) return 'Swapping...';
-
-    return 'Swap';
   };
 
   return (
@@ -127,7 +152,7 @@ function SwapForm({
           <div className={styles.submitContainer}>
             <Button
               type="submit"
-              text={getButtonText()}
+              text="Transfer"
               disabled={disabled}
               isLoading={
                 approve.isLoading ||
@@ -152,6 +177,10 @@ function SwapForm({
           </div>
         </footer>
       </form>
+
+      {transactionModal && (
+        <TransactionModal close={closeTransactionModal} {...transactionModal} loadingStatus={getSubmitStatus()} />
+      )}
     </FormProvider>
   );
 }

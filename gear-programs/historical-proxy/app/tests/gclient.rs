@@ -1,5 +1,5 @@
 use checkpoint_light_client_io::{Handle, HandleResult};
-use erc20_relay_client::traits::*;
+use ethereum_event_client_client::traits::*;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
@@ -19,7 +19,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
     let api = GearApi::dev().await.unwrap();
     let gas_limit = api.block_gas_limit().unwrap();
 
-    let (api, proxy_code_id, erc20_relay_code_id, salt) = {
+    let (api, proxy_code_id, ethereum_event_client_code_id, salt) = {
         let mut lock = LOCK.lock().await;
         let proxy_code_id = match lock.1 {
             Some(code_id) => code_id,
@@ -33,10 +33,10 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
             }
         };
 
-        let erc20_relay_code_id = match lock.2 {
+        let ethereum_event_client_code_id = match lock.2 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api.upload_code(erc20_relay::WASM_BINARY).await.unwrap();
+                let (code_id, _) = api.upload_code(ethereum_event_client::WASM_BINARY).await.unwrap();
                 lock.2 = Some(code_id);
                 code_id
             }
@@ -52,7 +52,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
             .await
             .unwrap();
-        (api2, proxy_code_id, erc20_relay_code_id, salt)
+        (api2, proxy_code_id, ethereum_event_client_code_id, salt)
     };
 
     let id = api.account_id();
@@ -63,7 +63,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         api,
         admin,
         proxy_code_id,
-        erc20_relay_code_id,
+        ethereum_event_client_code_id,
         gas_limit,
         salt.to_le_bytes(),
     )
@@ -75,8 +75,8 @@ async fn proxy() {
 
     let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt) = connect_to_node().await;
     println!("node spun up, code uploaded, gas_limit={}", gas_limit);
-    let factory = erc20_relay_client::Erc20RelayFactory::new(GClientRemoting::new(api.clone()));
-    let erc20_relay_program_id = factory
+    let factory = ethereum_event_client_client::EthereumEventClientFactory::new(GClientRemoting::new(api.clone()));
+    let ethereum_event_client_program_id = factory
         .new(admin)
         .with_gas_limit(gas_limit)
         .send_recv(relay_code_id, salt)
@@ -95,7 +95,7 @@ async fn proxy() {
         historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
 
     proxy_client
-        .add_endpoint(message.proof_block.block.slot, erc20_relay_program_id)
+        .add_endpoint(message.proof_block.block.slot, ethereum_event_client_program_id)
         .send_recv(proxy_program_id)
         .await
         .unwrap()
@@ -107,7 +107,7 @@ async fn proxy() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(endpoint, erc20_relay_program_id);
+    assert_eq!(endpoint, ethereum_event_client_program_id);
     println!(
         "endpoint {:?}\nproxy: {:?}\nadmin: {:?}",
         endpoint, proxy_program_id, admin
@@ -129,7 +129,7 @@ async fn proxy() {
     let message_id = listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.source == erc20_relay_program_id.into()
+                if message.source == ethereum_event_client_program_id.into()
                     && message.destination == admin.into()
                     && message.details.is_none() =>
             {

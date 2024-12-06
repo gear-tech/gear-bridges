@@ -15,12 +15,12 @@ gclient.workspace = true
 gstd.workspace = true
 sp-core = { workspace = true, features = ["std"] }
 gtest.workspace = true
-erc20-relay-client.workspace = true
+ethereum-event-client-client.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
-erc20-relay = { workspace = true, features = ["wasm-binary"] }
+ethereum-event-client = { workspace = true, features = ["wasm-binary"] }
 vft-manager = { workspace = true, features = ["wasm-binary"] }
 vft-manager-client.workspace = true
 serde_json = { workspace = true }

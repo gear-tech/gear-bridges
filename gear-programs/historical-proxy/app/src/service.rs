@@ -1,8 +1,8 @@
 // Incorporate code generated based on the IDL file
 
 #[allow(dead_code)]
-pub(crate) mod erc20_relay {
-    include!(concat!(env!("OUT_DIR"), "/erc20_relay.rs"));
+pub(crate) mod ethereum_event_client {
+    include!(concat!(env!("OUT_DIR"), "/ethereum_event_client.rs"));
 }
 
 use sails_rs::{calls::ActionIo, gstd};
@@ -95,35 +95,35 @@ where
         drop(state);
         // 1) check if proofs are correct and receive data for further processing
         let check_proofs = {
-            let mut payload = erc20_relay::erc_20_relay::io::CheckProofs::ROUTE.to_vec();
+            let mut payload = ethereum_event_client::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
             payload.extend_from_slice(&proofs);
             payload
         };
 
-        let erc20_relay::CheckedProofs {
+        let ethereum_event_client::CheckedProofs {
             receipt_rlp,
             transaction_index,
             block_number,
-        } = erc20_relay::erc_20_relay::io::CheckProofs::decode_reply(
+        } = ethereum_event_client::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
                 .map_err(|e| {
                     ProxyError::SendFailure(format!(
-                        "failed to send message to erc20-relay: {:?}",
+                        "failed to send message to ethereum-event-client: {:?}",
                         e
                     ))
                 })?
                 .await
                 .map_err(|e| {
                     ProxyError::ReplyFailure(format!(
-                        "failed to receive reply from erc20-relay: {:?}",
+                        "failed to receive reply from ethereum-event-client: {:?}",
                         e
                     ))
                 })?,
         )
         .map_err(|e| {
-            ProxyError::DecodeFailure(format!("failed to decode reply from erc20-relay: {:?}", e))
+            ProxyError::DecodeFailure(format!("failed to decode reply from ethereum-event-client: {:?}", e))
         })?
-        .map_err(ProxyError::ERC20Relay)?;
+        .map_err(ProxyError::EthereumEventClient)?;
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
         let submit_receipt = {
             let params = (slot, transaction_index, receipt_rlp.clone());

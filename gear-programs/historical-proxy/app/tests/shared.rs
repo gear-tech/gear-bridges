@@ -1,6 +1,6 @@
 use alloy::rpc::types::TransactionReceipt;
 use alloy_rlp::Encodable;
-use erc20_relay_client::{BlockInclusionProof, EthToVaraEvent};
+use ethereum_event_client_client::{BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::light::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},

@@ -3,7 +3,7 @@ FROM node:20-alpine AS node
 FROM node AS api
 WORKDIR /assets
 COPY api/gear/vft_manager.idl .
-COPY api/gear/erc20_relay.idl .
+COPY api/gear/ethereum_event_client.idl .
 COPY api/ethereum/IERC20Manager.json .
 COPY api/ethereum/IMessageQueue.json .
 COPY indexer/scripts/abi.js .

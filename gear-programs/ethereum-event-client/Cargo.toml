@@ -1,13 +1,13 @@
 [package]
-name = "erc20-relay"
+name = "ethereum-event-client"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-erc20-relay-app.workspace = true
+ethereum-event-client-app.workspace = true
 
 [build-dependencies]
-erc20-relay-app.workspace = true
+ethereum-event-client-app.workspace = true
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-idl-gen.workspace = true
 

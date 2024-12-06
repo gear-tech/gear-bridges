@@ -9,7 +9,7 @@ fn main() {
         path.pop();
 
         path.push("api/gear/");
-        path.push("erc20_relay.idl");
+        path.push("ethereum_event_client.idl");
 
         path
     };
@@ -23,6 +23,6 @@ fn main() {
             "ExecutionPayload",
             "ethereum_common::beacon::light::ExecutionPayload",
         )
-        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("erc20_relay.rs"))
+        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("ethereum_event_client.rs"))
         .unwrap();
 }

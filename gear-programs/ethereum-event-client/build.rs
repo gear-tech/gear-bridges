@@ -19,5 +19,5 @@ fn main() {
 
     let mut idl_path = PathBuf::from(bin_path);
     idl_path.set_extension("idl");
-    sails_idl_gen::generate_idl_to_file::<erc20_relay_app::Erc20RelayProgram>(idl_path).unwrap();
+    sails_idl_gen::generate_idl_to_file::<ethereum_event_client_app::EthereumEventClientProgram>(idl_path).unwrap();
 }

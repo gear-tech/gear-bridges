@@ -1,4 +1,4 @@
-use super::service::erc20_relay;
+use super::service::ethereum_event_client;
 use parity_scale_codec::{Decode, Encode};
 use sails_rs::prelude::String;
 use scale_info::TypeInfo;
@@ -13,5 +13,5 @@ pub enum ProxyError {
     ReplyFailure(String),
     DecodeFailure(String),
     NotAdmin,
-    ERC20Relay(erc20_relay::Error),
+    EthereumEventClient(ethereum_event_client::Error),
 }

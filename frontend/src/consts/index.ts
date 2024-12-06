@@ -2,7 +2,7 @@ import { FUNGIBLE_TOKEN_ABI } from './abi';
 import { VARA_NODE_ADDRESS, ETH_NODE_ADDRESS, ETH_CHAIN_ID, WRAPPED_VARA_CONTRACT_ADDRESS } from './env';
 import { TOKEN_SVG } from './icons';
 import { ROUTE } from './routing';
-import { VftManagerProgram, VftProgram } from './sails';
+import { VftManagerProgram, VftProgram, WrappedVaraProgram } from './sails';
 
 export {
   FUNGIBLE_TOKEN_ABI,
@@ -14,4 +14,5 @@ export {
   WRAPPED_VARA_CONTRACT_ADDRESS,
   VftManagerProgram,
   VftProgram,
+  WrappedVaraProgram,
 };

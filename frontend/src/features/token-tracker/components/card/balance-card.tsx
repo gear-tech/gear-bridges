@@ -1,3 +1,5 @@
+import { PropsWithChildren } from 'react';
+
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import { Skeleton } from '@/components';
 import { SVGComponent } from '@/types';
@@ -5,20 +7,22 @@ import { cx } from '@/utils';
 
 import styles from './balance-card.module.scss';
 
-type Props = {
+type Props = PropsWithChildren & {
   SVG: SVGComponent;
   value: string;
   symbol: string;
   locked?: boolean;
 };
 
-function BalanceCard({ locked, value, SVG, symbol }: Props) {
+function BalanceCard({ locked, value, SVG, symbol, children }: Props) {
   return (
     <div className={cx(styles.card, locked && styles.locked)}>
       <span className={styles.balance}>
         <SVG />
         {value} {symbol}
       </span>
+
+      {children}
     </div>
   );
 }

@@ -127,7 +127,7 @@ impl ContractInfo {
 }
 
 fn decode_hex(hex: &str) -> Vec<u8> {
-    let formatted_hex = if &hex[..2] == "0x" { &hex[2..] } else { &hex };
+    let formatted_hex = if &hex[..2] == "0x" { &hex[2..] } else { hex };
     hex::decode(formatted_hex).unwrap_or_else(|_| panic!("Failed to decode hex string {}", hex))
 }
 

@@ -153,13 +153,13 @@ impl MessageSender {
         message: &TxHashWithSlot,
         gear_api: &GearApi,
     ) -> anyhow::Result<()> {
-        let message =
+        let payload =
             compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
 
         log::info!(
             "Sending message in gear_message_sender: tx_index={}, slot={}",
-            message.transaction_index,
-            message.proof_block.block.slot
+            payload.transaction_index,
+            payload.proof_block.block.slot
         );
 
         let gas_limit_block = gear_api.block_gas_limit()?;
@@ -172,8 +172,8 @@ impl MessageSender {
 
         let (_, vft_manager_reply) = proxy_service
             .redirect(
-                message.proof_block.block.slot,
-                message.encode(),
+                payload.proof_block.block.slot,
+                payload.encode(),
                 self.vft_manager_address.into(),
                 <SubmitReceipt as ActionIo>::ROUTE.to_vec(),
             )
@@ -194,7 +194,7 @@ impl MessageSender {
         match reply {
             Ok(_) => {}
             Err(vft_manager_client::Error::NotSupportedEvent) => {
-                log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)");
+                log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)", message.tx_hash);
             }
             Err(e) => {
                 anyhow::bail!("Internal vft-manager error: {:?}", e);

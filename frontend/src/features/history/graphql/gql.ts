@@ -13,7 +13,7 @@ import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/
  * Therefore it is highly recommended to use the babel or swc plugin for production.
  */
 const documents = {
-    "\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      blockNumber\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n    }\n  }\n": types.TransfersQueryDocument,
+    "\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      txHash\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n    }\n  }\n": types.TransfersQueryDocument,
     "\n  query TransfersConnectionQuery($where: TransferWhereInput) {\n    transfersConnection(orderBy: timestamp_DESC, where: $where) {\n      totalCount\n    }\n  }\n": types.TransfersConnectionQueryDocument,
 };
 
@@ -34,7 +34,7 @@ export function graphql(source: string): unknown;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      blockNumber\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n    }\n  }\n"): (typeof documents)["\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      blockNumber\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n    }\n  }\n"];
+export function graphql(source: "\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      txHash\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n    }\n  }\n"): (typeof documents)["\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      txHash\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

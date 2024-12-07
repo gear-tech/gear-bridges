@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 
 import { cx } from '@/utils';
 
-type Props = Omit<ButtonProps, 'onClick'> & {
+type Props = Omit<ButtonProps, 'onClick' | 'type'> & {
   to: string;
+  type?: 'internal' | 'external';
 };
 
 function LinkButton({
@@ -19,26 +20,34 @@ function LinkButton({
   block,
   noWrap,
   className,
+  type = 'internal',
 }: Props) {
-  return (
-    <Link
-      to={to}
-      className={cx(
-        buttonStyles.button,
-        buttonStyles[color],
-        color !== 'transparent' && buttonStyles[size],
-        disabled && buttonStyles.disabled,
-        isLoading && buttonStyles.loading,
-        !text && buttonStyles.noText,
-        block && buttonStyles.block,
-        noWrap && buttonStyles.noWrap,
-        className,
-      )}>
+  const cn = cx(
+    buttonStyles.button,
+    buttonStyles[color],
+    color !== 'transparent' && buttonStyles[size],
+    disabled && buttonStyles.disabled,
+    isLoading && buttonStyles.loading,
+    !text && buttonStyles.noText,
+    block && buttonStyles.block,
+    noWrap && buttonStyles.noWrap,
+    className,
+  );
+
+  return type === 'internal' ? (
+    <Link to={to} className={cn}>
       {Icon && <Icon />}
       {text && <span>{text}</span>}
 
       {children}
     </Link>
+  ) : (
+    <a href={to} target="_blank" rel="noreferrer" className={cn}>
+      {Icon && <Icon />}
+      {text && <span>{text}</span>}
+
+      {children}
+    </a>
   );
 }
 

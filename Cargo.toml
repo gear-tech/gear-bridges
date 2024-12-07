@@ -29,12 +29,13 @@ members = [
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
     "tools/genesis-config",
+    "tools/governance",
 ]
 
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 
 [workspace.dependencies]

@@ -35,6 +35,8 @@ pub struct MessageSender {
     historical_proxy_address: H256,
     vft_manager_address: H256,
 
+    waiting_checkpoint: Vec<TxHashWithSlot>,
+
     metrics: Metrics,
 }
 
@@ -79,12 +81,14 @@ impl MessageSender {
             historical_proxy_address,
             vft_manager_address,
 
+            waiting_checkpoint: vec![],
+
             metrics: Metrics::new(),
         }
     }
 
     pub fn run(
-        self,
+        mut self,
         messages: Receiver<TxHashWithSlot>,
         checkpoints: Receiver<EthereumSlotNumber>,
     ) {
@@ -97,12 +101,10 @@ impl MessageSender {
     }
 
     async fn run_inner(
-        &self,
+        &mut self,
         messages: &Receiver<TxHashWithSlot>,
         checkpoints: &Receiver<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
-        let mut waiting_checkpoint: Vec<TxHashWithSlot> = vec![];
-
         let mut latest_checkpoint_slot = None;
 
         loop {
@@ -120,19 +122,21 @@ impl MessageSender {
             }
 
             for message in messages.try_iter() {
-                waiting_checkpoint.push(message);
+                self.waiting_checkpoint.push(message);
             }
 
-            if waiting_checkpoint.is_empty() {
+            if self.waiting_checkpoint.is_empty() {
                 continue;
             }
 
             let gear_api = create_gclient_client(&self.args, &self.suri).await?;
-            for i in (0..waiting_checkpoint.len()).rev() {
-                if waiting_checkpoint[i].slot_number <= latest_checkpoint_slot.unwrap_or_default() {
-                    self.submit_message(&waiting_checkpoint[i], &gear_api)
+            for i in (0..self.waiting_checkpoint.len()).rev() {
+                if self.waiting_checkpoint[i].slot_number
+                    <= latest_checkpoint_slot.unwrap_or_default()
+                {
+                    self.submit_message(&self.waiting_checkpoint[i], &gear_api)
                         .await?;
-                    let _ = waiting_checkpoint.remove(i);
+                    let _ = self.waiting_checkpoint.remove(i);
                 }
             }
 
@@ -140,7 +144,7 @@ impl MessageSender {
 
             self.metrics
                 .messages_waiting_checkpoint
-                .set(waiting_checkpoint.len() as i64);
+                .set(self.waiting_checkpoint.len() as i64);
         }
     }
 
@@ -149,13 +153,13 @@ impl MessageSender {
         message: &TxHashWithSlot,
         gear_api: &GearApi,
     ) -> anyhow::Result<()> {
-        let message =
+        let payload =
             compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
 
         log::info!(
             "Sending message in gear_message_sender: tx_index={}, slot={}",
-            message.transaction_index,
-            message.proof_block.block.slot
+            payload.transaction_index,
+            payload.proof_block.block.slot
         );
 
         let gas_limit_block = gear_api.block_gas_limit()?;
@@ -168,8 +172,8 @@ impl MessageSender {
 
         let (_, vft_manager_reply) = proxy_service
             .redirect(
-                message.proof_block.block.slot,
-                message.encode(),
+                payload.proof_block.block.slot,
+                payload.encode(),
                 self.vft_manager_address.into(),
                 <SubmitReceipt as ActionIo>::ROUTE.to_vec(),
             )
@@ -184,11 +188,18 @@ impl MessageSender {
             })?
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
-        let reply = SubmitReceipt::decode_reply(&vft_manager_reply);
+        let reply = SubmitReceipt::decode_reply(&vft_manager_reply)
+            .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
 
-        reply
-            .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?
-            .map_err(|e| anyhow::anyhow!("Internal vft -manager error: {:?}", e))?;
+        match reply {
+            Ok(_) => {}
+            Err(vft_manager_client::Error::NotSupportedEvent) => {
+                log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)", message.tx_hash);
+            }
+            Err(e) => {
+                anyhow::bail!("Internal vft-manager error: {:?}", e);
+            }
+        }
 
         Ok(())
     }

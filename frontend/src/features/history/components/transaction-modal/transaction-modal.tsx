@@ -8,6 +8,7 @@ import GasSVG from '@/assets/gas.svg?react';
 import { CopyButton, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
+import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import ClockSVG from '../../assets/clock.svg?react';
@@ -98,7 +99,7 @@ function TransactionModal({
         </header>
       )}
 
-      <p className={styles.pairs}>
+      <p className={cx(styles.pairs, loadingStatus && styles.loading)}>
         <span className={styles.tx}>
           <span className={styles.amount}>
             {formattedAmount} {sourceSymbol}

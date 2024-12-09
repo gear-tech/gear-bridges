@@ -24,6 +24,7 @@
 }
 
 .container {
+  margin-bottom: 16px;
   padding: 32px;
 
   font-size: 16px;
@@ -37,7 +38,7 @@
 .text {
   &::after {
     content: '';
-    animation: loadingDots 1.5s steps(3, end) infinite;
+    animation: loadingDots 3s steps(3, end) infinite;
   }
 }
 

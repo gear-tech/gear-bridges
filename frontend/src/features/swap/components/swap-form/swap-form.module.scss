@@ -1,9 +1,10 @@
-.section,
 .footer {
   padding: 24px 32px;
 }
 
 .section {
+  padding: 24px 24px 32px;
+
   display: flex;
   flex-direction: column;
   gap: 16px;

@@ -61,4 +61,4 @@ jobs:
       - name: Check k8s deployments
         uses: sergeyfilyanin/kubectl-aws-eks@master
         with:
-          args: get deployment -o name -n vara | xargs -n1 -t kubectl rollout status -n gear-bridges --timeout=120s
+          args: get deployment -o name -n gear-bridges | xargs -n1 -t kubectl rollout status -n gear-bridges --timeout=120s

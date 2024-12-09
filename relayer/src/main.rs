@@ -153,7 +153,24 @@ async fn main() {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
-        CliCommands::RelayCheckpoints(args) => ethereum_checkpoints::relay(args).await,
+        CliCommands::RelayCheckpoints(args) => {
+            let gear_api = create_gclient_client(&args.vara_args, args.vara_suri).await;
+
+            let beacon_client = create_beacon_client(&args.beacon_args).await;
+
+            let program_id =
+                hex_utils::decode_h256(&args.program_id).expect("Failed to decode program_id");
+
+            let relayer = ethereum_checkpoints::Relayer::new(program_id, beacon_client, gear_api);
+
+            MetricsBuilder::new()
+                .register_service(&relayer)
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
+
+            relayer.run().await;
+        }
         CliCommands::RelayErc20(RelayErc20Args { common, command }) => {
             let eth_api = create_eth_client(&common.ethereum_args);
             let beacon_client = create_beacon_client(&common.beacon_rpc).await;
@@ -237,6 +254,15 @@ async fn main() {
             }
         }
     };
+}
+
+async fn create_gclient_client(args: &VaraArgs, suri: String) -> gclient::GearApi {
+    gclient::GearApi::builder()
+        .retries(args.vara_rpc_retries)
+        .suri(suri)
+        .build(gclient::WSAddress::new(&args.vara_domain, args.vara_port))
+        .await
+        .expect("GearApi client should be created")
 }
 
 async fn create_gear_client(args: &VaraArgs) -> GearApi {

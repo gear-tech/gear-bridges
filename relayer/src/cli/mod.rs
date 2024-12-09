@@ -162,13 +162,8 @@ pub struct RelayCheckpointsArgs {
     #[arg(long, env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS")]
     pub program_id: String,
 
-    /// Specify the endpoint providing Beacon API
-    #[arg(long, env = "BEACON_ENDPOINT")]
-    pub beacon_endpoint: String,
-
-    /// Specify the timeout in seconds for requests to the Beacon API endpoint
-    #[arg(long, default_value = "120", env = "BEACON_TIMEOUT")]
-    pub beacon_timeout: u64,
+    #[clap(flatten)]
+    pub beacon_args: BeaconRpcArgs,
 
     #[clap(flatten)]
     pub vara_args: VaraArgs,

@@ -6,11 +6,11 @@ import { SourceType } from 'react-number-format/types/types';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { NetworkCard } from '@/components';
 import { SVGComponent } from '@/types';
 import { cx } from '@/utils';
 
 import { FIELD_NAME } from '../../consts';
+import { NetworkCard } from '../network-card';
 
 import styles from './network.module.scss';
 

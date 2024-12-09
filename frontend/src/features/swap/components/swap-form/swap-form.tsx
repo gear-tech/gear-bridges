@@ -115,7 +115,7 @@ function SwapForm({
 
   return (
     <FormProvider {...form}>
-      <form className={styles.form} onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
         <div className={styles.section}>
           <FromNetwork
             options={options.from}

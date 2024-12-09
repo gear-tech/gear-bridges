@@ -1,0 +1,13 @@
+[package]
+name = "governance"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap.workspace = true
+dotenv.workspace = true
+gbuiltin-eth-bridge.workspace = true
+gclient.workspace = true
+gear-core.workspace = true
+hex.workspace = true
+tokio.workspace = true

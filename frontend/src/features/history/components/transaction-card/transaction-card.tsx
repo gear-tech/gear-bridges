@@ -1,9 +1,12 @@
 import { HexString } from '@gear-js/api';
 
-import { Card, CopyButton, Skeleton } from '@/components';
+import { Card, CopyButton, Skeleton, TruncatedText } from '@/components';
+import { useModal } from '@/hooks';
+import { cx } from '@/utils';
 
-import { Network, Transfer } from '../../types';
+import { Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
+import { TransactionModal } from '../transaction-modal';
 import { TransactionPair } from '../transaction-pair';
 import { TransactionStatus } from '../transaction-status';
 
@@ -18,7 +21,7 @@ type Props = Pick<
   | 'timestamp'
   | 'sourceNetwork'
   | 'destNetwork'
-  | 'blockNumber'
+  | 'txHash'
   | 'sender'
   | 'receiver'
 > & {
@@ -26,38 +29,51 @@ type Props = Pick<
   symbols: Record<HexString, string>;
 };
 
-function TransactionCard({ status, timestamp, blockNumber, ...props }: Props) {
-  const explorerUrl =
-    props.sourceNetwork === Network.Gear ? 'https://vara.subscan.io/block' : 'https://etherscan.io/block';
+function TransactionCard(props: Props) {
+  const { timestamp, txHash, status } = props;
+
+  const [isModalOpen, openModal, closeModal] = useModal();
 
   return (
-    <Card className={styles.wideCard}>
-      <TransactionDate timestamp={timestamp} />
+    <>
+      <Card className={cx(styles.wideCard, styles.button)}>
+        <TransactionDate timestamp={timestamp} />
 
-      <p className={styles.blockNumber}>
-        <a href={`${explorerUrl}/${blockNumber}`} target="_blank" rel="noreferrer">
-          {blockNumber}
-        </a>
+        <p className={styles.transactionHash}>
+          <button type="button" onClick={openModal}>
+            <TruncatedText value={txHash} />
+          </button>
 
-        <CopyButton value={blockNumber} />
-      </p>
+          <CopyButton value={txHash} />
+        </p>
 
-      <TransactionPair {...props} />
-      <TransactionStatus status={status} />
-    </Card>
+        <TransactionPair {...props} />
+        <TransactionStatus status={status} />
+      </Card>
+
+      {isModalOpen && <TransactionModal close={closeModal} {...props} />}
+    </>
   );
 }
 
-function TransactionCardCompact({ status, timestamp, ...props }: Props) {
-  return (
-    <Card className={styles.compactCard}>
-      <TransactionPair {...props} isCompact />
+function TransactionCardCompact(props: Props) {
+  const { status, timestamp } = props;
 
-      <div>
-        <TransactionStatus status={status} />
-        <TransactionDate timestamp={timestamp} isCompact />
-      </div>
-    </Card>
+  const [isModalOpen, openModal, closeModal] = useModal();
+
+  return (
+    <>
+      <Card as="button" className={cx(styles.compactCard, styles.button)} onClick={openModal}>
+        <TransactionPair {...props} isCompact />
+
+        <div className={styles.status}>
+          <TransactionStatus status={status} />
+          <TransactionDate timestamp={timestamp} isCompact />
+        </div>
+      </Card>
+
+      {isModalOpen && <TransactionModal close={closeModal} {...props} />}
+    </>
   );
 }
 
@@ -78,7 +94,7 @@ function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
     <Card className={styles.wideCard}>
       <TransactionDate.Skeleton />
 
-      <p className={styles.blockNumber}>
+      <p className={styles.transactionHash}>
         <Skeleton>
           <span>0x000000000</span>
         </Skeleton>

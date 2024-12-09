@@ -36,7 +36,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@master
         with:
-          context: indexer
+          context: .
           file: indexer/Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:testnet
@@ -61,4 +61,4 @@ jobs:
       - name: Check k8s deployments
         uses: sergeyfilyanin/kubectl-aws-eks@master
         with:
-          args: get deployment -o name -n vara | xargs -n1 -t kubectl rollout status -n gear-bridges --timeout=120s
+          args: get deployment -o name -n gear-bridges | xargs -n1 -t kubectl rollout status -n gear-bridges --timeout=120s

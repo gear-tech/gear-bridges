@@ -7,7 +7,7 @@ const TRANSFERS_QUERY = graphql(`
   query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {
     transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {
       amount
-      blockNumber
+      txHash
       destNetwork
       destination
       id

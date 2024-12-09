@@ -60,7 +60,7 @@ pub struct EthereumSignerArgs {
 
     /// Private key for fee payer
     #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
-    pub fee_payer: Option<String>,
+    pub fee_payer: String,
 }
 
 #[derive(Args)]

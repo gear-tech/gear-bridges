@@ -308,7 +308,7 @@ fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         eth_endpoint,
         mq_address,
         relayer_address,
-        args.fee_payer.as_deref(),
+        Some(&args.fee_payer),
     )
     .expect("Error while creating ethereum client")
 }

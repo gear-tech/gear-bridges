@@ -145,6 +145,10 @@ pub struct GearEthManualArgs {
     #[arg(long = "message-block", short = 'b')]
     pub block: u32,
 
+    /// Ethereum block number to start listening for merkle roots from. If not specified equals to the latest finalized block
+    #[arg(long = "from-eth-block")]
+    pub from_eth_block: Option<u64>,
+
     #[clap(flatten)]
     pub gear_args: GearArgs,
     #[clap(flatten)]

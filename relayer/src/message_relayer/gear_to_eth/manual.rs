@@ -13,7 +13,22 @@ use crate::message_relayer::common::{
     GearBlockNumber, MessageInBlock,
 };
 
-pub async fn relay(gear_api: GearApi, eth_api: EthApi, message_nonce: H256, gear_block: u32) {
+pub async fn relay(
+    gear_api: GearApi,
+    eth_api: EthApi,
+    message_nonce: H256,
+    gear_block: u32,
+    from_eth_block: Option<u64>,
+) {
+    let from_eth_block = if let Some(block) = from_eth_block {
+        block
+    } else {
+        eth_api
+            .finalized_block_number()
+            .await
+            .expect("Failed to get finalized block number on ethereum")
+    };
+
     let gear_block_hash = gear_api
         .block_number_to_hash(gear_block)
         .await
@@ -42,12 +57,6 @@ pub async fn relay(gear_api: GearApi, eth_api: EthApi, message_nonce: H256, gear
     };
 
     let (queued_messages_sender, queued_messages_receiver) = channel();
-
-    // TODO: Specify in cli.
-    let from_eth_block = eth_api
-        .finalized_block_number()
-        .await
-        .expect("Failed to get finalized block number on ethereum");
 
     let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
     let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), gear_api.clone());

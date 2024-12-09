@@ -47,7 +47,7 @@ impl Relayer {
         suri: String,
         eth_api: EthApi,
         beacon_client: BeaconClient,
-        erc20_treasury_address: H160,
+        erc20_manager_address: H160,
         checkpoint_light_client_address: H256,
         historical_proxy_address: H256,
         vft_manager_address: H256,
@@ -67,7 +67,7 @@ impl Relayer {
         let deposit_event_extractor = DepositEventExtractor::new(
             eth_api.clone(),
             beacon_client.clone(),
-            erc20_treasury_address,
+            erc20_manager_address,
         );
 
         let checkpoints_extractor =

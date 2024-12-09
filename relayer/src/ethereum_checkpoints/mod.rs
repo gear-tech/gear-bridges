@@ -1,5 +1,17 @@
-use super::*;
 use anyhow::{anyhow, Result as AnyResult};
+use futures::{
+    future::{self, Either},
+    pin_mut,
+};
+use gclient::{EventProcessor, GearApi};
+use parity_scale_codec::Decode;
+use primitive_types::H256;
+use tokio::{
+    signal::unix::{self, SignalKind},
+    sync::mpsc::{self, Sender},
+    time::{self, Duration},
+};
+
 use checkpoint_light_client_io::{
     ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH},
     meta::ReplayBack,
@@ -7,17 +19,7 @@ use checkpoint_light_client_io::{
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
 };
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
-use futures::{
-    future::{self, Either},
-    pin_mut,
-};
-use gclient::{EventProcessor, GearApi, WSAddress};
-use parity_scale_codec::Decode;
-use tokio::{
-    signal::unix::{self, SignalKind},
-    sync::mpsc::{self, Sender},
-    time::{self, Duration},
-};
+use utils_prometheus::MeteredService;
 
 #[cfg(test)]
 mod tests;
@@ -33,163 +35,165 @@ const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 // The constant is intentionally duplicated since vara-runtime is too heavy dependency.
 const UNITS: u128 = 1_000_000_000_000;
 
-pub async fn relay(args: RelayCheckpointsArgs) {
-    log::info!("Started");
+pub struct Relayer {
+    program_id: H256,
 
-    let RelayCheckpointsArgs {
-        program_id,
-        beacon_endpoint,
-        beacon_timeout,
-        vara_args:
-            VaraArgs {
-                vara_domain,
-                vara_port,
-                vara_rpc_retries,
-            },
-        vara_suri,
-        prometheus_args: PrometheusArgs {
-            endpoint: endpoint_prometheus,
-        },
-    } = args;
+    beacon_client: BeaconClient,
+    gear_api: GearApi,
 
-    let program_id =
-        crate::hex_utils::decode_byte_array(&program_id).expect("Failed to parse ProgramId");
+    metrics: metrics::Updates,
+}
 
-    let timeout = Some(Duration::from_secs(beacon_timeout));
-    let beacon_client = BeaconClient::new(beacon_endpoint.clone(), timeout)
-        .await
-        .expect("Failed to connect to beacon node");
+impl MeteredService for Relayer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
+}
 
-    let mut signal_interrupt = unix::signal(SignalKind::interrupt()).expect("Set SIGINT handler");
-
-    let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
-
-    sync_update::spawn_receiver(beacon_client.clone(), sender);
-
-    let client = GearApi::builder()
-        .retries(vara_rpc_retries)
-        .suri(vara_suri)
-        .build(WSAddress::new(vara_domain, vara_port))
-        .await
-        .expect("GearApi client should be created");
-
-    let gas_limit_block = client
-        .block_gas_limit()
-        .expect("Block gas limit should be determined");
-
-    // use 95% of block gas limit for all extrinsics
-    let gas_limit = gas_limit_block / 100 * 95;
-    log::info!("Gas limit for extrinsics: {gas_limit}");
-
-    let sync_update = receiver
-        .recv()
-        .await
-        .expect("Updates receiver should be open before the loop");
-
-    let mut slot_last = sync_update.finalized_header.slot;
-
-    match sync_update::try_to_apply(&client, program_id, sync_update.clone(), gas_limit).await {
-        Err(e) => {
-            log::error!("{e:?}");
-            return;
-        }
-        Ok(Err(sync_update::Error::ReplayBackRequired {
-            replay_back,
-            checkpoint,
-        })) => {
-            if let Err(e) = replay_back::execute(
-                &beacon_client,
-                &client,
-                program_id,
-                gas_limit,
-                replay_back,
-                checkpoint,
-                sync_update,
-            )
-            .await
-            {
-                log::error!("{e:?}. Exiting");
-                return;
-            }
-        }
-        Ok(Ok(_) | Err(sync_update::Error::NotActual)) => (),
-        _ => {
-            slot_last = 0;
+impl Relayer {
+    pub fn new(program_id: H256, beacon_client: BeaconClient, gear_api: GearApi) -> Self {
+        Self {
+            program_id,
+            beacon_client,
+            gear_api,
+            metrics: metrics::Updates::new(),
         }
     }
 
-    let update_metrics = metrics::Updates::new();
-    MetricsBuilder::new()
-        .register_service(&update_metrics)
-        .build()
-        .run(endpoint_prometheus)
-        .await;
+    pub async fn run(self) {
+        log::info!("Started");
 
-    log::info!("Metrics service spawned");
+        let mut signal_interrupt =
+            unix::signal(SignalKind::interrupt()).expect("Set SIGINT handler");
 
-    update_total_balance(&client, &update_metrics).await;
+        let (sender, mut receiver) = mpsc::channel(SIZE_CHANNEL);
 
-    loop {
-        let future_interrupt = signal_interrupt.recv();
-        pin_mut!(future_interrupt);
+        sync_update::spawn_receiver(self.beacon_client.clone(), sender);
 
-        let future_update = receiver.recv();
-        pin_mut!(future_update);
+        let gas_limit_block = self
+            .gear_api
+            .block_gas_limit()
+            .expect("Block gas limit should be determined");
 
-        let sync_update = match future::select(future_interrupt, future_update).await {
-            Either::Left((_interrupted, _)) => {
-                log::info!("Caught SIGINT. Exiting");
-                return;
-            }
+        // use 95% of block gas limit for all extrinsics
+        let gas_limit = gas_limit_block / 100 * 95;
+        log::info!("Gas limit for extrinsics: {gas_limit}");
 
-            Either::Right((Some(sync_update), _)) => sync_update,
-            Either::Right((None, _)) => {
-                log::info!("Updates receiver has been closed. Exiting");
-                return;
-            }
-        };
-        let slot = sync_update.finalized_header.slot;
+        let sync_update = receiver
+            .recv()
+            .await
+            .expect("Updates receiver should be open before the loop");
 
-        update_metrics
-            .fetched_sync_update_slot
-            .set(i64::from_le_bytes(slot.to_le_bytes()));
+        let mut slot_last = sync_update.finalized_header.slot;
 
-        let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
-        if !committee_update {
-            update_metrics.total_fetched_finality_updates.inc();
-        }
-
-        if slot == slot_last {
-            continue;
-        }
-
-        match sync_update::try_to_apply(&client, program_id, sync_update, gas_limit).await {
-            Ok(Ok(_)) => {
-                slot_last = slot;
-
-                if committee_update {
-                    update_metrics.processed_committee_updates.inc();
-                } else {
-                    update_metrics.processed_finality_updates.inc();
-                }
-            }
-            Ok(Err(sync_update::Error::ReplayBackRequired { .. })) => {
-                log::error!("Replay back within the main loop. Exiting");
-                return;
-            }
-            Ok(Err(e)) => {
-                log::error!("The program failed with: {e:?}. Skipping");
-                if let sync_update::Error::NotActual = e {
-                    slot_last = slot;
-                }
-            }
+        match sync_update::try_to_apply(
+            &self.gear_api,
+            self.program_id.0,
+            sync_update.clone(),
+            gas_limit,
+        )
+        .await
+        {
             Err(e) => {
                 log::error!("{e:?}");
                 return;
             }
+            Ok(Err(sync_update::Error::ReplayBackRequired {
+                replay_back,
+                checkpoint,
+            })) => {
+                if let Err(e) = replay_back::execute(
+                    &self.beacon_client,
+                    &self.gear_api,
+                    self.program_id.0,
+                    gas_limit,
+                    replay_back,
+                    checkpoint,
+                    sync_update,
+                )
+                .await
+                {
+                    log::error!("{e:?}. Exiting");
+                    return;
+                }
+            }
+            Ok(Ok(_) | Err(sync_update::Error::NotActual)) => (),
+            _ => {
+                slot_last = 0;
+            }
         }
 
-        update_total_balance(&client, &update_metrics).await;
+        update_total_balance(&self.gear_api, &self.metrics).await;
+
+        loop {
+            let future_interrupt = signal_interrupt.recv();
+            pin_mut!(future_interrupt);
+
+            let future_update = receiver.recv();
+            pin_mut!(future_update);
+
+            let sync_update = match future::select(future_interrupt, future_update).await {
+                Either::Left((_interrupted, _)) => {
+                    log::info!("Caught SIGINT. Exiting");
+                    return;
+                }
+
+                Either::Right((Some(sync_update), _)) => sync_update,
+                Either::Right((None, _)) => {
+                    log::info!("Updates receiver has been closed. Exiting");
+                    return;
+                }
+            };
+            let slot = sync_update.finalized_header.slot;
+
+            self.metrics
+                .fetched_sync_update_slot
+                .set(i64::from_le_bytes(slot.to_le_bytes()));
+
+            let committee_update = sync_update.sync_committee_next_pub_keys.is_some();
+            if !committee_update {
+                self.metrics.total_fetched_finality_updates.inc();
+            }
+
+            if slot == slot_last {
+                continue;
+            }
+
+            match sync_update::try_to_apply(
+                &self.gear_api,
+                self.program_id.0,
+                sync_update,
+                gas_limit,
+            )
+            .await
+            {
+                Ok(Ok(_)) => {
+                    slot_last = slot;
+
+                    if committee_update {
+                        self.metrics.processed_committee_updates.inc();
+                    } else {
+                        self.metrics.processed_finality_updates.inc();
+                    }
+                }
+                Ok(Err(sync_update::Error::ReplayBackRequired { .. })) => {
+                    log::error!("Replay back within the main loop. Exiting");
+                    return;
+                }
+                Ok(Err(e)) => {
+                    log::error!("The program failed with: {e:?}. Skipping");
+                    if let sync_update::Error::NotActual = e {
+                        slot_last = slot;
+                    }
+                }
+                Err(e) => {
+                    log::error!("{e:?}");
+                    return;
+                }
+            }
+
+            update_total_balance(&self.gear_api, &self.metrics).await;
+        }
     }
 }
 

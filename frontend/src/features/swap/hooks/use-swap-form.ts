@@ -71,7 +71,7 @@ function useSwapForm(
   const handleSubmit = form.handleSubmit((values) => {
     const onSuccess = () => {
       reset();
-      alert.success('Successful transaction');
+      alert.success('Transfer request is successful');
     };
 
     // string is only for cancelled sign and send popup error during useSendProgramTransaction

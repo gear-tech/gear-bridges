@@ -63,9 +63,7 @@ function SwapForm({
 
   const { account } = useAccount();
   const ethAccount = useEthAccount();
-  const [transactionModal, setTransactionModal] = useState<
-    Omit<ComponentProps<typeof TransactionModal>, 'close'> | undefined
-  >();
+  const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
 
   const openTransacionModal = (amount: string, receiver: string) => {
     if (!address || !destinationAddress) throw new Error('Address is not defined');
@@ -75,11 +73,10 @@ function SwapForm({
     const sourceNetwork = isVaraNetwork ? TransferNetwork.Gear : TransferNetwork.Ethereum;
     const destNetwork = isVaraNetwork ? TransferNetwork.Ethereum : TransferNetwork.Gear;
     const sender = isVaraNetwork ? account!.decodedAddress : ethAccount.address!;
+    const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver });
+    setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
-
-  const closeTransactionModal = () => setTransactionModal(undefined);
 
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
@@ -104,6 +101,14 @@ function SwapForm({
         onMaxButtonClick={setMaxBalance}
       />
     );
+  };
+
+  const getButtonText = () => {
+    if (mint?.isPending) return 'Locking...';
+    if (approve.isPending) return 'Approving...';
+    if (submit.isPending) return 'Swapping...';
+
+    return 'Transfer';
   };
 
   const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} />;
@@ -148,7 +153,7 @@ function SwapForm({
           <div className={styles.submitContainer}>
             <Button
               type="submit"
-              text="Transfer"
+              text={getButtonText()}
               disabled={disabled}
               isLoading={
                 approve.isLoading ||
@@ -174,9 +179,7 @@ function SwapForm({
         </footer>
       </form>
 
-      {transactionModal && (
-        <TransactionModal close={closeTransactionModal} {...transactionModal} renderProgressBar={renderProgressBar} />
-      )}
+      {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
     </FormProvider>
   );
 }

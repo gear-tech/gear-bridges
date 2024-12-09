@@ -74,9 +74,11 @@ function useSwapForm(
       alert.success('Successful transaction');
     };
 
-    const onError = (error: WriteContractErrorType) => {
-      logger.error('Transfer Error', error);
-      alert.error((error as BaseError).shortMessage || error.message);
+    // string is only for cancelled sign and send popup error during useSendProgramTransaction
+    // reevaluate after @gear-js/react-hooks update
+    const onError = (error: WriteContractErrorType | string) => {
+      logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
+      alert.error(typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message);
     };
 
     openTransactionModal(values[FIELD_NAME.EXPECTED_VALUE].toString(), values[FIELD_NAME.ADDRESS]);

@@ -2,41 +2,62 @@ import { CSSProperties } from 'react';
 
 import { cx } from '@/utils';
 
+import { UseHandleSubmit } from '../../types';
+
 import styles from './submit-progress-bar.module.scss';
 
 type Props = {
-  status: 'mint' | 'approve' | 'transfer';
-  error: string;
-  isSuccess: boolean;
+  submit: Omit<ReturnType<UseHandleSubmit>[0], 'mutateAsync'>;
+  approve: ReturnType<UseHandleSubmit>[1];
+  mint: ReturnType<UseHandleSubmit>[2];
 };
 
 const PERCENTAGE = {
+  default: 0,
   mint: 25,
   approve: 50,
   transfer: 75,
+  success: 100,
 } as const;
 
 const TEXT = {
+  default: '',
   mint: 'Locking',
   approve: 'Approving',
   transfer: 'Transferring',
+  success: 'Transfer request is successful',
 } as const;
 
 const ERROR_TEXT = {
+  default: '',
   mint: 'Lock',
   approve: 'Approve',
   transfer: 'Transfer',
+  success: '',
 } as const;
 
-function SubmitProgressBar({ status, error, isSuccess }: Props) {
-  const getClassName = () => {
-    if (isSuccess) return styles.success;
-    if (error) return styles.error;
+function SubmitProgressBar({ mint, approve, submit }: Props) {
+  const { isSuccess, isPending, error } = submit;
+
+  // string is only for cancelled sign and send popup error during useSendProgramTransaction
+  // reevaluate after @gear-js/react-hooks update
+  const errorMessage = typeof error === 'string' ? error : error?.message;
+
+  const getStatus = () => {
+    if (mint?.isPending || mint?.error) return 'mint';
+    if (approve.isPending || approve.error) return 'approve';
+    if (submit.isPending || submit.error) return 'transfer';
+    if (isSuccess) return 'success';
+    return 'default';
   };
 
+  const status = getStatus();
+
   return (
-    <div className={cx(styles.container, getClassName())}>
-      <p className={styles.text}>{error ? `${ERROR_TEXT[status]} failed: ${error}` : TEXT[status]}</p>
+    <div className={cx(styles.container, isPending && styles.loading, errorMessage && styles.error)}>
+      <p className={styles.text}>
+        {errorMessage ? `${ERROR_TEXT[status]} transaction failed: ${errorMessage}` : TEXT[status]}
+      </p>
 
       <div className={styles.bar} style={{ '--width': `${PERCENTAGE[status]}%` } as CSSProperties} />
     </div>

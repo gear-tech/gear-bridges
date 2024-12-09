@@ -67,24 +67,6 @@ function SwapForm({
     Omit<ComponentProps<typeof TransactionModal>, 'close'> | undefined
   >();
 
-  const getSubmitStatus = () => {
-    let status: 'mint' | 'approve' | 'transfer' = 'mint';
-
-    if (mint?.isPending || mint?.error) {
-      status = 'mint';
-    } else if (approve.isPending || approve.error) {
-      status = 'approve';
-    } else if (submit.isPending || submit.error) {
-      status = 'transfer';
-    }
-
-    const error = mint?.error || approve.error || submit.error;
-    const errorMessage = (typeof error === 'string' ? error : error?.message) || '';
-    const { isSuccess } = submit;
-
-    return { status, error: errorMessage, isSuccess };
-  };
-
   const openTransacionModal = (amount: string, receiver: string) => {
     if (!address || !destinationAddress) throw new Error('Address is not defined');
 
@@ -96,13 +78,6 @@ function SwapForm({
 
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver });
   };
-
-  // useEffect(() => {
-  //   if (!address || !destinationAddress) return;
-
-  //   openTransacionModal('0', '0x00');
-  //   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [address, destinationAddress]);
 
   const closeTransactionModal = () => setTransactionModal(undefined);
 
@@ -131,7 +106,7 @@ function SwapForm({
     );
   };
 
-  const renderProgressBar = () => <SubmitProgressBar {...getSubmitStatus()} />;
+  const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} />;
 
   return (
     <FormProvider {...form}>

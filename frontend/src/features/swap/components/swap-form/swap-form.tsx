@@ -1,8 +1,13 @@
+import { useAccount } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
+import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { TransactionModal } from '@/features/history/components/transaction-modal';
+import { Network as TransferNetwork } from '@/features/history/types';
+import { useEthAccount } from '@/hooks';
 
 import GasSVG from '../../assets/gas.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
@@ -12,6 +17,7 @@ import { getMergedBalance } from '../../utils';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { Network } from '../network';
+import { SubmitProgressBar } from '../submit-progress-bar';
 
 import styles from './swap-form.module.scss';
 
@@ -40,7 +46,7 @@ function SwapForm({
   const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
   const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
-  const { address, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
+  const { address, destinationAddress, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
   const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
@@ -55,6 +61,23 @@ function SwapForm({
     ftBalance.value,
   );
 
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
+  const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
+
+  const openTransacionModal = (amount: string, receiver: string) => {
+    if (!address || !destinationAddress) throw new Error('Address is not defined');
+
+    const source = address;
+    const destination = destinationAddress;
+    const sourceNetwork = isVaraNetwork ? TransferNetwork.Gear : TransferNetwork.Ethereum;
+    const destNetwork = isVaraNetwork ? TransferNetwork.Ethereum : TransferNetwork.Gear;
+    const sender = isVaraNetwork ? account!.decodedAddress : ethAccount.address!;
+    const close = () => setTransactionModal(undefined);
+
+    setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
+  };
+
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     isNativeToken,
@@ -64,6 +87,7 @@ function SwapForm({
     fee.value,
     disabled,
     onSubmit,
+    openTransacionModal,
   );
 
   const renderFromBalance = () => {
@@ -80,12 +104,14 @@ function SwapForm({
   };
 
   const getButtonText = () => {
-    if (mint?.isPending) return 'Minting...';
+    if (mint?.isPending) return 'Locking...';
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Swapping...';
 
-    return 'Swap';
+    return 'Transfer';
   };
+
+  const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} />;
 
   return (
     <FormProvider {...form}>
@@ -152,6 +178,8 @@ function SwapForm({
           </div>
         </footer>
       </form>
+
+      {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
     </FormProvider>
   );
 }

@@ -78,11 +78,17 @@ function useHandleVaraSubmit(
     if (isUndefined(allowance)) throw new Error('Allowance is not found');
     if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
 
-    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && expectedAmount > ftBalance)
+    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && expectedAmount > ftBalance) {
       await mint.sendTransactionAsync({ args: [], value: expectedAmount - ftBalance });
+    } else {
+      mint.reset();
+    }
 
-    if (expectedAmount > allowance)
+    if (expectedAmount > allowance) {
       await vftApprove.sendTransactionAsync({ args: [vftManagerAddress, expectedAmount] });
+    } else {
+      vftApprove.reset();
+    }
 
     return sendBridgingPaymentRequest(expectedAmount, accountAddress);
   };

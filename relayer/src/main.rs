@@ -23,8 +23,8 @@ mod prover_interface;
 mod relay_merkle_roots;
 
 use cli::{
-    BeaconRpcArgs, Cli, CliCommands, EthereumArgs, GenesisConfigArgs, ProofStorageArgs,
-    RelayErc20Args, RelayErc20Commands, VaraArgs,
+    BeaconRpcArgs, Cli, CliCommands, EthGearTokensArgs, EthGearTokensCommands, EthereumArgs,
+    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, VaraArgs,
 };
 
 #[tokio::main]
@@ -45,7 +45,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        CliCommands::RelayMerkleRoots(args) => {
+        CliCommands::GearEthCore(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
@@ -99,7 +99,7 @@ async fn main() {
 
             kill_switch.run().await.expect("Kill switch relayer failed");
         }
-        CliCommands::RelayMessages(args) => {
+        CliCommands::GearEthTokens(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
             let eth_api = create_eth_client(&args.ethereum_args);
 
@@ -153,8 +153,8 @@ async fn main() {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
-        CliCommands::RelayCheckpoints(args) => {
-            let gear_api = create_gclient_client(&args.vara_args, args.vara_suri).await;
+        CliCommands::EthGearCore(args) => {
+            let gear_api = create_gclient_client(&args.vara_args).await;
 
             let beacon_client = create_beacon_client(&args.beacon_args).await;
 
@@ -171,13 +171,12 @@ async fn main() {
 
             relayer.run().await;
         }
-        CliCommands::RelayErc20(RelayErc20Args {
+        CliCommands::EthGearTokens(EthGearTokensArgs {
             command,
             checkpoint_light_client_address,
             historical_proxy_address,
             vft_manager_address,
             vara_args,
-            vara_suri,
             ethereum_args,
             beacon_rpc,
             prometheus_args,
@@ -186,9 +185,9 @@ async fn main() {
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
-                vara_domain: vara_args.vara_domain,
-                vara_port: vara_args.vara_port,
-                vara_rpc_retries: vara_args.vara_rpc_retries,
+                vara_domain: vara_args.gear_args.vara_domain,
+                vara_port: vara_args.gear_args.vara_port,
+                vara_rpc_retries: vara_args.gear_args.vara_rpc_retries,
             };
 
             let checkpoint_light_client_address =
@@ -200,7 +199,7 @@ async fn main() {
                 hex_utils::decode_h256(&vft_manager_address).expect("Failed to parse address");
 
             match command {
-                RelayErc20Commands::AllTokenTransfers {
+                EthGearTokensCommands::AllTokenTransfers {
                     erc20_treasury_address,
                 } => {
                     let erc20_treasury_address = hex_utils::decode_h160(&erc20_treasury_address)
@@ -208,7 +207,7 @@ async fn main() {
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                         gsdk_args,
-                        vara_suri,
+                        vara_args.vara_suri,
                         eth_api,
                         beacon_client,
                         erc20_treasury_address,
@@ -227,7 +226,7 @@ async fn main() {
 
                     relayer.run();
                 }
-                RelayErc20Commands::PaidTokenTransfers {
+                EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
                 } => {
                     let bridging_payment_address =
@@ -236,7 +235,7 @@ async fn main() {
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gsdk_args,
-                        vara_suri,
+                        vara_args.vara_suri,
                         eth_api,
                         beacon_client,
                         bridging_payment_address,
@@ -265,11 +264,14 @@ async fn main() {
     };
 }
 
-async fn create_gclient_client(args: &VaraArgs, suri: String) -> gclient::GearApi {
+async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
     gclient::GearApi::builder()
-        .retries(args.vara_rpc_retries)
-        .suri(suri)
-        .build(gclient::WSAddress::new(&args.vara_domain, args.vara_port))
+        .retries(args.gear_args.vara_rpc_retries)
+        .suri(&args.vara_suri)
+        .build(gclient::WSAddress::new(
+            &args.gear_args.vara_domain,
+            args.gear_args.vara_port,
+        ))
         .await
         .expect("GearApi client should be created")
 }

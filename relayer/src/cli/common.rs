@@ -18,6 +18,19 @@ pub struct GenesisConfigArgs {
 }
 
 #[derive(Args)]
+pub struct GearSignerArgs {
+    #[clap(flatten)]
+    pub gear_args: VaraArgs,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, env = "VARA_SURI")]
+    pub vara_suri: String,
+}
+
+#[derive(Args)]
 pub struct VaraArgs {
     /// Domain of the VARA RPC endpoint
     #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]

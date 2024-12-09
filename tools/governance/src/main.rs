@@ -178,7 +178,16 @@ async fn update_ethereum_contract(
 
     match reply {
         gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => {
-            println!("Message successfully submitted to bridge. Nonce: {} Block number: {} Block hash: {}", nonce, block_number, hex::encode(&block_hash.0));
+            let mut nonce_le = [0; 32];
+            nonce.to_little_endian(&mut nonce_le);
+
+            println!("Message successfully submitted to bridge");
+            println!("Nonce: {}({})", nonce, hex::encode(nonce_le));
+            println!(
+                "Block number: {} Block hash: {}",
+                block_number,
+                hex::encode(block_hash.0)
+            );
         }
     };
 }

@@ -21,6 +21,7 @@ const handler = async (ctx: Context) => {
   const promises = [];
 
   for (let block of ctx.blocks) {
+    const timestamp = new Date(block.header.timestamp);
     for (let log of block.logs) {
       const address = log.address.toLowerCase();
       const topic = log.topics[0].toLowerCase();
@@ -32,7 +33,7 @@ const handler = async (ctx: Context) => {
             id: randomUUID(),
             txHash: log.transactionHash,
             blockNumber: block.header.height.toString(),
-            timestamp: new Date(block.header.timestamp),
+            timestamp,
             nonce: ethNonce(`${block.header.height}${log.transactionIndex}`),
             sourceNetwork: Network.Ethereum,
             source: token,
@@ -46,7 +47,7 @@ const handler = async (ctx: Context) => {
         );
       } else if (address === MSGQ && topic === MSGQ_MESSAGE_PROCESSED) {
         const [_, __, nonce] = messageQueueAbi.events.MessageProcessed.decode(log);
-        promises.push(tempState.transferCompleted(gearNonce(nonce, false)));
+        promises.push(tempState.transferCompleted(gearNonce(nonce, false), timestamp));
       }
     }
   }

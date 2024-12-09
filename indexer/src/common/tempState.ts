@@ -45,8 +45,10 @@ export class TempState {
 
       if (transfers.length > 0) {
         for (const t of transfers) {
+          const completed = this._completed.get(t.nonce)!;
           t.status = Status.Completed;
-          completedToDelete.push(this._completed.get(t.nonce)!);
+          t.completedAt = completed.timestamp;
+          completedToDelete.push(completed);
           this._completed.delete(t.nonce);
         }
         if (completedToDelete.length > 0) {
@@ -129,8 +131,11 @@ export class TempState {
     this._ctx.log.info(`Transfer requested: ${transfer.nonce}`);
   }
 
-  public transferCompleted(nonce: string) {
-    this._completed.set(nonce, new CompletedTransfer({ id: randomUUID(), nonce, destNetwork: this._network }));
+  public transferCompleted(nonce: string, ts: Date) {
+    this._completed.set(
+      nonce,
+      new CompletedTransfer({ id: randomUUID(), nonce, destNetwork: this._network, timestamp: ts }),
+    );
     this._ctx.log.info(`Transfer completed: ${nonce}`);
   }
 

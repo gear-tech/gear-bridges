@@ -91,7 +91,7 @@ const handler = async (ctx: ProcessorContext) => {
             );
 
             const nonce = ethNonce(`${block_number}${transaction_index}`);
-            promises.push(tempState.transferCompleted(nonce));
+            promises.push(tempState.transferCompleted(nonce, timestamp));
             break;
           }
         }

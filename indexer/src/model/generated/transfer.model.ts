@@ -21,6 +21,9 @@ export class Transfer {
     @DateTimeColumn_({nullable: false})
     timestamp!: Date
 
+    @DateTimeColumn_({nullable: true})
+    completedAt!: Date | undefined | null
+
     @Index_()
     @StringColumn_({nullable: false})
     nonce!: string

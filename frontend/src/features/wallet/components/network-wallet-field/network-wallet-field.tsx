@@ -32,8 +32,6 @@ function NetworkWalletField() {
   const handleButtonClick = () => {
     if (account) return openSubstrateModal();
     if (ethAccount.address) return openEthModal();
-
-    return openModal();
   };
 
   // it's probably worth to check isConnecting too, but there is a bug:
@@ -42,24 +40,19 @@ function NetworkWalletField() {
 
   return (
     <>
-      <div className={styles.field}>
-        {isConnected && (
-          <div className={styles.wallet}>
-            {SVG && <SVG />}
-            {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
+      {isConnected ? (
+        // TODO: button
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+        <div className={styles.wallet} onClick={handleButtonClick}>
+          {SVG && <SVG />}
+          {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
 
-            {account && <TruncatedText value={account.address} />}
-            {ethAccount.address && <TruncatedText value={ethAccount.address} />}
-          </div>
-        )}
-
-        <Button
-          text={isConnected ? 'Change' : 'Connect'}
-          size="small"
-          onClick={handleButtonClick}
-          block={!isConnected}
-        />
-      </div>
+          {account && <TruncatedText value={account.address} />}
+          {ethAccount.address && <TruncatedText value={ethAccount.address} />}
+        </div>
+      ) : (
+        <Button text="Connect" size="small" onClick={openModal} block />
+      )}
 
       {isModalOpen && <NetworkWalletModal close={closeModal} />}
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}

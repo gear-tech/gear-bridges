@@ -1,8 +1,8 @@
+import ClockSVG from '@/assets/clock.svg?react';
 import { Skeleton } from '@/components';
 import { cx } from '@/utils';
 
 import CheckSVG from '../../assets/check.svg?react';
-import ClockSVG from '../../assets/clock.svg?react';
 import ErrorSVG from '../../assets/error.svg?react';
 import { Transfer, Status as StatusType } from '../../types';
 

@@ -171,23 +171,33 @@ async fn main() {
 
             relayer.run().await;
         }
-        CliCommands::RelayErc20(RelayErc20Args { common, command }) => {
-            let eth_api = create_eth_client(&common.ethereum_args);
-            let beacon_client = create_beacon_client(&common.beacon_rpc).await;
+        CliCommands::RelayErc20(RelayErc20Args {
+            command,
+            checkpoint_light_client_address,
+            historical_proxy_address,
+            vft_manager_address,
+            vara_args,
+            vara_suri,
+            ethereum_args,
+            beacon_rpc,
+            prometheus_args,
+        }) => {
+            let eth_api = create_eth_client(&ethereum_args);
+            let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
-                vara_domain: common.vara_args.vara_domain,
-                vara_port: common.vara_args.vara_port,
-                vara_rpc_retries: common.vara_args.vara_rpc_retries,
+                vara_domain: vara_args.vara_domain,
+                vara_port: vara_args.vara_port,
+                vara_rpc_retries: vara_args.vara_rpc_retries,
             };
 
             let checkpoint_light_client_address =
-                hex_utils::decode_h256(&common.checkpoint_light_client_address)
+                hex_utils::decode_h256(&checkpoint_light_client_address)
                     .expect("Failed to parse address");
-            let historical_proxy_address = hex_utils::decode_h256(&common.historical_proxy_address)
-                .expect("Failed to parse address");
-            let vft_manager_address = hex_utils::decode_h256(&common.vft_manager_address)
-                .expect("Failed to parse address");
+            let historical_proxy_address =
+                hex_utils::decode_h256(&historical_proxy_address).expect("Failed to parse address");
+            let vft_manager_address =
+                hex_utils::decode_h256(&vft_manager_address).expect("Failed to parse address");
 
             match command {
                 RelayErc20Commands::AllTokenTransfers {
@@ -198,7 +208,7 @@ async fn main() {
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                         gsdk_args,
-                        common.vara_suri,
+                        vara_suri,
                         eth_api,
                         beacon_client,
                         erc20_treasury_address,
@@ -212,12 +222,11 @@ async fn main() {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(common.prometheus_args.endpoint)
+                        .run(prometheus_args.endpoint)
                         .await;
 
                     relayer.run();
                 }
-
                 RelayErc20Commands::PaidTokenTransfers {
                     bridging_payment_address,
                 } => {
@@ -227,7 +236,7 @@ async fn main() {
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gsdk_args,
-                        common.vara_suri,
+                        vara_suri,
                         eth_api,
                         beacon_client,
                         bridging_payment_address,
@@ -241,7 +250,7 @@ async fn main() {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(common.prometheus_args.endpoint)
+                        .run(prometheus_args.endpoint)
                         .await;
 
                     relayer.run();

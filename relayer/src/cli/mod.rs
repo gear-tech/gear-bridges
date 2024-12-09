@@ -61,18 +61,31 @@ pub struct EthGearCoreArgs {
 
 #[derive(Args)]
 pub struct GearEthTokensArgs {
+    #[clap(subcommand)]
+    pub command: GearEthTokensCommands,
+
+    /// Block number to start relaying from. If not specified equals to the latest finalized block
+    #[arg(long = "from-block")]
+    pub from_block: Option<u32>,
+
     #[clap(flatten)]
     pub vara_args: VaraArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
-    /// Block number to start relaying from. If not specified equals to the latest finalized block
-    #[arg(long = "from-block")]
-    pub from_block: Option<u32>,
-    /// Address of bridging payment program (if not specified, relayer will relay all messages)
-    #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
-    pub bridging_payment_address: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum GearEthTokensCommands {
+    /// Relay all the messages
+    AllTokenTransfers,
+    /// Relay only messages sent through bridging-payment
+    PaidTokenTransfers {
+        /// Address of the bridging-payment program
+        #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
+        bridging_payment_address: String,
+    },
 }
 
 #[derive(Args)]
@@ -95,13 +108,10 @@ pub struct EthGearTokensArgs {
 
     #[clap(flatten)]
     pub vara_args: GearSignerArgs,
-
     #[clap(flatten)]
     pub ethereum_args: EthereumArgs,
-
     #[clap(flatten)]
     pub beacon_rpc: BeaconRpcArgs,
-
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
 }
@@ -110,9 +120,9 @@ pub struct EthGearTokensArgs {
 pub enum EthGearTokensCommands {
     /// Relay all the transactions
     AllTokenTransfers {
-        /// Address of the ERC20Treasury contract on ethereum
-        #[arg(long = "erc20-treasury-address", env = "ERC20_TREASURY_ADDRESS")]
-        erc20_treasury_address: String,
+        /// Address of the ERC20Manager contract on ethereum
+        #[arg(long = "erc20-manager-address", env = "ERC20_MANAGER_ADDRESS")]
+        erc20_manager_address: String,
     },
     /// Relay only transactions sent to BridgingPayment
     PaidTokenTransfers {
@@ -124,15 +134,16 @@ pub enum EthGearTokensCommands {
 
 #[derive(Args)]
 pub struct KillSwitchArgs {
+    /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block
+    #[arg(long = "from-eth-block")]
+    pub from_eth_block: Option<u64>,
+
     #[clap(flatten)]
     pub vara_args: VaraArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
     pub genesis_config_args: GenesisConfigArgs,
-    /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block
-    #[arg(long = "from-eth-block")]
-    pub from_eth_block: Option<u64>,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]

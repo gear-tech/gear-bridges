@@ -16,7 +16,7 @@ pub struct DepositEventExtractor {
     eth_api: EthApi,
     beacon_client: BeaconClient,
 
-    erc20_treasury_address: H160,
+    erc20_manager_address: H160,
 
     metrics: Metrics,
 }
@@ -37,12 +37,12 @@ impl_metered_service! {
 }
 
 impl DepositEventExtractor {
-    pub fn new(eth_api: EthApi, beacon_client: BeaconClient, erc20_treasury_address: H160) -> Self {
+    pub fn new(eth_api: EthApi, beacon_client: BeaconClient, erc20_manager_address: H160) -> Self {
         Self {
             eth_api,
             beacon_client,
 
-            erc20_treasury_address,
+            erc20_manager_address,
 
             metrics: Metrics::new(),
         }
@@ -80,7 +80,7 @@ impl DepositEventExtractor {
     ) -> anyhow::Result<()> {
         let events = self
             .eth_api
-            .fetch_deposit_events(self.erc20_treasury_address, block.0)
+            .fetch_deposit_events(self.erc20_manager_address, block.0)
             .await?;
 
         if events.is_empty() {

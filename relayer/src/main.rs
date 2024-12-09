@@ -24,7 +24,8 @@ mod relay_merkle_roots;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearTokensArgs, EthGearTokensCommands, EthereumArgs,
-    EthereumSignerArgs, GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, VaraArgs,
+    EthereumSignerArgs, GearEthTokensCommands, GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
+    VaraArgs,
 };
 
 #[tokio::main]
@@ -108,45 +109,51 @@ async fn main() {
                 vara_port: args.vara_args.vara_port,
                 vara_rpc_retries: args.vara_args.vara_rpc_retries,
             };
-            if let Some(bridging_payment_address) = args.bridging_payment_address {
-                let bridging_payment_address = hex_utils::decode_h256(&bridging_payment_address)
-                    .expect("Failed to parse address");
 
-                let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
-                    gear_api,
-                    gsdk_args,
-                    eth_api,
-                    args.from_block,
+            let mut metrics_builder = MetricsBuilder::new();
+
+            match args.command {
+                GearEthTokensCommands::AllTokenTransfers => {
+                    let relayer = gear_to_eth::all_token_transfers::Relayer::new(
+                        gear_api,
+                        gsdk_args,
+                        eth_api,
+                        args.from_block,
+                    )
+                    .await
+                    .unwrap();
+
+                    metrics_builder = metrics_builder.register_service(&relayer);
+
+                    relayer.run();
+                }
+                GearEthTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
-                )
-                .await
-                .unwrap();
+                } => {
+                    let bridging_payment_address =
+                        hex_utils::decode_h256(&bridging_payment_address)
+                            .expect("Failed to parse address");
 
-                MetricsBuilder::new()
-                    .register_service(&relayer)
-                    .build()
-                    .run(args.prometheus_args.endpoint)
-                    .await;
+                    let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
+                        gear_api,
+                        gsdk_args,
+                        eth_api,
+                        args.from_block,
+                        bridging_payment_address,
+                    )
+                    .await
+                    .unwrap();
 
-                relayer.run();
-            } else {
-                let relayer = gear_to_eth::all_token_transfers::Relayer::new(
-                    gear_api,
-                    gsdk_args,
-                    eth_api,
-                    args.from_block,
-                )
-                .await
-                .unwrap();
+                    metrics_builder = metrics_builder.register_service(&relayer);
 
-                MetricsBuilder::new()
-                    .register_service(&relayer)
-                    .build()
-                    .run(args.prometheus_args.endpoint)
-                    .await;
-
-                relayer.run();
+                    relayer.run();
+                }
             }
+
+            metrics_builder
+                .build()
+                .run(args.prometheus_args.endpoint)
+                .await;
 
             loop {
                 // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
@@ -200,9 +207,9 @@ async fn main() {
 
             match command {
                 EthGearTokensCommands::AllTokenTransfers {
-                    erc20_treasury_address,
+                    erc20_manager_address,
                 } => {
-                    let erc20_treasury_address = hex_utils::decode_h160(&erc20_treasury_address)
+                    let erc20_manager_address = hex_utils::decode_h160(&erc20_manager_address)
                         .expect("Failed to parse address");
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
@@ -210,7 +217,7 @@ async fn main() {
                         vara_args.vara_suri,
                         eth_api,
                         beacon_client,
-                        erc20_treasury_address,
+                        erc20_manager_address,
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,

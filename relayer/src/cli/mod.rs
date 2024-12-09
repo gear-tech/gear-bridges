@@ -28,6 +28,9 @@ pub enum CliCommands {
     /// Relay tokens from ethereum to gear
     EthGearTokens(EthGearTokensArgs),
 
+    /// Manually relay message from gear to ethereum
+    GearEthManual(GearEthManualArgs),
+
     /// Start kill switch relayer
     KillSwitch(KillSwitchArgs),
 }
@@ -130,6 +133,22 @@ pub enum EthGearTokensCommands {
         #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
         bridging_payment_address: String,
     },
+}
+
+#[derive(Args)]
+pub struct GearEthManualArgs {
+    /// Nonce of the target message
+    #[arg(long = "message-nonce", short = 'n')]
+    pub nonce: String,
+
+    /// Block where target message was sent
+    #[arg(long = "message-block", short = 'b')]
+    pub block: u32,
+
+    #[clap(flatten)]
+    pub gear_args: GearArgs,
+    #[clap(flatten)]
+    pub ethereum_args: EthereumSignerArgs,
 }
 
 #[derive(Args)]

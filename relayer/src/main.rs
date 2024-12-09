@@ -268,6 +268,13 @@ async fn main() {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
+        CliCommands::GearEthManual(args) => {
+            let nonce = hex_utils::decode_h256(&args.nonce).expect("Failed to parse message nonce");
+            let eth_api = create_eth_signer_client(&args.ethereum_args);
+            let gear_api = create_gear_client(&args.gear_args).await;
+
+            gear_to_eth::manual::relay(gear_api, eth_api, nonce, args.block).await;
+        }
     };
 }
 

@@ -9,11 +9,10 @@ import { SwapEthForm, SwapVaraForm } from '../swap-form';
 import styles from './swap.module.scss';
 
 type Props = {
-  renderWalletField: () => JSX.Element | null;
   renderSwapNetworkButton: (onClick: () => void) => JSX.Element;
 };
 
-function Swap({ renderWalletField, renderSwapNetworkButton }: Props) {
+function Swap({ renderSwapNetworkButton }: Props) {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
@@ -31,12 +30,6 @@ function Swap({ renderWalletField, renderSwapNetworkButton }: Props) {
 
   return (
     <div className={cx(styles.card, (account || ethAccount.isConnected) && styles.active)}>
-      <header className={styles.header}>
-        <p className={styles.label}>From wallet:</p>
-
-        {renderWalletField()}
-      </header>
-
       <Form renderSwapNetworkButton={() => renderSwapNetworkButton(() => setIsEthNetwork((prevValue) => !prevValue))} />
     </div>
   );

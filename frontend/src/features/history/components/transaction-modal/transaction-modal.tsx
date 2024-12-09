@@ -4,6 +4,7 @@ import { Modal } from '@gear-js/vara-ui';
 import { useLayoutEffect } from 'react';
 import { formatUnits } from 'viem';
 
+import ClockSVG from '@/assets/clock.svg?react';
 import GasSVG from '@/assets/gas.svg?react';
 import { CopyButton, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
@@ -11,7 +12,6 @@ import { useTokens } from '@/hooks';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import ClockSVG from '../../assets/clock.svg?react';
 import { NETWORK_SVG } from '../../consts';
 import { Network, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';

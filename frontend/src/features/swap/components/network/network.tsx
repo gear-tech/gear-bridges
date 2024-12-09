@@ -37,7 +37,7 @@ function Network({
 }: Props) {
   return (
     <div className={cx(styles.network, styles[inputName])}>
-      <NetworkCard SVG={SVG} name={name} />
+      <NetworkCard destination="from" SVG={SVG} name={name} />
 
       <div className={styles.inputs}>
         <Select options={options} value={selectValue} onChange={({ target }) => onSelectChange(target.value)} />

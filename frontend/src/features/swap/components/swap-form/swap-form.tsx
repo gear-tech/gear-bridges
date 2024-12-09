@@ -3,20 +3,27 @@ import { Button } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
+import ClockSVG from '@/assets/clock.svg?react';
+import EthSVG from '@/assets/eth.svg?react';
+import GasSVG from '@/assets/gas.svg?react';
+import VaraSVG from '@/assets/vara.svg?react';
 import { Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
+import { NetworkWalletField } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
 
-import GasSVG from '../../assets/gas.svg?react';
+import WalletSVG from '../../assets/wallet.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useBridge } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';
+import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { Network } from '../network';
+import { NetworkCard } from '../network-card';
 import { SubmitProgressBar } from '../submit-progress-bar';
 
 import styles from './swap-form.module.scss';
@@ -116,66 +123,102 @@ function SwapForm({
   return (
     <FormProvider {...form}>
       <form onSubmit={handleSubmit}>
-        <div className={styles.section}>
-          <FromNetwork
-            options={options.from}
-            selectValue={pair.value}
-            inputName={FIELD_NAME.VALUE}
-            onSelectChange={pair.set}
-            onChange={onValueChange}
-            renderBalance={renderFromBalance}
-          />
+        <div className={styles.sections}>
+          <div className={styles.section}>
+            <header className={styles.header}>
+              <NetworkCard
+                destination="From"
+                SVG={isVaraNetwork ? VaraSVG : EthSVG}
+                name={isVaraNetwork ? 'Vara' : 'Ethereum'}
+              />
 
-          {renderSwapNetworkButton()}
-        </div>
+              <div className={styles.wallet}>
+                <NetworkWalletField />
 
-        <div className={styles.section}>
-          <Input name={FIELD_NAME.ADDRESS} label={isVaraNetwork ? 'To ERC20 address' : 'To Substrate address'} block />
+                <div className={styles.balance}>
+                  <WalletSVG />
+                  {`${accountBalance.formattedValue} ${isVaraNetwork ? 'VARA' : 'ETH'}`}
+                </div>
+              </div>
+            </header>
 
-          <ToNetwork
-            options={options.to}
-            selectValue={pair.value}
-            inputName={FIELD_NAME.EXPECTED_VALUE}
-            onSelectChange={pair.set}
-            onChange={onExpectedValueChange}
-          />
-        </div>
+            <footer className={styles.footer}>
+              <AmountInput onChange={() => {}} />
+              {renderFromBalance()}
+            </footer>
 
-        <footer className={styles.footer}>
-          <Balance
-            SVG={GasSVG}
-            heading="Expected Fee"
-            value={fee.formattedValue}
-            isLoading={config.isLoading}
-            unit={isVaraNetwork ? 'VARA' : 'ETH'}
-          />
-
-          <div className={styles.submitContainer}>
-            <Button
-              type="submit"
-              text={getButtonText()}
-              disabled={disabled}
-              isLoading={
-                approve.isLoading ||
-                submit.isPending ||
-                accountBalance.isLoading ||
-                ftBalance.isLoading ||
-                config.isLoading ||
-                bridge.isLoading ||
-                allowance.isLoading
-              }
-              block
-            />
-
-            <FTAllowanceTip
-              allowance={allowance.data}
-              decimals={decimals}
-              symbol={symbol}
-              amount={amount}
-              isVaraNetwork={isVaraNetwork}
-              isLoading={bridge.isLoading || allowance.isLoading}
-            />
+            {renderSwapNetworkButton()}
           </div>
+
+          <div className={styles.section}>
+            <header className={styles.header}>
+              <NetworkCard
+                destination="To"
+                SVG={isVaraNetwork ? EthSVG : VaraSVG}
+                name={isVaraNetwork ? 'Ethereum' : 'Vara'}
+              />
+
+              <div className={styles.destination}>
+                <Input
+                  name={FIELD_NAME.ADDRESS}
+                  label={isVaraNetwork ? 'To ERC20 address' : 'To Substrate address'}
+                  block
+                />
+
+                <Balance
+                  heading="Expected Fee"
+                  value={fee.formattedValue}
+                  isLoading={config.isLoading}
+                  unit={isVaraNetwork ? 'VARA' : 'ETH'}
+                />
+              </div>
+            </header>
+
+            {/* TODO: transaction card footer */}
+            <footer className={styles.destFooter}>
+              <p>
+                <span>Fee:</span>
+                <span>
+                  <GasSVG /> {`${fee.formattedValue} ${isVaraNetwork ? 'VARA' : 'ETH'}`}
+                </span>
+              </p>
+
+              <p>
+                <span>Bridge Time:</span>
+                <span>
+                  <ClockSVG /> ~30 mins
+                </span>
+              </p>
+            </footer>
+          </div>
+        </div>
+
+        <footer className={styles.submitContainer}>
+          <Button
+            type="submit"
+            text={getButtonText()}
+            size="small"
+            disabled={disabled}
+            isLoading={
+              approve.isLoading ||
+              submit.isPending ||
+              accountBalance.isLoading ||
+              ftBalance.isLoading ||
+              config.isLoading ||
+              bridge.isLoading ||
+              allowance.isLoading
+            }
+            block
+          />
+
+          <FTAllowanceTip
+            allowance={allowance.data}
+            decimals={decimals}
+            symbol={symbol}
+            amount={amount}
+            isVaraNetwork={isVaraNetwork}
+            isLoading={bridge.isLoading || allowance.isLoading}
+          />
         </footer>
       </form>
 

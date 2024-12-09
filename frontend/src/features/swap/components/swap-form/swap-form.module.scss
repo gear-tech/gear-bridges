@@ -1,5 +1,7 @@
-.footer {
-  padding: 24px 32px;
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .section {
@@ -7,23 +9,83 @@
 
   display: flex;
   flex-direction: column;
+  gap: 20px;
+
+  border-radius: 16px;
+  border: 1px solid #e8e8ef;
+
+  position: relative;
+}
+
+.header {
+  display: flex;
+  gap: 20px;
+
+  padding-bottom: 20px;
+
+  border-bottom: 1px solid #e8e8ef;
+}
+
+.wallet,
+.destination {
+  flex: 1;
+
+  display: flex;
+  align-items: center;
   gap: 16px;
+}
 
-  &:first-child {
-    border-bottom: 1px solid #e8e8ef;
+.wallet {
+  overflow: hidden;
+}
 
-    position: relative; // for swap network button
+.balance {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(#010500, 0.7);
+
+  svg {
+    flex-shrink: 0;
   }
 }
 
 .footer {
-  display: grid;
-  grid-template-columns: 2.5fr 7.5fr;
-  align-items: center;
-  gap: 32px;
+  display: flex;
+  gap: 16px;
 }
 
+.destFooter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  p {
+    display: flex;
+    justify-content: space-between;
+
+    span {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+  }
+}
+
+// .footer {
+//   display: grid;
+//   grid-template-columns: 2.5fr 7.5fr;
+//   align-items: center;
+//   gap: 32px;
+// }
+
 .submitContainer {
+  margin-top: 20px;
+
   display: flex;
   align-items: center;
   gap: 8px;

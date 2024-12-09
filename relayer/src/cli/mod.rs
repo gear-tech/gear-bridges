@@ -3,8 +3,8 @@ use clap::{Args, Parser, Subcommand};
 mod common;
 
 pub use common::{
-    BeaconRpcArgs, EthereumArgs, GearSignerArgs, GenesisConfigArgs, PrometheusArgs,
-    ProofStorageArgs, VaraArgs,
+    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, GearSignerArgs, GenesisConfigArgs,
+    PrometheusArgs, ProofStorageArgs, VaraArgs,
 };
 
 #[derive(Parser)]
@@ -37,7 +37,7 @@ pub struct GearEthCoreArgs {
     #[clap(flatten)]
     pub vara_args: VaraArgs,
     #[clap(flatten)]
-    pub ethereum_args: EthereumArgs,
+    pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
     pub genesis_config_args: GenesisConfigArgs,
     #[clap(flatten)]
@@ -48,16 +48,13 @@ pub struct GearEthCoreArgs {
 
 #[derive(Args)]
 pub struct EthGearCoreArgs {
-    /// Specify ProgramId of the Checkpoint-light-client program
+    /// ProgramId of the checkpoint-light-client program
     #[arg(long, env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS")]
     pub program_id: String,
-
     #[clap(flatten)]
     pub beacon_args: BeaconRpcArgs,
-
     #[clap(flatten)]
     pub vara_args: GearSignerArgs,
-
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
 }
@@ -67,7 +64,7 @@ pub struct GearEthTokensArgs {
     #[clap(flatten)]
     pub vara_args: VaraArgs,
     #[clap(flatten)]
-    pub ethereum_args: EthereumArgs,
+    pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
     /// Block number to start relaying from. If not specified equals to the latest finalized block
@@ -130,7 +127,7 @@ pub struct KillSwitchArgs {
     #[clap(flatten)]
     pub vara_args: VaraArgs,
     #[clap(flatten)]
-    pub ethereum_args: EthereumArgs,
+    pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
     pub genesis_config_args: GenesisConfigArgs,
     /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block

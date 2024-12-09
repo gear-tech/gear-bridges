@@ -46,13 +46,20 @@ pub struct VaraArgs {
 }
 
 #[derive(Args)]
+pub struct EthereumSignerArgs {
+    #[clap(flatten)]
+    pub ethereum_args: EthereumArgs,
+
+    /// Private key for fee payer
+    #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
+    pub fee_payer: Option<String>,
+}
+
+#[derive(Args)]
 pub struct EthereumArgs {
     /// Address of the ethereum endpoint
     #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
     pub eth_endpoint: String,
-    /// Private key for fee payer
-    #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
-    pub fee_payer: Option<String>,
     /// Ethereum address of relayer contract
     #[arg(long = "relayer-address", env = "ETH_RELAYER_ADDRESS")]
     pub relayer_address: String,

@@ -24,7 +24,7 @@ mod relay_merkle_roots;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearTokensArgs, EthGearTokensCommands, EthereumArgs,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, VaraArgs,
+    EthereumSignerArgs, GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, VaraArgs,
 };
 
 #[tokio::main]
@@ -47,7 +47,7 @@ async fn main() {
     match cli.command {
         CliCommands::GearEthCore(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
-            let eth_api = create_eth_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let metrics = MetricsBuilder::new();
 
@@ -69,7 +69,7 @@ async fn main() {
         }
         CliCommands::KillSwitch(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
-            let eth_api = create_eth_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let metrics = MetricsBuilder::new();
 
@@ -101,7 +101,7 @@ async fn main() {
         }
         CliCommands::GearEthTokens(args) => {
             let gear_api = create_gear_client(&args.vara_args).await;
-            let eth_api = create_eth_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let gsdk_args = message_relayer::common::GSdkArgs {
                 vara_domain: args.vara_args.vara_domain,
@@ -282,21 +282,31 @@ async fn create_gear_client(args: &VaraArgs) -> GearApi {
         .unwrap_or_else(|err| panic!("Error while creating gear client: {}", err))
 }
 
-fn create_eth_client(args: &EthereumArgs) -> EthApi {
+fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
-        fee_payer,
         relayer_address,
         mq_address,
-    } = args;
+    } = &args.ethereum_args;
 
     EthApi::new(
         eth_endpoint,
         mq_address,
         relayer_address,
-        fee_payer.as_deref(),
+        args.fee_payer.as_deref(),
     )
-    .unwrap_or_else(|err| panic!("Error while creating ethereum client: {}", err))
+    .expect("Error while creating ethereum client")
+}
+
+fn create_eth_client(args: &EthereumArgs) -> EthApi {
+    let EthereumArgs {
+        eth_endpoint,
+        relayer_address,
+        mq_address,
+    } = args;
+
+    EthApi::new(eth_endpoint, mq_address, relayer_address, None)
+        .expect("Error while creating ethereum client")
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {

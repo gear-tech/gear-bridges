@@ -17,8 +17,8 @@ members = [
     "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
-    "gear-programs/erc20-relay/app",
-    "gear-programs/erc20-relay/client",
+    "gear-programs/ethereum-event-client/app",
+    "gear-programs/ethereum-event-client/client",
     "gear-programs/wrapped-vara",
     "gear-programs/wrapped-vara/app",
     "gear-programs/wrapped-vara/client",
@@ -60,9 +60,9 @@ gear_proof_storage = { path = "gear-programs/proof-storage" }
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
-erc20-relay = { path = "gear-programs/erc20-relay" }
-erc20-relay-app = { path = "gear-programs/erc20-relay/app" }
-erc20-relay-client = { path = "gear-programs/erc20-relay/client" }
+ethereum-event-client = { path = "gear-programs/ethereum-event-client" }
+ethereum-event-client-app = { path = "gear-programs/ethereum-event-client/app" }
+ethereum-event-client-client = { path = "gear-programs/ethereum-event-client/client" }
 historical-proxy-app = { path = "gear-programs/historical-proxy/app" }
 historical-proxy-client = { path = "gear-programs/historical-proxy/client" }
 historical-proxy = { path = "gear-programs/historical-proxy" }

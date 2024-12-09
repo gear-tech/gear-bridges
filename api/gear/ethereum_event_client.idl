@@ -112,7 +112,7 @@ constructor {
   New : (checkpoint_light_client_address: actor_id);
 };
 
-service Erc20Relay {
+service EthereumEventClient {
   /// Check proofs and return receipt if successfull, error otherwise.
   CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
   query Admin : () -> actor_id;

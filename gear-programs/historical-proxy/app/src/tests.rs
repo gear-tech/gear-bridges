@@ -14,7 +14,7 @@ struct Fixture {
 const ADMIN_ID: u64 = 1_000;
 const USER_ID: u64 = 500;
 const PROXY_ID: u64 = 1_001;
-const ERC20_RELAY_ID: u64 = 1_002;
+const ETHEREUM_EVENT_CLIENT_ID: u64 = 1_002;
 const VFT_MANAGER_ID: u64 = 1_003;
 
 async fn setup_for_test() -> Fixture {
@@ -22,7 +22,7 @@ async fn setup_for_test() -> Fixture {
     system.init_logger();
     system.mint_to(ADMIN_ID, 100_000_000_000_000);
     system.mint_to(PROXY_ID, 100_000_000_000_000);
-    system.mint_to(ERC20_RELAY_ID, 100_000_000_000_000);
+    system.mint_to(ETHEREUM_EVENT_CLIENT_ID, 100_000_000_000_000);
     system.mint_to(VFT_MANAGER_ID, 100_000_000_000_000);
     system.mint_to(USER_ID, 100_000_000_000_000);
 

@@ -158,7 +158,7 @@ async fn update_ethereum_contract(
         / 100
         * 95;
 
-    let (message_id, _) = gear_api
+    let (message_id, block_hash) = gear_api
         .send_message_bytes(bridge_builtin_actor, payload, gas_limit, 0)
         .await
         .expect("Failed to send message to bridge builtin");
@@ -171,10 +171,14 @@ async fn update_ethereum_contract(
     let reply = gbuiltin_eth_bridge::Response::decode(&mut &reply[..])
         .expect("Failed to decode bridge bultin reply");
 
-    let _nonce = match reply {
+    let block_number = gear_api
+        .block_number_at(block_hash)
+        .await
+        .expect("Failed to query block hash by block number");
+
+    match reply {
         gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => {
-            println!("Message successfully submitted to bridge. Nonce: {}", nonce);
-            nonce
+            println!("Message successfully submitted to bridge. Nonce: {} Block number: {} Block hash: {}", nonce, block_number, hex::encode(&block_hash.0));
         }
     };
 }

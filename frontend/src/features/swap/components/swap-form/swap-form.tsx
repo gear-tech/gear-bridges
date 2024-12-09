@@ -17,6 +17,7 @@ import { getMergedBalance } from '../../utils';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { Network } from '../network';
+import { SubmitProgressBar } from '../submit-progress-bar';
 
 import styles from './swap-form.module.scss';
 
@@ -67,9 +68,21 @@ function SwapForm({
   >();
 
   const getSubmitStatus = () => {
-    if (mint?.isPending) return 'mint';
-    if (approve.isPending) return 'approve';
-    if (submit.isPending) return 'transfer';
+    let status: 'mint' | 'approve' | 'transfer' = 'mint';
+
+    if (mint?.isPending || mint?.error) {
+      status = 'mint';
+    } else if (approve.isPending || approve.error) {
+      status = 'approve';
+    } else if (submit.isPending || submit.error) {
+      status = 'transfer';
+    }
+
+    const error = mint?.error || approve.error || submit.error;
+    const errorMessage = (typeof error === 'string' ? error : error?.message) || '';
+    const { isSuccess } = submit;
+
+    return { status, error: errorMessage, isSuccess };
   };
 
   const openTransacionModal = (amount: string, receiver: string) => {
@@ -84,6 +97,13 @@ function SwapForm({
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver });
   };
 
+  // useEffect(() => {
+  //   if (!address || !destinationAddress) return;
+
+  //   openTransacionModal('0', '0x00');
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [address, destinationAddress]);
+
   const closeTransactionModal = () => setTransactionModal(undefined);
 
   const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
@@ -96,7 +116,6 @@ function SwapForm({
     disabled,
     onSubmit,
     openTransacionModal,
-    closeTransactionModal,
   );
 
   const renderFromBalance = () => {
@@ -111,6 +130,8 @@ function SwapForm({
       />
     );
   };
+
+  const renderProgressBar = () => <SubmitProgressBar {...getSubmitStatus()} />;
 
   return (
     <FormProvider {...form}>
@@ -179,7 +200,7 @@ function SwapForm({
       </form>
 
       {transactionModal && (
-        <TransactionModal close={closeTransactionModal} {...transactionModal} loadingStatus={getSubmitStatus()} />
+        <TransactionModal close={closeTransactionModal} {...transactionModal} renderProgressBar={renderProgressBar} />
       )}
     </FormProvider>
   );

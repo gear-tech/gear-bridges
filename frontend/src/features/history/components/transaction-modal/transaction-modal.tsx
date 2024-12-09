@@ -15,7 +15,6 @@ import ClockSVG from '../../assets/clock.svg?react';
 import { NETWORK_SVG } from '../../consts';
 import { Network, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
-import { TransactionLoadingBar } from '../transaction-loading-bar';
 import { TransactionStatus } from '../transaction-status';
 
 import styles from './transaction-modal.module.scss';
@@ -27,8 +26,8 @@ type Props = Pick<
   txHash?: Transfer['txHash'];
   timestamp?: Transfer['timestamp'];
   status?: Transfer['status'];
-  loadingStatus?: 'mint' | 'approve' | 'transfer';
   close: () => void;
+  renderProgressBar?: () => JSX.Element;
 };
 
 function TransactionModal({
@@ -42,7 +41,7 @@ function TransactionModal({
   destination,
   sender,
   receiver,
-  loadingStatus,
+  renderProgressBar,
   close,
 }: Props) {
   const { decimals, symbols } = useTokens();
@@ -99,7 +98,7 @@ function TransactionModal({
         </header>
       )}
 
-      <p className={cx(styles.pairs, loadingStatus && styles.loading)}>
+      <p className={cx(styles.pairs, renderProgressBar && styles.loading)}>
         <span className={styles.tx}>
           <span className={styles.amount}>
             {formattedAmount} {sourceSymbol}
@@ -141,7 +140,7 @@ function TransactionModal({
         </span>
       </p>
 
-      {loadingStatus && <TransactionLoadingBar status={loadingStatus} />}
+      {renderProgressBar?.()}
 
       <div className={styles.stats}>
         <p className={styles.stat}>

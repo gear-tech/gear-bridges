@@ -29,7 +29,6 @@ function useSwapForm(
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
   openTransactionModal: (amount: string, receiver: string) => void,
-  closeTransactionModal: () => void,
 ) {
   const alert = useAlert();
 
@@ -76,7 +75,6 @@ function useSwapForm(
     };
 
     const onError = (error: WriteContractErrorType) => {
-      closeTransactionModal();
       logger.error('Transfer Error', error);
       alert.error((error as BaseError).shortMessage || error.message);
     };

@@ -15,6 +15,7 @@ type Transfer @entity {
     txHash: String!
     blockNumber: String!
     timestamp: DateTime! @index
+    completedAt: DateTime
     nonce: String! @index
     sourceNetwork: Network!
     source: String! @index
@@ -36,4 +37,5 @@ type CompletedTransfer @entity {
     id: ID!
     nonce: String! @index @unique
     destNetwork: Network!
+    timestamp: DateTime
 }

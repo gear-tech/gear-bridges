@@ -20,29 +20,37 @@ pub struct GenesisConfigArgs {
 #[derive(Args)]
 pub struct GearSignerArgs {
     #[clap(flatten)]
-    pub gear_args: VaraArgs,
+    pub common: GearArgs,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
     /// etc.). The password for URI should be specified in the same `suri`,
     /// separated by the ':' char
-    #[arg(long, env = "VARA_SURI")]
-    pub vara_suri: String,
+    #[arg(long = "gear-suri", env = "GEAR_SURI")]
+    pub suri: String,
 }
 
 #[derive(Args)]
-pub struct VaraArgs {
-    /// Domain of the VARA RPC endpoint
-    #[arg(long, default_value = "ws://127.0.0.1", env = "VARA_DOMAIN")]
-    pub vara_domain: String,
+pub struct GearArgs {
+    /// Domain of the Gear RPC endpoint
+    #[arg(
+        long = "gear-domain",
+        default_value = "ws://127.0.0.1",
+        env = "GEAR_DOMAIN"
+    )]
+    pub domain: String,
 
-    /// Port of the VARA RPC endpoint
-    #[arg(long, default_value = "9944", env = "VARA_PORT")]
-    pub vara_port: u16,
+    /// Port of the Gear RPC endpoint
+    #[arg(long = "gear-port", default_value = "9944", env = "GEAR_PORT")]
+    pub port: u16,
 
-    /// Set retries of the VARA RPC client
-    #[arg(long, default_value = "3", env = "VARA_RPC_RETRIES")]
-    pub vara_rpc_retries: u8,
+    /// Retry count of the Gear RPC client
+    #[arg(
+        long = "gear-rpc-retries",
+        default_value = "3",
+        env = "GEAR_RPC_RETRIES"
+    )]
+    pub retries: u8,
 }
 
 #[derive(Args)]

@@ -3,8 +3,8 @@ use clap::{Args, Parser, Subcommand};
 mod common;
 
 pub use common::{
-    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, GearSignerArgs, GenesisConfigArgs,
-    PrometheusArgs, ProofStorageArgs, VaraArgs,
+    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, GearArgs, GearSignerArgs, GenesisConfigArgs,
+    PrometheusArgs, ProofStorageArgs,
 };
 
 #[derive(Parser)]
@@ -35,7 +35,7 @@ pub enum CliCommands {
 #[derive(Args)]
 pub struct GearEthCoreArgs {
     #[clap(flatten)]
-    pub vara_args: VaraArgs,
+    pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
@@ -54,7 +54,7 @@ pub struct EthGearCoreArgs {
     #[clap(flatten)]
     pub beacon_args: BeaconRpcArgs,
     #[clap(flatten)]
-    pub vara_args: GearSignerArgs,
+    pub gear_args: GearSignerArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
 }
@@ -69,7 +69,7 @@ pub struct GearEthTokensArgs {
     pub from_block: Option<u32>,
 
     #[clap(flatten)]
-    pub vara_args: VaraArgs,
+    pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
@@ -107,7 +107,7 @@ pub struct EthGearTokensArgs {
     pub vft_manager_address: String,
 
     #[clap(flatten)]
-    pub vara_args: GearSignerArgs,
+    pub gear_args: GearSignerArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumArgs,
     #[clap(flatten)]
@@ -139,7 +139,7 @@ pub struct KillSwitchArgs {
     pub from_eth_block: Option<u64>,
 
     #[clap(flatten)]
-    pub vara_args: VaraArgs,
+    pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]

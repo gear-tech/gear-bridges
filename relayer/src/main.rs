@@ -24,8 +24,8 @@ mod relay_merkle_roots;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearTokensArgs, EthGearTokensCommands, EthereumArgs,
-    EthereumSignerArgs, GearEthTokensCommands, GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
-    VaraArgs,
+    EthereumSignerArgs, GearArgs, GearEthTokensCommands, GearSignerArgs, GenesisConfigArgs,
+    ProofStorageArgs,
 };
 
 #[tokio::main]
@@ -47,13 +47,13 @@ async fn main() {
 
     match cli.command {
         CliCommands::GearEthCore(args) => {
-            let gear_api = create_gear_client(&args.vara_args).await;
+            let gear_api = create_gear_client(&args.gear_args).await;
             let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let metrics = MetricsBuilder::new();
 
             let (proof_storage, metrics) =
-                create_proof_storage(&args.proof_storage_args, &args.vara_args, metrics).await;
+                create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
@@ -69,13 +69,13 @@ async fn main() {
             relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::KillSwitch(args) => {
-            let gear_api = create_gear_client(&args.vara_args).await;
+            let gear_api = create_gear_client(&args.gear_args).await;
             let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let metrics = MetricsBuilder::new();
 
             let (proof_storage, metrics) =
-                create_proof_storage(&args.proof_storage_args, &args.vara_args, metrics).await;
+                create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
@@ -101,13 +101,13 @@ async fn main() {
             kill_switch.run().await.expect("Kill switch relayer failed");
         }
         CliCommands::GearEthTokens(args) => {
-            let gear_api = create_gear_client(&args.vara_args).await;
+            let gear_api = create_gear_client(&args.gear_args).await;
             let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let gsdk_args = message_relayer::common::GSdkArgs {
-                vara_domain: args.vara_args.vara_domain,
-                vara_port: args.vara_args.vara_port,
-                vara_rpc_retries: args.vara_args.vara_rpc_retries,
+                vara_domain: args.gear_args.domain,
+                vara_port: args.gear_args.port,
+                vara_rpc_retries: args.gear_args.retries,
             };
 
             let mut metrics_builder = MetricsBuilder::new();
@@ -161,7 +161,7 @@ async fn main() {
             }
         }
         CliCommands::EthGearCore(args) => {
-            let gear_api = create_gclient_client(&args.vara_args).await;
+            let gear_api = create_gclient_client(&args.gear_args).await;
 
             let beacon_client = create_beacon_client(&args.beacon_args).await;
 
@@ -183,7 +183,7 @@ async fn main() {
             checkpoint_light_client_address,
             historical_proxy_address,
             vft_manager_address,
-            vara_args,
+            gear_args,
             ethereum_args,
             beacon_rpc,
             prometheus_args,
@@ -192,9 +192,9 @@ async fn main() {
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
-                vara_domain: vara_args.gear_args.vara_domain,
-                vara_port: vara_args.gear_args.vara_port,
-                vara_rpc_retries: vara_args.gear_args.vara_rpc_retries,
+                vara_domain: gear_args.common.domain,
+                vara_port: gear_args.common.port,
+                vara_rpc_retries: gear_args.common.retries,
             };
 
             let checkpoint_light_client_address =
@@ -214,7 +214,7 @@ async fn main() {
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                         gsdk_args,
-                        vara_args.vara_suri,
+                        gear_args.suri,
                         eth_api,
                         beacon_client,
                         erc20_manager_address,
@@ -242,7 +242,7 @@ async fn main() {
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gsdk_args,
-                        vara_args.vara_suri,
+                        gear_args.suri,
                         eth_api,
                         beacon_client,
                         bridging_payment_address,
@@ -273,18 +273,18 @@ async fn main() {
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
     gclient::GearApi::builder()
-        .retries(args.gear_args.vara_rpc_retries)
-        .suri(&args.vara_suri)
+        .retries(args.common.retries)
+        .suri(&args.suri)
         .build(gclient::WSAddress::new(
-            &args.gear_args.vara_domain,
-            args.gear_args.vara_port,
+            &args.common.domain,
+            args.common.port,
         ))
         .await
         .expect("GearApi client should be created")
 }
 
-async fn create_gear_client(args: &VaraArgs) -> GearApi {
-    GearApi::new(&args.vara_domain, args.vara_port, args.vara_rpc_retries)
+async fn create_gear_client(args: &GearArgs) -> GearApi {
+    GearApi::new(&args.domain, args.port, args.retries)
         .await
         .unwrap_or_else(|err| panic!("Error while creating gear client: {}", err))
 }
@@ -326,15 +326,15 @@ async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
 
 async fn create_proof_storage(
     proof_storage_args: &ProofStorageArgs,
-    vara_args: &VaraArgs,
+    gear_args: &GearArgs,
     mut metrics: MetricsBuilder,
 ) -> (Box<dyn ProofStorage>, MetricsBuilder) {
     let proof_storage: Box<dyn ProofStorage> =
         if let Some(fee_payer) = proof_storage_args.gear_fee_payer.as_ref() {
             let proof_storage = GearProofStorage::new(
-                &vara_args.vara_domain,
-                vara_args.vara_port,
-                vara_args.vara_rpc_retries,
+                &gear_args.domain,
+                gear_args.port,
+                gear_args.retries,
                 fee_payer,
                 "./onchain_proof_storage_data".into(),
             )

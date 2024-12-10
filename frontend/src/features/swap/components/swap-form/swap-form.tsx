@@ -1,5 +1,5 @@
 import { useAccount } from '@gear-js/react-hooks';
-import { Button } from '@gear-js/vara-ui';
+import { Button, Select } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
@@ -143,7 +143,16 @@ function SwapForm({
             </header>
 
             <footer className={styles.footer}>
-              <AmountInput onChange={() => {}} />
+              <div className={styles.amount}>
+                <AmountInput onChange={() => {}} />
+                <Select
+                  options={options.from}
+                  value={pair.value}
+                  onChange={({ target }) => pair.set(target.value)}
+                  className={styles.select}
+                />
+              </div>
+
               {renderFromBalance()}
             </footer>
 
@@ -165,12 +174,7 @@ function SwapForm({
                   block
                 />
 
-                <Balance
-                  heading="Expected Fee"
-                  value={fee.formattedValue}
-                  isLoading={config.isLoading}
-                  unit={isVaraNetwork ? 'VARA' : 'ETH'}
-                />
+                <Balance heading="Receive" value={amount} unit={isVaraNetwork ? 'VARA' : 'ETH'} />
               </div>
             </header>
 

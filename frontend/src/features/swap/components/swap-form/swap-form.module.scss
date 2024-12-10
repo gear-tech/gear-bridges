@@ -26,6 +26,23 @@
   border-bottom: 1px solid #e8e8ef;
 }
 
+.amount {
+  flex: 1;
+
+  display: flex;
+  gap: 8px;
+}
+
+.select {
+  flex-shrink: 0;
+
+  // TODO: temp fix for https://github.com/gear-tech/gear-js/issues/1705
+  // feel free to remove after @gear-js/vara-ui is updated
+  select {
+    padding-right: 32px;
+  }
+}
+
 .wallet,
 .destination {
   flex: 1;

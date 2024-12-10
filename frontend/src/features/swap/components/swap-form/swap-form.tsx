@@ -3,11 +3,9 @@ import { Button, Select } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
-import ClockSVG from '@/assets/clock.svg?react';
 import EthSVG from '@/assets/eth.svg?react';
-import GasSVG from '@/assets/gas.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { Input } from '@/components';
+import { FeeAndTimeFooter, Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
@@ -178,22 +176,7 @@ function SwapForm({
               </div>
             </header>
 
-            {/* TODO: transaction card footer */}
-            <footer className={styles.destFooter}>
-              <p>
-                <span>Fee:</span>
-                <span>
-                  <GasSVG /> {`${fee.formattedValue} ${isVaraNetwork ? 'VARA' : 'ETH'}`}
-                </span>
-              </p>
-
-              <p>
-                <span>Bridge Time:</span>
-                <span>
-                  <ClockSVG /> ~30 mins
-                </span>
-              </p>
-            </footer>
+            <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
           </div>
         </div>
 

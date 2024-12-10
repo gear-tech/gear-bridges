@@ -76,30 +76,6 @@
   gap: 16px;
 }
 
-.destFooter {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-
-  p {
-    display: flex;
-    justify-content: space-between;
-
-    span {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-    }
-  }
-}
-
-// .footer {
-//   display: grid;
-//   grid-template-columns: 2.5fr 7.5fr;
-//   align-items: center;
-//   gap: 32px;
-// }
-
 .submitContainer {
   margin-top: 20px;
 

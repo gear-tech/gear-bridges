@@ -93,27 +93,8 @@
   }
 }
 
-.stats {
+.footer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-
-  .stat {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  .value {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    font-size: 14px;
-    font-weight: 500;
-    opacity: 0.7;
-  }
-
-  &:not(:last-child) {
-    margin-bottom: 32px;
-  }
+  gap: 32px;
 }

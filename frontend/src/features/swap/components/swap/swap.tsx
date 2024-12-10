@@ -1,15 +1,13 @@
 import { useAccount } from '@gear-js/react-hooks';
 import { useMemo, useState } from 'react';
 
+import { ETH_CHAIN_ID } from '@/consts';
+import { SwapNetworkButton } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
 
 import { SwapEthForm, SwapVaraForm } from '../swap-form';
 
-type Props = {
-  renderSwapNetworkButton: (onClick: () => void) => JSX.Element;
-};
-
-function Swap({ renderSwapNetworkButton }: Props) {
+function Swap() {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
@@ -26,7 +24,14 @@ function Swap({ renderSwapNetworkButton }: Props) {
   }, [isEthNetwork, ethAccount, account]);
 
   return (
-    <Form renderSwapNetworkButton={() => renderSwapNetworkButton(() => setIsEthNetwork((prevValue) => !prevValue))} />
+    <Form
+      renderSwapNetworkButton={() => (
+        <SwapNetworkButton
+          onClick={() => setIsEthNetwork((prevValue) => !prevValue)}
+          isActive={(ethAccount.isConnected && ethAccount.chainId === ETH_CHAIN_ID) || Boolean(account)}
+        />
+      )}
+    />
   );
 }
 

@@ -2,14 +2,13 @@ import { Container, LinkButton } from '@/components';
 import { ROUTE } from '@/consts';
 import { LatestTransactions } from '@/features/history';
 import { Swap as SwapFeature } from '@/features/swap';
-import { SwapNetworkButton } from '@/features/wallet';
 
 import styles from './home.module.scss';
 
 function Home() {
   return (
     <Container.Live maxWidth="md" className={styles.container}>
-      <SwapFeature renderSwapNetworkButton={(onClick: () => void) => <SwapNetworkButton onClick={onClick} />} />
+      <SwapFeature />
 
       <div className={styles.transactions}>
         <header className={styles.header}>

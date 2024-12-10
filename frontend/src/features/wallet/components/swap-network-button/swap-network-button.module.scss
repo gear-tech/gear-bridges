@@ -12,7 +12,6 @@
   width: 40px;
   height: 40px;
   margin: 0 auto;
-  padding: 8px !important; // overriding @gear-js/vara-ui
 
   position: absolute;
   bottom: -25px;
@@ -26,4 +25,13 @@
 
   border: 1px solid #e8e8ef;
   border-radius: 50%;
+  transition: border-color 0.25s;
+
+  svg {
+    flex-shrink: 0;
+  }
+
+  &.active {
+    border-color: #00ffc4;
+  }
 }

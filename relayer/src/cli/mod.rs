@@ -30,6 +30,8 @@ pub enum CliCommands {
 
     /// Manually relay message from gear to ethereum
     GearEthManual(GearEthManualArgs),
+    /// Manually relay message from ethereum to gear
+    EthGearManual(EthGearManualArgs),
 
     /// Start kill switch relayer
     KillSwitch(KillSwitchArgs),
@@ -153,6 +155,28 @@ pub struct GearEthManualArgs {
     pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
+}
+
+#[derive(Args)]
+pub struct EthGearManualArgs {
+    /// Transaction hash of the target message
+    #[arg(long = "tx-hash", short = 't')]
+    pub tx_hash: String,
+
+    /// Ethereum slot containing target message
+    #[arg(long = "slot", short = 's')]
+    pub slot: u64,
+
+    /// Gear block number to start listening for checkpoints roots from. If not specified equals to the latest finalized block
+    #[arg(long = "from-gear-block")]
+    pub from_gear_block: Option<u32>,
+
+    /// ProgramId of the checkpoint-light-client program
+    #[arg(long = "checkpoint-light-client")]
+    pub checkpoint_light_client: String,
+
+    #[clap(flatten)]
+    pub gear_args: GearSignerArgs,
 }
 
 #[derive(Args)]

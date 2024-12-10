@@ -281,6 +281,9 @@ async fn main() {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
+        CliCommands::EthGearManual(args) => {
+            //
+        }
     };
 }
 

@@ -6,7 +6,6 @@ import { Skeleton, TruncatedText } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
 
 import { WALLET } from '../../consts';
-import { useAccountSync } from '../../hooks';
 import { WalletId } from '../../types';
 import { NetworkWalletModal } from '../network-wallet-modal';
 import { WalletModal } from '../wallet-modal';
@@ -14,8 +13,6 @@ import { WalletModal } from '../wallet-modal';
 import styles from './network-wallet-field.module.scss';
 
 function NetworkWalletField() {
-  useAccountSync();
-
   const { account, isAccountReady } = useAccount();
   const wallet = account ? WALLET[account.meta.source as WalletId] : undefined;
   const { SVG } = wallet || {};

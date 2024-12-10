@@ -25,7 +25,7 @@
 
   border: 1px solid #e8e8ef;
   border-radius: 50%;
-  transition: border-color 0.25s;
+  transition: border-color 0.25s, background-color 0.25s;
 
   svg {
     flex-shrink: 0;

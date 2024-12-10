@@ -40,13 +40,13 @@ function NetworkWalletField() {
       {isConnected ? (
         // TODO: button
         // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
-        <div className={styles.wallet} onClick={handleButtonClick}>
+        <button type="button" className={styles.button} onClick={handleButtonClick}>
           {SVG && <SVG />}
           {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
 
           {account && <TruncatedText value={account.address} />}
           {ethAccount.address && <TruncatedText value={ethAccount.address} />}
-        </div>
+        </button>
       ) : (
         <Button text="Connect" size="small" onClick={openModal} block />
       )}

@@ -12,9 +12,32 @@
   gap: 20px;
 
   border-radius: 16px;
-  border: 1px solid #e8e8ef;
+  border: 1px double transparent;
+  background-image: linear-gradient(#fff, #fff),
+    linear-gradient(180deg, var(--gradient-start-color) 0%, var(--gradient-end-color) 100%);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 
   position: relative;
+
+  &:first-child {
+    --gradient-start-color: transparent;
+    --gradient-end-color: rgba(232, 232, 239, 0.5);
+
+    &.active {
+      --gradient-end-color: rgba(0, 255, 196, 0.5);
+    }
+  }
+
+  &:not(:first-child) {
+    --gradient-start-color: rgba(232, 232, 239, 0.5);
+    --gradient-end-color: #e8e8ef;
+
+    &.active {
+      --gradient-start-color: rgba(0, 255, 196, 0.5);
+      --gradient-end-color: #00ffc4;
+    }
+  }
 }
 
 .row {

@@ -2,11 +2,8 @@ import { useAccount } from '@gear-js/react-hooks';
 import { useMemo, useState } from 'react';
 
 import { useEthAccount } from '@/hooks';
-import { cx } from '@/utils';
 
 import { SwapEthForm, SwapVaraForm } from '../swap-form';
-
-import styles from './swap.module.scss';
 
 type Props = {
   renderSwapNetworkButton: (onClick: () => void) => JSX.Element;
@@ -29,9 +26,7 @@ function Swap({ renderSwapNetworkButton }: Props) {
   }, [isEthNetwork, ethAccount, account]);
 
   return (
-    <div className={cx(styles.card, (account || ethAccount.isConnected) && styles.active)}>
-      <Form renderSwapNetworkButton={() => renderSwapNetworkButton(() => setIsEthNetwork((prevValue) => !prevValue))} />
-    </div>
+    <Form renderSwapNetworkButton={() => renderSwapNetworkButton(() => setIsEthNetwork((prevValue) => !prevValue))} />
   );
 }
 

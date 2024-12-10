@@ -11,6 +11,7 @@ import { TransactionModal } from '@/features/history/components/transaction-moda
 import { Network as TransferNetwork } from '@/features/history/types';
 import { NetworkWalletField } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
+import { cx } from '@/utils';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
@@ -119,7 +120,7 @@ function SwapForm({
     <FormProvider {...form}>
       <form onSubmit={handleSubmit}>
         <div className={styles.sections}>
-          <div className={styles.section}>
+          <div className={cx(styles.section, !disabled && styles.active)}>
             <div className={styles.row}>
               <div className={styles.wallet}>
                 <NetworkCard
@@ -159,7 +160,7 @@ function SwapForm({
             {renderSwapNetworkButton()}
           </div>
 
-          <div className={styles.section}>
+          <div className={cx(styles.section, !disabled && styles.active)}>
             <div className={styles.row}>
               <div className={styles.destination}>
                 <NetworkCard

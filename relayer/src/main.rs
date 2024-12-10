@@ -275,6 +275,11 @@ async fn main() {
 
             gear_to_eth::manual::relay(gear_api, eth_api, nonce, args.block, args.from_eth_block)
                 .await;
+
+            loop {
+                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         }
     };
 }

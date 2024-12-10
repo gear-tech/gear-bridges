@@ -6,12 +6,9 @@ import { NETWORK_INDEX } from '../consts';
 import { getOptions } from '../utils';
 
 function useBridge(networkIndex: number) {
-  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
-
   const { addresses, symbols, decimals: tokenDecimals, isLoading } = useTokens();
 
-  const { varaOptions, ethOptions } = useMemo(() => getOptions(addresses, symbols), [addresses, symbols]);
-  const options = { from: isVaraNetwork ? varaOptions : ethOptions, to: isVaraNetwork ? ethOptions : varaOptions };
+  const options = useMemo(() => getOptions(addresses, symbols), [addresses, symbols]);
 
   const [pair, setPair] = useState('0');
   const pairIndex = Number(pair);

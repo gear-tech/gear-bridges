@@ -20,7 +20,6 @@ import { getMergedBalance } from '../../utils';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
-import { Network } from '../network';
 import { NetworkCard } from '../network-card';
 import { SubmitProgressBar } from '../submit-progress-bar';
 
@@ -48,8 +47,6 @@ function SwapForm({
   renderSwapNetworkButton,
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
-  const FromNetwork = isVaraNetwork ? Network.Vara : Network.Eth;
-  const ToNetwork = isVaraNetwork ? Network.Eth : Network.Vara;
 
   const { address, destinationAddress, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
   const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
@@ -83,7 +80,7 @@ function SwapForm({
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const { form, amount, onValueChange, onExpectedValueChange, handleSubmit, setMaxBalance } = useSwapForm(
+  const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     isNativeToken,
     accountBalance,
@@ -146,10 +143,10 @@ function SwapForm({
 
             <div className={styles.row}>
               <div className={styles.amount}>
-                <AmountInput onChange={() => {}} />
+                <AmountInput />
 
                 <Select
-                  options={options.from}
+                  options={options}
                   value={pair.value}
                   onChange={({ target }) => pair.set(target.value)}
                   className={styles.select}
@@ -178,7 +175,7 @@ function SwapForm({
                 />
               </div>
 
-              <Balance heading="Receive" value={amount} unit={symbol} />
+              <Balance heading="Receive" value={amount || '0'} unit={symbol} />
             </div>
 
             <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />

@@ -44,21 +44,17 @@ const getAmountSchema = (
 
 const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexString, string> | undefined) => {
   const varaOptions: { label: string; value: string }[] = [];
-  const ethOptions: { label: string; value: string }[] = [];
 
-  if (!addresses || !symbols) return { varaOptions, ethOptions };
+  if (!addresses || !symbols) return [];
 
-  addresses.forEach(([varaAddress, ethAddress], index) => {
+  addresses.forEach(([varaAddress], index) => {
     const value = index.toString();
+    const label = symbols[varaAddress];
 
-    const varaSymbol = symbols[varaAddress];
-    const ethSymbol = symbols[ethAddress];
-
-    varaOptions.push({ label: varaSymbol, value });
-    ethOptions.push({ label: ethSymbol, value });
+    varaOptions.push({ label, value });
   });
 
-  return { varaOptions, ethOptions };
+  return varaOptions;
 };
 
 const getMergedBalance = (

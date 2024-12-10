@@ -8,7 +8,8 @@ import { getOptions } from '../utils';
 function useBridge(networkIndex: number) {
   const { addresses, symbols, decimals: tokenDecimals, isLoading } = useTokens();
 
-  const options = useMemo(() => getOptions(addresses, symbols), [addresses, symbols]);
+  const { varaOptions, ethOptions } = useMemo(() => getOptions(addresses, symbols), [addresses, symbols]);
+  const options = networkIndex === NETWORK_INDEX.VARA ? varaOptions : ethOptions;
 
   const [pair, setPair] = useState('0');
   const pairIndex = Number(pair);

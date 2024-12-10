@@ -151,6 +151,7 @@ function SwapForm({
                   value={pair.value}
                   onChange={({ target }) => pair.set(target.value)}
                   className={styles.select}
+                  disabled={options.length === 0}
                 />
               </div>
 

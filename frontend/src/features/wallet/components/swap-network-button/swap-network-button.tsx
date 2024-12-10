@@ -29,7 +29,7 @@ function SwapNetworkButton({ onClick }: Props) {
 
   return (
     <>
-      <Button icon={SwapSVG} color="grey" className={styles.button} onClick={handleClick} />
+      <Button icon={SwapSVG} color="light" className={styles.button} onClick={handleClick} />
 
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}
     </>

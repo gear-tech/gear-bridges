@@ -23,4 +23,7 @@
   // using animation instead of transition,
   // cuz swap form is rendering different components based on network
   animation: rotate 0.25s ease-in-out;
+
+  border: 1px solid #e8e8ef;
+  border-radius: 50%;
 }

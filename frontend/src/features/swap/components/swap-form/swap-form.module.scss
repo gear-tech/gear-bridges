@@ -1,28 +1,111 @@
-.section,
-.footer {
-  padding: 24px 32px;
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .section {
+  padding: 24px 24px 32px;
+
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
+
+  border-radius: 16px;
+  border: 1px double transparent;
+  background-image: linear-gradient(#fff, #fff),
+    linear-gradient(180deg, var(--gradient-start-color) 0%, var(--gradient-end-color) 100%);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+
+  position: relative;
 
   &:first-child {
-    border-bottom: 1px solid #e8e8ef;
+    --gradient-start-color: transparent;
+    --gradient-end-color: rgba(232, 232, 239, 0.5);
 
-    position: relative; // for swap network button
+    &.active {
+      --gradient-end-color: rgba(0, 255, 196, 0.5);
+    }
+  }
+
+  &:not(:first-child) {
+    --gradient-start-color: rgba(232, 232, 239, 0.5);
+    --gradient-end-color: #e8e8ef;
+
+    &.active {
+      --gradient-start-color: rgba(0, 255, 196, 0.5);
+      --gradient-end-color: #00ffc4;
+    }
   }
 }
 
-.footer {
+.row {
   display: grid;
-  grid-template-columns: 2.5fr 7.5fr;
+  grid-template-columns: 8fr 2fr;
   align-items: center;
-  gap: 32px;
+  gap: 16px;
+
+  &:first-child {
+    padding-bottom: 20px;
+
+    border-bottom: 1px solid #e8e8ef;
+  }
+
+  > *:only-child {
+    grid-column: span 2;
+  }
+}
+
+.wallet {
+  display: grid;
+  grid-template-columns: 173px 1fr;
+  gap: 16px;
+
+  overflow: hidden;
+}
+
+.balance {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(#010500, 0.7);
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.amount {
+  display: flex;
+  gap: 8px;
+
+  .select {
+    min-width: 95px;
+
+    // TODO: temp fix for https://github.com/gear-tech/gear-js/issues/1705
+    // feel free to remove after @gear-js/vara-ui is updated
+    select {
+      padding-right: 32px;
+    }
+  }
+}
+
+.destination {
+  display: grid;
+  grid-template-columns: 173px 1fr;
+  gap: 16px;
+
+  gap: 16px;
 }
 
 .submitContainer {
+  margin-top: 20px;
+
   display: flex;
   align-items: center;
   gap: 8px;

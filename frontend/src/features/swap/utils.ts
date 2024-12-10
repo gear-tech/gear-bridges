@@ -50,7 +50,6 @@ const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexS
 
   addresses.forEach(([varaAddress, ethAddress], index) => {
     const value = index.toString();
-
     const varaSymbol = symbols[varaAddress];
     const ethSymbol = symbols[ethAddress];
 

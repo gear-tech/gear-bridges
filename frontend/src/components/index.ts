@@ -1,9 +1,9 @@
 import { Card } from './card';
 import { CopyButton } from './copy-button';
+import { FeeAndTimeFooter } from './fee-and-time-footer';
 import { Input, Checkbox, Radio, Select, Textarea } from './form';
 import { Container, Footer, Header, ErrorBoundary, PrivateRoute, Skeleton, TruncatedText } from './layout';
 import { LinkButton } from './link-button';
-import { NetworkCard } from './network-card';
 import { Tooltip } from './tooltip';
 
 export {
@@ -19,9 +19,9 @@ export {
   ErrorBoundary,
   Skeleton,
   TruncatedText,
-  NetworkCard,
   LinkButton,
   Card,
   CopyButton,
   Tooltip,
+  FeeAndTimeFooter,
 };

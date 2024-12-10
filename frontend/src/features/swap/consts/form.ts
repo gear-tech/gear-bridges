@@ -6,13 +6,11 @@ import { isValidAddress as isSubstrateAddress } from '@/utils';
 
 const FIELD_NAME = {
   VALUE: 'amount',
-  EXPECTED_VALUE: 'expectedAmount',
   ADDRESS: 'accountAddress',
 } as const;
 
 const DEFAULT_VALUES = {
   [FIELD_NAME.VALUE]: '',
-  [FIELD_NAME.EXPECTED_VALUE]: '',
   [FIELD_NAME.ADDRESS]: '',
 };
 

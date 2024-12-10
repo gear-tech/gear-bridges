@@ -1,15 +1,5 @@
-.field,
-.wallet {
-  overflow: hidden;
-}
-
-.field {
-  display: flex;
-  gap: 16px;
-}
-
-.wallet {
-  padding: 9px 16px;
+.button {
+  padding: 11px 16px;
 
   display: flex;
   align-items: center;
@@ -19,7 +9,10 @@
   letter-spacing: 0.42px;
 
   border-radius: 6px;
-  background-image: linear-gradient(0deg, #f5f6f8 0%, #f5f6f8 100%), linear-gradient(270deg, #cfcfcf 0%, #cfcfcf 100%);
+  background-color: #f5f6f8;
+  transition: background-color 0.25s;
+
+  overflow: hidden;
 
   img {
     width: 16px;
@@ -28,5 +21,9 @@
 
   svg {
     flex-shrink: 0;
+  }
+
+  &:hover {
+    background-color: #d4d4d4;
   }
 }

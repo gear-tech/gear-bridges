@@ -71,26 +71,26 @@ function useHandleVaraSubmit(
     });
   };
 
-  const onSubmit = async ({ expectedAmount, accountAddress }: FormattedValues) => {
+  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
     if (!vftManagerAddress) throw new Error('VFT manager address is not found');
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
     if (isUndefined(allowance)) throw new Error('Allowance is not found');
     if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
 
-    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && expectedAmount > ftBalance) {
-      await mint.sendTransactionAsync({ args: [], value: expectedAmount - ftBalance });
+    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && amount > ftBalance) {
+      await mint.sendTransactionAsync({ args: [], value: amount - ftBalance });
     } else {
       mint.reset();
     }
 
-    if (expectedAmount > allowance) {
-      await vftApprove.sendTransactionAsync({ args: [vftManagerAddress, expectedAmount] });
+    if (amount > allowance) {
+      await vftApprove.sendTransactionAsync({ args: [vftManagerAddress, amount] });
     } else {
       vftApprove.reset();
     }
 
-    return sendBridgingPaymentRequest(expectedAmount, accountAddress);
+    return sendBridgingPaymentRequest(amount, accountAddress);
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

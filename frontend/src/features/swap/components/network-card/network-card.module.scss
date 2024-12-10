@@ -1,0 +1,28 @@
+.card {
+  padding: 11px 12px;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  font-size: 16px;
+  font-weight: 500;
+  color: #010500;
+
+  border-radius: 4px;
+  background-color: #f5f6f8;
+  border: 1px solid rgba(#e1e1e3, 0.6);
+
+  svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.network {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  font-weight: 600;
+}

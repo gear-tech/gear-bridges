@@ -1,6 +1,7 @@
 import { useAccount } from '@gear-js/react-hooks';
 import { CSSProperties, ReactNode } from 'react';
 
+import { ETH_CHAIN_ID } from '@/consts';
 import { useEthAccount } from '@/hooks';
 import { cx } from '@/utils';
 
@@ -22,7 +23,7 @@ function Live({ children, ...props }: Props) {
   const ethAccount = useEthAccount();
   const { account } = useAccount();
 
-  const isAccount = account || ethAccount.isConnected;
+  const isAccount = account || (ethAccount.isConnected && ethAccount.chainId === ETH_CHAIN_ID);
 
   const renderWaves = () =>
     new Array(WAVES_COUNT)

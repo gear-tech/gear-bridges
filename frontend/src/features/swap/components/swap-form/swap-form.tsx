@@ -5,7 +5,7 @@ import { FormProvider } from 'react-hook-form';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FeeAndTimeFooter, Input } from '@/components';
+import { FeeAndTimeFooter, Input, Skeleton } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
@@ -123,26 +123,31 @@ function SwapForm({
       <form onSubmit={handleSubmit}>
         <div className={styles.sections}>
           <div className={styles.section}>
-            <header className={styles.header}>
-              <NetworkCard
-                destination="From"
-                SVG={isVaraNetwork ? VaraSVG : EthSVG}
-                name={isVaraNetwork ? 'Vara' : 'Ethereum'}
-              />
-
+            <div className={styles.row}>
               <div className={styles.wallet}>
-                <NetworkWalletField />
+                <NetworkCard
+                  destination="From"
+                  SVG={isVaraNetwork ? VaraSVG : EthSVG}
+                  name={isVaraNetwork ? 'Vara' : 'Ethereum'}
+                />
 
+                <NetworkWalletField />
+              </div>
+
+              {accountBalance.formattedValue && (
                 <div className={styles.balance}>
                   <WalletSVG />
                   {`${accountBalance.formattedValue} ${isVaraNetwork ? 'VARA' : 'ETH'}`}
                 </div>
-              </div>
-            </header>
+              )}
 
-            <footer className={styles.footer}>
+              {accountBalance.isLoading && <Skeleton />}
+            </div>
+
+            <div className={styles.row}>
               <div className={styles.amount}>
                 <AmountInput onChange={() => {}} />
+
                 <Select
                   options={options.from}
                   value={pair.value}
@@ -152,29 +157,29 @@ function SwapForm({
               </div>
 
               {renderFromBalance()}
-            </footer>
+            </div>
 
             {renderSwapNetworkButton()}
           </div>
 
           <div className={styles.section}>
-            <header className={styles.header}>
-              <NetworkCard
-                destination="To"
-                SVG={isVaraNetwork ? EthSVG : VaraSVG}
-                name={isVaraNetwork ? 'Ethereum' : 'Vara'}
-              />
-
+            <div className={styles.row}>
               <div className={styles.destination}>
+                <NetworkCard
+                  destination="To"
+                  SVG={isVaraNetwork ? EthSVG : VaraSVG}
+                  name={isVaraNetwork ? 'Ethereum' : 'Vara'}
+                />
+
                 <Input
                   name={FIELD_NAME.ADDRESS}
                   label={isVaraNetwork ? 'To ERC20 address' : 'To Substrate address'}
                   block
                 />
-
-                <Balance heading="Receive" value={amount} unit={isVaraNetwork ? 'VARA' : 'ETH'} />
               </div>
-            </header>
+
+              <Balance heading="Receive" value={amount} unit={symbol} />
+            </div>
 
             <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
           </div>

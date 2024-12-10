@@ -17,42 +17,24 @@
   position: relative;
 }
 
-.header {
-  display: flex;
-  gap: 20px;
+.row {
+  display: grid;
+  grid-template-columns: 8fr 2fr;
+  align-items: center;
+  gap: 16px;
 
-  padding-bottom: 20px;
+  &:first-child {
+    padding-bottom: 20px;
 
-  border-bottom: 1px solid #e8e8ef;
-}
-
-.amount {
-  flex: 1;
-
-  display: flex;
-  gap: 8px;
-}
-
-.select {
-  flex-shrink: 0;
-
-  // TODO: temp fix for https://github.com/gear-tech/gear-js/issues/1705
-  // feel free to remove after @gear-js/vara-ui is updated
-  select {
-    padding-right: 32px;
+    border-bottom: 1px solid #e8e8ef;
   }
 }
 
-.wallet,
-.destination {
-  flex: 1;
-
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
 .wallet {
+  display: grid;
+  grid-template-columns: 3.5fr 6.5fr;
+  gap: 16px;
+
   overflow: hidden;
 }
 
@@ -71,8 +53,26 @@
   }
 }
 
-.footer {
+.amount {
   display: flex;
+  gap: 8px;
+
+  .select {
+    flex-shrink: 0;
+
+    // TODO: temp fix for https://github.com/gear-tech/gear-js/issues/1705
+    // feel free to remove after @gear-js/vara-ui is updated
+    select {
+      padding-right: 32px;
+    }
+  }
+}
+
+.destination {
+  display: grid;
+  grid-template-columns: 3.5fr 6.5fr;
+  gap: 16px;
+
   gap: 16px;
 }
 

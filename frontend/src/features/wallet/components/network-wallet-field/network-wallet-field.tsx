@@ -36,7 +36,7 @@ function NetworkWalletField() {
 
   // it's probably worth to check isConnecting too, but there is a bug:
   // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-  if (!isAccountReady || ethAccount.isReconnecting) return <Skeleton height="40px" />;
+  if (!isAccountReady || ethAccount.isReconnecting) return <Skeleton height="100%" width="100%" />;
 
   return (
     <>

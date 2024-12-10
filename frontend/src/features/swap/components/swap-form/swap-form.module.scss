@@ -51,11 +51,15 @@
 
     border-bottom: 1px solid #e8e8ef;
   }
+
+  > *:only-child {
+    grid-column: span 2;
+  }
 }
 
 .wallet {
   display: grid;
-  grid-template-columns: 3.5fr 6.5fr;
+  grid-template-columns: 173px 1fr;
   gap: 16px;
 
   overflow: hidden;
@@ -93,7 +97,7 @@
 
 .destination {
   display: grid;
-  grid-template-columns: 3.5fr 6.5fr;
+  grid-template-columns: 173px 1fr;
   gap: 16px;
 
   gap: 16px;

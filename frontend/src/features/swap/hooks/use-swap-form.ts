@@ -28,6 +28,7 @@ function useSwapForm(
   fee: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
+  openTransactionModal: (amount: string, receiver: string) => void,
 ) {
   const alert = useAlert();
 
@@ -70,15 +71,17 @@ function useSwapForm(
   const handleSubmit = form.handleSubmit((values) => {
     const onSuccess = () => {
       reset();
-      alert.success('Successful transaction');
+      alert.success('Transfer request is successful');
     };
 
-    const onError = (error: WriteContractErrorType) => {
-      const errorMessage = (error as BaseError).shortMessage || error.message;
-
-      logger.error('Transfer Error', error);
-      alert.error(errorMessage);
+    // string is only for cancelled sign and send popup error during useSendProgramTransaction
+    // reevaluate after @gear-js/react-hooks update
+    const onError = (error: WriteContractErrorType | string) => {
+      logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
+      alert.error(typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message);
     };
+
+    openTransactionModal(values[FIELD_NAME.EXPECTED_VALUE].toString(), values[FIELD_NAME.ADDRESS]);
 
     onSubmit(values).then(onSuccess).catch(onError);
   });

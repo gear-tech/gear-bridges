@@ -49,7 +49,11 @@ function useHandleEthSubmit(ftAddress: HexString | undefined, fee: bigint | unde
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
     if (isUndefined(allowance)) throw new Error('Allowance is not defined');
 
-    if (amount > allowance) await approve.mutateAsync(amount);
+    if (amount > allowance) {
+      await approve.mutateAsync(amount);
+    } else {
+      approve.reset();
+    }
 
     return requestBridging(amount, accountAddress).then(() => watch());
   };

@@ -89,7 +89,6 @@ function SwapForm({
     accountBalance,
     ftBalance,
     decimals,
-    fee.value,
     disabled,
     onSubmit,
   );

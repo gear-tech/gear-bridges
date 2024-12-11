@@ -23,13 +23,12 @@ function useSwapForm(
   accountBalance: Values,
   ftBalance: Values,
   decimals: number | undefined,
-  fee: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, fee, decimals);
+  const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({

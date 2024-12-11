@@ -57,13 +57,6 @@ function SwapForm({
   const ftBalance = useFTBalance(address, decimals);
   const allowance = useFTAllowance(address);
 
-  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
-    address,
-    fee.value,
-    allowance.data,
-    ftBalance.value,
-  );
-
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
@@ -81,6 +74,15 @@ function SwapForm({
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
+  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
+    address,
+    fee.value,
+    allowance.data,
+    ftBalance.value,
+    accountBalance.value,
+    openTransacionModal,
+  );
+
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     isNativeToken,
@@ -90,7 +92,6 @@ function SwapForm({
     fee.value,
     disabled,
     onSubmit,
-    openTransacionModal,
   );
 
   const renderFromBalance = () => {

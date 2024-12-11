@@ -26,7 +26,6 @@ function useSwapForm(
   fee: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
-  openTransactionModal: (amount: string, receiver: string) => void,
 ) {
   const alert = useAlert();
 
@@ -56,8 +55,6 @@ function useSwapForm(
       logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
       alert.error(getErrorMessage(error));
     };
-
-    openTransactionModal(values[FIELD_NAME.VALUE].toString(), values[FIELD_NAME.ADDRESS]);
 
     onSubmit(values).then(onSuccess).catch(onError);
   });

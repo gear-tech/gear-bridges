@@ -30,17 +30,8 @@ const getAmountSchema = (
       .refine(() => feeValue <= accountBalanceValue, { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE });
 
   return schema
-    .refine((value) => value >= feeValue, { message: ERROR_MESSAGE.MIN_AMOUNT })
-    .refine(
-      (value) => {
-        const expectedValue = value - feeValue;
-        const isMintRequired = expectedValue > ftBalanceValue;
-        const valueToMint = isMintRequired ? expectedValue - ftBalanceValue : BigInt(0);
-
-        return valueToMint + feeValue <= accountBalanceValue;
-      },
-      { message: ERROR_MESSAGE.NO_ACCOUNT_BALANCE },
-    );
+    .refine((value) => value > feeValue, { message: ERROR_MESSAGE.MIN_AMOUNT })
+    .refine((value) => value <= accountBalanceValue + ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE });
 };
 
 const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexString, string> | undefined) => {

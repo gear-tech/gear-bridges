@@ -1,8 +1,8 @@
 import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
-import { WatchContractEventOnLogsParameter } from 'viem';
+import { encodeFunctionData, WatchContractEventOnLogsParameter } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
-import { watchContractEvent } from 'wagmi/actions';
+import { estimateGas, watchContractEvent } from 'wagmi/actions';
 
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount } from '@/hooks';
@@ -41,16 +41,27 @@ function useApprove(address: HexString | undefined) {
       const unwatch = watchContractEvent(config, { address, abi, eventName, args, onLogs, onError });
     });
 
-  const approve = async (amount: bigint) => {
+  const getGasLimit = (amount: bigint) => {
+    if (!address) throw new Error('Fungible token address is not defined');
+
+    const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
+    const args = [ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] as const;
+    const to = address;
+    const data = encodeFunctionData({ abi, functionName, args });
+
+    return estimateGas(config, { to, data });
+  };
+
+  const approve = async ({ amount, gas }: { amount: bigint; gas: bigint }) => {
     if (!address) throw new Error('Fungible token address is not defined');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
     const args = [ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS, amount] as const;
 
-    return writeContractAsync({ address, abi, functionName, args }).then(() => watch(amount));
+    return writeContractAsync({ address, abi, functionName, args, gas }).then(() => watch(amount));
   };
 
-  return useMutation({ mutationFn: approve });
+  return { ...useMutation({ mutationFn: approve }), getGasLimit };
 }
 
 export { useApprove };

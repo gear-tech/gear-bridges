@@ -1,12 +1,12 @@
 import { HexString } from '@gear-js/api';
-import { useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { useProgram, useProgramQuery, useSendProgramTransaction } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 
 import { VftProgram, WrappedVaraProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
 import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
-import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
+import { FUNCTION_NAME, QUERY_NAME, SERVICE_NAME } from '../../consts/vara';
 import { FormattedValues } from '../../types';
 
 import { useVFTManagerAddress } from './use-vft-manager-address';
@@ -50,6 +50,33 @@ function useRequestBridging() {
   });
 }
 
+function useTransferGasLimit() {
+  const { data: program } = useProgram({
+    library: BridgingPaymentProgram,
+    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+  });
+
+  return useProgramQuery({
+    program,
+    serviceName: SERVICE_NAME.BRIDGING_PAYMENT,
+    functionName: QUERY_NAME.GET_CONFIG,
+    args: [],
+
+    query: {
+      select: (data) => {
+        const gasLimit =
+          BigInt(data.gas_for_reply_deposit) +
+          BigInt(data.gas_to_send_request_to_vft_manager) +
+          BigInt(data.gas_for_request_to_vft_manager_msg);
+
+        const increasePercent = 3n;
+
+        return gasLimit + (gasLimit * increasePercent) / 100n;
+      },
+    },
+  });
+}
+
 function useHandleVaraSubmit(
   ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
@@ -59,13 +86,16 @@ function useHandleVaraSubmit(
   const mint = useMint();
   const vftApprove = useApprove(ftAddress);
   const bridgingPaymentRequest = useRequestBridging();
-  const { data: vftManagerAddress, isLoading } = useVFTManagerAddress();
+  const { data: vftManagerAddress, isLoading: isVftManagerAddressLoading } = useVFTManagerAddress();
+  const { data: gasLimit, isLoading: isGasLimitLoading } = useTransferGasLimit();
+  const isLoading = isVftManagerAddressLoading || isGasLimitLoading;
 
   const sendBridgingPaymentRequest = (amount: bigint, accountAddress: HexString) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
+    if (isUndefined(gasLimit)) throw new Error('Gas limit is not found');
 
     return bridgingPaymentRequest.sendTransactionAsync({
-      gasLimit: BigInt(350000000000),
+      gasLimit,
       args: [amount, accountAddress, ftAddress],
       value: feeValue,
     });

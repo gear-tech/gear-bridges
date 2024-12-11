@@ -6,7 +6,6 @@ type Values = typeof DEFAULT_VALUES;
 
 type FormattedValues = {
   [FIELD_NAME.VALUE]: bigint;
-  [FIELD_NAME.EXPECTED_VALUE]: bigint;
   [FIELD_NAME.ADDRESS]: HexString;
 };
 

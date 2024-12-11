@@ -1,7 +1,7 @@
+import ClockSVG from '@/assets/clock.svg?react';
 import { Skeleton } from '@/components';
 import { cx } from '@/utils';
 
-import ClockSVG from '../../assets/clock.svg?react';
 import { Transfer } from '../../types';
 
 import styles from './transaction-date.module.scss';

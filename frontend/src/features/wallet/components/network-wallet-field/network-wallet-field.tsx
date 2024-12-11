@@ -6,7 +6,6 @@ import { Skeleton, TruncatedText } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
 
 import { WALLET } from '../../consts';
-import { useAccountSync } from '../../hooks';
 import { WalletId } from '../../types';
 import { NetworkWalletModal } from '../network-wallet-modal';
 import { WalletModal } from '../wallet-modal';
@@ -14,8 +13,6 @@ import { WalletModal } from '../wallet-modal';
 import styles from './network-wallet-field.module.scss';
 
 function NetworkWalletField() {
-  useAccountSync();
-
   const { account, isAccountReady } = useAccount();
   const wallet = account ? WALLET[account.meta.source as WalletId] : undefined;
   const { SVG } = wallet || {};
@@ -32,34 +29,27 @@ function NetworkWalletField() {
   const handleButtonClick = () => {
     if (account) return openSubstrateModal();
     if (ethAccount.address) return openEthModal();
-
-    return openModal();
   };
 
   // it's probably worth to check isConnecting too, but there is a bug:
   // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-  if (!isAccountReady || ethAccount.isReconnecting) return <Skeleton height="40px" />;
+  if (!isAccountReady || ethAccount.isReconnecting) return <Skeleton height="100%" width="100%" />;
 
   return (
     <>
-      <div className={styles.field}>
-        {isConnected && (
-          <div className={styles.wallet}>
-            {SVG && <SVG />}
-            {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
+      {isConnected ? (
+        // TODO: button
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+        <button type="button" className={styles.button} onClick={handleButtonClick}>
+          {SVG && <SVG />}
+          {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
 
-            {account && <TruncatedText value={account.address} />}
-            {ethAccount.address && <TruncatedText value={ethAccount.address} />}
-          </div>
-        )}
-
-        <Button
-          text={isConnected ? 'Change' : 'Connect'}
-          size="small"
-          onClick={handleButtonClick}
-          block={!isConnected}
-        />
-      </div>
+          {account && <TruncatedText value={account.address} />}
+          {ethAccount.address && <TruncatedText value={ethAccount.address} />}
+        </button>
+      ) : (
+        <Button text="Connect" size="small" onClick={openModal} block />
+      )}
 
       {isModalOpen && <NetworkWalletModal close={closeModal} />}
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}

@@ -14,7 +14,7 @@ const withPrecision = (value: string) => {
 function useEthAccountBalance() {
   const ethAccount = useEthAccount();
 
-  const { data, isPending, queryKey } = useBalance({
+  const { data, isLoading, queryKey } = useBalance({
     address: ethAccount?.address,
   });
 
@@ -22,7 +22,6 @@ function useEthAccountBalance() {
 
   const { value } = data || {};
   const formattedValue = data ? withPrecision(formatEther(data.value)) : undefined;
-  const isLoading = isPending;
 
   return { value, formattedValue, isLoading };
 }

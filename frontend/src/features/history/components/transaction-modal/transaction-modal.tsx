@@ -4,14 +4,12 @@ import { Modal } from '@gear-js/vara-ui';
 import { useLayoutEffect } from 'react';
 import { formatUnits } from 'viem';
 
-import GasSVG from '@/assets/gas.svg?react';
-import { CopyButton, LinkButton, TruncatedText } from '@/components';
+import { CopyButton, FeeAndTimeFooter, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import ClockSVG from '../../assets/clock.svg?react';
 import { NETWORK_SVG } from '../../consts';
 import { Network, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
@@ -142,29 +140,13 @@ function TransactionModal({
 
       {renderProgressBar?.()}
 
-      <div className={styles.stats}>
-        <p className={styles.stat}>
-          <span>Paid Fee:</span>
+      <footer className={styles.footer}>
+        <FeeAndTimeFooter fee={fee.formattedValue} symbol={isGearNetwork ? 'VARA' : 'ETH'} />
 
-          <span className={styles.value}>
-            <GasSVG />
-            {`${fee.formattedValue} ${isGearNetwork ? 'VARA' : 'ETH'}`}
-          </span>
-        </p>
-
-        <p className={styles.stat}>
-          <span>Bridge Time:</span>
-
-          <span className={styles.value}>
-            <ClockSVG />
-            ~30 mins
-          </span>
-        </p>
-      </div>
-
-      {txHash && (
-        <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
-      )}
+        {txHash && (
+          <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
+        )}
+      </footer>
     </Modal>
   );
 }

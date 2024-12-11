@@ -4,17 +4,17 @@ import styles from './network-card.module.scss';
 
 type Props = {
   SVG: SVGComponent;
+  destination: string;
   name: string;
 };
 
-function NetworkCard({ SVG, name }: Props) {
+function NetworkCard({ SVG, destination, name }: Props) {
   return (
     <div className={styles.card}>
-      <SVG />
-
-      <p>
+      {destination}
+      <p className={styles.network}>
+        <SVG />
         <span className={styles.name}>{name}</span>
-        <span className={styles.text}>Network</span>
       </p>
     </div>
   );

@@ -3,6 +3,7 @@ import { Button } from '@gear-js/vara-ui';
 import { useWeb3Modal } from '@web3modal/wagmi/react';
 
 import { useEthAccount, useModal } from '@/hooks';
+import { cx } from '@/utils';
 
 import SwapSVG from '../../assets/swap.svg?react';
 import { WalletModal } from '../wallet-modal';
@@ -10,10 +11,11 @@ import { WalletModal } from '../wallet-modal';
 import styles from './swap-network-button.module.scss';
 
 type Props = {
+  isActive: boolean;
   onClick: () => void;
 };
 
-function SwapNetworkButton({ onClick }: Props) {
+function SwapNetworkButton({ isActive, onClick }: Props) {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
@@ -29,7 +31,12 @@ function SwapNetworkButton({ onClick }: Props) {
 
   return (
     <>
-      <Button icon={SwapSVG} color="grey" className={styles.button} onClick={handleClick} />
+      <Button
+        icon={SwapSVG}
+        color="light"
+        className={cx(styles.button, isActive && styles.active)}
+        onClick={handleClick}
+      />
 
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}
     </>

@@ -1,5 +1,6 @@
 import { HexString } from '@gear-js/api';
-import { formatUnits, parseUnits } from 'viem';
+import { BaseError, formatUnits, parseUnits } from 'viem';
+import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
 import { FTAddressPair } from '@/types';
@@ -82,4 +83,9 @@ const getMergedBalance = (
   return { value, formattedValue, isLoading };
 };
 
-export { getAmountSchema, getOptions, getMergedBalance };
+// string is only for cancelled sign and send popup error during useSendProgramTransaction
+// reevaluate after @gear-js/react-hooks update
+const getErrorMessage = (error: Error | WriteContractErrorType | string) =>
+  typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
+
+export { getAmountSchema, getOptions, getMergedBalance, getErrorMessage };

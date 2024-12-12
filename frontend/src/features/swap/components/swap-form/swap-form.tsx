@@ -49,7 +49,8 @@ function SwapForm({
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
-  const { address, destinationAddress, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
+  const { address, destinationAddress, destinationSymbol, options, symbol, pair, decimals, ...bridge } =
+    useBridge(networkIndex);
   const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
@@ -186,7 +187,7 @@ function SwapForm({
                 />
               </div>
 
-              <Balance heading="Receive" value={amount || '0'} unit={symbol} />
+              <Balance heading="Receive" value={amount || '0'} unit={destinationSymbol} />
             </div>
 
             <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />

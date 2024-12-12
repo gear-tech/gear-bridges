@@ -37,12 +37,13 @@ const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexS
 
   if (!addresses || !symbols) return { varaOptions, ethOptions };
 
-  addresses.forEach(([varaAddress, ethAddress]) => {
+  addresses.forEach(([varaAddress, ethAddress], pairIndex) => {
+    const value = pairIndex.toString();
     const varaSymbol = symbols[varaAddress];
     const ethSymbol = symbols[ethAddress];
 
-    varaOptions.push({ label: varaSymbol, value: varaAddress });
-    ethOptions.push({ label: ethSymbol, value: ethAddress });
+    varaOptions.push({ label: varaSymbol, value });
+    ethOptions.push({ label: ethSymbol, value });
   });
 
   return { varaOptions, ethOptions };

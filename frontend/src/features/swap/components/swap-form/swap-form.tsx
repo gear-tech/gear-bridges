@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { useAccount } from '@gear-js/react-hooks';
 import { Button, Select } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
@@ -51,23 +50,24 @@ function SwapForm({
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
-  const { tokenAddress, setTokenAddress } = useBridge();
-  const { destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } = useToken();
-  const isNativeToken = tokenAddress === WRAPPED_VARA_CONTRACT_ADDRESS;
+  const { pairIndex, setPairIndex } = useBridge();
+  const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } =
+    useToken(networkIndex);
+  const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
-  const ftBalance = useFTBalance(tokenAddress, decimals);
-  const allowance = useFTAllowance(tokenAddress);
+  const ftBalance = useFTBalance(address, decimals);
+  const allowance = useFTAllowance(address);
 
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
 
   const openTransacionModal = (amount: string, receiver: string) => {
-    if (!tokenAddress || !destinationAddress) throw new Error('Address is not defined');
+    if (!address || !destinationAddress) throw new Error('Address is not defined');
 
-    const source = tokenAddress;
+    const source = address;
     const destination = destinationAddress;
     const sourceNetwork = isVaraNetwork ? TransferNetwork.Gear : TransferNetwork.Ethereum;
     const destNetwork = isVaraNetwork ? TransferNetwork.Ethereum : TransferNetwork.Gear;
@@ -78,7 +78,7 @@ function SwapForm({
   };
 
   const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
-    tokenAddress,
+    address,
     fee.value,
     allowance.data,
     ftBalance.value,
@@ -160,8 +160,8 @@ function SwapForm({
 
                 <Select
                   options={options}
-                  value={tokenAddress}
-                  onChange={({ target }) => setTokenAddress(target.value as HexString)}
+                  value={pairIndex.toString()}
+                  onChange={({ target }) => setPairIndex(Number(target.value))}
                   className={styles.select}
                   disabled={options.length === 0}
                 />

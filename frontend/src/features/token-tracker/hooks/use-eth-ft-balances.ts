@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { useMemo } from 'react';
 import { useReadContracts } from 'wagmi';
 
@@ -23,14 +24,14 @@ function useEthFTBalances(addresses: FTAddressPair[] | undefined) {
   const getBalancesMap = (data: { result?: string | number | bigint }[]) => {
     if (!addresses) return;
 
-    const entries = data.map(({ result }, index) => {
-      const address = addresses[index][1];
+    const entries = data.map(({ result }, pairIndex) => {
+      const address = addresses[pairIndex][1];
       const balance = isUndefined(result) ? 0n : BigInt(result);
 
-      return [address, balance] as const;
+      return [address, { balance, pairIndex }] as const;
     });
 
-    return Object.fromEntries(entries);
+    return Object.fromEntries(entries) as Record<HexString, { balance: bigint; pairIndex: number }>;
   };
 
   return useReadContracts({

@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { getTypedEntries, useAccount, useAlert } from '@gear-js/react-hooks';
 import { Modal, Button } from '@gear-js/vara-ui';
 import { formatUnits } from 'viem';
@@ -9,6 +8,7 @@ import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useBridge } from '@/contexts';
 import { useVaraAccountBalance, useEthAccountBalance, useTokens, useLargeModal } from '@/hooks';
+import { isUndefined } from '@/utils';
 
 import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../card';
@@ -23,12 +23,14 @@ type Props = {
 function TokenTrackerModal({ lockedBalance, close }: Props) {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
-  const { setTokenAddress } = useBridge();
+  const { setPairIndex } = useBridge();
   const burn = useBurnVaraTokens();
   const alert = useAlert();
 
   const isVaraNetwork = Boolean(account);
   const networkIndex = isVaraNetwork ? 0 : 1;
+
+  const nativePairIndex = addresses?.findIndex((pair) => pair[networkIndex] === WRAPPED_VARA_CONTRACT_ADDRESS);
   const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
 
   const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
@@ -49,8 +51,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
     </>
   );
 
-  const handleTransferClick = (address: HexString) => {
-    setTokenAddress(address);
+  const handleTransferClick = (index: number) => {
+    setPairIndex(index);
     close();
   };
 
@@ -60,13 +62,13 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
         .fill(null)
         .map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
-    return getTypedEntries(ftBalances).map(([address, balance]) => (
+    return getTypedEntries(ftBalances).map(([address, { balance, pairIndex }]) => (
       <li key={address}>
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
           value={formatUnits(balance, decimals[address] ?? 0)}
           symbol={symbols[address] ?? 'Unit'}>
-          <Button text="Transfer" color="grey" size="small" onClick={() => handleTransferClick(address)} />
+          <Button text="Transfer" color="grey" size="small" onClick={() => handleTransferClick(pairIndex)} />
         </BalanceCard>
       </li>
     ));
@@ -94,12 +96,12 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
               SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.formattedValue}
               symbol={isVaraNetwork ? 'VARA' : 'ETH'}>
-              {isVaraNetwork && (
+              {!isUndefined(nativePairIndex) && nativePairIndex !== -1 && (
                 <Button
                   text="Transfer"
                   color="grey"
                   size="small"
-                  onClick={() => handleTransferClick(WRAPPED_VARA_CONTRACT_ADDRESS)}
+                  onClick={() => handleTransferClick(nativePairIndex)}
                 />
               )}
             </BalanceCard>

@@ -83,7 +83,11 @@ pub struct BeaconRpcArgs {
     pub beacon_endpoint: String,
 
     /// Timeout in seconds for requests to the ethereum beacon RPC
-    #[arg(long = "ethereum-beacon-rpc-timeout", env = "ETH_BEACON_RPC_TIMEOUT")]
+    #[arg(
+        long = "ethereum-beacon-rpc-timeout",
+        env = "ETH_BEACON_RPC_TIMEOUT",
+        default_value = "10"
+    )]
     pub beacon_timeout: Option<u64>,
 }
 

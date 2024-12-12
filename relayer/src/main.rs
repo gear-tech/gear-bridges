@@ -284,7 +284,6 @@ async fn main() {
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
             slot,
-            from_gear_block,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
@@ -306,8 +305,8 @@ async fn main() {
                 .expect("Failed to parse historical proxy address");
             let receiver_address = hex_utils::decode_h256(&receiver_program)
                 .expect("Failed to parse receiver program address");
-            let receiver_route =
-                hex::decode(&receiver_route).expect("Failed to decode receiver route");
+            let receiver_route = hex_utils::decode_byte_vec(&receiver_route)
+                .expect("Failed to decode receiver route");
             let tx_hash = hex_utils::decode_h256(&tx_hash)
                 .expect("Failed to decode tx hash")
                 .0
@@ -324,7 +323,6 @@ async fn main() {
                 receiver_route,
                 tx_hash,
                 slot,
-                from_gear_block,
             )
             .await;
 

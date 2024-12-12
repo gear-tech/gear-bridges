@@ -30,28 +30,16 @@ pub async fn relay(
 
     tx_hash: TxHash,
     slot: u64,
-    from_gear_block: Option<u32>,
 ) {
-    let from_gear_block = if let Some(from_gear_block) = from_gear_block {
-        from_gear_block
-    } else {
-        let gear_api = GearApi::new(
-            &gear_client_args.vara_domain,
-            gear_client_args.vara_port,
-            gear_client_args.vara_rpc_retries,
-        )
+    let from_gear_block = gear_api
+        .latest_finalized_block()
         .await
-        .expect("Failed to create gear api");
-        let from_gear_block = gear_api
-            .latest_finalized_block()
-            .await
-            .expect("Failed to fetch latest finalized block");
+        .expect("Failed to fetch latest finalized block");
 
-        gear_api
-            .block_hash_to_number(from_gear_block)
-            .await
-            .expect("Failed to fetch block number by hash")
-    };
+    let from_gear_block = gear_api
+        .block_hash_to_number(from_gear_block)
+        .await
+        .expect("Failed to fetch block number by hash");
 
     let gear_block_listener = GearBlockListener::new(gear_client_args.clone(), from_gear_block);
 

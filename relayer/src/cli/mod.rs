@@ -167,10 +167,6 @@ pub struct EthGearManualArgs {
     #[arg(long = "slot", short = 's')]
     pub slot: u64,
 
-    /// Gear block number to start listening for checkpoints from. If not specified equals to the latest finalized block
-    #[arg(long = "from-gear-block")]
-    pub from_gear_block: Option<u32>,
-
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]
     pub checkpoint_light_client: String,

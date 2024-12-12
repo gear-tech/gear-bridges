@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { getTypedEntries, useAccount, useAlert } from '@gear-js/react-hooks';
 import { Modal, Button } from '@gear-js/vara-ui';
 import { formatUnits } from 'viem';
@@ -6,6 +7,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { useBridge } from '@/contexts';
 import { useVaraAccountBalance, useEthAccountBalance, useTokens, useLargeModal } from '@/hooks';
 
 import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
@@ -21,6 +23,7 @@ type Props = {
 function TokenTrackerModal({ lockedBalance, close }: Props) {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
+  const { setTokenAddress } = useBridge();
   const burn = useBurnVaraTokens();
   const alert = useAlert();
 
@@ -46,6 +49,11 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
     </>
   );
 
+  const handleTransferClick = (address: HexString) => {
+    setTokenAddress(address);
+    close();
+  };
+
   const renderBalances = () => {
     if (!ftBalances || !decimals || !symbols)
       return new Array(Object.keys(TOKEN_SVG).length)
@@ -57,8 +65,9 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
           value={formatUnits(balance, decimals[address] ?? 0)}
-          symbol={symbols[address] ?? 'Unit'}
-        />
+          symbol={symbols[address] ?? 'Unit'}>
+          <Button text="Transfer" color="grey" size="small" onClick={() => handleTransferClick(address)} />
+        </BalanceCard>
       </li>
     ));
   };
@@ -85,7 +94,14 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
               SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.formattedValue}
               symbol={isVaraNetwork ? 'VARA' : 'ETH'}>
-              {isVaraNetwork && <Button text="Transfer" color="grey" size="small" />}
+              {isVaraNetwork && (
+                <Button
+                  text="Transfer"
+                  color="grey"
+                  size="small"
+                  onClick={() => handleTransferClick(WRAPPED_VARA_CONTRACT_ADDRESS)}
+                />
+              )}
             </BalanceCard>
           </li>
         )}

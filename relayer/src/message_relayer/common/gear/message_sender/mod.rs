@@ -33,7 +33,8 @@ pub struct MessageSender {
     eth_api: EthApi,
     beacon_client: BeaconClient,
     historical_proxy_address: H256,
-    vft_manager_address: H256,
+    receiver_address: H256,
+    receiver_route: Vec<u8>,
 
     waiting_checkpoint: Vec<TxHashWithSlot>,
 
@@ -70,16 +71,17 @@ impl MessageSender {
         eth_api: EthApi,
         beacon_client: BeaconClient,
         historical_proxy_address: H256,
-        vft_manager_address: H256,
+        receiver_address: H256,
+        receiver_route: Vec<u8>,
     ) -> Self {
         Self {
             args,
             suri,
             eth_api,
             beacon_client,
-
             historical_proxy_address,
-            vft_manager_address,
+            receiver_address,
+            receiver_route,
 
             waiting_checkpoint: vec![],
 
@@ -170,12 +172,12 @@ impl MessageSender {
 
         let mut proxy_service = HistoricalProxy::new(remoting.clone());
 
-        let (_, vft_manager_reply) = proxy_service
+        let (_, receiver_reply) = proxy_service
             .redirect(
                 payload.proof_block.block.slot,
                 payload.encode(),
-                self.vft_manager_address.into(),
-                <SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+                self.receiver_address.into(),
+                self.receiver_route.clone(),
             )
             .with_gas_limit(gas_limit)
             .send_recv(self.historical_proxy_address.into())
@@ -188,7 +190,8 @@ impl MessageSender {
             })?
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
-        let reply = SubmitReceipt::decode_reply(&vft_manager_reply)
+        // TODO: Don't decode it here.
+        let reply = SubmitReceipt::decode_reply(&receiver_reply)
             .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
 
         match reply {

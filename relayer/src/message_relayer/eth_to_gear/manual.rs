@@ -64,6 +64,7 @@ pub async fn relay(
         beacon_client,
         historical_proxy_address,
         receiver_address,
+        receiver_route,
     );
 
     let [gear_blocks] = gear_block_listener.run();

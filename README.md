@@ -29,7 +29,7 @@ This repository contains the implementation of a token bridging protocol built o
 <details>
     <summary>Details</summary>
 
-    ![Components of Gear <-> Eth Bridge](images/block_diagram.png)
+    <img src="images/block_diagram.png">
 </details>
 
 #### Protocol part

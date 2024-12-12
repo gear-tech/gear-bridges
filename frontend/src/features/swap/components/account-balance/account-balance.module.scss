@@ -1,6 +1,14 @@
+.container,
 .balance {
   display: flex;
   align-items: center;
+}
+
+.container {
+  gap: 8px;
+}
+
+.balance {
   gap: 4px;
 
   font-size: 14px;

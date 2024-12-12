@@ -69,7 +69,7 @@ function useHandleVaraSubmit(
     const balanceToWithdraw = valueToMint + totalGasLimit + totalEstimatedFee + feeValue;
 
     if (accountBalance < balanceToWithdraw)
-      throw new InsufficientAccountBalanceError(accountBalance, balanceToWithdraw);
+      throw new InsufficientAccountBalanceError('VARA', accountBalance, balanceToWithdraw);
 
     return {
       mintTx: preparedMint.transaction,

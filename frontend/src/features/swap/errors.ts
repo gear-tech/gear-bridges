@@ -1,13 +1,11 @@
-import { ERROR_MESSAGE } from './consts';
-
 class InsufficientAccountBalanceError extends Error {
   balanceValue: bigint;
-  minValue: bigint;
+  requiredValue: bigint;
 
-  constructor(balanceValue: bigint, minValue: bigint) {
-    super(ERROR_MESSAGE.NO_ACCOUNT_BALANCE);
+  constructor(symbol: string, balanceValue: bigint, requiredValue: bigint) {
+    super(`Not enough ${symbol} to pay gas and fees`);
     this.balanceValue = balanceValue;
-    this.minValue = minValue;
+    this.requiredValue = requiredValue;
   }
 }
 

@@ -77,7 +77,7 @@ function SwapForm({
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
+  const [submit, approve, mint] = useHandleSubmit(
     address,
     fee.value,
     allowance.data,
@@ -93,7 +93,7 @@ function SwapForm({
     ftBalance,
     decimals,
     disabled,
-    onSubmit,
+    submit.mutateAsync,
   );
 
   const renderFromBalance = () => {
@@ -144,7 +144,7 @@ function SwapForm({
                 <NetworkWalletField />
               </div>
 
-              <AccountBalance {...accountBalance} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
+              <AccountBalance submit={submit} isVaraNetwork={isVaraNetwork} {...accountBalance} />
             </div>
 
             <div className={styles.row}>

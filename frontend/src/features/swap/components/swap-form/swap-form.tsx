@@ -144,7 +144,7 @@ function SwapForm({
                 <NetworkWalletField />
               </div>
 
-              <AccountBalance submit={submit} isVaraNetwork={isVaraNetwork} {...accountBalance} />
+              <AccountBalance amount={amount} submit={submit} isVaraNetwork={isVaraNetwork} {...accountBalance} />
             </div>
 
             <div className={styles.row}>

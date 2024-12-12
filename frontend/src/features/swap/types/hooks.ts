@@ -34,6 +34,7 @@ type UseHandleSubmit = (
   [
     {
       mutateAsync: (values: FormattedValues) => Promise<unknown>;
+      reset: () => void;
       isPending: boolean;
       isSuccess: boolean;
       error: Error | null;

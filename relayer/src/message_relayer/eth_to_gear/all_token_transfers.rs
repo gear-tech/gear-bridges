@@ -85,6 +85,7 @@ impl Relayer {
             historical_proxy_address,
             vft_manager_address,
             route,
+            true,
         );
 
         Ok(Self {

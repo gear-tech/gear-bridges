@@ -14,6 +14,7 @@ use crate::message_relayer::common::{
     EthereumSlotNumber, GSdkArgs, TxHashWithSlot,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub async fn relay(
     gear_client_args: GSdkArgs,
     gear_suri: String,
@@ -65,6 +66,7 @@ pub async fn relay(
         historical_proxy_address,
         receiver_address,
         receiver_route,
+        false,
     );
 
     let [gear_blocks] = gear_block_listener.run();

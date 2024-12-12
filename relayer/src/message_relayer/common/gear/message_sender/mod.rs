@@ -35,6 +35,7 @@ pub struct MessageSender {
     historical_proxy_address: H256,
     receiver_address: H256,
     receiver_route: Vec<u8>,
+    decode_reply: bool,
 
     waiting_checkpoint: Vec<TxHashWithSlot>,
 
@@ -65,6 +66,7 @@ impl_metered_service! {
 }
 
 impl MessageSender {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         args: GSdkArgs,
         suri: String,
@@ -73,6 +75,7 @@ impl MessageSender {
         historical_proxy_address: H256,
         receiver_address: H256,
         receiver_route: Vec<u8>,
+        decode_reply: bool,
     ) -> Self {
         Self {
             args,
@@ -82,6 +85,7 @@ impl MessageSender {
             historical_proxy_address,
             receiver_address,
             receiver_route,
+            decode_reply,
 
             waiting_checkpoint: vec![],
 
@@ -190,18 +194,22 @@ impl MessageSender {
             })?
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
-        // TODO: Don't decode it here.
-        let reply = SubmitReceipt::decode_reply(&receiver_reply)
-            .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
+        // TODO: Refactor this approach.
+        if self.decode_reply {
+            let reply = SubmitReceipt::decode_reply(&receiver_reply)
+                .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
 
-        match reply {
-            Ok(_) => {}
-            Err(vft_manager_client::Error::NotSupportedEvent) => {
-                log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)", message.tx_hash);
+            match reply {
+                Ok(_) => {}
+                Err(vft_manager_client::Error::NotSupportedEvent) => {
+                    log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)", message.tx_hash);
+                }
+                Err(e) => {
+                    anyhow::bail!("Internal vft-manager error: {:?}", e);
+                }
             }
-            Err(e) => {
-                anyhow::bail!("Internal vft-manager error: {:?}", e);
-            }
+        } else {
+            log::info!("Received reply: {}", hex::encode(&receiver_reply));
         }
 
         Ok(())

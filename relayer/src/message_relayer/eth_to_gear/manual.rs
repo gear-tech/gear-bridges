@@ -31,6 +31,14 @@ pub async fn relay(
     tx_hash: TxHash,
     slot: u64,
 ) {
+    let gear_api = GearApi::new(
+        &gear_client_args.vara_domain,
+        gear_client_args.vara_port,
+        gear_client_args.vara_rpc_retries,
+    )
+    .await
+    .expect("Failed to create GearApi");
+
     let from_gear_block = gear_api
         .latest_finalized_block()
         .await

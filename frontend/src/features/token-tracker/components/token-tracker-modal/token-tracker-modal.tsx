@@ -6,7 +6,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
+import { useVaraAccountBalance, useEthAccountBalance, useTokens, useLargeModal } from '@/hooks';
 
 import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../card';
@@ -71,6 +71,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
       .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
   };
 
+  useLargeModal();
+
   return (
     // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
     // fast fix for now, cuz major font update was made without a fallback,
@@ -81,8 +83,9 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
             <BalanceCard
               SVG={account ? VaraSVG : EthSVG}
               value={accountBalance.formattedValue}
-              symbol={account ? 'VARA' : 'ETH'}
-            />
+              symbol={account ? 'VARA' : 'ETH'}>
+              {account && <Button text="Transfer" color="grey" size="small" />}
+            </BalanceCard>
           </li>
         )}
 

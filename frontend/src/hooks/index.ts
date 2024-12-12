@@ -2,6 +2,7 @@ import { useChangeEffect, useLoading, useModal, useDebounce, useInvalidateOnBloc
 import { useTokens } from './tokens';
 import { useEthAccount } from './use-eth-account';
 import { useEthAccountBalance } from './use-eth-account-balance';
+import { useLargeModal } from './use-large-modal';
 import { useVaraAccountBalance } from './use-vara-account-balance';
 import { useVaraFTBalance } from './use-vara-ft-balance';
 
@@ -16,4 +17,5 @@ export {
   useVaraAccountBalance,
   useVaraFTBalance,
   useEthAccountBalance,
+  useLargeModal,
 };

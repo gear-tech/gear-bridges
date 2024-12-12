@@ -28,7 +28,6 @@ This repository contains the implementation of a token bridging protocol built o
 
 <details>
     <summary>Details</summary>
-
     <img src="images/block_diagram.png">
 </details>
 

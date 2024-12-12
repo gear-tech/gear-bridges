@@ -11,6 +11,8 @@ import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 
+const TRANSFER_GAS_LIMIT_FALLBACK = 21000n * 10n;
+
 function useHandleEthSubmit(
   ftAddress: HexString | undefined,
   fee: bigint | undefined,
@@ -46,10 +48,16 @@ function useHandleEthSubmit(
     if (isUndefined(accountBalance)) throw new Error('Account balance is not defined');
 
     const isApproveRequired = amount > allowance;
-
     const approveGasLimit = isApproveRequired ? await approve.getGasLimit(amount) : BigInt(0);
-    const transferGasLimit = await getTransferGasLimit(amount, accountAddress);
-    const gasLimit = approveGasLimit + transferGasLimit;
+
+    // if approve is not made, transfer gas estimate will fail.
+    // it can be avoided by using stateOverride,
+    // but it requires the knowledge of the storage slot or state diff of the allowance for each token,
+    // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
+    const transferGasLimit = isApproveRequired ? undefined : await getTransferGasLimit(amount, accountAddress);
+
+    // TRANSFER_GAS_LIMIT_FALLBACK is just for balance check, during the actual transfer it will be recalculated
+    const gasLimit = approveGasLimit + (transferGasLimit || TRANSFER_GAS_LIMIT_FALLBACK);
 
     const { maxFeePerGas } = await estimateFeesPerGas(config);
     const weiGasLimit = gasLimit * maxFeePerGas;
@@ -61,7 +69,7 @@ function useHandleEthSubmit(
     return { isApproveRequired, approveGasLimit, transferGasLimit };
   };
 
-  const transfer = async (amount: bigint, accountAddress: HexString, gasLimit: bigint) => {
+  const transfer = async (amount: bigint, accountAddress: HexString, gasLimit: bigint | undefined) => {
     if (!ftAddress) throw new Error('Fungible token address is not defined');
     if (!fee) throw new Error('Fee is not defined');
 

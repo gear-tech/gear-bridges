@@ -3,6 +3,7 @@ import { CSSProperties } from 'react';
 import { cx } from '@/utils';
 
 import { UseHandleSubmit } from '../../types';
+import { getErrorMessage } from '../../utils';
 
 import styles from './submit-progress-bar.module.scss';
 
@@ -38,10 +39,7 @@ const ERROR_TEXT = {
 
 function SubmitProgressBar({ mint, approve, submit }: Props) {
   const { isSuccess, isPending, error } = submit;
-
-  // string is only for cancelled sign and send popup error during useSendProgramTransaction
-  // reevaluate after @gear-js/react-hooks update
-  const errorMessage = typeof error === 'string' ? error : error?.message;
+  const errorMessage = error ? getErrorMessage(error) : '';
 
   const getStatus = () => {
     if (mint?.isPending || mint?.error) return 'mint';

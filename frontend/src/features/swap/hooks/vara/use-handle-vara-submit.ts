@@ -1,101 +1,105 @@
 import { HexString } from '@gear-js/api';
-import { useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { useApi } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 
-import { VftProgram, WrappedVaraProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
-import { FUNCTION_NAME, SERVICE_NAME } from '../../consts/vara';
+import { ERROR_MESSAGE } from '../../consts';
 import { FormattedValues } from '../../types';
 
+import { useApprove } from './use-approve';
+import { useMint } from './use-mint';
+import { useTransfer, useTransferGasLimit } from './use-transfer';
 import { useVFTManagerAddress } from './use-vft-manager-address';
-
-function useMint() {
-  const { data: program } = useProgram({
-    library: WrappedVaraProgram,
-    id: WRAPPED_VARA_CONTRACT_ADDRESS,
-  });
-
-  return useSendProgramTransaction({
-    program,
-    serviceName: 'tokenizer',
-    functionName: 'mint',
-  });
-}
-
-function useApprove(ftAddress: HexString | undefined) {
-  const { data: program } = useProgram({
-    library: VftProgram,
-    id: ftAddress,
-  });
-
-  return useSendProgramTransaction({
-    program,
-    serviceName: SERVICE_NAME.VFT,
-    functionName: FUNCTION_NAME.APPROVE,
-  });
-}
-
-function useRequestBridging() {
-  const { data: program } = useProgram({
-    library: BridgingPaymentProgram,
-    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-  });
-
-  return useSendProgramTransaction({
-    program,
-    serviceName: SERVICE_NAME.BRIDGING_PAYMENT,
-    functionName: 'makeRequest',
-  });
-}
 
 function useHandleVaraSubmit(
   ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
   allowance: bigint | undefined,
   ftBalance: bigint | undefined,
+  accountBalance: bigint | undefined,
+  openTransactionModal: (amount: string, receiver: string) => void,
 ) {
+  const { api, isApiReady } = useApi();
   const mint = useMint();
-  const vftApprove = useApprove(ftAddress);
-  const bridgingPaymentRequest = useRequestBridging();
-  const { data: vftManagerAddress, isLoading } = useVFTManagerAddress();
+  const approve = useApprove(ftAddress);
+  const transfer = useTransfer();
+  const { data: vftManagerAddress, isLoading: isVftManagerAddressLoading } = useVFTManagerAddress();
+  const { data: transferGasLimit, isLoading: isGasLimitLoading } = useTransferGasLimit();
+  const isLoading = isVftManagerAddressLoading || isGasLimitLoading;
 
-  const sendBridgingPaymentRequest = (amount: bigint, accountAddress: HexString) => {
-    if (!ftAddress) throw new Error('Fungible token address is not found');
-
-    return bridgingPaymentRequest.sendTransactionAsync({
-      gasLimit: BigInt(350000000000),
-      args: [amount, accountAddress, ftAddress],
-      value: feeValue,
-    });
-  };
-
-  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
+  const validateBalance = async (amount: bigint, accountAddress: HexString) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
     if (!vftManagerAddress) throw new Error('VFT manager address is not found');
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
     if (isUndefined(allowance)) throw new Error('Allowance is not found');
     if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
+    if (isUndefined(transferGasLimit)) throw new Error('Gas limit is not found');
+    if (!isApiReady) throw new Error('API is not initialized');
+    if (isUndefined(accountBalance)) throw new Error('Account balance is not found');
 
-    if (ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && amount > ftBalance) {
-      await mint.sendTransactionAsync({ args: [], value: amount - ftBalance });
+    const isMintRequired = ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && amount > ftBalance;
+    const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
+
+    const isApproveRequired = amount > allowance;
+
+    const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
+
+    const preparedMint = isMintRequired
+      ? await mint.prepareTransactionAsync({ args: [], value: valueToMint })
+      : DEFAULT_TX;
+
+    const preparedApprove = isApproveRequired
+      ? await approve.prepareTransactionAsync({ args: [vftManagerAddress, amount] })
+      : DEFAULT_TX;
+
+    const preparedTransfer = await transfer.prepareTransactionAsync({
+      gasLimit: transferGasLimit,
+      args: [amount, accountAddress, ftAddress],
+      value: feeValue,
+    });
+
+    // TODO: replace with calculated values after https://github.com/gear-tech/sails/issues/474 is resolved
+    const mintGasLimit = BigInt(isMintRequired ? 20000000000 : 0);
+    const approveGasLimit = BigInt(isApproveRequired ? 20000000000 : 0);
+
+    const totalGasLimit = (mintGasLimit + approveGasLimit + transferGasLimit) * api.valuePerGas.toBigInt();
+    const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + preparedTransfer.awaited.fee;
+    const balanceToWithdraw = valueToMint + totalGasLimit + totalEstimatedFee + feeValue;
+
+    if (accountBalance < balanceToWithdraw) throw new Error(ERROR_MESSAGE.NO_ACCOUNT_BALANCE);
+
+    return {
+      mintTx: preparedMint.transaction,
+      approveTx: preparedApprove.transaction,
+      transferTx: preparedTransfer.transaction,
+    };
+  };
+
+  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
+    const { mintTx, approveTx, transferTx } = await validateBalance(amount, accountAddress);
+
+    openTransactionModal(amount.toString(), accountAddress);
+
+    if (mintTx) {
+      await mint.sendTransactionAsync(mintTx);
     } else {
       mint.reset();
     }
 
-    if (amount > allowance) {
-      await vftApprove.sendTransactionAsync({ args: [vftManagerAddress, amount] });
+    if (approveTx) {
+      await approve.sendTransactionAsync(approveTx);
     } else {
-      vftApprove.reset();
+      approve.reset();
     }
 
-    return sendBridgingPaymentRequest(amount, accountAddress);
+    return transfer.sendTransactionAsync(transferTx);
   };
 
   const submit = useMutation({ mutationFn: onSubmit });
 
-  return [submit, { ...vftApprove, isLoading }, mint] as const;
+  return [submit, { ...approve, isLoading }, mint] as const;
 }
 
 export { useHandleVaraSubmit };

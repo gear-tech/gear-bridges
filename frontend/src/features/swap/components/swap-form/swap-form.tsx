@@ -11,7 +11,7 @@ import { TransactionModal } from '@/features/history/components/transaction-moda
 import { Network as TransferNetwork } from '@/features/history/types';
 import { NetworkWalletField } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
-import { cx } from '@/utils';
+import { cx, isUndefined } from '@/utils';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
@@ -57,13 +57,6 @@ function SwapForm({
   const ftBalance = useFTBalance(address, decimals);
   const allowance = useFTAllowance(address);
 
-  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
-    address,
-    fee.value,
-    allowance.data,
-    ftBalance.value,
-  );
-
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
@@ -81,16 +74,23 @@ function SwapForm({
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
+  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
+    address,
+    fee.value,
+    allowance.data,
+    ftBalance.value,
+    accountBalance.value,
+    openTransacionModal,
+  );
+
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
     isNativeToken,
     accountBalance,
     ftBalance,
     decimals,
-    fee.value,
     disabled,
     onSubmit,
-    openTransacionModal,
   );
 
   const renderFromBalance = () => {
@@ -106,7 +106,16 @@ function SwapForm({
     );
   };
 
+  const isBalanceValid = () => {
+    if (accountBalance.isLoading || config.isLoading) return true;
+    if (!accountBalance.value || isUndefined(fee.value)) return false;
+
+    return accountBalance.value > fee.value;
+  };
+
   const getButtonText = () => {
+    if (!isBalanceValid()) return isVaraNetwork ? 'Not enough VARA' : 'Not enough ETH';
+
     if (mint?.isPending) return 'Locking...';
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Swapping...';
@@ -189,7 +198,7 @@ function SwapForm({
             type="submit"
             text={getButtonText()}
             size="small"
-            disabled={disabled}
+            disabled={disabled || !isBalanceValid()}
             isLoading={
               approve.isLoading ||
               submit.isPending ||

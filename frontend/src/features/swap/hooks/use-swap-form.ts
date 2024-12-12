@@ -2,7 +2,6 @@ import { useAlert } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
@@ -10,7 +9,7 @@ import { logger } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { FormattedValues } from '../types';
-import { getAmountSchema, getMergedBalance } from '../utils';
+import { getAmountSchema, getErrorMessage, getMergedBalance } from '../utils';
 
 type Values = {
   value: bigint | undefined;
@@ -24,14 +23,12 @@ function useSwapForm(
   accountBalance: Values,
   ftBalance: Values,
   decimals: number | undefined,
-  fee: bigint | undefined,
   disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
-  openTransactionModal: (amount: string, receiver: string) => void,
 ) {
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, fee, decimals);
+  const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({
@@ -53,14 +50,10 @@ function useSwapForm(
       alert.success('Transfer request is successful');
     };
 
-    // string is only for cancelled sign and send popup error during useSendProgramTransaction
-    // reevaluate after @gear-js/react-hooks update
     const onError = (error: WriteContractErrorType | string) => {
       logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
-      alert.error(typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message);
+      alert.error(getErrorMessage(error));
     };
-
-    openTransactionModal(values[FIELD_NAME.VALUE].toString(), values[FIELD_NAME.ADDRESS]);
 
     onSubmit(values).then(onSuccess).catch(onError);
   });

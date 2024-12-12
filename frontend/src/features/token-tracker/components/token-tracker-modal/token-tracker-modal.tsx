@@ -6,7 +6,9 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
+import { useBridge } from '@/contexts';
+import { useVaraAccountBalance, useEthAccountBalance, useTokens, useLargeModal } from '@/hooks';
+import { isUndefined } from '@/utils';
 
 import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../card';
@@ -21,10 +23,14 @@ type Props = {
 function TokenTrackerModal({ lockedBalance, close }: Props) {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
+  const { setPairIndex } = useBridge();
   const burn = useBurnVaraTokens();
   const alert = useAlert();
 
-  const networkIndex = account ? 0 : 1;
+  const isVaraNetwork = Boolean(account);
+  const networkIndex = isVaraNetwork ? 0 : 1;
+
+  const nativePairIndex = addresses?.findIndex((pair) => pair[networkIndex] === WRAPPED_VARA_CONTRACT_ADDRESS);
   const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
 
   const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
@@ -33,17 +39,22 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
 
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
-  const accountBalance = account ? varaAccountBalance : ethAccountBalance;
+  const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
   const renderHeading = () => (
     <>
       My Tokens
       <span className={styles.network}>
-        {account ? <VaraSVG /> : <EthSVG />}
-        {account ? 'Vara' : 'Ethereum'}
+        {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
+        {isVaraNetwork ? 'Vara' : 'Ethereum'}
       </span>
     </>
   );
+
+  const handleTransferClick = (index: number) => {
+    setPairIndex(index);
+    close();
+  };
 
   const renderBalances = () => {
     if (!ftBalances || !decimals || !symbols)
@@ -51,13 +62,14 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
         .fill(null)
         .map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
-    return getTypedEntries(ftBalances).map(([address, balance]) => (
+    return getTypedEntries(ftBalances).map(([address, { balance, pairIndex }]) => (
       <li key={address}>
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
           value={formatUnits(balance, decimals[address] ?? 0)}
-          symbol={symbols[address] ?? 'Unit'}
-        />
+          symbol={symbols[address] ?? 'Unit'}>
+          <Button text="Transfer" color="grey" size="small" onClick={() => handleTransferClick(pairIndex)} />
+        </BalanceCard>
       </li>
     ));
   };
@@ -71,6 +83,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
       .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
   };
 
+  useLargeModal();
+
   return (
     // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
     // fast fix for now, cuz major font update was made without a fallback,
@@ -79,10 +93,18 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
         {accountBalance.formattedValue && (
           <li>
             <BalanceCard
-              SVG={account ? VaraSVG : EthSVG}
+              SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.formattedValue}
-              symbol={account ? 'VARA' : 'ETH'}
-            />
+              symbol={isVaraNetwork ? 'VARA' : 'ETH'}>
+              {!isUndefined(nativePairIndex) && nativePairIndex !== -1 && (
+                <Button
+                  text="Transfer"
+                  color="grey"
+                  size="small"
+                  onClick={() => handleTransferClick(nativePairIndex)}
+                />
+              )}
+            </BalanceCard>
           </li>
         )}
 

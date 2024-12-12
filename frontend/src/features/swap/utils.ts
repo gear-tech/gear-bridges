@@ -37,8 +37,8 @@ const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexS
 
   if (!addresses || !symbols) return { varaOptions, ethOptions };
 
-  addresses.forEach(([varaAddress, ethAddress], index) => {
-    const value = index.toString();
+  addresses.forEach(([varaAddress, ethAddress], pairIndex) => {
+    const value = pairIndex.toString();
     const varaSymbol = symbols[varaAddress];
     const ethSymbol = symbols[ethAddress];
 

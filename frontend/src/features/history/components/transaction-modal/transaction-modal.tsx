@@ -1,12 +1,11 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
-import { useLayoutEffect } from 'react';
 import { formatUnits } from 'viem';
 
 import { CopyButton, FeeAndTimeFooter, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
-import { useTokens } from '@/hooks';
+import { useLargeModal, useTokens } from '@/hooks';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -62,20 +61,14 @@ function TransactionModal({
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
 
-  useLayoutEffect(() => {
-    // TODO: monkey patch, update after @gear-js/vara-ui is updated to support different modal sizes
-    setTimeout(() => {
-      const modalElement = document.querySelector('#modal-root > div > div');
-      modalElement?.classList.add(styles.modal);
-    }, 0);
-  }, []);
-
   const renderHeading = () => (
     <>
       Transaction Details
       {status && <TransactionStatus status={status} />}
     </>
   );
+
+  useLargeModal();
 
   return (
     // TODO: remove assertion after @gear-js/vara-ui update

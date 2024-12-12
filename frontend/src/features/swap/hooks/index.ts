@@ -1,6 +1,6 @@
 import { useEthFTBalance, useHandleEthSubmit, useEthFee, useEthFTAllowance } from './eth';
-import { useBridge } from './use-bridge';
 import { useSwapForm } from './use-swap-form';
+import { useToken } from './use-token';
 import { useVaraFee, useHandleVaraSubmit, useVaraFTAllowance, useVFTManagerAddress } from './vara';
 
 export {
@@ -12,6 +12,6 @@ export {
   useVaraFee,
   useHandleVaraSubmit,
   useVaraFTAllowance,
-  useBridge,
+  useToken,
   useVFTManagerAddress,
 };

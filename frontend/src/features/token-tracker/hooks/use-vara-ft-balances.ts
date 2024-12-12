@@ -14,12 +14,12 @@ function useVaraFTBalances(addresses: FTAddressPair[] | undefined) {
     if (!account) throw new Error('Account not found');
     if (!addresses) throw new Error('Fungible tokens are not found');
 
-    const result: Record<HexString, bigint> = {};
+    const result: Record<HexString, { balance: bigint; pairIndex: number }> = {};
 
-    for (const [address] of addresses) {
+    for (const [pairIndex, [address]] of addresses.entries()) {
       const balance = await new VftProgram(api, address).vft.balanceOf(account.decodedAddress);
 
-      result[address] = balance;
+      result[address] = { balance, pairIndex };
     }
 
     return result;

@@ -7,6 +7,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FeeAndTimeFooter, Input, Skeleton } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { useBridge } from '@/contexts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { NetworkWalletField } from '@/features/wallet';
@@ -15,7 +16,7 @@ import { cx, isUndefined } from '@/utils';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
-import { useSwapForm, useBridge } from '../../hooks';
+import { useSwapForm, useToken } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';
 import { AmountInput } from '../amount-input';
@@ -49,7 +50,9 @@ function SwapForm({
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
-  const { address, destinationAddress, options, symbol, pair, decimals, ...bridge } = useBridge(networkIndex);
+  const { pairIndex, setPairIndex } = useBridge();
+  const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } =
+    useToken(networkIndex);
   const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
@@ -157,8 +160,8 @@ function SwapForm({
 
                 <Select
                   options={options}
-                  value={pair.value}
-                  onChange={({ target }) => pair.set(target.value)}
+                  value={pairIndex.toString()}
+                  onChange={({ target }) => setPairIndex(Number(target.value))}
                   className={styles.select}
                   disabled={options.length === 0}
                 />
@@ -186,7 +189,7 @@ function SwapForm({
                 />
               </div>
 
-              <Balance heading="Receive" value={amount || '0'} unit={symbol} />
+              <Balance heading="Receive" value={amount || '0'} unit={destinationSymbol} />
             </div>
 
             <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />

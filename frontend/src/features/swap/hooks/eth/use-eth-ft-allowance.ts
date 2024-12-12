@@ -14,6 +14,7 @@ function useEthFTAllowance(address: HexString | undefined) {
     abi: FUNGIBLE_TOKEN_ABI,
     functionName: 'allowance',
     args: ethAccount.address ? [ethAccount.address, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS] : undefined,
+    query: { enabled: Boolean(ethAccount.address) },
   });
 
   const { queryKey } = state;

@@ -65,21 +65,6 @@
   overflow: hidden;
 }
 
-.balance {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  color: rgba(#010500, 0.7);
-
-  svg {
-    flex-shrink: 0;
-  }
-}
-
 .amount {
   display: flex;
   gap: 8px;

@@ -17,7 +17,7 @@ const DEFAULT_VALUES = {
 const ERROR_MESSAGE = {
   NO_FT_BALANCE: 'Insufficient token balance',
   INVALID_ADDRESS: 'Invalid address',
-  MIN_AMOUNT: 'Amount is less than fee',
+  MIN_AMOUNT: 'Amount should be bigger than 0',
 } as const;
 
 const VARA_ADDRESS_SCHEMA = z

@@ -35,9 +35,9 @@ This repository contains the implementation of a token bridging protocol built o
 
 - **Pallet-Gear-Eth-Bridge Built-in Actor**: a [Built-in Actor](https://wiki.gear-tech.io/docs/gear/features/builtin-actors) - the entry point into the generic bridging protocol. Receives messages from any actor on the Gear network and relays them to `pallet-gear-eth-bridge`.
 - **Pallet-Gear-Eth-Bridge**: Receives messages from the `pallet-gear-eth-bridge` built-in actor and stores them in the binary Merkle trie. This Merkle trie gets slashed at the end of each `ERA`. Also stores and updates hashed `GRANDPA` authority set.
-- **Relayer(proxy)[^2]**: Accepts proofs of Merkle trie root inclusion and, if they're valid, stores Merkle trie roots in memory. Deployed behind [ERC-1967 Proxy](https://eips.ethereum.org/EIPS/eip-1967).
+- **Relayer(proxy)[^1]**: Accepts proofs of Merkle trie root inclusion and, if they're valid, stores Merkle trie roots in memory. Deployed behind [ERC-1967 Proxy](https://eips.ethereum.org/EIPS/eip-1967).
 - **Verifier**: A contract capable of verifying `plonk` proofs created by [gnark](https://github.com/Consensys/gnark). The submitted proofs are [plonky2](https://github.com/0xPolygonZero/plonky2) proofs wrapped by `gnark`.
-- **MessageQueue(proxy)[^2]**: Used to recover messages from Merkle tries. A user can request a message to be relayed further onto Ethereum by providing proof of inclusion of a message actually included in the Merkle trie, given that this Merkle root was already relayed by `gear->eth protocol relayer` (or another party). This is also the exit point of the generic Gear -> Eth bridging protocol.
+- **MessageQueue(proxy)[^1]**: Used to recover messages from Merkle tries. A user can request a message to be relayed further onto Ethereum by providing proof of inclusion of a message actually included in the Merkle trie, given that this Merkle root was already relayed by `gear->eth protocol relayer` (or another party). This is also the exit point of the generic Gear -> Eth bridging protocol.
 - **Checkpoint-Light-Client**: Lazy ethereum light client that maintains `sync committee` validator list and is capable of verifying block headers using it.
 - **Ethereum-Event-Client**: Program on Gear that's capable of verifying that some event was included into some block. To check validity of the block it requests data from `checkpoint-light-client`.
 - **Historical-Proxy**: Program on Gear that maintains historical `ethereum-event-client` program addresses and redirects requests to a `ethereum-event-client` responsible of processing requested transaction. Serves as an exit point from core Ethereum -> Gear protocol.
@@ -48,11 +48,11 @@ This repository contains the implementation of a token bridging protocol built o
 
 - **VFT**: A program capable of transferring, burning, and minting `vft` tokens. It repeats the implementation of the `ERC20` standard on the Gear network, the standard implementation `vft` can be found [here](https://github.com/gear-foundation/standards/tree/master).
 - **VFT-Manager**: Receives `vft` tokens from users, burns/locks them, and emits a message to the `pallet-gear-eth-bridge` built-in actor. This message contains information about which token is being bridged, how much of it, and the recipient of funds on the Ethereum network. Also manages `Eth -> Gear` token transfers by verifying ethereum events using `historical-proxy` program and minting/unlocking corresponding tokens. It can work with both Ethereum and Gear supplied tokens. When token supply is based on Ethereum it will perform burns and mints of corresponding `VFT` tokens. When token supply is based on Gear it will perform locks and unlocks of corresponding `VFT` tokens.
-- **ERC20Manager(proxy)[^2]**: Mirroring behaviour of `vft-manager` but on Ethereum side and without sending request to a `pallet-gear-eth-bridge`.
+- **ERC20Manager(proxy)[^1]**: Mirroring behaviour of `vft-manager` but on Ethereum side and without sending request to a `pallet-gear-eth-bridge`.
 - **Bridging Payment**: Program on Gear and smart-contract on Ethereum that have the same functions. When bridging request is sent to them, they collect fees and relay this request to the corresponding smart-contract/program responsible of executing this request. Then some `token relayer` can observe events signaling that request have been processed and fee is paid and process this request on the other chain, using its own funds as tx fees. `bridging payment` services are fully in control of relayer that've deployed them, so to perform bridging using them one should trust the owner.
 - **Gear -> Eth Token Relayer** and **Eth -> Gear Token Relayer**: These relayers hook to the events produced by `bridging payment` services and perform cross-chain actions to guarantee message delivery. For example, `gear -> eth token relayer` collects bridging fees from user on Gear. When merkle root that contain this message will be relayed to Ethereum, this relayer will send transaction to the `MessageQueue` that will trigger transfer from `ERC20Manager` to the user.
 
-### Workflow of `Gear -> Ethereum` Token[^1] Transfer
+### Workflow of `Gear -> Ethereum` Token[^2] Transfer
 
 ![Workflow of Gear -> Eth Transfer](images/gear_eth_transfer.png)
 
@@ -68,7 +68,7 @@ This repository contains the implementation of a token bridging protocol built o
 - The `message queue contract` reads the Merkle root from the `relayer contract`, checks the Merkle proof, and relays the message to the `ERC20 treasury`.
 - The `ERC20 treasury` releases funds to the user's account on Ethereum.
 
-### Workflow of `Ethereum -> Gear` Token[^1] Transfer
+### Workflow of `Ethereum -> Gear` Token[^2] Transfer
 
 ![Workflow of Eth -> Gear Transfer](images/eth_gear_transfer.png)
 
@@ -115,6 +115,6 @@ cargo run --release -- --help
 ```
 to see required parameters to start relayer.
 
-[^1]: Gear itself is not a blockchain network and has no native token. This refers to the token of any network built on Gear technology, such as Vara.
+[^1]: (proxy) means that this contract is deployed behind [ERC-1967 Proxy](https://eips.ethereum.org/EIPS/eip-1967)
 
-[^2]: (proxy) means that this contract is deployed behind [ERC-1967 Proxy](https://eips.ethereum.org/EIPS/eip-1967)
+[^2]: Gear itself is not a blockchain network and has no native token. This refers to the token of any network built on Gear technology, such as Vara.

@@ -13,6 +13,7 @@ import { WagmiProvider, http } from 'wagmi';
 import * as allChains from 'wagmi/chains';
 
 import { VARA_NODE_ADDRESS, ETH_CHAIN_ID, ETH_NODE_ADDRESS } from './consts';
+import { BridgeProvider } from './contexts';
 
 function ApiProvider({ children }: ProviderProps) {
   return <GearApiProvider initialArgs={{ endpoint: VARA_NODE_ADDRESS }}>{children}</GearApiProvider>;
@@ -93,7 +94,7 @@ function QueryProvider({ children }: ProviderProps) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider];
+const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider, BridgeProvider];
 
 const withProviders = (Component: ComponentType) => () =>
   providers.reduceRight((children, Provider) => <Provider>{children}</Provider>, <Component />);

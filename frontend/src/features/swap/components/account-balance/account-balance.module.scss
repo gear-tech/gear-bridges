@@ -1,0 +1,22 @@
+.container,
+.balance {
+  display: flex;
+  align-items: center;
+}
+
+.container {
+  gap: 8px;
+}
+
+.balance {
+  gap: 4px;
+
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(#010500, 0.7);
+
+  svg {
+    flex-shrink: 0;
+  }
+}

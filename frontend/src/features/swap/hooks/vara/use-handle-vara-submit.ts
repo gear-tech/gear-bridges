@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { ERROR_MESSAGE } from '../../consts';
+import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
@@ -68,7 +68,8 @@ function useHandleVaraSubmit(
     const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + preparedTransfer.awaited.fee;
     const balanceToWithdraw = valueToMint + totalGasLimit + totalEstimatedFee + feeValue;
 
-    if (accountBalance < balanceToWithdraw) throw new Error(ERROR_MESSAGE.NO_ACCOUNT_BALANCE);
+    if (accountBalance < balanceToWithdraw)
+      throw new InsufficientAccountBalanceError('VARA', accountBalance, balanceToWithdraw);
 
     return {
       mintTx: preparedMint.transaction,

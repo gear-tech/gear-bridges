@@ -5,7 +5,7 @@ import { FormProvider } from 'react-hook-form';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FeeAndTimeFooter, Input, Skeleton } from '@/components';
+import { FeeAndTimeFooter, Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useBridge } from '@/contexts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
@@ -14,11 +14,11 @@ import { NetworkWalletField } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
 import { cx, isUndefined } from '@/utils';
 
-import WalletSVG from '../../assets/wallet.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useToken } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';
+import { AccountBalance } from '../account-balance/account-balance';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { FTAllowanceTip } from '../ft-allowance-tip';
@@ -77,7 +77,7 @@ function SwapForm({
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const [{ mutateAsync: onSubmit, ...submit }, approve, mint] = useHandleSubmit(
+  const [submit, approve, mint] = useHandleSubmit(
     address,
     fee.value,
     allowance.data,
@@ -93,7 +93,7 @@ function SwapForm({
     ftBalance,
     decimals,
     disabled,
-    onSubmit,
+    submit.mutateAsync,
   );
 
   const renderFromBalance = () => {
@@ -144,14 +144,7 @@ function SwapForm({
                 <NetworkWalletField />
               </div>
 
-              {accountBalance.formattedValue && (
-                <div className={styles.balance}>
-                  <WalletSVG />
-                  {`${accountBalance.formattedValue} ${isVaraNetwork ? 'VARA' : 'ETH'}`}
-                </div>
-              )}
-
-              {accountBalance.isLoading && <Skeleton />}
+              <AccountBalance submit={submit} isVaraNetwork={isVaraNetwork} {...accountBalance} />
             </div>
 
             <div className={styles.row}>

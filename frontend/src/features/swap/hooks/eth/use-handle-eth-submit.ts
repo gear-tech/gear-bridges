@@ -6,7 +6,8 @@ import { estimateFeesPerGas, estimateGas, watchContractEvent } from 'wagmi/actio
 
 import { isUndefined } from '@/utils';
 
-import { BRIDGING_PAYMENT_ABI, ERROR_MESSAGE, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { BRIDGING_PAYMENT_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
@@ -64,7 +65,8 @@ function useHandleEthSubmit(
 
     const balanceToWithdraw = weiGasLimit + fee;
 
-    if (balanceToWithdraw > accountBalance) throw new Error(ERROR_MESSAGE.NO_ACCOUNT_BALANCE);
+    if (balanceToWithdraw > accountBalance)
+      throw new InsufficientAccountBalanceError('ETH', accountBalance, balanceToWithdraw);
 
     return { isApproveRequired, approveGasLimit, transferGasLimit };
   };

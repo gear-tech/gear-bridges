@@ -19,7 +19,7 @@ const getAmountSchema = (
 
   const schema = z
     .string()
-    .trim() // TODO: required field check
+    .trim()
     .transform((value) => parseUnits(value, decimals)) // if fraction is > decimals, value will be rounded
     .refine((value) => value > 0n, { message: ERROR_MESSAGE.MIN_AMOUNT });
 

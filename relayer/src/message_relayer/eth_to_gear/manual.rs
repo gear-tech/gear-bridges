@@ -23,7 +23,9 @@ pub async fn relay(
 
     checkpoint_light_client_address: H256,
     historical_proxy_address: H256,
-    vft_manager_address: H256,
+    receiver_address: H256,
+
+    receiver_route: Vec<u8>,
 
     tx_hash: TxHash,
     slot: u64,
@@ -61,7 +63,7 @@ pub async fn relay(
         eth_api,
         beacon_client,
         historical_proxy_address,
-        vft_manager_address,
+        receiver_address,
     );
 
     let [gear_blocks] = gear_block_listener.run();

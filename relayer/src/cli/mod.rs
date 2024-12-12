@@ -167,7 +167,7 @@ pub struct EthGearManualArgs {
     #[arg(long = "slot", short = 's')]
     pub slot: u64,
 
-    /// Gear block number to start listening for checkpoints roots from. If not specified equals to the latest finalized block
+    /// Gear block number to start listening for checkpoints from. If not specified equals to the latest finalized block
     #[arg(long = "from-gear-block")]
     pub from_gear_block: Option<u32>,
 
@@ -175,8 +175,24 @@ pub struct EthGearManualArgs {
     #[arg(long = "checkpoint-light-client")]
     pub checkpoint_light_client: String,
 
+    /// ProgramId of the historical-proxy program
+    #[arg(long = "historical-proxy")]
+    pub historical_proxy: String,
+
+    /// ProgramId of the program that will receive target message
+    #[arg(long = "receiver-program")]
+    pub receiver_program: String,
+
+    /// Route of the function that will be called on receiver-program
+    #[arg(long = "receiver-route")]
+    pub receiver_route: String,
+
     #[clap(flatten)]
     pub gear_args: GearSignerArgs,
+    #[clap(flatten)]
+    pub ethereum_args: EthereumArgs,
+    #[clap(flatten)]
+    pub beacon_args: BeaconRpcArgs,
 }
 
 #[derive(Args)]

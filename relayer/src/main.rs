@@ -23,9 +23,9 @@ mod prover_interface;
 mod relay_merkle_roots;
 
 use cli::{
-    BeaconRpcArgs, Cli, CliCommands, EthGearTokensArgs, EthGearTokensCommands, EthereumArgs,
-    EthereumSignerArgs, GearArgs, GearEthTokensCommands, GearSignerArgs, GenesisConfigArgs,
-    ProofStorageArgs,
+    BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
+    EthereumArgs, EthereumSignerArgs, GearArgs, GearEthTokensCommands, GearSignerArgs,
+    GenesisConfigArgs, ProofStorageArgs,
 };
 
 #[tokio::main]
@@ -277,12 +277,61 @@ async fn main() {
                 .await;
 
             loop {
-                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
+                // relay() spawns thread and exits, so we need to add this loop after calling run.
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
-        CliCommands::EthGearManual(args) => {
-            //
+        CliCommands::EthGearManual(EthGearManualArgs {
+            tx_hash,
+            slot,
+            from_gear_block,
+            checkpoint_light_client,
+            historical_proxy,
+            receiver_program,
+            receiver_route,
+            gear_args,
+            ethereum_args,
+            beacon_args,
+        }) => {
+            let gear_client_args = message_relayer::common::GSdkArgs {
+                vara_domain: gear_args.common.domain,
+                vara_port: gear_args.common.port,
+                vara_rpc_retries: gear_args.common.retries,
+            };
+            let eth_api = create_eth_client(&ethereum_args);
+            let beacon_client = create_beacon_client(&beacon_args).await;
+            let checkpoint_light_client_address = hex_utils::decode_h256(&checkpoint_light_client)
+                .expect("Failed to parse checkpoint light client address");
+            let historical_proxy_address = hex_utils::decode_h256(&historical_proxy)
+                .expect("Failed to parse historical proxy address");
+            let receiver_address = hex_utils::decode_h256(&receiver_program)
+                .expect("Failed to parse receiver program address");
+            let receiver_route =
+                hex::decode(&receiver_route).expect("Failed to decode receiver route");
+            let tx_hash = hex_utils::decode_h256(&tx_hash)
+                .expect("Failed to decode tx hash")
+                .0
+                .into();
+
+            eth_to_gear::manual::relay(
+                gear_client_args,
+                gear_args.suri,
+                eth_api,
+                beacon_client,
+                checkpoint_light_client_address,
+                historical_proxy_address,
+                receiver_address,
+                receiver_route,
+                tx_hash,
+                slot,
+                from_gear_block,
+            )
+            .await;
+
+            loop {
+                // relay() spawns thread and exits, so we need to add this loop after calling run.
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         }
     };
 }

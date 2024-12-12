@@ -57,30 +57,32 @@ This repository contains the implementation of a token bridging protocol built o
 ![Workflow of Gear -> Eth Transfer](images/gear_eth_transfer.png)
 
 - The user submits his bridging request to `frontend`
-- `frontend` submits `approve` call to the `vft` program. Approve should allow `vft-gateway` to spend amount of tokens that user have requested to bridge.
+- `frontend` submits `approve` call to the `vft` program. Approve should allow `vft-manager` to spend amount of tokens that user have requested to bridge.
 - `frontend` submits user request to the `bridging-payment`.
-- `bridging-payment` takes fee and submits a message to the `vft-gateway` to initiate bridging.
-- The `vft-gateway` burns `vft` tokens and emits a message to the `pallet-gear-eth-bridge` built-in actor.
+- `bridging-payment` takes fee and submits a message to the `vft-manager` to initiate bridging.
+- The `vft-manager` burns/locks `vft` tokens and emits a message to the `pallet-gear-eth-bridge` built-in actor.
 - The `pallet-gear-eth-bridge` built-in actor relays the message to `pallet-gear-eth-bridge`.
 - The `pallet-gear-eth-bridge` stores the message in a Merkle trie.
-- Eventually, the `relayer` (or another party) relays the message to the `relayer contract`, and it gets stored there.
-- `message relayer` sees that user message was relayed and submits a Merkle proof of inclusion to the `message queue contract`.
-- The `message queue contract` reads the Merkle root from the `relayer contract`, checks the Merkle proof, and relays the message to the `ERC20 treasury`.
-- The `ERC20 treasury` releases funds to the user's account on Ethereum.
+- Eventually, the `gear->eth protocol relayer` (or another party) relays the message to the `Relayer` contract, and it gets stored there.
+- `gear->eth token relayer` sees that user message was relayed and submits a Merkle proof of inclusion to the `MessageQueue` contract.
+- The `MessageQueue` contract reads the Merkle root from the `Relayer` contract, checks the Merkle proof, and relays the message to the `ERC20Manager`.
+- The `ERC20Manager` releases funds to the user's account on Ethereum.
 
 ### Workflow of `Ethereum -> Gear` Token[^2] Transfer
 
 ![Workflow of Eth -> Gear Transfer](images/eth_gear_transfer.png)
 
 - The user submits his bridging request to `frontend`
-- `frontend` submits `approve` call to the corresponding `ERC20 contract`. Approve should allow `ERC20 Treasury` to spend amount of tokens that user have requested to bridge.
-- `frontend` submits user request to the `ERC20 Treasury`.
-- The `ERC20 Treasury` locks `ERC20` tokens on his balance and emits an event.
-- Eventually, the `checkpoint relayer` (or another party) sumbits to `checkpoint-light-client` ethereum block which has block number bigger than one where event have been emitted.
-- Eventually, the `token transfer relayer` (or another party) submits this event to `ethereum-event-client`
-- `ethereum event client` send request to mint tokens to `vft-gateway`
-- `vft-gateway` sends message to a `vft` program that corresponds to a `ERC20` token that've been locked in step 4.
-- `vft` program mints tokens to a user's address.
+- `frontend` submits `approve` call to the corresponding `ERC20` contract. Approve should allow `BridgingPayment` to spend amount of tokens that user have requested to bridge.
+- `frontend` submits user request to the `BridgingPayment`.
+- The `ERC20Manager` locks/burns `ERC20` tokens and emits an event.
+- Eventually, the `eth->gear protocol relayer` (or another party) sumbits to `checkpoint-light-client` ethereum block which has block number bigger than one where event have been emitted.
+- Eventually, the `eth->gear token relayer` (or another party) submits this event to `historical-proxy`
+- `historical-proxy` verifies this event by sending a message to `ethereum-event-client`.
+- `ethereum-event-client` verifies that block where event is present is a valid finalized block on ethereum by calling `checkpoint-light-client`.
+- `historical-proxy` routes user bridging request to `vft-manager`
+- `vft-manager` sends message to a `vft` program that corresponds to a `ERC20` token that've been locked/burned in step 4. This message is either `transfer`(in the case when token supply is on Gear) or `mint`(in the case when token supply is on Ethereum).
+- `vft` program mints/transfers tokens to a user address.
 
 ## Build and run
 
@@ -106,14 +108,14 @@ foundryup
 
 Build workspace:
 ```sh
-cargo build --release
+cargo build --release -p relayer
 ```
 
 And then run
 ```sh
-cargo run --release -- --help
+./target/release/relayer --help
 ```
-to see required parameters to start relayer.
+to see required parameters to start different kinds of relayers.
 
 [^1]: (proxy) means that this contract is deployed behind [ERC-1967 Proxy](https://eips.ethereum.org/EIPS/eip-1967)
 

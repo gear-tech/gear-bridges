@@ -24,7 +24,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   const burn = useBurnVaraTokens();
   const alert = useAlert();
 
-  const networkIndex = account ? 0 : 1;
+  const isVaraNetwork = Boolean(account);
+  const networkIndex = isVaraNetwork ? 0 : 1;
   const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
 
   const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
@@ -33,14 +34,14 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
 
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
-  const accountBalance = account ? varaAccountBalance : ethAccountBalance;
+  const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
   const renderHeading = () => (
     <>
       My Tokens
       <span className={styles.network}>
-        {account ? <VaraSVG /> : <EthSVG />}
-        {account ? 'Vara' : 'Ethereum'}
+        {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
+        {isVaraNetwork ? 'Vara' : 'Ethereum'}
       </span>
     </>
   );
@@ -81,10 +82,10 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
         {accountBalance.formattedValue && (
           <li>
             <BalanceCard
-              SVG={account ? VaraSVG : EthSVG}
+              SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.formattedValue}
-              symbol={account ? 'VARA' : 'ETH'}>
-              {account && <Button text="Transfer" color="grey" size="small" />}
+              symbol={isVaraNetwork ? 'VARA' : 'ETH'}>
+              {isVaraNetwork && <Button text="Transfer" color="grey" size="small" />}
             </BalanceCard>
           </li>
         )}

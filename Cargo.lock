@@ -1838,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "bridging-payment"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "bridging-payment",
  "bridging-payment-app",
@@ -1856,7 +1856,7 @@ dependencies = [
 
 [[package]]
 name = "bridging-payment-app"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
@@ -1867,7 +1867,7 @@ dependencies = [
 
 [[package]]
 name = "bridging-payment-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "bridging-payment-app",
  "mockall 0.12.1",
@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint_light_client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "ark-serialize 0.4.2",
  "checkpoint_light_client-io",
@@ -2100,7 +2100,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint_light_client-io"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "deploy-checkpoints"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
@@ -3059,7 +3059,7 @@ dependencies = [
 
 [[package]]
 name = "deploy-to-gear"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "dotenv",
@@ -3633,7 +3633,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "erc20-relay"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "erc20-relay-app",
  "sails-idl-gen",
@@ -3642,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "erc20-relay-app"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "alloy-rlp",
  "checkpoint_light_client-io",
@@ -3664,7 +3664,7 @@ dependencies = [
 
 [[package]]
 name = "erc20-relay-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "erc20-relay-app",
  "ethereum-common",
@@ -3707,7 +3707,7 @@ dependencies = [
 
 [[package]]
 name = "ethereum-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "ahash 0.7.8",
  "alloy",
@@ -3770,7 +3770,7 @@ dependencies = [
 
 [[package]]
 name = "ethereum_beacon_client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
@@ -4982,7 +4982,7 @@ dependencies = [
 
 [[package]]
 name = "gear-rpc-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake2",
@@ -5302,7 +5302,7 @@ dependencies = [
 
 [[package]]
 name = "gear_proof_storage"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "gear-wasm-builder 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -5355,7 +5355,7 @@ dependencies = [
 
 [[package]]
 name = "genesis-config"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "gear-rpc-client",
@@ -5479,19 +5479,6 @@ dependencies = [
  "derive_more 0.99.18",
  "hex",
  "scale-info",
-]
-
-[[package]]
-name = "governance"
-version = "0.3.0"
-dependencies = [
- "clap",
- "dotenv",
- "gbuiltin-eth-bridge",
- "gclient",
- "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex",
- "tokio",
 ]
 
 [[package]]
@@ -5929,7 +5916,7 @@ checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
 name = "historical-proxy"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "historical-proxy",
  "historical-proxy-app",
@@ -5941,14 +5928,14 @@ dependencies = [
 
 [[package]]
 name = "historical-proxy-app"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "alloy",
  "alloy-rlp",
  "checkpoint_light_client-io",
+ "erc20-relay",
+ "erc20-relay-client",
  "ethereum-common",
- "ethereum-event-client",
- "ethereum-event-client-client",
  "futures",
  "gclient",
  "getrandom 0.2.15",
@@ -5972,7 +5959,7 @@ dependencies = [
 
 [[package]]
 name = "historical-proxy-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "historical-proxy-app",
  "mockall 0.12.1",
@@ -9261,7 +9248,7 @@ dependencies = [
 
 [[package]]
 name = "plonky2_blake2b256"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake2",
@@ -9289,7 +9276,7 @@ dependencies = [
 
 [[package]]
 name = "plonky2_ed25519"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -9339,7 +9326,7 @@ dependencies = [
 
 [[package]]
 name = "plonky2_sha512"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "itertools 0.10.5",
@@ -9786,7 +9773,7 @@ dependencies = [
 
 [[package]]
 name = "prover"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake2",
@@ -10191,7 +10178,7 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
 name = "relayer"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "alloy",
  "alloy-consensus",
@@ -10208,9 +10195,9 @@ dependencies = [
  "clap",
  "derive_more 0.99.18",
  "dotenv",
+ "erc20-relay-client",
  "ethereum-client",
  "ethereum-common",
- "ethereum-event-client-client",
  "ethereum_beacon_client",
  "futures",
  "gclient",
@@ -14457,7 +14444,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils-prometheus"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "prometheus",
@@ -14490,7 +14477,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vft-manager"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -14513,7 +14500,7 @@ dependencies = [
 
 [[package]]
 name = "vft-manager-app"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
@@ -14532,7 +14519,7 @@ dependencies = [
 
 [[package]]
 name = "vft-manager-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "mockall 0.12.1",
  "sails-client-gen",
@@ -14543,7 +14530,7 @@ dependencies = [
 
 [[package]]
 name = "vft-service"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "env_logger 0.9.3",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -15777,7 +15764,7 @@ dependencies = [
 
 [[package]]
 name = "wrapped-vara"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "gclient",
  "gtest",
@@ -15792,16 +15779,16 @@ dependencies = [
 
 [[package]]
 name = "wrapped-vara-app"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "sails-client-gen",
  "sails-rs",
- "vft-service 0.3.0",
+ "vft-service 0.1.0",
 ]
 
 [[package]]
 name = "wrapped-vara-client"
-version = "0.3.0"
+version = "0.1.0"
 dependencies = [
  "mockall 0.12.1",
  "sails-client-gen",

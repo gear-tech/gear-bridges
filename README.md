@@ -16,15 +16,21 @@ Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge faci
 > [!WARNING]
 > One of the conclusions of this audit was that malicious node which relayer is connected to can cause the proof generation process to be halt. So all deployed relayers **MUST** use their own dedicated gear node which is known to be non-malicious.
 
-## High-Level Bi-Directional `Gear <-> Eth` Design
+## High-Level Design
 
-The **Gear <-> Eth** transfer protocol allows relaying messages from Gear-based blockchains to Ethereum and back. These messages consist of generic data defined by protocols built on top of the bridge. The protocol doesn't guarantee the order in which messages are relayed.
+The **Gear <-> Eth** transfer protocol allows relaying messages from Gear-based blockchains to Ethereum and back. These messages contain generic data defined by protocols built on top of the bridge. The protocol doesn't guarantee the order in which messages are relayed.
 
 This repository contains the implementation of a token bridging protocol built on top of a more generic messaging protocol.
 
-### Components Present in `Gear <-> Eth` Bridge
+### Components of `Gear <-> Eth` bridge
 
-![Components of Gear <-> Eth Bridge](images/block_diagram.png)
+![Components of Gear <-> Eth Bridge](images/block_diagram_simplified.png)
+
+<details>
+    <summary>Details</summary>
+
+    ![Components of Gear <-> Eth Bridge](images/block_diagram.png)
+</details>
 
 #### Protocol part
 

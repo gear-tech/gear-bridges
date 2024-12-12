@@ -1,8 +1,7 @@
 import { HexString } from '@gear-js/api';
-import { useAccount } from '@gear-js/react-hooks';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
-import { useTokens } from '@/hooks';
+import { useEthAccount, useTokens } from '@/hooks';
 
 const NETWORK_INDEX = {
   VARA: 0,
@@ -26,9 +25,12 @@ const { Provider } = BridgeContext;
 const useBridge = () => useContext(BridgeContext);
 
 function BridgeProvider({ children }: PropsWithChildren) {
-  const { account } = useAccount();
-  const isVaraNetwork = Boolean(account);
-  const networkIndex = isVaraNetwork ? NETWORK_INDEX.VARA : NETWORK_INDEX.ETH;
+  const ethAccount = useEthAccount();
+
+  // since eth account is reconnecting immediately without any visible loading state,
+  // and in swap form vara is the first network by default,
+  // check for loading status (isAccountReady || ethAccount.isReconnecting) is minor and can be neglected
+  const networkIndex = ethAccount.isConnected ? NETWORK_INDEX.ETH : NETWORK_INDEX.VARA;
 
   const { addresses } = useTokens();
   const [tokenAddress, setTokenAddress] = useState<HexString>();

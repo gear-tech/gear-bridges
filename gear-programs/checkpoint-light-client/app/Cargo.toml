@@ -1,0 +1,7 @@
+[package]
+name = "checkpoint-light-client-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sails-rs.workspace = true

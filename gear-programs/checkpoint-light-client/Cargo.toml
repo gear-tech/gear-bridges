@@ -1,0 +1,15 @@
+[package]
+name = "checkpoint-light-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+checkpoint-light-client-app.workspace = true
+
+[build-dependencies]
+checkpoint-light-client-app.workspace = true
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
+
+[features]
+wasm-binary = []

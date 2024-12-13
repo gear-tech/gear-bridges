@@ -2081,6 +2081,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "checkpoint-light-client"
+version = "0.3.0"
+dependencies = [
+ "checkpoint-light-client-app",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "checkpoint-light-client-app"
+version = "0.3.0"
+dependencies = [
+ "sails-rs",
+]
+
+[[package]]
+name = "checkpoint-light-client-client"
+version = "0.3.0"
+dependencies = [
+ "checkpoint-light-client-app",
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -2093,6 +2093,10 @@ dependencies = [
 name = "checkpoint-light-client-app"
 version = "0.3.0"
 dependencies = [
+ "ark-bls12-381",
+ "ark-scale 0.0.12",
+ "ark-serialize 0.4.2",
+ "ethereum-common",
  "sails-rs",
 ]
 

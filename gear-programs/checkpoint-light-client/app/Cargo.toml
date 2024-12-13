@@ -4,4 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+ark-bls12-381 = { workspace = true, features = ["curve"] }
+ark-scale.workspace = true
+ark-serialize.workspace = true
+ethereum-common.workspace = true
 sails-rs.workspace = true

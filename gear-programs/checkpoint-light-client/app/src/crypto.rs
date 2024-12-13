@@ -1,7 +1,6 @@
 use ark_bls12_381::{Bls12_381, G1Affine, G2Affine};
-use ark_ec::{bls12::Bls12Config, pairing::Pairing, AffineRepr, CurveGroup};
-use ark_ff::{fields::field_hashers::DefaultFieldHasher, Field, Zero};
-use ark_serialize::CanonicalSerialize;
+use ark_ec::{pairing::Pairing, AffineRepr};
+use ark_ff::{Field, Zero};
 use core::ops::Neg;
 use gbuiltin_bls381::*;
 use crate::sync_committee::{ArkScale, G1, G2};

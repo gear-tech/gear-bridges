@@ -1,6 +1,7 @@
 #![no_std]
 
 mod common;
+mod crypto;
 mod services;
 pub mod state;
 pub mod sync_committee;

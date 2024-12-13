@@ -2094,12 +2094,15 @@ name = "checkpoint-light-client-app"
 version = "0.3.0"
 dependencies = [
  "ark-bls12-381",
+ "ark-ec",
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
  "circular-buffer",
  "ethereum-common",
+ "gbuiltin-bls381 1.7.0",
  "hex-literal",
  "sails-rs",
+ "tree_hash_derive",
 ]
 
 [[package]]
@@ -4556,6 +4559,21 @@ dependencies = [
 name = "gbuiltin-bls381"
 version = "1.6.2"
 source = "git+https://github.com/gear-tech/gear.git?tag=v1.6.2#93eb5b59abc5b3567355e5ca9f20bdf39eace498"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-scale 0.0.12",
+ "ark-serialize 0.4.2",
+ "derive_more 0.99.18",
+ "parity-scale-codec",
+]
+
+[[package]]
+name = "gbuiltin-bls381"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "797566ac6a65cc80b105988fe2f7a9c0ef56fc9d30690e2d1c5afd9a5b26f601"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -8708,7 +8726,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support 4.0.0-dev",
  "frame-system 4.0.0-dev",
- "gbuiltin-bls381",
+ "gbuiltin-bls381 1.6.2",
  "gbuiltin-staking",
  "gear-common 1.6.2 (git+https://github.com/gear-tech/gear.git?tag=v1.6.2)",
  "gear-core 1.6.2 (git+https://github.com/gear-tech/gear.git?tag=v1.6.2)",

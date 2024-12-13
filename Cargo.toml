@@ -16,7 +16,6 @@ members = [
     "gear-programs/vft-manager/client",
     "gear-programs/vft-service",
     "gear-programs/*",
-    "gear-programs/checkpoint-light-client/io",
     "gear-programs/ethereum-event-client/app",
     "gear-programs/ethereum-event-client/client",
     "gear-programs/wrapped-vara",
@@ -57,9 +56,7 @@ vft-manager = { path = "gear-programs/vft-manager" }
 vft-manager-app = { path = "gear-programs/vft-manager/app" }
 vft-manager-client = { path = "gear-programs/vft-manager/client" }
 gear_proof_storage = { path = "gear-programs/proof-storage" }
-checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
-checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
 ethereum-event-client = { path = "gear-programs/ethereum-event-client" }
 ethereum-event-client-app = { path = "gear-programs/ethereum-event-client/app" }
 ethereum-event-client-client = { path = "gear-programs/ethereum-event-client/client" }

@@ -2081,42 +2081,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "checkpoint_light_client"
-version = "0.3.0"
-dependencies = [
- "ark-serialize 0.4.2",
- "checkpoint_light_client-io",
- "circular-buffer",
- "gbuiltin-bls381 1.6.1",
- "gear-wasm-builder 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "getrandom 0.2.15",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex-literal",
- "lazy_static",
- "parity-scale-codec",
- "primitive-types 0.12.2",
- "tree_hash_derive",
-]
-
-[[package]]
-name = "checkpoint_light_client-io"
-version = "0.3.0"
-dependencies = [
- "ark-bls12-381",
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-scale 0.0.12",
- "ark-serialize 0.4.2",
- "ethereum-common",
- "gmeta 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "scale-info",
- "serde",
- "tree_hash_derive",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2140,12 +2104,6 @@ dependencies = [
  "inout",
  "zeroize",
 ]
-
-[[package]]
-name = "circular-buffer"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67261db007b5f4cf8cba393c1a5c511a5cc072339ce16e12aeba1d7b9b77946"
 
 [[package]]
 name = "clap"
@@ -3046,8 +3004,6 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
  "clap",
  "dotenv",
  "ethereum_beacon_client",
@@ -3632,49 +3588,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "erc20-relay"
-version = "0.3.0"
-dependencies = [
- "erc20-relay-app",
- "sails-idl-gen",
- "sails-rs",
-]
-
-[[package]]
-name = "erc20-relay-app"
-version = "0.3.0"
-dependencies = [
- "alloy-rlp",
- "checkpoint_light_client-io",
- "erc20-relay",
- "erc20-relay-client",
- "ethereum-common",
- "futures",
- "gclient",
- "getrandom 0.2.15",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex",
- "hex-literal",
- "lazy_static",
- "sails-client-gen",
- "sails-rs",
- "sp-core 21.0.0",
- "tokio",
-]
-
-[[package]]
-name = "erc20-relay-client"
-version = "0.3.0"
-dependencies = [
- "erc20-relay-app",
- "ethereum-common",
- "mockall 0.12.1",
- "sails-client-gen",
- "sails-idl-gen",
- "sails-rs",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3753,6 +3666,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethereum-event-client"
+version = "0.3.0"
+dependencies = [
+ "ethereum-event-client-app",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "ethereum-event-client-app"
+version = "0.3.0"
+dependencies = [
+ "alloy-rlp",
+ "ethereum-common",
+ "ethereum-event-client",
+ "ethereum-event-client-client",
+ "futures",
+ "gclient",
+ "getrandom 0.2.15",
+ "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
+ "hex-literal",
+ "lazy_static",
+ "sails-client-gen",
+ "sails-rs",
+ "sp-core 21.0.0",
+ "tokio",
+]
+
+[[package]]
+name = "ethereum-event-client-client"
+version = "0.3.0"
+dependencies = [
+ "ethereum-common",
+ "ethereum-event-client-app",
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
 name = "ethereum-types"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3774,7 +3729,6 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
- "checkpoint_light_client-io",
  "ethereum-common",
  "futures",
  "hex",
@@ -4557,21 +4511,6 @@ version = "1.6.2"
 source = "git+https://github.com/gear-tech/gear.git?tag=v1.6.2#93eb5b59abc5b3567355e5ca9f20bdf39eace498"
 dependencies = [
  "gear-dlmalloc",
-]
-
-[[package]]
-name = "gbuiltin-bls381"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f43e801303b63970495dd98bb7426d8cb6b214fbfe8b592691b84bb7e3d6ef2"
-dependencies = [
- "ark-bls12-381",
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-scale 0.0.12",
- "ark-serialize 0.4.2",
- "derive_more 0.99.18",
- "parity-scale-codec",
 ]
 
 [[package]]
@@ -5945,7 +5884,6 @@ version = "0.3.0"
 dependencies = [
  "alloy",
  "alloy-rlp",
- "checkpoint_light_client-io",
  "ethereum-common",
  "ethereum-event-client",
  "ethereum-event-client-client",
@@ -8731,7 +8669,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support 4.0.0-dev",
  "frame-system 4.0.0-dev",
- "gbuiltin-bls381 1.6.2",
+ "gbuiltin-bls381",
  "gbuiltin-staking",
  "gear-common 1.6.2 (git+https://github.com/gear-tech/gear.git?tag=v1.6.2)",
  "gear-core 1.6.2 (git+https://github.com/gear-tech/gear.git?tag=v1.6.2)",
@@ -10203,8 +10141,6 @@ dependencies = [
  "axum",
  "bridging-payment-client",
  "cgo_oligami",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
  "clap",
  "derive_more 0.99.18",
  "dotenv",

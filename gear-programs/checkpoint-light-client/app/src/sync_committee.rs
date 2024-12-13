@@ -10,6 +10,7 @@ use ethereum_common::{
     SYNC_COMMITTEE_SIZE,
 };
 use sails_rs::prelude::*;
+use crate::common::{ReplayBack, Slot};
 
 // The constant defines how many epochs may be skipped.
 pub const MAX_EPOCHS_GAP: u64 = 3;
@@ -19,7 +20,6 @@ pub const G1_UNCOMPRESSED_SIZE: usize = 96;
 pub const G2_UNCOMPRESSED_SIZE: usize = 192;
 
 pub type ArkScale<T> = ark_scale::ArkScale<T, { ark_scale::HOST_CALL }>;
-pub type Slot = u64;
 
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct G1TypeInfo(pub G1);
@@ -69,7 +69,7 @@ pub enum Error {
     InvalidNextSyncCommitteeProof,
     InvalidPublicKeys,
     ReplayBackRequired {
-        // replay_back: Option<meta::ReplayBack>,
+        replay_back: Option<ReplayBack>,
         checkpoint: (Slot, Hash256),
     },
 }

@@ -1,31 +1,20 @@
 #![no_std]
 
+mod common;
+mod services;
+pub mod state;
 pub mod sync_committee;
 
+use cell::RefCell;
 use ethereum_common::{
     beacon::BLSPubKey,
     network::Network,
 };
 use sails_rs::prelude::*;
 
-struct CheckpointLightClientService(());
+const STORED_CHECKPOINTS_COUNT: usize = 150_000;
 
-#[sails_rs::service]
-impl CheckpointLightClientService {
-    pub fn new() -> Self {
-        Self(())
-    }
-
-    // Service's method (command)
-    pub fn do_something(&mut self) -> String {
-        "Hello from CheckpointLightClient!".to_string()
-    }
-
-    // Service's query
-    pub fn get_something(&self) -> String {
-        "Hello from CheckpointLightClient!".to_string()
-    }    
-}
+type State = state::State<STORED_CHECKPOINTS_COUNT>;
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -38,16 +27,19 @@ pub struct Init {
     pub update: sync_committee::Update,
 }
 
-pub struct CheckpointLightClientProgram(());
+pub struct CheckpointLightClientProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl CheckpointLightClientProgram {
     pub fn init(_init: Init) -> Self {
-        Self(())
+        todo!()
     }
 
-    // Exposed service
-    pub fn checkpoint_light_client(&self) -> CheckpointLightClientService {
-        CheckpointLightClientService::new()
+    pub fn checkpoint_for(&self) -> services::CheckpointFor {
+        services::CheckpointFor::new(&self.0)
+    }
+
+    pub fn state(&self) -> services::State {
+        services::State::new(&self.0)
     }
 }

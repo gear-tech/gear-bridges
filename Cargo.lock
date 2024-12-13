@@ -2096,7 +2096,9 @@ dependencies = [
  "ark-bls12-381",
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
+ "circular-buffer",
  "ethereum-common",
+ "hex-literal",
  "sails-rs",
 ]
 
@@ -2135,6 +2137,12 @@ dependencies = [
  "inout",
  "zeroize",
 ]
+
+[[package]]
+name = "circular-buffer"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67261db007b5f4cf8cba393c1a5c511a5cc072339ce16e12aeba1d7b9b77946"
 
 [[package]]
 name = "clap"

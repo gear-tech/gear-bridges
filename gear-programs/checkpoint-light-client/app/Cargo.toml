@@ -7,5 +7,9 @@ edition.workspace = true
 ark-bls12-381 = { workspace = true, features = ["curve"] }
 ark-scale.workspace = true
 ark-serialize.workspace = true
+circular-buffer.workspace = true
 ethereum-common.workspace = true
 sails-rs.workspace = true
+
+[dev-dependencies]
+hex-literal.workspace = true

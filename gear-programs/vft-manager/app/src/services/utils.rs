@@ -76,6 +76,7 @@ pub async fn send_message_with_gas_for_reply(
         .map_err(|_| Error::ReplyHook)?
         .await
         .map_err(|_| Error::ReplyFailure)?;
+
     Ok(())
 }
 

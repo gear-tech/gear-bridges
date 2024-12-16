@@ -1,17 +1,18 @@
-use bridge_builtin_operations::Payload;
 use collections::btree_set::BTreeSet;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
 pub mod abi;
 mod bridge_builtin_operations;
-pub mod error;
-pub mod msg_tracker;
+mod error;
+mod msg_tracker;
+mod token_mapping;
+mod token_operations;
 mod utils;
+
+use bridge_builtin_operations::Payload;
 use error::Error;
 use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
 use token_mapping::TokenMap;
-mod token_mapping;
-mod token_operations;
 
 pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 const CAPACITY: usize = 500_000;
@@ -167,7 +168,7 @@ where
 
     /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
     /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
-    /// This entrypoint can be called only by `ethereum-event-client`.
+    /// This entrypoint can be called only by `historical-proxy`.
     pub async fn submit_receipt(
         &mut self,
         slot: u64,
@@ -226,7 +227,7 @@ where
             return Err(Error::AlreadyProcessed);
         }
 
-        if CAPACITY <= transactions.len()
+        if transactions.len() >= CAPACITY
             && transactions
                 .first()
                 .map(|first| &key < first)
@@ -235,14 +236,20 @@ where
             return Err(Error::TransactionTooOld);
         }
 
+        let msg_id = gstd::msg::id();
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
-        let msg_id = gstd::msg::id();
         let transaction_details = TxDetails::SubmitReceipt {
             vara_token_id,
             receiver,
             amount,
         };
+
+        if transactions.len() >= CAPACITY {
+            transactions.pop_first();
+        }
+        transactions.insert((slot, transaction_index));
+
         msg_tracker_mut().insert_message_info(
             msg_id,
             MessageStatus::SendingMessageToMintTokens,
@@ -261,10 +268,6 @@ where
             }
         }
 
-        if CAPACITY <= transactions.len() {
-            transactions.pop_first();
-        }
-        transactions.insert((slot, transaction_index));
         Ok(())
     }
 
@@ -321,6 +324,7 @@ where
             Ok(nonce) => nonce,
             Err(e) => {
                 // In case of failure, mint tokens back to the sender
+                // TODO: Or unlock.
                 token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
                 return Err(e);
             }

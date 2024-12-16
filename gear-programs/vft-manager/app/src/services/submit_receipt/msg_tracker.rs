@@ -73,6 +73,18 @@ pub fn init() {
     unsafe { MSG_TRACKER = Some(MessageTracker::default()) }
 }
 
+pub fn msg_tracker_state() -> Vec<(MessageId, MessageInfo)> {
+    unsafe {
+        MSG_TRACKER
+            .as_mut()
+            .expect("VftManager::seed() should be called")
+    }
+    .message_info
+    .clone()
+    .into_iter()
+    .collect()
+}
+
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
     unsafe {
         MSG_TRACKER

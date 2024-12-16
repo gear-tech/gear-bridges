@@ -178,81 +178,24 @@ where
 
     pub async fn handle_interrupted_transfer(
         &mut self,
-        _msg_id: MessageId,
+        msg_id: MessageId,
     ) -> Result<(U256, H160), Error> {
-        // let state = self.state();
-
-        // let config = self.config();
-        // let msg_tracker = msg_tracker_mut();
-
-        // let msg_info = msg_tracker
-        //     .get_message_info(&msg_id)
-        //     .expect("Unexpected: msg status does not exist");
-
-        // let TxDetails::RequestBridging {
-        //     vara_token_id,
-        //     sender,
-        //     amount,
-        //     receiver,
-        //     token_supply: _,
-        // } = msg_info.details
-        // else {
-        //     panic!("Wrong message type")
-        // };
-
-        // let eth_token_id = self
-        //     .state()
-        //     .token_map
-        //     .get_eth_token_id(&vara_token_id)
-        //     .expect("Failed to get ethereum token id");
-
-        // match msg_info.status {
-        //     MessageStatus::TokenDepositCompleted(true) | MessageStatus::BridgeBuiltinStep => {
-        //         let payload = Payload {
-        //             receiver,
-        //             token_id: eth_token_id,
-        //             amount,
-        //         };
-
-        //         match bridge_builtin_operations::send_message_to_bridge_builtin(
-        //             state.gear_bridge_builtin,
-        //             state.erc20_manager_address,
-        //             payload,
-        //             config,
-        //             msg_id,
-        //         )
-        //         .await
-        //         {
-        //             Ok(nonce) => Ok((nonce, eth_token_id)),
-        //             Err(_) => {
-        //                 // TODO: Or unlock.
-        //                 // In case of failure, mint tokens back to the sender
-        //                 token_operations::mint(vara_token_id, sender, amount, config, msg_id)
-        //                     .await?;
-        //                 Err(Error::TokensRefunded)
-        //             }
-        //         }
-        //     }
-        //     MessageStatus::BridgeResponseReceived(Some(nonce)) => {
-        //         msg_tracker_mut().remove_message_info(&msg_id);
-        //         Ok((nonce, eth_token_id))
-        //     }
-        //     MessageStatus::WithdrawTokensStep => {
-        //         token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
-        //         Err(Error::TokensRefunded)
-        //     }
-        //     _ => {
-        //         panic!("Unexpected status or transaction completed.")
-        //     }
-        // }
-
-        todo!()
+        // TODO: differentiate.
+        request_bridging::handle_interrupted_transfer(self, msg_id.clone()).await?;
+        submit_receipt::handle_interrupted_transfer(self, msg_id.clone()).await
     }
 
-    // pub fn msg_tracker_state(&self) -> Vec<(MessageId, MessageInfo)> {
-    //     //msg_tracker().message_info.clone().into_iter().collect()
-    //     todo!()
-    // }
+    pub fn request_briding_msg_tracker_state(
+        &self,
+    ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
+        request_bridging::msg_tracker_state()
+    }
+
+    pub fn submit_receipt_msg_tracker_state(
+        &self,
+    ) -> Vec<(MessageId, submit_receipt::MsgTrackerMessageInfo)> {
+        submit_receipt::msg_tracker_state()
+    }
 
     pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160, TokenSupply)> {
         self.state().token_map.read_state()

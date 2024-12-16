@@ -10,6 +10,8 @@ mod utils;
 
 use msg_tracker::{MessageStatus, TxDetails};
 
+pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
+
 pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 const CAPACITY: usize = 500_000;
 
@@ -29,15 +31,12 @@ pub fn seed() {
     }
 }
 
-pub async fn submit_receipt<T>(
+pub async fn submit_receipt<T: ExecContext>(
     service: &mut VftManager<T>,
     slot: u64,
     transaction_index: u64,
     receipt_rlp: Vec<u8>,
-) -> Result<(), Error>
-where
-    T: ExecContext,
-{
+) -> Result<(), Error> {
     use alloy_rlp::Decodable;
     use alloy_sol_types::SolEvent;
     use ethereum_common::utils::ReceiptEnvelope;
@@ -129,4 +128,43 @@ where
     }
 
     Ok(())
+}
+
+pub async fn handle_interrupted_transfer<T: ExecContext>(
+    service: &mut VftManager<T>,
+    msg_id: MessageId,
+) -> Result<(U256, H160), Error> {
+    let config = service.config();
+    let msg_tracker = msg_tracker::msg_tracker_mut();
+
+    let msg_info = msg_tracker
+        .get_message_info(&msg_id)
+        .expect("Unexpected: msg status does not exist");
+
+    let TxDetails {
+        vara_token_id,
+        amount,
+        receiver,
+        token_supply,
+    } = msg_info.details;
+
+    match msg_info.status {
+        MessageStatus::WithdrawTokensStep => {
+            match token_supply {
+                TokenSupply::Ethereum => {
+                    token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await?;
+                }
+                TokenSupply::Gear => {
+                    token_operations::unlock(vara_token_id, receiver, amount, config, msg_id)
+                        .await?;
+                }
+            }
+
+            // TODO: Not refunded, just minted.
+            Err(Error::TokensRefunded)
+        }
+        _ => {
+            panic!("Unexpected status or transaction completed.")
+        }
+    }
 }

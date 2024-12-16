@@ -6,9 +6,8 @@ use super::{error::Error, TokenSupply, VftManager};
 pub mod abi;
 mod msg_tracker;
 mod token_operations;
-mod utils;
 
-use msg_tracker::{MessageStatus, TxDetails};
+use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
 
 pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
 
@@ -111,12 +110,12 @@ pub async fn submit_receipt<T: ExecContext>(
     }
     transactions.insert((slot, transaction_index));
 
-    msg_tracker::msg_tracker_mut().insert_message_info(
+    msg_tracker_mut().insert_message_info(
         msg_id,
         MessageStatus::SendingMessageToWithdrawTokens,
         transaction_details,
     );
-    utils::set_critical_hook(msg_id);
+    set_critical_hook(msg_id);
 
     match supply_type {
         TokenSupply::Ethereum => {
@@ -127,6 +126,8 @@ pub async fn submit_receipt<T: ExecContext>(
         }
     }
 
+    msg_tracker_mut().check_withdraw_result(&msg_id)?;
+
     Ok(())
 }
 
@@ -135,7 +136,7 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     msg_id: MessageId,
 ) -> Result<(U256, H160), Error> {
     let config = service.config();
-    let msg_tracker = msg_tracker::msg_tracker_mut();
+    let msg_tracker = msg_tracker_mut();
 
     let msg_info = msg_tracker
         .get_message_info(&msg_id)
@@ -149,7 +150,11 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     } = msg_info.details;
 
     match msg_info.status {
-        MessageStatus::WithdrawTokensStep => {
+        MessageStatus::SendingMessageToWithdrawTokens | MessageStatus::TokenWithdrawFailed => {
+            msg_tracker_mut()
+                .update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
+            set_critical_hook(msg_id);
+
             match token_supply {
                 TokenSupply::Ethereum => {
                     token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await?;
@@ -160,11 +165,33 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
                 }
             }
 
+            msg_tracker_mut().check_withdraw_result(&msg_id)?;
+
             // TODO: Not refunded, just minted.
             Err(Error::TokensRefunded)
         }
-        _ => {
+        MessageStatus::WaitingReplyFromTokenWithdrawMessage
+        | MessageStatus::TokenWithdrawCompleted => {
             panic!("Unexpected status or transaction completed.")
         }
     }
+}
+
+fn set_critical_hook(msg_id: MessageId) {
+    gstd::critical::set_hook(move || {
+        let msg_tracker = msg_tracker_mut();
+        let msg_info = msg_tracker
+            .get_message_info(&msg_id)
+            .expect("Unexpected: msg info does not exist");
+
+        match msg_info.status {
+            MessageStatus::SendingMessageToWithdrawTokens => {
+                msg_tracker.update_message_status(
+                    msg_id,
+                    MessageStatus::WaitingReplyFromTokenWithdrawMessage,
+                );
+            }
+            _ => {}
+        };
+    });
 }

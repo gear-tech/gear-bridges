@@ -52,7 +52,7 @@ impl MessageTracker {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
                 MessageStatus::TokenWithdrawCompleted => Ok(()),
-                MessageStatus::WithdrawTokensStep => Err(Error::MessageFailed),
+                MessageStatus::TokenWithdrawFailed => Err(Error::MessageFailed),
                 _ => Err(Error::InvalidMessageStatus),
             }
         } else {
@@ -64,9 +64,9 @@ impl MessageTracker {
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
     SendingMessageToWithdrawTokens,
-    TokenWithdrawCompleted,
     WaitingReplyFromTokenWithdrawMessage,
-    WithdrawTokensStep,
+    TokenWithdrawCompleted,
+    TokenWithdrawFailed,
 }
 
 pub fn init() {

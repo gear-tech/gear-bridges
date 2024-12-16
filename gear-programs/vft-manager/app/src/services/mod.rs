@@ -298,28 +298,12 @@ where
 
         match supply_type {
             TokenSupply::Ethereum => {
-                token_operations::burn(
-                    vara_token_id,
-                    supply_type,
-                    sender,
-                    receiver,
-                    amount,
-                    config,
-                    msg_id,
-                )
-                .await?;
+                token_operations::burn(vara_token_id, sender, receiver, amount, config, msg_id)
+                    .await?;
             }
             TokenSupply::Gear => {
-                token_operations::lock(
-                    vara_token_id,
-                    supply_type,
-                    sender,
-                    amount,
-                    receiver,
-                    config,
-                    msg_id,
-                )
-                .await?;
+                token_operations::lock(vara_token_id, sender, amount, receiver, config, msg_id)
+                    .await?;
             }
         }
 

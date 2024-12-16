@@ -6,7 +6,6 @@ use sails_rs::prelude::*;
 
 pub async fn burn(
     vara_token_id: ActorId,
-    token_supply: TokenSupply,
     sender: ActorId,
     receiver: H160,
     amount: U256,
@@ -20,7 +19,7 @@ pub async fn burn(
         sender,
         amount,
         receiver,
-        token_supply,
+        token_supply: TokenSupply::Ethereum,
     };
 
     msg_tracker_mut().insert_message_info(
@@ -67,7 +66,6 @@ pub async fn mint(
 
 pub async fn lock(
     vara_token_id: ActorId,
-    token_supply: TokenSupply,
     sender: ActorId,
     amount: U256,
     eth_receiver: H160,
@@ -82,7 +80,7 @@ pub async fn lock(
         sender,
         amount,
         receiver: eth_receiver,
-        token_supply,
+        token_supply: TokenSupply::Gear,
     };
 
     msg_tracker_mut().insert_message_info(

@@ -1,8 +1,10 @@
-use super::msg_tracker::TxDetails;
-use super::{msg_tracker_mut, utils, Config, Error, MessageStatus, TokenSupply};
+use sails_rs::prelude::*;
+
 use extended_vft_client::vft::io as vft_io;
 
-use sails_rs::prelude::*;
+use super::super::{Config, Error};
+use super::msg_tracker::{msg_tracker_mut, MessageStatus};
+use super::utils;
 
 pub async fn mint(
     token_id: ActorId,
@@ -38,6 +40,7 @@ pub async fn unlock(
 
     let sender = gstd::exec::program_id();
     let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, recepient, amount);
+
     utils::send_message_with_gas_for_reply(
         vara_token_id,
         bytes,

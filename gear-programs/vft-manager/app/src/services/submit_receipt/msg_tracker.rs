@@ -17,10 +17,10 @@ pub struct MessageInfo {
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct TxDetails {
-    vara_token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
-    token_supply: TokenSupply,
+    pub vara_token_id: ActorId,
+    pub receiver: ActorId,
+    pub amount: U256,
+    pub token_supply: TokenSupply,
 }
 
 impl MessageTracker {
@@ -69,15 +69,11 @@ pub enum MessageStatus {
     WithdrawTokensStep,
 }
 
-fn msg_tracker() -> &'static MessageTracker {
-    unsafe {
-        MSG_TRACKER
-            .as_ref()
-            .expect("VftManager::seed() should be called")
-    }
+pub fn init() {
+    unsafe { MSG_TRACKER = Some(MessageTracker::default()) }
 }
 
-fn msg_tracker_mut() -> &'static mut MessageTracker {
+pub fn msg_tracker_mut() -> &'static mut MessageTracker {
     unsafe {
         MSG_TRACKER
             .as_mut()

@@ -1,4 +1,8 @@
-use super::{msg_tracker_mut, utils, Config, Error, MessageStatus};
+use super::{
+    super::{Config, Error},
+    msg_tracker::{msg_tracker_mut, MessageStatus},
+    utils,
+};
 use gstd::MessageId;
 use sails_rs::prelude::*;
 

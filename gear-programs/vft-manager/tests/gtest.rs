@@ -2,7 +2,7 @@ use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use extended_vft_client::{traits::*, ExtendedVftFactory as VftFactoryC, Vft as VftC};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_manager_app::services::abi::ERC20_MANAGER;
+use vft_manager_app::services::eth_abi::ERC20_MANAGER;
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,

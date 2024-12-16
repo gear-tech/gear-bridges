@@ -1,5 +1,7 @@
+use super::super::error::Error;
+use super::msg_tracker::{msg_tracker_mut, MessageStatus};
 use super::TokenSupply;
-use super::{error::Error, msg_tracker_mut, MessageStatus};
+
 use extended_vft_client::vft::io as vft_io;
 use gstd::{msg, MessageId};
 use sails_rs::calls::ActionIo;
@@ -80,7 +82,7 @@ fn handle_reply_hook(msg_id: MessageId) {
 
     match msg_info.status {
         MessageStatus::SendingMessageToDepositTokens => {
-            let reply = match msg_info.details.get_token_supply() {
+            let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
                 TokenSupply::Gear => decode_lock_reply(&reply_bytes),
             };
@@ -96,7 +98,7 @@ fn handle_reply_hook(msg_id: MessageId) {
             };
         }
         MessageStatus::WaitingReplyFromTokenDepositMessage => {
-            let reply = match msg_info.details.get_token_supply() {
+            let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
                 TokenSupply::Gear => decode_lock_reply(&reply_bytes),
             }
@@ -135,7 +137,7 @@ fn handle_reply_hook(msg_id: MessageId) {
 
         MessageStatus::WaitingReplyFromTokenWithdrawMessage
         | MessageStatus::SendingMessageToWithdrawTokens => {
-            let reply = match msg_info.details.get_token_supply() {
+            let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
                 TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
             }

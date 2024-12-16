@@ -1,18 +1,15 @@
 use collections::btree_set::BTreeSet;
 use sails_rs::{gstd::ExecContext, prelude::*};
 
-pub mod abi;
-mod bridge_builtin_operations;
 mod error;
-mod msg_tracker;
 mod token_mapping;
-mod token_operations;
 mod utils;
 
-use bridge_builtin_operations::Payload;
 use error::Error;
-use msg_tracker::{MessageInfo, MessageStatus, MessageTracker, TxDetails};
 use token_mapping::TokenMap;
+
+mod request_bridging;
+mod submit_receipt;
 
 pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 const CAPACITY: usize = 500_000;
@@ -59,7 +56,6 @@ enum Event {
 
 static mut STATE: Option<State> = None;
 static mut CONFIG: Option<Config> = None;
-static mut MSG_TRACKER: Option<MessageTracker> = None;
 
 #[derive(Debug, Default)]
 pub struct State {
@@ -478,21 +474,5 @@ where
                 .as_ref()
                 .expect("VftManager::seed() should be called")
         }
-    }
-}
-
-fn msg_tracker() -> &'static MessageTracker {
-    unsafe {
-        MSG_TRACKER
-            .as_ref()
-            .expect("VftManager::seed() should be called")
-    }
-}
-
-fn msg_tracker_mut() -> &'static mut MessageTracker {
-    unsafe {
-        MSG_TRACKER
-            .as_mut()
-            .expect("VftManager::seed() should be called")
     }
 }

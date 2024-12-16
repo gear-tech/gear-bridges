@@ -1,6 +1,8 @@
-use super::{Error, TokenSupply};
+use super::super::{Error, TokenSupply};
 use gstd::{prelude::collections::HashMap, MessageId};
 use sails_rs::prelude::*;
+
+static mut MSG_TRACKER: Option<MessageTracker> = None;
 
 #[derive(Default, Debug)]
 pub struct MessageTracker {
@@ -14,30 +16,12 @@ pub struct MessageInfo {
 }
 
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub enum TxDetails {
-    RequestBridging {
-        vara_token_id: ActorId,
-        sender: ActorId,
-        amount: U256,
-        receiver: H160,
-        token_supply: TokenSupply,
-    },
-    SubmitReceipt {
-        vara_token_id: ActorId,
-        receiver: ActorId,
-        amount: U256,
-        token_supply: TokenSupply,
-    },
-}
-
-// TODO: Remove this.
-impl TxDetails {
-    pub fn get_token_supply(&self) -> TokenSupply {
-        match self {
-            Self::RequestBridging { token_supply, .. } => *token_supply,
-            Self::SubmitReceipt { token_supply, .. } => *token_supply,
-        }
-    }
+pub struct TxDetails {
+    vara_token_id: ActorId,
+    sender: ActorId,
+    amount: U256,
+    receiver: H160,
+    token_supply: TokenSupply,
 }
 
 impl MessageTracker {
@@ -80,18 +64,6 @@ impl MessageTracker {
         }
     }
 
-    pub fn check_withdraw_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenWithdrawCompleted => Ok(()),
-                MessageStatus::WithdrawTokensStep => Err(Error::MessageFailed),
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
     pub fn check_bridge_reply(&mut self, msg_id: &MessageId) -> Result<U256, Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
@@ -123,11 +95,21 @@ pub enum MessageStatus {
     TokenDepositCompleted(bool),
     WaitingReplyFromTokenDepositMessage,
 
-    // Withdraw tokens statuses
-    SendingMessageToWithdrawTokens,
-    TokenWithdrawCompleted,
-    WaitingReplyFromTokenWithdrawMessage,
-    WithdrawTokensStep,
-
     MessageProcessedWithSuccess(U256),
+}
+
+fn msg_tracker() -> &'static MessageTracker {
+    unsafe {
+        MSG_TRACKER
+            .as_ref()
+            .expect("VftManager::seed() should be called")
+    }
+}
+
+fn msg_tracker_mut() -> &'static mut MessageTracker {
+    unsafe {
+        MSG_TRACKER
+            .as_mut()
+            .expect("VftManager::seed() should be called")
+    }
 }

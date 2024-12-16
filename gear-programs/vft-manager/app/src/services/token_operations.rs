@@ -1,11 +1,12 @@
 use super::msg_tracker::TxDetails;
-use super::{msg_tracker_mut, utils, Config, Error, MessageStatus};
+use super::{msg_tracker_mut, utils, Config, Error, MessageStatus, TokenSupply};
 use extended_vft_client::vft::io as vft_io;
 
 use sails_rs::prelude::*;
 
 pub async fn burn(
     vara_token_id: ActorId,
+    token_supply: TokenSupply,
     sender: ActorId,
     receiver: H160,
     amount: U256,
@@ -19,11 +20,12 @@ pub async fn burn(
         sender,
         amount,
         receiver,
+        token_supply,
     };
 
     msg_tracker_mut().insert_message_info(
         msg_id,
-        MessageStatus::SendingMessageToBurnTokens,
+        MessageStatus::SendingMessageToDepositTokens,
         transaction_details,
     );
 
@@ -37,7 +39,7 @@ pub async fn burn(
         msg_id,
     )
     .await?;
-    msg_tracker_mut().check_burn_result(&msg_id)
+    msg_tracker_mut().check_deposit_result(&msg_id)
 }
 
 pub async fn mint(
@@ -47,7 +49,7 @@ pub async fn mint(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToMintTokens);
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
 
     let bytes: Vec<u8> = vft_io::Mint::encode_call(receiver, amount);
     utils::send_message_with_gas_for_reply(
@@ -60,11 +62,12 @@ pub async fn mint(
     )
     .await?;
 
-    msg_tracker_mut().check_mint_result(&msg_id)
+    msg_tracker_mut().check_withdraw_result(&msg_id)
 }
 
 pub async fn lock(
     vara_token_id: ActorId,
+    token_supply: TokenSupply,
     sender: ActorId,
     amount: U256,
     eth_receiver: H160,
@@ -79,11 +82,12 @@ pub async fn lock(
         sender,
         amount,
         receiver: eth_receiver,
+        token_supply,
     };
 
     msg_tracker_mut().insert_message_info(
         msg_id,
-        MessageStatus::SendingMessageToLockTokens,
+        MessageStatus::SendingMessageToDepositTokens,
         transaction_details,
     );
 
@@ -98,7 +102,7 @@ pub async fn lock(
     )
     .await?;
 
-    msg_tracker_mut().check_lock_result(&msg_id)
+    msg_tracker_mut().check_deposit_result(&msg_id)
 }
 
 pub async fn unlock(
@@ -108,7 +112,7 @@ pub async fn unlock(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToUnlockTokens);
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
 
     let sender = gstd::exec::program_id();
     let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, recepient, amount);
@@ -122,5 +126,5 @@ pub async fn unlock(
     )
     .await?;
 
-    msg_tracker_mut().check_unlock_result(&msg_id)
+    msg_tracker_mut().check_withdraw_result(&msg_id)
 }

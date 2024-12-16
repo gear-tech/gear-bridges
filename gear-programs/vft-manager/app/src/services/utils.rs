@@ -1,3 +1,4 @@
+use super::TokenSupply;
 use super::{error::Error, msg_tracker_mut, MessageStatus};
 use extended_vft_client::vft::io as vft_io;
 use gstd::{msg, MessageId};
@@ -12,29 +13,19 @@ pub fn set_critical_hook(msg_id: MessageId) {
             .expect("Unexpected: msg info does not exist");
 
         match msg_info.status {
-            MessageStatus::SendingMessageToBurnTokens => {
+            MessageStatus::SendingMessageToDepositTokens => {
                 // If still sending, transition to `WaitingReplyFromBurn`.
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBurn);
+                msg_tracker.update_message_status(
+                    msg_id,
+                    MessageStatus::WaitingReplyFromTokenDepositMessage,
+                );
             }
-            MessageStatus::TokenBurnCompleted(true) => {
+            MessageStatus::TokenDepositCompleted(true) => {
                 // If the token transfer is successful, continue to bridge builtin step.
                 msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
             }
-            MessageStatus::TokenBurnCompleted(false) => {
+            MessageStatus::TokenDepositCompleted(false) => {
                 // If the token burn fails, cancel the transaction.
-                msg_tracker.remove_message_info(&msg_id);
-            }
-
-            MessageStatus::SendingMessageToLockTokens => {
-                // If still sending, transition to `WaitingReplyFromLock`.
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromLock);
-            }
-            MessageStatus::TokenLockCompleted(true) => {
-                // If the token transfer is successful, continue to bridge builtin step.
-                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
-            }
-            MessageStatus::TokenLockCompleted(false) => {
-                // If the token lock fails, cancel the transaction.
                 msg_tracker.remove_message_info(&msg_id);
             }
 
@@ -44,15 +35,14 @@ pub fn set_critical_hook(msg_id: MessageId) {
             }
             MessageStatus::BridgeResponseReceived(None) => {
                 // If error occurs during builtin message, go to mint step
-                msg_tracker.update_message_status(msg_id, MessageStatus::MintTokensStep)
+                msg_tracker.update_message_status(msg_id, MessageStatus::WithdrawTokensStep)
             }
 
-            MessageStatus::SendingMessageToMintTokens => {
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromMint);
-            }
-
-            MessageStatus::SendingMessageToUnlockTokens => {
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromUnlock);
+            MessageStatus::SendingMessageToWithdrawTokens => {
+                msg_tracker.update_message_status(
+                    msg_id,
+                    MessageStatus::WaitingReplyFromTokenWithdrawMessage,
+                );
             }
 
             _ => {}
@@ -89,39 +79,29 @@ fn handle_reply_hook(msg_id: MessageId) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
 
     match msg_info.status {
-        MessageStatus::SendingMessageToBurnTokens => {
-            match decode_burn_reply(&reply_bytes) {
-                Ok(reply) => {
-                    msg_tracker
-                        .update_message_status(msg_id, MessageStatus::TokenBurnCompleted(reply));
-                }
-                Err(_) => {
-                    msg_tracker.remove_message_info(&msg_id);
-                }
+        MessageStatus::SendingMessageToDepositTokens => {
+            let reply = match msg_info.details.get_token_supply() {
+                TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
+                TokenSupply::Gear => decode_lock_reply(&reply_bytes),
             };
-        }
-        MessageStatus::WaitingReplyFromBurn => {
-            let reply = decode_burn_reply(&reply_bytes).unwrap_or(false);
-            if reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
-            } else {
-                msg_tracker.remove_message_info(&msg_id);
-            }
-        }
 
-        MessageStatus::SendingMessageToLockTokens => {
-            match decode_lock_reply(&reply_bytes) {
+            match reply {
                 Ok(reply) => {
                     msg_tracker
-                        .update_message_status(msg_id, MessageStatus::TokenLockCompleted(reply));
+                        .update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
                 }
                 Err(_) => {
                     msg_tracker.remove_message_info(&msg_id);
                 }
             };
         }
-        MessageStatus::WaitingReplyFromLock => {
-            let reply = decode_lock_reply(&reply_bytes).unwrap_or(false);
+        MessageStatus::WaitingReplyFromTokenDepositMessage => {
+            let reply = match msg_info.details.get_token_supply() {
+                TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
+                TokenSupply::Gear => decode_lock_reply(&reply_bytes),
+            }
+            .unwrap_or(false);
+
             if reply {
                 msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
             } else {
@@ -148,28 +128,26 @@ fn handle_reply_hook(msg_id: MessageId) {
                     );
                 }
                 _ => {
-                    msg_tracker.update_message_status(msg_id, MessageStatus::MintTokensStep);
+                    msg_tracker.update_message_status(msg_id, MessageStatus::WithdrawTokensStep);
                 }
             };
         }
 
-        MessageStatus::WaitingReplyFromMint | MessageStatus::SendingMessageToMintTokens => {
-            let reply = decode_mint_reply(&reply_bytes).unwrap_or(false);
+        MessageStatus::WaitingReplyFromTokenWithdrawMessage
+        | MessageStatus::SendingMessageToWithdrawTokens => {
+            let reply = match msg_info.details.get_token_supply() {
+                TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
+                TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
+            }
+            .unwrap_or(false);
+
             if !reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::MintTokensStep);
+                msg_tracker.update_message_status(msg_id, MessageStatus::WithdrawTokensStep);
             } else {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokenMintCompleted);
+                msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawCompleted);
             }
         }
 
-        MessageStatus::WaitingReplyFromUnlock | MessageStatus::SendingMessageToUnlockTokens => {
-            let reply = decode_unlock_reply(&reply_bytes).unwrap_or(false);
-            if !reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::UnlockTokensStep);
-            } else {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokenUnlockCompleted);
-            }
-        }
         _ => {}
     };
 }

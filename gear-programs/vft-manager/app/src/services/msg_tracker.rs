@@ -1,4 +1,4 @@
-use super::Error;
+use super::{Error, TokenSupply};
 use gstd::{prelude::collections::HashMap, MessageId};
 use sails_rs::prelude::*;
 
@@ -20,12 +20,24 @@ pub enum TxDetails {
         sender: ActorId,
         amount: U256,
         receiver: H160,
+        token_supply: TokenSupply,
     },
     SubmitReceipt {
         vara_token_id: ActorId,
         receiver: ActorId,
         amount: U256,
+        token_supply: TokenSupply,
     },
+}
+
+// TODO: Remove this.
+impl TxDetails {
+    pub fn get_token_supply(&self) -> TokenSupply {
+        match self {
+            Self::RequestBridging { token_supply, .. } => *token_supply,
+            Self::SubmitReceipt { token_supply, .. } => *token_supply,
+        }
+    }
 }
 
 impl MessageTracker {
@@ -53,11 +65,11 @@ impl MessageTracker {
         self.message_info.remove(msg_id)
     }
 
-    pub fn check_burn_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+    pub fn check_deposit_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
-                MessageStatus::TokenBurnCompleted(true) => Ok(()),
-                MessageStatus::TokenBurnCompleted(false) => {
+                MessageStatus::TokenDepositCompleted(true) => Ok(()),
+                MessageStatus::TokenDepositCompleted(false) => {
                     self.message_info.remove(msg_id);
                     Err(Error::BurnTokensFailed)
                 }
@@ -68,38 +80,11 @@ impl MessageTracker {
         }
     }
 
-    pub fn check_lock_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
+    pub fn check_withdraw_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
-                MessageStatus::TokenLockCompleted(true) => Ok(()),
-                MessageStatus::TokenLockCompleted(false) => {
-                    self.message_info.remove(msg_id);
-                    Err(Error::LockTokensFailed)
-                }
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
-    pub fn check_mint_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenMintCompleted => Ok(()),
-                MessageStatus::MintTokensStep => Err(Error::MessageFailed),
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
-    pub fn check_unlock_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenUnlockCompleted => Ok(()),
-                MessageStatus::UnlockTokensStep => Err(Error::MessageFailed),
+                MessageStatus::TokenWithdrawCompleted => Ok(()),
+                MessageStatus::WithdrawTokensStep => Err(Error::MessageFailed),
                 _ => Err(Error::InvalidMessageStatus),
             }
         } else {
@@ -133,27 +118,16 @@ pub enum MessageStatus {
     WaitingReplyFromBuiltin,
     BridgeBuiltinStep,
 
-    // Burn tokens statuses
-    SendingMessageToBurnTokens,
-    TokenBurnCompleted(bool),
-    WaitingReplyFromBurn,
+    // Deposit tokens statuses
+    SendingMessageToDepositTokens,
+    TokenDepositCompleted(bool),
+    WaitingReplyFromTokenDepositMessage,
 
-    // Mint tokens status
-    SendingMessageToMintTokens,
-    TokenMintCompleted,
-    WaitingReplyFromMint,
-    MintTokensStep,
-
-    // Lock tokens statuses
-    SendingMessageToLockTokens,
-    TokenLockCompleted(bool),
-    WaitingReplyFromLock,
-
-    // Unlock tokens status
-    SendingMessageToUnlockTokens,
-    TokenUnlockCompleted,
-    WaitingReplyFromUnlock,
-    UnlockTokensStep,
+    // Withdraw tokens statuses
+    SendingMessageToWithdrawTokens,
+    TokenWithdrawCompleted,
+    WaitingReplyFromTokenWithdrawMessage,
+    WithdrawTokensStep,
 
     MessageProcessedWithSuccess(U256),
 }

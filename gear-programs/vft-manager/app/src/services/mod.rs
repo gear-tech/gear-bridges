@@ -29,7 +29,7 @@ pub struct VftManager<ExecContext> {
     exec_context: ExecContext,
 }
 
-#[derive(Debug, Decode, Encode, TypeInfo, Clone)]
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy)]
 #[repr(u8)]
 pub enum TokenSupply {
     Ethereum = 0,
@@ -239,10 +239,12 @@ where
         let msg_id = gstd::msg::id();
         let amount = U256::from_little_endian(event.amount.as_le_slice());
         let receiver = ActorId::from(event.to.0);
+        let supply_type = self.state().token_map.get_supply_type(&vara_token_id)?;
         let transaction_details = TxDetails::SubmitReceipt {
             vara_token_id,
             receiver,
             amount,
+            token_supply: supply_type,
         };
 
         if transactions.len() >= CAPACITY {
@@ -252,12 +254,10 @@ where
 
         msg_tracker_mut().insert_message_info(
             msg_id,
-            MessageStatus::SendingMessageToMintTokens,
+            MessageStatus::SendingMessageToWithdrawTokens,
             transaction_details,
         );
         utils::set_critical_hook(msg_id);
-
-        let supply_type = self.state().token_map.get_supply_type(&vara_token_id)?;
 
         match supply_type {
             TokenSupply::Ethereum => {
@@ -298,12 +298,28 @@ where
 
         match supply_type {
             TokenSupply::Ethereum => {
-                token_operations::burn(vara_token_id, sender, receiver, amount, config, msg_id)
-                    .await?;
+                token_operations::burn(
+                    vara_token_id,
+                    supply_type,
+                    sender,
+                    receiver,
+                    amount,
+                    config,
+                    msg_id,
+                )
+                .await?;
             }
             TokenSupply::Gear => {
-                token_operations::lock(vara_token_id, sender, amount, receiver, config, msg_id)
-                    .await?;
+                token_operations::lock(
+                    vara_token_id,
+                    supply_type,
+                    sender,
+                    amount,
+                    receiver,
+                    config,
+                    msg_id,
+                )
+                .await?;
             }
         }
 
@@ -360,6 +376,7 @@ where
             sender,
             amount,
             receiver,
+            token_supply: _,
         } = msg_info.details
         else {
             panic!("Wrong message type")
@@ -372,7 +389,7 @@ where
             .expect("Failed to get ethereum token id");
 
         match msg_info.status {
-            MessageStatus::TokenBurnCompleted(true) | MessageStatus::BridgeBuiltinStep => {
+            MessageStatus::TokenDepositCompleted(true) | MessageStatus::BridgeBuiltinStep => {
                 let payload = Payload {
                     receiver,
                     token_id: eth_token_id,
@@ -390,6 +407,7 @@ where
                 {
                     Ok(nonce) => Ok((nonce, eth_token_id)),
                     Err(_) => {
+                        // TODO: Or unlock.
                         // In case of failure, mint tokens back to the sender
                         token_operations::mint(vara_token_id, sender, amount, config, msg_id)
                             .await?;
@@ -401,7 +419,7 @@ where
                 msg_tracker_mut().remove_message_info(&msg_id);
                 Ok((nonce, eth_token_id))
             }
-            MessageStatus::MintTokensStep => {
+            MessageStatus::WithdrawTokensStep => {
                 token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
                 Err(Error::TokensRefunded)
             }

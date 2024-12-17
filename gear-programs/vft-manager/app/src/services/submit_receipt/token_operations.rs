@@ -77,7 +77,8 @@ fn handle_reply_hook(msg_id: MessageId) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
 
     match msg_info.status {
-        MessageStatus::SendingMessageToWithdrawTokens => {
+        MessageStatus::SendingMessageToWithdrawTokens
+        | MessageStatus::WaitingReplyFromTokenWithdrawMessage => {
             let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
                 TokenSupply::Gear => decode_unlock_reply(&reply_bytes),

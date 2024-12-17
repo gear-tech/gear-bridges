@@ -4,6 +4,7 @@ use sails_rs::prelude::*;
 
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
+// TODO: Itr doesn't cleaned up.
 #[derive(Default, Debug)]
 pub struct MessageTracker {
     pub message_info: HashMap<MessageId, MessageInfo>,

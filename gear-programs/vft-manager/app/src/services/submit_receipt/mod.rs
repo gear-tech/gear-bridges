@@ -47,13 +47,6 @@ pub async fn submit_receipt<T: ExecContext>(
         return Err(Error::NotEthClient);
     }
 
-    let config = service.config();
-    if gstd::exec::gas_available()
-        < config.gas_for_token_ops + config.gas_for_submit_receipt + config.gas_for_reply_deposit
-    {
-        return Err(Error::NotEnoughGas);
-    }
-
     let receipt =
         ReceiptEnvelope::decode(&mut &receipt_rlp[..]).map_err(|_| Error::NotSupportedEvent)?;
 
@@ -119,16 +112,16 @@ pub async fn submit_receipt<T: ExecContext>(
 
     match supply_type {
         TokenSupply::Ethereum => {
-            token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await?;
+            token_operations::mint(vara_token_id, receiver, amount, service.config(), msg_id)
+                .await?;
         }
         TokenSupply::Gear => {
-            token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await?;
+            token_operations::unlock(vara_token_id, receiver, amount, service.config(), msg_id)
+                .await?;
         }
     }
 
-    msg_tracker_mut().check_withdraw_result(&msg_id)?;
-
-    Ok(())
+    msg_tracker_mut().check_withdraw_result(&msg_id)
 }
 
 pub async fn handle_interrupted_transfer<T: ExecContext>(

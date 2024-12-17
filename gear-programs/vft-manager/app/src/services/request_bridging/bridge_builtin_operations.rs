@@ -23,7 +23,6 @@ pub async fn send_message_to_bridge_builtin(
     }
     .encode();
 
-    utils::set_critical_hook(msg_id);
     utils::send_message_with_gas_for_reply(
         gear_bridge_builtin,
         bytes,

@@ -7,51 +7,6 @@ use gstd::{msg, MessageId};
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
 
-pub fn set_critical_hook(msg_id: MessageId) {
-    gstd::critical::set_hook(move || {
-        let msg_tracker = msg_tracker_mut();
-        let msg_info = msg_tracker
-            .get_message_info(&msg_id)
-            .expect("Unexpected: msg info does not exist");
-
-        match msg_info.status {
-            MessageStatus::SendingMessageToDepositTokens => {
-                // If still sending, transition to `WaitingReplyFromBurn`.
-                msg_tracker.update_message_status(
-                    msg_id,
-                    MessageStatus::WaitingReplyFromTokenDepositMessage,
-                );
-            }
-            MessageStatus::TokenDepositCompleted(true) => {
-                // If the token transfer is successful, continue to bridge builtin step.
-                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
-            }
-            MessageStatus::TokenDepositCompleted(false) => {
-                // If the token burn fails, cancel the transaction.
-                msg_tracker.remove_message_info(&msg_id);
-            }
-
-            MessageStatus::SendingMessageToBridgeBuiltin => {
-                // If still sending, transition to `WaitingReplyFromBuiltin`.
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin);
-            }
-            MessageStatus::BridgeResponseReceived(None) => {
-                // If error occurs during builtin message, go to mint step
-                msg_tracker.update_message_status(msg_id, MessageStatus::WithdrawTokensStep)
-            }
-
-            MessageStatus::SendingMessageToWithdrawTokens => {
-                msg_tracker.update_message_status(
-                    msg_id,
-                    MessageStatus::WaitingReplyFromTokenWithdrawMessage,
-                );
-            }
-
-            _ => {}
-        };
-    });
-}
-
 pub async fn send_message_with_gas_for_reply(
     destination: ActorId,
     message: Vec<u8>,
@@ -81,7 +36,8 @@ fn handle_reply_hook(msg_id: MessageId) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
 
     match msg_info.status {
-        MessageStatus::SendingMessageToDepositTokens => {
+        MessageStatus::SendingMessageToDepositTokens
+        | MessageStatus::WaitingReplyFromTokenDepositMessage => {
             let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
                 TokenSupply::Gear => decode_lock_reply(&reply_bytes),
@@ -97,21 +53,7 @@ fn handle_reply_hook(msg_id: MessageId) {
                 }
             };
         }
-        MessageStatus::WaitingReplyFromTokenDepositMessage => {
-            let reply = match msg_info.details.token_supply {
-                TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
-                TokenSupply::Gear => decode_lock_reply(&reply_bytes),
-            }
-            .unwrap_or(false);
-
-            if reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::BridgeBuiltinStep);
-            } else {
-                msg_tracker.remove_message_info(&msg_id);
-            }
-        }
-
-        MessageStatus::SendingMessageToBridgeBuiltin => {
+        MessageStatus::SendingMessageToBridgeBuiltin | MessageStatus::WaitingReplyFromBuiltin => {
             let reply = decode_bridge_reply(&reply_bytes);
             let result = match reply {
                 Ok(Some(nonce)) => Some(nonce),
@@ -120,23 +62,8 @@ fn handle_reply_hook(msg_id: MessageId) {
             msg_tracker
                 .update_message_status(msg_id, MessageStatus::BridgeResponseReceived(result));
         }
-        MessageStatus::WaitingReplyFromBuiltin => {
-            let reply = decode_bridge_reply(&reply_bytes);
-            match reply {
-                Ok(Some(nonce)) => {
-                    msg_tracker.update_message_status(
-                        msg_id,
-                        MessageStatus::MessageProcessedWithSuccess(nonce),
-                    );
-                }
-                _ => {
-                    msg_tracker.update_message_status(msg_id, MessageStatus::WithdrawTokensStep);
-                }
-            };
-        }
-
-        MessageStatus::WaitingReplyFromTokenWithdrawMessage
-        | MessageStatus::SendingMessageToWithdrawTokens => {
+        MessageStatus::WaitingReplyFromTokenReturnMessage
+        | MessageStatus::SendingMessageToReturnTokens => {
             let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
                 TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
@@ -144,9 +71,9 @@ fn handle_reply_hook(msg_id: MessageId) {
             .unwrap_or(false);
 
             if !reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::WithdrawTokensStep);
+                msg_tracker.update_message_status(msg_id, MessageStatus::TokenReturnFailed);
             } else {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawCompleted);
+                msg_tracker.update_message_status(msg_id, MessageStatus::TokensReturned);
             }
         }
 

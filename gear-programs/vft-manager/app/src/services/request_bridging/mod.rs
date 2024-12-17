@@ -8,7 +8,7 @@ mod token_operations;
 mod utils;
 
 use bridge_builtin_operations::Payload;
-use msg_tracker::{MessageStatus, TxDetails};
+use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
 
 pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
 
@@ -29,21 +29,27 @@ pub async fn request_bridging<T: ExecContext>(
     let supply_type = service.state().token_map.get_supply_type(&vara_token_id)?;
     let config = service.config();
 
-    if gstd::exec::gas_available()
-        < config.gas_for_token_ops
-            + config.gas_to_send_request_to_builtin
-            + config.gas_for_request_bridging
-            + 3 * config.gas_for_reply_deposit
-    {
-        panic!("Please attach more gas");
-    }
+    let transaction_details = TxDetails {
+        vara_token_id,
+        sender,
+        amount,
+        receiver,
+        token_supply: TokenSupply::Ethereum,
+    };
+
+    msg_tracker_mut().insert_message_info(
+        msg_id,
+        MessageStatus::SendingMessageToDepositTokens,
+        transaction_details,
+    );
+    set_critical_hook(msg_id);
 
     match supply_type {
         TokenSupply::Ethereum => {
-            token_operations::burn(vara_token_id, sender, receiver, amount, config, msg_id).await?;
+            token_operations::burn(vara_token_id, sender, amount, config, msg_id).await?;
         }
         TokenSupply::Gear => {
-            token_operations::lock(vara_token_id, sender, amount, receiver, config, msg_id).await?;
+            token_operations::lock(vara_token_id, sender, amount, config, msg_id).await?;
         }
     }
 
@@ -52,15 +58,17 @@ pub async fn request_bridging<T: ExecContext>(
         token_id: eth_token_id,
         amount,
     };
-    let nonce = match bridge_builtin_operations::send_message_to_bridge_builtin(
+
+    let bridge_builtin_reply = bridge_builtin_operations::send_message_to_bridge_builtin(
         state.gear_bridge_builtin,
         state.erc20_manager_address,
         payload,
         config,
         msg_id,
     )
-    .await
-    {
+    .await;
+
+    let nonce = match bridge_builtin_reply {
         Ok(nonce) => nonce,
         Err(e) => {
             match supply_type {
@@ -117,7 +125,7 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
         .expect("Failed to get ethereum token id");
 
     match msg_info.status {
-        MessageStatus::TokenDepositCompleted(true) | MessageStatus::BridgeBuiltinStep => {
+        MessageStatus::TokenDepositCompleted(true) => {
             let payload = Payload {
                 receiver,
                 token_id: eth_token_id,
@@ -155,7 +163,8 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
             msg_tracker::msg_tracker_mut().remove_message_info(&msg_id);
             Ok((nonce, eth_token_id))
         }
-        MessageStatus::WithdrawTokensStep => {
+        MessageStatus::SendingMessageToReturnTokens | MessageStatus::TokenReturnFailed => {
+            // TODO: Or unlock.
             token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
             Err(Error::TokensRefunded)
         }
@@ -163,4 +172,43 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
             panic!("Unexpected status or transaction completed.")
         }
     }
+}
+
+fn set_critical_hook(msg_id: MessageId) {
+    gstd::critical::set_hook(move || {
+        let msg_tracker = msg_tracker_mut();
+        let msg_info = msg_tracker
+            .get_message_info(&msg_id)
+            .expect("Unexpected: msg info does not exist");
+
+        match msg_info.status {
+            MessageStatus::SendingMessageToDepositTokens => {
+                // If still sending, transition to `WaitingReplyFromBurn`.
+                msg_tracker.update_message_status(
+                    msg_id,
+                    MessageStatus::WaitingReplyFromTokenDepositMessage,
+                );
+            }
+            // MessageStatus::TokenDepositCompleted(false) => {
+            //     // If the token burn fails, cancel the transaction.
+            //     msg_tracker.remove_message_info(&msg_id);
+            // }
+            MessageStatus::SendingMessageToBridgeBuiltin => {
+                // If still sending, transition to `WaitingReplyFromBuiltin`.
+                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin);
+            }
+            // MessageStatus::BridgeResponseReceived(None) => {
+            //     // If error occurs during builtin message, go to mint step
+            //     msg_tracker.update_message_status(msg_id, MessageStatus::ReturnTokensStep)
+            // }
+            MessageStatus::SendingMessageToReturnTokens => {
+                msg_tracker.update_message_status(
+                    msg_id,
+                    MessageStatus::WaitingReplyFromTokenReturnMessage,
+                );
+            }
+
+            _ => {}
+        };
+    });
 }

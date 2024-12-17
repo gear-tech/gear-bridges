@@ -84,8 +84,8 @@ impl MessageTracker {
     pub fn check_withdraw_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
-                MessageStatus::TokenWithdrawCompleted => Ok(()),
-                MessageStatus::WithdrawTokensStep => Err(Error::MessageFailed),
+                MessageStatus::TokensReturned => Ok(()),
+                MessageStatus::TokenReturnFailed => Err(Error::MessageFailed),
                 _ => Err(Error::InvalidMessageStatus),
             }
         } else {
@@ -96,22 +96,21 @@ impl MessageTracker {
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
-    // Send message to bridge builtin
-    SendingMessageToBridgeBuiltin,
-    BridgeResponseReceived(Option<U256>),
-    WaitingReplyFromBuiltin,
-    BridgeBuiltinStep,
-
     // Deposit tokens statuses
     SendingMessageToDepositTokens,
-    TokenDepositCompleted(bool),
     WaitingReplyFromTokenDepositMessage,
+    TokenDepositCompleted(bool),
 
-    // Withdraw tokens statuses.
-    SendingMessageToWithdrawTokens,
-    TokenWithdrawCompleted,
-    WaitingReplyFromTokenWithdrawMessage,
-    WithdrawTokensStep,
+    // Send message to bridge builtin
+    SendingMessageToBridgeBuiltin,
+    WaitingReplyFromBuiltin,
+    BridgeResponseReceived(Option<U256>),
+
+    // Return tokens statuses.
+    SendingMessageToReturnTokens,
+    WaitingReplyFromTokenReturnMessage,
+    TokensReturned,
+    TokenReturnFailed,
 
     MessageProcessedWithSuccess(U256),
 }

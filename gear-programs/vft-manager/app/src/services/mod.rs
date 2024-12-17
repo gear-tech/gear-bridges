@@ -63,22 +63,6 @@ pub struct InitConfig {
     pub config: Config,
 }
 
-impl InitConfig {
-    pub fn new(
-        erc20_manager_address: H160,
-        gear_bridge_builtin: ActorId,
-        historical_proxy_address: ActorId,
-        config: Config,
-    ) -> Self {
-        Self {
-            erc20_manager_address,
-            gear_bridge_builtin,
-            historical_proxy_address,
-            config,
-        }
-    }
-}
-
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
     gas_for_token_ops: u64,

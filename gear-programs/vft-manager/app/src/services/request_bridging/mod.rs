@@ -122,6 +122,9 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
         | MessageStatus::SendingMessageToReturnTokens
         | MessageStatus::TokensReturnComplete(false)
         | MessageStatus::BridgeResponseReceived(None) => {
+            msg_tracker_mut()
+                .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+
             set_critical_hook(msg_id);
 
             match token_supply {
@@ -133,7 +136,7 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
                 }
             }
 
-            Err(Error::TokensRefunded)
+            Ok(())
         }
         MessageStatus::TokenDepositCompleted(false)
         | MessageStatus::SendingMessageToDepositTokens

@@ -12,7 +12,7 @@ use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
 pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
 
 pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
-const CAPACITY: usize = 500_000;
+const TX_HISTORY_DEPTH: usize = 500_000;
 
 pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe {
@@ -78,7 +78,7 @@ pub async fn submit_receipt<T: ExecContext>(
         return Err(Error::AlreadyProcessed);
     }
 
-    if transactions.len() >= CAPACITY
+    if transactions.len() >= TX_HISTORY_DEPTH
         && transactions
             .first()
             .map(|first| &key < first)
@@ -98,7 +98,7 @@ pub async fn submit_receipt<T: ExecContext>(
         token_supply: supply_type,
     };
 
-    if transactions.len() >= CAPACITY {
+    if transactions.len() >= TX_HISTORY_DEPTH {
         transactions.pop_first();
     }
     transactions.insert((slot, transaction_index));
@@ -112,16 +112,13 @@ pub async fn submit_receipt<T: ExecContext>(
 
     match supply_type {
         TokenSupply::Ethereum => {
-            token_operations::mint(vara_token_id, receiver, amount, service.config(), msg_id)
-                .await?;
+            token_operations::mint(vara_token_id, receiver, amount, service.config(), msg_id).await
         }
         TokenSupply::Gear => {
             token_operations::unlock(vara_token_id, receiver, amount, service.config(), msg_id)
-                .await?;
+                .await
         }
     }
-
-    msg_tracker_mut().check_withdraw_result(&msg_id)
 }
 
 pub async fn handle_interrupted_transfer<T: ExecContext>(
@@ -143,28 +140,24 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     } = msg_info.details;
 
     match msg_info.status {
-        MessageStatus::SendingMessageToWithdrawTokens | MessageStatus::TokenWithdrawFailed => {
+        MessageStatus::SendingMessageToWithdrawTokens
+        | MessageStatus::TokenWithdrawComplete(false) => {
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
+
             set_critical_hook(msg_id);
 
             match token_supply {
                 TokenSupply::Ethereum => {
-                    token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await?;
+                    token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await
                 }
                 TokenSupply::Gear => {
-                    token_operations::unlock(vara_token_id, receiver, amount, config, msg_id)
-                        .await?;
+                    token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await
                 }
             }
-
-            msg_tracker_mut().check_withdraw_result(&msg_id)?;
-
-            // TODO: Not refunded, just minted.
-            Err(Error::TokensRefunded)
         }
         MessageStatus::WaitingReplyFromTokenWithdrawMessage
-        | MessageStatus::TokenWithdrawCompleted => {
+        | MessageStatus::TokenWithdrawComplete(true) => {
             panic!("Unexpected status or transaction completed.")
         }
     }
@@ -178,10 +171,8 @@ fn set_critical_hook(msg_id: MessageId) {
             .expect("Unexpected: msg info does not exist");
 
         if msg_info.status == MessageStatus::SendingMessageToWithdrawTokens {
-            msg_tracker.update_message_status(
-                msg_id,
-                MessageStatus::WaitingReplyFromTokenWithdrawMessage,
-            );
+            msg_tracker
+                .update_message_status(msg_id, MessageStatus::WaitingReplyFromTokenWithdrawMessage);
         }
     });
 }

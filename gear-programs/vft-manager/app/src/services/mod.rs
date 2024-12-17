@@ -134,7 +134,7 @@ where
     }
 
     /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
-    /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
+    /// and checked that it's a valid receipt from tx sent to `ERC20Manager` contract.
     /// This entrypoint can be called only by `historical-proxy`.
     pub async fn submit_receipt(
         &mut self,

@@ -65,7 +65,15 @@ pub async fn send_message_with_gas_for_reply(
         .await
         .map_err(|_| Error::ReplyFailure)?;
 
-    Ok(())
+    if let Some(info) = msg_tracker_mut().get_message_info(&msg_id) {
+        match info.status {
+            MessageStatus::TokenWithdrawComplete(true) => Ok(()),
+            MessageStatus::TokenWithdrawComplete(false) => Err(Error::MessageFailed),
+            _ => Err(Error::InvalidMessageStatus),
+        }
+    } else {
+        Err(Error::MessageNotFound)
+    }
 }
 
 fn handle_reply_hook(msg_id: MessageId) {
@@ -85,11 +93,7 @@ fn handle_reply_hook(msg_id: MessageId) {
             }
             .unwrap_or(false);
 
-            if !reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawFailed);
-            } else {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawCompleted);
-            }
+            msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawComplete(reply));
         }
 
         _ => {}

@@ -1,10 +1,10 @@
-use super::super::{Error, TokenSupply};
+use super::super::TokenSupply;
 use gstd::{prelude::collections::HashMap, MessageId};
 use sails_rs::prelude::*;
 
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
-// TODO: Itr doesn't cleaned up.
+// TODO: remove completed messages.
 #[derive(Default, Debug)]
 pub struct MessageTracker {
     pub message_info: HashMap<MessageId, MessageInfo>,
@@ -48,26 +48,13 @@ impl MessageTracker {
     pub fn remove_message_info(&mut self, msg_id: &MessageId) -> Option<MessageInfo> {
         self.message_info.remove(msg_id)
     }
-
-    pub fn check_withdraw_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenWithdrawCompleted => Ok(()),
-                MessageStatus::TokenWithdrawFailed => Err(Error::MessageFailed),
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
     SendingMessageToWithdrawTokens,
     WaitingReplyFromTokenWithdrawMessage,
-    TokenWithdrawCompleted,
-    TokenWithdrawFailed,
+    TokenWithdrawComplete(bool),
 }
 
 pub fn init() {

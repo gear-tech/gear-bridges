@@ -95,7 +95,6 @@ fn handle_reply_hook(msg_id: MessageId) {
 
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawComplete(reply));
         }
-
         _ => {}
     };
 }

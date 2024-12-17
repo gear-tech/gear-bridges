@@ -13,7 +13,9 @@ pub async fn send_message_to_bridge_builtin(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<U256, Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
+    let msg_tracker = msg_tracker_mut();
+
+    msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
 
     let payload_bytes = payload.pack();
 
@@ -32,7 +34,19 @@ pub async fn send_message_to_bridge_builtin(
         msg_id,
     )
     .await?;
-    msg_tracker_mut().check_bridge_reply(&msg_id)
+
+    if let Some(info) = msg_tracker.get_message_info(&msg_id) {
+        match info.status {
+            MessageStatus::BridgeResponseReceived(Some(nonce)) => {
+                msg_tracker.remove_message_info(&msg_id);
+                Ok(nonce)
+            }
+            MessageStatus::BridgeResponseReceived(None) => Err(Error::BridgeBuiltinMessageFailed),
+            _ => Err(Error::InvalidMessageStatus),
+        }
+    } else {
+        Err(Error::MessageNotFound)
+    }
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]

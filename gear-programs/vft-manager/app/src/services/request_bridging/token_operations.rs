@@ -3,7 +3,7 @@ use sails_rs::prelude::*;
 use extended_vft_client::vft::io as vft_io;
 
 use super::super::{Config, Error};
-use super::msg_tracker::{msg_tracker_mut, MessageStatus};
+use super::msg_tracker::{msg_tracker_mut, MessageStatus, MessageTracker};
 use super::utils;
 
 pub async fn burn(
@@ -24,7 +24,8 @@ pub async fn burn(
         msg_id,
     )
     .await?;
-    msg_tracker_mut().check_deposit_result(&msg_id)
+
+    fetch_deposit_result(&*msg_tracker_mut(), &msg_id)
 }
 
 pub async fn lock(
@@ -47,7 +48,7 @@ pub async fn lock(
     )
     .await?;
 
-    msg_tracker_mut().check_deposit_result(&msg_id)
+    fetch_deposit_result(&*msg_tracker_mut(), &msg_id)
 }
 
 pub async fn mint(
@@ -57,7 +58,9 @@ pub async fn mint(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+    let msg_tracker = msg_tracker_mut();
+
+    msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
 
     let bytes: Vec<u8> = vft_io::Mint::encode_call(receiver, amount);
     utils::send_message_with_gas_for_reply(
@@ -70,7 +73,7 @@ pub async fn mint(
     )
     .await?;
 
-    msg_tracker_mut().check_withdraw_result(&msg_id)
+    fetch_withdraw_result(&*msg_tracker, &msg_id)
 }
 
 pub async fn unlock(
@@ -80,7 +83,9 @@ pub async fn unlock(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+    let msg_tracker = msg_tracker_mut();
+
+    msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
 
     let sender = gstd::exec::program_id();
     let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, recepient, amount);
@@ -95,5 +100,29 @@ pub async fn unlock(
     )
     .await?;
 
-    msg_tracker_mut().check_withdraw_result(&msg_id)
+    fetch_withdraw_result(&*msg_tracker, &msg_id)
+}
+
+fn fetch_deposit_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Result<(), Error> {
+    if let Some(info) = msg_tracker.message_info.get(msg_id) {
+        match info.status {
+            MessageStatus::TokenDepositCompleted(true) => Ok(()),
+            MessageStatus::TokenDepositCompleted(false) => Err(Error::BurnTokensFailed),
+            _ => Err(Error::InvalidMessageStatus),
+        }
+    } else {
+        Err(Error::MessageNotFound)
+    }
+}
+
+fn fetch_withdraw_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Result<(), Error> {
+    if let Some(info) = msg_tracker.message_info.get(msg_id) {
+        match info.status {
+            MessageStatus::TokensReturnComplete(true) => Ok(()),
+            MessageStatus::TokensReturnComplete(false) => Err(Error::MessageFailed),
+            _ => Err(Error::InvalidMessageStatus),
+        }
+    } else {
+        Err(Error::MessageNotFound)
+    }
 }

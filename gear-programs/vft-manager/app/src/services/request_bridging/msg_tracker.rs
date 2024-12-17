@@ -1,9 +1,10 @@
-use super::super::{Error, TokenSupply};
+use super::super::TokenSupply;
 use gstd::{prelude::collections::HashMap, MessageId};
 use sails_rs::prelude::*;
 
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
+// TODO: Remove completed messages.
 #[derive(Default, Debug)]
 pub struct MessageTracker {
     pub message_info: HashMap<MessageId, MessageInfo>,
@@ -47,50 +48,6 @@ impl MessageTracker {
 
     pub fn remove_message_info(&mut self, msg_id: &MessageId) -> Option<MessageInfo> {
         self.message_info.remove(msg_id)
-    }
-
-    pub fn check_deposit_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokenDepositCompleted(true) => Ok(()),
-                MessageStatus::TokenDepositCompleted(false) => {
-                    self.message_info.remove(msg_id);
-                    Err(Error::BurnTokensFailed)
-                }
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
-    pub fn check_bridge_reply(&mut self, msg_id: &MessageId) -> Result<U256, Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::BridgeResponseReceived(Some(nonce)) => {
-                    self.remove_message_info(msg_id);
-                    Ok(nonce)
-                }
-                MessageStatus::BridgeResponseReceived(None) => {
-                    Err(Error::BridgeBuiltinMessageFailed)
-                }
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
-    }
-
-    pub fn check_withdraw_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
-        if let Some(info) = self.message_info.get(msg_id) {
-            match info.status {
-                MessageStatus::TokensReturnComplete(true) => Ok(()),
-                MessageStatus::TokensReturnComplete(false) => Err(Error::MessageFailed),
-                _ => Err(Error::InvalidMessageStatus),
-            }
-        } else {
-            Err(Error::MessageNotFound)
-        }
     }
 }
 

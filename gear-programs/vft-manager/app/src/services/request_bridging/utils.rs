@@ -41,26 +41,14 @@ fn handle_reply_hook(msg_id: MessageId) {
             let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
                 TokenSupply::Gear => decode_lock_reply(&reply_bytes),
-            };
+            }
+            .unwrap_or(false);
 
-            match reply {
-                Ok(reply) => {
-                    msg_tracker
-                        .update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
-                }
-                Err(_) => {
-                    msg_tracker.remove_message_info(&msg_id);
-                }
-            };
+            msg_tracker.update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
         }
         MessageStatus::SendingMessageToBridgeBuiltin | MessageStatus::WaitingReplyFromBuiltin => {
-            let reply = decode_bridge_reply(&reply_bytes);
-            let result = match reply {
-                Ok(Some(nonce)) => Some(nonce),
-                _ => None,
-            };
-            msg_tracker
-                .update_message_status(msg_id, MessageStatus::BridgeResponseReceived(result));
+            let reply = decode_bridge_reply(&reply_bytes).ok().flatten();
+            msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(reply));
         }
         MessageStatus::WaitingReplyFromTokenReturnMessage
         | MessageStatus::SendingMessageToReturnTokens => {
@@ -70,13 +58,8 @@ fn handle_reply_hook(msg_id: MessageId) {
             }
             .unwrap_or(false);
 
-            if !reply {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokenReturnFailed);
-            } else {
-                msg_tracker.update_message_status(msg_id, MessageStatus::TokensReturned);
-            }
+            msg_tracker.update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
         }
-
         _ => {}
     };
 }

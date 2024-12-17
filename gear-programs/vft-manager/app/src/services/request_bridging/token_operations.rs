@@ -57,7 +57,7 @@ pub async fn mint(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
 
     let bytes: Vec<u8> = vft_io::Mint::encode_call(receiver, amount);
     utils::send_message_with_gas_for_reply(
@@ -80,7 +80,7 @@ pub async fn unlock(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
 
     let sender = gstd::exec::program_id();
     let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, recepient, amount);

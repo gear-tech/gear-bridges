@@ -101,8 +101,6 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     service: &mut VftManager<T>,
     msg_id: MessageId,
 ) -> Result<(U256, H160), Error> {
-    let state = service.state();
-
     let config = service.config();
     let msg_tracker = msg_tracker::msg_tracker_mut();
 
@@ -114,61 +112,36 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
         vara_token_id,
         sender,
         amount,
-        receiver,
+        receiver: _,
         token_supply,
     } = msg_info.details;
 
-    let eth_token_id = service
-        .state()
-        .token_map
-        .get_eth_token_id(&vara_token_id)
-        .expect("Failed to get ethereum token id");
-
     match msg_info.status {
-        MessageStatus::TokenDepositCompleted(true) => {
-            let payload = Payload {
-                receiver,
-                token_id: eth_token_id,
-                amount,
-            };
+        MessageStatus::TokenDepositCompleted(true)
+        | MessageStatus::SendingMessageToBridgeBuiltin
+        | MessageStatus::SendingMessageToReturnTokens
+        | MessageStatus::TokensReturnComplete(false)
+        | MessageStatus::BridgeResponseReceived(None) => {
+            set_critical_hook(msg_id);
 
-            match bridge_builtin_operations::send_message_to_bridge_builtin(
-                state.gear_bridge_builtin,
-                state.erc20_manager_address,
-                payload,
-                config,
-                msg_id,
-            )
-            .await
-            {
-                Ok(nonce) => Ok((nonce, eth_token_id)),
-                Err(_) => {
-                    match token_supply {
-                        TokenSupply::Ethereum => {
-                            token_operations::mint(vara_token_id, sender, amount, config, msg_id)
-                                .await?;
-                        }
-                        TokenSupply::Gear => {
-                            token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
-                                .await?;
-                        }
-                    }
-
-                    // In case of failure, mint tokens back to the sender
-                    Err(Error::TokensRefunded)
+            match token_supply {
+                TokenSupply::Ethereum => {
+                    token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
+                }
+                TokenSupply::Gear => {
+                    token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
                 }
             }
-        }
-        MessageStatus::BridgeResponseReceived(Some(nonce)) => {
-            msg_tracker::msg_tracker_mut().remove_message_info(&msg_id);
-            Ok((nonce, eth_token_id))
-        }
-        MessageStatus::SendingMessageToReturnTokens | MessageStatus::TokenReturnFailed => {
-            // TODO: Or unlock.
-            token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
+
             Err(Error::TokensRefunded)
         }
-        _ => {
+        MessageStatus::TokenDepositCompleted(false)
+        | MessageStatus::SendingMessageToDepositTokens
+        | MessageStatus::WaitingReplyFromTokenDepositMessage
+        | MessageStatus::WaitingReplyFromBuiltin
+        | MessageStatus::WaitingReplyFromTokenReturnMessage
+        | MessageStatus::BridgeResponseReceived(Some(_))
+        | MessageStatus::TokensReturnComplete(true) => {
             panic!("Unexpected status or transaction completed.")
         }
     }
@@ -183,31 +156,20 @@ fn set_critical_hook(msg_id: MessageId) {
 
         match msg_info.status {
             MessageStatus::SendingMessageToDepositTokens => {
-                // If still sending, transition to `WaitingReplyFromBurn`.
                 msg_tracker.update_message_status(
                     msg_id,
                     MessageStatus::WaitingReplyFromTokenDepositMessage,
                 );
             }
-            // MessageStatus::TokenDepositCompleted(false) => {
-            //     // If the token burn fails, cancel the transaction.
-            //     msg_tracker.remove_message_info(&msg_id);
-            // }
             MessageStatus::SendingMessageToBridgeBuiltin => {
-                // If still sending, transition to `WaitingReplyFromBuiltin`.
                 msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin);
             }
-            // MessageStatus::BridgeResponseReceived(None) => {
-            //     // If error occurs during builtin message, go to mint step
-            //     msg_tracker.update_message_status(msg_id, MessageStatus::ReturnTokensStep)
-            // }
             MessageStatus::SendingMessageToReturnTokens => {
                 msg_tracker.update_message_status(
                     msg_id,
                     MessageStatus::WaitingReplyFromTokenReturnMessage,
                 );
             }
-
             _ => {}
         };
     });

@@ -84,8 +84,8 @@ impl MessageTracker {
     pub fn check_withdraw_result(&mut self, msg_id: &MessageId) -> Result<(), Error> {
         if let Some(info) = self.message_info.get(msg_id) {
             match info.status {
-                MessageStatus::TokensReturned => Ok(()),
-                MessageStatus::TokenReturnFailed => Err(Error::MessageFailed),
+                MessageStatus::TokensReturnComplete(true) => Ok(()),
+                MessageStatus::TokensReturnComplete(false) => Err(Error::MessageFailed),
                 _ => Err(Error::InvalidMessageStatus),
             }
         } else {
@@ -109,10 +109,7 @@ pub enum MessageStatus {
     // Return tokens statuses.
     SendingMessageToReturnTokens,
     WaitingReplyFromTokenReturnMessage,
-    TokensReturned,
-    TokenReturnFailed,
-
-    MessageProcessedWithSuccess(U256),
+    TokensReturnComplete(bool),
 }
 
 pub fn init() {

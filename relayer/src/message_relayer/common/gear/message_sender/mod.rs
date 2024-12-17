@@ -194,7 +194,7 @@ impl MessageSender {
             })?
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
-        // TODO: Refactor this approach.
+        // TODO: Refactor this approach. #255
         if self.decode_reply {
             let reply = SubmitReceipt::decode_reply(&receiver_reply)
                 .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;

@@ -83,10 +83,8 @@ impl InitConfig {
 pub struct Config {
     gas_for_token_ops: u64,
     gas_for_reply_deposit: u64,
-    gas_for_submit_receipt: u64,
     gas_to_send_request_to_builtin: u64,
     reply_timeout: u32,
-    gas_for_request_bridging: u64,
 }
 
 #[service(events = Event)]
@@ -176,13 +174,18 @@ where
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
     }
 
-    pub async fn handle_interrupted_transfer(
+    pub async fn handle_request_bridging_interrupted_transfer(
         &mut self,
         msg_id: MessageId,
-    ) -> Result<(U256, H160), Error> {
-        // TODO: differentiate.
-        request_bridging::handle_interrupted_transfer(self, msg_id.clone()).await?;
-        submit_receipt::handle_interrupted_transfer(self, msg_id.clone()).await
+    ) -> Result<(), Error> {
+        request_bridging::handle_interrupted_transfer(self, msg_id).await
+    }
+
+    pub async fn handle_submit_receipt_interrupted_transfer(
+        &mut self,
+        msg_id: MessageId,
+    ) -> Result<(), Error> {
+        submit_receipt::handle_interrupted_transfer(self, msg_id).await
     }
 
     pub fn request_briding_msg_tracker_state(

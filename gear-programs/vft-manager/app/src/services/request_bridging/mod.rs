@@ -100,7 +100,7 @@ pub async fn request_bridging<T: ExecContext>(
 pub async fn handle_interrupted_transfer<T: ExecContext>(
     service: &mut VftManager<T>,
     msg_id: MessageId,
-) -> Result<(U256, H160), Error> {
+) -> Result<(), Error> {
     let config = service.config();
     let msg_tracker = msg_tracker::msg_tracker_mut();
 

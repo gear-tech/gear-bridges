@@ -127,7 +127,7 @@ pub async fn submit_receipt<T: ExecContext>(
 pub async fn handle_interrupted_transfer<T: ExecContext>(
     service: &mut VftManager<T>,
     msg_id: MessageId,
-) -> Result<(U256, H160), Error> {
+) -> Result<(), Error> {
     let config = service.config();
     let msg_tracker = msg_tracker_mut();
 
@@ -177,14 +177,11 @@ fn set_critical_hook(msg_id: MessageId) {
             .get_message_info(&msg_id)
             .expect("Unexpected: msg info does not exist");
 
-        match msg_info.status {
-            MessageStatus::SendingMessageToWithdrawTokens => {
-                msg_tracker.update_message_status(
-                    msg_id,
-                    MessageStatus::WaitingReplyFromTokenWithdrawMessage,
-                );
-            }
-            _ => {}
-        };
+        if msg_info.status == MessageStatus::SendingMessageToWithdrawTokens {
+            msg_tracker.update_message_status(
+                msg_id,
+                MessageStatus::WaitingReplyFromTokenWithdrawMessage,
+            );
+        }
     });
 }

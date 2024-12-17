@@ -2100,7 +2100,9 @@ dependencies = [
  "circular-buffer",
  "ethereum-common",
  "gbuiltin-bls381 1.7.0",
+ "getrandom 0.2.15",
  "hex-literal",
+ "lazy_static",
  "sails-rs",
  "tree_hash_derive",
 ]

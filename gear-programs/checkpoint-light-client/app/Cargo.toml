@@ -15,5 +15,9 @@ hex-literal.workspace = true
 sails-rs.workspace = true
 tree_hash_derive.workspace = true
 
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["custom"] }
+lazy_static = { workspace = true, features = ["spin_no_std"] }
+
 [dev-dependencies]
 hex-literal.workspace = true

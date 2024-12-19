@@ -4,23 +4,23 @@
 }
 
 .container {
-  display: flex;
-
   position: relative;
-
-  svg {
-    transition: 0.25s opacity;
-
-    &:hover {
-      opacity: 0.75;
-    }
-  }
 
   &:hover {
     .tooltip {
       opacity: 1;
     }
+
+    .body {
+      opacity: 0.75;
+    }
   }
+}
+
+.body {
+  display: flex;
+
+  transition: 0.25s opacity;
 }
 
 .tooltip {

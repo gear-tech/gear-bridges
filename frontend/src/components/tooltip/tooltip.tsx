@@ -8,24 +8,20 @@ import { Skeleton } from '../layout';
 import QuestionSVG from './question.svg?react';
 import styles from './tooltip.module.scss';
 
-type BaseProps = {
-  text?: string;
-  children?: ReactNode;
+type Props = {
+  value?: ReactNode;
   position?: 'top' | 'bottom-end';
   SVG?: SVGComponent;
+  children?: ReactNode;
 };
 
-type TextProps = BaseProps & { text: string };
-type ChildrenProps = BaseProps & { children: ReactNode };
-type Props = TextProps | ChildrenProps;
-
-function Tooltip({ text, children, position = 'top', SVG = QuestionSVG }: Props) {
+function Tooltip({ value, position = 'top', SVG = QuestionSVG, children }: Props) {
   return (
     <div className={styles.container}>
-      <SVG />
+      <div className={styles.body}>{children || <SVG />}</div>
 
       <div className={cx(styles.tooltip, styles[position])}>
-        {text ? <p className={styles.heading}>{text}</p> : children}
+        {typeof value === 'string' ? <p className={styles.heading}>{value}</p> : value}
       </div>
     </div>
   );

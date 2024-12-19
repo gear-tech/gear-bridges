@@ -26,7 +26,7 @@ function TokenTracker() {
         </button>
 
         {Boolean(lockedBalance) && (
-          <Tooltip SVG={WarningSVG} text="You have tokens available to unlock" position="bottom-end" />
+          <Tooltip SVG={WarningSVG} value="You have tokens available to unlock" position="bottom-end" />
         )}
       </div>
 

@@ -44,13 +44,18 @@ function AccountBalance({ data: value, isLoading, isVaraNetwork, submit }: Props
       </div>
 
       {isBalanceError && (
-        <Tooltip SVG={DangerSVG}>
-          <p>{error.message}</p>
+        <Tooltip
+          SVG={DangerSVG}
+          value={
+            <>
+              <p>{error.message}</p>
 
-          <p>
-            At least {formatUnits(error.requiredValue, decimals)} {symbol} is needed
-          </p>
-        </Tooltip>
+              <p>
+                At least {formatUnits(error.requiredValue, decimals)} {symbol} is needed
+              </p>
+            </>
+          }
+        />
       )}
     </div>
   );

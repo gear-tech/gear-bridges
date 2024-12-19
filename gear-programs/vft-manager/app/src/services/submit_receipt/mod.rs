@@ -111,13 +111,18 @@ pub async fn submit_receipt<T: ExecContext>(
 
     match supply_type {
         TokenSupply::Ethereum => {
-            token_operations::mint(vara_token_id, receiver, amount, service.config(), msg_id).await
+            token_operations::mint(vara_token_id, receiver, amount, service.config(), msg_id)
+                .await
+                .expect("Failed to mint tokens");
         }
         TokenSupply::Gear => {
             token_operations::unlock(vara_token_id, receiver, amount, service.config(), msg_id)
                 .await
+                .expect("Failed to unlock tokens");
         }
     }
+
+    Ok(())
 }
 
 pub async fn handle_interrupted_transfer<T: ExecContext>(
@@ -145,10 +150,14 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
 
             match token_supply {
                 TokenSupply::Ethereum => {
-                    token_operations::mint(vara_token_id, receiver, amount, config, msg_id).await
+                    token_operations::mint(vara_token_id, receiver, amount, config, msg_id)
+                        .await
+                        .expect("Failed to mint tokens");
                 }
                 TokenSupply::Gear => {
-                    token_operations::unlock(vara_token_id, receiver, amount, config, msg_id).await
+                    token_operations::unlock(vara_token_id, receiver, amount, config, msg_id)
+                        .await
+                        .expect("Failed to unlock tokens");
                 }
             }
         }
@@ -156,4 +165,6 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
             panic!("Unexpected status or transaction completed.")
         }
     }
+
+    Ok(())
 }

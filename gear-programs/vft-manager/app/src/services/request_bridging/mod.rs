@@ -50,12 +50,14 @@ pub async fn request_bridging<T: ExecContext>(
 
     match supply_type {
         TokenSupply::Ethereum => {
-            // TODO: If it'll return an error `msg_tracker` state will be saved.
-            token_operations::burn(vara_token_id, sender, amount, config, msg_id).await?;
+            token_operations::burn(vara_token_id, sender, amount, config, msg_id)
+                .await
+                .expect("Failed to burn tokens");
         }
         TokenSupply::Gear => {
-            // TODO: If it'll return an error `msg_tracker` state will be saved.
-            token_operations::lock(vara_token_id, sender, amount, config, msg_id).await?;
+            token_operations::lock(vara_token_id, sender, amount, config, msg_id)
+                .await
+                .expect("Failed to lock tokens");
         }
     }
 
@@ -84,10 +86,14 @@ pub async fn request_bridging<T: ExecContext>(
 
             match supply_type {
                 TokenSupply::Ethereum => {
-                    token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
+                    token_operations::mint(vara_token_id, sender, amount, config, msg_id)
+                        .await
+                        .expect("Failed to mint tokens");
                 }
                 TokenSupply::Gear => {
-                    token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
+                    token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
+                        .await
+                        .expect("Failed to unlock tokens");
                 }
             }
 

@@ -26,6 +26,9 @@ importers:
       '@polkadot/react-identicon':
         specifier: 3.11.3
         version: 3.11.3(@polkadot/keyring@13.2.3(@polkadot/util-crypto@13.2.3(@polkadot/util@13.2.3))(@polkadot/util@13.2.3))(@polkadot/networks@13.2.3)(@polkadot/util-crypto@13.2.3(@polkadot/util@13.2.3))(@polkadot/util@13.2.3)(react-dom@18.3.1(react@18.3.1))(react-is@18.2.0)(react@18.3.1)
+      '@polkadot/util':
+        specifier: 13.2.3
+        version: 13.2.3
       '@tanstack/react-query':
         specifier: 5.61.5
         version: 5.61.5(react@18.3.1)

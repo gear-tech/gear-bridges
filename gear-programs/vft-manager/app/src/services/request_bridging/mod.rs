@@ -47,7 +47,6 @@ pub async fn request_bridging<T: ExecContext>(
         MessageStatus::SendingMessageToDepositTokens,
         transaction_details,
     );
-    set_critical_hook(msg_id);
 
     match supply_type {
         TokenSupply::Ethereum => {
@@ -147,8 +146,6 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
 
-            set_critical_hook(msg_id);
-
             match token_supply {
                 TokenSupply::Ethereum => {
                     token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
@@ -164,37 +161,4 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
             panic!("Unexpected status or transaction completed.")
         }
     }
-}
-
-/// Set critical hook that will drive state machine further if some errors occur
-/// across `.await` points. This hook will set message state to `WaitReplyFrom...`
-/// if it's called with `SendingMessageTo...`. This behaviour should prevent
-/// `handle_executed_transfer` fron double spending as once message is sent to
-/// some program we will be forced to wait for reply.
-fn set_critical_hook(msg_id: MessageId) {
-    gstd::critical::set_hook(move || {
-        let msg_tracker = msg_tracker_mut();
-        let msg_info = msg_tracker
-            .get_message_info(&msg_id)
-            .expect("Unexpected: msg info does not exist");
-
-        match msg_info.status {
-            MessageStatus::SendingMessageToDepositTokens => {
-                msg_tracker.update_message_status(
-                    msg_id,
-                    MessageStatus::WaitingReplyFromTokenDepositMessage,
-                );
-            }
-            MessageStatus::SendingMessageToBridgeBuiltin => {
-                msg_tracker.update_message_status(msg_id, MessageStatus::WaitingReplyFromBuiltin);
-            }
-            MessageStatus::SendingMessageToReturnTokens => {
-                msg_tracker.update_message_status(
-                    msg_id,
-                    MessageStatus::WaitingReplyFromTokenReturnMessage,
-                );
-            }
-            _ => {}
-        };
-    });
 }

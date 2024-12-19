@@ -53,19 +53,13 @@ impl MessageTracker {
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
-    // Deposit tokens statuses
     SendingMessageToDepositTokens,
-    WaitingReplyFromTokenDepositMessage,
     TokenDepositCompleted(bool),
 
-    // Send message to bridge builtin
     SendingMessageToBridgeBuiltin,
-    WaitingReplyFromBuiltin,
     BridgeResponseReceived(Option<U256>),
 
-    // Return tokens statuses.
     SendingMessageToReturnTokens,
-    WaitingReplyFromTokenReturnMessage,
     TokensReturnComplete(bool),
 }
 

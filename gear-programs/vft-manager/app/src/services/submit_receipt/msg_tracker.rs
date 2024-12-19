@@ -53,7 +53,6 @@ impl MessageTracker {
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
     SendingMessageToWithdrawTokens,
-    WaitingReplyFromTokenWithdrawMessage,
     TokenWithdrawComplete(bool),
 }
 

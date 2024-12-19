@@ -107,7 +107,7 @@ fn handle_reply_hook(msg_id: MessageId) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
 
     match msg_info.status {
-        MessageStatus::SendingMessageToBridgeBuiltin | MessageStatus::WaitingReplyFromBuiltin => {
+        MessageStatus::SendingMessageToBridgeBuiltin => {
             let reply = decode_bridge_reply(&reply_bytes).ok().flatten();
             msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(reply));
         }

@@ -154,8 +154,7 @@ fn handle_reply_hook(msg_id: MessageId) {
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
 
     match msg_info.status {
-        MessageStatus::SendingMessageToDepositTokens
-        | MessageStatus::WaitingReplyFromTokenDepositMessage => {
+        MessageStatus::SendingMessageToDepositTokens => {
             let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
                 TokenSupply::Gear => decode_lock_reply(&reply_bytes),
@@ -164,8 +163,7 @@ fn handle_reply_hook(msg_id: MessageId) {
 
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
         }
-        MessageStatus::WaitingReplyFromTokenReturnMessage
-        | MessageStatus::SendingMessageToReturnTokens => {
+        MessageStatus::SendingMessageToReturnTokens => {
             let reply = match msg_info.details.token_supply {
                 TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
                 TokenSupply::Gear => decode_unlock_reply(&reply_bytes),

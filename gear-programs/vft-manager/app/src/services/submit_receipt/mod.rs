@@ -108,7 +108,6 @@ pub async fn submit_receipt<T: ExecContext>(
         MessageStatus::SendingMessageToWithdrawTokens,
         transaction_details,
     );
-    set_critical_hook(msg_id);
 
     match supply_type {
         TokenSupply::Ethereum => {
@@ -140,12 +139,9 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     } = msg_info.details;
 
     match msg_info.status {
-        MessageStatus::SendingMessageToWithdrawTokens
-        | MessageStatus::TokenWithdrawComplete(false) => {
+        MessageStatus::TokenWithdrawComplete(false) => {
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToWithdrawTokens);
-
-            set_critical_hook(msg_id);
 
             match token_supply {
                 TokenSupply::Ethereum => {
@@ -156,23 +152,8 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
                 }
             }
         }
-        MessageStatus::WaitingReplyFromTokenWithdrawMessage
-        | MessageStatus::TokenWithdrawComplete(true) => {
+        _ => {
             panic!("Unexpected status or transaction completed.")
         }
     }
-}
-
-fn set_critical_hook(msg_id: MessageId) {
-    gstd::critical::set_hook(move || {
-        let msg_tracker = msg_tracker_mut();
-        let msg_info = msg_tracker
-            .get_message_info(&msg_id)
-            .expect("Unexpected: msg info does not exist");
-
-        if msg_info.status == MessageStatus::SendingMessageToWithdrawTokens {
-            msg_tracker
-                .update_message_status(msg_id, MessageStatus::WaitingReplyFromTokenWithdrawMessage);
-        }
-    });
 }

@@ -1,9 +1,8 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
-import { formatUnits } from 'viem';
 
-import { CopyButton, FeeAndTimeFooter, LinkButton, TruncatedText } from '@/components';
+import { CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
 import { cx } from '@/utils';
@@ -56,8 +55,6 @@ function TransactionModal({
   const sourceSymbol = symbols?.[source as HexString] || 'Unit';
   const destinationSymbol = symbols?.[destination as HexString] || 'Unit';
 
-  const formattedAmount = formatUnits(BigInt(amount), decimals?.[source as HexString] ?? 0);
-
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
 
@@ -83,11 +80,14 @@ function TransactionModal({
         </header>
       )}
 
-      <p className={cx(styles.pairs, renderProgressBar && styles.loading)}>
+      <div className={cx(styles.pairs, renderProgressBar && styles.loading)}>
         <span className={styles.tx}>
-          <span className={styles.amount}>
-            {formattedAmount} {sourceSymbol}
-          </span>
+          <FormattedBalance
+            value={BigInt(amount)}
+            decimals={decimals?.[source as HexString] ?? 0}
+            symbol={sourceSymbol}
+            className={styles.amount}
+          />
 
           <span className={styles.label}>on</span>
 
@@ -100,9 +100,12 @@ function TransactionModal({
         <ArrowSVG className={styles.arrowSvg} />
 
         <span className={styles.tx}>
-          <span className={styles.amount}>
-            {formattedAmount} {destinationSymbol}
-          </span>
+          <FormattedBalance
+            value={BigInt(amount)}
+            decimals={decimals?.[source as HexString] ?? 0}
+            symbol={destinationSymbol}
+            className={styles.amount}
+          />
 
           <span className={styles.label}>on</span>
 
@@ -123,7 +126,7 @@ function TransactionModal({
           <span className={styles.label}>To</span>
           <TruncatedText value={formattedReceiverAddress} className={styles.value} />
         </span>
-      </p>
+      </div>
 
       {renderProgressBar?.()}
 

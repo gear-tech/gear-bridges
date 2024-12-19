@@ -1,29 +1,20 @@
-import { formatEther } from 'viem';
 import { useBalance } from 'wagmi';
 
 import { useInvalidateOnBlock } from './common';
 import { useEthAccount } from './use-eth-account';
 
-const withPrecision = (value: string) => {
-  // simplest solution without rounding for now
-  const digitsCount = 3;
-
-  return value.slice(0, value.indexOf('.') + digitsCount + 1);
-};
-
 function useEthAccountBalance() {
   const ethAccount = useEthAccount();
 
-  const { data, isLoading, queryKey } = useBalance({
+  const state = useBalance({
     address: ethAccount?.address,
+    query: { select: ({ value }) => value },
   });
 
+  const { queryKey } = state;
   useInvalidateOnBlock({ queryKey });
 
-  const { value } = data || {};
-  const formattedValue = data ? withPrecision(formatEther(data.value)) : undefined;
-
-  return { value, formattedValue, isLoading };
+  return state;
 }
 
 export { useEthAccountBalance };

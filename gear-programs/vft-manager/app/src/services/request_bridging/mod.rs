@@ -19,6 +19,9 @@ pub fn seed() {
     msg_tracker::init();
 }
 
+/// Lock/burn `vft` tokens (specific operation depends on the token supply type) and send
+/// request to the bridge built-in actor. If request is failed then tokens will be refunded back
+/// to the sender.
 pub async fn request_bridging<T: ExecContext>(
     service: &mut VftManager<T>,
     sender: ActorId,
@@ -49,9 +52,11 @@ pub async fn request_bridging<T: ExecContext>(
 
     match supply_type {
         TokenSupply::Ethereum => {
+            // TODO: If it'll return an error `msg_tracker` state will be saved.
             token_operations::burn(vara_token_id, sender, amount, config, msg_id).await?;
         }
         TokenSupply::Gear => {
+            // TODO: If it'll return an error `msg_tracker` state will be saved.
             token_operations::lock(vara_token_id, sender, amount, config, msg_id).await?;
         }
     }
@@ -161,6 +166,11 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     }
 }
 
+/// Set critical hook that will drive state machine further if some errors occur
+/// across `.await` points. This hook will set message state to `WaitReplyFrom...`
+/// if it's called with `SendingMessageTo...`. This behaviour should prevent
+/// `handle_executed_transfer` fron double spending as once message is sent to
+/// some program we will be forced to wait for reply.
 fn set_critical_hook(msg_id: MessageId) {
     gstd::critical::set_hook(move || {
         let msg_tracker = msg_tracker_mut();

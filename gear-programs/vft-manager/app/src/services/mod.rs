@@ -145,9 +145,7 @@ where
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
     }
 
-    /// Request bridging of tokens from gear to ethereum. It involves locking/burning
-    /// `vft` tokens (specific operation depends on the token supply type) and sending
-    /// request to the bridge built-in actor.
+    /// Request bridging of tokens from gear to ethereum.
     pub async fn request_bridging(
         &mut self,
         sender: ActorId,

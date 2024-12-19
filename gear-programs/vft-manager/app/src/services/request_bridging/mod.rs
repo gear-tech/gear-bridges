@@ -1,3 +1,5 @@
+//! Bridging request entrypoint of `VFTManager` service.
+
 use sails_rs::{gstd::ExecContext, prelude::*};
 
 use super::{error::Error, Event, TokenSupply, VftManager};
@@ -12,6 +14,7 @@ use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
 
 pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
 
+/// Initialize state that's used by this entrypoint.
 pub fn seed() {
     msg_tracker::init();
 }
@@ -97,6 +100,14 @@ pub async fn request_bridging<T: ExecContext>(
     Ok((nonce, eth_token_id))
 }
 
+/// Try to execute failed request again. It can be used to return funds back to the user when
+/// the [request_bridging] execution unexpectedly finished (due to the insufficient gas amount
+/// or some other temporary error) but funds have already been locked/burnt.
+///
+/// This function can return funds back to the user in the following scenarios:
+/// - Token lock/burn is complete but message to the built-in actor haven't yet been sent.
+/// - Message to the built-in actor have returned error but token refund message haven't been sent yet.
+/// - token refund message have been sent but it have failed.
 pub async fn handle_interrupted_transfer<T: ExecContext>(
     service: &mut VftManager<T>,
     msg_id: MessageId,
@@ -119,9 +130,9 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
     match msg_info.status {
         MessageStatus::TokenDepositCompleted(true)
         | MessageStatus::SendingMessageToBridgeBuiltin
+        | MessageStatus::BridgeResponseReceived(None)
         | MessageStatus::SendingMessageToReturnTokens
-        | MessageStatus::TokensReturnComplete(false)
-        | MessageStatus::BridgeResponseReceived(None) => {
+        | MessageStatus::TokensReturnComplete(false) => {
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
 

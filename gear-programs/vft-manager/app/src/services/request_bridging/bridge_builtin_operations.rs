@@ -1,14 +1,18 @@
+//! Operations involving comunication with `pallet-gear-eth-bridge` built-in actor.
+
+use gstd::MessageId;
+use sails_rs::prelude::*;
+
 use super::{
     super::{Config, Error},
     msg_tracker::{msg_tracker_mut, MessageStatus},
     utils,
 };
-use gstd::MessageId;
-use sails_rs::prelude::*;
 
+/// Send bridging request to a `pallet-gear-eth-bridge` built-in actor.
 pub async fn send_message_to_bridge_builtin(
     gear_bridge_builtin: ActorId,
-    receiver_contract_address: H160,
+    erc20_manager: H160,
     payload: Payload,
     config: &Config,
     msg_id: MessageId,
@@ -20,7 +24,7 @@ pub async fn send_message_to_bridge_builtin(
     let payload_bytes = payload.pack();
 
     let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
-        destination: receiver_contract_address,
+        destination: erc20_manager,
         payload: payload_bytes,
     }
     .encode();
@@ -49,14 +53,19 @@ pub async fn send_message_to_bridge_builtin(
     }
 }
 
+/// Payload of the message that `ERC20Manager` will accept.
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct Payload {
+    /// Account of the tokens receiver.
     pub receiver: H160,
+    /// Address of the bridged `ERC20` token contract.
     pub token_id: H160,
+    /// Bridged amount.
     pub amount: U256,
 }
 
 impl Payload {
+    /// Pack [Payload] into a binary format that `ERC20Manager` will parse.
     pub fn pack(self) -> Vec<u8> {
         // H160 is 20 bytes, U256 is 32 bytes
         let mut packed = Vec::with_capacity(20 + 20 + 32);

@@ -1,4 +1,4 @@
-import { useAccount } from '@gear-js/react-hooks';
+import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button, Select } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
@@ -50,6 +50,7 @@ function SwapForm({
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
+  const { api, isApiReady } = useApi();
   const { pairIndex, setPairIndex } = useBridge();
   const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } =
     useToken(networkIndex);
@@ -110,10 +111,12 @@ function SwapForm({
   };
 
   const isBalanceValid = () => {
-    if (accountBalance.isLoading || config.isLoading) return true;
+    if (!isApiReady || accountBalance.isLoading || config.isLoading) return true; // not valid ofc, but we don't want to render error
     if (!accountBalance.value || isUndefined(fee.value)) return false;
 
-    return accountBalance.value > fee.value;
+    const requiredBalance = isVaraNetwork ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
+
+    return accountBalance.value > requiredBalance;
   };
 
   const getButtonText = () => {

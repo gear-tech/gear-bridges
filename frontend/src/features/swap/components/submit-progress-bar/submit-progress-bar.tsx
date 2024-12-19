@@ -26,7 +26,7 @@ const TEXT = {
   mint: 'Locking',
   approve: 'Approving',
   transfer: 'Transferring',
-  success: 'Transfer request is successful',
+  success: 'Your transfer request was successful',
 } as const;
 
 const ERROR_TEXT = {

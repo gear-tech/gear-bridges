@@ -65,8 +65,7 @@ function useHandleEthSubmit(
 
     const balanceToWithdraw = weiGasLimit + fee;
 
-    if (balanceToWithdraw > accountBalance)
-      throw new InsufficientAccountBalanceError('ETH', accountBalance, balanceToWithdraw);
+    if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
 
     return { isApproveRequired, approveGasLimit, transferGasLimit };
   };

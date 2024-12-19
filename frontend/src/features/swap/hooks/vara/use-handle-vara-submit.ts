@@ -66,10 +66,10 @@ function useHandleVaraSubmit(
 
     const totalGasLimit = (mintGasLimit + approveGasLimit + transferGasLimit) * api.valuePerGas.toBigInt();
     const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + preparedTransfer.awaited.fee;
-    const balanceToWithdraw = valueToMint + totalGasLimit + totalEstimatedFee + feeValue;
+    const requiredBalance =
+      valueToMint + totalGasLimit + totalEstimatedFee + feeValue + api.existentialDeposit.toBigInt();
 
-    if (accountBalance < balanceToWithdraw)
-      throw new InsufficientAccountBalanceError('VARA', accountBalance, balanceToWithdraw);
+    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError('VARA', requiredBalance);
 
     return {
       mintTx: preparedMint.transaction,

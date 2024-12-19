@@ -1,7 +1,7 @@
 import { PropsWithChildren } from 'react';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
-import { Skeleton } from '@/components';
+import { FormattedBalance, Skeleton } from '@/components';
 import { SVGComponent } from '@/types';
 import { cx } from '@/utils';
 
@@ -9,17 +9,18 @@ import styles from './balance-card.module.scss';
 
 type Props = PropsWithChildren & {
   SVG: SVGComponent;
-  value: string;
+  value: bigint;
+  decimals: number;
   symbol: string;
   locked?: boolean;
 };
 
-function BalanceCard({ locked, value, SVG, symbol, children }: Props) {
+function BalanceCard({ locked, value, decimals, SVG, symbol, children }: Props) {
   return (
     <div className={cx(styles.card, locked && styles.locked)}>
       <span className={styles.balance}>
         <SVG />
-        {value} {symbol}
+        <FormattedBalance value={value} decimals={decimals} symbol={symbol} />
       </span>
 
       {children}

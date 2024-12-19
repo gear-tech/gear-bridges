@@ -1,18 +1,20 @@
 import { Button } from '@gear-js/vara-ui';
 
-import { Skeleton } from '@/components';
+import { FormattedBalance, Skeleton } from '@/components';
+import { isUndefined } from '@/utils';
 
 import styles from './balance.module.scss';
 
 type Props = {
-  value: string | undefined;
-  unit: string | undefined;
+  value: bigint | undefined;
+  decimals: number | undefined;
+  symbol: string | undefined;
   isLoading?: boolean;
   heading?: string;
   onMaxButtonClick?: () => void;
 };
 
-function Balance({ heading = 'Balance', value, unit, isLoading, onMaxButtonClick }: Props) {
+function Balance({ heading = 'Balance', value, decimals, symbol, isLoading, onMaxButtonClick }: Props) {
   return (
     <div className={styles.balance}>
       <header className={styles.header}>
@@ -23,11 +25,14 @@ function Balance({ heading = 'Balance', value, unit, isLoading, onMaxButtonClick
         )}
       </header>
 
-      <p className={styles.value}>
+      <div className={styles.value}>
         {isLoading && <Skeleton />}
-        {!isLoading && !value && <Skeleton disabled />}
-        {value && unit && `${value} ${unit}`}
-      </p>
+        {!isLoading && isUndefined(value) && <Skeleton disabled />}
+
+        {!isUndefined(value) && !isUndefined(decimals) && symbol && (
+          <FormattedBalance value={value} decimals={decimals} symbol={symbol} />
+        )}
+      </div>
     </div>
   );
 }

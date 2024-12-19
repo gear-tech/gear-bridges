@@ -146,6 +146,8 @@ where
     }
 
     /// Request bridging of tokens from gear to ethereum.
+    ///
+    /// Allowance should allow `vft-manager` to spend `amount` tokens from the `sender` address.
     pub async fn request_bridging(
         &mut self,
         sender: ActorId,

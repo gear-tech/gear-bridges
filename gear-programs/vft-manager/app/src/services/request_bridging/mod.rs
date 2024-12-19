@@ -1,4 +1,4 @@
-//! Bridging request entrypoint of `VFTManager` service.
+//! Gear -> ethereum bridging request entrypoint of `VFTManager` service.
 
 use sails_rs::{gstd::ExecContext, prelude::*};
 
@@ -7,7 +7,6 @@ use super::{error::Error, Event, TokenSupply, VftManager};
 mod bridge_builtin_operations;
 mod msg_tracker;
 mod token_operations;
-mod utils;
 
 use bridge_builtin_operations::Payload;
 use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};

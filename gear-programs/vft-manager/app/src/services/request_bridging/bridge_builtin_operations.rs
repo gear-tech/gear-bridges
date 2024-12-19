@@ -1,12 +1,11 @@
 //! Operations involving comunication with `pallet-gear-eth-bridge` built-in actor.
 
-use gstd::MessageId;
+use gstd::{msg, MessageId};
 use sails_rs::prelude::*;
 
 use super::{
     super::{Config, Error},
     msg_tracker::{msg_tracker_mut, MessageStatus},
-    utils,
 };
 
 /// Send bridging request to a `pallet-gear-eth-bridge` built-in actor.
@@ -29,7 +28,7 @@ pub async fn send_message_to_bridge_builtin(
     }
     .encode();
 
-    utils::send_message_with_gas_for_reply(
+    send_message_with_gas_for_reply(
         gear_bridge_builtin,
         bytes,
         config.gas_to_send_request_to_builtin,
@@ -78,5 +77,51 @@ impl Payload {
         packed.extend_from_slice(&amount_bytes);
 
         packed
+    }
+}
+
+async fn send_message_with_gas_for_reply(
+    destination: ActorId,
+    message: Vec<u8>,
+    gas_to_send: u64,
+    gas_deposit: u64,
+    reply_timeout: u32,
+    msg_id: MessageId,
+) -> Result<(), Error> {
+    gstd::msg::send_bytes_with_gas_for_reply(destination, message, gas_to_send, 0, gas_deposit)
+        .map_err(|_| Error::SendFailure)?
+        .up_to(Some(reply_timeout))
+        .map_err(|_| Error::ReplyTimeout)?
+        .handle_reply(move || handle_reply_hook(msg_id))
+        .map_err(|_| Error::ReplyHook)?
+        .await
+        .map_err(|_| Error::ReplyFailure)?;
+
+    Ok(())
+}
+
+fn handle_reply_hook(msg_id: MessageId) {
+    let msg_tracker = msg_tracker_mut();
+
+    let msg_info = msg_tracker
+        .get_message_info(&msg_id)
+        .expect("Unexpected: msg info does not exist");
+    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
+
+    match msg_info.status {
+        MessageStatus::SendingMessageToBridgeBuiltin | MessageStatus::WaitingReplyFromBuiltin => {
+            let reply = decode_bridge_reply(&reply_bytes).ok().flatten();
+            msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(reply));
+        }
+        _ => {}
+    };
+}
+
+fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<U256>, Error> {
+    let reply =
+        gbuiltin_eth_bridge::Response::decode(&mut bytes).map_err(|_| Error::BuiltinDecode)?;
+
+    match reply {
+        gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => Ok(Some(nonce)),
     }
 }

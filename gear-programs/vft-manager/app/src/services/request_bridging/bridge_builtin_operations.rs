@@ -18,8 +18,6 @@ pub async fn send_message_to_bridge_builtin(
 ) -> Result<U256, Error> {
     let msg_tracker = msg_tracker_mut();
 
-    msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
-
     let payload_bytes = payload.pack();
 
     let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {

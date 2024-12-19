@@ -66,6 +66,8 @@ pub async fn request_bridging<T: ExecContext>(
         amount,
     };
 
+    msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
+
     let bridge_builtin_reply = bridge_builtin_operations::send_message_to_bridge_builtin(
         state.gear_bridge_builtin,
         state.erc20_manager_address,
@@ -78,6 +80,9 @@ pub async fn request_bridging<T: ExecContext>(
     let nonce = match bridge_builtin_reply {
         Ok(nonce) => nonce,
         Err(e) => {
+            msg_tracker_mut()
+                .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+
             match supply_type {
                 TokenSupply::Ethereum => {
                     token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
@@ -109,17 +114,21 @@ pub async fn request_bridging<T: ExecContext>(
 /// or some other temporary error) but funds have already been locked/burnt.
 ///
 /// This function can return funds back to the user in the following scenarios:
-/// - Token lock/burn is complete but message to the built-in actor haven't yet been sent.
-/// - Message to the built-in actor have returned error but token refund message haven't been sent yet.
-/// - token refund message have been sent but it have failed.
+/// - Token lock/burn is complete but message to the built-in actor haven't been sent yet. It can happen if
+///     user haven't attached gas enough to process the message further after the first `wake` or if network
+///     is loaded and timeout we've set to the reply is expired.
+/// - Message to the built-in actor have returned error but token refund message haven't been sent yet. It
+///     can happen if user haven't attached gas enough to process the message further after the second `wake`
+///     or if network is loaded and timeout we've set to the reply is expired.
+/// - Token refund message have been sent but it have failed. This case should be practically impossible
+///     due to the invariants that `vft-manager` provides but left just in case.
 pub async fn handle_interrupted_transfer<T: ExecContext>(
     service: &mut VftManager<T>,
     msg_id: MessageId,
 ) -> Result<(), Error> {
     let config = service.config();
-    let msg_tracker = msg_tracker::msg_tracker_mut();
 
-    let msg_info = msg_tracker
+    let msg_info = msg_tracker_mut()
         .get_message_info(&msg_id)
         .expect("Unexpected: msg status does not exist");
 
@@ -133,9 +142,7 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
 
     match msg_info.status {
         MessageStatus::TokenDepositCompleted(true)
-        | MessageStatus::SendingMessageToBridgeBuiltin
         | MessageStatus::BridgeResponseReceived(None)
-        | MessageStatus::SendingMessageToReturnTokens
         | MessageStatus::TokensReturnComplete(false) => {
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
@@ -153,13 +160,7 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
 
             Ok(())
         }
-        MessageStatus::TokenDepositCompleted(false)
-        | MessageStatus::SendingMessageToDepositTokens
-        | MessageStatus::WaitingReplyFromTokenDepositMessage
-        | MessageStatus::WaitingReplyFromBuiltin
-        | MessageStatus::WaitingReplyFromTokenReturnMessage
-        | MessageStatus::BridgeResponseReceived(Some(_))
-        | MessageStatus::TokensReturnComplete(true) => {
+        _ => {
             panic!("Unexpected status or transaction completed.")
         }
     }

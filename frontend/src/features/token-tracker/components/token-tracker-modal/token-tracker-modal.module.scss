@@ -26,13 +26,3 @@
   font-weight: 600;
   line-height: 16px;
 }
-
-// TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
-// fast fix for now, cuz major font update was made without a fallback,
-:global(#modal-root) {
-  > div > div > header > h3 {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-  }
-}

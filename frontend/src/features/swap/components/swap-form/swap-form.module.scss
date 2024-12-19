@@ -72,12 +72,6 @@
   .select {
     flex-shrink: 0;
     min-width: 95px;
-
-    // TODO: temp fix for https://github.com/gear-tech/gear-js/issues/1705
-    // feel free to remove after @gear-js/vara-ui is updated
-    select {
-      padding-right: 32px;
-    }
   }
 }
 

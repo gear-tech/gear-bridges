@@ -7,7 +7,7 @@ import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useBridge } from '@/contexts';
-import { useVaraAccountBalance, useEthAccountBalance, useTokens, useLargeModal } from '@/hooks';
+import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
@@ -41,14 +41,11 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   const ethAccountBalance = useEthAccountBalance();
   const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
-  const renderHeading = () => (
-    <>
-      My Tokens
-      <span className={styles.network}>
-        {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
-        {isVaraNetwork ? 'Vara' : 'Ethereum'}
-      </span>
-    </>
+  const renderNativeToken = () => (
+    <span className={styles.network}>
+      {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
+      {isVaraNetwork ? 'Vara' : 'Ethereum'}
+    </span>
   );
 
   const handleTransferClick = (index: number) => {
@@ -83,12 +80,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
       .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
   };
 
-  useLargeModal();
-
   return (
-    // TODO: remove assertion after @gear-js/vara-ui heading is updated to accept ReactNode.
-    // fast fix for now, cuz major font update was made without a fallback,
-    <Modal heading={renderHeading() as unknown as string} close={close}>
+    <Modal heading="My Tokens" headerAddon={renderNativeToken()} close={close} maxWidth="large">
       <ul className={styles.list}>
         {accountBalance.formattedValue && (
           <li>

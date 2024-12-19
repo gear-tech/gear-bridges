@@ -38,8 +38,6 @@ function NetworkWalletField() {
   return (
     <>
       {isConnected ? (
-        // TODO: button
-        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
         <button type="button" className={styles.button} onClick={handleButtonClick}>
           {SVG && <SVG />}
           {ethWallet && <img src={ethWallet.icon} alt="wallet" />}

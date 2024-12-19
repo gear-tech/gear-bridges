@@ -5,7 +5,7 @@ import { formatUnits } from 'viem';
 
 import { CopyButton, FeeAndTimeFooter, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
-import { useLargeModal, useTokens } from '@/hooks';
+import { useTokens } from '@/hooks';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -61,18 +61,12 @@ function TransactionModal({
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
 
-  const renderHeading = () => (
-    <>
-      Transaction Details
-      {status && <TransactionStatus status={status} />}
-    </>
-  );
-
-  useLargeModal();
-
   return (
-    // TODO: remove assertion after @gear-js/vara-ui update
-    <Modal heading={renderHeading() as unknown as string} close={close}>
+    <Modal
+      heading="Transaction Details"
+      headerAddon={status && <TransactionStatus status={status} />}
+      close={close}
+      maxWidth="large">
       {(txHash || timestamp) && (
         <header className={styles.header}>
           {txHash && (

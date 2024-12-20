@@ -1,4 +1,5 @@
 import { formatBalance } from '@polkadot/util';
+import { ComponentProps } from 'react';
 import { formatUnits } from 'viem';
 
 import { cx } from '@/utils';
@@ -11,18 +12,20 @@ type Props = {
   value: bigint;
   decimals: number;
   symbol: string;
+  tooltipPosition?: ComponentProps<typeof Tooltip>['position'];
   className?: string;
 };
 
-function FormattedBalance({ value, decimals, symbol, className }: Props) {
+function FormattedBalance({ value, decimals, symbol, tooltipPosition, className }: Props) {
   const formattedValue = formatUnits(value, decimals);
   const compactBalance = formatBalance(value, { decimals, withUnit: symbol, withZero: false });
 
   return (
-    <span className={cx(styles.balance, className)}>
-      {compactBalance}
-      <Tooltip text={`${formattedValue} ${symbol}`} />
-    </span>
+    <Tooltip value={`${formattedValue} ${symbol}`} position={tooltipPosition}>
+      <span className={cx(styles.balance, className)}>
+        {compactBalance === '0' ? `${compactBalance} ${symbol}` : compactBalance}
+      </span>
+    </Tooltip>
   );
 }
 

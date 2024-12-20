@@ -47,7 +47,7 @@ function useSwapForm(
   const handleSubmit = form.handleSubmit((values) => {
     const onSuccess = () => {
       reset();
-      alert.success('Transfer request is successful');
+      alert.success('Your transfer request was successful');
     };
 
     const onError = (error: WriteContractErrorType | string) => {

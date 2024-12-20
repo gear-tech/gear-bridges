@@ -1,4 +1,4 @@
-import { HexString } from '@gear-js/api';
+import { ExtrinsicFailedData, HexString } from '@gear-js/api';
 import { BaseError, formatUnits, parseUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
@@ -73,7 +73,12 @@ const getMergedBalance = (
 
 // string is only for cancelled sign and send popup error during useSendProgramTransaction
 // reevaluate after @gear-js/react-hooks update
-const getErrorMessage = (error: Error | WriteContractErrorType | string) =>
-  typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
+const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
+  if (typeof error === 'object' && 'docs' in error) {
+    return error.docs || error.method || error.name;
+  }
+
+  return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
+};
 
 export { getAmountSchema, getOptions, getMergedBalance, getErrorMessage };

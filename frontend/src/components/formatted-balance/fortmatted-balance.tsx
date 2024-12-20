@@ -2,11 +2,8 @@ import { formatBalance } from '@polkadot/util';
 import { ComponentProps } from 'react';
 import { formatUnits } from 'viem';
 
-import { cx } from '@/utils';
-
+import { TruncatedText } from '../layout';
 import { Tooltip } from '../tooltip';
-
-import styles from './fortmatted-balance.module.scss';
 
 type Props = {
   value: bigint;
@@ -22,9 +19,10 @@ function FormattedBalance({ value, decimals, symbol, tooltipPosition, className 
 
   return (
     <Tooltip value={`${formattedValue} ${symbol}`} position={tooltipPosition}>
-      <span className={cx(styles.balance, className)}>
-        {compactBalance === '0' ? `${compactBalance} ${symbol}` : compactBalance}
-      </span>
+      <TruncatedText
+        value={compactBalance === '0' ? `${compactBalance} ${symbol}` : compactBalance}
+        className={className}
+      />
     </Tooltip>
   );
 }

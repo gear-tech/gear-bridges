@@ -2,18 +2,18 @@ import { useAlert } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
+import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import { logger } from '@/utils';
+import { isUndefined, logger } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { FormattedValues } from '../types';
 import { getAmountSchema, getErrorMessage, getMergedBalance } from '../utils';
 
 type Values = {
-  value: bigint | undefined;
-  formattedValue: string | undefined;
+  data: bigint | undefined;
   isLoading: boolean;
 };
 
@@ -28,7 +28,7 @@ function useSwapForm(
 ) {
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(isNativeToken, accountBalance.value, ftBalance.value, decimals);
+  const valueSchema = getAmountSchema(isNativeToken, accountBalance.data, ftBalance.data, decimals);
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({
@@ -64,12 +64,14 @@ function useSwapForm(
   }, [disabled]);
 
   const setMaxBalance = () => {
-    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance, decimals) : ftBalance;
-    if (!balance.formattedValue) throw new Error('Balance is not defined');
+    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
+    if (isUndefined(decimals)) throw new Error('Decimals are not defined');
+    if (isUndefined(balance.data)) throw new Error('Balance is not defined');
 
+    const formattedValue = formatUnits(balance.data, decimals);
     const shouldValidate = formState.isSubmitted; // validating only if validation was already fired
 
-    setValue(FIELD_NAME.VALUE, balance.formattedValue, { shouldValidate });
+    setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate });
   };
 
   return { form, amount, handleSubmit, setMaxBalance };

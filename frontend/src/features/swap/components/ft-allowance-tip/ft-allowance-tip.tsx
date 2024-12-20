@@ -35,15 +35,19 @@ function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork, is
   };
 
   return (
-    <Tooltip>
-      <p className={styles.heading}>
-        {allowance > 0
-          ? `You have already approved ${formattedAllowance} ${symbol} to the ${contractName} contract.`
-          : `You don't have any approved tokens to the ${contractName} contract yet.`}
-      </p>
+    <Tooltip
+      value={
+        <>
+          <p className={styles.heading}>
+            {allowance > 0
+              ? `You have already approved ${formattedAllowance} ${symbol} to the ${contractName} contract.`
+              : `You don't have any approved tokens to the ${contractName} contract yet.`}
+          </p>
 
-      <p className={styles.subheading}>{getSubheading()}</p>
-    </Tooltip>
+          <p className={styles.subheading}>{getSubheading()}</p>
+        </>
+      }
+    />
   );
 }
 

@@ -1,6 +1,5 @@
 import { getTypedEntries, useAccount, useAlert } from '@gear-js/react-hooks';
 import { Modal, Button } from '@gear-js/vara-ui';
-import { formatUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
@@ -16,7 +15,7 @@ import { BalanceCard } from '../card';
 import styles from './token-tracker-modal.module.scss';
 
 type Props = {
-  lockedBalance: { value: bigint | undefined; formattedValue: string | undefined };
+  lockedBalance: bigint | undefined;
   close: () => void;
 };
 
@@ -63,7 +62,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
       <li key={address}>
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
-          value={formatUnits(balance, decimals[address] ?? 0)}
+          value={balance}
+          decimals={decimals[address] ?? 0}
           symbol={symbols[address] ?? 'Unit'}>
           <Button text="Transfer" color="grey" size="small" onClick={() => handleTransferClick(pairIndex)} />
         </BalanceCard>
@@ -72,10 +72,10 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   };
 
   const handleUnlockBalanceClick = () => {
-    if (!lockedBalance.value) throw new Error('Locked balance is not found');
+    if (isUndefined(lockedBalance)) throw new Error('Locked balance is not found');
 
     burn
-      .sendTransactionAsync({ args: [lockedBalance.value] })
+      .sendTransactionAsync({ args: [lockedBalance] })
       .then(() => alert.success('Tokens unlocked successfully'))
       .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
   };
@@ -83,11 +83,12 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   return (
     <Modal heading="My Tokens" headerAddon={renderNativeToken()} close={close} maxWidth="large">
       <ul className={styles.list}>
-        {accountBalance.formattedValue && (
+        {!isUndefined(accountBalance.data) && (
           <li>
             <BalanceCard
               SVG={isVaraNetwork ? VaraSVG : EthSVG}
-              value={accountBalance.formattedValue}
+              value={accountBalance.data}
+              decimals={isVaraNetwork ? 12 : 18}
               symbol={isVaraNetwork ? 'VARA' : 'ETH'}>
               {!isUndefined(nativePairIndex) && nativePairIndex !== -1 && (
                 <Button
@@ -104,16 +105,17 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
         {renderBalances()}
       </ul>
 
-      {lockedBalance.formattedValue && symbols && (
+      {!isUndefined(lockedBalance) && symbols && decimals && (
         <>
           <h4 className={styles.heading}>Locked Tokens</h4>
 
           <BalanceCard
-            value={lockedBalance.formattedValue}
+            value={lockedBalance}
             SVG={TOKEN_SVG[WRAPPED_VARA_CONTRACT_ADDRESS] ?? TokenPlaceholderSVG}
+            decimals={decimals[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 0}
             symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
             locked>
-            {Boolean(lockedBalance.value) && (
+            {Boolean(lockedBalance) && (
               <Button text="Unlock" size="small" onClick={handleUnlockBalanceClick} isLoading={burn.isPending} />
             )}
           </BalanceCard>

@@ -1,10 +1,9 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
-import { formatUnits } from 'viem';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { Skeleton, TruncatedText } from '@/components';
+import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
 import { TOKEN_SVG } from '@/consts';
 import { cx } from '@/utils';
 
@@ -41,8 +40,6 @@ function TransactionPair(props: Props) {
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
 
-  const formattedAmount = formatUnits(BigInt(amount), decimals[sourceHex] ?? 0);
-
   return (
     <div className={cx(styles.pair, isCompact && styles.compact)}>
       <div className={styles.tx}>
@@ -52,7 +49,13 @@ function TransactionPair(props: Props) {
         </div>
 
         <div>
-          <TruncatedText value={`${formattedAmount} ${sourceSymbol}`} className={styles.amount} />
+          <FormattedBalance
+            value={BigInt(amount)}
+            decimals={decimals[sourceHex] ?? 0}
+            symbol={sourceSymbol}
+            className={styles.amount}
+          />
+
           <TruncatedText value={formattedSenderAddress} className={styles.address} />
         </div>
       </div>
@@ -66,7 +69,13 @@ function TransactionPair(props: Props) {
         </div>
 
         <div>
-          <TruncatedText value={`${formattedAmount} ${destinationSymbol}`} className={styles.amount} />
+          <FormattedBalance
+            value={BigInt(amount)}
+            decimals={decimals[sourceHex] ?? 0}
+            symbol={destinationSymbol}
+            className={styles.amount}
+          />
+
           <TruncatedText value={formattedReceiverAddress} className={styles.address} />
         </div>
       </div>

@@ -101,18 +101,15 @@ fn handle_reply_hook(msg_id: MessageId) {
         .expect("Unexpected: msg info does not exist");
     let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
 
-    match msg_info.status {
-        MessageStatus::SendingMessageToWithdrawTokens => {
-            let reply = match msg_info.details.token_supply {
-                TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
-                TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
-            }
-            .unwrap_or(false);
-
-            msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawComplete(reply));
+    if msg_info.status == MessageStatus::SendingMessageToWithdrawTokens {
+        let reply = match msg_info.details.token_supply {
+            TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
+            TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
         }
-        _ => {}
-    };
+        .unwrap_or(false);
+
+        msg_tracker.update_message_status(msg_id, MessageStatus::TokenWithdrawComplete(reply));
+    }
 }
 
 /// Decode reply received from the `extended-vft::Mint` method.

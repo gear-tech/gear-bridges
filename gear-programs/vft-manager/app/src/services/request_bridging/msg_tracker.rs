@@ -18,18 +18,18 @@ pub struct MessageTracker {
 pub struct MessageInfo {
     /// State of the message.
     pub status: MessageStatus,
-    /// Message details.
+    /// Request details.
     pub details: TxDetails,
 }
 
-/// Details about a message stored in [MessageTracker].
+/// Details about a request associated with a message stored in [MessageTracker].
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct TxDetails {
     /// Address of the `VFT` token which is being bridged.
     pub vara_token_id: ActorId,
     /// Original `VFT` token owner.
     pub sender: ActorId,
-    /// Bridged token amount.
+    /// Bridged tokens amount.
     pub amount: U256,
     /// `ERC20` token receiver on Ethereum.
     pub receiver: H160,

@@ -40,19 +40,19 @@ pub struct TxDetails {
 /// State in which message processing can be.
 #[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
-    /// Message to deposit tokens is awaiting to be sent.
+    /// Message to deposit tokens is sent.
     SendingMessageToDepositTokens,
-    /// Message to deposit tokens sent and reply is received.
+    /// Reply is received for a token deposit message.
     TokenDepositCompleted(bool),
 
-    /// Message to the `pallet-gear-eth-bridge` is awaiting to be sent.
+    /// Message to the `pallet-gear-eth-bridge` is sent.
     SendingMessageToBridgeBuiltin,
-    /// Message to the `pallet-gear-eth-bridge` is sent and reply is received.
+    /// Reply is received for a message to the `pallet-gear-eth-bridge`.
     BridgeResponseReceived(Option<U256>),
 
-    /// Message to refund tokens is awaiting to be sent.
+    /// Message to refund tokens is sent.
     SendingMessageToReturnTokens,
-    /// Message to refund tokens is sent and reply is received.
+    /// Reply is received for a token refund message.
     TokensReturnComplete(bool),
 }
 

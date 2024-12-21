@@ -8,6 +8,10 @@ use super::{
     msg_tracker::{msg_tracker_mut, MessageStatus},
 };
 
+/// Mint `amount` tokens into the `receiver` address.
+///
+/// It will send `Mint` call to the corresponding `VFT` program and
+/// asyncronously wait for the reply.
 pub async fn mint(
     token_id: ActorId,
     receiver: ActorId,
@@ -27,6 +31,11 @@ pub async fn mint(
     .await
 }
 
+/// Transfer `amount` tokens from the current program address to the `receiver` address,
+/// effectively unlocking them.
+///
+/// It will send `TransferFrom` call to the corresponding `VFT` program and
+/// asyncronously wait for the reply.
 pub async fn unlock(
     vara_token_id: ActorId,
     recepient: ActorId,
@@ -48,6 +57,11 @@ pub async fn unlock(
     .await
 }
 
+/// Configure parameters for message sending and send message
+/// asyncronously waiting for the reply.
+///
+/// It will set reply hook to the [handle_reply_hook] and
+/// timeout to the `reply_timeout`.
 pub async fn send_message_with_gas_for_reply(
     destination: ActorId,
     message: Vec<u8>,
@@ -76,6 +90,9 @@ pub async fn send_message_with_gas_for_reply(
     }
 }
 
+/// Handle reply received from `VFT` program.
+///
+/// It will drive [MessageTracker](super::msg_tracker::MessageTracker) state machine further.
 fn handle_reply_hook(msg_id: MessageId) {
     let msg_tracker = msg_tracker_mut();
 
@@ -98,10 +115,12 @@ fn handle_reply_hook(msg_id: MessageId) {
     };
 }
 
+/// Decode reply received from the `extended-vft::Mint` method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecode)
 }
 
+/// Decode reply received from the `extended-vft::TransferFrom` method.
 fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }

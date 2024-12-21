@@ -231,7 +231,7 @@ where
     /// This receipt is decoded under the hood and checked that it's a valid receipt from tx
     /// sent to `ERC20Manager` contract.
     ///
-    /// This entrypoint can be called only by [State::historical_proxy_address] program.
+    /// This method can be called only by [State::historical_proxy_address] program.
     pub async fn submit_receipt(
         &mut self,
         slot: u64,

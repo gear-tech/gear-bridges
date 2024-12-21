@@ -89,7 +89,7 @@ pub async fn mint(
     fetch_withdraw_result(&*msg_tracker, &msg_id)
 }
 
-/// Transfer `amount` tokens from the current program address to the current `receiver` address,
+/// Transfer `amount` tokens from the current program address to the `receiver` address,
 /// effectively unlocking them.
 ///
 /// It will send `TransferFrom` call to the corresponding `VFT` program and
@@ -178,7 +178,7 @@ async fn send_message_with_gas_for_reply(
     Ok(())
 }
 
-/// Handle reply received from `extended-vft` program.
+/// Handle reply received from `VFT` program.
 ///
 /// It will drive [MessageTracker] state machine further.
 fn handle_reply_hook(msg_id: MessageId) {

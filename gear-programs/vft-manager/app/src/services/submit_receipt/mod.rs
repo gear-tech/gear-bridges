@@ -11,10 +11,16 @@ use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
 
 pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
 
-pub(crate) static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+/// Successfully processed Ethereum transactions. They're stored to prevent
+/// double-spending attacks on this program.
+static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+
+/// Maximum amount of successfully processed Ethereum transactions that this
+/// program can store.
 const TX_HISTORY_DEPTH: usize = 500_000;
 
-pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
+/// Get mutable reference to a transactions storage.
+fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe {
         TRANSACTIONS
             .as_mut()
@@ -22,6 +28,7 @@ pub(crate) fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     }
 }
 
+/// Initialize state that's used by this VFT Manager method.
 pub fn seed() {
     msg_tracker::init();
 
@@ -30,6 +37,13 @@ pub fn seed() {
     }
 }
 
+/// Submit rlp-encoded transaction receipt.
+///
+/// This receipt is decoded under the hood and checked that it's a valid receipt from tx
+/// sent to `ERC20Manager` contract. Also it will check that this transaction haven't been
+/// processed yet.
+///
+/// This method can be called only by [State::historical_proxy_address] program.
 pub async fn submit_receipt<T: ExecContext>(
     service: &mut VftManager<T>,
     slot: u64,
@@ -54,7 +68,7 @@ pub async fn submit_receipt<T: ExecContext>(
         return Err(Error::NotSupportedEvent);
     }
 
-    // decode log and check that it is from an allowed address
+    // Decode log and check that it is from an allowed address.
     let (vara_token_id, event) = receipt
         .logs()
         .iter()
@@ -125,6 +139,10 @@ pub async fn submit_receipt<T: ExecContext>(
     Ok(())
 }
 
+/// Try to execute failed request again. It can be used to complete funds withdrawal when
+/// the [submit_receipt] execution unexpectedly finished (due to the insufficient gas amount
+/// or some other temporary error) after message to `VFT` program have already been sent
+/// and failed for some reason (in this case Ethereum transaction hash is already marked as processed).
 pub async fn handle_interrupted_transfer<T: ExecContext>(
     service: &mut VftManager<T>,
     msg_id: MessageId,

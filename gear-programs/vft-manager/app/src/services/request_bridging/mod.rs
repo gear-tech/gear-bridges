@@ -13,7 +13,7 @@ use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
 
 pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
 
-/// Initialize state that's used by this entrypoint.
+/// Initialize state that's used by this VFT Manager method.
 pub fn seed() {
     msg_tracker::init();
 }

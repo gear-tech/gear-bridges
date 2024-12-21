@@ -162,19 +162,21 @@ impl<T> VftManager<T>
 where
     T: ExecContext,
 {
-    /// Change [State::erc20_manager_address].
+    /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
     pub fn update_erc20_manager_address(&mut self, new_erc20_manager_address: H160) {
         self.ensure_admin();
 
         self.state_mut().erc20_manager_address = new_erc20_manager_address;
     }
 
+    /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
     pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
 
         self.state_mut().historical_proxy_address = historical_proxy_address_new;
     }
 
+    /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
     pub fn map_vara_to_eth_address(
         &mut self,
         vara_token_id: ActorId,
@@ -194,6 +196,7 @@ where
         .expect("Failed to emit event");
     }
 
+    /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
 
@@ -206,6 +209,9 @@ where
         .expect("Failed to emit event");
     }
 
+    /// Change [Config]. Can be called only by a [State::admin].
+    ///
+    /// For more info see [Config] docs.
     pub fn update_config(&mut self, config: Config) {
         self.ensure_admin();
 
@@ -214,15 +220,19 @@ where
         }
     }
 
+    /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
         if self.state().admin != self.exec_context.actor_id() {
             panic!("Not admin")
         }
     }
 
-    /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
-    /// and checked that it's a valid receipt from tx sent to `ERC20Manager` contract.
-    /// This entrypoint can be called only by `historical-proxy`.
+    /// Submit rlp-encoded transaction receipt.
+    ///
+    /// This receipt is decoded under the hood and checked that it's a valid receipt from tx
+    /// sent to `ERC20Manager` contract.
+    ///
+    /// This entrypoint can be called only by [State::historical_proxy_address] program.
     pub async fn submit_receipt(
         &mut self,
         slot: u64,
@@ -232,9 +242,9 @@ where
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
     }
 
-    /// Request bridging of tokens from gear to ethereum.
+    /// Request bridging of tokens from Gear to Ethereum.
     ///
-    /// Allowance should allow `vft-manager` to spend `amount` tokens from the `sender` address.
+    /// Allowance should allow current program to spend `amount` tokens from the `sender` address.
     pub async fn request_bridging(
         &mut self,
         sender: ActorId,
@@ -245,6 +255,14 @@ where
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
     }
 
+    /// Process message further if some error was encountered during the `request_bridging`.
+    ///
+    /// This method should be called only to recover funds that were stuck in the middle of the bridging
+    /// and is not a part of a normal workflow.
+    ///
+    /// There can be several reasons for `request_bridging` to fail:
+    /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
+    /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
     pub async fn handle_request_bridging_interrupted_transfer(
         &mut self,
         msg_id: MessageId,
@@ -252,6 +270,14 @@ where
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
+    /// Process message further if some error was encountered during the `submit_receipt`.
+    ///
+    /// This method should be called only to recover funds that were stuck in the middle of the bridging
+    /// and is not a part of a normal workflow.
+    ///
+    /// There can be several reasons for `submit_receipt` to fail:
+    /// - Gas attached to a message wasn't enough to execute entire logic in `submit_receipt`.
+    /// - Network was heavily loaded and some message was stuck so `submit_receipt` failed.
     pub async fn handle_submit_receipt_interrupted_transfer(
         &mut self,
         msg_id: MessageId,
@@ -259,38 +285,46 @@ where
         submit_receipt::handle_interrupted_transfer(self, msg_id).await
     }
 
+    /// Get state of a `request_bridging` message tracker.
     pub fn request_briding_msg_tracker_state(
         &self,
     ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
         request_bridging::msg_tracker_state()
     }
 
+    /// Get state of a `submit_receipt` message tracker.
     pub fn submit_receipt_msg_tracker_state(
         &self,
     ) -> Vec<(MessageId, submit_receipt::MsgTrackerMessageInfo)> {
         submit_receipt::msg_tracker_state()
     }
 
+    /// Get current [token mapping](State::token_map).
     pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160, TokenSupply)> {
         self.state().token_map.read_state()
     }
 
+    /// Get current [State::erc20_manager_address] address.
     pub fn erc20_manager_address(&self) -> H160 {
         self.state().erc20_manager_address
     }
 
+    /// Get current [State::gear_bridge_builtin] address.
     pub fn gear_bridge_builtin(&self) -> ActorId {
         self.state().gear_bridge_builtin
     }
 
+    /// Get current [State::admin] address.
     pub fn admin(&self) -> ActorId {
         self.state().admin
     }
 
+    /// Get current [Config].
     pub fn get_config(&self) -> Config {
         self.config().clone()
     }
 
+    /// Get current [State::historical_proxy_address].
     pub fn historical_proxy_address(&self) -> ActorId {
         self.state().historical_proxy_address
     }

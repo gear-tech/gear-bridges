@@ -298,7 +298,7 @@ async fn test_withdraw_fails_with_bad_origin() {
         .await
         .unwrap();
 
-    assert_eq!(result.unwrap_err(), Error::NotEthClient);
+    assert_eq!(result.unwrap_err(), Error::NotHistoricalProxy);
 }
 
 async fn balance_of(

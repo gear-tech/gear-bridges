@@ -42,7 +42,7 @@ pub async fn send_message_to_bridge_builtin(
                 msg_tracker.remove_message_info(&msg_id);
                 Ok(nonce)
             }
-            MessageStatus::BridgeResponseReceived(None) => Err(Error::BridgeBuiltinMessageFailed),
+            MessageStatus::BridgeResponseReceived(None) => Err(Error::MessageFailed),
             _ => Err(Error::InvalidMessageStatus),
         }
     } else {

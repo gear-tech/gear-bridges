@@ -105,7 +105,7 @@ fn fetch_deposit_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Res
     if let Some(info) = msg_tracker.message_info.get(msg_id) {
         match info.status {
             MessageStatus::TokenDepositCompleted(true) => Ok(()),
-            MessageStatus::TokenDepositCompleted(false) => Err(Error::BurnTokensFailed),
+            MessageStatus::TokenDepositCompleted(false) => Err(Error::MessageFailed),
             _ => Err(Error::InvalidMessageStatus),
         }
     } else {

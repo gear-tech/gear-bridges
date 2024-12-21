@@ -44,7 +44,7 @@ pub async fn submit_receipt<T: ExecContext>(
     let sender = service.exec_context.actor_id();
 
     if sender != state.historical_proxy_address {
-        return Err(Error::NotEthClient);
+        return Err(Error::NotHistoricalProxy);
     }
 
     let receipt =

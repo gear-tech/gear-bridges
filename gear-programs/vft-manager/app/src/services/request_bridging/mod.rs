@@ -39,7 +39,7 @@ pub async fn request_bridging<T: ExecContext>(
         sender,
         amount,
         receiver,
-        token_supply: TokenSupply::Ethereum,
+        token_supply: supply_type,
     };
 
     msg_tracker_mut().insert_message_info(

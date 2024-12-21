@@ -88,7 +88,6 @@ enum Event {
     },
 }
 
-// TODO: Move to the `VftManager`.
 static mut STATE: Option<State> = None;
 static mut CONFIG: Option<Config> = None;
 
@@ -334,6 +333,7 @@ impl<T> VftManager<T>
 where
     T: ExecContext,
 {
+    /// Initialize VFT Manager service.
     pub fn seed(config: InitConfig, exec_context: T) {
         unsafe {
             STATE = Some(State {
@@ -350,18 +350,22 @@ where
         submit_receipt::seed();
     }
 
+    /// Create VFT Manager service.
     pub fn new(exec_context: T) -> Self {
         Self { exec_context }
     }
 
+    /// Get a reference to the global [State].
     fn state(&self) -> &State {
         unsafe { STATE.as_ref().expect("VftManager::seed() should be called") }
     }
 
+    /// Get a mutable reference to the global [State].
     fn state_mut(&mut self) -> &mut State {
         unsafe { STATE.as_mut().expect("VftManager::seed() should be called") }
     }
 
+    /// Get a reference to the global [Config].
     fn config(&self) -> &Config {
         unsafe {
             CONFIG

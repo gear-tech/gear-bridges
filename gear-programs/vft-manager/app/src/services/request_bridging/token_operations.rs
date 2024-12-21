@@ -8,6 +8,10 @@ use crate::services::TokenSupply;
 use super::super::{Config, Error};
 use super::msg_tracker::{msg_tracker_mut, MessageStatus, MessageTracker};
 
+/// Burn `amount` tokens from the `sender` address.
+///
+/// It will send `Burn` call to the corresponding `VFT` program and
+/// asyncronously wait for the reply.
 pub async fn burn(
     vara_token_id: ActorId,
     sender: ActorId,
@@ -30,6 +34,11 @@ pub async fn burn(
     fetch_deposit_result(&*msg_tracker_mut(), &msg_id)
 }
 
+/// Transfer `amount` tokens from the `sender` address to the current program address,
+/// effectively locking them.
+///
+/// It will send `TransferFrom` call to the corresponding `VFT` program and
+/// asyncronously wait for the reply.
 pub async fn lock(
     vara_token_id: ActorId,
     sender: ActorId,
@@ -53,6 +62,10 @@ pub async fn lock(
     fetch_deposit_result(&*msg_tracker_mut(), &msg_id)
 }
 
+/// Mint `amount` tokens into the `receiver` address.
+///
+/// It will send `Mint` call to the corresponding `VFT` program and
+/// asyncronously wait for the reply.
 pub async fn mint(
     token_id: ActorId,
     receiver: ActorId,
@@ -76,9 +89,14 @@ pub async fn mint(
     fetch_withdraw_result(&*msg_tracker, &msg_id)
 }
 
+/// Transfer `amount` tokens from the current program address to the current `receiver` address,
+/// effectively unlocking them.
+///
+/// It will send `TransferFrom` call to the corresponding `VFT` program and
+/// asyncronously wait for the reply.
 pub async fn unlock(
     vara_token_id: ActorId,
-    recepient: ActorId,
+    receiver: ActorId,
     amount: U256,
     config: &Config,
     msg_id: MessageId,
@@ -86,7 +104,7 @@ pub async fn unlock(
     let msg_tracker = msg_tracker_mut();
 
     let sender = gstd::exec::program_id();
-    let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, recepient, amount);
+    let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, receiver, amount);
 
     send_message_with_gas_for_reply(
         vara_token_id,
@@ -101,6 +119,11 @@ pub async fn unlock(
     fetch_withdraw_result(&*msg_tracker, &msg_id)
 }
 
+/// Fetch result of the message sent to deposit tokens into this program.
+///
+/// It will look for the specified [MessageId] in the [MessageTracker] and return result
+/// based on this message state. The state should be present in the [MessageTracker] according
+/// to the [handle_reply_hook] logic.
 fn fetch_deposit_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Result<(), Error> {
     if let Some(info) = msg_tracker.message_info.get(msg_id) {
         match info.status {
@@ -113,6 +136,11 @@ fn fetch_deposit_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Res
     }
 }
 
+/// Fetch result of the message sent to withdraw tokens from this program.
+///
+/// It will look for the specified [MessageId] in the [MessageTracker] and return result
+/// based on this message state. The state should be present in the [MessageTracker] according
+/// to the [handle_reply_hook] logic.
 fn fetch_withdraw_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Result<(), Error> {
     if let Some(info) = msg_tracker.message_info.get(msg_id) {
         match info.status {
@@ -125,6 +153,11 @@ fn fetch_withdraw_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Re
     }
 }
 
+/// Configure parameters for message sending and send message
+/// asyncronously waiting for the reply.
+///
+/// It will set reply hook to the [handle_reply_hook] and
+/// timeout to the `reply_timeout`.
 async fn send_message_with_gas_for_reply(
     destination: ActorId,
     message: Vec<u8>,
@@ -145,6 +178,9 @@ async fn send_message_with_gas_for_reply(
     Ok(())
 }
 
+/// Handle reply received from `extended-vft` program.
+///
+/// It will drive [MessageTracker] state machine further.
 fn handle_reply_hook(msg_id: MessageId) {
     let msg_tracker = msg_tracker_mut();
 
@@ -176,18 +212,22 @@ fn handle_reply_hook(msg_id: MessageId) {
     };
 }
 
+/// Decode reply received from the `extended-vft::Burn` method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::Burn::decode_reply(bytes).map_err(|_| Error::BurnTokensDecode)
 }
 
+/// Decode reply received from the `extended-vft::TransferFrom` method.
 fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }
 
+/// Decode reply received from the `extended-vft::Mint` method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecode)
 }
 
+/// Decode reply received from the `extended-vft::TransferFrom` method.
 fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
     vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }

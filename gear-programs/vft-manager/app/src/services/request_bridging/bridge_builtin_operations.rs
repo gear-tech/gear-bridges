@@ -8,48 +8,6 @@ use super::{
     msg_tracker::{msg_tracker_mut, MessageStatus},
 };
 
-/// Send bridging request to a `pallet-gear-eth-bridge` built-in actor.
-pub async fn send_message_to_bridge_builtin(
-    gear_bridge_builtin: ActorId,
-    erc20_manager: H160,
-    payload: Payload,
-    config: &Config,
-    msg_id: MessageId,
-) -> Result<U256, Error> {
-    let msg_tracker = msg_tracker_mut();
-
-    let payload_bytes = payload.pack();
-
-    let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
-        destination: erc20_manager,
-        payload: payload_bytes,
-    }
-    .encode();
-
-    send_message_with_gas_for_reply(
-        gear_bridge_builtin,
-        bytes,
-        config.gas_to_send_request_to_builtin,
-        config.gas_for_reply_deposit,
-        config.reply_timeout,
-        msg_id,
-    )
-    .await?;
-
-    if let Some(info) = msg_tracker.get_message_info(&msg_id) {
-        match info.status {
-            MessageStatus::BridgeResponseReceived(Some(nonce)) => {
-                msg_tracker.remove_message_info(&msg_id);
-                Ok(nonce)
-            }
-            MessageStatus::BridgeResponseReceived(None) => Err(Error::MessageFailed),
-            _ => Err(Error::InvalidMessageStatus),
-        }
-    } else {
-        Err(Error::MessageNotFound)
-    }
-}
-
 /// Payload of the message that `ERC20Manager` will accept.
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct Payload {
@@ -78,26 +36,59 @@ impl Payload {
     }
 }
 
-async fn send_message_with_gas_for_reply(
-    destination: ActorId,
-    message: Vec<u8>,
-    gas_to_send: u64,
-    gas_deposit: u64,
-    reply_timeout: u32,
+/// Send bridging request to a `pallet-gear-eth-bridge` built-in actor.
+///
+/// It will asyncronously wait for reply from built-in and decode it
+/// when it'll be received.
+pub async fn send_message_to_bridge_builtin(
+    gear_bridge_builtin: ActorId,
+    erc20_manager: H160,
+    payload: Payload,
+    config: &Config,
     msg_id: MessageId,
-) -> Result<(), Error> {
-    gstd::msg::send_bytes_with_gas_for_reply(destination, message, gas_to_send, 0, gas_deposit)
-        .map_err(|_| Error::SendFailure)?
-        .up_to(Some(reply_timeout))
-        .map_err(|_| Error::ReplyTimeout)?
-        .handle_reply(move || handle_reply_hook(msg_id))
-        .map_err(|_| Error::ReplyHook)?
-        .await
-        .map_err(|_| Error::ReplyFailure)?;
+) -> Result<U256, Error> {
+    let msg_tracker = msg_tracker_mut();
 
-    Ok(())
+    let payload_bytes = payload.pack();
+    let bytes = gbuiltin_eth_bridge::Request::SendEthMessage {
+        destination: erc20_manager,
+        payload: payload_bytes,
+    }
+    .encode();
+
+    gstd::msg::send_bytes_with_gas_for_reply(
+        gear_bridge_builtin,
+        bytes,
+        config.gas_to_send_request_to_builtin,
+        0,
+        config.gas_for_reply_deposit,
+    )
+    .map_err(|_| Error::SendFailure)?
+    .up_to(Some(config.reply_timeout))
+    .map_err(|_| Error::ReplyTimeout)?
+    .handle_reply(move || handle_reply_hook(msg_id))
+    .map_err(|_| Error::ReplyHook)?
+    .await
+    .map_err(|_| Error::ReplyFailure)?;
+
+    if let Some(info) = msg_tracker.get_message_info(&msg_id) {
+        match info.status {
+            MessageStatus::BridgeResponseReceived(Some(nonce)) => {
+                msg_tracker.remove_message_info(&msg_id);
+                Ok(nonce)
+            }
+            MessageStatus::BridgeResponseReceived(None) => Err(Error::MessageFailed),
+            _ => Err(Error::InvalidMessageStatus),
+        }
+    } else {
+        Err(Error::MessageNotFound)
+    }
 }
 
+/// Handle reply received from `pallet-gear-eth-bridge` built-in actor.
+///
+/// It will switch state of the currently processed message in
+/// [message tracker](super::msg_tracker::MessageTracker) correspondingly.
 fn handle_reply_hook(msg_id: MessageId) {
     let msg_tracker = msg_tracker_mut();
 
@@ -115,6 +106,7 @@ fn handle_reply_hook(msg_id: MessageId) {
     };
 }
 
+/// Decode reply received from `pallet-gear-eth-bridge` built-in actor.
 fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<U256>, Error> {
     let reply =
         gbuiltin_eth_bridge::Response::decode(&mut bytes).map_err(|_| Error::BuiltinDecode)?;

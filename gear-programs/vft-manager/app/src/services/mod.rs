@@ -11,71 +11,158 @@ mod submit_receipt;
 
 pub use submit_receipt::abi as eth_abi;
 
+/// VFT Manager service.
 pub struct VftManager<ExecContext> {
     exec_context: ExecContext,
 }
 
+/// Type of the token supply.
 #[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy)]
 #[repr(u8)]
 pub enum TokenSupply {
+    /// Token supply is located on Ethereum.
+    ///
+    /// This means that we're working with some pre-existing `ERC20` token on Ethereum and with
+    /// wrapped `VFT` token on Gear.
+    ///
+    /// When this type of token supply is activated corresponding tokens will be minted/burned
+    /// on the gear side and locked/unlocked on the Ethereum side.
+    ///
+    /// For example this type of token supply can be used to work with
+    /// `USDT ERC20 token`/`wrappedUSDT VFT token` pair.
     Ethereum = 0,
+    /// Token supply is located on Gear.
+    ///
+    /// This means that we're working with some pre-existing `VFT` token on Gear and with
+    /// wrapped `ERC20` token on Ethereum.
+    ///
+    /// When this type of token supply is activated corresponding tokens will be locked/unlocked
+    /// on the gear side and minted/burned on the Gear side.
+    ///
+    /// For example this type of token supply can be used to work with
+    /// `VARA VFT token`/`wrappedVARA ERC20 token` pair.
     Gear = 1,
 }
 
+/// Events emitted by VFT Manager service.
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 enum Event {
+    /// Token mapping was added.
+    ///
+    /// This means that VFT Manager service now supports specified
+    /// [vara_token_id](Event::TokenMappingAdded::vara_token_id)/[eth_token_id](Event::TokenMappingAdded::eth_token_id) pair.
     TokenMappingAdded {
+        /// `VFT` token address that was added into mapping.
         vara_token_id: ActorId,
+        /// `ERC20` token address that was added into mapping.
         eth_token_id: H160,
     },
+    /// Token mapping was removed.
+    ///
+    /// This means that VFT Manager service doesn't support specified
+    /// [vara_token_id](Event::TokenMappingRemoved::vara_token_id)/[eth_token_id](Event::TokenMappingRemoved::eth_token_id)
+    /// pair anymore.
     TokenMappingRemoved {
+        /// `VFT` token address that was removed from mapping.
         vara_token_id: ActorId,
+        /// `ERC20` token address that was removed from mapping.
         eth_token_id: H160,
     },
+    /// Bridging of tokens from Gear to Ethereum was requested.
+    ///
+    /// When this event is emitted it means that `VFT` tokens were locked/burned and
+    /// a message to the gear-eth-bridge built-in actor was successfully submitted.
     BridgingRequested {
+        /// Nonce that gear-eth-bridge built-in actor have returned.
         nonce: U256,
+        /// `VFT` token address that was locked/burned.
         vara_token_id: ActorId,
+        /// Amount of tokens that should be bridged.
         amount: U256,
+        /// Original token owner on the Gear side.
         sender: ActorId,
+        /// Receiver of the tokens on the Ethereum side.
         receiver: H160,
     },
 }
 
+// TODO: Move to the `VftManager`.
 static mut STATE: Option<State> = None;
 static mut CONFIG: Option<Config> = None;
 
+/// State of the VFT Manager service.
 #[derive(Debug, Default)]
 pub struct State {
+    /// Address of the gear-eth-bridge built-in actor.
     gear_bridge_builtin: ActorId,
+    /// Governance of this program. This address is in the charge of:
+    /// - Changing [Config]
+    /// - Updating [State::erc20_manager_address]
+    /// - Updating [State::historical_proxy_address]
+    /// - Managing token mapping in [State::token_map]
     admin: ActorId,
+    /// Address of the `ERC20Manager` contract address on Ethereum.
+    ///
+    /// Can be adjusted by the [State::admin].
     erc20_manager_address: H160,
+    /// Mapping between `VFT` and `ERC20` tokens.
+    ///
+    /// Can be adjusted by the [State::admin].
     token_map: TokenMap,
+    /// Address of the `historical-proxy` program.
+    ///
+    /// VFT Manager service will only accept incoming requests on token withdrawals
+    /// from this address.
+    ///
+    /// Can be adjusted by the [State::admin].
     historical_proxy_address: ActorId,
 }
 
+/// Config that should be provided to this service on initialization.
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
+    /// Address of the `ERC20Manager` contract on ethereum.
+    ///
+    /// For more info see [State::erc20_manager_address].
     pub erc20_manager_address: H160,
+    /// Address of the gear-eth-bridge built-in actor.
     pub gear_bridge_builtin: ActorId,
+    /// Address of the `historical-proxy` program.
+    ///
+    /// For more info see [State::historical_proxy_address].
     pub historical_proxy_address: ActorId,
+    /// Config that will be used to send messages to the other programs.
+    ///
+    /// For more info see [Config].
     pub config: Config,
 }
 
+/// Config that will be used to send messages to the other programs.
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
+    /// Gas limit for token operations. Token operations include:
+    /// - Mint
+    /// - Burn
+    /// - TransferFrom
     gas_for_token_ops: u64,
+    /// Gas to reserve for reply processing.
     gas_for_reply_deposit: u64,
+    /// Gas limit for gear-eth-bridge built-in actor request.
     gas_to_send_request_to_builtin: u64,
+    /// Timeout in blocks that current program will wait for reply from
+    /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
 }
 
+/// VFT Manager service implementation.
 #[service(events = Event)]
 impl<T> VftManager<T>
 where
     T: ExecContext,
 {
+    /// Change [State::erc20_manager_address].
     pub fn update_erc20_manager_address(&mut self, new_erc20_manager_address: H160) {
         self.ensure_admin();
 

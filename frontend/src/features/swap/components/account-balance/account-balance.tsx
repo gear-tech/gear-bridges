@@ -2,7 +2,7 @@ import { useApi } from '@gear-js/react-hooks';
 import { useEffect } from 'react';
 import { formatUnits } from 'viem';
 
-import { Skeleton, Tooltip } from '@/components';
+import { Skeleton, Tooltip, FormattedBalance } from '@/components';
 import { isUndefined } from '@/utils';
 
 import DangerSVG from '../../assets/danger.svg?react';
@@ -17,7 +17,7 @@ type Props = ReturnType<UseAccountBalance> & {
   isVaraNetwork: boolean;
 };
 
-function AccountBalance({ value, formattedValue, isLoading, isVaraNetwork, submit }: Props) {
+function AccountBalance({ data: value, isLoading, isVaraNetwork, submit }: Props) {
   const { api } = useApi();
 
   const { error } = submit;
@@ -31,7 +31,7 @@ function AccountBalance({ value, formattedValue, isLoading, isVaraNetwork, submi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  if (isLoading || !formattedValue || !api) return <Skeleton />;
+  if (isLoading || isUndefined(value) || !api) return <Skeleton />;
 
   const decimals = isVaraNetwork ? api.registry.chainDecimals[0] : 18;
   const symbol = isVaraNetwork ? 'VARA' : 'ETH';
@@ -40,17 +40,22 @@ function AccountBalance({ value, formattedValue, isLoading, isVaraNetwork, submi
     <div className={styles.container}>
       <div className={styles.balance}>
         <WalletSVG />
-        {`${formattedValue} ${symbol}`}
+        <FormattedBalance value={value} decimals={decimals} symbol={symbol} />
       </div>
 
       {isBalanceError && (
-        <Tooltip SVG={DangerSVG}>
-          <p>{error.message}</p>
+        <Tooltip
+          SVG={DangerSVG}
+          value={
+            <>
+              <p>{error.message}</p>
 
-          <p>
-            At least {formatUnits(error.requiredValue, decimals)} {symbol} is needed
-          </p>
-        </Tooltip>
+              <p>
+                At least {formatUnits(error.requiredValue, decimals)} {symbol} is needed
+              </p>
+            </>
+          }
+        />
       )}
     </div>
   );

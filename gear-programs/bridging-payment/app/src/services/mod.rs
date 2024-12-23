@@ -1,3 +1,5 @@
+//! Bridging Payment service implementation.
+
 use sails_rs::{
     gstd::{msg, ExecContext},
     prelude::*,
@@ -7,17 +9,25 @@ use gstd::exec;
 mod error;
 mod vft_manager_msg;
 
+/// Bridging Payment service.
 pub struct BridgingPayment<ExecContext> {
     exec_context: ExecContext,
 }
 
+/// Events emitted by Bridging Payment service.
 #[derive(Encode, Decode, TypeInfo)]
 pub enum BridgingPaymentEvents {
+    /// Bridging of tokens from Gear to Ethereum is requested successfully.
     TeleportVaraToEth {
+        /// Nonce of the bridging message. Returned by the `pallet-gear-eth-bridge` built-in actor.
         nonce: U256,
+        /// Original owner of the `VFT` tokens on Gear side.
         sender: ActorId,
+        /// Amount of tokens.
         amount: U256,
+        /// Receiver of the `ERC20` tokens on Ethereum side.
         receiver: H160,
+        /// Address of the `ERC20` token that will be received by `receiver` on Ethereum.
         eth_token_id: H160,
     },
 }
@@ -25,25 +35,42 @@ pub enum BridgingPaymentEvents {
 static mut STATE: Option<State> = None;
 static mut CONFIG: Option<Config> = None;
 
+/// Global state of the Bridging Payment service.
 #[derive(Debug)]
 pub struct State {
+    /// Admin of this service. Admin is in charge of:
+    /// - Changing fee
+    /// - Withdrawing collected fees from the program address
+    /// - Updating `vft-manager` address
+    /// - Updating [Config] of this service
     admin_address: ActorId,
+    /// Address of the `vft-manager` where bridging request will be sent.
     vft_manager_address: ActorId,
 }
 
+/// Config usd for Bridging Payment service initialization.
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
+    /// Admin of this service. For detailed description see [State::admin_address].
     pub admin_address: ActorId,
+    /// Address of the `vft-manager` where bridging request will be sent.
     pub vft_manager_address: ActorId,
+    /// [Config] that will be initially set for this service.
     pub config: Config,
 }
 
+/// Config of the Bridging Payment service.
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
+    /// Fee that will be taken from all the incoming bridging requests.
     pub fee: u128,
+    /// Gas that will be reserved for reply processing.
     pub gas_for_reply_deposit: u64,
+    /// Gas that will be attached to a message to the `vft-manager`.
     pub gas_to_send_request_to_vft_manager: u64,
+    /// Reply timeout that will be applied to a message to the `vft-manager`.
     pub reply_timeout: u32,
+    /// Gas that's required to process `make_request` logic.
     pub gas_for_request_to_vft_manager_msg: u64,
 }
 
@@ -69,14 +96,16 @@ where
 
     fn state(&self) -> &State {
         unsafe {
-            STATE.as_ref()
+            STATE
+                .as_ref()
                 .expect("BridgingPayment::seed() should be called")
         }
     }
 
     fn state_mut(&mut self) -> &mut State {
         unsafe {
-            STATE.as_mut()
+            STATE
+                .as_mut()
                 .expect("BridgingPayment::seed() should be called")
         }
     }

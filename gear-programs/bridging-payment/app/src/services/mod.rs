@@ -88,6 +88,7 @@ where
             CONFIG = Some(config.config);
         }
     }
+
     pub fn new(exec_context: T) -> Self {
         Self { exec_context }
     }
@@ -129,38 +130,35 @@ where
     T: ExecContext,
 {
     pub fn set_fee(&mut self, fee: u128) {
-        let data = self.data();
-        if data.admin_address != self.exec_context.actor_id() {
-            panic!("Not admin");
-        }
+        self.ensure_admin();
+
         let config: &mut Config = self.config_mut();
         config.fee = fee;
     }
 
     pub fn reclaim_fee(&mut self) {
-        let data = self.data();
-        if data.admin_address != self.exec_context.actor_id() {
-            panic!("Not admin");
-        }
+        self.ensure_admin();
 
         let fee_balance = exec::value_available();
-        msg::send(data.admin_address, "", fee_balance).expect("Failed to reclaim fees");
+        msg::send(self.data().admin_address, "", fee_balance).expect("Failed to reclaim fees");
     }
 
     pub fn update_vft_manager_address(&mut self, new_vft_manager_address: ActorId) {
-        let data = self.data();
-        if data.admin_address != self.exec_context.actor_id() {
-            panic!("Not admin");
-        }
+        self.ensure_admin();
+
         self.data_mut().vft_manager_address = new_vft_manager_address;
     }
 
     pub fn set_config(&mut self, config: Config) {
-        if self.data().admin_address != self.exec_context.actor_id() {
-            panic!("Not admin")
-        }
+        self.ensure_admin();
 
         *self.config_mut() = config;
+    }
+
+    fn ensure_admin(&self) {
+        if self.data().admin_address != self.exec_context.actor_id() {
+            panic!("Not an admin")
+        }
     }
 
     pub async fn make_request(&mut self, amount: U256, receiver: H160, vara_token_id: ActorId) {

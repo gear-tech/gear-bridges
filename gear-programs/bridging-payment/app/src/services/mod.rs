@@ -22,65 +22,39 @@ pub enum BridgingPaymentEvents {
     },
 }
 
-static mut DATA: Option<BridgingPaymentData> = None;
+static mut STATE: Option<State> = None;
 static mut CONFIG: Option<Config> = None;
 
 #[derive(Debug)]
-pub struct BridgingPaymentData {
+pub struct State {
     admin_address: ActorId,
     vft_manager_address: ActorId,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
-    admin_address: ActorId,
-    vft_manager_address: ActorId,
-    config: Config,
-}
-
-impl InitConfig {
-    pub fn new(admin_address: ActorId, vft_manager_address: ActorId, config: Config) -> Self {
-        Self {
-            admin_address,
-            vft_manager_address,
-            config,
-        }
-    }
+    pub admin_address: ActorId,
+    pub vft_manager_address: ActorId,
+    pub config: Config,
 }
 
 #[derive(Debug, Decode, Encode, TypeInfo, Clone)]
 pub struct Config {
-    fee: u128,
-    gas_for_reply_deposit: u64,
-    gas_to_send_request_to_vft_manager: u64,
-    reply_timeout: u32,
-    gas_for_request_to_vft_manager_msg: u64,
+    pub fee: u128,
+    pub gas_for_reply_deposit: u64,
+    pub gas_to_send_request_to_vft_manager: u64,
+    pub reply_timeout: u32,
+    pub gas_for_request_to_vft_manager_msg: u64,
 }
 
-impl Config {
-    pub fn new(
-        fee: u128,
-        gas_for_reply_deposit: u64,
-        gas_to_send_request_to_vft_manager: u64,
-        reply_timeout: u32,
-        gas_for_request_to_vft_manager_msg: u64,
-    ) -> Self {
-        Self {
-            fee,
-            gas_for_reply_deposit,
-            gas_to_send_request_to_vft_manager,
-            reply_timeout,
-            gas_for_request_to_vft_manager_msg,
-        }
-    }
-}
 impl<T> BridgingPayment<T>
 where
     T: ExecContext,
 {
+    /// Initialize state of the Bridging Payment service.
     pub fn seed(config: InitConfig) {
         unsafe {
-            DATA = Some(BridgingPaymentData {
+            STATE = Some(State {
                 admin_address: config.admin_address,
                 vft_manager_address: config.vft_manager_address,
             });
@@ -88,21 +62,22 @@ where
         }
     }
 
+    /// Create Bridging Payment service.
     pub fn new(exec_context: T) -> Self {
         Self { exec_context }
     }
 
-    fn data(&self) -> &BridgingPaymentData {
+    fn state(&self) -> &State {
         unsafe {
-            DATA.as_ref()
-                .expect("BridgingPaymentData::seed() should be called")
+            STATE.as_ref()
+                .expect("BridgingPayment::seed() should be called")
         }
     }
 
-    fn data_mut(&mut self) -> &mut BridgingPaymentData {
+    fn state_mut(&mut self) -> &mut State {
         unsafe {
-            DATA.as_mut()
-                .expect("BridgingPaymentData::seed() should be called")
+            STATE.as_mut()
+                .expect("BridgingPayment::seed() should be called")
         }
     }
 
@@ -110,7 +85,7 @@ where
         unsafe {
             CONFIG
                 .as_ref()
-                .expect("BridgingPaymentData::seed() should be called")
+                .expect("BridgingPayment::seed() should be called")
         }
     }
 
@@ -118,7 +93,7 @@ where
         unsafe {
             CONFIG
                 .as_mut()
-                .expect("BridgingPaymentData::seed() should be called")
+                .expect("BridgingPayment::seed() should be called")
         }
     }
 }
@@ -128,6 +103,9 @@ impl<T> BridgingPayment<T>
 where
     T: ExecContext,
 {
+    /// Set fee that this program will take from incoming requests.
+    ///
+    /// This method can be called only by admin.
     pub fn set_fee(&mut self, fee: u128) {
         self.ensure_admin();
 
@@ -135,19 +113,28 @@ where
         config.fee = fee;
     }
 
+    /// Withdraw fees that were collected from user requests.
+    ///
+    /// This method can be called only by admin.
     pub fn reclaim_fee(&mut self) {
         self.ensure_admin();
 
         let fee_balance = exec::value_available();
-        msg::send(self.data().admin_address, "", fee_balance).expect("Failed to reclaim fees");
+        msg::send(self.state().admin_address, "", fee_balance).expect("Failed to reclaim fees");
     }
 
+    /// Set new `vft-manager` address.
+    ///
+    /// This method can be called only by admin.
     pub fn update_vft_manager_address(&mut self, new_vft_manager_address: ActorId) {
         self.ensure_admin();
 
-        self.data_mut().vft_manager_address = new_vft_manager_address;
+        self.state_mut().vft_manager_address = new_vft_manager_address;
     }
 
+    /// Set new config.
+    ///
+    /// This method can be called only by admin.
     pub fn set_config(&mut self, config: Config) {
         self.ensure_admin();
 
@@ -155,15 +142,29 @@ where
     }
 
     fn ensure_admin(&self) {
-        if self.data().admin_address != self.exec_context.actor_id() {
+        if self.state().admin_address != self.exec_context.actor_id() {
             panic!("Not an admin")
         }
     }
 
+    /// Send request to the underlying `vft-manager` program.
+    ///
+    /// This method will take additional fee from the message sender, so **exactly** [Config::fee] must
+    /// be attached as a value when sending message to this method.
+    ///
+    /// Current fee amount can be retreived by calling `get_config`.
     pub async fn make_request(&mut self, amount: U256, receiver: H160, vara_token_id: ActorId) {
-        let vft_manager_address = self.data().vft_manager_address;
+        let vft_manager_address = self.state().vft_manager_address;
         let config = self.config();
         let sender = self.exec_context.actor_id();
+
+        if gstd::exec::gas_available()
+            < config.gas_to_send_request_to_vft_manager
+                + config.gas_for_request_to_vft_manager_msg
+                + config.gas_for_reply_deposit
+        {
+            panic!("Please attach more gas");
+        }
 
         let attached_value = msg::value();
         if attached_value != config.fee {
@@ -194,14 +195,17 @@ where
         .expect("Error depositing event");
     }
 
+    /// Get admin address.
     pub fn admin_address(&self) -> ActorId {
-        self.data().admin_address
+        self.state().admin_address
     }
 
+    /// Get `vft-manager` address.
     pub fn vft_manager_address(&self) -> ActorId {
-        self.data().vft_manager_address
+        self.state().vft_manager_address
     }
 
+    /// Get currently applied [Config].
     pub fn get_config(&self) -> Config {
         self.config().clone()
     }

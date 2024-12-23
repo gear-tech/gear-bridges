@@ -1,4 +1,3 @@
-
 //! Functions to work with `vft-service`.
 
 use sails_rs::prelude::*;

@@ -5,7 +5,6 @@ use sails_rs::{
 
 use gstd::exec;
 mod error;
-use error::Error;
 mod vft_manager_msg;
 
 pub struct BridgingPayment<ExecContext> {
@@ -166,43 +165,33 @@ where
         let config = self.config();
         let sender = self.exec_context.actor_id();
 
-        if gstd::exec::gas_available()
-            < config.gas_to_send_request_to_vft_manager
-                + config.gas_for_request_to_vft_manager_msg
-                + config.gas_for_reply_deposit
-        {
-            panic!("Please attach more gas");
-        }
-
         let attached_value = msg::value();
-
-        if attached_value < config.fee {
-            panic!("Not enough fee");
+        if attached_value != config.fee {
+            panic!("Please attach exactly {} value", config.fee);
         }
 
-        // Return surplus of attached value
-        refund_surplus(sender, attached_value, config.fee);
-
-        let result = handle_vft_manager_transaction(
+        let (nonce, eth_token_id) = vft_manager_msg::send(
+            vft_manager_address,
             sender,
             vara_token_id,
             amount,
             receiver,
-            vft_manager_address,
             config,
         )
-        .await;
+        .await
+        .inspect_err(|_| {
+            msg::send_with_gas(sender, "", 0, config.fee).expect("Error in refund");
+        })
+        .expect("Failed to send message to vft-manager");
 
-        match result {
-            Ok(value) => {
-                if let Err(e) = self.notify_on(value) {
-                    panic!("Error in depositing events: {:?}", e);
-                }
-            }
-            Err(e) => {
-                panic!("Message processing failed with error: {:?}", e);
-            }
-        }
+        self.notify_on(BridgingPaymentEvents::TeleportVaraToEth {
+            nonce,
+            sender,
+            amount,
+            receiver,
+            eth_token_id,
+        })
+        .expect("Error depositing event");
     }
 
     pub fn admin_address(&self) -> ActorId {
@@ -216,49 +205,4 @@ where
     pub fn get_config(&self) -> Config {
         self.config().clone()
     }
-}
-
-async fn handle_vft_manager_transaction(
-    sender: ActorId,
-    vara_token_id: ActorId,
-    amount: U256,
-    receiver: H160,
-    vft_manager_address: ActorId,
-    config: &Config,
-) -> Result<BridgingPaymentEvents, Error> {
-    let (nonce, eth_token_id) = vft_manager_msg::send(
-        vft_manager_address,
-        sender,
-        vara_token_id,
-        amount,
-        receiver,
-        config,
-    )
-    .await
-    .inspect_err(|_| {
-        refund_fee(sender, config.fee);
-    })?;
-
-    Ok(BridgingPaymentEvents::TeleportVaraToEth {
-        nonce,
-        sender,
-        amount,
-        receiver,
-        eth_token_id,
-    })
-}
-
-fn refund_surplus(sender: ActorId, attached_value: u128, fee: u128) {
-    let refund = attached_value - fee;
-    if refund >= exec::env_vars().existential_deposit {
-        send_refund(sender, refund);
-    }
-}
-
-fn refund_fee(sender: ActorId, fee: u128) {
-    send_refund(sender, fee);
-}
-
-fn send_refund(actor_id: ActorId, amount: u128) {
-    msg::send_with_gas(actor_id, "", 0, amount).expect("Error in refund");
 }

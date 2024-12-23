@@ -1,111 +1,247 @@
+/// Config that should be provided to this service on initialization.
 type InitConfig = struct {
+  /// Address of the `ERC20Manager` contract on ethereum.
+  /// 
+  /// For more info see [State::erc20_manager_address].
   erc20_manager_address: h160,
+  /// Address of the gear-eth-bridge built-in actor.
   gear_bridge_builtin: actor_id,
+  /// Address of the `historical-proxy` program.
+  /// 
+  /// For more info see [State::historical_proxy_address].
   historical_proxy_address: actor_id,
+  /// Config that will be used to send messages to the other programs.
+  /// 
+  /// For more info see [Config].
   config: Config,
 };
 
+/// Config that will be used to send messages to the other programs.
 type Config = struct {
+  /// Gas limit for token operations. Token operations include:
+  /// - Mint
+  /// - Burn
+  /// - TransferFrom
   gas_for_token_ops: u64,
+  /// Gas to reserve for reply processing.
   gas_for_reply_deposit: u64,
-  gas_for_submit_receipt: u64,
+  /// Gas limit for gear-eth-bridge built-in actor request.
   gas_to_send_request_to_builtin: u64,
+  /// Timeout in blocks that current program will wait for reply from
+  /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
   reply_timeout: u32,
-  gas_for_request_bridging: u64,
 };
 
+/// Error types for VFT Manageer service.
 type Error = enum {
+  /// Error sending message to the program.
   SendFailure,
+  /// Error while waiting for reply from the program.
   ReplyFailure,
-  BurnTokensDecode,
-  TransferFromDecode,
-  BuiltinDecode,
-  MintTokensDecode,
+  /// Failed to set reply timeout.
   ReplyTimeout,
-  NoCorrespondingEthAddress,
+  /// Failed to set reply hook.
   ReplyHook,
+  /// Original `MessageId` wasn't found in message tracker when processing reply.
   MessageNotFound,
+  /// Invalid message status was found in the message tracker when processing reply.
   InvalidMessageStatus,
+  /// Message sent to the program failed.
   MessageFailed,
-  BurnTokensFailed,
-  LockTokensFailed,
-  BridgeBuiltinMessageFailed,
-  TokensRefunded,
-  NotEthClient,
-  NotEnoughGas,
+  /// Failed to decode `extended-vft::Burn` reply.
+  BurnTokensDecode,
+  /// Failed to decode `extended-vft::TransferFrom` reply.
+  TransferFromDecode,
+  /// Failed to decode `extended-vft::Mint` reply.
+  MintTokensDecode,
+  /// Failed to decode payload from gear-eth-bridge built-in actor.
+  BuiltinDecode,
+  /// `ERC20` address wasn't found in the token mapping.
+  NoCorrespondingEthAddress,
+  /// `VFT` address wasn't found in the token mapping.
   NoCorrespondingVaraAddress,
+  /// `submit_receipt` can only be called by `historical-proxy` program.
+  NotHistoricalProxy,
+  /// Ethereum transaction receipt is not supported.
   NotSupportedEvent,
-  AlreadyProcessed,
+  /// Ethereum transaction is too old and already have been removed from storage.
   TransactionTooOld,
+  /// Ethereum transaction was already processed by VFT Manager service.
+  AlreadyProcessed,
 };
 
+/// Type of the token supply.
 type TokenSupply = enum {
+  /// Token supply is located on Ethereum.
+  /// 
+  /// This means that we're working with some pre-existing `ERC20` token on Ethereum and with
+  /// wrapped `VFT` token on Gear.
+  /// 
+  /// When this type of token supply is activated corresponding tokens will be minted/burned
+  /// on the gear side and locked/unlocked on the Ethereum side.
+  /// 
+  /// For example this type of token supply can be used to work with
+  /// `USDT ERC20 token`/`wrappedUSDT VFT token` pair.
   Ethereum,
+  /// Token supply is located on Gear.
+  /// 
+  /// This means that we're working with some pre-existing `VFT` token on Gear and with
+  /// wrapped `ERC20` token on Ethereum.
+  /// 
+  /// When this type of token supply is activated corresponding tokens will be locked/unlocked
+  /// on the gear side and minted/burned on the Gear side.
+  /// 
+  /// For example this type of token supply can be used to work with
+  /// `VARA VFT token`/`wrappedVARA ERC20 token` pair.
   Gear,
 };
 
-type MessageInfo = struct {
-  status: MessageStatus,
-  details: TxDetails,
+/// Entry for a single message in [MessageTracker].
+type RequestBridgingMsgTrackerMessageInfo = struct {
+  /// State of the message.
+  status: RequestBridgingMsgTrackerMessageStatus,
+  /// Request details.
+  details: RequestBridgingMsgTrackerTxDetails,
 };
 
-type MessageStatus = enum {
+/// State in which message processing can be.
+type RequestBridgingMsgTrackerMessageStatus = enum {
+  /// Message to deposit tokens is sent.
+  SendingMessageToDepositTokens,
+  /// Reply is received for a token deposit message.
+  TokenDepositCompleted: bool,
+  /// Message to the `pallet-gear-eth-bridge` is sent.
   SendingMessageToBridgeBuiltin,
+  /// Reply is received for a message to the `pallet-gear-eth-bridge`.
   BridgeResponseReceived: opt u256,
-  WaitingReplyFromBuiltin,
-  BridgeBuiltinStep,
-  SendingMessageToBurnTokens,
-  TokenBurnCompleted: bool,
-  WaitingReplyFromBurn,
-  SendingMessageToMintTokens,
-  TokenMintCompleted,
-  WaitingReplyFromMint,
-  MintTokensStep,
-  SendingMessageToLockTokens,
-  TokenLockCompleted: bool,
-  WaitingReplyFromLock,
-  SendingMessageToUnlockTokens,
-  TokenUnlockCompleted,
-  WaitingReplyFromUnlock,
-  UnlockTokensStep,
-  MessageProcessedWithSuccess: u256,
+  /// Message to refund tokens is sent.
+  SendingMessageToReturnTokens,
+  /// Reply is received for a token refund message.
+  TokensReturnComplete: bool,
 };
 
-type TxDetails = enum {
-  RequestBridging: struct { vara_token_id: actor_id, sender: actor_id, amount: u256, receiver: h160 },
-  SubmitReceipt: struct { vara_token_id: actor_id, receiver: actor_id, amount: u256 },
+/// Details about a request associated with a message stored in [MessageTracker].
+type RequestBridgingMsgTrackerTxDetails = struct {
+  /// Address of the `VFT` token which is being bridged.
+  vara_token_id: actor_id,
+  /// Original `VFT` token owner.
+  sender: actor_id,
+  /// Bridged tokens amount.
+  amount: u256,
+  /// `ERC20` token receiver on Ethereum.
+  receiver: h160,
+  /// [TokenSupply] type of the token being bridged.
+  token_supply: TokenSupply,
+};
+
+/// Entry for a single message in [MessageTracker].
+type SubmitReceiptMsgTrackerMessageInfo = struct {
+  /// State of the message.
+  status: SubmitReceiptMsgTrackerMessageStatus,
+  /// Request details.
+  details: SubmitReceiptMsgTrackerTxDetails,
+};
+
+/// State in which message processing can be.
+type SubmitReceiptMsgTrackerMessageStatus = enum {
+  /// Message to withdraw tokens is sent.
+  SendingMessageToWithdrawTokens,
+  /// Reply is received for a token withdraw message.
+  TokenWithdrawComplete: bool,
+};
+
+/// Details about a request associated with a message stored in [MessageTracker].
+type SubmitReceiptMsgTrackerTxDetails = struct {
+  /// Address of the `VFT` token which is being bridged.
+  vara_token_id: actor_id,
+  /// Bridged tokens receiver on Gear.
+  receiver: actor_id,
+  /// Bridged tokens amount.
+  amount: u256,
+  /// [TokenSupply] type of the token being bridged.
+  token_supply: TokenSupply,
 };
 
 constructor {
+  /// Create VFT Manager program.
   New : (init_config: InitConfig);
 };
 
 service VftManager {
-  HandleInterruptedTransfer : (msg_id: message_id) -> result (struct { u256, h160 }, Error);
+  /// Process message further if some error was encountered during the `request_bridging`.
+  /// 
+  /// This method should be called only to recover funds that were stuck in the middle of the bridging
+  /// and is not a part of a normal workflow.
+  /// 
+  /// There can be several reasons for `request_bridging` to fail:
+  /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
+  /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
+  HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
+  /// Process message further if some error was encountered during the `submit_receipt`.
+  /// 
+  /// This method should be called only to recover funds that were stuck in the middle of the bridging
+  /// and is not a part of a normal workflow.
+  /// 
+  /// There can be several reasons for `submit_receipt` to fail:
+  /// - Gas attached to a message wasn't enough to execute entire logic in `submit_receipt`.
+  /// - Network was heavily loaded and some message was stuck so `submit_receipt` failed.
+  HandleSubmitReceiptInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
+  /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
+  /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
-  /// Request bridging of tokens from gear to ethereum. It involves locking/burning
-  /// `vft` tokens (specific operation depends on the token supply type) and sending
-  /// request to the bridge built-in actor.
+  /// Request bridging of tokens from Gear to Ethereum.
+  /// 
+  /// Allowance should allow current program to spend `amount` tokens from the `sender` address.
   RequestBridging : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
-  /// Submit rlp-encoded transaction receipt. This receipt is decoded under the hood
-  /// and checked that it's a valid receipt from tx send to `ERC20Manager` contract.
-  /// This entrypoint can be called only by `ethereum-event-client`.
+  /// Submit rlp-encoded transaction receipt.
+  /// 
+  /// This receipt is decoded under the hood and checked that it's a valid receipt from tx
+  /// sent to `ERC20Manager` contract.
+  /// 
+  /// This method can be called only by [State::historical_proxy_address] program.
   SubmitReceipt : (slot: u64, transaction_index: u64, receipt_rlp: vec u8) -> result (null, Error);
+  /// Change [Config]. Can be called only by a [State::admin].
+  /// 
+  /// For more info see [Config] docs.
   UpdateConfig : (config: Config) -> null;
+  /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
   UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
+  /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
+  /// Get current [State::admin] address.
   query Admin : () -> actor_id;
+  /// Get current [State::erc20_manager_address] address.
   query Erc20ManagerAddress : () -> h160;
+  /// Get current [State::gear_bridge_builtin] address.
   query GearBridgeBuiltin : () -> actor_id;
+  /// Get current [Config].
   query GetConfig : () -> Config;
+  /// Get current [State::historical_proxy_address].
   query HistoricalProxyAddress : () -> actor_id;
-  query MsgTrackerState : () -> vec struct { message_id, MessageInfo };
+  /// Get state of a `request_bridging` message tracker.
+  query RequestBridingMsgTrackerState : () -> vec struct { message_id, RequestBridgingMsgTrackerMessageInfo };
+  /// Get state of a `submit_receipt` message tracker.
+  query SubmitReceiptMsgTrackerState : () -> vec struct { message_id, SubmitReceiptMsgTrackerMessageInfo };
+  /// Get current [token mapping](State::token_map).
   query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
 
   events {
+    /// Token mapping was added.
+    /// 
+    /// This means that VFT Manager service now supports specified
+    /// [vara_token_id](Event::TokenMappingAdded::vara_token_id)/[eth_token_id](Event::TokenMappingAdded::eth_token_id) pair.
     TokenMappingAdded: struct { vara_token_id: actor_id, eth_token_id: h160 };
+    /// Token mapping was removed.
+    /// 
+    /// This means that VFT Manager service doesn't support specified
+    /// [vara_token_id](Event::TokenMappingRemoved::vara_token_id)/[eth_token_id](Event::TokenMappingRemoved::eth_token_id)
+    /// pair anymore.
     TokenMappingRemoved: struct { vara_token_id: actor_id, eth_token_id: h160 };
+    /// Bridging of tokens from Gear to Ethereum was requested.
+    /// 
+    /// When this event is emitted it means that `VFT` tokens were locked/burned and
+    /// a message to the gear-eth-bridge built-in actor was successfully submitted.
     BridgingRequested: struct { nonce: u256, vara_token_id: actor_id, amount: u256, sender: actor_id, receiver: h160 };
   }
 };

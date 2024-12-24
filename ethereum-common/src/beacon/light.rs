@@ -1,4 +1,4 @@
-// Module contains lightened versions of the entities.
+//! Module contains lightened versions of the entities.
 
 use super::*;
 

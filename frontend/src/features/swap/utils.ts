@@ -1,5 +1,5 @@
-import { HexString } from '@gear-js/api';
-import { BaseError, formatUnits, parseUnits } from 'viem';
+import { ExtrinsicFailedData, HexString } from '@gear-js/api';
+import { BaseError, parseUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
@@ -49,31 +49,25 @@ const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexS
   return { varaOptions, ethOptions };
 };
 
-const getMergedBalance = (
-  accountBalance: ReturnType<UseAccountBalance>,
-  ftBalance: ReturnType<UseAccountBalance>,
-  decimals: number | undefined,
-) => {
+const getMergedBalance = (accountBalance: ReturnType<UseAccountBalance>, ftBalance: ReturnType<UseAccountBalance>) => {
   const isLoading = accountBalance.isLoading || ftBalance.isLoading;
 
-  if (
-    isUndefined(accountBalance.value) ||
-    isUndefined(ftBalance.value) ||
-    isUndefined(decimals) ||
-    !accountBalance.formattedValue ||
-    !ftBalance.formattedValue
-  )
-    return { value: undefined, formattedValue: undefined, isLoading };
+  const data =
+    !isUndefined(accountBalance.data) && !isUndefined(ftBalance.data)
+      ? accountBalance.data + ftBalance.data
+      : undefined;
 
-  const value = accountBalance.value + ftBalance.value;
-  const formattedValue = formatUnits(value, decimals);
-
-  return { value, formattedValue, isLoading };
+  return { data, isLoading };
 };
 
 // string is only for cancelled sign and send popup error during useSendProgramTransaction
 // reevaluate after @gear-js/react-hooks update
-const getErrorMessage = (error: Error | WriteContractErrorType | string) =>
-  typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
+const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
+  if (typeof error === 'object' && 'docs' in error) {
+    return error.docs || error.method || error.name;
+  }
+
+  return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
+};
 
 export { getAmountSchema, getOptions, getMergedBalance, getErrorMessage };

@@ -1,7 +1,8 @@
-import { useAccount } from '@gear-js/react-hooks';
+import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button, Select } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
+import { parseUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
@@ -50,6 +51,7 @@ function SwapForm({
 }: Props) {
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
+  const { api, isApiReady } = useApi();
   const { pairIndex, setPairIndex } = useBridge();
   const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } =
     useToken(networkIndex);
@@ -57,7 +59,7 @@ function SwapForm({
 
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
-  const ftBalance = useFTBalance(address, decimals);
+  const ftBalance = useFTBalance(address);
   const allowance = useFTAllowance(address);
 
   const { account } = useAccount();
@@ -81,8 +83,8 @@ function SwapForm({
     address,
     fee.value,
     allowance.data,
-    ftBalance.value,
-    accountBalance.value,
+    ftBalance.data,
+    accountBalance.data,
     openTransacionModal,
   );
 
@@ -97,12 +99,13 @@ function SwapForm({
   );
 
   const renderFromBalance = () => {
-    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance, decimals) : ftBalance;
+    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
 
     return (
       <Balance
-        value={balance.formattedValue}
-        unit={symbol}
+        value={balance.data}
+        decimals={decimals}
+        symbol={symbol}
         isLoading={balance.isLoading || bridge.isLoading}
         onMaxButtonClick={setMaxBalance}
       />
@@ -110,10 +113,12 @@ function SwapForm({
   };
 
   const isBalanceValid = () => {
-    if (accountBalance.isLoading || config.isLoading) return true;
-    if (!accountBalance.value || isUndefined(fee.value)) return false;
+    if (!isApiReady || accountBalance.isLoading || config.isLoading) return true; // not valid ofc, but we don't want to render error
+    if (!accountBalance.data || isUndefined(fee.value)) return false;
 
-    return accountBalance.value > fee.value;
+    const requiredBalance = isVaraNetwork ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
+
+    return accountBalance.data > requiredBalance;
   };
 
   const getButtonText = () => {
@@ -182,7 +187,12 @@ function SwapForm({
                 />
               </div>
 
-              <Balance heading="Receive" value={amount || '0'} unit={destinationSymbol} />
+              <Balance
+                heading="Receive"
+                value={!isUndefined(decimals) ? parseUnits(amount || '0', decimals) : 0n}
+                decimals={decimals}
+                symbol={destinationSymbol}
+              />
             </div>
 
             <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />

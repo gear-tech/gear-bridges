@@ -7,14 +7,13 @@ type BalanceValues = {
   formattedValue: string | undefined;
 };
 
-type UseAccountBalance = () => BalanceValues & {
+type UseAccountBalance = () => {
+  data: bigint | undefined;
   isLoading: boolean;
 };
 
-type UseFTBalance = (
-  ftAddress: HexString | undefined,
-  decimals: number | undefined,
-) => BalanceValues & {
+type UseFTBalance = (ftAddress: HexString | undefined) => {
+  data: bigint | undefined;
   isLoading: boolean;
 };
 

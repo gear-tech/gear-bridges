@@ -33,7 +33,9 @@ pub struct MessageSender {
     eth_api: EthApi,
     beacon_client: BeaconClient,
     historical_proxy_address: H256,
-    vft_manager_address: H256,
+    receiver_address: H256,
+    receiver_route: Vec<u8>,
+    decode_reply: bool,
 
     waiting_checkpoint: Vec<TxHashWithSlot>,
 
@@ -64,22 +66,26 @@ impl_metered_service! {
 }
 
 impl MessageSender {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         args: GSdkArgs,
         suri: String,
         eth_api: EthApi,
         beacon_client: BeaconClient,
         historical_proxy_address: H256,
-        vft_manager_address: H256,
+        receiver_address: H256,
+        receiver_route: Vec<u8>,
+        decode_reply: bool,
     ) -> Self {
         Self {
             args,
             suri,
             eth_api,
             beacon_client,
-
             historical_proxy_address,
-            vft_manager_address,
+            receiver_address,
+            receiver_route,
+            decode_reply,
 
             waiting_checkpoint: vec![],
 
@@ -170,12 +176,12 @@ impl MessageSender {
 
         let mut proxy_service = HistoricalProxy::new(remoting.clone());
 
-        let (_, vft_manager_reply) = proxy_service
+        let (_, receiver_reply) = proxy_service
             .redirect(
                 payload.proof_block.block.slot,
                 payload.encode(),
-                self.vft_manager_address.into(),
-                <SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+                self.receiver_address.into(),
+                self.receiver_route.clone(),
             )
             .with_gas_limit(gas_limit)
             .send_recv(self.historical_proxy_address.into())
@@ -188,17 +194,22 @@ impl MessageSender {
             })?
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
-        let reply = SubmitReceipt::decode_reply(&vft_manager_reply)
-            .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
+        // TODO: Refactor this approach. #255
+        if self.decode_reply {
+            let reply = SubmitReceipt::decode_reply(&receiver_reply)
+                .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
 
-        match reply {
-            Ok(_) => {}
-            Err(vft_manager_client::Error::NotSupportedEvent) => {
-                log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)", message.tx_hash);
+            match reply {
+                Ok(_) => {}
+                Err(vft_manager_client::Error::NotSupportedEvent) => {
+                    log::warn!("Dropping message for {} as it's considered invalid by vft-manager(probably unsupported ERC20 token)", message.tx_hash);
+                }
+                Err(e) => {
+                    anyhow::bail!("Internal vft-manager error: {:?}", e);
+                }
             }
-            Err(e) => {
-                anyhow::bail!("Internal vft-manager error: {:?}", e);
-            }
+        } else {
+            log::info!("Received reply: {}", hex::encode(&receiver_reply));
         }
 
         Ok(())

@@ -33,10 +33,14 @@ type BlockBody = struct {
   blob_kzg_commitments: h256,
 };
 
+/// A homogenous collection of a fixed number of byte values.
 type BytesFixed1 = struct {
   FixedArray1ForU8,
 };
 
+/// A homogenous collection of a fixed number of values.
+/// 
+/// NOTE: collection of length `0` is illegal.
 type FixedArray1ForU8 = struct {
   [u8, 32],
 };
@@ -61,23 +65,31 @@ type ExecutionPayload = struct {
   excess_blob_gas: u64,
 };
 
+/// A homogenous collection of a fixed number of byte values.
 type BytesFixed2 = struct {
   FixedArray2ForU8,
 };
 
+/// A homogenous collection of a fixed number of values.
+/// 
+/// NOTE: collection of length `0` is illegal.
 type FixedArray2ForU8 = struct {
   [u8, 20],
 };
 
+/// A homogenous collection of a variable number of byte values.
 type ByteList = struct {
   ListForU8,
 };
 
 /// A homogenous collection of a variable number of values.
+/// 
+/// NOTE: collection of length `0` is illegal.
 type ListForU8 = struct {
   data: vec u8,
 };
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#beaconblockheader).
 type BlockHeader = struct {
   slot: u64,
   proposer_index: u64,

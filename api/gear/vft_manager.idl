@@ -163,7 +163,6 @@ type SubmitReceiptMsgTrackerTxDetails = struct {
 };
 
 constructor {
-  /// Create VFT Manager program.
   New : (init_config: InitConfig);
 };
 

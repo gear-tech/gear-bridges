@@ -1,5 +1,5 @@
 //! The module contains implementations of basic types used by higher level
-//! types. Inspired by https://github.com/sigp/ssz_types/ and https://github.com/ralexstokes/ssz-rs.
+//! types. Inspired by <https://github.com/sigp/ssz_types> and <https://github.com/ralexstokes/ssz-rs>.
 
 use super::*;
 

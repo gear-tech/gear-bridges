@@ -1,5 +1,6 @@
 use super::*;
 
+/// A homogenous collection of a variable number of byte values.
 #[derive(Debug, Clone, Decode, Encode, PartialEq, TypeInfo)]
 pub struct ByteList<const N: usize>(pub List<u8, N>);
 

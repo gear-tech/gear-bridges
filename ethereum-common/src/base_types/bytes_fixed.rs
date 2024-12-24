@@ -1,5 +1,6 @@
 use super::*;
 
+/// A homogenous collection of a fixed number of byte values.
 #[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
 pub struct BytesFixed<const N: usize>(pub FixedArray<u8, N>);
 

@@ -1,15 +1,22 @@
-//! The module defines types used by Beacon Chain entities. Inspired by
-//! https://github.com/a16z/helios and https://github.com/sigp/lighthouse/ projects.
+//! The module implement types used defined by Ethereum Beacon Chain spec v1.4.0.
+//!
+//! Inspired by <https://github.com/a16z/helios> and <https://github.com/sigp/lighthouse> projects.
 
 use super::*;
 
 pub type Bytes32 = base_types::BytesFixed<32>;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/bellatrix/beacon-chain.md#custom-types).
 pub type Address = base_types::BytesFixed<20>;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/bellatrix/beacon-chain.md#execution).
 pub type LogsBloom = base_types::BytesFixed<256>;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/bellatrix/beacon-chain.md#custom-types).
 pub type Transaction = base_types::ByteList<1_073_741_824>;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#custom-types).
 pub type SignatureBytes = base_types::BytesFixed<96>;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#custom-types).
 pub type BLSPubKey = base_types::BytesFixed<48>;
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/capella/beacon-chain.md#withdrawal).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -23,6 +30,7 @@ pub struct Withdrawal {
     pub amount: u64,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#eth1data).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -33,6 +41,7 @@ pub struct Eth1Data {
     pub block_hash: Bytes32,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#signedbeaconblockheader).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -41,6 +50,7 @@ pub struct SignedBeaconBlockHeader {
     pub signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#proposerslashing).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -49,6 +59,7 @@ pub struct ProposerSlashing {
     pub signed_header_2: SignedBeaconBlockHeader,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#attesterslashing).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -57,6 +68,7 @@ pub struct AttesterSlashing {
     pub attestation_2: IndexedAttestation,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#indexedattestation).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -66,6 +78,7 @@ pub struct IndexedAttestation {
     pub signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#attestation).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -75,6 +88,7 @@ pub struct Attestation {
     pub signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#attestationdata).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -88,6 +102,7 @@ pub struct AttestationData {
     pub target: Checkpoint,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#checkpoint).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -97,6 +112,7 @@ pub struct Checkpoint {
     pub root: Bytes32,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#deposit).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -105,6 +121,7 @@ pub struct Deposit {
     pub data: DepositData,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#depositdata).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -116,6 +133,7 @@ pub struct DepositData {
     pub signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#signedvoluntaryexit).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -124,6 +142,7 @@ pub struct SignedVoluntaryExit {
     pub signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#voluntaryexit).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -134,6 +153,7 @@ pub struct VoluntaryExit {
     pub validator_index: u64,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/capella/beacon-chain.md#signedblstoexecutionchange).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -142,6 +162,7 @@ pub struct SignedBlsToExecutionChange {
     pub signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/capella/beacon-chain.md#blstoexecutionchange).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -152,6 +173,7 @@ pub struct BlsToExecutionChange {
     pub to_execution_address: Address,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/beacon-chain.md#syncaggregate).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
@@ -160,6 +182,7 @@ pub struct SyncAggregate {
     pub sync_committee_signature: SignatureBytes,
 }
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/beacon-chain.md#synccommittee).
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]

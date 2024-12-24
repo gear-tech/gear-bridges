@@ -4,13 +4,32 @@ use super::{
 };
 use ring::digest::{Context as RingContext, SHA256 as RingSHA256};
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
+///
+/// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `CURRENT_SYNC_COMMITTEE_GINDEX` value.
 pub const MERKLE_PROOF_DEPTH_CURRENT_SYNC_COMMITTEE: u32 = 5;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
+///
+/// Complement part of [`MERKLE_PROOF_DEPTH_CURRENT_SYNC_COMMITTEE`].
 pub const MERKLE_PROOF_INDEX_CURRENT_SYNC_COMMITTEE: u32 = 22;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
+///
+/// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `NEXT_SYNC_COMMITTEE_GINDEX` value.
 pub const MERKLE_PROOF_DEPTH_NEXT_SYNC_COMMITTEE: u32 = 5;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
+///
+/// Complement part of [`MERKLE_PROOF_DEPTH_NEXT_SYNC_COMMITTEE`].
 pub const MERKLE_PROOF_INDEX_NEXT_SYNC_COMMITTEE: u32 = 23;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
+///
+/// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `FINALIZED_ROOT_GINDEX` value.
 pub const MERKLE_PROOF_DEPTH_FINALITY: u32 = 6;
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
+///
+/// Complement part of [`MERKLE_PROOF_DEPTH_FINALITY`].
 pub const MERKLE_PROOF_INDEX_FINALITY: u32 = 41;
 
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#is_valid_merkle_branch).
 pub fn is_valid_merkle_branch(
     leaf: [u8; 32],
     branch: &[[u8; 32]],

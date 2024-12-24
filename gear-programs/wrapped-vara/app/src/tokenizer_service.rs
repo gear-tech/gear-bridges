@@ -17,7 +17,7 @@ pub enum TokenizerEvent {
 /// This service is responsible for exchanging native tokens to/from
 /// the token specified in `vft-service` on the current program.
 /// Conversion rate is always 1:1.
-/// 
+///
 /// Exchanging is performed by locking/unlocking native token
 /// on the program address and minting/burning `VFT` token defined
 /// in the `vft-service` on the current program.

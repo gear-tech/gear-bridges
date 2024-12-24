@@ -3,6 +3,7 @@ use sails_rs::calls::ActionIo;
 use sails_rs::prelude::*;
 use vft_manager_client::vft_manager::io as vft_manager_io;
 
+/// Send bridging request to the `vft-manager`.
 pub async fn send(
     vft_manager_address: ActorId,
     sender: ActorId,

@@ -1,3 +1,5 @@
+//! Functions to work with `vft-service`.
+
 use sails_rs::prelude::*;
 use vft_service::{
     funcs,
@@ -5,6 +7,7 @@ use vft_service::{
     Storage,
 };
 
+/// Mint `value` tokens into `to` account.
 pub fn mint(to: ActorId, value: U256) -> Result<()> {
     let total_supply = Storage::total_supply();
     let balances = Storage::balances();
@@ -23,6 +26,7 @@ pub fn mint(to: ActorId, value: U256) -> Result<()> {
     Ok(())
 }
 
+/// Burn `value` tokens from `from` address.
 pub fn burn(from: ActorId, value: U256) -> Result<()> {
     let total_supply = Storage::total_supply();
     let balances = Storage::balances();

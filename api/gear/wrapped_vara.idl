@@ -1,13 +1,19 @@
 constructor {
+  /// Program's constructor.
   New : (name: str, symbol: str, decimals: u8);
 };
 
 service Tokenizer {
+  /// Burn `value` of `VFT` token and return it as a value attached to the message.
   Burn : (value: u128) -> u128;
+  /// Lock all the value attached to the message and mint corresponding
+  /// amount of the `VFT` tokens.
   Mint : () -> u128;
 
   events {
+    /// Native token was converted into `VFT` token for the specified address.
     Minted: struct { to: actor_id, value: u128 };
+    /// `VFT` token was converted into native token for the specified address.
     Burned: struct { from: actor_id, value: u128 };
   }
 };

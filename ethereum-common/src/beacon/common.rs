@@ -1,5 +1,5 @@
 //! The module defines types used by Beacon Chain entities. Inspired by
-//! https://github.com/a16z/helios and https://github.com/sigp/lighthouse/ projects.
+//! <https://github.com/a16z/helios> and <https://github.com/sigp/lighthouse> projects.
 
 use super::*;
 

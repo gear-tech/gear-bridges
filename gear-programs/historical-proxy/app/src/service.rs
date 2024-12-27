@@ -1,5 +1,4 @@
 // Incorporate code generated based on the IDL file
-
 #[allow(dead_code)]
 #[allow(clippy::module_inception)]
 pub(crate) mod ethereum_event_client {
@@ -82,16 +81,15 @@ where
     /// requests with slots starting from `slot`.
     ///
     /// This function can be called only by an admin.
-    pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) -> Result<(), ProxyError> {
+    pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
         let source = self.exec_context.actor_id();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
-            return Err(ProxyError::NotAdmin);
+            panic!("Not an admin");
         }
 
         state.endpoints.push(slot, endpoint);
-        Ok(())
     }
 
     /// Get endpoint map stored in this service.

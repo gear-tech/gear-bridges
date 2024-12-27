@@ -106,12 +106,11 @@ async fn proxy() {
         )
         .send_recv(proxy_program_id)
         .await
-        .unwrap()
         .unwrap();
 
     let endpoint = proxy_client
         .endpoint_for(message.proof_block.block.slot)
-        .send_recv(proxy_program_id)
+        .recv(proxy_program_id)
         .await
         .unwrap()
         .unwrap();

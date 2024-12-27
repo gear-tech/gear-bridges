@@ -59,12 +59,11 @@ async fn test_utility_functions() {
         .add_endpoint(42, ActorId::from(0x42))
         .send_recv(proxy_program_id)
         .await
-        .unwrap()
         .unwrap();
 
     let recv_endpoint = HistoricalProxyC::new(remoting.clone())
         .endpoint_for(43)
-        .send_recv(proxy_program_id)
+        .recv(proxy_program_id)
         .await
         .unwrap();
 
@@ -72,7 +71,7 @@ async fn test_utility_functions() {
 
     let recv_endpoint = HistoricalProxyC::new(remoting.clone())
         .endpoint_for(41)
-        .send_recv(proxy_program_id)
+        .recv(proxy_program_id)
         .await
         .unwrap();
 
@@ -93,19 +92,18 @@ async fn test_utility_functions() {
         .add_endpoint(84, ActorId::from(0x800))
         .send_recv(proxy_program_id)
         .await
-        .unwrap()
         .unwrap();
 
     let endpoint_for_slot_0 = HistoricalProxyC::new(remoting.clone())
         .endpoint_for(43)
-        .send_recv(proxy_program_id)
+        .recv(proxy_program_id)
         .await
         .unwrap();
     assert_eq!(endpoint_for_slot_0, Ok(ActorId::from(0x42)));
 
     let endpoint_for_slot_1 = HistoricalProxyC::new(remoting.clone())
         .endpoint_for(85)
-        .send_recv(proxy_program_id)
+        .recv(proxy_program_id)
         .await
         .unwrap();
 

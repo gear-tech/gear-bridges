@@ -1,5 +1,4 @@
 // Incorporate code generated based on the IDL file
-
 #[allow(dead_code)]
 #[allow(clippy::module_inception)]
 pub(crate) mod ethereum_event_client {
@@ -16,17 +15,41 @@ use crate::{
     state::{ProxyState, Slot},
 };
 
+/// Events enmitted by the Historical Proxy service.
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 enum Event {
+    /// Tx receipt is checked to be valid and successfully sent to the
+    /// underlying program.
     Relayed {
+        /// Ethereum slot containing target transaction.
         slot: u64,
+        /// Ethereum block number which contains target transaction.
         block_number: u64,
+        /// Index of the target transaction in the `block_number`.
         transaction_index: u32,
     },
 }
 
+/// Historical Proxy service.
+///
+/// `etereum-event-client` programs can become outdated with Ethereum updates, so
+/// every `ethereum-event-client` ever deployed is valid for some Ethereum slot interval.
+///
+/// When Ethereum updates in a way incompatible with `ethereum-event-cleint`(or if we need to
+/// update `ethereum-event-client` for some other reason) we need to deploy a new version of
+/// `ethereum-event-client` and still have access to the old one(in order to process
+/// historical transactions).
+///
+/// This service provides such an access. For every `ethereum-event-client` ever deployed
+/// it maps Ethereum slot from which this `ethereum-event-client` is valid from.
+///
+/// When user makes request to the Historical Proxy service he will specify Ethereum slot number
+/// where the target transaction was sent. Historical Proxy will decide which `ethereum-event-client`
+/// is responsible of processing transactions for this slot and will redirect user request to it.
+/// If `ethereum-event-client` returned success its reply will be redirected to the program
+/// that user have specified in his request. For more info see `redirect` implementation.
 pub struct HistoricalProxyService<'a, ExecContext> {
     state: &'a RefCell<ProxyState>,
     exec_context: ExecContext,
@@ -44,45 +67,51 @@ where
         }
     }
 
+    /// Get current service admin.
     pub fn admin(&self) -> ActorId {
         self.state.borrow().admin
     }
 
-    pub fn endpoint_for(&mut self, slot: Slot) -> Result<ActorId, ProxyError> {
+    /// Get endpoint for the specified `slot`.
+    pub fn endpoint_for(&self, slot: Slot) -> Result<ActorId, ProxyError> {
         self.state.borrow().endpoints.endpoint_for(slot)
     }
 
-    pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) -> Result<(), ProxyError> {
+    /// Add new endpoint to the map. Endpoint will be effective for all the
+    /// requests with slots starting from `slot`.
+    ///
+    /// This function can be called only by an admin.
+    pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
         let source = self.exec_context.actor_id();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
-            return Err(ProxyError::NotAdmin);
+            panic!("Not an admin");
         }
 
         state.endpoints.push(slot, endpoint);
-        Ok(())
     }
 
+    /// Get endpoint map stored in this service.
     pub fn endpoints(&self) -> Vec<(Slot, ActorId)> {
         self.state.borrow().endpoints.endpoints()
     }
 
-    /// Redirect message to ERC20 Relay service which is valid for `slot`.
-    /// If message is relayed successfully then reply from relay service is sent to
-    /// `client` address and proofs are returned.
+    /// Redirect message to `ethereum-event-client` program which is valid for `slot`.
+    /// If message is relayed successfully then reply is sent to `client` address
+    /// to `client_route` route.
     ///
     /// # Parameters
     ///
     /// - `slot`: slot for which message is relayed.
-    /// - `tx_index`: transaction index for message.
     /// - `proofs`: SCALE encoded `EthToVaraEvent`.
     /// - `client`: client address to send receipt to on success.
     /// - `client_route`: route to send receipt to on success.
+    ///
     /// # Returns
+    ///
     /// - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
     /// - `ProxyError`: if redirect failed
-    ///
     #[allow(clippy::await_holding_refcell_ref)]
     pub async fn redirect(
         &mut self,

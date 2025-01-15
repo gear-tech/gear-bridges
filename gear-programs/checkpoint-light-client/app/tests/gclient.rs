@@ -1,10 +1,10 @@
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress, Result};
 use ethereum_common::{
     base_types::BytesFixed,
-    beacon::SyncAggregate, utils::{Bootstrap, Update, BootstrapResponse, UpdateData}, network::Network,
+    beacon::SyncAggregate, utils::{Bootstrap, Update, BootstrapResponse, UpdateData, FinalityUpdateResponse}, network::Network,
     tree_hash::TreeHash,
 };
-use checkpoint_light_client_io::{G2, Init};
+use checkpoint_light_client_io::{G2, Init, Error};
 use hex_literal::hex;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use sp_core::crypto::DEV_PHRASE;
@@ -153,6 +153,72 @@ async fn init_holesky() -> Result<()> {
         .unwrap();
 
     println!("program_id = {:?}", hex::encode(program_id));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn sync_update_requires_replaying_back() -> Result<()> {
+    let finality_update: FinalityUpdateResponse =
+        serde_json::from_slice(SEPOLIA_FINALITY_UPDATE_5_263_072).unwrap();
+    let finality_update = finality_update.data;
+    println!(
+        "finality_update slot = {}",
+        finality_update.finalized_header.slot
+    );
+
+    let slot = finality_update.finalized_header.slot;
+
+    let BootstrapResponse { data: bootstrap } =
+        serde_json::from_slice(SEPOLIA_BOOTSTRAP_640).unwrap();
+    let mut updates: Vec<UpdateData> = serde_json::from_slice(SEPOLIA_UPDATE_640).unwrap();
+    let update = match updates.pop() {
+        Some(update) if updates.is_empty() => update.data,
+        _ => unreachable!("Requested single update"),
+    };
+
+    let (api, admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
+        GClientRemoting::new(api.clone()),
+    );
+
+    let init = construct_init(Network::Sepolia, update, bootstrap);
+    let program_id = factory
+        .init(init)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .unwrap();
+
+    println!("program_id = {:?}", hex::encode(program_id));
+
+    println!();
+    println!();
+
+    println!(
+        "slot = {slot:?}, attested slot = {:?}, signature slot = {:?}",
+        finality_update.attested_header.slot, finality_update.signature_slot
+    );
+
+    let mut sync_update = checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()),);
+    let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
+    let result = sync_update
+        .process(utils::sync_update_from_finality(
+            decode_signature(&finality_update.sync_aggregate),
+            finality_update,)
+        , 
+        sync_aggregate_encoded)
+        .send_recv(program_id)
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Err(Error::ReplayBackRequired { .. })
+        ),
+        "result = {result:?}"
+    );
 
     Ok(())
 }

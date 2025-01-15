@@ -96,4 +96,8 @@ impl CheckpointLightClientProgram {
     pub fn state(&self) -> services::State {
         services::State::new(&self.0)
     }
+
+    pub fn sync_update(&self) -> services::SyncUpdate {
+        services::SyncUpdate::new(&self.0)
+    }
 }

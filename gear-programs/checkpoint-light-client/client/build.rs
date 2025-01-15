@@ -11,6 +11,8 @@ fn main() {
     // Generate client code from IDL file
     ClientGenerator::from_idl_path(&idl_file_path)
         .with_external_type("Init", "checkpoint_light_client_io::Init")
+        .with_external_type("Update", "checkpoint_light_client_io::Update")
+        .with_external_type("Error", "checkpoint_light_client_io::Error")
         .with_mocks("mocks")
         .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("checkpoint_light_client_client.rs"))
         .unwrap();

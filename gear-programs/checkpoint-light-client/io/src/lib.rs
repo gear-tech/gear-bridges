@@ -80,7 +80,7 @@ pub struct Init {
     pub sync_aggregate_encoded: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Decode, TypeInfo)]
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 pub enum Error {
@@ -92,6 +92,7 @@ pub enum Error {
     InvalidFinalityProof,
     InvalidNextSyncCommitteeProof,
     InvalidPublicKeys,
+    InvalidSyncAggregate,
     ReplayBackRequired {
         replay_back: Option<ReplayBack>,
         checkpoint: (Slot, Hash256),

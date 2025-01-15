@@ -4,3 +4,4 @@ pub mod sync_update;
 
 pub use checkpoint::CheckpointFor;
 pub use state::ServiceState as State;
+pub use sync_update::SyncUpdate;

@@ -4,9 +4,11 @@ use crate::{
     crypto,
     utils,
 };
-use checkpoint_light_client_io::{Slot, Keys as SyncCommitteeKeys, Error as SyncCommitteeUpdateError, Update as SyncCommitteeUpdate};
-use ethereum_common::{beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate}, merkle, network::Network, utils as eth_utils, SYNC_COMMITTEE_SIZE};
+use checkpoint_light_client_io::{Slot, Keys as SyncCommitteeKeys, Error as SyncCommitteeUpdateError, Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP, ReplayBack};
+use ethereum_common::{beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate}, merkle, network::Network, utils as eth_utils, SYNC_COMMITTEE_SIZE, tree_hash::TreeHash};
 use sails_rs::prelude::*;
+use cell::RefCell;
+use crate::State;
 
 pub async fn verify(
     network: &Network,
@@ -95,4 +97,68 @@ pub async fn verify(
     }
 
     Ok((finalized_header_update, committee_update))
+}
+
+
+pub struct SyncUpdate<'a> {
+    state: &'a RefCell<State>,
+}
+
+#[sails_rs::service]
+impl<'a> SyncUpdate<'a> {
+    pub fn new(state: &'a RefCell<State>) -> Self {
+        Self { state }
+    }
+
+    pub async fn process(&mut self, sync_update: SyncCommitteeUpdate, 
+        sync_aggregate_encoded: Vec<u8>,) -> Result<(), SyncCommitteeUpdateError>
+    {
+        let state = self.state.borrow();
+        if eth_utils::calculate_epoch(state.finalized_header.slot) + MAX_EPOCHS_GAP
+            <= eth_utils::calculate_epoch(sync_update.finalized_header.slot)
+        {
+            return Err(SyncCommitteeUpdateError::ReplayBackRequired {
+                replay_back: state
+                    .replay_back
+                    .as_ref()
+                    .map(|replay_back| ReplayBack {
+                        finalized_header: replay_back.finalized_header.slot,
+                        last_header: replay_back.last_header.slot,
+                    }),
+                checkpoint: state
+                    .checkpoints
+                    .last()
+                    .expect("The program should be initialized so there is a checkpoint"),
+            });
+        }
+
+        let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
+            .map_err(|_| SyncCommitteeUpdateError::InvalidSyncAggregate)?;
+        let (finalized_header_update, committee_update) = verify(
+            &state.network,
+            state.finalized_header.slot,
+            &state.sync_committee_current,
+            &state.sync_committee_next,
+            sync_update,
+            sync_aggregate,
+        )
+        .await?;
+
+        mem::drop(state);
+        let mut state = self.state.borrow_mut();
+
+        if let Some(finalized_header) = finalized_header_update {
+            state
+                .checkpoints
+                .push(finalized_header.slot, finalized_header.tree_hash_root());
+            state.finalized_header = finalized_header;
+        }
+
+        if let Some(sync_committee_next) = committee_update {
+            state.sync_committee_current =
+                core::mem::replace(&mut state.sync_committee_next, sync_committee_next);
+        }
+
+        Ok(())
+    }
 }

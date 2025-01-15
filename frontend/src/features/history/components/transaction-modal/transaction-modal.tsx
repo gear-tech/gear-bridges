@@ -1,11 +1,10 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
-import { formatUnits } from 'viem';
 
-import { CopyButton, FeeAndTimeFooter, LinkButton, TruncatedText } from '@/components';
+import { CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
-import { useLargeModal, useTokens } from '@/hooks';
+import { useTokens } from '@/hooks';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -56,23 +55,15 @@ function TransactionModal({
   const sourceSymbol = symbols?.[source as HexString] || 'Unit';
   const destinationSymbol = symbols?.[destination as HexString] || 'Unit';
 
-  const formattedAmount = formatUnits(BigInt(amount), decimals?.[source as HexString] ?? 0);
-
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
 
-  const renderHeading = () => (
-    <>
-      Transaction Details
-      {status && <TransactionStatus status={status} />}
-    </>
-  );
-
-  useLargeModal();
-
   return (
-    // TODO: remove assertion after @gear-js/vara-ui update
-    <Modal heading={renderHeading() as unknown as string} close={close}>
+    <Modal
+      heading="Transaction Details"
+      headerAddon={status && <TransactionStatus status={status} />}
+      close={close}
+      maxWidth="large">
       {(txHash || timestamp) && (
         <header className={styles.header}>
           {txHash && (
@@ -89,11 +80,14 @@ function TransactionModal({
         </header>
       )}
 
-      <p className={cx(styles.pairs, renderProgressBar && styles.loading)}>
+      <div className={cx(styles.pairs, renderProgressBar && styles.loading)}>
         <span className={styles.tx}>
-          <span className={styles.amount}>
-            {formattedAmount} {sourceSymbol}
-          </span>
+          <FormattedBalance
+            value={BigInt(amount)}
+            decimals={decimals?.[source as HexString] ?? 0}
+            symbol={sourceSymbol}
+            className={styles.amount}
+          />
 
           <span className={styles.label}>on</span>
 
@@ -106,9 +100,12 @@ function TransactionModal({
         <ArrowSVG className={styles.arrowSvg} />
 
         <span className={styles.tx}>
-          <span className={styles.amount}>
-            {formattedAmount} {destinationSymbol}
-          </span>
+          <FormattedBalance
+            value={BigInt(amount)}
+            decimals={decimals?.[source as HexString] ?? 0}
+            symbol={destinationSymbol}
+            className={styles.amount}
+          />
 
           <span className={styles.label}>on</span>
 
@@ -129,7 +126,7 @@ function TransactionModal({
           <span className={styles.label}>To</span>
           <TruncatedText value={formattedReceiverAddress} className={styles.value} />
         </span>
-      </p>
+      </div>
 
       {renderProgressBar?.()}
 

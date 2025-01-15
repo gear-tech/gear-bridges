@@ -1,6 +1,6 @@
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_event_client_client::traits::*;
-use gclient::{Event, EventProcessor, GearApi, GearEvent, WSAddress};
+use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
@@ -106,12 +106,11 @@ async fn proxy() {
         )
         .send_recv(proxy_program_id)
         .await
-        .unwrap()
         .unwrap();
 
     let endpoint = proxy_client
         .endpoint_for(message.proof_block.block.slot)
-        .send_recv(proxy_program_id)
+        .recv(proxy_program_id)
         .await
         .unwrap()
         .unwrap();
@@ -122,6 +121,7 @@ async fn proxy() {
     );
 
     let gas_limit = api.block_gas_limit().unwrap();
+    let mut listener = api.subscribe().await.unwrap();
     let result = proxy_client
         .redirect(
             message.proof_block.block.slot,
@@ -133,7 +133,6 @@ async fn proxy() {
         .send(proxy_program_id)
         .await
         .unwrap();
-    let mut listener = api.subscribe().await.unwrap();
     let message_id = listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
@@ -162,6 +161,7 @@ async fn proxy() {
         hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
     )));
 
+    let mut listener = api.subscribe().await.unwrap();
     let (message_id, _, _) = match api
         .send_reply(message_id.into(), reply, gas_limit / 100 * 95, 0)
         .await
@@ -178,32 +178,46 @@ async fn proxy() {
             crate::panic!("{:?}", err);
         }
     };
-    println!("Checkpoint reply with ID #{:?}", message_id);
-    assert!(listener
-        .message_processed(message_id)
-        .await
-        .unwrap()
-        .succeed());
-    println!("Processed...");
-    let mut listener = api.subscribe().await.unwrap();
-    // wait for SubmitReceipt request and reply to it
-    let message_id = listener
-        .proc(|e| match e {
-            Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.destination == admin.into() && message.details.is_none() =>
-            {
-                message
-                    .payload
-                    .0
-                    .starts_with(vft_manager::io::SubmitReceipt::ROUTE)
-                    .then_some(message.id)
-                    .or_else(|| crate::panic!())
-            }
 
-            _ => None,
+    println!("Checkpoint reply with ID {:?}", message_id);
+
+    println!("Processed...");
+    // wait for SubmitReceipt request and reply to it
+    let predicate = |e| match e {
+        Event::Gear(GearEvent::UserMessageSent { message, .. })
+            if message.destination == admin.into() && message.details.is_none() =>
+        {
+            message
+                .payload
+                .0
+                .starts_with(vft_manager::io::SubmitReceipt::ROUTE)
+                .then_some((Some(message.id), None))
+        }
+
+        Event::Gear(GearEvent::MessagesDispatched { statuses, .. }) => {
+            statuses.into_iter().find_map(|(mid, status)| {
+                (mid.0 == message_id.into_bytes())
+                    .then_some((None, Some(DispatchStatus::from(status))))
+            })
+        }
+
+        _ => None,
+    };
+
+    let mut results = listener
+        .proc_many(predicate, |pairs| {
+            let len = pairs.len();
+
+            (pairs, len > 1)
         })
         .await
         .unwrap();
+    let (message_id_1, status_1) = results.pop().unwrap();
+    let (message_id_2, status_2) = results.pop().unwrap();
+
+    assert!(status_1.or(status_2).unwrap().succeed());
+
+    let message_id = message_id_1.or(message_id_2).unwrap();
 
     println!("Submit receipt request");
     let reply: <vft_manager::io::SubmitReceipt as ActionIo>::Reply = Ok(());

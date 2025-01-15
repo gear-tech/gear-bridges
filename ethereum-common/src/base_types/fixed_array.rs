@@ -1,5 +1,8 @@
 use super::*;
 
+/// A homogenous collection of a fixed number of values.
+///
+/// NOTE: collection of length `0` is illegal.
 #[derive(Clone, TypeInfo)]
 pub struct FixedArray<T, const N: usize>(pub [T; N]);
 

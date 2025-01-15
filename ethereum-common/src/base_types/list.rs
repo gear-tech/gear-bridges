@@ -1,6 +1,8 @@
 use super::*;
 
 /// A homogenous collection of a variable number of values.
+///
+/// NOTE: collection of length `0` is illegal.
 #[derive(Clone, TypeInfo)]
 pub struct List<T, const N: usize> {
     data: Vec<T>,

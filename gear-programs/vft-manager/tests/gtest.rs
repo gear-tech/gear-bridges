@@ -2,7 +2,7 @@ use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use extended_vft_client::{traits::*, ExtendedVftFactory as VftFactoryC, Vft as VftC};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
-use vft_manager_app::services::abi::ERC20_MANAGER;
+use vft_manager_app::services::eth_abi::ERC20_MANAGER;
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,
@@ -85,10 +85,8 @@ async fn setup_for_test() -> Fixture {
         config: Config {
             gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,
-            gas_for_submit_receipt: 15_000_000_000,
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
-            gas_for_request_bridging: 20_000_000_000,
         },
     };
     let vft_manager_program_id = VftManagerFactoryC::new(remoting.clone())
@@ -300,7 +298,7 @@ async fn test_withdraw_fails_with_bad_origin() {
         .await
         .unwrap();
 
-    assert_eq!(result.unwrap_err(), Error::NotEthClient);
+    assert_eq!(result.unwrap_err(), Error::NotHistoricalProxy);
 }
 
 async fn balance_of(

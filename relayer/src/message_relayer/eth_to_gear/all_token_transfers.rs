@@ -1,6 +1,7 @@
 use std::iter;
 
 use primitive_types::{H160, H256};
+use sails_rs::calls::ActionIo;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
@@ -47,7 +48,7 @@ impl Relayer {
         suri: String,
         eth_api: EthApi,
         beacon_client: BeaconClient,
-        erc20_treasury_address: H160,
+        erc20_manager_address: H160,
         checkpoint_light_client_address: H256,
         historical_proxy_address: H256,
         vft_manager_address: H256,
@@ -67,11 +68,14 @@ impl Relayer {
         let deposit_event_extractor = DepositEventExtractor::new(
             eth_api.clone(),
             beacon_client.clone(),
-            erc20_treasury_address,
+            erc20_manager_address,
         );
 
         let checkpoints_extractor =
             CheckpointsExtractor::new(args.clone(), checkpoint_light_client_address);
+
+        let route =
+            <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
 
         let gear_message_sender = MessageSender::new(
             args,
@@ -80,6 +84,8 @@ impl Relayer {
             beacon_client,
             historical_proxy_address,
             vft_manager_address,
+            route,
+            true,
         );
 
         Ok(Self {

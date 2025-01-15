@@ -7,10 +7,6 @@ use crate::sync_committee::{ArkScale, G1, G2};
 use ethereum_common::{network::Network, tree_hash::{self, TreeHash}, Hash256, beacon::BlockHeader as BeaconBlockHeader};
 use sails_rs::{prelude::*, gstd::msg};
 
-// Domain type for sync committee signatures.
-// https://eth2book.info/capella/part3/config/constants/#domain-types
-const DOMAIN_TYPE: [u8; 4] = [0x07, 0x00, 0x00, 0x00];
-
 const BUILTIN_BLS381: ActorId = ActorId::new(hex_literal::hex!(
     "6b6e292c382945e80bf51af2ba7fe9f458dcff81ae6075c46f9095e1bbecdc37"
 ));
@@ -22,8 +18,12 @@ pub async fn verify_sync_committee_signature(
     signature: &G2,
     signature_slot: u64,
 ) -> bool {
-    let H256(header_root) = attested_header.tree_hash_root();
-    let signing_root = compute_committee_sign_root(network, header_root, signature_slot);
+    let domain = signing_root::compute_domain(
+        DOMAIN_SYNC_COMMITTEE,
+        network.fork_version(),
+        network.genesis_validators_root(),
+    );
+    let signing_root = signing_root::compute(attested_header.tree_hash_root(), domain);
 
     let points: ArkScale<Vec<G1>> = pub_keys.into();
     let request = Request::AggregateG1 {
@@ -99,54 +99,4 @@ pub async fn verify_sync_committee_signature(
     };
 
     <Bls12_381 as Pairing>::TargetField::ONE == exp.0
-}
-
-#[derive(Default, Debug, tree_hash_derive::TreeHash)]
-struct SigningData {
-    object_root: [u8; 32],
-    domain: [u8; 32],
-}
-
-#[derive(Default, Debug, tree_hash_derive::TreeHash)]
-struct ForkData {
-    current_version: [u8; 4],
-    genesis_validator_root: [u8; 32],
-}
-
-pub fn compute_signing_root(object_root: [u8; 32], domain: [u8; 32]) -> Hash256 {
-    let data = SigningData {
-        object_root,
-        domain,
-    };
-
-    data.tree_hash_root()
-}
-
-pub fn compute_domain(
-    domain_type: &[u8],
-    fork_version: [u8; 4],
-    genesis_root: [u8; 32],
-) -> [u8; 32] {
-    let H256(fork_data_root) = compute_fork_data_root(fork_version, genesis_root);
-    let start = domain_type;
-    let end = &fork_data_root.as_ref()[..28];
-    let d = [start, end].concat();
-
-    d.to_vec().try_into().unwrap()
-}
-
-fn compute_fork_data_root(current_version: [u8; 4], genesis_validator_root: [u8; 32]) -> Hash256 {
-    let fork_data = ForkData {
-        current_version,
-        genesis_validator_root,
-    };
-
-    fork_data.tree_hash_root()
-}
-
-fn compute_committee_sign_root(network: &Network, header: [u8; 32], _slot: u64) -> Hash256 {
-    let H256(genesis_root) = network.genesis_validators_root();
-    let domain = compute_domain(&DOMAIN_TYPE, network.fork_version(), genesis_root);
-
-    compute_signing_root(header, domain)
 }

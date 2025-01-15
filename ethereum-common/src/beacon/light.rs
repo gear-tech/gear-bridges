@@ -1,4 +1,5 @@
-// Module contains lightened versions of the entities.
+//! Module contains lightened versions of the entities, i.e. some fields
+//! are replaced by its tree hash root value.
 
 use super::*;
 

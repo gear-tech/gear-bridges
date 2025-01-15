@@ -1,5 +1,6 @@
 use sails_rs::prelude::*;
-use crate::{common::{Slot, ReplayBack}, State};
+use checkpoint_light_client_io::{Slot, ReplayBack};
+use crate::State;
 use cell::RefCell;
 use ethereum_common::Hash256;
 

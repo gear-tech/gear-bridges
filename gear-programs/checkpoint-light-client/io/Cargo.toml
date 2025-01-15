@@ -1,0 +1,20 @@
+[package]
+name = "checkpoint-light-client-io"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ark-bls12-381 = { workspace = true, features = ["curve"] }
+ark-scale.workspace = true
+ark-serialize.workspace = true
+ethereum-common.workspace = true
+sails-rs.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "ark-bls12-381/std",
+    "ark-scale/std",
+    "ark-serialize/std",
+    "ethereum-common/std",
+]

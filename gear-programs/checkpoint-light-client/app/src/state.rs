@@ -1,7 +1,4 @@
-use super::{
-    common::Slot,
-    sync_committee::Keys as SyncCommitteeKeys,
-};
+use checkpoint_light_client_io::{Slot, Keys as SyncCommitteeKeys};
 use circular_buffer::CircularBuffer;
 use ethereum_common::{network::Network, Hash256, beacon::BlockHeader as BeaconBlockHeader};
 use sails_rs::prelude::*;

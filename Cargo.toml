@@ -62,6 +62,7 @@ utils-prometheus = { path = "utils-prometheus" }
 checkpoint-light-client = { path = "gear-programs/checkpoint-light-client" }
 checkpoint-light-client-app = { path = "gear-programs/checkpoint-light-client/app" }
 checkpoint-light-client-client = { path = "gear-programs/checkpoint-light-client/client" }
+checkpoint-light-client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 ethereum-event-client = { path = "gear-programs/ethereum-event-client" }
 ethereum-event-client-app = { path = "gear-programs/ethereum-event-client/app" }
 ethereum-event-client-client = { path = "gear-programs/ethereum-event-client/client" }

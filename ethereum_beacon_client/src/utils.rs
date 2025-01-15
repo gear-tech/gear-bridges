@@ -1,12 +1,12 @@
 use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
-    ArkScale, G1TypeInfo, G2TypeInfo, SyncCommitteeKeys, SyncCommitteeUpdate, G1, G2,
-    SYNC_COMMITTEE_SIZE,
+    ArkScale, G1TypeInfo, G2TypeInfo, Keys as SyncCommitteeKeys, Update as SyncCommitteeUpdate, G1, G2,
 };
 use ethereum_common::{
     base_types::{BytesFixed, FixedArray},
     beacon::BLSPubKey,
     utils::{FinalityUpdate, Update},
+    SYNC_COMMITTEE_SIZE,
 };
 
 pub fn sync_update_from_finality(
@@ -17,7 +17,6 @@ pub fn sync_update_from_finality(
         signature_slot: finality_update.signature_slot,
         attested_header: finality_update.attested_header,
         finalized_header: finality_update.finalized_header,
-        sync_aggregate: finality_update.sync_aggregate,
         sync_committee_next_aggregate_pubkey: None,
         sync_committee_signature: G2TypeInfo(signature).into(),
         sync_committee_next_pub_keys: None,
@@ -60,7 +59,6 @@ pub fn sync_update_from_update(signature: G2, update: Update) -> SyncCommitteeUp
         signature_slot: update.signature_slot,
         attested_header: update.attested_header,
         finalized_header: update.finalized_header,
-        sync_aggregate: update.sync_aggregate,
         sync_committee_next_aggregate_pubkey: Some(update.next_sync_committee.aggregate_pubkey),
         sync_committee_signature: G2TypeInfo(signature).into(),
         sync_committee_next_pub_keys: Some(next_sync_committee_keys),

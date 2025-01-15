@@ -2097,13 +2097,24 @@ dependencies = [
  "ark-ec",
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "circular-buffer",
  "ethereum-common",
+ "ethereum_beacon_client",
+ "futures",
  "gbuiltin-bls381 1.7.0",
+ "gclient",
  "getrandom 0.2.15",
+ "hex",
  "hex-literal",
  "lazy_static",
+ "ruzstd",
  "sails-rs",
+ "serde_json",
+ "sp-core 21.0.0",
+ "tokio",
  "tree_hash_derive",
 ]
 
@@ -2112,9 +2123,21 @@ name = "checkpoint-light-client-client"
 version = "0.3.0"
 dependencies = [
  "checkpoint-light-client-app",
+ "checkpoint-light-client-io",
  "mockall 0.12.1",
  "sails-client-gen",
  "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "checkpoint-light-client-io"
+version = "0.1.0"
+dependencies = [
+ "ark-bls12-381",
+ "ark-scale 0.0.12",
+ "ark-serialize 0.4.2",
+ "ethereum-common",
  "sails-rs",
 ]
 
@@ -3773,6 +3796,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
+ "checkpoint-light-client-io",
  "ethereum-common",
  "futures",
  "hex",

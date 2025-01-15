@@ -1,5 +1,6 @@
 use sails_rs::prelude::*;
-use crate::{common::Slot, State, state::CheckpointError};
+use checkpoint_light_client_io::Slot;
+use crate::{state::CheckpointError, State};
 use cell::RefCell;
 use ethereum_common::Hash256;
 

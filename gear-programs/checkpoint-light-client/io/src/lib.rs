@@ -1,16 +1,29 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ethereum_common::{
+pub use ethereum_common::{
     self,
     base_types::FixedArray,
     beacon::{
         BLSPubKey, BlockHeader as BeaconBlockHeader,
     },
     Hash256,
-    SYNC_COMMITTEE_SIZE,
+    SYNC_COMMITTEE_SIZE, network::Network,
 };
 use sails_rs::prelude::*;
-use crate::common::{ReplayBack, Slot};
+
+pub type Slot = u64;
+
+/// The struct contains slots of the finalized and the last checked headers.
+/// This is the state of the checkpoint backfilling process.
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct ReplayBack {
+    pub finalized_header: Slot,
+    pub last_header: Slot,
+}
 
 // The constant defines how many epochs may be skipped.
 pub const MAX_EPOCHS_GAP: u64 = 3;
@@ -41,7 +54,7 @@ impl ark_scale::ArkScaleMaxEncodedLen for G2TypeInfo {
 
 pub type Keys = FixedArray<ArkScale<G1TypeInfo>, SYNC_COMMITTEE_SIZE>;
 
-#[derive(Clone, Debug, Decode, TypeInfo)]
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 pub struct Update {
@@ -53,6 +66,18 @@ pub struct Update {
     pub sync_committee_next_pub_keys: Option<Box<Keys>>,
     pub sync_committee_next_branch: Option<Vec<[u8; 32]>>,
     pub finality_branch: Vec<[u8; 32]>,
+}
+
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct Init {
+    pub network: Network,
+    pub sync_committee_current_pub_keys: Box<Keys>,
+    pub sync_committee_current_aggregate_pubkey: BLSPubKey,
+    pub sync_committee_current_branch: Vec<[u8; 32]>,
+    pub update: Update,
+    pub sync_aggregate_encoded: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Decode, TypeInfo)]

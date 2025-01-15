@@ -3,7 +3,7 @@ use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_ff::{Field, Zero};
 use core::ops::Neg;
 use gbuiltin_bls381::*;
-use crate::sync_committee::{ArkScale, G1, G2};
+use checkpoint_light_client_io::{ArkScale, G1, G2};
 use ethereum_common::{network::Network, tree_hash::TreeHash, beacon::BlockHeader as BeaconBlockHeader, signing_root, DOMAIN_SYNC_COMMITTEE};
 use sails_rs::{prelude::*, gstd::msg};
 

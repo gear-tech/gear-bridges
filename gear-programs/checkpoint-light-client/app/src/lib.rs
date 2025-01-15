@@ -1,10 +1,8 @@
 #![no_std]
 
-mod common;
 mod crypto;
 mod services;
 mod state;
-mod sync_committee;
 mod utils;
 
 use cell::RefCell;
@@ -16,22 +14,11 @@ use ethereum_common::{
     tree_hash::TreeHash,
 };
 use sails_rs::prelude::*;
+use checkpoint_light_client_io::Init;
 
 const STORED_CHECKPOINTS_COUNT: usize = 150_000;
 
 type State = state::State<STORED_CHECKPOINTS_COUNT>;
-
-#[derive(Clone, Debug, Decode, TypeInfo)]
-#[codec(crate = sails_rs::scale_codec)]
-#[scale_info(crate = sails_rs::scale_info)]
-pub struct Init {
-    pub network: Network,
-    pub sync_committee_current_pub_keys: Box<sync_committee::Keys>,
-    pub sync_committee_current_aggregate_pubkey: BLSPubKey,
-    pub sync_committee_current_branch: Vec<[u8; 32]>,
-    pub update: sync_committee::Update,
-    pub sync_aggregate_encoded: Vec<u8>,
-}
 
 pub struct CheckpointLightClientProgram(RefCell<State>);
 

@@ -2,10 +2,9 @@ mod committee;
 
 use crate::{
     crypto,
-    sync_committee::{Keys as SyncCommitteeKeys, Error as SyncCommitteeUpdateError, Update as SyncCommitteeUpdate},
     utils,
-    common::Slot,
 };
+use checkpoint_light_client_io::{Slot, Keys as SyncCommitteeKeys, Error as SyncCommitteeUpdateError, Update as SyncCommitteeUpdate};
 use ethereum_common::{beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate}, merkle, network::Network, utils as eth_utils, SYNC_COMMITTEE_SIZE};
 use sails_rs::prelude::*;
 

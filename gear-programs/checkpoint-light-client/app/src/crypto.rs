@@ -4,7 +4,7 @@ use ark_ff::{Field, Zero};
 use core::ops::Neg;
 use gbuiltin_bls381::*;
 use crate::sync_committee::{ArkScale, G1, G2};
-use ethereum_common::{network::Network, tree_hash::{self, TreeHash}, Hash256, beacon::BlockHeader as BeaconBlockHeader};
+use ethereum_common::{network::Network, tree_hash::TreeHash, beacon::BlockHeader as BeaconBlockHeader, signing_root, DOMAIN_SYNC_COMMITTEE};
 use sails_rs::{prelude::*, gstd::msg};
 
 const BUILTIN_BLS381: ActorId = ActorId::new(hex_literal::hex!(
@@ -16,7 +16,7 @@ pub async fn verify_sync_committee_signature(
     pub_keys: Vec<G1>,
     attested_header: &BeaconBlockHeader,
     signature: &G2,
-    signature_slot: u64,
+    _signature_slot: u64,
 ) -> bool {
     let domain = signing_root::compute_domain(
         DOMAIN_SYNC_COMMITTEE,

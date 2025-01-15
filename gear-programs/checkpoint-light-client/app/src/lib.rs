@@ -30,6 +30,7 @@ pub struct Init {
     pub sync_committee_current_aggregate_pubkey: BLSPubKey,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
     pub update: sync_committee::Update,
+    pub sync_aggregate_encoded: Vec<u8>,
 }
 
 pub struct CheckpointLightClientProgram(RefCell<State>);
@@ -43,8 +44,12 @@ impl CheckpointLightClientProgram {
             sync_committee_current_aggregate_pubkey,
             sync_committee_current_branch,
             update,
+            sync_aggregate_encoded,
         } = init;
-    
+
+        let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
+            .expect("Correctly scale-encoded SyncAggregate");
+
         let Some(sync_committee_current) = utils::construct_sync_committee(
             sync_committee_current_aggregate_pubkey,
             &sync_committee_current_pub_keys,
@@ -67,6 +72,7 @@ impl CheckpointLightClientProgram {
             &sync_committee_current_pub_keys,
             &sync_committee_current_pub_keys,
             update,
+            sync_aggregate,
         )
         .await
         {

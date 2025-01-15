@@ -6,7 +6,7 @@ use crate::{
     utils,
     common::Slot,
 };
-use ethereum_common::{merkle, utils as eth_utils, SYNC_COMMITTEE_SIZE, beacon::{BlockHeader as BeaconBlockHeader, BLSPubKey}, network::Network,};
+use ethereum_common::{beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate}, merkle, network::Network, utils as eth_utils, SYNC_COMMITTEE_SIZE};
 use sails_rs::prelude::*;
 
 pub async fn verify(
@@ -15,12 +15,12 @@ pub async fn verify(
     stored_sync_committee_current: &SyncCommitteeKeys,
     stored_sync_committee_next: &SyncCommitteeKeys,
     sync_update: SyncCommitteeUpdate,
+    sync_aggregate: SyncAggregate,
 ) -> Result<(Option<BeaconBlockHeader>, Option<Box<SyncCommitteeKeys>>), SyncCommitteeUpdateError> {
     let SyncCommitteeUpdate {
         signature_slot,
         attested_header,
         finalized_header,
-        sync_aggregate,
         sync_committee_signature,
         sync_committee_next_aggregate_pubkey,
         sync_committee_next_pub_keys,

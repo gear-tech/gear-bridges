@@ -4,7 +4,7 @@ use ethereum_common::{
     self,
     base_types::FixedArray,
     beacon::{
-        BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate,
+        BLSPubKey, BlockHeader as BeaconBlockHeader,
     },
     Hash256,
     SYNC_COMMITTEE_SIZE,
@@ -48,7 +48,6 @@ pub struct Update {
     pub signature_slot: u64,
     pub attested_header: BeaconBlockHeader,
     pub finalized_header: BeaconBlockHeader,
-    pub sync_aggregate: SyncAggregate,
     pub sync_committee_signature: ArkScale<G2TypeInfo>,
     pub sync_committee_next_aggregate_pubkey: Option<BLSPubKey>,
     pub sync_committee_next_pub_keys: Option<Box<Keys>>,

@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 alloy-rlp.workspace = true
+checkpoint-light-client-client.workspace = true
 ethereum-common.workspace = true
 sails-rs.workspace = true
 

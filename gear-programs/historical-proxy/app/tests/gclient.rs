@@ -1,4 +1,4 @@
-use checkpoint_light_client_io::{Handle, HandleResult};
+use checkpoint_light_client_client::checkpoint_for;
 use ethereum_event_client_client::traits::*;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use hex_literal::hex;
@@ -11,7 +11,7 @@ use vft_manager_client::vft_manager;
 mod shared;
 
 static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((
-    42_42_42, /* random number choosen by fair random */
+    2_000,
     None, None,
 ));
 
@@ -127,7 +127,7 @@ async fn proxy() {
             message.proof_block.block.slot,
             message.encode(),
             admin,
-            <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+            vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
         )
         .with_gas_limit(gas_limit / 100 * 95)
         .send(proxy_program_id)
@@ -138,17 +138,16 @@ async fn proxy() {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
                 if message.source == ethereum_event_client_program_id.into()
                     && message.destination == admin.into()
-                    && message.details.is_none() =>
+                    && message.details.is_none()
+                    && message.payload.0.starts_with(checkpoint_for::io::Get::ROUTE) =>
             {
-                let request = Handle::decode(&mut &message.payload.0[..]).ok()?;
+                let encoded = &message.payload.0[checkpoint_for::io::Get::ROUTE.len()..];
+                let slot: <checkpoint_for::io::Get as ActionIo>::Params = Decode::decode(&mut &encoded[..]).ok()?;
 
-                match request {
-                    Handle::GetCheckpointFor { slot } if slot == 2_498_456 => {
+                if slot == 2_498_456 {
                         println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
                         Some(message.id)
-                    }
-                    _ => None,
-                }
+                    } else { None }
             }
 
             _ => None,
@@ -156,14 +155,20 @@ async fn proxy() {
         .await
         .unwrap();
 
-    let reply = HandleResult::Checkpoint(Ok((
+    let reply: <checkpoint_for::io::Get as ActionIo>::Reply = Ok((
         2_496_464,
         hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
-    )));
+    ));
+    let payload = {
+        let mut result = checkpoint_for::io::Get::ROUTE.to_vec();
+        reply.encode_to(&mut result);
+
+        result
+    };
 
     let mut listener = api.subscribe().await.unwrap();
     let (message_id, _, _) = match api
-        .send_reply(message_id.into(), reply, gas_limit / 100 * 95, 0)
+        .send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
         .await
     {
         Ok(reply) => reply,
@@ -221,10 +226,10 @@ async fn proxy() {
 
     println!("Submit receipt request");
     let reply: <vft_manager::io::SubmitReceipt as ActionIo>::Reply = Ok(());
-    let route = <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE;
     let payload = {
-        let mut result = route.to_vec();
+        let mut result = vft_manager::io::SubmitReceipt::ROUTE.to_vec();
         reply.encode_to(&mut result);
+
         result
     };
 

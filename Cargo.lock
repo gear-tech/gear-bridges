@@ -3747,6 +3747,7 @@ name = "ethereum-event-client-app"
 version = "0.3.0"
 dependencies = [
  "alloy-rlp",
+ "checkpoint-light-client-client",
  "ethereum-common",
  "ethereum-event-client",
  "ethereum-event-client-client",
@@ -5968,6 +5969,7 @@ version = "0.3.0"
 dependencies = [
  "alloy",
  "alloy-rlp",
+ "checkpoint-light-client-client",
  "ethereum-common",
  "ethereum-event-client",
  "ethereum-event-client-client",

@@ -1,7 +1,7 @@
 // Incorporate code generated based on the IDL file
 
 use super::{error::Error, RefCell, State};
-use checkpoint_light_client_io::{Handle, HandleResult};
+use checkpoint_light_client_client::{traits::CheckpointFor as _, CheckpointFor};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
@@ -12,7 +12,7 @@ use ethereum_common::{
     H256,
 };
 use ops::ControlFlow::*;
-use sails_rs::{gstd::msg, prelude::*};
+use sails_rs::{prelude::*, gstd::calls::GStdRemoting, calls::*};
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -131,18 +131,17 @@ impl<'a> EthereumEventClient<'a> {
     }
 
     async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {
-        let request = Handle::GetCheckpointFor { slot }.encode();
-        let reply = msg::send_bytes_for_reply(checkpoints, &request, 0, 0)
-            .map_err(|_| Error::SendFailure)?
+        let remoting = GStdRemoting::default();
+        let service = CheckpointFor::new(remoting);
+        let result = service
+            .get(slot)
+            .recv(checkpoints)
             .await
-            .map_err(|_| Error::ReplyFailure)?;
-
-        match HandleResult::decode(&mut reply.as_slice())
-            .map_err(|_| Error::HandleResultDecodeFailure)?
+            .map_err(|_| Error::SendFailure)?;
+        match result
         {
-            HandleResult::Checkpoint(Ok((_slot, hash))) => Ok(hash),
-            HandleResult::Checkpoint(Err(_)) => Err(Error::MissingCheckpoint),
-            _ => panic!("Unexpected result to `GetCheckpointFor` request"),
+            Ok((_slot, hash)) => Ok(hash),
+            Err(_) => Err(Error::MissingCheckpoint),
         }
     }
 }

@@ -1,6 +1,5 @@
 use sails_rs::prelude::*;
-use checkpoint_light_client_io::{Slot, ReplayBack};
-use crate::State;
+use checkpoint_light_client_io::{Slot, IoReplayBack};
 use cell::RefCell;
 use ethereum_common::Hash256;
 
@@ -11,7 +10,7 @@ pub struct StateData {
     pub checkpoints: Vec<(Slot, Hash256)>,
     /// The field contains the data if the program is
     /// replaying checkpoints back.
-    pub replay_back: Option<ReplayBack>,
+    pub replay_back: Option<IoReplayBack>,
 }
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
@@ -22,13 +21,13 @@ pub enum Order {
     Reverse,
 }
 
-pub struct ServiceState<'a> {
-    state: &'a RefCell<State>,
+pub struct State<'a> {
+    state: &'a RefCell<crate::State>,
 }
 
 #[sails_rs::service]
-impl<'a> ServiceState<'a> {
-    pub fn new(state: &'a RefCell<State>) -> Self {
+impl<'a> State<'a> {
+    pub fn new(state: &'a RefCell<crate::State>) -> Self {
         Self { state }
     }
 
@@ -52,7 +51,7 @@ impl<'a> ServiceState<'a> {
         let replay_back = state
             .replay_back
             .as_ref()
-            .map(|replay_back| ReplayBack {
+            .map(|replay_back| IoReplayBack {
                 finalized_header: replay_back.finalized_header.slot,
                 last_header: replay_back.last_header.slot,
             });

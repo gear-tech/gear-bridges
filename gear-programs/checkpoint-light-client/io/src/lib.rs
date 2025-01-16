@@ -17,10 +17,10 @@ pub type Slot = u64;
 
 /// The struct contains slots of the finalized and the last checked headers.
 /// This is the state of the checkpoint backfilling process.
-#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
-pub struct ReplayBack {
+pub struct IoReplayBack {
     pub finalized_header: Slot,
     pub last_header: Slot,
 }
@@ -94,7 +94,31 @@ pub enum Error {
     InvalidPublicKeys,
     InvalidSyncAggregate,
     ReplayBackRequired {
-        replay_back: Option<ReplayBack>,
+        replay_back: Option<IoReplayBack>,
         checkpoint: (Slot, Hash256),
     },
+}
+
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum ReplayBackStatus {
+    InProcess,
+    Finished,
+}
+
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum ReplayBackError {
+    AlreadyStarted,
+    NotStarted,
+    Verify(Error),
+    NoFinalityUpdate,
+}
+
+impl From<Error> for ReplayBackError {
+    fn from(e: Error) -> Self {
+        ReplayBackError::Verify(e)
+    }
 }

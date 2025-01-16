@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 checkpoint-light-client-io.workspace = true
+ethereum-common.workspace = true
 mockall = { workspace = true, optional = true }
 sails-rs.workspace = true
 

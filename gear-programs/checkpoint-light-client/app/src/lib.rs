@@ -7,8 +7,6 @@ mod utils;
 
 use cell::RefCell;
 use ethereum_common::{
-    beacon::BLSPubKey,
-    network::Network,
     merkle,
     utils as eth_utils,
     tree_hash::TreeHash,
@@ -91,6 +89,10 @@ impl CheckpointLightClientProgram {
 
     pub fn checkpoint_for(&self) -> services::CheckpointFor {
         services::CheckpointFor::new(&self.0)
+    }
+
+    pub fn replay_back(&self) -> services::ReplayBack {
+        services::ReplayBack::new(&self.0)
     }
 
     pub fn state(&self) -> services::State {

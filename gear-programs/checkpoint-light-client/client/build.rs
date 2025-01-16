@@ -10,9 +10,19 @@ fn main() {
 
     // Generate client code from IDL file
     ClientGenerator::from_idl_path(&idl_file_path)
+        .with_external_type("BlockHeader", "ethereum_common::beacon::BlockHeader")
+        .with_external_type("Block", "ethereum_common::beacon::light::Block")
+        .with_external_type("BlockBody", "ethereum_common::beacon::light::BlockBody")
+        .with_external_type(
+            "ExecutionPayload",
+            "ethereum_common::beacon::light::ExecutionPayload",
+        )
         .with_external_type("Init", "checkpoint_light_client_io::Init")
         .with_external_type("Update", "checkpoint_light_client_io::Update")
         .with_external_type("Error", "checkpoint_light_client_io::Error")
+        .with_external_type("IoReplayBack", "checkpoint_light_client_io::IoReplayBack")
+        .with_external_type("ReplayBackError", "checkpoint_light_client_io::ReplayBackError")
+        .with_external_type("ReplayBackStatus", "checkpoint_light_client_io::ReplayBackStatus")
         .with_mocks("mocks")
         .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("checkpoint_light_client_client.rs"))
         .unwrap();

@@ -2124,6 +2124,7 @@ version = "0.3.0"
 dependencies = [
  "checkpoint-light-client-app",
  "checkpoint-light-client-io",
+ "ethereum-common",
  "mockall 0.12.1",
  "sails-client-gen",
  "sails-idl-gen",

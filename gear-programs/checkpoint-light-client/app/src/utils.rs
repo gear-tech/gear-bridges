@@ -15,11 +15,8 @@ pub fn construct_sync_committee(
     for pub_key in public_keys.0.iter() {
         let mut buffer = BytesFixed(FixedArray([0u8; 48]));
 
-        if <G1 as CanonicalSerialize>::serialize_compressed(&pub_key.0 .0, buffer.0 .0.as_mut())
-            .is_err()
-        {
-            return None;
-        }
+        <G1 as CanonicalSerialize>::serialize_compressed(&pub_key.0 .0, buffer.0 .0.as_mut())
+            .ok()?;
 
         pub_keys.push(buffer);
     }

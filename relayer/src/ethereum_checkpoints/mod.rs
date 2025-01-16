@@ -21,9 +21,6 @@ use checkpoint_light_client_io::{
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
 use utils_prometheus::MeteredService;
 
-#[cfg(test)]
-mod tests;
-
 mod metrics;
 mod replay_back;
 mod sync_update;

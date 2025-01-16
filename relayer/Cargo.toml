@@ -18,6 +18,8 @@ alloy-rlp.workspace = true
 anyhow.workspace = true
 ark-serialize = { workspace = true, features = ["std"] }
 axum.workspace = true
+checkpoint-light-client-client.workspace = true
+checkpoint-light-client-io.workspace = true
 clap.workspace = true
 derive_more.workspace = true
 dotenv.workspace = true

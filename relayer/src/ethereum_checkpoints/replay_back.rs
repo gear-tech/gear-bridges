@@ -1,20 +1,22 @@
 use super::*;
 use ethereum_beacon_client::{self, BeaconClient};
+use checkpoint_light_client_client::traits::ReplayBack as _;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(
     beacon_client: &BeaconClient,
-    client: &GearApi,
+    remoting: &GClientRemoting,
     program_id: [u8; 32],
     gas_limit: u64,
-    replay_back: Option<ReplayBack>,
+    replay_back: Option<IoReplayBack>,
     checkpoint: (Slot, Hash256),
     sync_update: SyncCommitteeUpdate,
+    sync_aggregate_encoded: Vec<u8>,
 ) -> AnyResult<()> {
     log::info!("Replaying back started");
 
     let (mut slot_start, _) = checkpoint;
-    if let Some(ReplayBack {
+    if let Some(IoReplayBack {
         finalized_header,
         last_header: slot_end,
     }) = replay_back
@@ -24,7 +26,7 @@ pub async fn execute(
 
         replay_back_slots(
             beacon_client,
-            client,
+            remoting,
             program_id,
             gas_limit,
             slots_batch_iter,
@@ -53,21 +55,23 @@ pub async fn execute(
         )
         .map_err(|e| anyhow!("Failed to deserialize point on G2 (replay back): {e:?}"))?;
 
+        let sync_aggregate_encoded = update.data.sync_aggregate.encode();
         let sync_update =
             ethereum_beacon_client::utils::sync_update_from_update(signature, update.data);
         replay_back_slots_start(
             beacon_client,
-            client,
+            remoting,
             program_id,
             gas_limit,
             slots_batch_iter.next(),
             sync_update,
+            sync_aggregate_encoded,
         )
         .await?;
 
         replay_back_slots(
             beacon_client,
-            client,
+            remoting,
             program_id,
             gas_limit,
             slots_batch_iter,
@@ -85,17 +89,18 @@ pub async fn execute(
 
     replay_back_slots_start(
         beacon_client,
-        client,
+        remoting,
         program_id,
         gas_limit,
         slots_batch_iter.next(),
         sync_update,
+        sync_aggregate_encoded,
     )
     .await?;
 
     replay_back_slots(
         beacon_client,
-        client,
+        remoting,
         program_id,
         gas_limit,
         slots_batch_iter,
@@ -109,7 +114,7 @@ pub async fn execute(
 
 async fn replay_back_slots(
     beacon_client: &BeaconClient,
-    client: &GearApi,
+    remoting: &GClientRemoting,
     program_id: [u8; 32],
     gas_limit: u64,
     slots_batch_iter: SlotsBatchIter,
@@ -118,7 +123,7 @@ async fn replay_back_slots(
         log::debug!("slot_start = {slot_start}, slot_end = {slot_end}");
         replay_back_slots_inner(
             beacon_client,
-            client,
+            remoting,
             program_id,
             slot_start,
             slot_end,
@@ -133,78 +138,45 @@ async fn replay_back_slots(
 #[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_inner(
     beacon_client: &BeaconClient,
-    client: &GearApi,
+    remoting: &GClientRemoting,
     program_id: [u8; 32],
     slot_start: Slot,
     slot_end: Slot,
     gas_limit: u64,
 ) -> AnyResult<()> {
-    let payload = Handle::ReplayBack(beacon_client.request_headers(slot_start, slot_end).await?);
-
-    let mut listener = client.subscribe().await?;
-
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
+    let mut service = checkpoint_light_client_client::ReplayBack::new(remoting.clone());
+    
+    service
+        .process(beacon_client.request_headers(slot_start, slot_end).await?)
+        .with_gas_limit(gas_limit)
+        .send_recv(program_id.into())
         .await
-        .map_err(|e| anyhow!("Failed to send ReplayBack message: {e:?}"))?;
-
-    let (_message_id, payload, _value) = listener
-        .reply_bytes_on(message_id)
-        .await
-        .map_err(|e| anyhow!("Failed to get reply to ReplayBack message: {e:?}"))?;
-    let payload =
-        payload.map_err(|e| anyhow!("Failed to get replay payload to ReplayBack: {e:?}"))?;
-    let result_decoded = HandleResult::decode(&mut &payload[..])
-        .map_err(|e| anyhow!("Failed to decode HandleResult of ReplayBack: {e:?}"))?;
-
-    log::debug!("replay_back_slots_inner; result_decoded = {result_decoded:?}");
-
-    match result_decoded {
-        HandleResult::ReplayBack(Some(_)) => Ok(()),
-        HandleResult::ReplayBack(None) => Err(anyhow!("Replaying back wasn't started")),
-        _ => Err(anyhow!("Wrong handle result to ReplayBack")),
-    }
+        .map_err(|e| anyhow!("Failed to send ReplayBack message: {e:?}"))?
+        .map(|_| ())
+        .map_err(|e| anyhow!("Backreplay failed: {e:?}"))
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_start(
     beacon_client: &BeaconClient,
-    client: &GearApi,
+    remoting: &GClientRemoting,
     program_id: [u8; 32],
     gas_limit: u64,
     slots: Option<(Slot, Slot)>,
     sync_update: SyncCommitteeUpdate,
+    sync_aggregate_encoded: Vec<u8>,
 ) -> AnyResult<()> {
     let Some((slot_start, slot_end)) = slots else {
         return Ok(());
     };
+    let mut service = checkpoint_light_client_client::ReplayBack::new(remoting.clone());
 
-    let payload = Handle::ReplayBackStart {
-        sync_update,
-        headers: beacon_client.request_headers(slot_start, slot_end).await?,
-    };
-
-    let mut listener = client.subscribe().await?;
-
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
+    service
+        .start(sync_update, sync_aggregate_encoded, beacon_client.request_headers(slot_start, slot_end).await?)
+        .with_gas_limit(gas_limit)
+        .send_recv(program_id.into())
         .await
-        .map_err(|e| anyhow!("Failed to send ReplayBackStart message: {e:?}"))?;
-
-    let (_message_id, payload, _value) = listener
-        .reply_bytes_on(message_id)
-        .await
-        .map_err(|e| anyhow!("Failed to get reply to ReplayBackStart message: {e:?}"))?;
-    let payload =
-        payload.map_err(|e| anyhow!("Failed to get replay payload to ReplayBackStart: {e:?}"))?;
-    let result_decoded = HandleResult::decode(&mut &payload[..])
-        .map_err(|e| anyhow!("Failed to decode HandleResult of ReplayBackStart: {e:?}"))?;
-
-    log::debug!("replay_back_slots_start; result_decoded = {result_decoded:?}");
-
-    match result_decoded {
-        HandleResult::ReplayBackStart(Ok(_)) => Ok(()),
-        HandleResult::ReplayBackStart(Err(e)) => Err(anyhow!("ReplayBackStart failed: {e:?}")),
-        _ => Err(anyhow!("Wrong handle result to ReplayBackStart")),
-    }
+        .map_err(|e| anyhow!("Failed to send ReplayBack start message: {e:?}"))?
+        .map(|_| ())
+        .map_err(|e| anyhow!("Failed to start ReplayBack failed: {e:?}"))
 }

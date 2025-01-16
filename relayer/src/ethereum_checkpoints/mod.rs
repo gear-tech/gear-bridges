@@ -3,8 +3,8 @@ use futures::{
     future::{self, Either},
     pin_mut,
 };
-use gclient::{EventProcessor, GearApi};
-use parity_scale_codec::Decode;
+use gclient::GearApi;
+use parity_scale_codec::Encode;
 use primitive_types::H256;
 use tokio::{
     signal::unix::{self, SignalKind},
@@ -12,14 +12,11 @@ use tokio::{
     time::{self, Duration},
 };
 
-use checkpoint_light_client_io::{
-    ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH},
-    meta::ReplayBack,
-    tree_hash::Hash256,
-    Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
-};
+use ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH};
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
 use utils_prometheus::MeteredService;
+use checkpoint_light_client_io::{Error, Update as SyncCommitteeUpdate, Slot, G2, Hash256, IoReplayBack};
+use sails_rs::{calls::*, gclient::calls::*};
 
 mod metrics;
 mod replay_back;
@@ -31,6 +28,11 @@ const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 // The constant is intentionally duplicated since vara-runtime is too heavy dependency.
 const UNITS: u128 = 1_000_000_000_000;
+
+struct SyncUpdate {
+    sync_update: SyncCommitteeUpdate,
+    sync_aggregate_encoded: Vec<u8>,
+}
 
 pub struct Relayer {
     program_id: H256,
@@ -76,17 +78,22 @@ impl Relayer {
         let gas_limit = gas_limit_block / 100 * 95;
         log::info!("Gas limit for extrinsics: {gas_limit}");
 
-        let sync_update = receiver
+        let SyncUpdate {
+            sync_update,
+            sync_aggregate_encoded,
+        } = receiver
             .recv()
             .await
             .expect("Updates receiver should be open before the loop");
 
         let mut slot_last = sync_update.finalized_header.slot;
+        let remoting = GClientRemoting::new(self.gear_api.clone());
 
         match sync_update::try_to_apply(
-            &self.gear_api,
+            &remoting,
             self.program_id.0,
             sync_update.clone(),
+            sync_aggregate_encoded.clone(),
             gas_limit,
         )
         .await
@@ -95,18 +102,19 @@ impl Relayer {
                 log::error!("{e:?}");
                 return;
             }
-            Ok(Err(sync_update::Error::ReplayBackRequired {
+            Ok(Err(Error::ReplayBackRequired {
                 replay_back,
                 checkpoint,
             })) => {
                 if let Err(e) = replay_back::execute(
                     &self.beacon_client,
-                    &self.gear_api,
+                    &remoting,
                     self.program_id.0,
                     gas_limit,
                     replay_back,
                     checkpoint,
                     sync_update,
+                    sync_aggregate_encoded,
                 )
                 .await
                 {
@@ -114,7 +122,7 @@ impl Relayer {
                     return;
                 }
             }
-            Ok(Ok(_) | Err(sync_update::Error::NotActual)) => (),
+            Ok(Ok(_) | Err(Error::NotActual)) => (),
             _ => {
                 slot_last = 0;
             }
@@ -129,7 +137,10 @@ impl Relayer {
             let future_update = receiver.recv();
             pin_mut!(future_update);
 
-            let sync_update = match future::select(future_interrupt, future_update).await {
+            let SyncUpdate {
+                sync_update,
+                sync_aggregate_encoded,
+            } = match future::select(future_interrupt, future_update).await {
                 Either::Left((_interrupted, _)) => {
                     log::info!("Caught SIGINT. Exiting");
                     return;
@@ -157,9 +168,10 @@ impl Relayer {
             }
 
             match sync_update::try_to_apply(
-                &self.gear_api,
+                &remoting,
                 self.program_id.0,
                 sync_update,
+                sync_aggregate_encoded,
                 gas_limit,
             )
             .await
@@ -173,13 +185,13 @@ impl Relayer {
                         self.metrics.processed_finality_updates.inc();
                     }
                 }
-                Ok(Err(sync_update::Error::ReplayBackRequired { .. })) => {
+                Ok(Err(Error::ReplayBackRequired { .. })) => {
                     log::error!("Replay back within the main loop. Exiting");
                     return;
                 }
                 Ok(Err(e)) => {
                     log::error!("The program failed with: {e:?}. Skipping");
-                    if let sync_update::Error::NotActual = e {
+                    if let Error::NotActual = e {
                         slot_last = slot;
                     }
                 }

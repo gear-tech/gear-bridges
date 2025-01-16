@@ -10227,6 +10227,8 @@ dependencies = [
  "axum",
  "bridging-payment-client",
  "cgo_oligami",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "clap",
  "derive_more 0.99.18",
  "dotenv",

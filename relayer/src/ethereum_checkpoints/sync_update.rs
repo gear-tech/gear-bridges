@@ -1,9 +1,9 @@
 use super::*;
-pub use checkpoint_light_client_io::sync_update::Error;
-use ethereum_beacon_client::{self, BeaconClient};
+use checkpoint_light_client_client::traits::SyncUpdate as _;
+use ethereum_beacon_client::{BeaconClient, utils};
 use std::ops::ControlFlow::{self, *};
 
-pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncCommitteeUpdate>) {
+pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncUpdate>) {
     tokio::spawn(async move {
         log::info!("Update receiver spawned");
 
@@ -29,7 +29,7 @@ pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncCommitteeU
 
 async fn receive(
     beacon_client: &BeaconClient,
-    sender: &Sender<SyncCommitteeUpdate>,
+    sender: &Sender<SyncUpdate>,
 ) -> AnyResult<ControlFlow<()>> {
     let finality_update = beacon_client
         .get_finality_update()
@@ -58,13 +58,13 @@ async fn receive(
         <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(reader_signature)
             .map_err(|e| anyhow!("Failed to deserialize point on G2: {e:?}"))?;
 
-    let sync_update = if update.finalized_header.slot >= finality_update.finalized_header.slot {
-        ethereum_beacon_client::utils::sync_update_from_update(signature, update)
+    let (sync_aggregate_encoded, sync_update) = if update.finalized_header.slot >= finality_update.finalized_header.slot {
+        (update.sync_aggregate.encode(), utils::sync_update_from_update(signature, update))
     } else {
-        ethereum_beacon_client::utils::sync_update_from_finality(signature, finality_update)
+        (finality_update.sync_aggregate.encode(), utils::sync_update_from_finality(signature, finality_update))
     };
 
-    if sender.send(sync_update).await.is_err() {
+    if sender.send(SyncUpdate { sync_update, sync_aggregate_encoded }).await.is_err() {
         return Ok(Break(()));
     }
 
@@ -72,32 +72,18 @@ async fn receive(
 }
 
 pub async fn try_to_apply(
-    client: &GearApi,
+    remoting: &GClientRemoting,
     program_id: [u8; 32],
     sync_update: SyncCommitteeUpdate,
+    sync_aggregate_encoded: Vec<u8>,
     gas_limit: u64,
 ) -> AnyResult<Result<(), Error>> {
-    let mut listener = client.subscribe().await?;
+    let mut service = checkpoint_light_client_client::SyncUpdate::new(remoting.clone());
 
-    let payload = Handle::SyncUpdate(sync_update);
-    let (message_id, _) = client
-        .send_message(program_id.into(), payload, gas_limit, 0)
+    Ok(service
+        .process(sync_update, sync_aggregate_encoded)
+        .with_gas_limit(gas_limit)
+        .send_recv(program_id.into())
         .await
-        .map_err(|e| anyhow!("Failed to send message: {e:?}"))?;
-
-    let (_message_id, payload, _value) = listener
-        .reply_bytes_on(message_id)
-        .await
-        .map_err(|e| anyhow!("Failed to get reply: {e:?}"))?;
-    let payload =
-        payload.map_err(|e| anyhow!("Failed to get replay payload to SyncUpdate: {e:?}"))?;
-    let result_decoded = HandleResult::decode(&mut &payload[..])
-        .map_err(|e| anyhow!("Failed to decode HandleResult of SyncUpdate: {e:?}"))?;
-
-    log::debug!("try_to_apply; result_decoded = {result_decoded:?}");
-
-    match result_decoded {
-        HandleResult::SyncUpdate(result) => Ok(result),
-        _ => Err(anyhow!("Wrong response type")),
-    }
+        .map_err(|e| anyhow!("Failed to apply sync committee: {e:?}"))?)
 }

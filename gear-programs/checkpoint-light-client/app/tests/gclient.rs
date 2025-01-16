@@ -1,11 +1,10 @@
-use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress, Result};
+use gclient::{GearApi, WSAddress, Result};
 use ethereum_common::{
     base_types::BytesFixed,
-    beacon::SyncAggregate, utils::{Bootstrap, Update, BootstrapResponse, UpdateData, FinalityUpdateResponse}, network::Network,
-    tree_hash::TreeHash,
+    beacon::SyncAggregate, utils::{Bootstrap, Update, BootstrapResponse, UpdateData, FinalityUpdateResponse, BeaconBlockHeaderResponse}, network::Network,
+    tree_hash::TreeHash, SLOTS_PER_EPOCH,
 };
-use checkpoint_light_client_io::{G2, Init, Error};
-use hex_literal::hex;
+use checkpoint_light_client_io::{G2, Init, Error, ReplayBackStatus, ReplayBackError};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use sp_core::crypto::DEV_PHRASE;
 use checkpoint_light_client::WASM_BINARY;
@@ -139,7 +138,7 @@ fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Ini
 async fn init_holesky() -> Result<()> {
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (api, admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let (api, _admin, code_id, gas_limit, salt) = connect_to_node().await;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
@@ -177,7 +176,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         _ => unreachable!("Requested single update"),
     };
 
-    let (api, admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let (api, _admin, code_id, gas_limit, salt) = connect_to_node().await;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
@@ -219,6 +218,174 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         ),
         "result = {result:?}"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn replay_back_and_updating() -> Result<()> {
+    let (bootstrap, update) = get_bootstrap_and_update();
+
+    let (api, _admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
+        GClientRemoting::new(api.clone()),
+    );
+
+    let init = construct_init(Network::Holesky, update, bootstrap);
+    let program_id = factory
+        .init(init)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .unwrap();
+
+    println!("program_id = {:?}", hex::encode(program_id));
+
+    println!();
+    println!();
+
+    let finality_update: FinalityUpdateResponse =
+        serde_json::from_slice(HOLESKY_FINALITY_UPDATE_3_014_736).unwrap();
+    let finality_update = finality_update.data;
+
+    let mut decoder = StreamingDecoder::new(&HOLESKY_HEADERS[..]).unwrap();
+    let mut headers = Vec::new();
+    decoder.read_to_end(&mut headers).unwrap();
+
+    let headers: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
+    let size_batch = 40 * SLOTS_PER_EPOCH as usize;
+    let mut service = checkpoint_light_client_client::ReplayBack::new(GClientRemoting::new(api.clone()),);
+    let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
+    let signature = decode_signature(&finality_update.sync_aggregate);
+
+    // attempt to process next headers of inactive backreplaying should fail
+    let result = service
+        .process(
+        headers
+            .iter()
+            .rev()
+            .skip(size_batch)
+            .map(|r| r.data.header.message.clone())
+            .collect(),
+    )
+    .send_recv(program_id)
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Err(ReplayBackError::NotStarted)),
+        "result = {result:?}"
+    );
+
+    // start to replay back
+    let result = service
+        .start(utils::sync_update_from_finality(
+            signature.clone(),
+            finality_update.clone(),
+        ),
+        sync_aggregate_encoded.clone(),
+        headers
+            .iter()
+            .rev()
+            .take(size_batch)
+            .map(|r| r.data.header.message.clone())
+            .collect(),
+    )
+    .send_recv(program_id)
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Ok(ReplayBackStatus::InProcess)),
+        "result = {result:?}"
+    );
+
+    // second attempt to start backreplay should fail
+    let result = service
+        .start(utils::sync_update_from_finality(
+            signature,
+            finality_update,
+        ),
+        sync_aggregate_encoded,
+        headers
+            .iter()
+            .rev()
+            .take(size_batch)
+            .map(|r| r.data.header.message.clone())
+            .collect(),
+    )
+    .send_recv(program_id)
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Err(ReplayBackError::AlreadyStarted)),
+        "result = {result:?}"
+    );
+
+    // replaying the blocks back
+    let result = service
+        .process(
+        headers
+            .iter()
+            .rev()
+            .skip(size_batch)
+            .map(|r| r.data.header.message.clone())
+            .collect(),
+    )
+    .send_recv(program_id)
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Ok(ReplayBackStatus::Finished)),
+        "result = {result:?}"
+    );
+
+    // updating
+    let mut service = checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()),);
+    let finality_updates = vec![
+        {
+            let finality_update: FinalityUpdateResponse =
+                serde_json::from_slice(HOLESKY_FINALITY_UPDATE_3_014_768).unwrap();
+
+            finality_update.data
+        },
+        {
+            let finality_update: FinalityUpdateResponse =
+                serde_json::from_slice(HOLESKY_FINALITY_UPDATE_3_014_799).unwrap();
+
+            finality_update.data
+        },
+    ];
+    for update in finality_updates {
+        println!(
+            "slot = {:?}, attested slot = {:?}, signature slot = {:?}",
+            update.finalized_header.slot, update.attested_header.slot, update.signature_slot
+        );
+
+        let sync_aggregate_encoded = update.sync_aggregate.encode();
+        let result = service
+            .process(utils::sync_update_from_finality(
+                decode_signature(&update.sync_aggregate),
+                update,
+            ),
+        sync_aggregate_encoded)
+        .send_recv(program_id)
+        .await
+        .unwrap();
+
+        assert!(
+            matches!(
+                result,
+                Ok(_) | Err(Error::LowVoteCount)
+            ),
+            "result = {result:?}"
+        );
+
+        println!();
+        println!();
+    }
 
     Ok(())
 }

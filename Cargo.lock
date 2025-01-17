@@ -3072,12 +3072,16 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "clap",
  "dotenv",
  "ethereum_beacon_client",
  "gclient",
  "hex",
  "parity-scale-codec",
+ "sails-rs",
  "tokio",
 ]
 

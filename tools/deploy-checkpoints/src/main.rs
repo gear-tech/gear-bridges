@@ -1,15 +1,16 @@
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client::WASM_BINARY;
+use checkpoint_light_client_client::{traits::*, checkpoint_light_client_factory};
 use checkpoint_light_client_io::{
-    ethereum_common::{base_types::BytesFixed, network::Network, utils as eth_utils},
-    tree_hash::TreeHash,
+    ethereum_common::{base_types::BytesFixed, network::Network, utils as eth_utils, tree_hash::TreeHash,},
     Init, G2,
 };
 use clap::Parser;
 use ethereum_beacon_client::{utils, BeaconClient};
-use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
+use gclient::{GearApi, WSAddress};
 use parity_scale_codec::Encode;
 use std::time::Duration;
+use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 
 const GEAR_API_RETRIES: u8 = 3;
 
@@ -107,6 +108,7 @@ async fn main() -> AnyResult<()> {
     )
     .map_err(|e| anyhow!("Failed to decode signature: {e:?}"))?;
 
+    let sync_aggregate_encoded = update.sync_aggregate.encode();
     let sync_update = utils::sync_update_from_update(signature, update);
     let pub_keys = utils::map_public_keys(&bootstrap.current_sync_committee.pubkeys);
 
@@ -120,57 +122,41 @@ async fn main() -> AnyResult<()> {
             .map(|BytesFixed(bytes)| bytes.0)
             .collect(),
         update: sync_update,
+        sync_aggregate_encoded,
     };
 
-    let client = GearApi::builder()
+    let api = GearApi::builder()
         .retries(GEAR_API_RETRIES)
         .suri(cli.gear_suri)
         .build(WSAddress::new(&cli.gear_endpoint, cli.gear_port))
         .await?;
-    let mut listener = client.subscribe().await?;
-    let program_id = upload_program(&client, &mut listener, init).await?;
+    let gas_limit = {
+        let payload = {
+            let mut result = checkpoint_light_client_factory::io::Init::ROUTE.to_vec();
+            init.encode_to(&mut result);
+    
+            result
+        };
+
+        api
+        .calculate_upload_gas(None, WASM_BINARY.to_vec(), payload, 0, true)
+        .await?
+        .min_limit
+    };
+    let (code_id, _) = api
+                    .upload_code(WASM_BINARY)
+                    .await?;
+    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
+        GClientRemoting::new(api.clone()),
+    );
+    let program_id = factory
+        .init(init)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [])
+        .await
+        .map_err(|e| anyhow!("Failed to construct program: {e:?}"))?;
 
     println!("program_id = {:?}", hex::encode(program_id));
 
     Ok(())
-}
-
-async fn common_upload_program(
-    client: &GearApi,
-    code: Vec<u8>,
-    payload: impl Encode,
-) -> AnyResult<([u8; 32], [u8; 32])> {
-    let encoded_payload = payload.encode();
-    let gas_limit = client
-        .calculate_upload_gas(None, code.clone(), encoded_payload, 0, true)
-        .await?
-        .min_limit;
-    println!("init gas {gas_limit:?}");
-    let (message_id, program_id, _) = client
-        .upload_program(
-            code,
-            gclient::now_micros().to_le_bytes(),
-            payload,
-            gas_limit,
-            0,
-        )
-        .await?;
-
-    Ok((message_id.into(), program_id.into()))
-}
-
-async fn upload_program(
-    client: &GearApi,
-    listener: &mut EventListener,
-    payload: impl Encode,
-) -> AnyResult<[u8; 32]> {
-    let (message_id, program_id) =
-        common_upload_program(client, WASM_BINARY.to_vec(), payload).await?;
-
-    assert!(listener
-        .message_processed(message_id.into())
-        .await?
-        .succeed());
-
-    Ok(program_id)
 }

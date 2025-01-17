@@ -6,10 +6,14 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 ark-serialize = { workspace = true, features = ["std"] }
+checkpoint-light-client = { workspace = true, features = ["wasm-binary"] }
+checkpoint-light-client-client.workspace = true
+checkpoint-light-client-io.workspace = true
 clap.workspace = true
 dotenv.workspace = true
 ethereum_beacon_client.workspace = true
 gclient.workspace = true
 hex = { workspace = true, features = ["std"] }
 parity-scale-codec = { workspace = true, features = ["std"] }
+sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true

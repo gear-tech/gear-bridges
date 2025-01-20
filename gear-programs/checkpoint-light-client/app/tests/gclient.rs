@@ -1,5 +1,5 @@
 use checkpoint_light_client::WASM_BINARY;
-use checkpoint_light_client_client::traits::*;
+use checkpoint_light_client_client::{traits::*, checkpoint_light_client_factory::io as factory_io};
 use checkpoint_light_client_io::{Error, Init, ReplayBackError, ReplayBackStatus, G2};
 use ethereum_beacon_client::utils;
 use ethereum_common::{
@@ -128,16 +128,47 @@ fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Ini
     }
 }
 
+async fn calculate_upload_gas(api: &GearApi, code_id: CodeId, init: &Init) -> Result<u64> {
+    let origin = H256::from_slice(api.account_id().as_ref());
+    let payload = {
+        let mut payload = factory_io::Init::ROUTE.to_vec();
+        init.encode_to(&mut payload);
+
+        payload
+    };
+
+    Ok(api
+        .calculate_create_gas(Some(origin), code_id, payload, 0, true)
+        .await?
+        .min_limit)
+}
+
+async fn calculate_gas<T: ActionIo>(api: &GearApi, program_id: ActorId, to_encode: impl Encode) -> Result<u64> {
+    let origin = H256::from_slice(api.account_id().as_ref());
+    let payload = {
+        let mut payload = T::ROUTE.to_vec();
+        to_encode.encode_to(&mut payload);
+
+        payload
+    };
+
+    Ok(api
+        .calculate_handle_gas(Some(origin), program_id, payload, 0, true)
+        .await?
+        .min_limit)
+}
+
 #[tokio::test]
 async fn init_holesky() -> Result<()> {
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (api, _admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let (api, _admin, code_id, _gas_limit, salt) = connect_to_node().await;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
 
     let init = construct_init(Network::Holesky, update, bootstrap);
+    let gas_limit = calculate_upload_gas(&api, code_id, &init).await?;
     let program_id = factory
         .init(init)
         .with_gas_limit(gas_limit)
@@ -145,13 +176,15 @@ async fn init_holesky() -> Result<()> {
         .await
         .unwrap();
 
-    println!("program_id = {:?}", hex::encode(program_id));
+    println!("program_id = {:?}, gas_limit = {gas_limit}", hex::encode(program_id));
 
     Ok(())
 }
 
 #[tokio::test]
 async fn sync_update_requires_replaying_back() -> Result<()> {
+    use checkpoint_light_client_client::service_sync_update::io;
+
     let finality_update: FinalityUpdateResponse =
         serde_json::from_slice(SEPOLIA_FINALITY_UPDATE_5_263_072).unwrap();
     let finality_update = finality_update.data;
@@ -170,12 +203,13 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         _ => unreachable!("Requested single update"),
     };
 
-    let (api, _admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let (api, _admin, code_id, _gas_limit, salt) = connect_to_node().await;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
 
     let init = construct_init(Network::Sepolia, update, bootstrap);
+    let gas_limit = calculate_upload_gas(&api, code_id, &init).await?;
     let program_id = factory
         .init(init)
         .with_gas_limit(gas_limit)
@@ -183,7 +217,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         .await
         .unwrap();
 
-    println!("program_id = {:?}", hex::encode(program_id));
+        println!("program_id = {:?}, gas_limit = {gas_limit}", hex::encode(program_id));
 
     println!();
     println!();
@@ -193,15 +227,17 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         finality_update.attested_header.slot, finality_update.signature_slot
     );
 
-    let mut sync_update =
-        checkpoint_light_client_client::ServiceSyncUpdate::new(GClientRemoting::new(api.clone()));
+    let mut service = checkpoint_light_client_client::ServiceSyncUpdate::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
-    let result = sync_update
+    let update = utils::sync_update_from_finality(
+        decode_signature(&finality_update.sync_aggregate),
+        finality_update,
+    );
+    let gas_limit = calculate_gas::<io::Process>(&api, program_id, (&update, &sync_aggregate_encoded)).await?;
+    println!("process gas_limit = {gas_limit}");
+    let result = service
         .process(
-            utils::sync_update_from_finality(
-                decode_signature(&finality_update.sync_aggregate),
-                finality_update,
-            ),
+            update,
             sync_aggregate_encoded,
         )
         .send_recv(program_id)
@@ -218,14 +254,17 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
 
 #[tokio::test]
 async fn replay_back_and_updating() -> Result<()> {
+    use checkpoint_light_client_client::{service_sync_update::io as sync_update_io, service_replay_back::io as replay_back_io};
+
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (api, _admin, code_id, gas_limit, salt) = connect_to_node().await;
+    let (api, _admin, code_id, _gas_limit, salt) = connect_to_node().await;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
 
     let init = construct_init(Network::Holesky, update, bootstrap);
+    let gas_limit = calculate_upload_gas(&api, code_id, &init).await?;
     let program_id = factory
         .init(init)
         .with_gas_limit(gas_limit)
@@ -233,7 +272,7 @@ async fn replay_back_and_updating() -> Result<()> {
         .await
         .unwrap();
 
-    println!("program_id = {:?}", hex::encode(program_id));
+    println!("program_id = {:?}, gas_limit = {gas_limit}", hex::encode(program_id));
 
     println!();
     println!();
@@ -246,7 +285,7 @@ async fn replay_back_and_updating() -> Result<()> {
     let mut headers = Vec::new();
     decoder.read_to_end(&mut headers).unwrap();
 
-    let headers: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
+    let headers_all: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
     let size_batch = 40 * SLOTS_PER_EPOCH as usize;
     let mut service =
         checkpoint_light_client_client::ServiceReplayBack::new(GClientRemoting::new(api.clone()));
@@ -256,7 +295,7 @@ async fn replay_back_and_updating() -> Result<()> {
     // attempt to process next headers of inactive backreplaying should fail
     let result = service
         .process(
-            headers
+            headers_all
                 .iter()
                 .rev()
                 .skip(size_batch)
@@ -273,16 +312,20 @@ async fn replay_back_and_updating() -> Result<()> {
     );
 
     // start to replay back
+    let sync_update = utils::sync_update_from_finality(signature, finality_update.clone());
+    let headers = headers_all
+    .iter()
+    .rev()
+    .take(size_batch)
+    .map(|r| r.data.header.message.clone())
+    .collect();
+    let gas_limit = calculate_gas::<replay_back_io::Start>(&api, program_id, (&sync_update, &sync_aggregate_encoded, &headers)).await?;
+    println!("replay_back_io::Start gas_limit = {gas_limit}");
     let result = service
         .start(
-            utils::sync_update_from_finality(signature, finality_update.clone()),
+            sync_update,
             sync_aggregate_encoded.clone(),
-            headers
-                .iter()
-                .rev()
-                .take(size_batch)
-                .map(|r| r.data.header.message.clone())
-                .collect(),
+            headers,
         )
         .send_recv(program_id)
         .await
@@ -298,7 +341,7 @@ async fn replay_back_and_updating() -> Result<()> {
         .start(
             utils::sync_update_from_finality(signature, finality_update),
             sync_aggregate_encoded,
-            headers
+            headers_all
                 .iter()
                 .rev()
                 .take(size_batch)
@@ -315,14 +358,17 @@ async fn replay_back_and_updating() -> Result<()> {
     );
 
     // replaying the blocks back
+    let headers = headers_all
+    .iter()
+    .rev()
+    .skip(size_batch)
+    .map(|r| r.data.header.message.clone())
+    .collect();
+    let gas_limit = calculate_gas::<replay_back_io::Process>(&api, program_id, &headers).await?;
+    println!("replay_back_io::Process gas_limit = {gas_limit}");
     let result = service
         .process(
-            headers
-                .iter()
-                .rev()
-                .skip(size_batch)
-                .map(|r| r.data.header.message.clone())
-                .collect(),
+            headers,
         )
         .send_recv(program_id)
         .await
@@ -357,9 +403,12 @@ async fn replay_back_and_updating() -> Result<()> {
         );
 
         let sync_aggregate_encoded = update.sync_aggregate.encode();
+        let update = utils::sync_update_from_finality(decode_signature(&update.sync_aggregate), update);
+        let gas_limit = calculate_gas::<sync_update_io::Process>(&api, program_id, (&update, &sync_aggregate_encoded)).await?;
+        println!("process gas_limit = {gas_limit}");
         let result = service
             .process(
-                utils::sync_update_from_finality(decode_signature(&update.sync_aggregate), update),
+                update,
                 sync_aggregate_encoded,
             )
             .send_recv(program_id)

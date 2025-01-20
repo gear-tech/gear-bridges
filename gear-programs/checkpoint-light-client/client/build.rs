@@ -20,7 +20,7 @@ fn main() {
         .with_external_type("Init", "checkpoint_light_client_io::Init")
         .with_external_type("Update", "checkpoint_light_client_io::Update")
         .with_external_type("Error", "checkpoint_light_client_io::Error")
-        .with_external_type("IoReplayBack", "checkpoint_light_client_io::IoReplayBack")
+        .with_external_type("ReplayBack", "checkpoint_light_client_io::ReplayBack")
         .with_external_type(
             "ReplayBackError",
             "checkpoint_light_client_io::ReplayBackError",

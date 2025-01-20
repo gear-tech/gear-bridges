@@ -18,7 +18,7 @@ pub type Slot = u64;
 #[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
-pub struct IoReplayBack {
+pub struct ReplayBack {
     pub finalized_header: Slot,
     pub last_header: Slot,
 }
@@ -92,7 +92,7 @@ pub enum Error {
     InvalidPublicKeys,
     InvalidSyncAggregate,
     ReplayBackRequired {
-        replay_back: Option<IoReplayBack>,
+        replay_back: Option<ReplayBack>,
         checkpoint: (Slot, Hash256),
     },
 }

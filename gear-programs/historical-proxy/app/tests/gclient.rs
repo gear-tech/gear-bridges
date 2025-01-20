@@ -1,4 +1,4 @@
-use checkpoint_light_client_client::checkpoint_for;
+use checkpoint_light_client_client::service_checkpoint_for::io as checkpoint_for_io;
 use ethereum_event_client_client::traits::*;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress};
 use hex_literal::hex;
@@ -139,10 +139,10 @@ async fn proxy() {
                     && message
                         .payload
                         .0
-                        .starts_with(checkpoint_for::io::Get::ROUTE) =>
+                        .starts_with(checkpoint_for_io::Get::ROUTE) =>
             {
-                let encoded = &message.payload.0[checkpoint_for::io::Get::ROUTE.len()..];
-                let slot: <checkpoint_for::io::Get as ActionIo>::Params =
+                let encoded = &message.payload.0[checkpoint_for_io::Get::ROUTE.len()..];
+                let slot: <checkpoint_for_io::Get as ActionIo>::Params =
                     Decode::decode(&mut &encoded[..]).ok()?;
 
                 if slot == 2_498_456 {
@@ -158,12 +158,12 @@ async fn proxy() {
         .await
         .unwrap();
 
-    let reply: <checkpoint_for::io::Get as ActionIo>::Reply = Ok((
+    let reply: <checkpoint_for_io::Get as ActionIo>::Reply = Ok((
         2_496_464,
         hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
     ));
     let payload = {
-        let mut result = checkpoint_for::io::Get::ROUTE.to_vec();
+        let mut result = checkpoint_for_io::Get::ROUTE.to_vec();
         reply.encode_to(&mut result);
 
         result

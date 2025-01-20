@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use checkpoint_light_client_io::{
-    Error, Hash256, IoReplayBack, Slot, Update as SyncCommitteeUpdate, G2,
+    Error, Hash256, ReplayBack, Slot, Update as SyncCommitteeUpdate, G2,
 };
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
 use ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH};

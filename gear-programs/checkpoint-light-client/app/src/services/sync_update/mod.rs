@@ -4,7 +4,7 @@ use crate::State;
 use crate::{crypto, utils};
 use cell::RefCell;
 use checkpoint_light_client_io::{
-    Error as SyncCommitteeUpdateError, IoReplayBack, Keys as SyncCommitteeKeys, Slot,
+    Error as SyncCommitteeUpdateError, ReplayBack, Keys as SyncCommitteeKeys, Slot,
     Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP,
 };
 use ethereum_common::{
@@ -136,7 +136,7 @@ impl<'a> SyncUpdate<'a> {
         {
             let state = self.state.borrow();
             return Err(SyncCommitteeUpdateError::ReplayBackRequired {
-                replay_back: state.replay_back.as_ref().map(|replay_back| IoReplayBack {
+                replay_back: state.replay_back.as_ref().map(|replay_back| ReplayBack {
                     finalized_header: replay_back.finalized_header.slot,
                     last_header: replay_back.last_header.slot,
                 }),

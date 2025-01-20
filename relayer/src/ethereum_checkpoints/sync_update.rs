@@ -1,5 +1,5 @@
 use super::*;
-use checkpoint_light_client_client::traits::SyncUpdate as _;
+use checkpoint_light_client_client::{traits::ServiceSyncUpdate as _, ServiceSyncUpdate};
 use ethereum_beacon_client::{utils, BeaconClient};
 use std::ops::ControlFlow::{self, *};
 
@@ -92,7 +92,7 @@ pub async fn try_to_apply(
     sync_aggregate_encoded: Vec<u8>,
     gas_limit: u64,
 ) -> AnyResult<Result<(), Error>> {
-    let mut service = checkpoint_light_client_client::SyncUpdate::new(remoting.clone());
+    let mut service = ServiceSyncUpdate::new(remoting.clone());
 
     service
         .process(sync_update, sync_aggregate_encoded)

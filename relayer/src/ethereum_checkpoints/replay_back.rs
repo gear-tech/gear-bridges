@@ -1,5 +1,5 @@
 use super::*;
-use checkpoint_light_client_client::traits::ReplayBack as _;
+use checkpoint_light_client_client::traits::ServiceReplayBack as _;
 use ethereum_beacon_client::{self, BeaconClient};
 
 #[allow(clippy::too_many_arguments)]
@@ -8,7 +8,7 @@ pub async fn execute(
     remoting: &GClientRemoting,
     program_id: [u8; 32],
     gas_limit: u64,
-    replay_back: Option<IoReplayBack>,
+    replay_back: Option<ReplayBack>,
     checkpoint: (Slot, Hash256),
     sync_update: SyncCommitteeUpdate,
     sync_aggregate_encoded: Vec<u8>,
@@ -16,7 +16,7 @@ pub async fn execute(
     log::info!("Replaying back started");
 
     let (mut slot_start, _) = checkpoint;
-    if let Some(IoReplayBack {
+    if let Some(ReplayBack {
         finalized_header,
         last_header: slot_end,
     }) = replay_back
@@ -144,7 +144,7 @@ async fn replay_back_slots_inner(
     slot_end: Slot,
     gas_limit: u64,
 ) -> AnyResult<()> {
-    let mut service = checkpoint_light_client_client::ReplayBack::new(remoting.clone());
+    let mut service = checkpoint_light_client_client::ServiceReplayBack::new(remoting.clone());
 
     service
         .process(beacon_client.request_headers(slot_start, slot_end).await?)
@@ -169,7 +169,7 @@ async fn replay_back_slots_start(
     let Some((slot_start, slot_end)) = slots else {
         return Ok(());
     };
-    let mut service = checkpoint_light_client_client::ReplayBack::new(remoting.clone());
+    let mut service = checkpoint_light_client_client::ServiceReplayBack::new(remoting.clone());
 
     service
         .start(

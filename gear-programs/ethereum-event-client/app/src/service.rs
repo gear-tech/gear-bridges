@@ -1,7 +1,7 @@
 // Incorporate code generated based on the IDL file
 
 use super::{error::Error, RefCell, State};
-use checkpoint_light_client_client::{traits::CheckpointFor as _, CheckpointFor};
+use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
 use ethereum_common::{
     beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
@@ -131,7 +131,7 @@ impl<'a> EthereumEventClient<'a> {
     }
 
     async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {
-        let service = CheckpointFor::new(GStdRemoting);
+        let service = ServiceCheckpointFor::new(GStdRemoting);
         let result = service
             .get(slot)
             .recv(checkpoints)

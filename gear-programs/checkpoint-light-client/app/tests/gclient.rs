@@ -194,7 +194,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     );
 
     let mut sync_update =
-        checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()));
+        checkpoint_light_client_client::ServiceSyncUpdate::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
     let result = sync_update
         .process(
@@ -249,7 +249,7 @@ async fn replay_back_and_updating() -> Result<()> {
     let headers: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
     let size_batch = 40 * SLOTS_PER_EPOCH as usize;
     let mut service =
-        checkpoint_light_client_client::ReplayBack::new(GClientRemoting::new(api.clone()));
+        checkpoint_light_client_client::ServiceReplayBack::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
     let signature = decode_signature(&finality_update.sync_aggregate);
 
@@ -335,7 +335,7 @@ async fn replay_back_and_updating() -> Result<()> {
 
     // updating
     let mut service =
-        checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()));
+        checkpoint_light_client_client::ServiceSyncUpdate::new(GClientRemoting::new(api.clone()));
     let finality_updates = vec![
         {
             let finality_update: FinalityUpdateResponse =

@@ -85,11 +85,11 @@ impl CheckpointsExtractor {
         block: u32,
         sender: &Sender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
-        use checkpoint_light_client_client::state;
+        use checkpoint_light_client_client::service_state::io;
 
         let block_hash = gear_api.block_number_to_hash(block).await?;
 
-        let payload = state::io::Get::encode_call(Order::Reverse, 0, 1);
+        let payload = io::Get::encode_call(Order::Reverse, 0, 1);
         let api = gclient::GearApi::from(gear_api.api.clone());
         let origin = H256::from_slice(api.account_id().as_ref());
         let gas_limit = api.block_gas_limit()?;
@@ -105,7 +105,7 @@ impl CheckpointsExtractor {
             )
             .await?;
 
-        let state: <state::io::Get as ActionIo>::Reply = match reply_info.code {
+        let state: <io::Get as ActionIo>::Reply = match reply_info.code {
             ReplyCode::Success(_) => Decode::decode(&mut &reply_info.payload[..])?,
             ReplyCode::Error(reason) => Err(anyhow!("Failed to query state, reason: {reason:?}"))?,
             ReplyCode::Unsupported => Err(anyhow!("Failed to query state"))?,

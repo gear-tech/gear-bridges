@@ -1,5 +1,5 @@
 use cell::RefCell;
-use checkpoint_light_client_io::{IoReplayBack, Slot};
+use checkpoint_light_client_io::{ReplayBack, Slot};
 use ethereum_common::Hash256;
 use sails_rs::prelude::*;
 
@@ -10,7 +10,7 @@ pub struct StateData {
     pub checkpoints: Vec<(Slot, Hash256)>,
     /// The field contains the data if the program is
     /// replaying checkpoints back.
-    pub replay_back: Option<IoReplayBack>,
+    pub replay_back: Option<ReplayBack>,
 }
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
@@ -49,7 +49,7 @@ impl<'a> State<'a> {
             Order::Reverse => collect(index_start, count, state.checkpoints.iter().rev()),
         };
 
-        let replay_back = state.replay_back.as_ref().map(|replay_back| IoReplayBack {
+        let replay_back = state.replay_back.as_ref().map(|replay_back| ReplayBack {
             finalized_header: replay_back.finalized_header.slot,
             last_header: replay_back.last_header.slot,
         });

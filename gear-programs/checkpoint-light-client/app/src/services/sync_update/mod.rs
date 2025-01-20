@@ -1,14 +1,20 @@
 mod committee;
 
-use crate::{
-    crypto,
-    utils,
-};
-use checkpoint_light_client_io::{Slot, Keys as SyncCommitteeKeys, Error as SyncCommitteeUpdateError, Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP, IoReplayBack};
-use ethereum_common::{beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate}, merkle, network::Network, utils as eth_utils, SYNC_COMMITTEE_SIZE, tree_hash::TreeHash};
-use sails_rs::{prelude::*, rc::Rc};
-use cell::RefCell;
 use crate::State;
+use crate::{crypto, utils};
+use cell::RefCell;
+use checkpoint_light_client_io::{
+    Error as SyncCommitteeUpdateError, IoReplayBack, Keys as SyncCommitteeKeys, Slot,
+    Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP,
+};
+use ethereum_common::{
+    beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate},
+    merkle,
+    network::Network,
+    tree_hash::TreeHash,
+    utils as eth_utils, SYNC_COMMITTEE_SIZE,
+};
+use sails_rs::{prelude::*, rc::Rc};
 
 pub async fn verify(
     network: &Network,
@@ -99,7 +105,6 @@ pub async fn verify(
     Ok((finalized_header_update, committee_update))
 }
 
-
 pub struct SyncUpdate<'a> {
     state: &'a RefCell<State>,
 }
@@ -110,13 +115,20 @@ impl<'a> SyncUpdate<'a> {
         Self { state }
     }
 
-    pub async fn process(&mut self, sync_update: SyncCommitteeUpdate, 
-        sync_aggregate_encoded: Vec<u8>,) -> Result<(), SyncCommitteeUpdateError>
-    {
+    pub async fn process(
+        &mut self,
+        sync_update: SyncCommitteeUpdate,
+        sync_aggregate_encoded: Vec<u8>,
+    ) -> Result<(), SyncCommitteeUpdateError> {
         let (network, slot, sync_committee_current, sync_committee_next) = {
             let state = self.state.borrow();
 
-            (state.network.clone(), state.finalized_header.slot, Rc::clone(&state.sync_committee_current), Rc::clone(&state.sync_committee_next))
+            (
+                state.network.clone(),
+                state.finalized_header.slot,
+                Rc::clone(&state.sync_committee_current),
+                Rc::clone(&state.sync_committee_next),
+            )
         };
 
         if eth_utils::calculate_epoch(slot) + MAX_EPOCHS_GAP
@@ -124,13 +136,10 @@ impl<'a> SyncUpdate<'a> {
         {
             let state = self.state.borrow();
             return Err(SyncCommitteeUpdateError::ReplayBackRequired {
-                replay_back: state
-                    .replay_back
-                    .as_ref()
-                    .map(|replay_back| IoReplayBack {
-                        finalized_header: replay_back.finalized_header.slot,
-                        last_header: replay_back.last_header.slot,
-                    }),
+                replay_back: state.replay_back.as_ref().map(|replay_back| IoReplayBack {
+                    finalized_header: replay_back.finalized_header.slot,
+                    last_header: replay_back.last_header.slot,
+                }),
                 checkpoint: state
                     .checkpoints
                     .last()

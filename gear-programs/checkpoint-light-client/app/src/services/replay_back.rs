@@ -1,8 +1,10 @@
-use sails_rs::{prelude::*, rc::Rc};
-use checkpoint_light_client_io::{ReplayBackError, ReplayBackStatus, Update, BeaconBlockHeader, Error};
 use crate::{state::ReplayBackState, State};
 use cell::RefCell;
-use ethereum_common::{tree_hash::TreeHash, SLOTS_PER_EPOCH, EPOCHS_PER_SYNC_COMMITTEE};
+use checkpoint_light_client_io::{
+    BeaconBlockHeader, Error, ReplayBackError, ReplayBackStatus, Update,
+};
+use ethereum_common::{tree_hash::TreeHash, EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH};
+use sails_rs::{prelude::*, rc::Rc};
 
 pub struct ReplayBack<'a> {
     state: &'a RefCell<State>,
@@ -14,20 +16,26 @@ impl<'a> ReplayBack<'a> {
         Self { state }
     }
 
-    pub async fn start(&mut self, sync_update: Update,
+    pub async fn start(
+        &mut self,
+        sync_update: Update,
         sync_aggregate_encoded: Vec<u8>,
         headers: Vec<BeaconBlockHeader>,
-    ) -> Result<ReplayBackStatus, ReplayBackError>
-    {
+    ) -> Result<ReplayBackStatus, ReplayBackError> {
         let (network, slot, sync_committee_current, sync_committee_next) = {
             let state = self.state.borrow();
             if state.replay_back.is_some() {
                 return Err(ReplayBackError::AlreadyStarted);
             }
 
-            (state.network.clone(), state.finalized_header.slot, Rc::clone(&state.sync_committee_current), Rc::clone(&state.sync_committee_next))
+            (
+                state.network.clone(),
+                state.finalized_header.slot,
+                Rc::clone(&state.sync_committee_current),
+                Rc::clone(&state.sync_committee_next),
+            )
         };
-    
+
         let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
             .map_err(|_| Error::InvalidSyncAggregate)?;
         let (finalized_header_update, committee_update) = super::sync_update::verify(
@@ -39,7 +47,7 @@ impl<'a> ReplayBack<'a> {
             sync_aggregate,
         )
         .await?;
-    
+
         let finalized_header = finalized_header_update.ok_or(ReplayBackError::NoFinalityUpdate)?;
         let mut state = self.state.borrow_mut();
         state.replay_back = Some(ReplayBackState {
@@ -48,7 +56,7 @@ impl<'a> ReplayBack<'a> {
             checkpoints: {
                 let mut checkpoints = Vec::with_capacity(EPOCHS_PER_SYNC_COMMITTEE as usize);
                 checkpoints.push((finalized_header.slot, finalized_header.tree_hash_root()));
-    
+
                 checkpoints
             },
             last_header: finalized_header,
@@ -60,10 +68,10 @@ impl<'a> ReplayBack<'a> {
         })
     }
 
-    pub async fn process(&mut self,
+    pub async fn process(
+        &mut self,
         headers: Vec<BeaconBlockHeader>,
-    ) -> Result<ReplayBackStatus, ReplayBackError>
-    {
+    ) -> Result<ReplayBackStatus, ReplayBackError> {
         let mut state = self.state.borrow_mut();
         if state.replay_back.is_none() {
             return Err(ReplayBackError::NotStarted);
@@ -76,10 +84,7 @@ impl<'a> ReplayBack<'a> {
     }
 }
 
-fn process_headers(
-    state: &mut State,
-    mut headers: Vec<BeaconBlockHeader>,
-) -> bool {
+fn process_headers(state: &mut State, mut headers: Vec<BeaconBlockHeader>) -> bool {
     headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
 
     let replay_back = state.replay_back.as_mut().expect("Checked by the caller");

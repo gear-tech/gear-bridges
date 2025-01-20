@@ -1,11 +1,14 @@
 use ark_bls12_381::{Bls12_381, G1Affine, G2Affine};
 use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_ff::{Field, Zero};
-use core::ops::Neg;
-use gbuiltin_bls381::*;
 use checkpoint_light_client_io::{ArkScale, G1, G2};
-use ethereum_common::{network::Network, tree_hash::TreeHash, beacon::BlockHeader as BeaconBlockHeader, signing_root, DOMAIN_SYNC_COMMITTEE};
-use sails_rs::{prelude::*, gstd::msg};
+use core::ops::Neg;
+use ethereum_common::{
+    beacon::BlockHeader as BeaconBlockHeader, network::Network, signing_root, tree_hash::TreeHash,
+    DOMAIN_SYNC_COMMITTEE,
+};
+use gbuiltin_bls381::*;
+use sails_rs::{gstd::msg, prelude::*};
 
 const BUILTIN_BLS381: ActorId = ActorId::new(hex_literal::hex!(
     "6b6e292c382945e80bf51af2ba7fe9f458dcff81ae6075c46f9095e1bbecdc37"

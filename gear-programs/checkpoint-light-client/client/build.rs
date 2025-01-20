@@ -21,9 +21,17 @@ fn main() {
         .with_external_type("Update", "checkpoint_light_client_io::Update")
         .with_external_type("Error", "checkpoint_light_client_io::Error")
         .with_external_type("IoReplayBack", "checkpoint_light_client_io::IoReplayBack")
-        .with_external_type("ReplayBackError", "checkpoint_light_client_io::ReplayBackError")
-        .with_external_type("ReplayBackStatus", "checkpoint_light_client_io::ReplayBackStatus")
+        .with_external_type(
+            "ReplayBackError",
+            "checkpoint_light_client_io::ReplayBackError",
+        )
+        .with_external_type(
+            "ReplayBackStatus",
+            "checkpoint_light_client_io::ReplayBackStatus",
+        )
         .with_mocks("mocks")
-        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("checkpoint_light_client_client.rs"))
+        .generate_to(
+            PathBuf::from(env::var("OUT_DIR").unwrap()).join("checkpoint_light_client_client.rs"),
+        )
         .unwrap();
 }

@@ -1,6 +1,6 @@
 use super::*;
 use checkpoint_light_client_client::traits::SyncUpdate as _;
-use ethereum_beacon_client::{BeaconClient, utils};
+use ethereum_beacon_client::{utils, BeaconClient};
 use std::ops::ControlFlow::{self, *};
 
 pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncUpdate>) {
@@ -58,13 +58,27 @@ async fn receive(
         <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(reader_signature)
             .map_err(|e| anyhow!("Failed to deserialize point on G2: {e:?}"))?;
 
-    let (sync_aggregate_encoded, sync_update) = if update.finalized_header.slot >= finality_update.finalized_header.slot {
-        (update.sync_aggregate.encode(), utils::sync_update_from_update(signature, update))
-    } else {
-        (finality_update.sync_aggregate.encode(), utils::sync_update_from_finality(signature, finality_update))
-    };
+    let (sync_aggregate_encoded, sync_update) =
+        if update.finalized_header.slot >= finality_update.finalized_header.slot {
+            (
+                update.sync_aggregate.encode(),
+                utils::sync_update_from_update(signature, update),
+            )
+        } else {
+            (
+                finality_update.sync_aggregate.encode(),
+                utils::sync_update_from_finality(signature, finality_update),
+            )
+        };
 
-    if sender.send(SyncUpdate { sync_update, sync_aggregate_encoded }).await.is_err() {
+    if sender
+        .send(SyncUpdate {
+            sync_update,
+            sync_aggregate_encoded,
+        })
+        .await
+        .is_err()
+    {
         return Ok(Break(()));
     }
 

@@ -12,11 +12,13 @@ use tokio::{
     time::{self, Duration},
 };
 
-use ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH};
+use checkpoint_light_client_io::{
+    Error, Hash256, IoReplayBack, Slot, Update as SyncCommitteeUpdate, G2,
+};
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
-use utils_prometheus::MeteredService;
-use checkpoint_light_client_io::{Error, Update as SyncCommitteeUpdate, Slot, G2, Hash256, IoReplayBack};
+use ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH};
 use sails_rs::{calls::*, gclient::calls::*};
+use utils_prometheus::MeteredService;
 
 mod metrics;
 mod replay_back;

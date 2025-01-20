@@ -1,18 +1,24 @@
-use gclient::{GearApi, WSAddress, Result};
-use ethereum_common::{
-    base_types::BytesFixed,
-    beacon::SyncAggregate, utils::{Bootstrap, Update, BootstrapResponse, UpdateData, FinalityUpdateResponse, BeaconBlockHeaderResponse}, network::Network,
-    tree_hash::TreeHash, SLOTS_PER_EPOCH,
-};
-use checkpoint_light_client_io::{G2, Init, Error, ReplayBackStatus, ReplayBackError};
-use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use sp_core::crypto::DEV_PHRASE;
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_client::traits::*;
-use tokio::sync::Mutex;
+use checkpoint_light_client_io::{Error, Init, ReplayBackError, ReplayBackStatus, G2};
 use ethereum_beacon_client::utils;
+use ethereum_common::{
+    base_types::BytesFixed,
+    beacon::SyncAggregate,
+    network::Network,
+    tree_hash::TreeHash,
+    utils::{
+        BeaconBlockHeaderResponse, Bootstrap, BootstrapResponse, FinalityUpdateResponse, Update,
+        UpdateData,
+    },
+    SLOTS_PER_EPOCH,
+};
+use gclient::{GearApi, Result, WSAddress};
 use ruzstd::StreamingDecoder;
+use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sp_core::crypto::DEV_PHRASE;
 use std::io::Read;
+use tokio::sync::Mutex;
 
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./chain-data/sepolia-finality-update-5_263_072.json");
@@ -32,10 +38,7 @@ const HOLESKY_FINALITY_UPDATE_3_014_768: &[u8; 4_932] =
 const HOLESKY_FINALITY_UPDATE_3_014_799: &[u8; 4_980] =
     include_bytes!("./chain-data/holesky-finality-update-3_016_799.json");
 
-static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((
-    1_000,
-    None,
-));
+static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((1_000, None));
 
 async fn connect_to_node() -> (GearApi, ActorId, CodeId, GasUnit, [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
@@ -46,10 +49,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, GasUnit, [u8; 4]) {
         let code_id = match lock.1 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api
-                    .upload_code(WASM_BINARY)
-                    .await
-                    .unwrap();
+                let (code_id, _) = api.upload_code(WASM_BINARY).await.unwrap();
                 lock.1 = Some(code_id);
 
                 code_id
@@ -73,13 +73,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, GasUnit, [u8; 4]) {
     let id = api.account_id();
     let admin = <[u8; 32]>::from(id.clone());
 
-    (
-        api,
-        admin.into(),
-        code_id,
-        gas_limit,
-        salt.to_le_bytes(),
-    )
+    (api, admin.into(), code_id, gas_limit, salt.to_le_bytes())
 }
 
 #[track_caller]
@@ -199,23 +193,23 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         finality_update.attested_header.slot, finality_update.signature_slot
     );
 
-    let mut sync_update = checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()),);
+    let mut sync_update =
+        checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
     let result = sync_update
-        .process(utils::sync_update_from_finality(
-            decode_signature(&finality_update.sync_aggregate),
-            finality_update,)
-        , 
-        sync_aggregate_encoded)
+        .process(
+            utils::sync_update_from_finality(
+                decode_signature(&finality_update.sync_aggregate),
+                finality_update,
+            ),
+            sync_aggregate_encoded,
+        )
         .send_recv(program_id)
         .await
         .unwrap();
 
     assert!(
-        matches!(
-            result,
-            Err(Error::ReplayBackRequired { .. })
-        ),
+        matches!(result, Err(Error::ReplayBackRequired { .. })),
         "result = {result:?}"
     );
 
@@ -254,23 +248,24 @@ async fn replay_back_and_updating() -> Result<()> {
 
     let headers: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
     let size_batch = 40 * SLOTS_PER_EPOCH as usize;
-    let mut service = checkpoint_light_client_client::ReplayBack::new(GClientRemoting::new(api.clone()),);
+    let mut service =
+        checkpoint_light_client_client::ReplayBack::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
     let signature = decode_signature(&finality_update.sync_aggregate);
 
     // attempt to process next headers of inactive backreplaying should fail
     let result = service
         .process(
-        headers
-            .iter()
-            .rev()
-            .skip(size_batch)
-            .map(|r| r.data.header.message.clone())
-            .collect(),
-    )
-    .send_recv(program_id)
-    .await
-    .unwrap();
+            headers
+                .iter()
+                .rev()
+                .skip(size_batch)
+                .map(|r| r.data.header.message.clone())
+                .collect(),
+        )
+        .send_recv(program_id)
+        .await
+        .unwrap();
 
     assert!(
         matches!(result, Err(ReplayBackError::NotStarted)),
@@ -279,21 +274,19 @@ async fn replay_back_and_updating() -> Result<()> {
 
     // start to replay back
     let result = service
-        .start(utils::sync_update_from_finality(
-            signature,
-            finality_update.clone(),
-        ),
-        sync_aggregate_encoded.clone(),
-        headers
-            .iter()
-            .rev()
-            .take(size_batch)
-            .map(|r| r.data.header.message.clone())
-            .collect(),
-    )
-    .send_recv(program_id)
-    .await
-    .unwrap();
+        .start(
+            utils::sync_update_from_finality(signature, finality_update.clone()),
+            sync_aggregate_encoded.clone(),
+            headers
+                .iter()
+                .rev()
+                .take(size_batch)
+                .map(|r| r.data.header.message.clone())
+                .collect(),
+        )
+        .send_recv(program_id)
+        .await
+        .unwrap();
 
     assert!(
         matches!(result, Ok(ReplayBackStatus::InProcess)),
@@ -302,21 +295,19 @@ async fn replay_back_and_updating() -> Result<()> {
 
     // second attempt to start backreplay should fail
     let result = service
-        .start(utils::sync_update_from_finality(
-            signature,
-            finality_update,
-        ),
-        sync_aggregate_encoded,
-        headers
-            .iter()
-            .rev()
-            .take(size_batch)
-            .map(|r| r.data.header.message.clone())
-            .collect(),
-    )
-    .send_recv(program_id)
-    .await
-    .unwrap();
+        .start(
+            utils::sync_update_from_finality(signature, finality_update),
+            sync_aggregate_encoded,
+            headers
+                .iter()
+                .rev()
+                .take(size_batch)
+                .map(|r| r.data.header.message.clone())
+                .collect(),
+        )
+        .send_recv(program_id)
+        .await
+        .unwrap();
 
     assert!(
         matches!(result, Err(ReplayBackError::AlreadyStarted)),
@@ -326,16 +317,16 @@ async fn replay_back_and_updating() -> Result<()> {
     // replaying the blocks back
     let result = service
         .process(
-        headers
-            .iter()
-            .rev()
-            .skip(size_batch)
-            .map(|r| r.data.header.message.clone())
-            .collect(),
-    )
-    .send_recv(program_id)
-    .await
-    .unwrap();
+            headers
+                .iter()
+                .rev()
+                .skip(size_batch)
+                .map(|r| r.data.header.message.clone())
+                .collect(),
+        )
+        .send_recv(program_id)
+        .await
+        .unwrap();
 
     assert!(
         matches!(result, Ok(ReplayBackStatus::Finished)),
@@ -343,7 +334,8 @@ async fn replay_back_and_updating() -> Result<()> {
     );
 
     // updating
-    let mut service = checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()),);
+    let mut service =
+        checkpoint_light_client_client::SyncUpdate::new(GClientRemoting::new(api.clone()));
     let finality_updates = vec![
         {
             let finality_update: FinalityUpdateResponse =
@@ -366,20 +358,16 @@ async fn replay_back_and_updating() -> Result<()> {
 
         let sync_aggregate_encoded = update.sync_aggregate.encode();
         let result = service
-            .process(utils::sync_update_from_finality(
-                decode_signature(&update.sync_aggregate),
-                update,
-            ),
-        sync_aggregate_encoded)
-        .send_recv(program_id)
-        .await
-        .unwrap();
+            .process(
+                utils::sync_update_from_finality(decode_signature(&update.sync_aggregate), update),
+                sync_aggregate_encoded,
+            )
+            .send_recv(program_id)
+            .await
+            .unwrap();
 
         assert!(
-            matches!(
-                result,
-                Ok(_) | Err(Error::LowVoteCount)
-            ),
+            matches!(result, Ok(_) | Err(Error::LowVoteCount)),
             "result = {result:?}"
         );
 

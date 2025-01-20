@@ -12,7 +12,7 @@ use ethereum_common::{
     H256,
 };
 use ops::ControlFlow::*;
-use sails_rs::{prelude::*, gstd::calls::GStdRemoting, calls::*};
+use sails_rs::{calls::*, gstd::calls::GStdRemoting, prelude::*};
 
 #[derive(Clone, Debug, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -137,8 +137,7 @@ impl<'a> EthereumEventClient<'a> {
             .recv(checkpoints)
             .await
             .map_err(|_| Error::SendFailure)?;
-        match result
-        {
+        match result {
             Ok((_slot, hash)) => Ok(hash),
             Err(_) => Err(Error::MissingCheckpoint),
         }

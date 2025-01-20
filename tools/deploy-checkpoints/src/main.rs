@@ -1,16 +1,18 @@
 use anyhow::{anyhow, Result as AnyResult};
 use checkpoint_light_client::WASM_BINARY;
-use checkpoint_light_client_client::{traits::*, checkpoint_light_client_factory};
+use checkpoint_light_client_client::{checkpoint_light_client_factory, traits::*};
 use checkpoint_light_client_io::{
-    ethereum_common::{base_types::BytesFixed, network::Network, utils as eth_utils, tree_hash::TreeHash,},
+    ethereum_common::{
+        base_types::BytesFixed, network::Network, tree_hash::TreeHash, utils as eth_utils,
+    },
     Init, G2,
 };
 use clap::Parser;
 use ethereum_beacon_client::{utils, BeaconClient};
 use gclient::{GearApi, WSAddress};
 use parity_scale_codec::Encode;
-use std::time::Duration;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use std::time::Duration;
 
 const GEAR_API_RETRIES: u8 = 3;
 
@@ -134,18 +136,15 @@ async fn main() -> AnyResult<()> {
         let payload = {
             let mut result = checkpoint_light_client_factory::io::Init::ROUTE.to_vec();
             init.encode_to(&mut result);
-    
+
             result
         };
 
-        api
-        .calculate_upload_gas(None, WASM_BINARY.to_vec(), payload, 0, true)
-        .await?
-        .min_limit
+        api.calculate_upload_gas(None, WASM_BINARY.to_vec(), payload, 0, true)
+            .await?
+            .min_limit
     };
-    let (code_id, _) = api
-                    .upload_code(WASM_BINARY)
-                    .await?;
+    let (code_id, _) = api.upload_code(WASM_BINARY).await?;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );

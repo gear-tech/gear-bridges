@@ -6,13 +6,9 @@ mod state;
 mod utils;
 
 use cell::RefCell;
-use ethereum_common::{
-    merkle,
-    utils as eth_utils,
-    tree_hash::TreeHash,
-};
-use sails_rs::prelude::*;
 use checkpoint_light_client_io::Init;
+use ethereum_common::{merkle, tree_hash::TreeHash, utils as eth_utils};
+use sails_rs::prelude::*;
 
 const STORED_CHECKPOINTS_COUNT: usize = 150_000;
 
@@ -41,7 +37,7 @@ impl CheckpointLightClientProgram {
         ) else {
             panic!("Wrong public committee keys");
         };
-    
+
         if !merkle::is_current_committee_proof_valid(
             &update.finalized_header,
             &sync_committee_current,
@@ -49,7 +45,7 @@ impl CheckpointLightClientProgram {
         ) {
             panic!("Current sync committee proof is not valid");
         }
-    
+
         let period = eth_utils::calculate_period(update.finalized_header.slot) - 1;
         match services::sync_update::verify(
             &network,
@@ -62,23 +58,21 @@ impl CheckpointLightClientProgram {
         .await
         {
             Err(e) => panic!("Failed to verify sync committee update: {e:?}"),
-    
-            Ok((Some(finalized_header), Some(sync_committee_next))) => {
-                Self(RefCell::new(State {
-                    network,
-                    sync_committee_current: sync_committee_current_pub_keys.into(),
-                    sync_committee_next,
-                    checkpoints: {
-                        let mut checkpoints = state::Checkpoints::new();
-                        checkpoints.push(finalized_header.slot, finalized_header.tree_hash_root());
-    
-                        checkpoints
-                    },
-                    finalized_header,
-                    replay_back: None,
-                }))
-            },
-    
+
+            Ok((Some(finalized_header), Some(sync_committee_next))) => Self(RefCell::new(State {
+                network,
+                sync_committee_current: sync_committee_current_pub_keys.into(),
+                sync_committee_next,
+                checkpoints: {
+                    let mut checkpoints = state::Checkpoints::new();
+                    checkpoints.push(finalized_header.slot, finalized_header.tree_hash_root());
+
+                    checkpoints
+                },
+                finalized_header,
+                replay_back: None,
+            })),
+
             Ok((finalized_header, sync_committee_next)) => panic!(
                 "Incorrect initial sync committee update ({}, {})",
                 finalized_header.is_some(),

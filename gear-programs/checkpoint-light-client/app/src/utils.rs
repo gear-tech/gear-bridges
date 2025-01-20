@@ -1,11 +1,11 @@
+use ark_serialize::CanonicalSerialize;
+use checkpoint_light_client_io::{Keys, G1};
 use ethereum_common::{
-    base_types::{BytesFixed, Bitvector, FixedArray},
+    base_types::{Bitvector, BytesFixed, FixedArray},
     beacon::{BLSPubKey, SyncCommittee},
     SYNC_COMMITTEE_SIZE,
 };
-use checkpoint_light_client_io::{Keys, G1};
 use sails_rs::prelude::*;
-use ark_serialize::CanonicalSerialize;
 
 pub fn construct_sync_committee(
     aggregate_pubkey: BLSPubKey,

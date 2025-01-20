@@ -1,15 +1,15 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
+use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
+use anyhow::anyhow;
+use checkpoint_light_client_client::Order;
 use futures::executor::block_on;
+use gear_core::message::ReplyCode;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
 use prometheus::IntGauge;
-use utils_prometheus::{impl_metered_service, MeteredService};
-use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
-use checkpoint_light_client_client::Order;
 use sails_rs::calls::*;
-use anyhow::anyhow;
-use gear_core::message::ReplyCode;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
@@ -95,7 +95,14 @@ impl CheckpointsExtractor {
         let gas_limit = api.block_gas_limit()?;
 
         let reply_info = api
-            .calculate_reply_for_handle_at(Some(origin), self.checkpoint_light_client_address.into(), payload, gas_limit, 0, Some(block_hash))
+            .calculate_reply_for_handle_at(
+                Some(origin),
+                self.checkpoint_light_client_address.into(),
+                payload,
+                gas_limit,
+                0,
+                Some(block_hash),
+            )
             .await?;
 
         let state: <state::io::Get as ActionIo>::Reply = match reply_info.code {

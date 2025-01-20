@@ -1,8 +1,8 @@
-use sails_rs::prelude::*;
-use checkpoint_light_client_io::Slot;
 use crate::{state::CheckpointError, State};
 use cell::RefCell;
+use checkpoint_light_client_io::Slot;
 use ethereum_common::Hash256;
+use sails_rs::prelude::*;
 
 pub struct CheckpointFor<'a> {
     state: &'a RefCell<State>,

@@ -10,10 +10,7 @@ use vft_manager_client::vft_manager;
 
 mod shared;
 
-static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((
-    2_000,
-    None, None,
-));
+static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((2_000, None, None));
 
 async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4]) {
     let api = GearApi::dev().await.unwrap();
@@ -139,15 +136,21 @@ async fn proxy() {
                 if message.source == ethereum_event_client_program_id.into()
                     && message.destination == admin.into()
                     && message.details.is_none()
-                    && message.payload.0.starts_with(checkpoint_for::io::Get::ROUTE) =>
+                    && message
+                        .payload
+                        .0
+                        .starts_with(checkpoint_for::io::Get::ROUTE) =>
             {
                 let encoded = &message.payload.0[checkpoint_for::io::Get::ROUTE.len()..];
-                let slot: <checkpoint_for::io::Get as ActionIo>::Params = Decode::decode(&mut &encoded[..]).ok()?;
+                let slot: <checkpoint_for::io::Get as ActionIo>::Params =
+                    Decode::decode(&mut &encoded[..]).ok()?;
 
                 if slot == 2_498_456 {
-                        println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
-                        Some(message.id)
-                    } else { None }
+                    println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
+                    Some(message.id)
+                } else {
+                    None
+                }
             }
 
             _ => None,

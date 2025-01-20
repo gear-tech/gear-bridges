@@ -5,11 +5,9 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
     self,
     base_types::FixedArray,
-    beacon::{
-        BLSPubKey, BlockHeader as BeaconBlockHeader,
-    },
-    Hash256,
-    SYNC_COMMITTEE_SIZE, network::Network,
+    beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader},
+    network::Network,
+    Hash256, SYNC_COMMITTEE_SIZE,
 };
 use sails_rs::prelude::*;
 

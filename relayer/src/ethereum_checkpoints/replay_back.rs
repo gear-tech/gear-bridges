@@ -1,6 +1,6 @@
 use super::*;
-use ethereum_beacon_client::{self, BeaconClient};
 use checkpoint_light_client_client::traits::ReplayBack as _;
+use ethereum_beacon_client::{self, BeaconClient};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(
@@ -145,7 +145,7 @@ async fn replay_back_slots_inner(
     gas_limit: u64,
 ) -> AnyResult<()> {
     let mut service = checkpoint_light_client_client::ReplayBack::new(remoting.clone());
-    
+
     service
         .process(beacon_client.request_headers(slot_start, slot_end).await?)
         .with_gas_limit(gas_limit)
@@ -172,7 +172,11 @@ async fn replay_back_slots_start(
     let mut service = checkpoint_light_client_client::ReplayBack::new(remoting.clone());
 
     service
-        .start(sync_update, sync_aggregate_encoded, beacon_client.request_headers(slot_start, slot_end).await?)
+        .start(
+            sync_update,
+            sync_aggregate_encoded,
+            beacon_client.request_headers(slot_start, slot_end).await?,
+        )
         .with_gas_limit(gas_limit)
         .send_recv(program_id.into())
         .await

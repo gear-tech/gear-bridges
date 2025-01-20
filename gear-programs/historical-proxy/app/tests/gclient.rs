@@ -136,10 +136,7 @@ async fn proxy() {
                 if message.source == ethereum_event_client_program_id.into()
                     && message.destination == admin.into()
                     && message.details.is_none()
-                    && message
-                        .payload
-                        .0
-                        .starts_with(checkpoint_for_io::Get::ROUTE) =>
+                    && message.payload.0.starts_with(checkpoint_for_io::Get::ROUTE) =>
             {
                 let encoded = &message.payload.0[checkpoint_for_io::Get::ROUTE.len()..];
                 let slot: <checkpoint_for_io::Get as ActionIo>::Params =

@@ -280,7 +280,7 @@ async fn replay_back_and_updating() -> Result<()> {
     // start to replay back
     let result = service
         .start(utils::sync_update_from_finality(
-            signature.clone(),
+            signature,
             finality_update.clone(),
         ),
         sync_aggregate_encoded.clone(),

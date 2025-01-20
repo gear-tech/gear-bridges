@@ -5,7 +5,7 @@ enum Status<'a> {
         update_period_finalized: u64,
         attested_header: &'a BeaconBlockHeader,
         sync_committee_next_aggregate_pubkey: BLSPubKey,
-        sync_committee_next_pub_keys: Box<SyncCommitteeKeys>,
+        sync_committee_next_pub_keys: Rc<SyncCommitteeKeys>,
         sync_committee_next_branch: Vec<[u8; 32]>,
     },
     NotActual,
@@ -37,13 +37,13 @@ impl<'a> Update<'a> {
             (
                 true,
                 Some(sync_committee_next_aggregate_pubkey),
-                Some(sync_committee_next_pub_keys),
+                Some(keys),
                 Some(sync_committee_next_branch),
             ) => Self(Status::Actual {
                 update_period_finalized,
                 attested_header,
                 sync_committee_next_aggregate_pubkey,
-                sync_committee_next_pub_keys,
+                sync_committee_next_pub_keys: keys.into(),
                 sync_committee_next_branch,
             }),
 
@@ -51,7 +51,7 @@ impl<'a> Update<'a> {
         }
     }
 
-    pub fn verify(self, store_period: u64) -> Result<Option<Box<SyncCommitteeKeys>>, Error> {
+    pub fn verify(self, store_period: u64) -> Result<Option<Rc<SyncCommitteeKeys>>, Error> {
         let Status::Actual {
             update_period_finalized,
             attested_header,
@@ -70,7 +70,7 @@ impl<'a> Update<'a> {
         .ok_or(Error::InvalidPublicKeys)?;
 
         if !merkle::is_next_committee_proof_valid(
-            &attested_header,
+            attested_header,
             &sync_committee_next,
             &sync_committee_next_branch,
         ) {

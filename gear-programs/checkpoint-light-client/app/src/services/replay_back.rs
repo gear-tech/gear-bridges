@@ -1,4 +1,4 @@
-use sails_rs::prelude::*;
+use sails_rs::{prelude::*, rc::Rc};
 use checkpoint_light_client_io::{ReplayBackError, ReplayBackStatus, Update, BeaconBlockHeader, Error};
 use crate::{state::ReplayBackState, State};
 use cell::RefCell;
@@ -19,25 +19,29 @@ impl<'a> ReplayBack<'a> {
         headers: Vec<BeaconBlockHeader>,
     ) -> Result<ReplayBackStatus, ReplayBackError>
     {
-        let mut state = self.state.borrow_mut();
-        if state.replay_back.is_some() {
-            return Err(ReplayBackError::AlreadyStarted);
-        }
+        let (network, slot, sync_committee_current, sync_committee_next) = {
+            let state = self.state.borrow();
+            if state.replay_back.is_some() {
+                return Err(ReplayBackError::AlreadyStarted);
+            }
+
+            (state.network.clone(), state.finalized_header.slot, Rc::clone(&state.sync_committee_current), Rc::clone(&state.sync_committee_next))
+        };
     
         let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
             .map_err(|_| Error::InvalidSyncAggregate)?;
         let (finalized_header_update, committee_update) = super::sync_update::verify(
-            &state.network,
-            state.finalized_header.slot,
-            &state.sync_committee_current,
-            &state.sync_committee_next,
+            &network,
+            slot,
+            &sync_committee_current,
+            &sync_committee_next,
             sync_update,
             sync_aggregate,
         )
         .await?;
     
         let finalized_header = finalized_header_update.ok_or(ReplayBackError::NoFinalityUpdate)?;
-    
+        let mut state = self.state.borrow_mut();
         state.replay_back = Some(ReplayBackState {
             finalized_header: finalized_header.clone(),
             sync_committee_next: committee_update,

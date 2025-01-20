@@ -80,10 +80,10 @@ pub async fn try_to_apply(
 ) -> AnyResult<Result<(), Error>> {
     let mut service = checkpoint_light_client_client::SyncUpdate::new(remoting.clone());
 
-    Ok(service
+    service
         .process(sync_update, sync_aggregate_encoded)
         .with_gas_limit(gas_limit)
         .send_recv(program_id.into())
         .await
-        .map_err(|e| anyhow!("Failed to apply sync committee: {e:?}"))?)
+        .map_err(|e| anyhow!("Failed to apply sync committee: {e:?}"))
 }

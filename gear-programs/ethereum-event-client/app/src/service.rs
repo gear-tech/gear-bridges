@@ -131,8 +131,7 @@ impl<'a> EthereumEventClient<'a> {
     }
 
     async fn request_checkpoint(checkpoints: ActorId, slot: u64) -> Result<H256, Error> {
-        let remoting = GStdRemoting::default();
-        let service = CheckpointFor::new(remoting);
+        let service = CheckpointFor::new(GStdRemoting);
         let result = service
             .get(slot)
             .recv(checkpoints)

@@ -6,7 +6,7 @@ use crate::{
 };
 use checkpoint_light_client_io::{Slot, Keys as SyncCommitteeKeys, Error as SyncCommitteeUpdateError, Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP, IoReplayBack};
 use ethereum_common::{beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader, SyncAggregate}, merkle, network::Network, utils as eth_utils, SYNC_COMMITTEE_SIZE, tree_hash::TreeHash};
-use sails_rs::prelude::*;
+use sails_rs::{prelude::*, rc::Rc};
 use cell::RefCell;
 use crate::State;
 
@@ -17,7 +17,7 @@ pub async fn verify(
     stored_sync_committee_next: &SyncCommitteeKeys,
     sync_update: SyncCommitteeUpdate,
     sync_aggregate: SyncAggregate,
-) -> Result<(Option<BeaconBlockHeader>, Option<Box<SyncCommitteeKeys>>), SyncCommitteeUpdateError> {
+) -> Result<(Option<BeaconBlockHeader>, Option<Rc<SyncCommitteeKeys>>), SyncCommitteeUpdateError> {
     let SyncCommitteeUpdate {
         signature_slot,
         attested_header,
@@ -45,7 +45,7 @@ pub async fn verify(
     };
 
     let pub_keys =
-        utils::get_participating_keys(&sync_committee, &sync_aggregate.sync_committee_bits);
+        utils::get_participating_keys(sync_committee, &sync_aggregate.sync_committee_bits);
     let committee_count = pub_keys.len();
 
     // committee_count < 512 * 2 / 3
@@ -113,10 +113,16 @@ impl<'a> SyncUpdate<'a> {
     pub async fn process(&mut self, sync_update: SyncCommitteeUpdate, 
         sync_aggregate_encoded: Vec<u8>,) -> Result<(), SyncCommitteeUpdateError>
     {
-        let state = self.state.borrow();
-        if eth_utils::calculate_epoch(state.finalized_header.slot) + MAX_EPOCHS_GAP
+        let (network, slot, sync_committee_current, sync_committee_next) = {
+            let state = self.state.borrow();
+
+            (state.network.clone(), state.finalized_header.slot, Rc::clone(&state.sync_committee_current), Rc::clone(&state.sync_committee_next))
+        };
+
+        if eth_utils::calculate_epoch(slot) + MAX_EPOCHS_GAP
             <= eth_utils::calculate_epoch(sync_update.finalized_header.slot)
         {
+            let state = self.state.borrow();
             return Err(SyncCommitteeUpdateError::ReplayBackRequired {
                 replay_back: state
                     .replay_back
@@ -135,16 +141,15 @@ impl<'a> SyncUpdate<'a> {
         let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
             .map_err(|_| SyncCommitteeUpdateError::InvalidSyncAggregate)?;
         let (finalized_header_update, committee_update) = verify(
-            &state.network,
-            state.finalized_header.slot,
-            &state.sync_committee_current,
-            &state.sync_committee_next,
+            &network,
+            slot,
+            &sync_committee_current,
+            &sync_committee_next,
             sync_update,
             sync_aggregate,
         )
         .await?;
 
-        mem::drop(state);
         let mut state = self.state.borrow_mut();
 
         if let Some(finalized_header) = finalized_header_update {

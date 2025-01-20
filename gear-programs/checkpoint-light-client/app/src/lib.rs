@@ -66,7 +66,7 @@ impl CheckpointLightClientProgram {
             Ok((Some(finalized_header), Some(sync_committee_next))) => {
                 Self(RefCell::new(State {
                     network,
-                    sync_committee_current: sync_committee_current_pub_keys,
+                    sync_committee_current: sync_committee_current_pub_keys.into(),
                     sync_committee_next,
                     checkpoints: {
                         let mut checkpoints = state::Checkpoints::new();

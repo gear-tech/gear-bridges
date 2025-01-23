@@ -148,15 +148,10 @@ async fn calculate_upload_gas(api: &GearApi, code_id: CodeId, init: &Init) -> Re
 async fn calculate_gas<T: ActionIo>(
     api: &GearApi,
     program_id: ActorId,
-    to_encode: impl Encode,
+    params: &T::Params,
 ) -> Result<u64> {
     let origin = H256::from_slice(api.account_id().as_ref());
-    let payload = {
-        let mut payload = T::ROUTE.to_vec();
-        to_encode.encode_to(&mut payload);
-
-        payload
-    };
+    let payload = T::encode_call(params);
 
     Ok(api
         .calculate_handle_gas(Some(origin), program_id, payload, 0, true)
@@ -241,13 +236,22 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
 
     let mut service =
         checkpoint_light_client_client::ServiceSyncUpdate::new(GClientRemoting::new(api.clone()));
-    let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
-    let update = utils::sync_update_from_finality(
-        decode_signature(&finality_update.sync_aggregate),
-        finality_update,
-    );
-    let gas_limit =
-        calculate_gas::<io::Process>(&api, program_id, (&update, &sync_aggregate_encoded)).await?;
+    let (gas_limit, (update, sync_aggregate_encoded)) = {
+        let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
+        let params = (
+            utils::sync_update_from_finality(
+                decode_signature(&finality_update.sync_aggregate),
+                finality_update,
+            ),
+            sync_aggregate_encoded,
+        );
+
+        (
+            calculate_gas::<io::Process>(&api, program_id, &params).await?,
+            params,
+        )
+    };
+
     println!("process gas_limit = {gas_limit}");
     let result = service
         .process(update, sync_aggregate_encoded)
@@ -328,19 +332,25 @@ async fn replay_back_and_updating() -> Result<()> {
     );
 
     // start to replay back
-    let sync_update = utils::sync_update_from_finality(signature, finality_update.clone());
-    let headers = headers_all
-        .iter()
-        .rev()
-        .take(size_batch)
-        .map(|r| r.data.header.message.clone())
-        .collect();
-    let gas_limit = calculate_gas::<replay_back_io::Start>(
-        &api,
-        program_id,
-        (&sync_update, &sync_aggregate_encoded, &headers),
-    )
-    .await?;
+    let (gas_limit, (sync_update, sync_aggregate_encoded, headers)) = {
+        let sync_update = utils::sync_update_from_finality(signature, finality_update.clone());
+        let params = (
+            sync_update,
+            sync_aggregate_encoded,
+            headers_all
+                .iter()
+                .rev()
+                .take(size_batch)
+                .map(|r| r.data.header.message.clone())
+                .collect(),
+        );
+
+        (
+            calculate_gas::<replay_back_io::Start>(&api, program_id, &params).await?,
+            params,
+        )
+    };
+
     println!("replay_back_io::Start gas_limit = {gas_limit}");
     let result = service
         .start(sync_update, sync_aggregate_encoded.clone(), headers)
@@ -417,15 +427,19 @@ async fn replay_back_and_updating() -> Result<()> {
             update.finalized_header.slot, update.attested_header.slot, update.signature_slot
         );
 
-        let sync_aggregate_encoded = update.sync_aggregate.encode();
-        let update =
-            utils::sync_update_from_finality(decode_signature(&update.sync_aggregate), update);
-        let gas_limit = calculate_gas::<sync_update_io::Process>(
-            &api,
-            program_id,
-            (&update, &sync_aggregate_encoded),
-        )
-        .await?;
+        let (gas_limit, (update, sync_aggregate_encoded)) = {
+            let sync_aggregate_encoded = update.sync_aggregate.encode();
+            let params = (
+                utils::sync_update_from_finality(decode_signature(&update.sync_aggregate), update),
+                sync_aggregate_encoded,
+            );
+
+            (
+                calculate_gas::<sync_update_io::Process>(&api, program_id, &params).await?,
+                params,
+            )
+        };
+
         println!("process gas_limit = {gas_limit}");
         let result = service
             .process(update, sync_aggregate_encoded)

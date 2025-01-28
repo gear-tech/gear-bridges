@@ -13,7 +13,7 @@ pub async fn send(
     config: &Config,
 ) -> Result<(U256, H160), Error> {
     let bytes: Vec<u8> =
-        vft_manager_io::RequestBridging::encode_call(sender, vara_token_id, amount, receiver);
+        vft_manager_io::RequestBridgingPayed::encode_call(sender, vara_token_id, amount, receiver);
 
     let reply_bytes = gstd::msg::send_bytes_with_gas_for_reply(
         vft_manager_address,

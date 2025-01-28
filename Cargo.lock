@@ -1858,10 +1858,21 @@ dependencies = [
 name = "bridging-payment-app"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
+ "bridging-payment",
+ "bridging-payment-client",
+ "extended-vft",
+ "extended-vft-client",
+ "futures",
+ "gclient",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
+ "sp-core 21.0.0",
+ "tokio",
+ "vft-manager",
  "vft-manager-client",
 ]
 

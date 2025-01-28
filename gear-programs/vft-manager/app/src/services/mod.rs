@@ -246,11 +246,12 @@ where
     /// Allowance should allow current program to spend `amount` tokens from the `sender` address.
     pub async fn request_bridging(
         &mut self,
-        sender: ActorId,
         vara_token_id: ActorId,
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
+        let sender = self.exec_context.actor_id();
+
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
     }
 

@@ -41,7 +41,6 @@ async fn connect_to_node() -> Result<(GearApi, GearApi, CodeId, CodeId, GasUnit,
 
         let suri = format!("{DEV_PHRASE}//vft-manager-{salt}:");
         let api2 = GearApi::init_with(WSAddress::dev(), suri).await?;
-
         let account_id: &[u8; 32] = api2.account_id().as_ref();
         api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
             .await?;
@@ -153,7 +152,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let mut service =
         vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
     let reply = service
-        .request_bridging(account, extended_vft_id, amount, Default::default())
+        .request_bridging(extended_vft_id, amount, Default::default())
         .send(vft_manager_id)
         .await;
 

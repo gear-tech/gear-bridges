@@ -4,12 +4,14 @@ use bridging_payment_client::traits::*;
 use extended_vft::WASM_BINARY as WASM_EXTENDED_VFT;
 use extended_vft_client::traits::*;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, Result, WSAddress};
+use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use sp_core::crypto::DEV_PHRASE;
 use tokio::sync::Mutex;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, TokenSupply};
 
+#[allow(clippy::type_complexity)]
 static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>, Option<CodeId>)> =
     Mutex::const_new((4_000, None, None, None));
 
@@ -22,7 +24,11 @@ async fn connect_to_node() -> Result<(GearApi, CodeId, CodeId, CodeId, GasUnit, 
         let code_id = match lock.1 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api.upload_code(WASM_VFT_MANAGER).await?;
+                let code_id = api
+                    .upload_code(WASM_VFT_MANAGER)
+                    .await
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(WASM_VFT_MANAGER));
                 lock.1 = Some(code_id);
 
                 code_id
@@ -32,7 +38,11 @@ async fn connect_to_node() -> Result<(GearApi, CodeId, CodeId, CodeId, GasUnit, 
         let code_id_vft = match lock.2 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api.upload_code(WASM_EXTENDED_VFT).await?;
+                let code_id = api
+                    .upload_code(WASM_EXTENDED_VFT)
+                    .await
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(WASM_EXTENDED_VFT));
                 lock.2 = Some(code_id);
 
                 code_id
@@ -42,7 +52,11 @@ async fn connect_to_node() -> Result<(GearApi, CodeId, CodeId, CodeId, GasUnit, 
         let code_id_pay = match lock.3 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api.upload_code(WASM_BRIDGING_PAYMENT).await?;
+                let code_id = api
+                    .upload_code(WASM_BRIDGING_PAYMENT)
+                    .await
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(WASM_BRIDGING_PAYMENT));
                 lock.3 = Some(code_id);
 
                 code_id

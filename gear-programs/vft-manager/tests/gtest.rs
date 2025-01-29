@@ -175,9 +175,9 @@ async fn test_gear_supply_token() {
         .unwrap();
     assert!(ok);
 
-    let mut vft_manager = VftManagerC::new(remoting.clone());
+    let mut vft_manager = VftManagerC::new(remoting.clone().with_actor_id(account_id));
     let reply = vft_manager
-        .request_bridging(account_id, gear_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .request_bridging(gear_supply_vft, amount, ETH_TOKEN_RECEIVER)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -240,9 +240,9 @@ async fn test_eth_supply_token() {
         .unwrap();
     assert!(ok);
 
-    let mut vft_manager = VftManagerC::new(remoting.clone());
+    let mut vft_manager = VftManagerC::new(remoting.clone().with_actor_id(account_id));
     let reply = vft_manager
-        .request_bridging(account_id, eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -265,10 +265,8 @@ async fn test_mapping_does_not_exists() {
         ..
     } = setup_for_test().await;
 
-    let account_id: ActorId = 42.into();
     let reply = VftManagerC::new(remoting.clone())
         .request_bridging(
-            account_id,
             WRONG_GEAR_SUPPLY_VFT.into(),
             U256::zero(),
             ETH_TOKEN_RECEIVER,

@@ -18,6 +18,7 @@ extended-vft = { workspace = true, features = ["wasm-binary"] }
 extended-vft-client.workspace = true
 futures.workspace = true
 gclient.workspace = true
+gear-core.workspace = true
 hex.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 sp-core = { workspace = true, features = ["std"] }

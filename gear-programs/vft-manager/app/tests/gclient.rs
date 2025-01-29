@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use extended_vft::WASM_BINARY as WASM_EXTENDED_VFT;
 use extended_vft_client::traits::*;
 use gclient::{GearApi, Result, WSAddress};
+use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use sp_core::crypto::DEV_PHRASE;
 use tokio::sync::Mutex;
@@ -10,31 +11,36 @@ use vft_manager_client::{traits::*, Config, InitConfig, TokenSupply};
 
 static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((3_000, None, None));
 
+async fn upload_code(
+    api: &GearApi,
+    wasm_binary: &[u8],
+    store: &mut Option<CodeId>,
+) -> Result<CodeId> {
+    Ok(match store {
+        Some(code_id) => *code_id,
+        None => {
+            let code_id = api
+                .upload_code(wasm_binary)
+                .await
+                .map(|(code_id, ..)| code_id)
+                .unwrap_or_else(|_| CodeId::generate(wasm_binary));
+
+            *store = Some(code_id);
+
+            code_id
+        }
+    })
+}
+
 async fn connect_to_node() -> Result<(GearApi, GearApi, CodeId, CodeId, GasUnit, [u8; 4])> {
     let api = GearApi::dev().await?;
     let gas_limit = api.block_gas_limit()?;
 
     let (api1, api2, code_id, code_id_vft, salt) = {
         let mut lock = LOCK.lock().await;
-        let code_id = match lock.1 {
-            Some(code_id) => code_id,
-            None => {
-                let (code_id, _) = api.upload_code(WASM_VFT_MANAGER).await?;
-                lock.1 = Some(code_id);
 
-                code_id
-            }
-        };
-
-        let code_id_vft = match lock.2 {
-            Some(code_id) => code_id,
-            None => {
-                let (code_id, _) = api.upload_code(WASM_EXTENDED_VFT).await?;
-                lock.2 = Some(code_id);
-
-                code_id
-            }
-        };
+        let code_id = upload_code(&api, WASM_VFT_MANAGER, &mut lock.1).await?;
+        let code_id_vft = upload_code(&api, WASM_EXTENDED_VFT, &mut lock.2).await?;
 
         let salt = lock.0;
         lock.0 += 2;

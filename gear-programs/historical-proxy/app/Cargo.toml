@@ -12,6 +12,7 @@ ethereum-common.workspace = true
 [dev-dependencies]
 futures.workspace = true
 gclient.workspace = true
+gear-core.workspace = true
 gstd.workspace = true
 sp-core = { workspace = true, features = ["std"] }
 gtest.workspace = true

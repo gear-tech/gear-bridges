@@ -163,8 +163,14 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
-    VftManagerC::new(remoting.clone())
+    let mut service = VftManagerC::new(remoting.clone());
+    service
         .map_vara_to_eth_address(vft_program_id, eth_token_id, TokenSupply::Ethereum)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    service
+        .update_fee_charger(Some(bridging_payment_program_id))
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();

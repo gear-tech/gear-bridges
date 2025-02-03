@@ -19,9 +19,7 @@ impl Program {
     pub fn gas_calculation(_init_config: InitConfig, _slot_first: u64) -> Self {
         #[cfg(feature = "gas_calculation")]
         {
-            let self_ = Self::new(
-                _init_config
-            );
+            let self_ = Self::new(_init_config);
 
             let transactions = services::submit_receipt::transactions_mut();
             for i in 0..services::SIZE_FILL_TRANSACTIONS_STEP {

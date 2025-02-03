@@ -1,7 +1,7 @@
+use super::super::{Config, Error};
+use extended_vft_client::vft::io as vft_io;
 use gstd::msg;
 use sails_rs::{calls::ActionIo, prelude::*};
-use extended_vft_client::vft::io as vft_io;
-use super::super::{Config, Error};
 
 async fn send<Action: ActionIo<Reply = bool>>(
     slot: u64,
@@ -28,10 +28,7 @@ async fn send<Action: ActionIo<Reply = bool>>(
     Ok(())
 }
 
-fn handle_reply<Action: ActionIo<Reply = bool>>(
-    slot: u64,
-    transaction_index: u64,
-) {
+fn handle_reply<Action: ActionIo<Reply = bool>>(slot: u64, transaction_index: u64) {
     let reply_bytes = msg::load_bytes()
         .expect("May fail because of the insufficient gas only but the limit was specified by the caller; qed");
     let result = Action::decode_reply(&reply_bytes)
@@ -63,7 +60,14 @@ pub async fn mint(
     amount: U256,
     config: &Config,
 ) -> Result<(), Error> {
-    send::<vft_io::Mint>(slot, transaction_index, token_id, &(receiver, amount), config).await
+    send::<vft_io::Mint>(
+        slot,
+        transaction_index,
+        token_id,
+        &(receiver, amount),
+        config,
+    )
+    .await
 }
 
 /// Transfer `amount` tokens from the current program address to the `receiver` address,
@@ -81,5 +85,12 @@ pub async fn unlock(
 ) -> Result<(), Error> {
     let sender = gstd::exec::program_id();
 
-    send::<vft_io::TransferFrom>(slot, transaction_index, token_id, &(sender, receiver, amount), config).await
+    send::<vft_io::TransferFrom>(
+        slot,
+        transaction_index,
+        token_id,
+        &(sender, receiver, amount),
+        config,
+    )
+    .await
 }

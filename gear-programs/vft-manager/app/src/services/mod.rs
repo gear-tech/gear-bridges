@@ -348,11 +348,13 @@ where
 
     /// The method is intended for tests and is available only when the feature `gas_calculation`
     /// is enabled. Populates the collection with processed transactions.
-    /// 
+    ///
     /// Returns false when the collection is populated.
     pub fn fill_transactions(&mut self) -> bool {
         #[cfg(feature = "gas_calculation")]
-        { submit_receipt::fill_transactions() }
+        {
+            submit_receipt::fill_transactions()
+        }
 
         #[cfg(not(feature = "gas_calculation"))]
         panic!("Please rebuild with enabled `gas_calculation` feature")
@@ -361,7 +363,7 @@ where
     /// The method is intended for tests and is available only when the feature `gas_calculation`
     /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
     /// on the `_supply_type`.
-    /// 
+    ///
     /// Designed for benchmarking gas consumption by the VFT-response processing function.
     pub async fn calculate_gas_for_reply(
         &mut self,
@@ -376,13 +378,27 @@ where
             let source = self.exec_context.actor_id();
             match _supply_type {
                 TokenSupply::Ethereum => {
-                    token_operations::mint(_slot, _transaction_index, source, source, 100u32.into(), self.config())
-                        .await
+                    token_operations::mint(
+                        _slot,
+                        _transaction_index,
+                        source,
+                        source,
+                        100u32.into(),
+                        self.config(),
+                    )
+                    .await
                 }
-        
+
                 TokenSupply::Gear => {
-                    token_operations::unlock(_slot, _transaction_index, source, source, 100u32.into(), self.config())
-                        .await
+                    token_operations::unlock(
+                        _slot,
+                        _transaction_index,
+                        source,
+                        source,
+                        100u32.into(),
+                        self.config(),
+                    )
+                    .await
                 }
             }
         }

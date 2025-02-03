@@ -5,7 +5,10 @@ use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::{gas::GasInfo, ids::prelude::*};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use sp_core::{crypto::DEV_PHRASE, sr25519::Pair, Pair as _};
-use sp_runtime::{traits::{Verify, IdentifyAccount}, MultiSignature};
+use sp_runtime::{
+    traits::{IdentifyAccount, Verify},
+    MultiSignature,
+};
 use tokio::sync::Mutex;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, TokenSupply};
@@ -33,12 +36,8 @@ async fn upload_code(
     })
 }
 
-async fn create_account(
-    api: &GearApi,
-    suri: &str,
-) -> Result<()> {
-    let pair = Pair::from_string(suri, None)
-            .map_err(|e| anyhow!("{e:?}"))?;
+async fn create_account(api: &GearApi, suri: &str) -> Result<()> {
+    let pair = Pair::from_string(suri, None).map_err(|e| anyhow!("{e:?}"))?;
     let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();
     let account_id: &[u8; 32] = account.as_ref();
 
@@ -73,7 +72,8 @@ async fn connect_to_node() -> Result<(GearApi, String, String, CodeId, CodeId, G
 
     Ok((
         api,
-        suri1, suri2,
+        suri1,
+        suri2,
         code_id,
         code_id_vft,
         gas_limit,
@@ -81,7 +81,14 @@ async fn connect_to_node() -> Result<(GearApi, String, String, CodeId, CodeId, G
     ))
 }
 
-async fn calculate_reply_gas(api: &GearApi, service: &mut vft_manager_client::VftManager<GClientRemoting>, i: u64, supply_type: TokenSupply, gas_limit: u64, vft_manager_id: ActorId) -> Result<GasInfo> {
+async fn calculate_reply_gas(
+    api: &GearApi,
+    service: &mut vft_manager_client::VftManager<GClientRemoting>,
+    i: u64,
+    supply_type: TokenSupply,
+    gas_limit: u64,
+    vft_manager_id: ActorId,
+) -> Result<GasInfo> {
     let route = match supply_type {
         TokenSupply::Ethereum => <extended_vft_client::vft::io::Mint as ActionIo>::ROUTE,
         TokenSupply::Gear => <extended_vft_client::vft::io::TransferFrom as ActionIo>::ROUTE,
@@ -120,8 +127,7 @@ async fn calculate_reply_gas(api: &GearApi, service: &mut vft_manager_client::Vf
         result
     };
 
-    api
-        .calculate_reply_gas(Some(origin), message_id.into(), payload, 0, true)
+    api.calculate_reply_gas(Some(origin), message_id.into(), payload, 0, true)
         .await
 }
 
@@ -145,7 +151,8 @@ fn average(array: &[u64]) -> u64 {
 async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     assert!(!(amount / 2).is_zero());
 
-    let (api, suri, suri_unauthorized, code_id, code_id_vft, _gas_limit, salt) = connect_to_node().await?;
+    let (api, suri, suri_unauthorized, code_id, code_id_vft, _gas_limit, salt) =
+        connect_to_node().await?;
     let api = api.with(suri).unwrap();
     let account: &[u8; 32] = api.account_id().as_ref();
     let account = ActorId::from(*account);
@@ -229,8 +236,9 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     // about the allowance (e.g., by monitoring transactions or allowances on-chain)
     // and submits `request_bridging` to the VFT-manager on the user behalf. It is worth noting
     // that VFT-manager has burner role so is able to call burn functionality on any user funds.
-    let mut service =
-        vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()).with_suri(suri_unauthorized));
+    let mut service = vft_manager_client::VftManager::new(
+        GClientRemoting::new(api.clone()).with_suri(suri_unauthorized),
+    );
     let reply = service
         .request_bridging(extended_vft_id, amount, Default::default())
         .send(vft_manager_id)
@@ -277,18 +285,20 @@ async fn bench_gas_for_reply() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let slot_start = 2_000;
     let vft_manager_id = factory
-        .gas_calculation(InitConfig {
-            erc20_manager_address: Default::default(),
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                reply_timeout: 100,
+        .gas_calculation(
+            InitConfig {
+                erc20_manager_address: Default::default(),
+                gear_bridge_builtin: Default::default(),
+                historical_proxy_address: Default::default(),
+                config: Config {
+                    gas_for_token_ops: 20_000_000_000,
+                    gas_for_reply_deposit: 10_000_000_000,
+                    gas_to_send_request_to_builtin: 20_000_000_000,
+                    reply_timeout: 100,
+                },
             },
-        },
-        slot_start,)
+            slot_start,
+        )
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -300,8 +310,7 @@ async fn bench_gas_for_reply() -> Result<()> {
     );
 
     // fill the collection with processed transactions info to bench the edge case
-    let mut service =
-        vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
     while service
         .fill_transactions()
         .with_gas_limit(gas_limit)
@@ -321,7 +330,16 @@ async fn bench_gas_for_reply() -> Result<()> {
             _ => TokenSupply::Gear,
         };
 
-        let gas_info = calculate_reply_gas(&api, &mut service, i, supply_type, gas_limit, vft_manager_id).await.unwrap();
+        let gas_info = calculate_reply_gas(
+            &api,
+            &mut service,
+            i,
+            supply_type,
+            gas_limit,
+            vft_manager_id,
+        )
+        .await
+        .unwrap();
 
         results_burned.push(gas_info.burned);
         results_min_limit.push(gas_info.min_limit);
@@ -334,7 +352,16 @@ async fn bench_gas_for_reply() -> Result<()> {
             _ => TokenSupply::Gear,
         };
 
-        let gas_info = calculate_reply_gas(&api, &mut service, i, supply_type, gas_limit, vft_manager_id).await.unwrap();
+        let gas_info = calculate_reply_gas(
+            &api,
+            &mut service,
+            i,
+            supply_type,
+            gas_limit,
+            vft_manager_id,
+        )
+        .await
+        .unwrap();
 
         results_burned.push(gas_info.burned);
         results_min_limit.push(gas_info.min_limit);
@@ -343,8 +370,18 @@ async fn bench_gas_for_reply() -> Result<()> {
     results_burned.sort_unstable();
     results_min_limit.sort_unstable();
 
-    println!("burned: min = {:?}, max = {:?}, average = {}", results_burned.first(), results_burned.last(), average(&results_burned[..]));
-    println!("min_limit: min = {:?}, max = {:?}, average = {}", results_min_limit.first(), results_min_limit.last(), average(&results_min_limit[..]));
+    println!(
+        "burned: min = {:?}, max = {:?}, average = {}",
+        results_burned.first(),
+        results_burned.last(),
+        average(&results_burned[..])
+    );
+    println!(
+        "min_limit: min = {:?}, max = {:?}, average = {}",
+        results_min_limit.first(),
+        results_min_limit.last(),
+        average(&results_min_limit[..])
+    );
 
     Ok(())
 }

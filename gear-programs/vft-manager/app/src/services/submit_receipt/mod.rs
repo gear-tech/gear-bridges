@@ -99,25 +99,41 @@ pub async fn submit_receipt<T: ExecContext>(
 
     match service.state().token_map.get_supply_type(&vara_token_id)? {
         TokenSupply::Ethereum => {
-            token_operations::mint(slot, transaction_index, vara_token_id, receiver, amount, service.config())
-                .await
+            token_operations::mint(
+                slot,
+                transaction_index,
+                vara_token_id,
+                receiver,
+                amount,
+                service.config(),
+            )
+            .await
         }
 
         TokenSupply::Gear => {
-            token_operations::unlock(slot, transaction_index, vara_token_id, receiver, amount, service.config())
-                .await
+            token_operations::unlock(
+                slot,
+                transaction_index,
+                vara_token_id,
+                receiver,
+                amount,
+                service.config(),
+            )
+            .await
         }
     }
 }
 
-pub fn fill_transactions(
-) -> bool {
+pub fn fill_transactions() -> bool {
     let transactions = transactions_mut();
     if TX_HISTORY_DEPTH <= transactions.len() {
         return false;
     }
 
-    let count = cmp::min(TX_HISTORY_DEPTH - transactions.len(), super::SIZE_FILL_TRANSACTIONS_STEP);
+    let count = cmp::min(
+        TX_HISTORY_DEPTH - transactions.len(),
+        super::SIZE_FILL_TRANSACTIONS_STEP,
+    );
     let (last, _) = transactions.last().copied().unwrap();
     for i in 0..count {
         transactions.insert((last + 1, i as u64));

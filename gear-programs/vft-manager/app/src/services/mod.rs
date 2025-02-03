@@ -346,6 +346,10 @@ where
         self.state().historical_proxy_address
     }
 
+    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    /// is enabled. Populates the collection with processed transactions.
+    /// 
+    /// Returns false when the collection is populated.
     pub fn fill_transactions(&mut self) -> bool {
         #[cfg(feature = "gas_calculation")]
         { submit_receipt::fill_transactions() }
@@ -354,6 +358,11 @@ where
         panic!("Please rebuild with enabled `gas_calculation` feature")
     }
 
+    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
+    /// on the `_supply_type`.
+    /// 
+    /// Designed for benchmarking gas consumption by the VFT-response processing function.
     pub async fn calculate_gas_for_reply(
         &mut self,
         _slot: u64,

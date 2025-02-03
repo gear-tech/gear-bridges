@@ -2093,39 +2093,65 @@ dependencies = [
 ]
 
 [[package]]
-name = "checkpoint_light_client"
+name = "checkpoint-light-client"
 version = "0.3.0"
 dependencies = [
- "ark-serialize 0.4.2",
- "checkpoint_light_client-io",
- "circular-buffer",
- "gbuiltin-bls381 1.6.1",
- "gear-wasm-builder 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "getrandom 0.2.15",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex-literal",
- "lazy_static",
- "parity-scale-codec",
- "primitive-types 0.12.2",
- "tree_hash_derive",
+ "checkpoint-light-client-app",
+ "sails-idl-gen",
+ "sails-rs",
 ]
 
 [[package]]
-name = "checkpoint_light_client-io"
+name = "checkpoint-light-client-app"
 version = "0.3.0"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
- "ark-ff 0.4.2",
+ "ark-scale 0.0.12",
+ "ark-serialize 0.4.2",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
+ "circular-buffer",
+ "ethereum-common",
+ "ethereum_beacon_client",
+ "futures",
+ "gbuiltin-bls381 1.7.0",
+ "gclient",
+ "getrandom 0.2.15",
+ "hex",
+ "hex-literal",
+ "lazy_static",
+ "ruzstd",
+ "sails-rs",
+ "serde_json",
+ "sp-core 21.0.0",
+ "tokio",
+ "tree_hash_derive",
+]
+
+[[package]]
+name = "checkpoint-light-client-client"
+version = "0.3.0"
+dependencies = [
+ "checkpoint-light-client-app",
+ "checkpoint-light-client-io",
+ "ethereum-common",
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "checkpoint-light-client-io"
+version = "0.1.0"
+dependencies = [
+ "ark-bls12-381",
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
  "ethereum-common",
- "gmeta 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "scale-info",
- "serde",
- "tree_hash_derive",
+ "sails-rs",
 ]
 
 [[package]]
@@ -3058,14 +3084,16 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "clap",
  "dotenv",
  "ethereum_beacon_client",
  "gclient",
  "hex",
  "parity-scale-codec",
+ "sails-rs",
  "tokio",
 ]
 
@@ -3735,7 +3763,7 @@ name = "ethereum-event-client-app"
 version = "0.3.0"
 dependencies = [
  "alloy-rlp",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-client",
  "ethereum-common",
  "ethereum-event-client",
  "ethereum-event-client-client",
@@ -3786,7 +3814,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-io",
  "ethereum-common",
  "futures",
  "hex",
@@ -4573,9 +4601,8 @@ dependencies = [
 
 [[package]]
 name = "gbuiltin-bls381"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f43e801303b63970495dd98bb7426d8cb6b214fbfe8b592691b84bb7e3d6ef2"
+version = "1.6.2"
+source = "git+https://github.com/gear-tech/gear.git?tag=v1.6.2#93eb5b59abc5b3567355e5ca9f20bdf39eace498"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -4588,8 +4615,9 @@ dependencies = [
 
 [[package]]
 name = "gbuiltin-bls381"
-version = "1.6.2"
-source = "git+https://github.com/gear-tech/gear.git?tag=v1.6.2#93eb5b59abc5b3567355e5ca9f20bdf39eace498"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "797566ac6a65cc80b105988fe2f7a9c0ef56fc9d30690e2d1c5afd9a5b26f601"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -5957,7 +5985,7 @@ version = "0.3.0"
 dependencies = [
  "alloy",
  "alloy-rlp",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-client",
  "ethereum-common",
  "ethereum-event-client",
  "ethereum-event-client-client",
@@ -10216,8 +10244,8 @@ dependencies = [
  "axum",
  "bridging-payment-client",
  "cgo_oligami",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "clap",
  "derive_more 0.99.18",
  "dotenv",

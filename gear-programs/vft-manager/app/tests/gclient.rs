@@ -1,10 +1,11 @@
 use anyhow::anyhow;
 use extended_vft::WASM_BINARY as WASM_EXTENDED_VFT;
 use extended_vft_client::traits::*;
-use gclient::{GearApi, Result, WSAddress, Event, GearEvent, EventProcessor};
+use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::{gas::GasInfo, ids::prelude::*};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use sp_core::crypto::DEV_PHRASE;
+use sp_core::{crypto::DEV_PHRASE, sr25519::Pair, Pair as _};
+use sp_runtime::{traits::{Verify, IdentifyAccount}, MultiSignature};
 use tokio::sync::Mutex;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, TokenSupply};
@@ -32,11 +33,26 @@ async fn upload_code(
     })
 }
 
-async fn connect_to_node() -> Result<(GearApi, GearApi, CodeId, CodeId, GasUnit, [u8; 4])> {
+async fn create_account(
+    api: &GearApi,
+    suri: &str,
+) -> Result<()> {
+    let pair = Pair::from_string(suri, None)
+            .map_err(|e| anyhow!("{e:?}"))?;
+    let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();
+    let account_id: &[u8; 32] = account.as_ref();
+
+    api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+        .await?;
+
+    Ok(())
+}
+
+async fn connect_to_node() -> Result<(GearApi, String, String, CodeId, CodeId, GasUnit, [u8; 4])> {
     let api = GearApi::dev().await?;
     let gas_limit = api.block_gas_limit()?;
 
-    let (api1, api2, code_id, code_id_vft, salt) = {
+    let (suri1, suri2, code_id, code_id_vft, salt) = {
         let mut lock = LOCK.lock().await;
 
         let code_id = upload_code(&api, WASM_VFT_MANAGER, &mut lock.1).await?;
@@ -45,24 +61,19 @@ async fn connect_to_node() -> Result<(GearApi, GearApi, CodeId, CodeId, GasUnit,
         let salt = lock.0;
         lock.0 += 2;
 
-        let suri = format!("{DEV_PHRASE}//vft-manager-{salt}:");
-        let api2 = GearApi::init_with(WSAddress::dev(), suri).await?;
-        let account_id: &[u8; 32] = api2.account_id().as_ref();
-        // api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
-        //     .await?;
+        let suri1 = format!("{DEV_PHRASE}//vft-manager-{salt}");
+        create_account(&api, &suri1).await?;
 
-        // let suri = format!("{DEV_PHRASE}//vft-manager-{salt}2:");
-        // let api3 = GearApi::init_with(WSAddress::dev(), suri).await?;
-        // let account_id: &[u8; 32] = api3.account_id().as_ref();
-        // api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
-        //     .await?;
+        let salt = 1 + salt;
+        let suri2 = format!("{DEV_PHRASE}//vft-manager-{salt}");
+        create_account(&api, &suri2).await?;
 
-        (api, api2, code_id, code_id_vft, salt)
+        (suri1, suri2, code_id, code_id_vft, salt)
     };
 
     Ok((
-        api1,
-        api2,
+        api,
+        suri1, suri2,
         code_id,
         code_id_vft,
         gas_limit,
@@ -70,15 +81,78 @@ async fn connect_to_node() -> Result<(GearApi, GearApi, CodeId, CodeId, GasUnit,
     ))
 }
 
+async fn calculate_reply_gas(api: &GearApi, service: &mut vft_manager_client::VftManager<GClientRemoting>, i: u64, supply_type: TokenSupply, gas_limit: u64, vft_manager_id: ActorId) -> Result<GasInfo> {
+    let route = match supply_type {
+        TokenSupply::Ethereum => <extended_vft_client::vft::io::Mint as ActionIo>::ROUTE,
+        TokenSupply::Gear => <extended_vft_client::vft::io::TransferFrom as ActionIo>::ROUTE,
+    };
+
+    let account: &[u8; 32] = api.account_id().as_ref();
+    let origin = H256::from_slice(account);
+    let account = ActorId::from(*account);
+
+    let mut listener = api.subscribe().await?;
+
+    service
+        .calculate_gas_for_reply(i, i, supply_type)
+        .with_gas_limit(gas_limit)
+        .send(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    let message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == account.into() && message.details.is_none() =>
+            {
+                message.payload.0.starts_with(route).then_some(message.id)
+            }
+            _ => None,
+        })
+        .await?;
+
+    let reply = true;
+    let payload = {
+        let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
+        result.extend_from_slice(route);
+        reply.encode_to(&mut result);
+
+        result
+    };
+
+    api
+        .calculate_reply_gas(Some(origin), message_id.into(), payload, 0, true)
+        .await
+}
+
+fn average(array: &[u64]) -> u64 {
+    let len = array.len();
+    match len % 2 {
+        // even
+        0 => {
+            let i = len / 2;
+            let a = array[i - 1];
+            let b = array[i];
+
+            a / 2 + b / 2 + a % 2 + b % 2
+        }
+
+        // odd
+        _ => array[len / 2],
+    }
+}
+
 async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     assert!(!(amount / 2).is_zero());
 
-    let (api_unauthorized, api, code_id, code_id_vft, _gas_limit, salt) = connect_to_node().await?;
+    let (api, suri, suri_unauthorized, code_id, code_id_vft, _gas_limit, salt) = connect_to_node().await?;
+    let api = api.with(suri).unwrap();
     let account: &[u8; 32] = api.account_id().as_ref();
     let account = ActorId::from(*account);
 
     // deploy VFT-manager
-    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let remoting = GClientRemoting::new(api.clone());
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
         .new(InitConfig {
             erc20_manager_address: Default::default(),
@@ -101,7 +175,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     );
 
     // deploy Vara Fungible Token
-    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let factory = extended_vft_client::ExtendedVftFactory::new(remoting.clone());
     let extended_vft_id = factory
         .new("TEST_TOKEN".into(), "TT".into(), 20)
         .send_recv(code_id_vft, salt)
@@ -113,7 +187,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
         hex::encode(extended_vft_id)
     );
 
-    let mut service_vft = extended_vft_client::Vft::new(GClientRemoting::new(api.clone()));
+    let mut service_vft = extended_vft_client::Vft::new(remoting.clone());
     // allow VFT-manager to burn funds
     service_vft
         .grant_burner_role(vft_manager_id)
@@ -144,7 +218,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
 
     // add the VFT program to the VFT-manager mapping
     let eth_token_id = H160::from([1u8; 20]);
-    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
         .map_vara_to_eth_address(extended_vft_id, eth_token_id, supply_type)
         .send_recv(vft_manager_id)
@@ -156,7 +230,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     // and submits `request_bridging` to the VFT-manager on the user behalf. It is worth noting
     // that VFT-manager has burner role so is able to call burn functionality on any user funds.
     let mut service =
-        vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
+        vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()).with_suri(suri_unauthorized));
     let reply = service
         .request_bridging(extended_vft_id, amount, Default::default())
         .send(vft_manager_id)
@@ -191,14 +265,13 @@ async fn unauthorized_teleport_erc20() {
     assert_eq!(result, (false, amount));
 }
 
+#[ignore]
 #[tokio::test]
 async fn bench_gas_for_reply() -> Result<()> {
     const CAPACITY: usize = 1_000;
 
-    let (api, _api, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
     let api = api.with("//Bob").unwrap();
-    let account: &[u8; 32] = api.account_id().as_ref();
-    let account = ActorId::from(*account);
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
@@ -274,65 +347,4 @@ async fn bench_gas_for_reply() -> Result<()> {
     println!("min_limit: min = {:?}, max = {:?}, average = {}", results_min_limit.first(), results_min_limit.last(), average(&results_min_limit[..]));
 
     Ok(())
-}
-
-async fn calculate_reply_gas(api: &GearApi, service: &mut vft_manager_client::VftManager<GClientRemoting>, i: u64, supply_type: TokenSupply, gas_limit: u64, vft_manager_id: ActorId) -> Result<GasInfo> {
-    let route = match supply_type {
-        TokenSupply::Ethereum => <extended_vft_client::vft::io::Mint as ActionIo>::ROUTE,
-        TokenSupply::Gear => <extended_vft_client::vft::io::TransferFrom as ActionIo>::ROUTE,
-    };
-
-    let account: &[u8; 32] = api.account_id().as_ref();
-    let origin = H256::from_slice(account);
-    let account = ActorId::from(*account);
-
-    let mut listener = api.subscribe().await?;
-
-    service
-        .calculate_gas_for_reply(i, i, supply_type)
-        .with_gas_limit(gas_limit)
-        .send(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    let message_id = listener
-        .proc(|e| match e {
-            Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.destination == account.into() && message.details.is_none() =>
-            {
-                message.payload.0.starts_with(route).then_some(message.id)
-            }
-            _ => None,
-        })
-        .await?;
-
-    let reply = true;
-    let payload = {
-        let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
-        result.extend_from_slice(route);
-        reply.encode_to(&mut result);
-
-        result
-    };
-
-    api
-        .calculate_reply_gas(Some(origin), message_id.into(), payload, 0, true)
-        .await
-}
-
-fn average(array: &[u64]) -> u64 {
-    let len = array.len();
-    match len % 2 {
-        // even
-        0 => {
-            let i = len / 2;
-            let a = array[i - 1];
-            let b = array[i];
-
-            a / 2 + b / 2 + a % 2 + b % 2
-        }
-
-        // odd
-        _ => array[len / 2],
-    }
 }

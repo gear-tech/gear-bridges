@@ -32,6 +32,7 @@ gear-core.workspace = true
 hex.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 sp-core = { workspace = true, features = ["std"] }
+sp-runtime = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 vft-manager = { workspace = true, features = ["wasm-binary", "gas_calculation"] }
 vft-manager-client.workspace = true

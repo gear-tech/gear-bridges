@@ -113,7 +113,7 @@ pub async fn submit_receipt<T: ExecContext>(
 pub fn fill_transactions(
 ) -> bool {
     let transactions = transactions_mut();
-    if TX_HISTORY_DEPTH == transactions.len() {
+    if TX_HISTORY_DEPTH <= transactions.len() {
         return false;
     }
 

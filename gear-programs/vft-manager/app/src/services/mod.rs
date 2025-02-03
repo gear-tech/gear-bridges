@@ -7,9 +7,11 @@ use error::Error;
 use token_mapping::TokenMap;
 
 mod request_bridging;
-mod submit_receipt;
+pub mod submit_receipt;
 
 pub use submit_receipt::abi as eth_abi;
+
+pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
 
 /// VFT Manager service.
 pub struct VftManager<ExecContext> {
@@ -307,33 +309,11 @@ where
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
-    /// Process message further if some error was encountered during the `submit_receipt`.
-    ///
-    /// This method should be called only to recover funds that were stuck in the middle of the bridging
-    /// and is not a part of a normal workflow.
-    ///
-    /// There can be several reasons for `submit_receipt` to fail:
-    /// - Gas attached to a message wasn't enough to execute entire logic in `submit_receipt`.
-    /// - Network was heavily loaded and some message was stuck so `submit_receipt` failed.
-    pub async fn handle_submit_receipt_interrupted_transfer(
-        &mut self,
-        msg_id: MessageId,
-    ) -> Result<(), Error> {
-        submit_receipt::handle_interrupted_transfer(self, msg_id).await
-    }
-
     /// Get state of a `request_bridging` message tracker.
     pub fn request_briding_msg_tracker_state(
         &self,
     ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
         request_bridging::msg_tracker_state()
-    }
-
-    /// Get state of a `submit_receipt` message tracker.
-    pub fn submit_receipt_msg_tracker_state(
-        &self,
-    ) -> Vec<(MessageId, submit_receipt::MsgTrackerMessageInfo)> {
-        submit_receipt::msg_tracker_state()
     }
 
     /// Get current [token mapping](State::token_map).
@@ -364,6 +344,42 @@ where
     /// Get current [State::historical_proxy_address].
     pub fn historical_proxy_address(&self) -> ActorId {
         self.state().historical_proxy_address
+    }
+
+    pub fn fill_transactions(&mut self) -> bool {
+        #[cfg(feature = "gas_calculation")]
+        { submit_receipt::fill_transactions() }
+
+        #[cfg(not(feature = "gas_calculation"))]
+        panic!("Please rebuild with enabled `gas_calculation` feature")
+    }
+
+    pub async fn calculate_gas_for_reply(
+        &mut self,
+        _slot: u64,
+        _transaction_index: u64,
+        _supply_type: TokenSupply,
+    ) -> Result<(), Error> {
+        #[cfg(feature = "gas_calculation")]
+        {
+            use submit_receipt::token_operations;
+
+            let source = self.exec_context.actor_id();
+            match _supply_type {
+                TokenSupply::Ethereum => {
+                    token_operations::mint(_slot, _transaction_index, source, source, 100u32.into(), self.config())
+                        .await
+                }
+        
+                TokenSupply::Gear => {
+                    token_operations::unlock(_slot, _transaction_index, source, source, 100u32.into(), self.config())
+                        .await
+                }
+            }
+        }
+
+        #[cfg(not(feature = "gas_calculation"))]
+        panic!("Please rebuild with enabled `gas_calculation` feature")
     }
 }
 

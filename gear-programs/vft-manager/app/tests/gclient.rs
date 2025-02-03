@@ -1,8 +1,8 @@
 use anyhow::anyhow;
 use extended_vft::WASM_BINARY as WASM_EXTENDED_VFT;
 use extended_vft_client::traits::*;
-use gclient::{GearApi, Result, WSAddress};
-use gear_core::ids::prelude::*;
+use gclient::{GearApi, Result, WSAddress, Event, GearEvent, EventProcessor};
+use gear_core::{gas::GasInfo, ids::prelude::*};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use sp_core::crypto::DEV_PHRASE;
 use tokio::sync::Mutex;
@@ -48,16 +48,16 @@ async fn connect_to_node() -> Result<(GearApi, GearApi, CodeId, CodeId, GasUnit,
         let suri = format!("{DEV_PHRASE}//vft-manager-{salt}:");
         let api2 = GearApi::init_with(WSAddress::dev(), suri).await?;
         let account_id: &[u8; 32] = api2.account_id().as_ref();
-        api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
-            .await?;
+        // api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+        //     .await?;
 
-        let suri = format!("{DEV_PHRASE}//vft-manager-{salt}2:");
-        let api3 = GearApi::init_with(WSAddress::dev(), suri).await?;
-        let account_id: &[u8; 32] = api3.account_id().as_ref();
-        api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
-            .await?;
+        // let suri = format!("{DEV_PHRASE}//vft-manager-{salt}2:");
+        // let api3 = GearApi::init_with(WSAddress::dev(), suri).await?;
+        // let account_id: &[u8; 32] = api3.account_id().as_ref();
+        // api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+        //     .await?;
 
-        (api2, api3, code_id, code_id_vft, salt)
+        (api, api2, code_id, code_id_vft, salt)
     };
 
     Ok((
@@ -189,4 +189,150 @@ async fn unauthorized_teleport_erc20() {
     // since the request is sent by a non-authorized user it should fail
     // and the vft-balance of the user should remain unchanged
     assert_eq!(result, (false, amount));
+}
+
+#[tokio::test]
+async fn bench_gas_for_reply() -> Result<()> {
+    const CAPACITY: usize = 1_000;
+
+    let (api, _api, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with("//Bob").unwrap();
+    let account: &[u8; 32] = api.account_id().as_ref();
+    let account = ActorId::from(*account);
+
+    // deploy VFT-manager
+    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let slot_start = 2_000;
+    let vft_manager_id = factory
+        .gas_calculation(InitConfig {
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                reply_timeout: 100,
+            },
+        },
+        slot_start,)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    // fill the collection with processed transactions info to bench the edge case
+    let mut service =
+        vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    while service
+        .fill_transactions()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap()
+    {}
+
+    println!("prepared");
+
+    let mut results_burned = Vec::with_capacity(CAPACITY);
+    let mut results_min_limit = Vec::with_capacity(CAPACITY);
+    // data inserted in the head
+    for i in (slot_start - CAPACITY as u64 / 2)..slot_start {
+        let supply_type = match i % 2 {
+            0 => TokenSupply::Ethereum,
+            _ => TokenSupply::Gear,
+        };
+
+        let gas_info = calculate_reply_gas(&api, &mut service, i, supply_type, gas_limit, vft_manager_id).await.unwrap();
+
+        results_burned.push(gas_info.burned);
+        results_min_limit.push(gas_info.min_limit);
+    }
+
+    // data inserted in the tail
+    for i in (2 * slot_start)..(2 * slot_start + CAPACITY as u64 / 2) {
+        let supply_type = match i % 2 {
+            0 => TokenSupply::Ethereum,
+            _ => TokenSupply::Gear,
+        };
+
+        let gas_info = calculate_reply_gas(&api, &mut service, i, supply_type, gas_limit, vft_manager_id).await.unwrap();
+
+        results_burned.push(gas_info.burned);
+        results_min_limit.push(gas_info.min_limit);
+    }
+
+    results_burned.sort_unstable();
+    results_min_limit.sort_unstable();
+
+    println!("burned: min = {:?}, max = {:?}, average = {}", results_burned.first(), results_burned.last(), average(&results_burned[..]));
+    println!("min_limit: min = {:?}, max = {:?}, average = {}", results_min_limit.first(), results_min_limit.last(), average(&results_min_limit[..]));
+
+    Ok(())
+}
+
+async fn calculate_reply_gas(api: &GearApi, service: &mut vft_manager_client::VftManager<GClientRemoting>, i: u64, supply_type: TokenSupply, gas_limit: u64, vft_manager_id: ActorId) -> Result<GasInfo> {
+    let route = match supply_type {
+        TokenSupply::Ethereum => <extended_vft_client::vft::io::Mint as ActionIo>::ROUTE,
+        TokenSupply::Gear => <extended_vft_client::vft::io::TransferFrom as ActionIo>::ROUTE,
+    };
+
+    let account: &[u8; 32] = api.account_id().as_ref();
+    let origin = H256::from_slice(account);
+    let account = ActorId::from(*account);
+
+    let mut listener = api.subscribe().await?;
+
+    service
+        .calculate_gas_for_reply(i, i, supply_type)
+        .with_gas_limit(gas_limit)
+        .send(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    let message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == account.into() && message.details.is_none() =>
+            {
+                message.payload.0.starts_with(route).then_some(message.id)
+            }
+            _ => None,
+        })
+        .await?;
+
+    let reply = true;
+    let payload = {
+        let mut result = Vec::with_capacity(route.len() + reply.encoded_size());
+        result.extend_from_slice(route);
+        reply.encode_to(&mut result);
+
+        result
+    };
+
+    api
+        .calculate_reply_gas(Some(origin), message_id.into(), payload, 0, true)
+        .await
+}
+
+fn average(array: &[u64]) -> u64 {
+    let len = array.len();
+    match len % 2 {
+        // even
+        0 => {
+            let i = len / 2;
+            let a = array[i - 1];
+            let b = array[i];
+
+            a / 2 + b / 2 + a % 2 + b % 2
+        }
+
+        // odd
+        _ => array[len / 2],
+    }
 }

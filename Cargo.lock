@@ -1858,10 +1858,22 @@ dependencies = [
 name = "bridging-payment-app"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
+ "bridging-payment",
+ "bridging-payment-client",
+ "extended-vft",
+ "extended-vft-client",
+ "futures",
+ "gclient",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
+ "sp-core 21.0.0",
+ "tokio",
+ "vft-manager",
  "vft-manager-client",
 ]
 
@@ -5951,6 +5963,7 @@ dependencies = [
  "ethereum-event-client-client",
  "futures",
  "gclient",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest",
@@ -14517,17 +14530,27 @@ version = "0.3.0"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
+ "anyhow",
  "ethereum-common",
+ "extended-vft",
  "extended-vft-client",
+ "futures",
  "gbuiltin-eth-bridge",
+ "gclient",
+ "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "git-download",
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
  "lazy_static",
  "parity-scale-codec",
  "sails-client-gen",
  "sails-rs",
  "scale-info",
+ "sp-core 21.0.0",
+ "tokio",
+ "vft-manager",
+ "vft-manager-client",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_event_client_client::traits::*;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress};
+use gear_core::ids::prelude::*;
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
@@ -24,11 +25,13 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         let proxy_code_id = match lock.1 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api
+                let code_id = api
                     .upload_code(historical_proxy::WASM_BINARY)
                     .await
-                    .unwrap();
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(historical_proxy::WASM_BINARY));
                 lock.1 = Some(code_id);
+
                 code_id
             }
         };
@@ -36,11 +39,13 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         let ethereum_event_client_code_id = match lock.2 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api
+                let code_id = api
                     .upload_code(ethereum_event_client::WASM_BINARY)
                     .await
-                    .unwrap();
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(ethereum_event_client::WASM_BINARY));
                 lock.2 = Some(code_id);
+
                 code_id
             }
         };

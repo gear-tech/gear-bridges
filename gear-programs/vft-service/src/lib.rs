@@ -19,18 +19,21 @@ pub struct Storage {
 
 impl Storage {
     pub fn get_mut() -> &'static mut Self {
-        unsafe { STORAGE.as_mut().expect("Storage is not initialized") }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw mut STORAGE).as_mut() }.expect("Storage is not initialized")
     }
+
     pub fn get() -> &'static Self {
-        unsafe { STORAGE.as_ref().expect("Storage is not initialized") }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw const STORAGE).as_ref() }.expect("Storage is not initialized")
     }
+
     pub fn balances() -> &'static mut HashMap<ActorId, U256> {
-        let storage = unsafe { STORAGE.as_mut().expect("Storage is not initialized") };
-        &mut storage.balances
+        &mut Self::get_mut().balances
     }
+
     pub fn total_supply() -> &'static mut U256 {
-        let storage = unsafe { STORAGE.as_mut().expect("Storage is not initialized") };
-        &mut storage.total_supply
+        &mut Self::get_mut().total_supply
     }
 }
 

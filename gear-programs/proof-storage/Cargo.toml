@@ -12,10 +12,6 @@ thiserror.workspace = true
 [build-dependencies]
 gear-wasm-builder.workspace = true
 
-[lib]
-crate-type = ["rlib"]
-name = "gear_proof_storage"
-
 [features]
-std = []
+std = ["thiserror/std", "parity-scale-codec/std", "scale-info/std"]
 default = ["std"]

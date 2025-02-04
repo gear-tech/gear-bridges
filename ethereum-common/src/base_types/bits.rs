@@ -10,7 +10,7 @@ const BITS_PER_BYTE: usize = 8;
 ///
 /// `bit_len == 0` requires a single byte.
 fn bytes_for_bit_len(bit_len: usize) -> usize {
-    core::cmp::max(1, (bit_len + BITS_PER_BYTE - 1) / BITS_PER_BYTE)
+    core::cmp::max(1, bit_len.div_ceil(BITS_PER_BYTE))
 }
 
 type Inner = BitVec<u8, Lsb0>;

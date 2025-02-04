@@ -1,3 +1,7 @@
+// Clippy warns about some imports below so disable the check.
+// Remove the directive once the clippy happy.
+#![allow(clippy::literal_string_with_formatting_args)]
+
 use anyhow::anyhow;
 use bridging_payment::WASM_BINARY as WASM_BRIDGING_PAYMENT;
 use bridging_payment_client::traits::*;

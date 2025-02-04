@@ -88,7 +88,7 @@ impl<'de, F: RichField> Deserialize<'de> for PoseidonBN128HashOut<F> {
     {
         struct PoseidonBN128HashOutVisitor;
 
-        impl<'a> serde::de::Visitor<'a> for PoseidonBN128HashOutVisitor {
+        impl serde::de::Visitor<'_> for PoseidonBN128HashOutVisitor {
             type Value = String;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

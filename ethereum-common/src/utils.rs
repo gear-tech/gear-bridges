@@ -199,7 +199,7 @@ where
     match T::tree_hash_type() {
         TreeHashType::Basic => {
             let mut hasher = MerkleHasher::with_leaves(
-                (N + T::tree_hash_packing_factor() - 1) / T::tree_hash_packing_factor(),
+                N.div_ceil(T::tree_hash_packing_factor())
             );
 
             for item in vec {
@@ -235,7 +235,7 @@ pub fn bitfield_bytes_tree_hash_root<const N: usize>(bytes: &[u8]) -> Hash256 {
     use tree_hash::{MerkleHasher, BYTES_PER_CHUNK};
 
     let byte_size = (N + 7) / 8;
-    let leaf_count = (byte_size + BYTES_PER_CHUNK - 1) / BYTES_PER_CHUNK;
+    let leaf_count = byte_size.div_ceil(BYTES_PER_CHUNK);
 
     let mut hasher = MerkleHasher::with_leaves(leaf_count);
 

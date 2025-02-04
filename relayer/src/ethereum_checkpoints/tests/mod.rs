@@ -216,7 +216,7 @@ async fn replay_back_and_updating() -> Result<()> {
     let headers: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
 
     // start to replay back
-    let size_batch = 40 * SLOTS_PER_EPOCH as usize;
+    let size_batch = 30 * SLOTS_PER_EPOCH as usize;
     let payload = Handle::ReplayBackStart {
         sync_update: utils::sync_update_from_finality(
             decode_signature(&finality_update.sync_aggregate),

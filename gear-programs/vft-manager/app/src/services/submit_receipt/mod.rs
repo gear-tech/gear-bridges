@@ -22,11 +22,7 @@ const TX_HISTORY_DEPTH: usize = 500_000;
 /// Get mutable reference to a transactions storage.
 fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     #[allow(clippy::deref_addrof)]
-    unsafe {
-        (*&raw mut TRANSACTIONS)
-            .as_mut()
-    }
-    .expect("Program should be constructed")
+    unsafe { (*&raw mut TRANSACTIONS).as_mut() }.expect("Program should be constructed")
 }
 
 /// Initialize state that's used by this VFT Manager method.

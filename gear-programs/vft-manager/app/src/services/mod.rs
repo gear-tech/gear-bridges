@@ -408,10 +408,6 @@ where
     /// Get a reference to the global [Config].
     fn config(&self) -> &Config {
         #[allow(clippy::deref_addrof)]
-        unsafe {
-            (*&raw const CONFIG)
-                .as_ref()
-        }
-        .expect("VftManager::seed() should be called")
+        unsafe { (*&raw const CONFIG).as_ref() }.expect("VftManager::seed() should be called")
     }
 }

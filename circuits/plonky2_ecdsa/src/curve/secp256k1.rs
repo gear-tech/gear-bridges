@@ -89,7 +89,7 @@ mod tests {
         let mut sum = ProjectivePoint::ZERO;
         for limb in lhs.to_canonical_biguint().to_u64_digits().iter() {
             for j in 0..64 {
-                if (limb >> j & 1u64) != 0u64 {
+                if ((limb >> j) & 1u64) != 0u64 {
                     sum = sum + g;
                 }
                 g = g.double();

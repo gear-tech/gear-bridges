@@ -95,35 +95,23 @@ where
     }
 
     fn state(&self) -> &State {
-        unsafe {
-            STATE
-                .as_ref()
-                .expect("BridgingPayment::seed() should be called")
-        }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw const STATE).as_ref() }.expect("BridgingPayment::seed() should be called")
     }
 
     fn state_mut(&mut self) -> &mut State {
-        unsafe {
-            STATE
-                .as_mut()
-                .expect("BridgingPayment::seed() should be called")
-        }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw mut STATE).as_mut() }.expect("BridgingPayment::seed() should be called")
     }
 
     fn config(&self) -> &Config {
-        unsafe {
-            CONFIG
-                .as_ref()
-                .expect("BridgingPayment::seed() should be called")
-        }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw const CONFIG).as_ref() }.expect("BridgingPayment::seed() should be called")
     }
 
     fn config_mut(&mut self) -> &mut Config {
-        unsafe {
-            CONFIG
-                .as_mut()
-                .expect("BridgingPayment::seed() should be called")
-        }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw mut CONFIG).as_mut() }.expect("BridgingPayment::seed() should be called")
     }
 }
 

@@ -15,15 +15,11 @@ pub use code::WASM_BINARY_OPT as WASM_BINARY;
 #[cfg(not(feature = "std"))]
 mod wasm;
 
-#[cfg_attr(feature = "std", derive(thiserror::Error))]
-#[derive(Debug, Decode, Encode, TypeInfo)]
+#[derive(Debug, Decode, Encode, TypeInfo, thiserror::Error)]
 pub enum Error {
-    #[cfg_attr(feature = "std", error("Authority set id is not sequential"))]
+    #[error("Authority set id is not sequential")]
     AuthoritySetIdNotSequential,
-    #[cfg_attr(
-        feature = "std",
-        error("Two or more proofs submitted at the same block")
-    )]
+    #[error("Two or more proofs submitted at the same block")]
     ManyProofsSubmittedInSameBlock,
 }
 

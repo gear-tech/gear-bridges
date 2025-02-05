@@ -395,20 +395,19 @@ where
 
     /// Get a reference to the global [State].
     fn state(&self) -> &State {
-        unsafe { STATE.as_ref().expect("VftManager::seed() should be called") }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw const STATE).as_ref() }.expect("VftManager::seed() should be called")
     }
 
     /// Get a mutable reference to the global [State].
     fn state_mut(&mut self) -> &mut State {
-        unsafe { STATE.as_mut().expect("VftManager::seed() should be called") }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw mut STATE).as_mut() }.expect("VftManager::seed() should be called")
     }
 
     /// Get a reference to the global [Config].
     fn config(&self) -> &Config {
-        unsafe {
-            CONFIG
-                .as_ref()
-                .expect("VftManager::seed() should be called")
-        }
+        #[allow(clippy::deref_addrof)]
+        unsafe { (*&raw const CONFIG).as_ref() }.expect("VftManager::seed() should be called")
     }
 }

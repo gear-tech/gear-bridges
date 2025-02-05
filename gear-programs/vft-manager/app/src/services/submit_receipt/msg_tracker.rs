@@ -51,24 +51,13 @@ pub fn init() {
 
 /// Fetch state of this message tracker.
 pub fn msg_tracker_state() -> Vec<(MessageId, MessageInfo)> {
-    unsafe {
-        MSG_TRACKER
-            .as_mut()
-            .expect("VftManager::seed() should be called")
-    }
-    .message_info
-    .clone()
-    .into_iter()
-    .collect()
+    msg_tracker_mut().message_info.clone().into_iter().collect()
 }
 
 /// Get mutable reference to a global message tracker.
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
-    unsafe {
-        MSG_TRACKER
-            .as_mut()
-            .expect("VftManager::seed() should be called")
-    }
+    #[allow(clippy::deref_addrof)]
+    unsafe { (*&raw mut MSG_TRACKER).as_mut() }.expect("VftManager::seed() should be called")
 }
 
 impl MessageTracker {
@@ -93,10 +82,5 @@ impl MessageTracker {
     /// Get current state of the tracked message. Will return `None` if message isn't found.
     pub fn get_message_info(&self, msg_id: &MessageId) -> Option<&MessageInfo> {
         self.message_info.get(msg_id)
-    }
-
-    /// Stop tracking message state. It will return current state of the target message.
-    pub fn remove_message_info(&mut self, msg_id: &MessageId) -> Option<MessageInfo> {
-        self.message_info.remove(msg_id)
     }
 }

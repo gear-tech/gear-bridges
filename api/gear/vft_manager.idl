@@ -32,6 +32,32 @@ type Config = struct {
   reply_timeout: u32,
 };
 
+/// Type of the token supply.
+type TokenSupply = enum {
+  /// Token supply is located on Ethereum.
+  /// 
+  /// This means that we're working with some pre-existing `ERC20` token on Ethereum and with
+  /// wrapped `VFT` token on Gear.
+  /// 
+  /// When this type of token supply is activated corresponding tokens will be minted/burned
+  /// on the gear side and locked/unlocked on the Ethereum side.
+  /// 
+  /// For example this type of token supply can be used to work with
+  /// `USDT ERC20 token`/`wrappedUSDT VFT token` pair.
+  Ethereum,
+  /// Token supply is located on Gear.
+  /// 
+  /// This means that we're working with some pre-existing `VFT` token on Gear and with
+  /// wrapped `ERC20` token on Ethereum.
+  /// 
+  /// When this type of token supply is activated corresponding tokens will be locked/unlocked
+  /// on the gear side and minted/burned on the Gear side.
+  /// 
+  /// For example this type of token supply can be used to work with
+  /// `VARA VFT token`/`wrappedVARA ERC20 token` pair.
+  Gear,
+};
+
 /// Error types for VFT Manageer service.
 type Error = enum {
   /// Error sending message to the program.
@@ -70,42 +96,16 @@ type Error = enum {
   AlreadyProcessed,
 };
 
-/// Type of the token supply.
-type TokenSupply = enum {
-  /// Token supply is located on Ethereum.
-  /// 
-  /// This means that we're working with some pre-existing `ERC20` token on Ethereum and with
-  /// wrapped `VFT` token on Gear.
-  /// 
-  /// When this type of token supply is activated corresponding tokens will be minted/burned
-  /// on the gear side and locked/unlocked on the Ethereum side.
-  /// 
-  /// For example this type of token supply can be used to work with
-  /// `USDT ERC20 token`/`wrappedUSDT VFT token` pair.
-  Ethereum,
-  /// Token supply is located on Gear.
-  /// 
-  /// This means that we're working with some pre-existing `VFT` token on Gear and with
-  /// wrapped `ERC20` token on Ethereum.
-  /// 
-  /// When this type of token supply is activated corresponding tokens will be locked/unlocked
-  /// on the gear side and minted/burned on the Gear side.
-  /// 
-  /// For example this type of token supply can be used to work with
-  /// `VARA VFT token`/`wrappedVARA ERC20 token` pair.
-  Gear,
-};
-
 /// Entry for a single message in [MessageTracker].
-type RequestBridgingMsgTrackerMessageInfo = struct {
+type MessageInfo = struct {
   /// State of the message.
-  status: RequestBridgingMsgTrackerMessageStatus,
+  status: MessageStatus,
   /// Request details.
-  details: RequestBridgingMsgTrackerTxDetails,
+  details: TxDetails,
 };
 
 /// State in which message processing can be.
-type RequestBridgingMsgTrackerMessageStatus = enum {
+type MessageStatus = enum {
   /// Message to deposit tokens is sent.
   SendingMessageToDepositTokens,
   /// Reply is received for a token deposit message.
@@ -121,7 +121,7 @@ type RequestBridgingMsgTrackerMessageStatus = enum {
 };
 
 /// Details about a request associated with a message stored in [MessageTracker].
-type RequestBridgingMsgTrackerTxDetails = struct {
+type TxDetails = struct {
   /// Address of the `VFT` token which is being bridged.
   vara_token_id: actor_id,
   /// Original `VFT` token owner.
@@ -134,39 +134,25 @@ type RequestBridgingMsgTrackerTxDetails = struct {
   token_supply: TokenSupply,
 };
 
-/// Entry for a single message in [MessageTracker].
-type SubmitReceiptMsgTrackerMessageInfo = struct {
-  /// State of the message.
-  status: SubmitReceiptMsgTrackerMessageStatus,
-  /// Request details.
-  details: SubmitReceiptMsgTrackerTxDetails,
-};
-
-/// State in which message processing can be.
-type SubmitReceiptMsgTrackerMessageStatus = enum {
-  /// Message to withdraw tokens is sent.
-  SendingMessageToWithdrawTokens,
-  /// Reply is received for a token withdraw message.
-  TokenWithdrawComplete: bool,
-};
-
-/// Details about a request associated with a message stored in [MessageTracker].
-type SubmitReceiptMsgTrackerTxDetails = struct {
-  /// Address of the `VFT` token which is being bridged.
-  vara_token_id: actor_id,
-  /// Bridged tokens receiver on Gear.
-  receiver: actor_id,
-  /// Bridged tokens amount.
-  amount: u256,
-  /// [TokenSupply] type of the token being bridged.
-  token_supply: TokenSupply,
-};
-
 constructor {
+  /// The constructor is intended for test purposes and is available only when the feature
+  /// `gas_calculation` is enabled.
+  GasCalculation : (_init_config: InitConfig, _slot_first: u64);
   New : (init_config: InitConfig);
 };
 
 service VftManager {
+  /// The method is intended for tests and is available only when the feature `gas_calculation`
+  /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
+  /// on the `_supply_type`.
+  /// 
+  /// Designed for benchmarking gas consumption by the VFT-response processing function.
+  CalculateGasForReply : (_slot: u64, _transaction_index: u64, _supply_type: TokenSupply) -> result (null, Error);
+  /// The method is intended for tests and is available only when the feature `gas_calculation`
+  /// is enabled. Populates the collection with processed transactions.
+  /// 
+  /// Returns false when the collection is populated.
+  FillTransactions : () -> bool;
   /// Process message further if some error was encountered during the `request_bridging`.
   /// 
   /// This method should be called only to recover funds that were stuck in the middle of the bridging
@@ -176,15 +162,6 @@ service VftManager {
   /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
   /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
-  /// Process message further if some error was encountered during the `submit_receipt`.
-  /// 
-  /// This method should be called only to recover funds that were stuck in the middle of the bridging
-  /// and is not a part of a normal workflow.
-  /// 
-  /// There can be several reasons for `submit_receipt` to fail:
-  /// - Gas attached to a message wasn't enough to execute entire logic in `submit_receipt`.
-  /// - Network was heavily loaded and some message was stuck so `submit_receipt` failed.
-  HandleSubmitReceiptInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
   /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
@@ -228,9 +205,7 @@ service VftManager {
   /// Get current [State::historical_proxy_address].
   query HistoricalProxyAddress : () -> actor_id;
   /// Get state of a `request_bridging` message tracker.
-  query RequestBridingMsgTrackerState : () -> vec struct { message_id, RequestBridgingMsgTrackerMessageInfo };
-  /// Get state of a `submit_receipt` message tracker.
-  query SubmitReceiptMsgTrackerState : () -> vec struct { message_id, SubmitReceiptMsgTrackerMessageInfo };
+  query RequestBridingMsgTrackerState : () -> vec struct { message_id, MessageInfo };
   /// Get current [token mapping](State::token_map).
   query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
 

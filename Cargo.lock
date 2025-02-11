@@ -14568,6 +14568,7 @@ dependencies = [
  "sails-rs",
  "scale-info",
  "sp-core 21.0.0",
+ "sp-runtime 24.0.0",
  "tokio",
  "vft-manager",
  "vft-manager-client",

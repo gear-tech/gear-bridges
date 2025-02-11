@@ -81,6 +81,10 @@ pub async fn request_bridging<T: ExecContext>(
     let nonce = match bridge_builtin_reply {
         Ok(nonce) => nonce,
         Err(e) => {
+            // Set critical section ensuring the message status is `SendingMessageToReturnTokens`
+            // regardless of the result of the next code execution.
+            set_critical_hook(msg_id);
+
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
 
@@ -151,20 +155,39 @@ pub async fn handle_interrupted_transfer<T: ExecContext>(
         | MessageStatus::TokensReturnComplete(false) => {
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
-
-            match token_supply {
-                TokenSupply::Ethereum => {
-                    token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
-                }
-                TokenSupply::Gear => {
-                    token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
-                }
-            }
-
-            Ok(())
         }
+
+        MessageStatus::SendingMessageToReturnTokens => (),
+
         _ => {
             panic!("Unexpected status or transaction completed.")
         }
     }
+
+    match token_supply {
+        TokenSupply::Ethereum => {
+            token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
+        }
+        TokenSupply::Gear => {
+            token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Helper function to change message status to `SendingMessageToReturnTokens` in the rare case
+/// when the reply hook of `send_message_to_bridge_builtin` does not get executed (because of
+/// the timeout for example).
+fn set_critical_hook(msg_id: MessageId) {
+    gstd::critical::set_hook(move || {
+        let msg_tracker = msg_tracker_mut();
+        let msg_info = msg_tracker
+            .get_message_info(&msg_id)
+            .expect("Unexpected: msg info does not exist");
+
+        if let MessageStatus::SendingMessageToBridgeBuiltin = msg_info.status {
+            msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+        }
+    });
 }

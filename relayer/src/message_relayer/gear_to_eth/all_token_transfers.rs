@@ -4,7 +4,7 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::{
+use crate::message_relayer::{self, common::{
     ethereum::{
         block_listener::BlockListener as EthereumBlockListener,
         merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
@@ -14,7 +14,7 @@ use crate::message_relayer::common::{
         message_queued_event_extractor::MessageQueuedEventExtractor,
     },
     GSdkArgs,
-};
+}};
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
@@ -44,16 +44,36 @@ impl Relayer {
         eth_api: EthApi,
         from_block: Option<u32>,
     ) -> anyhow::Result<Self> {
+        let (_handle, sender_requests) = message_relayer::common::gear::checkpoints_extractor::test222(&args.vara_domain, args.vara_port, args.vara_rpc_retries);
+
         let from_gear_block = if let Some(block) = from_block {
             block
         } else {
-            let block = gear_api.latest_finalized_block().await?;
-            gear_api.block_hash_to_number(block).await?
+            let from_gear_block = {
+                let (sender, mut reciever) = tokio::sync::oneshot::channel();
+                let request = message_relayer::common::gear::checkpoints_extractor::Request::LatestFinalizedBlock { sender };
+    
+                // todo: exit
+                sender_requests.send(request).await?;
+    
+                reciever.await??
+            };
+            let from_gear_block = {
+                let (sender, mut reciever) = tokio::sync::oneshot::channel();
+                let request = message_relayer::common::gear::checkpoints_extractor::Request::BlockHashToNumber { hash: from_gear_block, sender };
+    
+                // todo: exit
+                sender_requests.send(request).await?;
+    
+                reciever.await??
+            };
+
+            from_gear_block
         };
 
         let from_eth_block = eth_api.finalized_block_number().await?;
 
-        let gear_block_listener = GearBlockListener::new(args, from_gear_block);
+        let gear_block_listener = GearBlockListener::new(from_gear_block, sender_requests);
 
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 

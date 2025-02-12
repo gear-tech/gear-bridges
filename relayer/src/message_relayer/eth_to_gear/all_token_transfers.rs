@@ -8,7 +8,7 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::{
+use crate::message_relayer::{self, common::{
     ethereum::{
         block_listener::BlockListener as EthereumBlockListener,
         deposit_event_extractor::DepositEventExtractor,
@@ -18,7 +18,7 @@ use crate::message_relayer::common::{
         checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
     },
     GSdkArgs,
-};
+}};
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
@@ -53,14 +53,26 @@ impl Relayer {
         historical_proxy_address: H256,
         vft_manager_address: H256,
     ) -> anyhow::Result<Self> {
+        let (_handle, sender_requests) = message_relayer::common::gear::checkpoints_extractor::test222(&args.vara_domain, args.vara_port, args.vara_rpc_retries);
         let from_gear_block = {
-            let gear_api =
-                GearApi::new(&args.vara_domain, args.vara_port, args.vara_rpc_retries).await?;
-            let from_gear_block = gear_api.latest_finalized_block().await?;
+            let (sender, mut reciever) = tokio::sync::oneshot::channel();
+            let request = message_relayer::common::gear::checkpoints_extractor::Request::LatestFinalizedBlock { sender };
 
-            gear_api.block_hash_to_number(from_gear_block).await?
+            // todo: exit
+            sender_requests.send(request).await?;
+
+            reciever.await??
         };
-        let gear_block_listener = GearBlockListener::new(args.clone(), from_gear_block);
+        let from_gear_block = {
+            let (sender, mut reciever) = tokio::sync::oneshot::channel();
+            let request = message_relayer::common::gear::checkpoints_extractor::Request::BlockHashToNumber { hash: from_gear_block, sender };
+
+            // todo: exit
+            sender_requests.send(request).await?;
+
+            reciever.await??
+        };
+        let gear_block_listener = GearBlockListener::new(from_gear_block, sender_requests.clone());
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
@@ -72,7 +84,7 @@ impl Relayer {
         );
 
         let checkpoints_extractor =
-            CheckpointsExtractor::new(args.clone(), checkpoint_light_client_address);
+            CheckpointsExtractor::new(checkpoint_light_client_address, sender_requests);
 
         let route =
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();

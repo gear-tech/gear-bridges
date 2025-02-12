@@ -1,10 +1,11 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::{ops::ControlFlow, sync::mpsc::{channel, Receiver, Sender}, time::Duration};
 
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
 use prometheus::IntGauge;
+use tokio::task::JoinHandle;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use checkpoint_light_client_io::meta::{Order, State, StateRequest};
@@ -14,11 +15,10 @@ use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumb
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
 
-    args: GSdkArgs,
-
     latest_checkpoint: Option<EthereumSlotNumber>,
 
     metrics: Metrics,
+    sender: tokio::sync::mpsc::Sender<Request>,
 }
 
 impl MeteredService for CheckpointsExtractor {
@@ -37,12 +37,12 @@ impl_metered_service! {
 }
 
 impl CheckpointsExtractor {
-    pub fn new(args: GSdkArgs, checkpoint_light_client_address: H256) -> Self {
+    pub fn new(checkpoint_light_client_address: H256, sender: tokio::sync::mpsc::Sender<Request>,) -> Self {
         Self {
             checkpoint_light_client_address,
-            args,
             latest_checkpoint: None,
             metrics: Metrics::new(),
+            sender,
         }
     }
 
@@ -64,16 +64,9 @@ impl CheckpointsExtractor {
         sender: &Sender<EthereumSlotNumber>,
         blocks: &Receiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
-        let gear_api = GearApi::new(
-            &self.args.vara_domain,
-            self.args.vara_port,
-            self.args.vara_rpc_retries,
-        )
-        .await?;
-
         loop {
             for block in blocks.try_iter() {
-                self.process_block_events(&gear_api, block.0, sender)
+                self.process_block_events(block.0, sender)
                     .await?;
             }
         }
@@ -81,11 +74,18 @@ impl CheckpointsExtractor {
 
     async fn process_block_events(
         &mut self,
-        gear_api: &GearApi,
         block: u32,
         sender: &Sender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
-        let block_hash = gear_api.block_number_to_hash(block).await?;
+        let block_hash = {
+            let (sender, mut reciever) = tokio::sync::oneshot::channel();
+            let request = Request::BlockToHash { block, sender };
+
+            // todo: exit
+            self.sender.send(request).await?;
+
+            reciever.await??
+        };
 
         let request = StateRequest {
             order: Order::Reverse,
@@ -94,14 +94,15 @@ impl CheckpointsExtractor {
         }
         .encode();
 
-        let state = gear_api
-            .api
-            .read_state(
-                self.checkpoint_light_client_address,
-                request,
-                Some(block_hash),
-            )
-            .await?;
+        let state = {
+            let (sender, mut reciever) = tokio::sync::oneshot::channel();
+            let request = Request::ReadState { pid: self.checkpoint_light_client_address, payload: request, at: Some(block_hash), sender };
+
+            // todo: exit
+            self.sender.send(request).await?;
+
+            reciever.await??
+        };
 
         let state = hex::decode(&state[2..])?;
         let state = State::decode(&mut &state[..])?;
@@ -144,4 +145,175 @@ impl CheckpointsExtractor {
 
         Ok(())
     }
+}
+
+pub enum Request {
+    BlockToHash {
+        block: u32,
+        sender: tokio::sync::oneshot::Sender<anyhow::Result<H256>>,
+    },
+    ReadState {
+        pid: H256,
+        payload: Vec<u8>,
+        at: Option<H256>,
+        sender: tokio::sync::oneshot::Sender<anyhow::Result<String>>,
+    },
+    LatestFinalizedBlock {
+        sender: tokio::sync::oneshot::Sender<anyhow::Result<H256>>,
+    },
+    BlockHashToNumber {
+        hash: H256,
+        sender: tokio::sync::oneshot::Sender<anyhow::Result<u32>>,
+    },
+}
+
+// fn test() ->  {
+//     let (sender, receiver) = tokio::mpsc::channel(10_000);
+
+//     tokio::task::spawn(async move || {
+//         let gear_api = GearApi::new(
+//             &self.args.vara_domain,
+//             self.args.vara_port,
+//             self.args.vara_rpc_retries,
+//         )
+//         .await?;
+
+//         loop {
+//             let Some(request) = receiver.recv().await else {
+//                 // exit from the task
+//                 return;
+//             };
+
+//             match request {
+//                 Request::BlockToHash { block, sender } => {
+//                     let result = gear_api.block_number_to_hash(block).await;
+//                     let response = match result {
+//                         Err(e) if is_transport(&e) => { /* exit from the inner loop and recreate client */ todo!() }
+//                         result => result,
+//                     };
+
+//                     // we don't care if the other end is closed
+//                     let _ = sender.send(response).await;
+//                 }
+
+//                 Request::ReadState { pid, payload, at, sender } => {
+
+//                 }
+//             }
+//         }
+//     })
+
+//     sender
+// }
+
+pub fn test222(domain: &str, port: u16, retries: u8) -> (JoinHandle<()>, tokio::sync::mpsc::Sender<Request>) {
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(10_000);
+    let uri = format!("{domain}:{port}");
+
+    let handle = tokio::task::spawn(async move {
+        let mut request_last = None;
+        loop {
+            match loop_body(&uri, retries, &mut receiver, request_last.take()).await {
+                ControlFlow::Break(_) => break,
+                ControlFlow::Continue(request) => request_last = request,
+            }
+
+            // 2 minutes
+            tokio::time::sleep(Duration::from_secs(120)).await;
+        }
+    });
+
+    (handle, sender)
+}
+
+async fn loop_body(uri: &str, retries: u8, receiver: &mut tokio::sync::mpsc::Receiver<Request>, request_last: Option<Request>) -> ControlFlow<(), Option<Request>> {
+    let Ok(gsdk_api) = gsdk::Api::builder().retries(retries).build(uri).await else {
+        return ControlFlow::Continue(request_last);
+    };
+
+    if let Some(request) = request_last {
+        match process_request(&gsdk_api, request).await {
+            Ok(_) => (),
+            Err(Error2::Unknown) => todo!(),
+            Err(Error2::Transport(request)) => return ControlFlow::Continue(Some(request)),
+        }
+    }
+
+    loop_inner(&gsdk_api, receiver).await
+}
+
+fn is_transport(_e: &anyhow::Error) -> bool {
+    todo!()
+}
+
+async fn loop_inner(gsdk_api: &gsdk::Api, receiver: &mut tokio::sync::mpsc::Receiver<Request>) -> ControlFlow<(), Option<Request>> {
+    loop {
+        let Some(request) = receiver.recv().await else {
+            // exit from the task
+            return ControlFlow::Break(());
+        };
+
+        match process_request(gsdk_api, request).await {
+            Ok(_) => (),
+            Err(Error2::Unknown) => todo!(),
+            Err(Error2::Transport(request)) => return ControlFlow::Continue(Some(request)),
+        }
+    }
+}
+
+pub enum Error2 {
+    // transport error occurred. Contains the request being processed
+    Transport(Request),
+    Unknown,
+}
+
+async fn process_request(gsdk_api: &gsdk::Api, request: Request) -> Result<(), Error2> {
+    match request {
+        Request::BlockToHash { block, sender } => {
+            let result = GearApi::from(gsdk_api.clone()).block_number_to_hash(block).await;
+            let response = match result {
+                Err(e) if is_transport(&e) => return Err(Error2::Transport(Request::BlockToHash { block, sender })),
+                result => result,
+            };
+
+            // we don't care if the other end is closed
+            let _ = sender.send(response);
+        }
+
+        Request::ReadState { pid, payload, at, sender } => {
+            let result = gsdk_api.read_state(pid, payload.clone(), at).await
+                .map_err(Into::into);
+            let response = match result {
+                Err(e) if is_transport(&e) => return Err(Error2::Transport(Request::ReadState { pid, payload, at, sender })),
+                result => result,
+            };
+
+            // we don't care if the other end is closed
+            let _ = sender.send(response);
+        }
+
+        Request::LatestFinalizedBlock { sender } => {
+            let result = GearApi::from(gsdk_api.clone()).latest_finalized_block().await;
+            let response = match result {
+                Err(e) if is_transport(&e) => return Err(Error2::Transport(Request::LatestFinalizedBlock { sender })),
+                result => result,
+            };
+
+            // we don't care if the other end is closed
+            let _ = sender.send(response);
+        }
+
+        Request::BlockHashToNumber { hash, sender } => {
+            let result = GearApi::from(gsdk_api.clone()).block_hash_to_number(hash).await;
+            let response = match result {
+                Err(e) if is_transport(&e) => return Err(Error2::Transport(Request::BlockHashToNumber { hash, sender })),
+                result => result,
+            };
+
+            // we don't care if the other end is closed
+            let _ = sender.send(response);
+        }
+    }
+
+    Ok(())
 }

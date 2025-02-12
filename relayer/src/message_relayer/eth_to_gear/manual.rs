@@ -6,13 +6,13 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, TxHash};
 use gear_rpc_client::GearApi;
 
-use crate::message_relayer::common::{
+use crate::message_relayer::{self, common::{
     gear::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
     },
     EthereumSlotNumber, GSdkArgs, TxHashWithSlot,
-};
+}};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -39,20 +39,31 @@ pub async fn relay(
     .await
     .expect("Failed to create GearApi");
 
-    let from_gear_block = gear_api
-        .latest_finalized_block()
-        .await
-        .expect("Failed to fetch latest finalized block");
 
-    let from_gear_block = gear_api
-        .block_hash_to_number(from_gear_block)
-        .await
-        .expect("Failed to fetch block number by hash");
+    let (_handle, sender_requests) = message_relayer::common::gear::checkpoints_extractor::test222(&gear_client_args.vara_domain, gear_client_args.vara_port, gear_client_args.vara_rpc_retries);
+    let from_gear_block = {
+        let (sender, mut reciever) = tokio::sync::oneshot::channel();
+        let request = message_relayer::common::gear::checkpoints_extractor::Request::LatestFinalizedBlock { sender };
 
-    let gear_block_listener = GearBlockListener::new(gear_client_args.clone(), from_gear_block);
+        // todo: exit
+        sender_requests.send(request).await.unwrap();
+
+        reciever.await.unwrap().unwrap()
+    };
+    let from_gear_block = {
+        let (sender, mut reciever) = tokio::sync::oneshot::channel();
+        let request = message_relayer::common::gear::checkpoints_extractor::Request::BlockHashToNumber { hash: from_gear_block, sender };
+
+        // todo: exit
+        sender_requests.send(request).await.unwrap();
+
+        reciever.await.unwrap().unwrap()
+    };
+
+    let gear_block_listener = GearBlockListener::new(from_gear_block, sender_requests.clone());
 
     let checkpoints_extractor =
-        CheckpointsExtractor::new(gear_client_args.clone(), checkpoint_light_client_address);
+        CheckpointsExtractor::new(checkpoint_light_client_address, sender_requests);
 
     let gear_message_sender = MessageSender::new(
         gear_client_args,

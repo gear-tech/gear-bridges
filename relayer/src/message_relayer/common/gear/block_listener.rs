@@ -8,12 +8,12 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{GSdkArgs, GearBlockNumber};
+use crate::message_relayer::{self, common::{GSdkArgs, GearBlockNumber, gear::checkpoints_extractor::Request}};
 
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 pub struct BlockListener {
-    args: GSdkArgs,
+    sender: tokio::sync::mpsc::Sender<Request>,
     from_block: u32,
 
     metrics: Metrics,
@@ -35,9 +35,9 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(args: GSdkArgs, from_block: u32) -> Self {
+    pub fn new(from_block: u32, sender: tokio::sync::mpsc::Sender<Request>,) -> Self {
         Self {
-            args,
+            sender,
             from_block,
 
             metrics: Metrics::new(),
@@ -64,16 +64,25 @@ impl BlockListener {
 
         self.metrics.latest_block.set(current_block as i64);
 
-        let gear_api = GearApi::new(
-            &self.args.vara_domain,
-            self.args.vara_port,
-            self.args.vara_rpc_retries,
-        )
-        .await?;
-
         loop {
-            let finalized_head = gear_api.latest_finalized_block().await?;
-            let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;
+            let from_gear_block = {
+                let (sender, mut reciever) = tokio::sync::oneshot::channel();
+                let request = message_relayer::common::gear::checkpoints_extractor::Request::LatestFinalizedBlock { sender };
+
+                // todo: exit
+                self.sender.send(request).await?;
+
+                reciever.await??
+            };
+            let finalized_head = {
+                let (sender, mut reciever) = tokio::sync::oneshot::channel();
+                let request = message_relayer::common::gear::checkpoints_extractor::Request::BlockHashToNumber { hash: from_gear_block, sender };
+
+                // todo: exit
+                self.sender.send(request).await?;
+
+                reciever.await??
+            };
 
             if finalized_head >= current_block {
                 for block in current_block..=finalized_head {

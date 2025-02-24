@@ -1,17 +1,18 @@
-use prometheus::{Gauge, IntGauge};
-use prover::proving::GenesisConfig;
 use std::time::{Duration, Instant};
+
+use primitive_types::H256;
+use prometheus::{Gauge, IntGauge};
+
+use ethereum_client::{EthApi, TxHash, TxStatus};
+use gear_rpc_client::GearApi;
+use prover::proving::GenesisConfig;
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
-
-use ethereum_client::{EthApi, TxHash, TxStatus};
-use gear_rpc_client::GearApi;
-
-use utils_prometheus::{impl_metered_service, MeteredService};
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 
@@ -39,9 +40,19 @@ pub struct MerkleRootRelayer {
     proof_storage: Box<dyn ProofStorage>,
     eras: Eras,
 
+    latest_submitted_merkle_root: Option<SubmittedMerkleRoot>,
+
     genesis_config: GenesisConfig,
 
     metrics: Metrics,
+}
+
+struct SubmittedMerkleRoot {
+    value: H256,
+    gear_block: u32,
+    tx_hash: TxHash,
+    proof: FinalProof,
+    finalized: bool,
 }
 
 impl MeteredService for MerkleRootRelayer {
@@ -72,6 +83,7 @@ impl MerkleRootRelayer {
             eth_api,
             genesis_config,
             proof_storage,
+            latest_submitted_merkle_root: None,
             eras,
             metrics,
         }
@@ -103,7 +115,9 @@ impl MerkleRootRelayer {
 
         self.eras.process(self.proof_storage.as_mut()).await?;
 
-        self.submit_merkle_root().await
+        self.submit_merkle_root().await?;
+
+        self.try_finalize_submitted_merkle_root().await
     }
 
     async fn sync_authority_set_completely(&mut self) -> anyhow::Result<()> {
@@ -155,11 +169,10 @@ impl MerkleRootRelayer {
         .await
     }
 
-    async fn submit_merkle_root(&self) -> anyhow::Result<()> {
+    async fn submit_merkle_root(&mut self) -> anyhow::Result<()> {
         log::info!("Submitting merkle root to ethereum");
 
         let finalized_head = self.gear_api.latest_finalized_block().await?;
-
         let finalized_block_number = self.gear_api.block_hash_to_number(finalized_head).await?;
 
         let merkle_root = self
@@ -173,6 +186,16 @@ impl MerkleRootRelayer {
                 finalized_block_number
             );
             return Ok(());
+        }
+
+        if let Some(submitted_merkle_root) = &self.latest_submitted_merkle_root {
+            if submitted_merkle_root.value == merkle_root {
+                log::info!(
+                    "Message queue at block #{} don't contain new messages. Skipping",
+                    finalized_block_number
+                );
+                return Ok(());
+            }
         }
 
         log::info!(
@@ -197,11 +220,84 @@ impl MerkleRootRelayer {
         )
         .await?;
 
-        submit_merkle_root_to_ethereum(&self.eth_api, proof).await?;
+        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
 
         log::info!("Merkle root submitted to ethereum");
 
+        self.latest_submitted_merkle_root = Some(SubmittedMerkleRoot {
+            value: merkle_root,
+            gear_block: finalized_block_number,
+            tx_hash,
+            proof,
+            finalized: false,
+        });
+
         Ok(())
+    }
+
+    async fn try_finalize_submitted_merkle_root(&mut self) -> anyhow::Result<()> {
+        let Some(submitted_merkle_root) = &mut self.latest_submitted_merkle_root else {
+            return Ok(());
+        };
+
+        if submitted_merkle_root.finalized {
+            return Ok(());
+        }
+
+        log::info!(
+            "Trying to finalize tx containing merkle root 0x{}",
+            hex::encode(submitted_merkle_root.value)
+        );
+
+        let tx_status = self
+            .eth_api
+            .get_tx_status(submitted_merkle_root.tx_hash)
+            .await?;
+
+        match tx_status {
+            TxStatus::Finalized => {
+                submitted_merkle_root.finalized = true;
+
+                log::info!(
+                    "Tx containing merkle root 0x{} finalized",
+                    hex::encode(submitted_merkle_root.value)
+                );
+
+                Ok(())
+            }
+            TxStatus::Pending => Ok(()),
+            TxStatus::Failed => {
+                let root_exists = self
+                    .eth_api
+                    .read_finalized_merkle_root(submitted_merkle_root.gear_block)
+                    .await?
+                    .is_some();
+
+                // Someone already relayed this merkle root.
+                if root_exists {
+                    log::info!(
+                        "Merkle root 0x{} was already finalized",
+                        hex::encode(submitted_merkle_root.value)
+                    );
+
+                    submitted_merkle_root.finalized = true;
+                    return Ok(());
+                }
+
+                log::warn!(
+                    "Re-trying merkle root 0x{} sending",
+                    hex::encode(submitted_merkle_root.value)
+                );
+
+                submitted_merkle_root.tx_hash = submit_merkle_root_to_ethereum(
+                    &self.eth_api,
+                    submitted_merkle_root.proof.clone(),
+                )
+                .await?;
+
+                Ok(())
+            }
+        }
     }
 }
 

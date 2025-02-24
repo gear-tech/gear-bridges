@@ -99,37 +99,29 @@ impl MerkleRootRelayer {
         let balance = self.eth_api.get_approx_balance().await?;
         self.metrics.fee_payer_balance.set(balance);
 
-        log::info!("Syncing authority set id");
+        self.sync_authority_set_completely().await?;
+
+        self.eras.process(self.proof_storage.as_mut()).await?;
+
+        self.submit_merkle_root().await
+    }
+
+    async fn sync_authority_set_completely(&mut self) -> anyhow::Result<()> {
+        log::info!("Syncing authority set");
+
         loop {
-            let sync_steps = self.sync_authority_set_id().await?;
+            let sync_steps = self.sync_authority_set().await?;
             if sync_steps == 0 {
                 break;
             } else {
-                log::info!("Synced {} authority set ids", sync_steps);
+                log::info!("Synced {} authority sets", sync_steps);
             }
         }
-        log::info!("Authority set id is in sync");
 
-        log::info!("Trying to seal eras");
-        self.eras.try_seal(self.proof_storage.as_mut()).await?;
-        log::info!("Eras sealed");
-
-        log::info!("Trying to finalize eras");
-        self.eras.try_finalize().await?;
-        log::info!("Eras finalized");
-
-        log::info!("Proving merkle root presence");
-        let proof = self.prove_message_sent().await?;
-        log::info!("Proven merkle root presence");
-
-        log::info!("Submitting proof to ethereum");
-        submit_merkle_root_to_ethereum(&self.eth_api, proof).await?;
-        log::info!("Proof submitted to ethereum");
-
-        Ok(())
+        log::info!("Authority set is in sync");
     }
 
-    async fn sync_authority_set_id(&mut self) -> anyhow::Result<SyncStepCount> {
+    async fn sync_authority_set(&mut self) -> anyhow::Result<SyncStepCount> {
         let finalized_head = self
             .gear_api
             .latest_finalized_block()
@@ -161,15 +153,27 @@ impl MerkleRootRelayer {
         .await
     }
 
-    async fn prove_message_sent(&self) -> anyhow::Result<FinalProof> {
+    async fn submit_merkle_root(&self) -> anyhow::Result<()> {
+        log::info!("Submitting merkle root to ethereum");
+
         let finalized_head = self.gear_api.latest_finalized_block().await?;
 
         let finalized_block_number = self.gear_api.block_hash_to_number(finalized_head).await?;
 
+        let merkle_root = self
+            .gear_api
+            .fetch_queue_merkle_root(finalized_head)
+            .await?;
+
+        if merkle_root.is_zero() {
+            log::info!("Message queue at block #{} is empty. Skipping");
+            return Ok(());
+        }
+
         log::info!(
-            "Proving merkle root presence in block #{} with hash {}",
+            "Proving merkle root(0x{}) presence in block #{}",
+            hex::encode(merkle_root.as_bytes()),
             finalized_block_number,
-            finalized_head
         );
 
         let authority_set_id = self
@@ -180,13 +184,19 @@ impl MerkleRootRelayer {
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
 
-        prover_interface::prove_final(
+        let proof = prover_interface::prove_final(
             &self.gear_api,
             inner_proof,
             self.genesis_config,
             finalized_head,
         )
-        .await
+        .await;
+
+        submit_merkle_root_to_ethereum(&self.eth_api, proof).await?;
+
+        log::info!("Merkle root submitted to ethereum");
+
+        Ok(())
     }
 }
 
@@ -256,7 +266,18 @@ impl Eras {
         })
     }
 
-    pub async fn try_seal(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
+    pub async fn process(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
+        log::info!("Processing eras");
+
+        self.try_seal(proof_storage).await?;
+        self.try_finalize().await?;
+
+        log::info!("Eras processed");
+
+        Ok(())
+    }
+
+    async fn try_seal(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
         let latest = self.gear_api.latest_finalized_block().await?;
         let current_era = self.gear_api.signed_by_authority_set_id(latest).await?;
 
@@ -289,6 +310,16 @@ impl Eras {
 
         let block_number = self.gear_api.block_hash_to_number(block).await?;
 
+        let queue_merkle_root = self.gear_api.fetch_queue_merkle_root(block).await?;
+
+        if queue_merkle_root.is_zero() {
+            log::info!(
+                "Message queue at block #{} is empty. Skipping sealing",
+                block_number
+            );
+            return Ok(());
+        }
+
         let root_exists = self
             .eth_api
             .read_finalized_merkle_root(block_number)
@@ -317,7 +348,7 @@ impl Eras {
         Ok(())
     }
 
-    pub async fn try_finalize(&mut self) -> anyhow::Result<()> {
+    async fn try_finalize(&mut self) -> anyhow::Result<()> {
         for i in (0..self.sealed_not_finalized.len()).rev() {
             if self.sealed_not_finalized[i]
                 .try_finalize(&self.eth_api)

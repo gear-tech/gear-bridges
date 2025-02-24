@@ -406,6 +406,13 @@ impl Eras {
 
         let block_number = self.gear_api.block_hash_to_number(block).await?;
 
+        assert_eq!(
+            proof.block_number, block_number,
+            "It was expected that prover_interface::prove_final 
+            will not change the block number for the proof 
+            in the case of the first block in the era"
+        );
+
         let queue_merkle_root = self.gear_api.fetch_queue_merkle_root(block).await?;
 
         if queue_merkle_root.is_zero() {

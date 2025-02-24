@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 
-use primitive_types::H256;
 use prometheus::{Gauge, IntGauge};
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
@@ -48,8 +47,6 @@ pub struct MerkleRootRelayer {
 }
 
 struct SubmittedMerkleRoot {
-    value: H256,
-    gear_block: u32,
     tx_hash: TxHash,
     proof: FinalProof,
     finalized: bool,
@@ -189,7 +186,7 @@ impl MerkleRootRelayer {
         }
 
         if let Some(submitted_merkle_root) = &self.latest_submitted_merkle_root {
-            if submitted_merkle_root.value == merkle_root {
+            if submitted_merkle_root.proof.merkle_root == merkle_root.0 {
                 log::info!(
                     "Message queue at block #{} don't contain new messages. Skipping",
                     finalized_block_number
@@ -225,8 +222,6 @@ impl MerkleRootRelayer {
         log::info!("Merkle root submitted to ethereum");
 
         self.latest_submitted_merkle_root = Some(SubmittedMerkleRoot {
-            value: merkle_root,
-            gear_block: finalized_block_number,
             tx_hash,
             proof,
             finalized: false,
@@ -246,7 +241,7 @@ impl MerkleRootRelayer {
 
         log::info!(
             "Trying to finalize tx containing merkle root 0x{}",
-            hex::encode(submitted_merkle_root.value)
+            hex::encode(&submitted_merkle_root.proof.merkle_root)
         );
 
         let tx_status = self
@@ -260,7 +255,7 @@ impl MerkleRootRelayer {
 
                 log::info!(
                     "Tx containing merkle root 0x{} finalized",
-                    hex::encode(submitted_merkle_root.value)
+                    hex::encode(&submitted_merkle_root.proof.merkle_root)
                 );
 
                 Ok(())
@@ -269,7 +264,7 @@ impl MerkleRootRelayer {
             TxStatus::Failed => {
                 let root_exists = self
                     .eth_api
-                    .read_finalized_merkle_root(submitted_merkle_root.gear_block)
+                    .read_finalized_merkle_root(submitted_merkle_root.proof.block_number)
                     .await?
                     .is_some();
 
@@ -277,7 +272,7 @@ impl MerkleRootRelayer {
                 if root_exists {
                     log::info!(
                         "Merkle root 0x{} was already finalized",
-                        hex::encode(submitted_merkle_root.value)
+                        hex::encode(&submitted_merkle_root.proof.merkle_root)
                     );
 
                     submitted_merkle_root.finalized = true;
@@ -286,7 +281,7 @@ impl MerkleRootRelayer {
 
                 log::warn!(
                     "Re-trying merkle root 0x{} sending",
-                    hex::encode(submitted_merkle_root.value)
+                    hex::encode(&submitted_merkle_root.proof.merkle_root)
                 );
 
                 submitted_merkle_root.tx_hash = submit_merkle_root_to_ethereum(

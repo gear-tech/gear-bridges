@@ -119,6 +119,8 @@ impl MerkleRootRelayer {
         }
 
         log::info!("Authority set is in sync");
+
+        Ok(())
     }
 
     async fn sync_authority_set(&mut self) -> anyhow::Result<SyncStepCount> {
@@ -166,7 +168,10 @@ impl MerkleRootRelayer {
             .await?;
 
         if merkle_root.is_zero() {
-            log::info!("Message queue at block #{} is empty. Skipping");
+            log::info!(
+                "Message queue at block #{} is empty. Skipping",
+                finalized_block_number
+            );
             return Ok(());
         }
 
@@ -190,7 +195,7 @@ impl MerkleRootRelayer {
             self.genesis_config,
             finalized_head,
         )
-        .await;
+        .await?;
 
         submit_merkle_root_to_ethereum(&self.eth_api, proof).await?;
 

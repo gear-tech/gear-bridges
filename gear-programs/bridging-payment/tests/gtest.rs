@@ -91,10 +91,8 @@ async fn setup_for_test() -> Fixture {
         config: VftManagerConfig {
             gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,
-            gas_for_submit_receipt: 20_000_000_000,
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
-            gas_for_request_bridging: 20_000_000_000,
         },
     };
     let vft_manager_program_id = VftManagerFactoryC::new(remoting.clone())
@@ -165,8 +163,14 @@ async fn deposit_to_treasury() {
         .await
         .unwrap();
 
-    VftManagerC::new(remoting.clone())
+    let mut service = VftManagerC::new(remoting.clone());
+    service
         .map_vara_to_eth_address(vft_program_id, eth_token_id, TokenSupply::Ethereum)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    service
+        .update_fee_charger(Some(bridging_payment_program_id))
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();

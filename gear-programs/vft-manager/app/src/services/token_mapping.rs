@@ -3,14 +3,21 @@ use sails_rs::prelude::*;
 
 use super::{error::Error, TokenSupply};
 
+/// Mapping between `VFT` and `ERC20` tokens.
 #[derive(Debug, Default)]
 pub struct TokenMap {
+    /// Mapping from `VFT` token addresses to `ERC20` token addresses.
     vara_to_eth: HashMap<ActorId, H160>,
+    /// Mapping from `ERC20` token addresses to `VFT` token addresses.
     eth_to_vara: HashMap<H160, ActorId>,
+    /// Mapping from `VFT` token addresses to the [TokenSupply] types.
     supply_mapping: HashMap<ActorId, TokenSupply>,
 }
 
 impl TokenMap {
+    /// Insert token pair into the map.
+    ///
+    /// Will return error if either `vara_token_id` or `eth_token_id` is already present in the map.
     pub fn insert(&mut self, vara_token_id: ActorId, eth_token_id: H160, supply: TokenSupply) {
         if self
             .vara_to_eth
@@ -33,6 +40,9 @@ impl TokenMap {
         }
     }
 
+    /// Remove token pair from map.
+    ///
+    /// Will return error if `vara_token_id` don't correspond to the already existing mapping.
     pub fn remove(&mut self, vara_token_id: ActorId) -> H160 {
         let eth_token_id = self
             .vara_to_eth
@@ -52,6 +62,9 @@ impl TokenMap {
         eth_token_id
     }
 
+    /// Get `ERC20` token address by `VFT` token address.
+    ///
+    /// Will return error if mapping isn't found.
     pub fn get_eth_token_id(&self, vara_token_id: &ActorId) -> Result<H160, Error> {
         self.vara_to_eth
             .get(vara_token_id)
@@ -59,6 +72,9 @@ impl TokenMap {
             .ok_or(Error::NoCorrespondingEthAddress)
     }
 
+    /// Get `VFT` token address by `ERC20` token address.
+    ///
+    /// Will return error if mapping isn't found.
     pub fn get_vara_token_id(&self, eth_token_id: &H160) -> Result<ActorId, Error> {
         self.eth_to_vara
             .get(eth_token_id)
@@ -66,6 +82,9 @@ impl TokenMap {
             .ok_or(Error::NoCorrespondingVaraAddress)
     }
 
+    /// Get token pair [TokenSupply] type by `VFT` token address.
+    ///
+    /// Will return error if mapping isn't found.
     pub fn get_supply_type(&self, vara_token_id: &ActorId) -> Result<TokenSupply, Error> {
         self.supply_mapping
             .get(vara_token_id)
@@ -73,6 +92,7 @@ impl TokenMap {
             .ok_or(Error::NoCorrespondingVaraAddress)
     }
 
+    /// Read state of the token mapping. Will return all entries present in the mapping.
     pub fn read_state(&self) -> Vec<(ActorId, H160, TokenSupply)> {
         self.vara_to_eth
             .clone()

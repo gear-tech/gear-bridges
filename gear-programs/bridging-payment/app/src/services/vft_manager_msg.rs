@@ -1,7 +1,6 @@
 use super::{error::Error, Config};
-use sails_rs::calls::ActionIo;
-use sails_rs::prelude::*;
-use vft_manager_client::vft_manager::io as vft_manager_io;
+use sails_rs::{calls::ActionIo, prelude::*};
+use vft_manager_client::vft_manager::io::RequestBridgingPayed as Action;
 
 /// Send bridging request to the `vft-manager`.
 pub async fn send(
@@ -12,8 +11,7 @@ pub async fn send(
     receiver: H160,
     config: &Config,
 ) -> Result<(U256, H160), Error> {
-    let bytes: Vec<u8> =
-        vft_manager_io::RequestBridging::encode_call(sender, vara_token_id, amount, receiver);
+    let bytes = Action::encode_call(sender, vara_token_id, amount, receiver);
 
     let reply_bytes = gstd::msg::send_bytes_with_gas_for_reply(
         vft_manager_address,
@@ -28,6 +26,5 @@ pub async fn send(
     .await
     .map_err(|_| Error::ReplyFailure)?;
 
-    Ok(vft_manager_io::RequestBridging::decode_reply(&reply_bytes)
-        .map_err(|_| Error::RequestToVftManagerDecode)??)
+    Ok(Action::decode_reply(&reply_bytes).map_err(|_| Error::RequestToVftManagerDecode)??)
 }

@@ -241,7 +241,7 @@ impl MerkleRootRelayer {
 
         log::info!(
             "Trying to finalize tx containing merkle root 0x{}",
-            hex::encode(&submitted_merkle_root.proof.merkle_root)
+            hex::encode(submitted_merkle_root.proof.merkle_root)
         );
 
         let tx_status = self
@@ -255,7 +255,7 @@ impl MerkleRootRelayer {
 
                 log::info!(
                     "Tx containing merkle root 0x{} finalized",
-                    hex::encode(&submitted_merkle_root.proof.merkle_root)
+                    hex::encode(submitted_merkle_root.proof.merkle_root)
                 );
 
                 Ok(())
@@ -272,7 +272,7 @@ impl MerkleRootRelayer {
                 if root_exists {
                     log::info!(
                         "Merkle root 0x{} was already finalized",
-                        hex::encode(&submitted_merkle_root.proof.merkle_root)
+                        hex::encode(submitted_merkle_root.proof.merkle_root)
                     );
 
                     submitted_merkle_root.finalized = true;
@@ -281,7 +281,7 @@ impl MerkleRootRelayer {
 
                 log::warn!(
                     "Re-trying merkle root 0x{} sending",
-                    hex::encode(&submitted_merkle_root.proof.merkle_root)
+                    hex::encode(submitted_merkle_root.proof.merkle_root)
                 );
 
                 submitted_merkle_root.tx_hash = submit_merkle_root_to_ethereum(

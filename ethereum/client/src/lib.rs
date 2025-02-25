@@ -24,9 +24,6 @@ use reqwest::Url;
 
 pub use alloy::primitives::TxHash;
 
-#[cfg(test)]
-mod tests;
-
 mod abi;
 use abi::{
     BridgingPayment, ContentMessage, IERC20Manager, IMessageQueue,

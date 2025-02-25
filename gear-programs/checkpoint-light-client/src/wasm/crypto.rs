@@ -23,7 +23,7 @@ pub async fn verify_sync_committee_signature(
 ) -> bool {
     let domain = signing_root::compute_domain(
         DOMAIN_SYNC_COMMITTEE,
-        network.fork_version(),
+        network.fork_version(signature_slot),
         network.genesis_validators_root(),
     );
     let signing_root = signing_root::compute(attested_header.tree_hash_root(), domain);

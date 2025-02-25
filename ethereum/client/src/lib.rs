@@ -164,9 +164,21 @@ impl EthApi {
         self.contracts.get_tx_status(tx_hash).await
     }
 
-    pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
+    pub async fn read_finalized_merkle_root(
+        &self,
+        gear_block: u32,
+    ) -> Result<Option<[u8; 32]>, Error> {
         self.contracts
-            .read_finalized_merkle_root(U256::from(block))
+            .read_merkle_root(U256::from(gear_block), BlockNumberOrTag::Finalized)
+            .await
+    }
+
+    pub async fn read_chainhead_merkle_root(
+        &self,
+        gear_block: u32,
+    ) -> Result<Option<[u8; 32]>, Error> {
+        self.contracts
+            .read_merkle_root(U256::from(gear_block), BlockNumberOrTag::Latest)
             .await
     }
 
@@ -456,11 +468,15 @@ where
         }
     }
 
-    pub async fn read_finalized_merkle_root(&self, block: U256) -> Result<Option<[u8; 32]>, Error> {
+    pub async fn read_merkle_root(
+        &self,
+        block: U256,
+        block_tag: BlockNumberOrTag,
+    ) -> Result<Option<[u8; 32]>, Error> {
         let root = self
             .relayer_instance
             .getMerkleRoot(block)
-            .block(BlockId::Number(BlockNumberOrTag::Finalized))
+            .block(BlockId::Number(block_tag))
             .call()
             .await
             .map_err(Error::ErrorDuringContractExecution)?

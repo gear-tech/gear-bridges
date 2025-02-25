@@ -88,7 +88,7 @@ pub fn is_finality_proof_valid(
     finality_header: &BeaconBlockHeader,
     finality_branch: &[[u8; 32]],
 ) -> bool {
-    let (depth, index) = depth_index_current(network, attested_header.slot);
+    let (depth, index) = depth_index_finality(network, attested_header.slot);
     let leaf_hash = finality_header.tree_hash_root();
     let state_root = attested_header.state_root;
 

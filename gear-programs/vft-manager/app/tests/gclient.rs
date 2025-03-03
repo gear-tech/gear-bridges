@@ -273,7 +273,7 @@ async fn unauthorized_teleport_erc20() {
     assert_eq!(result, (false, amount));
 }
 
-#[ignore]
+#[ignore = "Used to benchmark gas usage"]
 #[tokio::test]
 async fn bench_gas_for_reply() -> Result<()> {
     const CAPACITY: usize = 1_000;

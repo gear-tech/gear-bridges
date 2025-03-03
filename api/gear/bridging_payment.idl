@@ -1,66 +1,45 @@
-/// Config usd for Bridging Payment service initialization.
-type InitConfig = struct {
-  /// Admin of this service. For detailed description see [State::admin_address].
+/// Global state of the Bridging Payment service.
+type State = struct {
+  /// Admin of this service. Admin is in charge of:
+  /// - Changing fee
+  /// - Withdrawing collected fees from the program address
+  /// - Updating [State] of this service
   admin_address: actor_id,
-  /// Address of the `vft-manager` where bridging request will be sent.
-  vft_manager_address: actor_id,
-  /// [Config] that will be initially set for this service.
-  config: Config,
-};
-
-/// Config of the Bridging Payment service.
-type Config = struct {
-  /// Fee that will be taken from all the incoming bridging requests.
+  /// Fee amount that will be charged from users.
   fee: u128,
-  /// Gas that will be reserved for reply processing.
-  gas_for_reply_deposit: u64,
-  /// Gas that will be attached to a message to the `vft-manager`.
-  gas_to_send_request_to_vft_manager: u64,
-  /// Reply timeout that will be applied to a message to the `vft-manager`.
-  reply_timeout: u32,
-  /// Gas that's required to process `make_request` logic.
-  gas_for_request_to_vft_manager_msg: u64,
 };
 
 constructor {
   /// Create Bridging Payment program.
-  New : (init_config: InitConfig);
+  New : (initial_state: State);
 };
 
 service BridgingPayment {
-  /// Send request to the underlying `vft-manager` program.
+  /// Pay fees for message processing to the admin.
   /// 
-  /// This method will take additional fee from the message sender, so **exactly** [Config::fee] must
+  /// This method requires that **exactly** [Config::fee] must
   /// be attached as a value when sending message to this method.
   /// 
-  /// Current fee amount can be retreived by calling `get_config`.
-  MakeRequest : (amount: u256, receiver: h160, vara_token_id: actor_id) -> null;
+  /// Current fee amount can be retreived by calling `get_state`.
+  PayFees : (nonce: u256) -> null;
   /// Withdraw fees that were collected from user requests.
   /// 
   /// This method can be called only by admin.
   ReclaimFee : () -> null;
-  /// Set new config.
+  /// Set new admin.
   /// 
   /// This method can be called only by admin.
-  SetConfig : (config: Config) -> null;
+  SetAdmin : (new_admin: actor_id) -> null;
   /// Set fee that this program will take from incoming requests.
   /// 
   /// This method can be called only by admin.
   SetFee : (fee: u128) -> null;
-  /// Set new `vft-manager` address.
-  /// 
-  /// This method can be called only by admin.
-  UpdateVftManagerAddress : (new_vft_manager_address: actor_id) -> null;
-  /// Get admin address.
-  query AdminAddress : () -> actor_id;
-  /// Get currently applied [Config].
-  query GetConfig : () -> Config;
-  /// Get `vft-manager` address.
-  query VftManagerAddress : () -> actor_id;
+  /// Get current service [State].
+  query GetState : () -> State;
 
   events {
-    /// Bridging of tokens from Gear to Ethereum is requested successfully.
-    TeleportVaraToEth: struct { nonce: u256, sender: actor_id, amount: u256, receiver: h160, eth_token_id: h160 };
+    /// Fee for the message processing by relayer was paid.
+    BridgingPaid: struct { nonce: u256 };
   }
 };
 

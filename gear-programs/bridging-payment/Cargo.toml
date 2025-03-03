@@ -11,18 +11,5 @@ bridging-payment-app = { path = "app" }
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-idl-gen.workspace = true
 
-[dev-dependencies]
-bridging-payment = { path = ".", features = ["wasm-binary"] }
-bridging-payment-client = { path = "client" }
-vft-manager = { workspace = true, features = ["wasm-binary"] }
-vft-manager-client.workspace = true
-extended-vft = { workspace = true, features = ["wasm-binary"] }
-extended-vft-client.workspace = true
-
-sails-rs = { workspace = true, features = ["gtest"] }
-tokio = { workspace = true, features = ["rt", "macros"] }
-gtest.workspace = true
-parity-scale-codec.workspace = true
-
 [features]
 wasm-binary = []

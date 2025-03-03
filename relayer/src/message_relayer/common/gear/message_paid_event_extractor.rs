@@ -97,7 +97,7 @@ impl MessagePaidEventExtractor {
             let user_reply = BridgingPaymentEvents::decode_event(message.payload)
                 .map_err(|_| anyhow::anyhow!("Failed to decode bridging payment event"))?;
 
-            let BridgingPaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+            let BridgingPaymentEvents::BridgingPaid { nonce } = user_reply;
 
             let mut nonce_le = [0; 32];
             nonce.to_little_endian(&mut nonce_le);

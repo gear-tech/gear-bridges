@@ -4,24 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-vft-manager-client.workspace = true
 sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 gstd.workspace = true
-
-[dev-dependencies]
-anyhow.workspace = true
-bridging-payment = { workspace = true, features = ["wasm-binary"] }
-bridging-payment-client.workspace = true
-extended-vft = { workspace = true, features = ["wasm-binary"] }
-extended-vft-client.workspace = true
-futures.workspace = true
-gclient.workspace = true
-gear-core.workspace = true
-hex.workspace = true
-sails-rs = { workspace = true, features = ["gclient"] }
-sp-core = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "macros"] }
-vft-manager = { workspace = true, features = ["wasm-binary"] }
-vft-manager-client.workspace = true

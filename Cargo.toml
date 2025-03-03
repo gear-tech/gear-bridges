@@ -190,12 +190,12 @@ primitive-types = { version = "0.12.2", default-features = false }
 binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 
 # Alloy deps
-alloy-consensus = { version = "0.5.2", default-features = false }
-alloy-eips = { version = "0.5.2", default-features = false }
-alloy-rlp = { version = "0.3.8", default-features = false }
-alloy-primitives = { version = "0.8.9", default-features = false }
-alloy-sol-types = { version = "0.8.9", default-features = false }
-alloy = { version = "0.5.2", package = "alloy", features = [
+alloy-consensus = { version = "=0.5.2", default-features = false }
+alloy-eips = { version = "=0.5.2", default-features = false }
+alloy-rlp = { version = "=0.3.8", default-features = false }
+alloy-primitives = { version = "=0.8.9", default-features = false }
+alloy-sol-types = { version = "=0.8.9", default-features = false }
+alloy = { version = "=0.5.2", package = "alloy", features = [
     "sol-types",
     "contract",
     "pubsub",

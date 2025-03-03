@@ -3,9 +3,9 @@ type State = struct {
   /// Admin of this service. Admin is in charge of:
   /// - Changing fee
   /// - Withdrawing collected fees from the program address
-  /// - Updating [Config] of this service
+  /// - Updating [State] of this service
   admin_address: actor_id,
-  /// Fee that will be taken from all the incoming bridging requests.
+  /// Fee amount that will be charged from users.
   fee: u128,
 };
 
@@ -15,12 +15,12 @@ constructor {
 };
 
 service BridgingPayment {
-  /// Pay fees for message processing to the relayer.
+  /// Pay fees for message processing to the admin.
   /// 
   /// This method requires that **exactly** [Config::fee] must
   /// be attached as a value when sending message to this method.
   /// 
-  /// Current fee amount can be retreived by calling `get_config`.
+  /// Current fee amount can be retreived by calling `get_state`.
   PayFees : (nonce: u256) -> null;
   /// Withdraw fees that were collected from user requests.
   /// 

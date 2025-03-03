@@ -30,9 +30,9 @@ pub struct State {
     /// Admin of this service. Admin is in charge of:
     /// - Changing fee
     /// - Withdrawing collected fees from the program address
-    /// - Updating [Config] of this service
+    /// - Updating [State] of this service
     pub admin_address: ActorId,
-    /// Fee that will be taken from all the incoming bridging requests.
+    /// Fee amount that will be charged from users.
     pub fee: u128,
 }
 
@@ -102,12 +102,12 @@ where
         }
     }
 
-    /// Pay fees for message processing to the relayer.
+    /// Pay fees for message processing to the admin.
     ///
     /// This method requires that **exactly** [Config::fee] must
     /// be attached as a value when sending message to this method.
     ///
-    /// Current fee amount can be retreived by calling `get_config`.
+    /// Current fee amount can be retreived by calling `get_state`.
     pub async fn pay_fees(&mut self, nonce: U256) {
         let fee = self.state().fee;
 

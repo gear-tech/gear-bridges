@@ -1852,7 +1852,6 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
- "vft-manager-client",
 ]
 
 [[package]]

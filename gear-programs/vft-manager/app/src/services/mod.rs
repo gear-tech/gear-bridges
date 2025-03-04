@@ -115,9 +115,8 @@ pub struct State {
     /// - Changing [State::pause_admin]
     /// - Changing [State::admin]
     admin: ActorId,
-    /// Governance of this program. This address is in charge of:
-    /// - Pausing/unpausing the current program
-    /// - Changing [State::pause_admin]
+    /// Governance of this program. This address is in charge of
+    /// pausing and unpausing the current program.
     pause_admin: ActorId,
     /// Address of the `ERC20Manager` contract address on Ethereum.
     ///
@@ -256,23 +255,18 @@ where
         self.state_mut().admin = new_admin;
     }
 
+    /// Change [State::pause_admin]. Can be called only by a [State::admin].
+    pub fn set_pause_admin(&mut self, new_pause_admin: ActorId) {
+        self.ensure_admin();
+
+        self.state_mut().pause_admin = new_pause_admin;
+    }
+
     /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
         if self.state().admin != self.exec_context.actor_id() {
             panic!("Not admin")
         }
-    }
-
-    /// Change [State::pause_admin]. Can be called only by a [State::admin] or [State::pause_admin].
-    pub fn set_pause_admin(&mut self, new_pause_admin: ActorId) {
-        let sender = self.exec_context.actor_id();
-        let state = &self.state();
-
-        if sender != state.admin && sender != state.pause_admin {
-            panic!("Access rejected");
-        }
-
-        self.state_mut().pause_admin = new_pause_admin;
     }
 
     /// Pause the `vft-manager`.
@@ -323,6 +317,14 @@ where
             .expect("Failed to deposit event");
     }
 
+    fn ensure_running(&self) -> Result<(), Error> {
+        if self.state().is_paused {
+            Err(Error::Paused)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Submit rlp-encoded transaction receipt.
     ///
     /// This receipt is decoded under the hood and checked that it's a valid receipt from tx
@@ -335,9 +337,7 @@ where
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<(), Error> {
-        if self.state().is_paused {
-            return Err(Error::Paused);
-        }
+        self.ensure_running()?;
 
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
     }
@@ -352,9 +352,7 @@ where
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
-        if self.state().is_paused {
-            return Err(Error::Paused);
-        }
+        self.ensure_running()?;
 
         let sender = self.exec_context.actor_id();
 
@@ -398,9 +396,7 @@ where
         &mut self,
         msg_id: MessageId,
     ) -> Result<(), Error> {
-        if self.state().is_paused {
-            return Err(Error::Paused);
-        }
+        self.ensure_running()?;
 
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
@@ -523,10 +519,13 @@ where
         unsafe {
             STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                erc20_manager_address: config.erc20_manager_address,
                 admin: exec_context.actor_id(),
+                pause_admin: exec_context.actor_id(),
+                erc20_manager_address: config.erc20_manager_address,
+                token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                ..Default::default()
+                fee_charger: None,
+                is_paused: false,
             });
             CONFIG = Some(config.config);
         }

@@ -189,7 +189,7 @@ service VftManager {
   RequestBridgingPayed : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   /// Change [State::admin]. Can be called only by a [State::admin].
   SetAdmin : (new_admin: actor_id) -> null;
-  /// Change [State::pause_admin]. Can be called only by a [State::admin] or [State::pause_admin].
+  /// Change [State::pause_admin]. Can be called only by a [State::admin].
   SetPauseAdmin : (new_pause_admin: actor_id) -> null;
   /// Submit rlp-encoded transaction receipt.
   /// 

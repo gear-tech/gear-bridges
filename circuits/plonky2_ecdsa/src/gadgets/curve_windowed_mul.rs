@@ -219,7 +219,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_curve_windowed_mul() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;

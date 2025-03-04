@@ -88,6 +88,14 @@ enum Event {
         /// Receiver of the tokens on the Ethereum side.
         receiver: H160,
     },
+    /// Vft-manager was paused by an admin.
+    ///
+    /// It means that any user requests to it will be rejected.
+    Paused,
+    /// Vft-manager was unpaused by an admin.
+    ///
+    /// It means that normal operation is continued after the pause.
+    Unpaused,
 }
 
 static mut STATE: Option<State> = None;
@@ -103,7 +111,13 @@ pub struct State {
     /// - Updating [State::erc20_manager_address]
     /// - Updating [State::historical_proxy_address]
     /// - Managing token mapping in [State::token_map]
+    /// - Pausing/unpausing the current program
+    /// - Changing [State::pause_admin]
+    /// - Changing [State::admin]
     admin: ActorId,
+    /// Governance of this program. This address is in charge of
+    /// pausing and unpausing the current program.
+    pause_admin: ActorId,
     /// Address of the `ERC20Manager` contract address on Ethereum.
     ///
     /// Can be adjusted by the [State::admin].
@@ -123,6 +137,8 @@ pub struct State {
     ///
     /// If it is None then requests to bridge funds are rejected.
     fee_charger: Option<ActorId>,
+    /// Is the `vft-manager` currently on pause.
+    is_paused: bool,
 }
 
 /// Config that should be provided to this service on initialization.
@@ -232,10 +248,80 @@ where
         }
     }
 
+    /// Change [State::admin]. Can be called only by a [State::admin].
+    pub fn set_admin(&mut self, new_admin: ActorId) {
+        self.ensure_admin();
+
+        self.state_mut().admin = new_admin;
+    }
+
+    /// Change [State::pause_admin]. Can be called only by a [State::admin].
+    pub fn set_pause_admin(&mut self, new_pause_admin: ActorId) {
+        self.ensure_admin();
+
+        self.state_mut().pause_admin = new_pause_admin;
+    }
+
     /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
         if self.state().admin != self.exec_context.actor_id() {
             panic!("Not admin")
+        }
+    }
+
+    /// Pause the `vft-manager`.
+    ///
+    /// When `vft-manager` is paused it means that any requests to
+    /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
+    /// will be rejected.
+    ///
+    /// Can be called only by a [State::admin] or [State::pause_admin].
+    pub fn pause(&mut self) {
+        let sender = self.exec_context.actor_id();
+        let state = &self.state();
+
+        if sender != state.admin && sender != state.pause_admin {
+            panic!("Access rejected");
+        }
+
+        if state.is_paused {
+            panic!("Already paused");
+        }
+
+        self.state_mut().is_paused = true;
+
+        self.notify_on(Event::Paused)
+            .expect("Failed to deposit event");
+    }
+
+    /// Unpause the `vft-manager`.
+    ///
+    /// It will effectively cancel effect of the [VftManager::pause].
+    ///
+    /// Can be called only by a [State::admin] or [State::pause_admin].
+    pub fn unpause(&mut self) {
+        let sender = self.exec_context.actor_id();
+        let state = &self.state();
+
+        if sender != state.admin && sender != state.pause_admin {
+            panic!("Access rejected");
+        }
+
+        if !state.is_paused {
+            panic!("Already unpaused");
+        }
+
+        self.state_mut().is_paused = false;
+
+        self.notify_on(Event::Unpaused)
+            .expect("Failed to deposit event");
+    }
+
+    fn ensure_running(&self) -> Result<(), Error> {
+        if self.state().is_paused {
+            Err(Error::Paused)
+        } else {
+            Ok(())
         }
     }
 
@@ -251,6 +337,8 @@ where
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<(), Error> {
+        self.ensure_running()?;
+
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
     }
 
@@ -264,6 +352,8 @@ where
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
+        self.ensure_running()?;
+
         let sender = self.exec_context.actor_id();
 
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
@@ -306,6 +396,8 @@ where
         &mut self,
         msg_id: MessageId,
     ) -> Result<(), Error> {
+        self.ensure_running()?;
+
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
@@ -334,6 +426,16 @@ where
     /// Get current [State::admin] address.
     pub fn admin(&self) -> ActorId {
         self.state().admin
+    }
+
+    /// Get current [State::pause_admin] address.
+    pub fn pause_admin(&self) -> ActorId {
+        self.state().pause_admin
+    }
+
+    /// Check if `vft-manager` is currently paused.
+    pub fn is_paused(&self) -> bool {
+        self.state().is_paused
     }
 
     /// Get current [Config].
@@ -417,10 +519,13 @@ where
         unsafe {
             STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                erc20_manager_address: config.erc20_manager_address,
                 admin: exec_context.actor_id(),
+                pause_admin: exec_context.actor_id(),
+                erc20_manager_address: config.erc20_manager_address,
+                token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                ..Default::default()
+                fee_charger: None,
+                is_paused: false,
             });
             CONFIG = Some(config.config);
         }

@@ -90,7 +90,7 @@ enum Event {
     },
     /// Vft-manager was paused by an admin.
     ///
-    /// It means that any requests to it will be rejected.
+    /// It means that any user requests to it will be rejected.
     Paused,
     /// Vft-manager was unpaused by an admin.
     ///

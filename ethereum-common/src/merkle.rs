@@ -8,27 +8,27 @@ use ring::digest::{Context as RingContext, SHA256 as RingSHA256};
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
 ///
-/// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `CURRENT_SYNC_COMMITTEE_GINDEX` value.
+/// It is the result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `CURRENT_SYNC_COMMITTEE_GINDEX` value.
 pub const DEPTH_CURRENT_SYNC_COMMITTEE: u32 = 5;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
 ///
-/// Complement part of [`DEPTH_CURRENT_SYNC_COMMITTEE`].
+/// It is the result of applying [get_subtree_index](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#get_subtree_index) to the `CURRENT_SYNC_COMMITTEE_GINDEX` value.
 pub const INDEX_CURRENT_SYNC_COMMITTEE: u32 = 22;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
 ///
-/// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `NEXT_SYNC_COMMITTEE_GINDEX` value.
+/// It is the result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `NEXT_SYNC_COMMITTEE_GINDEX` value.
 pub const DEPTH_NEXT_SYNC_COMMITTEE: u32 = 5;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
 ///
-/// Complement part of [`DEPTH_NEXT_SYNC_COMMITTEE`].
+/// It is the result of applying [get_subtree_index](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#get_subtree_index) to the `NEXT_SYNC_COMMITTEE_GINDEX` value.
 pub const INDEX_NEXT_SYNC_COMMITTEE: u32 = 23;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
 ///
-/// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `FINALIZED_ROOT_GINDEX` value.
+/// It is the result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `FINALIZED_ROOT_GINDEX` value.
 pub const DEPTH_FINALITY: u32 = 6;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#constants).
 ///
-/// Complement part of [`DEPTH_FINALITY`].
+/// It is the result of applying [get_subtree_index](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/light-client/sync-protocol.md#get_subtree_index) to the `FINALIZED_ROOT_GINDEX` value.
 pub const INDEX_FINALITY: u32 = 41;
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#is_valid_merkle_branch).
@@ -165,10 +165,12 @@ pub const fn depth_index_finality(network: &Network, slot: u64) -> (u32, u32) {
     (DEPTH_FINALITY, INDEX_FINALITY)
 }
 
+/// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/light-client/sync-protocol.md#new-constants).
+///
+/// The module contains new constants introduced by the Electra fork. For details see [`DEPTH_CURRENT_SYNC_COMMITTEE`],
+/// [`INDEX_CURRENT_SYNC_COMMITTEE`], [`DEPTH_NEXT_SYNC_COMMITTEE`], [`INDEX_NEXT_SYNC_COMMITTEE`],
+/// [`DEPTH_FINALITY`] and [`INDEX_FINALITY`].
 pub mod electra {
-    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/light-client/sync-protocol.md#new-constants).
-    ///
-    /// It is a result of applying [get_generalized_index_length](https://github.com/ethereum/consensus-specs/blob/v1.4.0/ssz/merkle-proofs.md#get_generalized_index_length) to the `CURRENT_SYNC_COMMITTEE_GINDEX` value.
     pub const DEPTH_CURRENT_SYNC_COMMITTEE: u32 = 6;
     pub const INDEX_CURRENT_SYNC_COMMITTEE: u32 = 22;
     pub const DEPTH_NEXT_SYNC_COMMITTEE: u32 = 6;

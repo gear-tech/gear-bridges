@@ -168,7 +168,7 @@ service VftManager {
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
   /// Pause the `vft-manager`.
   /// 
-  /// When `vft-manager` is paused it means that any user requests to
+  /// When `vft-manager` is paused it means that any requests to
   /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
   /// will be rejected.
   /// 
@@ -252,7 +252,7 @@ service VftManager {
     BridgingRequested: struct { nonce: u256, vara_token_id: actor_id, amount: u256, sender: actor_id, receiver: h160 };
     /// Vft-manager was paused by an admin.
     /// 
-    /// It means that any requests to it will be rejected.
+    /// It means that any user requests to it will be rejected.
     Paused;
     /// Vft-manager was unpaused by an admin.
     /// 

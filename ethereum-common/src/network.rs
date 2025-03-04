@@ -41,6 +41,7 @@ impl Network {
     pub const fn epoch_electra(&self) -> u64 {
         match self {
             Holesky => 115_968,
+            Sepolia => 222_464,
             _ => todo!(),
         }
     }

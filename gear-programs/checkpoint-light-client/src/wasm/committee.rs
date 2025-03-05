@@ -60,7 +60,7 @@ impl<'a> Update<'a> {
         }
     }
 
-    pub fn verify(self, store_period: u64) -> Result<Option<Box<SyncCommitteeKeys>>, Error> {
+    pub fn verify(self, network: &Network, store_period: u64) -> Result<Option<Box<SyncCommitteeKeys>>, Error> {
         let Status::Actual {
             update_period_finalized,
             attested_header,
@@ -79,6 +79,7 @@ impl<'a> Update<'a> {
         .ok_or(Error::InvalidPublicKeys)?;
 
         if !merkle::is_next_committee_proof_valid(
+            network,
             &attested_header,
             &sync_committee_next,
             &sync_committee_next_branch,

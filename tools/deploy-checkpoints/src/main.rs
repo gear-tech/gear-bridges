@@ -75,9 +75,9 @@ async fn main() -> AnyResult<()> {
     )
     .await?;
 
-    // use the latest finalized block as a checkpoint for bootstrapping
-    let finalized_block = beacon_client.get_block_finalized().await?;
-    let slot = finalized_block.slot;
+    // use the header from the latest finality update as a checkpoint for bootstrapping
+    let update = beacon_client.get_finality_update().await?;
+    let slot = update.finalized_header.slot;
     let current_period = eth_utils::calculate_period(slot);
     let mut updates = beacon_client.get_updates(current_period, 1).await?;
 

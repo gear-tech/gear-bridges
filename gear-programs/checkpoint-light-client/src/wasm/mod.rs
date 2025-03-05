@@ -48,6 +48,7 @@ async fn init() {
 
     let mut finalized_header = update.finalized_header.clone();
     if !merkle::is_current_committee_proof_valid(
+        &network,
         &finalized_header,
         &sync_committee_current,
         &sync_committee_current_branch,

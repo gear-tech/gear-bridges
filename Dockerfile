@@ -38,7 +38,7 @@ ENV PATH="/root/.foundry/bin:${PATH}"
 COPY . .
 
 # Build relayer
-RUN rustup toolchain install nightly-2025-01-09-x86_64-unknown-linux-gnu
+RUN rustup toolchain install
 RUN cargo build -p relayer --release
 
 # Compose final image

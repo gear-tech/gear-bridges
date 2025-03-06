@@ -12,6 +12,9 @@ use crate::{
         BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
+    storage_inclusion::storage_trie_proof::node_parser::{
+        MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
 };
 
 use super::{node_parser::branch_parser::BranchParser, storage_address::StorageAddressTarget};
@@ -38,10 +41,11 @@ pub struct HashedBranchParser {
 
 impl HashedBranchParser {
     pub fn prove(self) -> ProofWithCircuitData<HashedBranchParserTarget> {
-        let hasher_proof = GenericBlake2 {
-            data: self.branch_parser.node_data.clone(),
-        }
-        .prove();
+        const MAX_DATA_LENGTH_ESTIMATION: usize =
+            MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
+        let hasher_proof =
+            GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(self.branch_parser.node_data.clone())
+                .prove();
         let branch_parser_proof = self.branch_parser.prove();
 
         log::debug!("Composing hasher proof and branch parser proof...");

@@ -38,6 +38,7 @@ pub const NODE_DATA_BLOCK_BYTES: usize = 128;
 ///
 /// Which gives upper bound for branch node encoded data length = 563.
 pub const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
+pub const MAX_LEAF_NODE_DATA_LENGTH_IN_BLOCKS: usize = 1;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
 

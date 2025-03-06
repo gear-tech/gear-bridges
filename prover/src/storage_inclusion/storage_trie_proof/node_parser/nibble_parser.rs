@@ -4,7 +4,7 @@ use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
 use std::iter;
 
-use super::{NodeDataBlockTarget, PartialStorageAddressTarget};
+use super::{NodeDataBlockTarget, StorageAddressTarget};
 use crate::{
     common::targets::{impl_target_set, ArrayTarget, HalfByteTarget},
     prelude::*,
@@ -24,7 +24,7 @@ impl_target_set! {
         /// `nibble_count <= storage_address::MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES`.
         pub nibble_count: Target,
         /// Previously composed address, to which we should append read nibbles.
-        pub partial_address: PartialStorageAddressTarget
+        pub partial_address: StorageAddressTarget
     }
 }
 
@@ -33,7 +33,7 @@ impl_target_set! {
         /// Next data offset.
         pub resulting_offset: Target,
         /// Provided partial address composed with parsed nibbles.
-        pub partial_address: PartialStorageAddressTarget
+        pub partial_address: StorageAddressTarget
     }
 }
 
@@ -95,14 +95,14 @@ pub fn define(
         .collect::<Vec<_>>()
         .try_into()
         .expect("Correct amount of nibbles");
-    let first_nibble_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
+    let first_nibble_address_part = StorageAddressTarget::from_half_byte_targets_safe(
         first_nibble_padded,
         take_first_nibble.target,
         builder,
     );
 
     let take_from_remaining = builder.sub(input.nibble_count, take_first_nibble.target);
-    let remaining_nibbles_address_part = PartialStorageAddressTarget::from_half_byte_targets_safe(
+    let remaining_nibbles_address_part = StorageAddressTarget::from_half_byte_targets_safe(
         remaining_nibbles,
         take_from_remaining,
         builder,
@@ -257,7 +257,7 @@ mod tests {
             first_node_data_block: data_block_target,
             read_offset: builder.zero(),
             nibble_count: nibble_count_target,
-            partial_address: PartialStorageAddressTarget::empty(&mut builder),
+            partial_address: StorageAddressTarget::empty(&mut builder),
         };
 
         let output = define(input, &mut builder);

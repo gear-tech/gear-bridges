@@ -128,18 +128,20 @@ impl ValidatorSignsChain {
         // Assert that sign_count > 2/3 * validator_count
         // 3 * sign_count - 2 * validator_count - 1 >= 0
         {
-            let triple_sign_count =
-                builder.mul_const(F::from_canonical_usize(3), composed_proof_pis.sign_count);
+            let triple_sign_count = builder.mul_const(
+                F::from_canonical_usize(3),
+                composed_proof_pis.inner.sign_count,
+            );
             let double_validator_count =
-                builder.mul_const(F::TWO, composed_proof_pis.validator_count);
+                builder.mul_const(F::TWO, composed_proof_pis.inner.validator_count);
             let lhs = builder.sub(triple_sign_count, double_validator_count);
             let lhs = builder.add_const(lhs, F::NEG_ONE);
             builder.range_check(lhs, 32);
         }
 
         ValidatorSignsChainTarget {
-            validator_set_hash: composed_proof_pis.validator_set_hash,
-            message: composed_proof_pis.message,
+            validator_set_hash: composed_proof_pis.inner.validator_set_hash,
+            message: composed_proof_pis.inner.message,
         }
         .register_as_public_inputs(&mut builder);
 
@@ -153,16 +155,9 @@ impl ValidatorSignsChain {
 
 const VERIFIER_DATA_NUM_CAP_ELEMENTS: usize = 16;
 
-// TODO: Put nested target here.
 impl_target_set! {
     struct SignCompositionTarget {
-        validator_set_hash: Blake2Target,
-        validator_count: Target,
-
-        message: GrandpaMessageTarget,
-
-        latest_validator_idx: Target,
-        sign_count: Target,
+        inner: SignCompositionTargetWithoutCircuitData,
 
         verifier_data: VerifierDataTarget<VERIFIER_DATA_NUM_CAP_ELEMENTS>
     }
@@ -171,7 +166,7 @@ impl_target_set! {
 impl_parsable_target_set! {
     struct SignCompositionTargetWithoutCircuitData {
         validator_set_hash: Blake2Target,
-        validator_set_count: Target,
+        validator_count: Target,
 
         message: GrandpaMessageTarget,
 
@@ -288,15 +283,7 @@ impl SignComposition {
                 .clone()
                 .into_iter(),
         );
-        let mut inner_cyclic_proof_pis = SignCompositionTargetWithoutCircuitData {
-            validator_set_hash: inner_cyclic_proof_pis.validator_set_hash,
-            validator_set_count: inner_cyclic_proof_pis.validator_count,
-
-            message: inner_cyclic_proof_pis.message,
-
-            latest_validator_idx: inner_cyclic_proof_pis.latest_validator_idx,
-            sign_count: inner_cyclic_proof_pis.sign_count,
-        };
+        let mut inner_cyclic_proof_pis = inner_cyclic_proof_pis.inner;
 
         let neg_one = builder.neg_one();
         inner_cyclic_proof_pis.latest_validator_idx = builder.select(
@@ -309,9 +296,9 @@ impl SignComposition {
         inner_cyclic_proof_pis.sign_count =
             builder.select(condition, inner_cyclic_proof_pis.sign_count, zero);
 
-        inner_cyclic_proof_pis.validator_set_count = builder.select(
+        inner_cyclic_proof_pis.validator_count = builder.select(
             condition,
-            inner_cyclic_proof_pis.validator_set_count,
+            inner_cyclic_proof_pis.validator_count,
             inner_proof_pis.validator_count,
         );
 
@@ -323,7 +310,7 @@ impl SignComposition {
             .connect(&inner_cyclic_proof_pis.validator_set_hash, &mut builder);
         inner_proof_pis
             .validator_count
-            .connect(&inner_cyclic_proof_pis.validator_set_count, &mut builder);
+            .connect(&inner_cyclic_proof_pis.validator_count, &mut builder);
 
         let validator_idx_diff = builder.sub(
             inner_proof_pis.validator_idx,
@@ -336,7 +323,7 @@ impl SignComposition {
 
         let final_pis = SignCompositionTargetWithoutCircuitData {
             validator_set_hash: inner_cyclic_proof_pis.validator_set_hash,
-            validator_set_count: inner_cyclic_proof_pis.validator_set_count,
+            validator_count: inner_cyclic_proof_pis.validator_count,
             message: inner_cyclic_proof_pis.message,
             latest_validator_idx: inner_proof_pis.validator_idx,
             sign_count,

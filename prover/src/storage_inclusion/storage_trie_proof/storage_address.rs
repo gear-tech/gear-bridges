@@ -23,9 +23,8 @@ pub const MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES: usize = 64;
 pub const MAX_STORAGE_ADDRESS_LENGTH_IN_BYTES: usize = MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES / 2;
 
 impl_parsable_target_set! {
-    // TODO REFACTOR: rename to `StorageAddressTarget`.
     // Invariant: all the data after `length` is zeroed.
-    pub struct PartialStorageAddressTarget {
+    pub struct StorageAddressTarget {
         /// Storage address padded with zeroes.
         pub padded_address: ArrayTarget<HalfByteTarget, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES>,
         /// Length of address in nibbles.
@@ -33,8 +32,8 @@ impl_parsable_target_set! {
     }
 }
 
-impl PartialStorageAddressTarget {
-    /// Create `PartialStorageAddressTarget` with length = 0.
+impl StorageAddressTarget {
+    /// Create `StorageAddressTarget` with length = 0.
     pub fn empty(builder: &mut CircuitBuilder<F, D>) -> Self {
         let zero = builder.zero();
         let mut nibbles = iter::repeat(zero).take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
@@ -45,7 +44,7 @@ impl PartialStorageAddressTarget {
         }
     }
 
-    /// Create constant `PartialStorageAddressTarget`.
+    /// Create constant `StorageAddressTarget`.
     pub fn constant(nibbles: Vec<u8>, builder: &mut CircuitBuilder<F, D>) -> Self {
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
 
@@ -63,12 +62,12 @@ impl PartialStorageAddressTarget {
         }
     }
 
-    /// Create virtual `PartialStorageAddressTarget` without inserting any checks on values.
+    /// Create virtual `StorageAddressTarget` without inserting any checks on values.
     pub fn add_virtual_unsafe(builder: &mut CircuitBuilder<F, D>) -> Self {
         Self::parse(&mut iter::repeat(()).map(|_| builder.add_virtual_target()))
     }
 
-    /// Set witness value for `PartialStorageAddressTarget`.
+    /// Set witness value for `StorageAddressTarget`.
     pub fn set_witness(&self, nibbles: &[u8], witness: &mut PartialWitness<F>) {
         let length = nibbles.len();
         witness.set_target(self.length, F::from_canonical_usize(length));
@@ -85,10 +84,10 @@ impl PartialStorageAddressTarget {
         }
     }
 
-    /// Create `PartialStorageAddressTarget`.
+    /// Create `StorageAddressTarget`.
     ///
     /// Note that targets after `self.length` won't be taken into account and will be zeroed in
-    /// resulting `PartialStorageAddressTarget`.
+    /// resulting `StorageAddressTarget`.
     pub fn from_half_byte_targets_safe(
         targets: [HalfByteTarget; MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES],
         length: Target,
@@ -121,7 +120,7 @@ impl PartialStorageAddressTarget {
         }
     }
 
-    /// Creates `PartialStorageAddressTarget` and sets only first nibble of it.
+    /// Creates `StorageAddressTarget` and sets only first nibble of it.
     pub fn from_single_nibble_target(
         nibble: HalfByteTarget,
         builder: &mut CircuitBuilder<F, D>,
@@ -136,12 +135,8 @@ impl PartialStorageAddressTarget {
         }
     }
 
-    /// Concatenate two `PartialStorageAddressTarget`s.
-    pub fn append(
-        self,
-        append: PartialStorageAddressTarget,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> Self {
+    /// Concatenate two `StorageAddressTarget`s.
+    pub fn append(self, append: StorageAddressTarget, builder: &mut CircuitBuilder<F, D>) -> Self {
         let final_length = builder.add(self.length, append.length);
         let max_length = builder.constant(F::from_canonical_usize(
             MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES,
@@ -304,7 +299,7 @@ mod tests {
         let length = builder.constant(F::from_canonical_usize(length));
 
         let address =
-            PartialStorageAddressTarget::from_half_byte_targets_safe(targets, length, &mut builder);
+            StorageAddressTarget::from_half_byte_targets_safe(targets, length, &mut builder);
 
         let expected_address = create_address_target(expected_data, &mut builder, &mut pw);
 
@@ -326,7 +321,7 @@ pub mod tests_common {
         nibbles: &[u8],
         builder: &mut CircuitBuilder<F, D>,
         witness: &mut PartialWitness<F>,
-    ) -> PartialStorageAddressTarget {
+    ) -> StorageAddressTarget {
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
         let length = builder.add_virtual_target();
         witness.set_target(length, F::from_canonical_usize(nibbles.len()));
@@ -342,7 +337,7 @@ pub mod tests_common {
                 HalfByteTarget::from_target_safe(nibble_target, builder).to_target()
             });
 
-        PartialStorageAddressTarget {
+        StorageAddressTarget {
             length,
             padded_address: ArrayTarget::parse_exact(&mut nibble_targets),
         }

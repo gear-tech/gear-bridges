@@ -6,14 +6,13 @@ use plonky2_field::types::Field;
 use crate::{
     common::targets::{impl_target_set, ArrayTarget, Blake2Target, TargetSet},
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
-    storage_inclusion::storage_trie_proof::node_parser::NodeDataBlockTarget,
+    storage_inclusion::storage_trie_proof::node_parser::LeafNodeDataPaddedTarget,
 };
 
 impl_target_set! {
     pub struct HashedDataParserInputTarget {
-        // TODO: replace to `LeafNodeData`
-        /// Node encoded data.
-        pub first_node_data_block: NodeDataBlockTarget,
+        /// Encoded node data.
+        pub node_data: LeafNodeDataPaddedTarget,
         /// From which offset to read stored data.
         pub read_offset: Target,
     }
@@ -35,7 +34,7 @@ pub fn define(
     log::debug!("    Composing hashed data parser");
 
     let hash_data: ArrayTarget<_, BLAKE2_DIGEST_SIZE> = input
-        .first_node_data_block
+        .node_data
         .random_read_array(input.read_offset, builder);
 
     let mut hash_data_bits = hash_data.0.iter().flat_map(|byte_target| {

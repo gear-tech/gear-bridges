@@ -27,7 +27,7 @@ mod block_header_parser;
 mod scale_compact_integer_parser;
 mod storage_trie_proof;
 
-use storage_trie_proof::storage_address::PartialStorageAddressTarget;
+use storage_trie_proof::storage_address::StorageAddressTarget;
 
 use self::{block_header_parser::BlockHeaderParser, storage_trie_proof::StorageTrieProof};
 
@@ -90,8 +90,7 @@ impl StorageInclusion {
             .state_root
             .connect(&storage_trie_target.root_hash, &mut builder);
 
-        let storage_address =
-            PartialStorageAddressTarget::constant(self.address_nibbles, &mut builder);
+        let storage_address = StorageAddressTarget::constant(self.address_nibbles, &mut builder);
         storage_address.connect(&storage_trie_target.address, &mut builder);
 
         StorageInclusionTarget {

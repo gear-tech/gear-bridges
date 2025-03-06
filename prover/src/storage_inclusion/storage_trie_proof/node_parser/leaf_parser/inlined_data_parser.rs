@@ -12,7 +12,7 @@ use crate::{
         scale_compact_integer_parser::single_byte::{
             define as define_single_byte_int_parser, InputTarget as SingleByteIntParserInput,
         },
-        storage_trie_proof::node_parser::NodeDataBlockTarget,
+        storage_trie_proof::node_parser::LeafNodeDataPaddedTarget,
     },
 };
 
@@ -20,9 +20,8 @@ const INLINED_DATA_LENGTH: usize = 32;
 
 impl_target_set! {
     pub struct InlinedDataParserInputTarget {
-        // TODO: replace to `LeafNodeData`
-        /// Node encoded data.
-        pub first_node_data_block: NodeDataBlockTarget,
+        /// Encoded node data.
+        pub node_data: LeafNodeDataPaddedTarget,
         /// From which offset to read stored data.
         pub read_offset: Target,
     }
@@ -43,9 +42,7 @@ pub fn define(
 ) -> InlinedDataParserOutputTarget {
     log::debug!("    Composing inlined data parser");
 
-    let first_byte = input
-        .first_node_data_block
-        .random_read(input.read_offset, builder);
+    let first_byte = input.node_data.random_read(input.read_offset, builder);
     let parsed_length =
         define_single_byte_int_parser(SingleByteIntParserInput { first_byte }, builder);
 
@@ -54,9 +51,8 @@ pub fn define(
 
     let data_offset = builder.add_const(input.read_offset, F::ONE);
 
-    let inlined_data: ArrayTarget<_, INLINED_DATA_LENGTH> = input
-        .first_node_data_block
-        .random_read_array(data_offset, builder);
+    let inlined_data: ArrayTarget<_, INLINED_DATA_LENGTH> =
+        input.node_data.random_read_array(data_offset, builder);
 
     let inlined_data_bits = inlined_data
         .0

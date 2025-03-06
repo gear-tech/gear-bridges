@@ -60,7 +60,11 @@ impl<'a> Update<'a> {
         }
     }
 
-    pub fn verify(self, network: &Network, store_period: u64) -> Result<Option<Box<SyncCommitteeKeys>>, Error> {
+    pub fn verify(
+        self,
+        network: &Network,
+        store_period: u64,
+    ) -> Result<Option<Box<SyncCommitteeKeys>>, Error> {
         let Status::Actual {
             update_period_finalized,
             attested_header,

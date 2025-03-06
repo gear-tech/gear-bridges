@@ -1,8 +1,7 @@
 use super::{
     beacon::{BlockHeader as BeaconBlockHeader, SyncCommittee},
-    TreeHash,
     network::Network,
-    utils,
+    utils, TreeHash,
 };
 use ring::digest::{Context as RingContext, SHA256 as RingSHA256};
 
@@ -92,13 +91,7 @@ pub fn is_finality_proof_valid(
     let leaf_hash = finality_header.tree_hash_root();
     let state_root = attested_header.state_root;
 
-    is_valid_merkle_branch(
-        leaf_hash.0,
-        finality_branch,
-        depth,
-        index,
-        &state_root.0,
-    )
+    is_valid_merkle_branch(leaf_hash.0, finality_branch, depth, index, &state_root.0)
 }
 
 pub fn is_next_committee_proof_valid(
@@ -129,7 +122,10 @@ pub const fn depth_index_current(network: &Network, slot: u64) -> (u32, u32) {
     let epoch = utils::calculate_epoch(slot);
 
     if epoch >= epoch_electra {
-        return (electra::DEPTH_CURRENT_SYNC_COMMITTEE, electra::INDEX_CURRENT_SYNC_COMMITTEE);
+        return (
+            electra::DEPTH_CURRENT_SYNC_COMMITTEE,
+            electra::INDEX_CURRENT_SYNC_COMMITTEE,
+        );
     }
 
     (DEPTH_CURRENT_SYNC_COMMITTEE, INDEX_CURRENT_SYNC_COMMITTEE)
@@ -144,7 +140,10 @@ pub const fn depth_index_next(network: &Network, slot: u64) -> (u32, u32) {
     let epoch = utils::calculate_epoch(slot);
 
     if epoch >= epoch_electra {
-        return (electra::DEPTH_NEXT_SYNC_COMMITTEE, electra::INDEX_NEXT_SYNC_COMMITTEE);
+        return (
+            electra::DEPTH_NEXT_SYNC_COMMITTEE,
+            electra::INDEX_NEXT_SYNC_COMMITTEE,
+        );
     }
 
     (DEPTH_NEXT_SYNC_COMMITTEE, INDEX_NEXT_SYNC_COMMITTEE)

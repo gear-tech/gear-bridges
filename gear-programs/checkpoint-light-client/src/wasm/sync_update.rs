@@ -124,7 +124,12 @@ pub async fn verify(
 
     let mut finalized_header_update = None;
     if update_slot_finalized > stored_finalized_header.slot {
-        if merkle::is_finality_proof_valid(network, &attested_header, &finalized_header, &finality_branch) {
+        if merkle::is_finality_proof_valid(
+            network,
+            &attested_header,
+            &finalized_header,
+            &finality_branch,
+        ) {
             finalized_header_update = Some(finalized_header);
         } else {
             return Err(SyncCommitteeUpdateError::InvalidFinalityProof);

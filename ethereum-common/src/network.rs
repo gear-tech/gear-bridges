@@ -25,7 +25,14 @@ impl Network {
         let epoch = utils::calculate_epoch(slot);
         match self {
             Mainnet => hex!("04000000"),
-            Sepolia => hex!("90000073"),
+
+            Sepolia => {
+                if epoch >= epoch_electra {
+                    return hex!("90000074");
+                }
+
+                hex!("90000073")
+            }
 
             Holesky => {
                 if epoch >= epoch_electra {

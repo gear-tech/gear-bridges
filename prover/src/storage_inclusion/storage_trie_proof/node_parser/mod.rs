@@ -27,7 +27,6 @@ mod header_parser;
 pub mod leaf_parser;
 mod nibble_parser;
 
-// TODO: Compute these 2 constans based on existing ones?
 /// Aligned with blake2 block size to optimize generic hasher circuit.
 pub const NODE_DATA_BLOCK_BYTES: usize = 128;
 // TODO: Assert that child node data length <= 32 in `branch_node_parser``

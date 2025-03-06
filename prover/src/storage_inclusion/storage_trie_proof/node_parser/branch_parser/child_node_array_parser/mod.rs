@@ -108,6 +108,12 @@ impl ChildNodeArrayParser {
         for (child_idx, child_length) in self.children_lengths.into_iter().enumerate() {
             let assert_child_hash = child_idx == self.initial_data.claimed_child_index_in_array;
 
+            // NOTE: Constructing inner proofs to have `claimed_child_hash` all equal even
+            // if internally `ChildNodeParser` will not check the value of `claimed_child_hash`
+            // when `assert_child_hash` is `false`. It's used in the recursive proof construction
+            // to conveniently assert that for every proof in chain its `claimed_child_hash` equals
+            // to the previous one which gives us authentic `claimed_child_hash` in the latest proof
+            // in chain that we can later assert on.
             let inner_circuit = ChildNodeParser {
                 node_data: self.initial_data.node_data,
                 read_offset,

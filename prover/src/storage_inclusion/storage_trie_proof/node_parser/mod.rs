@@ -11,7 +11,7 @@ use plonky2::{
 use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
-use super::storage_address::PartialStorageAddressTarget;
+use super::storage_address::StorageAddressTarget;
 use crate::{
     common::{
         pad_byte_vec,

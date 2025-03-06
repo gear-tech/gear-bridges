@@ -14,7 +14,7 @@ use crate::{
     prelude::*,
 };
 
-use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget};
+use super::{node_parser::leaf_parser::LeafParser, storage_address::StorageAddressTarget};
 
 impl_parsable_target_set! {
     /// Public inputs for `HashedLeafParser`.
@@ -25,9 +25,9 @@ impl_parsable_target_set! {
         pub storage_data_hash: Blake2Target,
 
         /// Address composed from all the nodes from root to this.
-        pub partial_address: PartialStorageAddressTarget,
+        pub partial_address: StorageAddressTarget,
         /// Address of storage item.
-        pub final_address: PartialStorageAddressTarget,
+        pub final_address: StorageAddressTarget,
     }
 }
 

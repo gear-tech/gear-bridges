@@ -51,6 +51,11 @@ struct Cli {
     /// Specify the Ethereum network (Mainnet, Holesky or Sepolia)
     #[arg(long, default_value = "Mainnet", env = "NETWORK")]
     network: String,
+
+    /// Specify the checkpoint slot for bootstrapping. If it is None then the header from
+    /// the latest finality update is used to get the slot.
+    #[arg(long, env = "SLOT_CHECKPOINT")]
+    slot_checkpoint: Option<u64>,
 }
 
 #[tokio::main]
@@ -75,9 +80,14 @@ async fn main() -> AnyResult<()> {
     )
     .await?;
 
-    // use the latest finalized block as a checkpoint for bootstrapping
-    let finalized_block = beacon_client.get_block_finalized().await?;
-    let slot = finalized_block.slot;
+    let slot = match cli.slot_checkpoint {
+        Some(slot) => slot,
+        None => {
+            let update = beacon_client.get_finality_update().await?;
+
+            update.finalized_header.slot
+        }
+    };
     let current_period = eth_utils::calculate_period(slot);
     let mut updates = beacon_client.get_updates(current_period, 1).await?;
 

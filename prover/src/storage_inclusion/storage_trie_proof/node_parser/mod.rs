@@ -23,7 +23,6 @@ use crate::{
 };
 
 pub mod branch_parser;
-// TODO: Rename to `prefix_parser`.
 mod header_parser;
 pub mod leaf_parser;
 mod nibble_parser;
@@ -137,7 +136,6 @@ impl BranchNodeDataPaddedTarget {
         Self(ArrayTarget(targets))
     }
 
-    // TODO REFACTOR: Implement set_witness for all `ParsableTargetSet`s?
     /// Set `BranchNodeDataPaddedTarget` witness.
     pub fn set_witness(
         &self,

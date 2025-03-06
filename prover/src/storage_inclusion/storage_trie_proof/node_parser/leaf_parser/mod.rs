@@ -121,7 +121,7 @@ impl LeafParser {
             LeafType::HashedValueLeaf => {
                 let parsed_data = {
                     let input = HashedDataParserInputTarget {
-                        first_node_data_block: node_data_target.clone(),
+                        node_data: node_data_target.clone(),
                         read_offset: parsed_nibbles.resulting_offset,
                     };
                     hashed_data_parser::define(input, &mut builder)
@@ -132,7 +132,7 @@ impl LeafParser {
             LeafType::Leaf => {
                 let parsed_data = {
                     let input = InlinedDataParserInputTarget {
-                        first_node_data_block: node_data_target.clone(),
+                        node_data: node_data_target.clone(),
                         read_offset: parsed_nibbles.resulting_offset,
                     };
                     inlined_data_parser::define(input, &mut builder)

@@ -94,6 +94,8 @@ type Error = enum {
   TransactionTooOld,
   /// Ethereum transaction was already processed by VFT Manager service.
   AlreadyProcessed,
+  /// Vft-manager is paused and cannot process the request.
+  Paused,
 };
 
 /// Entry for a single message in [MessageTracker].
@@ -164,6 +166,14 @@ service VftManager {
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
+  /// Pause the `vft-manager`.
+  /// 
+  /// When `vft-manager` is paused it means that any requests to
+  /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
+  /// will be rejected.
+  /// 
+  /// Can be called only by a [State::admin] or [State::pause_admin].
+  Pause : () -> null;
   /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
   /// Request bridging of tokens from Gear to Ethereum.
@@ -177,6 +187,10 @@ service VftManager {
   /// Allowance should be granted to the current program to spend `amount` tokens
   /// from the `sender` address.
   RequestBridgingPayed : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  /// Change [State::admin]. Can be called only by a [State::admin].
+  SetAdmin : (new_admin: actor_id) -> null;
+  /// Change [State::pause_admin]. Can be called only by a [State::admin].
+  SetPauseAdmin : (new_pause_admin: actor_id) -> null;
   /// Submit rlp-encoded transaction receipt.
   /// 
   /// This receipt is decoded under the hood and checked that it's a valid receipt from tx
@@ -184,6 +198,12 @@ service VftManager {
   /// 
   /// This method can be called only by [State::historical_proxy_address] program.
   SubmitReceipt : (slot: u64, transaction_index: u64, receipt_rlp: vec u8) -> result (null, Error);
+  /// Unpause the `vft-manager`.
+  /// 
+  /// It will effectively cancel effect of the [VftManager::pause].
+  /// 
+  /// Can be called only by a [State::admin] or [State::pause_admin].
+  Unpause : () -> null;
   /// Change [Config]. Can be called only by a [State::admin].
   /// 
   /// For more info see [Config] docs.
@@ -204,6 +224,10 @@ service VftManager {
   query GetConfig : () -> Config;
   /// Get current [State::historical_proxy_address].
   query HistoricalProxyAddress : () -> actor_id;
+  /// Check if `vft-manager` is currently paused.
+  query IsPaused : () -> bool;
+  /// Get current [State::pause_admin] address.
+  query PauseAdmin : () -> actor_id;
   /// Get state of a `request_bridging` message tracker.
   query RequestBridingMsgTrackerState : () -> vec struct { message_id, MessageInfo };
   /// Get current [token mapping](State::token_map).
@@ -226,6 +250,14 @@ service VftManager {
     /// When this event is emitted it means that `VFT` tokens were locked/burned and
     /// a message to the gear-eth-bridge built-in actor was successfully submitted.
     BridgingRequested: struct { nonce: u256, vara_token_id: actor_id, amount: u256, sender: actor_id, receiver: h160 };
+    /// Vft-manager was paused by an admin.
+    /// 
+    /// It means that any user requests to it will be rejected.
+    Paused;
+    /// Vft-manager was unpaused by an admin.
+    /// 
+    /// It means that normal operation is continued after the pause.
+    Unpaused;
   }
 };
 

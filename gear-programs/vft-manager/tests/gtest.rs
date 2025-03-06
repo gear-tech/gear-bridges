@@ -299,6 +299,111 @@ async fn test_withdraw_fails_with_bad_origin() {
     assert_eq!(result.unwrap_err(), Error::NotHistoricalProxy);
 }
 
+#[tokio::test]
+async fn test_requests_fail_on_pause() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        ..
+    } = setup_for_test().await;
+
+    let mut vft_manager = VftManagerC::new(remoting.clone());
+
+    vft_manager
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    let result = vft_manager
+        .request_bridging(ActorId::zero(), U256::zero(), H160::zero())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(result, Err(Error::Paused));
+
+    let result = vft_manager
+        .submit_receipt(0, 0, vec![])
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(result, Err(Error::Paused));
+
+    let result = vft_manager
+        .handle_request_bridging_interrupted_transfer(MessageId::zero())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(result, Err(Error::Paused));
+}
+
+#[tokio::test]
+async fn test_pause_works() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        ..
+    } = setup_for_test().await;
+
+    let mut vft_manager = VftManagerC::new(remoting.clone());
+
+    let pause_admin = 11111.into();
+    let pause_remoting = remoting.clone().with_actor_id(pause_admin);
+    pause_remoting
+        .system()
+        .mint_to(pause_admin, 100_000_000_000_000);
+    let mut pause_admin_vft_manager = VftManagerC::new(pause_remoting);
+
+    vft_manager
+        .set_pause_admin(pause_admin)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    macro_rules! assert_paused {
+        ($paused: expr) => {
+            assert_eq!(
+                vft_manager
+                    .is_paused()
+                    .recv(vft_manager_program_id)
+                    .await
+                    .unwrap(),
+                $paused
+            );
+        };
+    }
+
+    assert_paused!(false);
+
+    pause_admin_vft_manager
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_paused!(true);
+
+    pause_admin_vft_manager
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_paused!(false);
+
+    vft_manager
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_paused!(true);
+
+    vft_manager
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_paused!(false);
+}
+
 async fn balance_of(
     remoting: &GTestRemoting,
     vft_program_id: ActorId,

@@ -124,6 +124,8 @@ where
     }
 }
 
+pub type Block = BlockGeneric<BlockBody>;
+
 pub mod electra {
     use super::*;
     use crate::beacon::electra;

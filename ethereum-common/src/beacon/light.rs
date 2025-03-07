@@ -97,7 +97,7 @@ impl From<super::BlockBody> for BlockBody {
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
-pub struct Block {
+pub struct BlockGeneric<BlockBody: tree_hash::TreeHash> {
     #[serde(deserialize_with = "utils::deserialize_u64")]
     pub slot: u64,
     #[serde(deserialize_with = "utils::deserialize_u64")]
@@ -107,8 +107,13 @@ pub struct Block {
     pub body: BlockBody,
 }
 
-impl From<super::Block> for Block {
-    fn from(value: super::Block) -> Self {
+impl<BlockBody, BlockBodyLight> From<beacon::block::BlockGeneric<BlockBody>>
+    for BlockGeneric<BlockBodyLight>
+where
+    BlockBody: tree_hash::TreeHash,
+    BlockBodyLight: From<BlockBody> + tree_hash::TreeHash,
+{
+    fn from(value: beacon::block::BlockGeneric<BlockBody>) -> Self {
         Self {
             slot: value.slot,
             proposer_index: value.proposer_index,
@@ -117,4 +122,50 @@ impl From<super::Block> for Block {
             body: value.body.into(),
         }
     }
+}
+
+pub mod electra {
+    use super::*;
+    use crate::beacon::electra;
+
+    #[derive(
+        Debug, Clone, Decode, Encode, PartialEq, tree_hash_derive::TreeHash, Deserialize, TypeInfo,
+    )]
+    pub struct BlockBody {
+        pub randao_reveal: H256,
+        pub eth1_data: H256,
+        pub graffiti: Bytes32,
+        pub proposer_slashings: H256,
+        pub attester_slashings: H256,
+        pub attestations: H256,
+        pub deposits: H256,
+        pub voluntary_exits: H256,
+        pub sync_aggregate: H256,
+        pub execution_payload: super::ExecutionPayload,
+        pub bls_to_execution_changes: H256,
+        pub blob_kzg_commitments: H256,
+        pub execution_requests: H256,
+    }
+
+    impl From<electra::BlockBody> for BlockBody {
+        fn from(value: electra::BlockBody) -> Self {
+            Self {
+                randao_reveal: value.randao_reveal.tree_hash_root(),
+                eth1_data: value.eth1_data.tree_hash_root(),
+                graffiti: value.graffiti,
+                proposer_slashings: value.proposer_slashings.tree_hash_root(),
+                attester_slashings: value.attester_slashings.tree_hash_root(),
+                attestations: value.attestations.tree_hash_root(),
+                deposits: value.deposits.tree_hash_root(),
+                voluntary_exits: value.voluntary_exits.tree_hash_root(),
+                sync_aggregate: value.sync_aggregate.tree_hash_root(),
+                execution_payload: value.execution_payload.into(),
+                bls_to_execution_changes: value.bls_to_execution_changes.tree_hash_root(),
+                blob_kzg_commitments: value.blob_kzg_commitments.tree_hash_root(),
+                execution_requests: value.execution_requests.tree_hash_root(),
+            }
+        }
+    }
+
+    pub type Block = super::BlockGeneric<BlockBody>;
 }

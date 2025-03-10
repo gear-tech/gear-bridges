@@ -48,7 +48,28 @@ impl_parsable_target_set! {
 // the valid inputs.
 pub struct GenericBlake2 {
     /// Data to be hashed.
-    pub data: Vec<u8>,
+    data: Vec<u8>,
+}
+
+impl GenericBlake2 {
+    /// Create new `GenericBlake2` circuit.
+    ///
+    /// This function will statically check that `MAX_DATA_LENGTH_ESTIMATION`
+    /// don't exceed `MAX_DATA_BYTES`.
+    pub fn new<const MAX_DATA_LENGTH_ESTIMATION: usize>(data: Vec<u8>) -> Self {
+        #[allow(clippy::let_unit_value)]
+        let _ = AssertDataLengthValid::<MAX_DATA_LENGTH_ESTIMATION>::VALID;
+
+        assert!(data.len() <= MAX_DATA_LENGTH_ESTIMATION);
+
+        Self { data }
+    }
+}
+
+struct AssertDataLengthValid<const DATA_LENGTH: usize>;
+
+impl<const DATA_LENGTH: usize> AssertDataLengthValid<DATA_LENGTH> {
+    const VALID: () = assert!(DATA_LENGTH <= MAX_DATA_BYTES);
 }
 
 impl GenericBlake2 {

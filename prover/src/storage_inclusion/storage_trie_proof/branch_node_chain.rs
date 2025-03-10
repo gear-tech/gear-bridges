@@ -17,8 +17,7 @@ use sp_core::{Blake2Hasher, Hasher};
 use std::iter;
 
 use super::{
-    hashed_branch_parser::HashedBranchParser, storage_address::PartialStorageAddressTarget,
-    BranchNodeData,
+    hashed_branch_parser::HashedBranchParser, storage_address::StorageAddressTarget, BranchNodeData,
 };
 use crate::{
     common::{
@@ -43,7 +42,7 @@ impl_parsable_target_set! {
         /// Blake2 hash of encoded leaf data.
         pub leaf_hash: Blake2Target,
         /// Result of composition of all addresses from root node to the last branch node.
-        pub partial_address: PartialStorageAddressTarget,
+        pub partial_address: StorageAddressTarget,
     }
 }
 
@@ -226,7 +225,7 @@ impl Circuit {
             &inner_cyclic_proof_pis.leaf_hash,
             &inner_cyclic_proof_pis.root_hash,
         );
-        let empty_address = PartialStorageAddressTarget::empty(&mut builder);
+        let empty_address = StorageAddressTarget::empty(&mut builder);
         inner_cyclic_proof_pis.partial_address = builder.select_target_set(
             condition,
             &inner_cyclic_proof_pis.partial_address,

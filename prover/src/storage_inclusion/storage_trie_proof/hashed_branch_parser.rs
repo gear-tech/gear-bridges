@@ -12,11 +12,12 @@ use crate::{
         BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
+    storage_inclusion::storage_trie_proof::node_parser::{
+        MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
 };
 
-use super::{
-    node_parser::branch_parser::BranchParser, storage_address::PartialStorageAddressTarget,
-};
+use super::{node_parser::branch_parser::BranchParser, storage_address::StorageAddressTarget};
 
 impl_parsable_target_set! {
     /// Public inputs for `HashedBranchParser`.
@@ -27,9 +28,9 @@ impl_parsable_target_set! {
         pub child_node_hash: Blake2Target,
 
         /// Address composed from all the nodes from root to this.
-        pub partial_address: PartialStorageAddressTarget,
+        pub partial_address: StorageAddressTarget,
         /// `partial_address` concatenated with this node address part.
-        pub resulting_partial_address: PartialStorageAddressTarget,
+        pub resulting_partial_address: StorageAddressTarget,
     }
 }
 
@@ -40,10 +41,11 @@ pub struct HashedBranchParser {
 
 impl HashedBranchParser {
     pub fn prove(self) -> ProofWithCircuitData<HashedBranchParserTarget> {
-        let hasher_proof = GenericBlake2 {
-            data: self.branch_parser.node_data.clone(),
-        }
-        .prove();
+        const MAX_DATA_LENGTH_ESTIMATION: usize =
+            MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
+        let hasher_proof =
+            GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(self.branch_parser.node_data.clone())
+                .prove();
         let branch_parser_proof = self.branch_parser.prove();
 
         log::debug!("Composing hasher proof and branch parser proof...");

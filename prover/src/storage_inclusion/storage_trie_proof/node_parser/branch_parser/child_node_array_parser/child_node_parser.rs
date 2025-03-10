@@ -50,7 +50,6 @@ pub struct ChildNodeParser {
     pub node_data: [[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
     /// Offset to read child info from `node_data`.
     pub read_offset: usize,
-    // TODO: Replace following 2 fields with one `Option`
     /// Whether to assert hash of this child node.
     pub assert_child_hash: bool,
     /// Hash to compare with in case `assert_child_hash` is set to `true`.

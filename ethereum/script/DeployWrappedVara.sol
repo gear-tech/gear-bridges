@@ -1,15 +1,10 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 
 import {ERC20GearSupply} from "../src/ERC20GearSupply.sol";
 
 contract Deploy is Script {
-    using Address for address;
-
     function setUp() public {}
 
     function run() public {

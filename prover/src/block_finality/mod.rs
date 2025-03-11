@@ -6,6 +6,7 @@
 //! NOTE: This circuit decides that block is finalized when more than 2/3 of validator set have
 //! signed it.
 
+use anyhow::Result;
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -89,7 +90,7 @@ pub struct BlockFinality {
 }
 
 impl BlockFinality {
-    pub(crate) fn prove(self) -> ProofWithCircuitData<BlockFinalityTarget> {
+    pub(crate) fn prove(self) -> Result<ProofWithCircuitData<BlockFinalityTarget>> {
         log::debug!("Proving block finality...");
 
         // Find such a number that processed_validator_count > 2/3 * validator_count.
@@ -120,7 +121,7 @@ impl BlockFinality {
             pre_commits: processed_pre_commits,
             message: self.message,
         }
-        .prove();
+        .prove()?;
 
         log::debug!("Composing validator signs and validator set hash proofs...");
 
@@ -128,7 +129,7 @@ impl BlockFinality {
         let mut witness = PartialWitness::new();
 
         let validator_signs_target =
-            builder.recursively_verify_constant_proof(&validator_signs_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&validator_signs_proof, &mut witness)?;
 
         let message = validator_signs_target.message;
         let discriminant = Target::from_bool_targets_le(message.discriminant, &mut builder);

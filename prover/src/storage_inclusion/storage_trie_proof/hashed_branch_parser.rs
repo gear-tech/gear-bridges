@@ -1,5 +1,6 @@
 //! Circuit that's used to prove correct parsing of branch node.
 
+use anyhow::Result;
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -39,12 +40,12 @@ pub struct HashedBranchParser {
 }
 
 impl HashedBranchParser {
-    pub fn prove(self) -> ProofWithCircuitData<HashedBranchParserTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<HashedBranchParserTarget>> {
         let hasher_proof = GenericBlake2 {
             data: self.branch_parser.node_data.clone(),
         }
-        .prove();
-        let branch_parser_proof = self.branch_parser.prove();
+        .prove()?;
+        let branch_parser_proof = self.branch_parser.prove()?;
 
         log::debug!("Composing hasher proof and branch parser proof...");
 
@@ -52,9 +53,10 @@ impl HashedBranchParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
+        let hasher_target =
+            builder.recursively_verify_constant_proof(&hasher_proof, &mut witness)?;
         let branch_parser_target =
-            builder.recursively_verify_constant_proof(&branch_parser_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&branch_parser_proof, &mut witness)?;
 
         hasher_target
             .length

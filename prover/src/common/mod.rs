@@ -1,5 +1,6 @@
 //! ### Commonly used abstractions and wrappers.
 
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::{
     gates::noop::NoopGate,
@@ -51,37 +52,37 @@ where
     pub fn prove_from_builder(
         builder: CircuitBuilder<F, D>,
         witness: PartialWitness<F>,
-    ) -> ProofWithCircuitData<TS> {
+    ) -> Result<ProofWithCircuitData<TS>> {
         let circuit_data = builder.build::<C>();
         let ProofWithPublicInputs {
             proof,
             public_inputs,
-        } = circuit_data.prove(witness).unwrap();
+        } = circuit_data.prove(witness)?;
 
-        ProofWithCircuitData {
+        Ok(ProofWithCircuitData {
             proof,
             circuit_data: Arc::from(circuit_data.verifier_data()),
             public_inputs,
             public_inputs_parser: PhantomData,
-        }
+        })
     }
 
     /// Prove using circuit data and witness.
     pub fn prove_from_circuit_data(
         circuit_data: &CircuitData<F, C, D>,
         witness: PartialWitness<F>,
-    ) -> ProofWithCircuitData<TS> {
+    ) -> Result<ProofWithCircuitData<TS>> {
         let ProofWithPublicInputs {
             proof,
             public_inputs,
-        } = circuit_data.prove(witness).unwrap();
+        } = circuit_data.prove(witness)?;
 
-        ProofWithCircuitData {
+        Ok(ProofWithCircuitData {
             proof,
             circuit_data: Arc::from(circuit_data.verifier_data()),
             public_inputs,
             public_inputs_parser: PhantomData,
-        }
+        })
     }
 
     /// Create a new `ProofWithCircuitData` from proof and circuit data.
@@ -121,20 +122,20 @@ where
     }
 
     /// Wrap proof in a recursion layer using `PoseidonBN128GoldilocksConfig` and serialize it.
-    pub fn export_wrapped(self) -> ExportedProofWithCircuitData {
+    pub fn export_wrapped(self) -> Result<ExportedProofWithCircuitData> {
         let proof_with_public_inputs = ProofWithPublicInputs {
             proof: self.proof,
             public_inputs: self.public_inputs,
         };
 
         let (proof_with_public_inputs, circuit_data) =
-            wrap_bn128(&self.circuit_data, proof_with_public_inputs);
+            wrap_bn128(&self.circuit_data, proof_with_public_inputs)?;
 
-        ExportedProofWithCircuitData {
+        Ok(ExportedProofWithCircuitData {
             proof_with_public_inputs: serde_json::to_string(&proof_with_public_inputs).unwrap(),
             common_circuit_data: serde_json::to_string(&circuit_data.common).unwrap(),
             verifier_only_circuit_data: serde_json::to_string(&circuit_data.verifier_only).unwrap(),
-        }
+        })
     }
 
     /// Verify proof.
@@ -154,7 +155,11 @@ pub trait CircuitImplBuilder {
     type PublicInputsTarget: TargetSet;
 
     fn build() -> (CircuitData<F, C, D>, Self::WitnessTargets);
-    fn set_witness(&self, targets: Self::WitnessTargets, witness: &mut PartialWitness<F>);
+    fn set_witness(
+        &self,
+        targets: Self::WitnessTargets,
+        witness: &mut PartialWitness<F>,
+    ) -> Result<()>;
 }
 
 pub struct CircuitDataCache<BUILDER: CircuitImplBuilder> {
@@ -175,9 +180,9 @@ impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
     pub fn prove(
         &self,
         impl_builder: BUILDER,
-    ) -> ProofWithCircuitData<BUILDER::PublicInputsTarget> {
+    ) -> Result<ProofWithCircuitData<BUILDER::PublicInputsTarget>> {
         let mut witness = PartialWitness::new();
-        impl_builder.set_witness(self.witness_targets.clone(), &mut witness);
+        impl_builder.set_witness(self.witness_targets.clone(), &mut witness)?;
         ProofWithCircuitData::prove_from_circuit_data(&self.circuit_data, witness)
     }
 }
@@ -185,10 +190,10 @@ impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
 fn wrap_bn128(
     inner_circuit_data: &VerifierCircuitData<F, C, D>,
     proof_with_public_inputs: ProofWithPublicInputs<F, C, D>,
-) -> (
+) -> Result<(
     ProofWithPublicInputs<F, PoseidonBN128GoldilocksConfig, D>,
     CircuitData<F, PoseidonBN128GoldilocksConfig, D>,
-) {
+)> {
     let mut builder: CircuitBuilder<F, D> =
         CircuitBuilder::new(CircuitConfig::standard_recursion_config());
 
@@ -198,7 +203,7 @@ fn wrap_bn128(
     builder.register_public_inputs(&proof_with_pis_target.public_inputs);
 
     let mut witness = PartialWitness::new();
-    witness.set_proof_with_pis_target(&proof_with_pis_target, &proof_with_public_inputs);
+    witness.set_proof_with_pis_target(&proof_with_pis_target, &proof_with_public_inputs)?;
 
     builder.verify_proof::<C>(
         &proof_with_pis_target,
@@ -207,9 +212,9 @@ fn wrap_bn128(
     );
 
     let circuit_data = builder.build::<PoseidonBN128GoldilocksConfig>();
-    let proof = circuit_data.prove(witness).unwrap();
+    let proof = circuit_data.prove(witness)?;
 
-    (proof, circuit_data)
+    Ok((proof, circuit_data))
 }
 
 pub trait BuilderExt {
@@ -218,7 +223,7 @@ pub trait BuilderExt {
         &mut self,
         proof: &ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
-    ) -> T;
+    ) -> Result<T>;
 
     /// Select if `condition` { `a` } else { `b` }
     fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T;
@@ -232,11 +237,11 @@ impl BuilderExt for CircuitBuilder<F, D> {
         &mut self,
         proof: &ProofWithCircuitData<T>,
         witness: &mut PartialWitness<F>,
-    ) -> T {
+    ) -> Result<T> {
         let proof_with_pis_target = self.add_virtual_proof_with_pis(&proof.circuit_data.common);
         let verifier_data_target = self.constant_verifier_data(&proof.circuit_data.verifier_only);
 
-        witness.set_proof_with_pis_target(&proof_with_pis_target, &proof.proof());
+        witness.set_proof_with_pis_target(&proof_with_pis_target, &proof.proof())?;
 
         self.verify_proof::<C>(
             &proof_with_pis_target,
@@ -244,7 +249,9 @@ impl BuilderExt for CircuitBuilder<F, D> {
             &proof.circuit_data.common,
         );
 
-        T::parse_exact(&mut proof_with_pis_target.public_inputs.into_iter())
+        Ok(T::parse_exact(
+            &mut proof_with_pis_target.public_inputs.into_iter(),
+        ))
     }
 
     fn select_target_set<T: TargetSet>(&mut self, condition: BoolTarget, a: &T, b: &T) -> T {

@@ -2,6 +2,7 @@
 //!
 //! Extracts state root from encoded block header and asserts that block hash equals to claimed.
 
+use anyhow::Result;
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -44,17 +45,18 @@ pub struct BlockHeaderParser {
 }
 
 impl BlockHeaderParser {
-    pub fn prove(self) -> ProofWithCircuitData<BlockHeaderParserTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<BlockHeaderParserTarget>> {
         let hasher_proof = GenericBlake2 {
             data: self.header_data,
         }
-        .prove();
+        .prove()?;
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
+        let hasher_target =
+            builder.recursively_verify_constant_proof(&hasher_proof, &mut witness)?;
 
         // Will not exceed the length as block number isn't last field in header.
         let block_number_targets = hasher_target

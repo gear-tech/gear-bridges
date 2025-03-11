@@ -78,10 +78,10 @@ vft-service = { path = "gear-programs/vft-service" }
 extended-vft = { git = "https://github.com/gear-foundation/standards/", rev = "a59ecb537ee3bb394baf18a720c5bb20c5c3afd1" }
 extended-vft-client = { git = "https://github.com/gear-foundation/standards/", rev = "a59ecb537ee3bb394baf18a720c5bb20c5c3afd1" }
 
-plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4c7dff788aa97cac019e6e935622ac0007238bb1" }
+plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4c7dff788aa97cac019e6e935622ac0007238bb1" }
+plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4c7dff788aa97cac019e6e935622ac0007238bb1" }
+plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "4c7dff788aa97cac019e6e935622ac0007238bb1" }
 
 # Coordinates of `EdwardsPoint` made public in fork.
 curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek", rev = "f63777fbeeb181944097bdcaeb9384ac158ec931" }

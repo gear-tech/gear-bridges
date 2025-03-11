@@ -187,17 +187,17 @@ where
 
     let targets = build_curve_scalar_mul_windowed_part_circuit::<F, CV, C, D>(&mut builder);
     let mut pw = PartialWitness::new();
-    pw.set_biguint_target(&targets.p_target.x.value, &p.x.to_canonical_biguint());
-    pw.set_biguint_target(&targets.p_target.y.value, &p.y.to_canonical_biguint());
+    pw.set_biguint_target(&targets.p_target.x.value, &p.x.to_canonical_biguint())?;
+    pw.set_biguint_target(&targets.p_target.y.value, &p.y.to_canonical_biguint())?;
     pw.set_biguint_target(
         &targets.q_init_target.x.value,
         &q_init.x.to_canonical_biguint(),
-    );
+    )?;
     pw.set_biguint_target(
         &targets.q_init_target.y.value,
         &q_init.y.to_canonical_biguint(),
-    );
-    pw.set_biguint_target(&targets.n_target.value, &n.to_canonical_biguint());
+    )?;
+    pw.set_biguint_target(&targets.n_target.value, &n.to_canonical_biguint())?;
 
     let data = builder.build::<C>();
     let timing = TimingTree::new("prove curve_scalar_mul_windowed_part", Level::Info);
@@ -342,23 +342,23 @@ where
 
     let (proof0, _, _) =
         prove_curve_scalar_mul_windowed_part::<F, Ed25519, C, D>(config.clone(), p, &q0_init, &n0)?;
-    pw.set_proof_with_pis_target(&targets.proof0, &proof0);
+    pw.set_proof_with_pis_target(&targets.proof0, &proof0)?;
 
     let (proof1, _, _) =
         prove_curve_scalar_mul_windowed_part::<F, Ed25519, C, D>(config.clone(), p, &q1_init, &n1)?;
-    pw.set_proof_with_pis_target(&targets.proof1, &proof1);
+    pw.set_proof_with_pis_target(&targets.proof1, &proof1)?;
 
-    pw.set_biguint_target(&targets.n_target.value, &n_biguint);
-    pw.set_biguint_target(&targets.p_target.x.value, &p.x.to_canonical_biguint());
-    pw.set_biguint_target(&targets.p_target.y.value, &p.y.to_canonical_biguint());
+    pw.set_biguint_target(&targets.n_target.value, &n_biguint)?;
+    pw.set_biguint_target(&targets.p_target.x.value, &p.x.to_canonical_biguint())?;
+    pw.set_biguint_target(&targets.p_target.y.value, &p.y.to_canonical_biguint())?;
     pw.set_biguint_target(
         &targets.q_target.x.value,
         &q_expected.x.to_canonical_biguint(),
-    );
+    )?;
     pw.set_biguint_target(
         &targets.q_target.y.value,
         &q_expected.y.to_canonical_biguint(),
-    );
+    )?;
 
     let data = builder.build::<C>();
     let timing = TimingTree::new("prove curve25519_mul_mt", Level::Info);

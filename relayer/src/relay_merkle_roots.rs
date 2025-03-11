@@ -44,6 +44,8 @@ pub struct MerkleRootRelayer {
     genesis_config: GenesisConfig,
 
     metrics: Metrics,
+
+    dry_run: bool,
 }
 
 struct SubmittedMerkleRoot {
@@ -68,6 +70,7 @@ impl MerkleRootRelayer {
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
+        dry_run: bool,
     ) -> MerkleRootRelayer {
         let eras = Eras::new(None, gear_api.clone(), eth_api.clone(), genesis_config)
             .await
@@ -83,6 +86,7 @@ impl MerkleRootRelayer {
             latest_submitted_merkle_root: None,
             eras,
             metrics,
+            dry_run,
         }
     }
 
@@ -217,7 +221,11 @@ impl MerkleRootRelayer {
         )
         .await?;
 
-        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
+        let tx_hash = if !self.dry_run {
+            submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?
+        } else {
+            TxHash::default()
+        };
 
         log::info!("Merkle root submitted to ethereum");
 
@@ -231,6 +239,10 @@ impl MerkleRootRelayer {
     }
 
     async fn try_finalize_submitted_merkle_root(&mut self) -> anyhow::Result<()> {
+        if self.dry_run {
+            return Ok(());
+        }
+
         let Some(submitted_merkle_root) = &mut self.latest_submitted_merkle_root else {
             return Ok(());
         };

@@ -3,6 +3,7 @@
 //! Proving this circuit is the most time-consuming proof among all the others, so the circuit
 //! is built only on first call to `prove` and taken from cache on the next calls.
 
+use anyhow::Result;
 use plonky2::{
     iop::witness::{PartialWitness, WitnessWrite},
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -46,7 +47,7 @@ pub struct SingleValidatorSign {
 }
 
 impl SingleValidatorSign {
-    pub fn prove(self) -> ProofWithCircuitData<PublicInputsTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<PublicInputsTarget>> {
         log::debug!("        Proving single validator sign...");
         let res = CACHE.prove(self);
         log::debug!("        Proven single validator sign...");
@@ -94,20 +95,26 @@ impl CircuitImplBuilder for SingleValidatorSign {
         (builder.build(), witness_targets)
     }
 
-    fn set_witness(&self, targets: Self::WitnessTargets, witness: &mut PartialWitness<F>) {
+    fn set_witness(
+        &self,
+        targets: Self::WitnessTargets,
+        witness: &mut PartialWitness<F>,
+    ) -> Result<()> {
         let pk_bits = array_to_bits(&self.public_key).into_iter();
         for (target, value) in targets.public_key.iter().zip(pk_bits) {
-            witness.set_bool_target(*target, value);
+            witness.set_bool_target(*target, value)?;
         }
 
         let signature_bits = array_to_bits(&self.signature).into_iter();
         for (target, value) in targets.signature.iter().zip(signature_bits) {
-            witness.set_bool_target(*target, value);
+            witness.set_bool_target(*target, value)?;
         }
 
         let msg_bits = array_to_bits(&self.message).into_iter();
         for (target, value) in targets.message.iter().zip(msg_bits) {
-            witness.set_bool_target(*target, value);
+            witness.set_bool_target(*target, value)?;
         }
+
+        Ok(())
     }
 }

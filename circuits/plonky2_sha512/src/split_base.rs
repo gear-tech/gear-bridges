@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::borrow::Borrow;
 
 use itertools::Itertools;
@@ -111,7 +112,11 @@ impl<F: RichField + Extendable<D>, const B: usize, const D: usize> SimpleGenerat
         self.limbs.iter().map(|b| b.target).collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let sum = self
             .limbs
             .iter()
@@ -121,7 +126,7 @@ impl<F: RichField + Extendable<D>, const B: usize, const D: usize> SimpleGenerat
                 acc * F::from_canonical_usize(B) + F::from_bool(limb)
             });
 
-        out_buffer.set_target(Target::wire(self.row, BaseSumGate::<B>::WIRE_SUM), sum);
+        out_buffer.set_target(Target::wire(self.row, BaseSumGate::<B>::WIRE_SUM), sum)
     }
 
     fn serialize(

@@ -1,5 +1,6 @@
 //! ### Circuit that's used to ceate proof that will be submitted to ethereum.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::Target,
@@ -47,8 +48,11 @@ pub struct FinalProof {
 }
 
 impl FinalProof {
-    pub fn prove(self, genesis_config: GenesisConfig) -> ProofWithCircuitData<FinalProofTarget> {
-        let message_sent_proof = self.message_sent.prove();
+    pub fn prove(
+        self,
+        genesis_config: GenesisConfig,
+    ) -> Result<ProofWithCircuitData<FinalProofTarget>> {
+        let message_sent_proof = self.message_sent.prove()?;
 
         log::debug!("Composing message sent and latest validator set proofs...");
 
@@ -58,7 +62,7 @@ impl FinalProof {
         let mut witness = PartialWitness::new();
 
         let message_sent_target =
-            builder.recursively_verify_constant_proof(&message_sent_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&message_sent_proof, &mut witness)?;
 
         let latest_validator_set_target = {
             let proof_with_pis_target = builder
@@ -69,7 +73,7 @@ impl FinalProof {
             witness.set_proof_with_pis_target(
                 &proof_with_pis_target,
                 &self.current_validator_set_proof,
-            );
+            )?;
 
             builder.verify_proof::<C>(
                 &proof_with_pis_target,

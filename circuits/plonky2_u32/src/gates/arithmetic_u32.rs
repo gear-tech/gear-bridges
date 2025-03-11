@@ -1,6 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
+use anyhow::Result;
 use core::marker::PhantomData;
 
 use itertools::unfold;
@@ -380,7 +381,11 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         ]
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let local_wire = |column| Wire {
             row: self.row,
             column,
@@ -404,8 +409,8 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         let output_high_wire = local_wire(self.gate.wire_ith_output_high_half(self.i));
         let output_low_wire = local_wire(self.gate.wire_ith_output_low_half(self.i));
 
-        out_buffer.set_wire(output_high_wire, output_high);
-        out_buffer.set_wire(output_low_wire, output_low);
+        out_buffer.set_wire(output_high_wire, output_high)?;
+        out_buffer.set_wire(output_low_wire, output_low)?;
 
         let diff = u32::MAX as u64 - output_high_u64;
         let inverse = if diff == 0 {
@@ -414,7 +419,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
             F::from_canonical_u64(diff).inverse()
         };
         let inverse_wire = local_wire(self.gate.wire_ith_inverse(self.i));
-        out_buffer.set_wire(inverse_wire, inverse);
+        out_buffer.set_wire(inverse_wire, inverse)?;
 
         let num_limbs = U32ArithmeticGate::<F, D>::num_limbs();
         let limb_base = 1 << U32ArithmeticGate::<F, D>::limb_bits();
@@ -428,8 +433,10 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
         for (j, output_limb) in output_limbs_f.enumerate() {
             let wire = local_wire(self.gate.wire_ith_output_jth_limb(self.i, j));
-            out_buffer.set_wire(wire, output_limb);
+            out_buffer.set_wire(wire, output_limb)?;
         }
+
+        Ok(())
     }
 
     fn serialize(

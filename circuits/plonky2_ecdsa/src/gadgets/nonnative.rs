@@ -3,6 +3,7 @@ use alloc::string::String;
 use alloc::vec;
 #[cfg(not(test))]
 use alloc::vec::Vec;
+use anyhow::Result;
 use core::marker::PhantomData;
 
 use num::{BigUint, Integer, One, Zero};
@@ -13,7 +14,6 @@ use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartitionWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::util::ceil_div_usize;
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
 use plonky2_u32::witness::GeneratedValuesU32;
@@ -30,7 +30,7 @@ pub struct NonNativeTarget<FF: Field> {
 
 pub trait CircuitBuilderNonNative<F: RichField + Extendable<D>, const D: usize> {
     fn num_nonnative_limbs<FF: Field>() -> usize {
-        ceil_div_usize(FF::BITS, 32)
+        FF::BITS.div_ceil(32)
     }
 
     fn biguint_to_nonnative<FF: Field>(&mut self, x: &BigUintTarget) -> NonNativeTarget<FF>;
@@ -125,7 +125,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderNonNative<F, D>
     for CircuitBuilder<F, D>
 {
     fn num_nonnative_limbs<FF: Field>() -> usize {
-        ceil_div_usize(FF::BITS, 32)
+        FF::BITS.div_ceil(32)
     }
 
     fn biguint_to_nonnative<FF: Field>(&mut self, x: &BigUintTarget) -> NonNativeTarget<FF> {
@@ -475,7 +475,11 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let a = FF::from_noncanonical_biguint(witness.get_biguint_target(self.a.value.clone()));
         let b = FF::from_noncanonical_biguint(witness.get_biguint_target(self.b.value.clone()));
         let a_biguint = a.to_canonical_biguint();
@@ -488,8 +492,8 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
             (false, sum_biguint)
         };
 
-        out_buffer.set_biguint_target(&self.sum.value, &sum_reduced);
-        out_buffer.set_bool_target(self.overflow, overflow);
+        out_buffer.set_biguint_target(&self.sum.value, &sum_reduced)?;
+        out_buffer.set_bool_target(self.overflow, overflow)
     }
 
     fn serialize(
@@ -534,7 +538,11 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let summands: Vec<_> = self
             .summands
             .iter()
@@ -555,8 +563,8 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
         let (overflow_biguint, sum_reduced) = sum_biguint.div_rem(&modulus);
         let overflow = overflow_biguint.to_u64_digits()[0] as u32;
 
-        out_buffer.set_biguint_target(&self.sum.value, &sum_reduced);
-        out_buffer.set_u32_target(self.overflow, overflow);
+        out_buffer.set_biguint_target(&self.sum.value, &sum_reduced)?;
+        out_buffer.set_u32_target(self.overflow, overflow)
     }
 
     fn serialize(
@@ -605,7 +613,11 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let a = FF::from_noncanonical_biguint(witness.get_biguint_target(self.a.value.clone()));
         let b = FF::from_noncanonical_biguint(witness.get_biguint_target(self.b.value.clone()));
         let a_biguint = a.to_canonical_biguint();
@@ -618,8 +630,8 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
             (modulus + a_biguint - b_biguint, true)
         };
 
-        out_buffer.set_biguint_target(&self.diff.value, &diff_biguint);
-        out_buffer.set_bool_target(self.overflow, overflow);
+        out_buffer.set_biguint_target(&self.diff.value, &diff_biguint)?;
+        out_buffer.set_bool_target(self.overflow, overflow)
     }
 
     fn serialize(
@@ -668,7 +680,11 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let a = FF::from_noncanonical_biguint(witness.get_biguint_target(self.a.value.clone()));
         let b = FF::from_noncanonical_biguint(witness.get_biguint_target(self.b.value.clone()));
         let a_biguint = a.to_canonical_biguint();
@@ -679,8 +695,8 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
         let modulus = FF::order();
         let (overflow_biguint, prod_reduced) = prod_biguint.div_rem(&modulus);
 
-        out_buffer.set_biguint_target(&self.prod.value, &prod_reduced);
-        out_buffer.set_biguint_target(&self.overflow, &overflow_biguint);
+        out_buffer.set_biguint_target(&self.prod.value, &prod_reduced)?;
+        out_buffer.set_biguint_target(&self.overflow, &overflow_biguint)
     }
 
     fn serialize(
@@ -721,7 +737,11 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
         self.x.value.limbs.iter().map(|&l| l.0).collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let x = FF::from_noncanonical_biguint(witness.get_biguint_target(self.x.value.clone()));
         let inv = x.inverse();
 
@@ -731,8 +751,8 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
         let modulus = FF::order();
         let (div, _rem) = prod.div_rem(&modulus);
 
-        out_buffer.set_biguint_target(&self.div, &div);
-        out_buffer.set_biguint_target(&self.inv, &inv_biguint);
+        out_buffer.set_biguint_target(&self.div, &div)?;
+        out_buffer.set_biguint_target(&self.inv, &inv_biguint)
     }
 
     fn serialize(

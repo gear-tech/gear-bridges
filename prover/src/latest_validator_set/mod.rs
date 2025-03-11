@@ -1,5 +1,6 @@
 //! ### Circuit that's used to prove correct transition from genesis to current validator set.
 
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::{
     field::types::Field,
@@ -71,7 +72,7 @@ impl Circuit {
     fn prove_genesis(
         mut self,
         config: GenesisConfig,
-    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+    ) -> Result<ProofWithCircuitData<LatestValidatorSetTarget>> {
         let genesis_data_pis = vec![config.authority_set_id]
             .into_iter()
             .chain(config.authority_set_hash_goldilocks())
@@ -79,7 +80,7 @@ impl Circuit {
             .enumerate()
             .collect();
 
-        self.witness.set_bool_target(self.condition, false);
+        self.witness.set_bool_target(self.condition, false)?;
         self.witness.set_proof_with_pis_target::<C, D>(
             &self.inner_cyclic_proof_with_pis,
             &cyclic_base_proof(
@@ -87,7 +88,7 @@ impl Circuit {
                 &self.cyclic_circuit_data.verifier_only,
                 genesis_data_pis,
             ),
-        );
+        )?;
 
         ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
@@ -95,10 +96,10 @@ impl Circuit {
     fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        self.witness.set_bool_target(self.condition, true);
+    ) -> Result<ProofWithCircuitData<LatestValidatorSetTarget>> {
+        self.witness.set_bool_target(self.condition, true)?;
         self.witness
-            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
+            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof)?;
 
         ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness)
     }
@@ -109,8 +110,8 @@ impl LatestValidatorSet {
     pub fn prove_genesis(
         self,
         config: GenesisConfig,
-    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        let circuit = self.build_circuit();
+    ) -> Result<ProofWithCircuitData<LatestValidatorSetTarget>> {
+        let circuit = self.build_circuit()?;
         circuit.prove_genesis(config)
     }
 
@@ -118,13 +119,13 @@ impl LatestValidatorSet {
     pub fn prove_recursive(
         self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        let circuit = self.build_circuit();
+    ) -> Result<ProofWithCircuitData<LatestValidatorSetTarget>> {
+        let circuit = self.build_circuit()?;
         circuit.prove_recursive(composed_proof)
     }
 
-    fn build_circuit(self) -> Circuit {
-        let next_validator_set_proof = self.change_proof.prove();
+    fn build_circuit(self) -> Result<Circuit> {
+        let next_validator_set_proof = self.change_proof.prove()?;
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let one = builder.one();
@@ -139,7 +140,7 @@ impl LatestValidatorSet {
         let mut witness = PartialWitness::new();
 
         let next_authority_set_public_inputs =
-            builder.recursively_verify_constant_proof(&next_validator_set_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&next_validator_set_proof, &mut witness)?;
 
         let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
         let next_set_id = builder.add(current_set_id, one);
@@ -200,9 +201,10 @@ impl LatestValidatorSet {
 
         let cyclic_circuit_data = builder.build::<C>();
 
-        witness.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
+        witness
+            .set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only)?;
 
-        Circuit {
+        Ok(Circuit {
             cyclic_circuit_data,
 
             common_data,
@@ -211,6 +213,6 @@ impl LatestValidatorSet {
             inner_cyclic_proof_with_pis,
 
             witness,
-        }
+        })
     }
 }

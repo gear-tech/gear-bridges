@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
@@ -88,7 +90,7 @@ pub fn fill_circuits<F: RichField + Extendable<D>, const D: usize>(
     sig: &[u8],
     pk: &[u8],
     targets: &EDDSATargets,
-) {
+) -> Result<()> {
     assert_eq!(sig.len(), 64);
     assert_eq!(pk.len(), 32);
 
@@ -104,14 +106,16 @@ pub fn fill_circuits<F: RichField + Extendable<D>, const D: usize>(
     let msg_bits = array_to_bits(msg);
 
     for i in 0..msg_bits.len() {
-        pw.set_bool_target(msg_targets[i], msg_bits[i]);
+        pw.set_bool_target(msg_targets[i], msg_bits[i])?;
     }
     for i in 0..512 {
-        pw.set_bool_target(sig_targets[i], sig_bits[i]);
+        pw.set_bool_target(sig_targets[i], sig_bits[i])?;
     }
     for i in 0..256 {
-        pw.set_bool_target(pk_targets[i], pk_bits[i]);
+        pw.set_bool_target(pk_targets[i], pk_bits[i])?;
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -142,7 +146,7 @@ mod tests {
             SAMPLE_SIG1.as_slice(),
             SAMPLE_PK1.as_slice(),
             &targets,
-        );
+        )?;
 
         dbg!(builder.num_gates());
         let data = builder.build::<C>();
@@ -171,7 +175,7 @@ mod tests {
             sig.as_slice(),
             SAMPLE_PK1.as_slice(),
             &targets,
-        );
+        )?;
 
         dbg!(builder.num_gates());
         let data = builder.build::<C>();

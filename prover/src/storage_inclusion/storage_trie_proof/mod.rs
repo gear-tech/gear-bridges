@@ -1,5 +1,6 @@
 //! ### Circuit that's used to prove inclusion of storage item into storage trie.
 
+use anyhow::Result;
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -45,11 +46,11 @@ pub struct StorageTrieProof {
 }
 
 impl StorageTrieProof {
-    pub fn prove(self) -> ProofWithCircuitData<StorageTrieProofTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<StorageTrieProofTarget>> {
         let branch_node_chain_proof = BranchNodeChain {
             nodes: self.branch_nodes,
         }
-        .prove();
+        .prove()?;
 
         let partial_address_nibbles = {
             let branch_node_chain_pis = BranchNodeChainParserTarget::parse_public_inputs_exact(
@@ -65,7 +66,7 @@ impl StorageTrieProof {
                 partial_address_nibbles,
             },
         }
-        .prove();
+        .prove()?;
 
         log::debug!("Composing branch node chain proof and hashed leaf parser proof...");
 
@@ -73,9 +74,9 @@ impl StorageTrieProof {
         let mut witness = PartialWitness::new();
 
         let branch_node_chain_target =
-            builder.recursively_verify_constant_proof(&branch_node_chain_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&branch_node_chain_proof, &mut witness)?;
         let hashed_leaf_parser_target =
-            builder.recursively_verify_constant_proof(&hashed_leaf_parser_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&hashed_leaf_parser_proof, &mut witness)?;
 
         branch_node_chain_target
             .leaf_hash

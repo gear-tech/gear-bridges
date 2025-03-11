@@ -1,5 +1,6 @@
 //! ### Circuit that's used to prove correct hashing of validator set.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::Target,
@@ -52,7 +53,7 @@ impl ValidatorSetHash {
         )
     }
 
-    pub fn prove(self) -> ProofWithCircuitData<ValidatorSetHashTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<ValidatorSetHashTarget>> {
         log::debug!("Proving correct hashing of validator set...");
 
         let validator_count = self.validator_set.len();
@@ -61,7 +62,7 @@ impl ValidatorSetHash {
         let hasher_proof = GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(
             self.validator_set.into_iter().flatten().collect(),
         )
-        .prove();
+        .prove()?;
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();
@@ -70,9 +71,9 @@ impl ValidatorSetHash {
         pw.set_target(
             validator_count_target,
             F::from_canonical_usize(validator_count),
-        );
+        )?;
 
-        let hasher_pis = builder.recursively_verify_constant_proof(&hasher_proof, &mut pw);
+        let hasher_pis = builder.recursively_verify_constant_proof(&hasher_proof, &mut pw)?;
         let desired_data_len = builder.mul_const(
             F::from_canonical_usize(ED25519_PUBLIC_KEY_SIZE),
             validator_count_target,

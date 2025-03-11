@@ -1,5 +1,6 @@
 //! ### Circuit that's used to prove authority set change.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -66,22 +67,22 @@ pub struct NextValidatorSet {
 }
 
 impl NextValidatorSet {
-    pub fn prove(self) -> ProofWithCircuitData<NextValidatorSetTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<NextValidatorSetTarget>> {
         log::debug!("Proving validator set change...");
 
         let storage_data_bits = array_to_bits(&self.next_validator_set_storage_data);
 
-        let inclusion_proof = self.next_validator_set_inclusion_proof.prove();
-        let block_finality_proof = self.current_epoch_block_finality.prove();
+        let inclusion_proof = self.next_validator_set_inclusion_proof.prove()?;
+        let block_finality_proof = self.current_epoch_block_finality.prove()?;
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
         let inclusion_proof_target =
-            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness)?;
         let block_finality_target =
-            builder.recursively_verify_constant_proof(&block_finality_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&block_finality_proof, &mut witness)?;
 
         inclusion_proof_target
             .block_hash
@@ -92,11 +93,15 @@ impl NextValidatorSet {
             &mut builder,
         );
 
-        let mut storage_data_bit_targets = storage_data_bits.into_iter().map(|bit| {
-            let target = builder.add_virtual_bool_target_safe();
-            witness.set_bool_target(target, bit);
-            target.target
-        });
+        let mut storage_data_bit_targets = storage_data_bits
+            .into_iter()
+            .map(|bit| {
+                let target = builder.add_virtual_bool_target_safe();
+                witness.set_bool_target(target, bit)?;
+                Ok(target.target)
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter();
         let storage_data_target =
             ValidatorSetStorageItemTarget::parse_exact(&mut storage_data_bit_targets);
 

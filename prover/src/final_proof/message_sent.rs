@@ -1,5 +1,6 @@
 //! ### Circuit that's used to prove that message was queued for relaying.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -69,11 +70,11 @@ pub struct MessageSent {
 }
 
 impl MessageSent {
-    pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<MessageSentTarget>> {
         log::debug!("Proving message presence in finalized block...");
 
-        let inclusion_proof = self.inclusion_proof.prove();
-        let finality_proof = self.block_finality.prove();
+        let inclusion_proof = self.inclusion_proof.prove()?;
+        let finality_proof = self.block_finality.prove()?;
 
         log::debug!("Composing inclusion and finality proofs...");
 
@@ -81,9 +82,9 @@ impl MessageSent {
         let mut witness = PartialWitness::new();
 
         let inclusion_proof_target =
-            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&inclusion_proof, &mut witness)?;
         let finality_proof_target =
-            builder.recursively_verify_constant_proof(&finality_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&finality_proof, &mut witness)?;
 
         let block_number =
             Target::from_bool_targets_le(finality_proof_target.message.block_number, &mut builder);
@@ -93,11 +94,15 @@ impl MessageSent {
             .connect(&finality_proof_target.message.block_hash, &mut builder);
 
         let storage_data_bits = array_to_bits(&self.message_storage_data);
-        let mut storage_data_bit_targets = storage_data_bits.into_iter().map(|bit| {
-            let target = builder.add_virtual_bool_target_safe();
-            witness.set_bool_target(target, bit);
-            target.target
-        });
+        let mut storage_data_bit_targets = storage_data_bits
+            .into_iter()
+            .map(|bit| {
+                let target = builder.add_virtual_bool_target_safe();
+                witness.set_bool_target(target, bit)?;
+                Ok(target.target)
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter();
         let storage_data_target =
             MessageInStorageTarget::parse_exact(&mut storage_data_bit_targets);
 

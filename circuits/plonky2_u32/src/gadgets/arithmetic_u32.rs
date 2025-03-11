@@ -1,5 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
+use anyhow::Result;
 use core::marker::PhantomData;
 
 use plonky2::field::extension::Extendable;
@@ -249,14 +250,18 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         vec![self.x]
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let x = witness.get_target(self.x);
         let x_u64 = x.to_canonical_u64();
         let low = x_u64 as u32;
         let high = (x_u64 >> 32) as u32;
 
-        out_buffer.set_u32_target(self.low, low);
-        out_buffer.set_u32_target(self.high, high);
+        out_buffer.set_u32_target(self.low, low)?;
+        out_buffer.set_u32_target(self.high, high)
     }
 
     fn serialize(
@@ -280,7 +285,6 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};

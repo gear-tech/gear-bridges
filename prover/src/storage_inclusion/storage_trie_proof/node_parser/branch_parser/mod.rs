@@ -1,5 +1,6 @@
 //! ### Circuit that's used to parse encoded branch node.
 
+use anyhow::Result;
 use parity_scale_codec::Encode;
 use plonky2::{
     iop::{
@@ -76,7 +77,7 @@ struct Metadata {
 }
 
 impl BranchParser {
-    pub fn prove(self) -> ProofWithCircuitData<BranchParserTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<BranchParserTarget>> {
         let metadata = self.parse_metadata();
 
         let child_node_parser_proof = ChildNodeArrayParser {
@@ -88,7 +89,7 @@ impl BranchParser {
             },
             children_lengths: metadata.children_lengths,
         }
-        .prove();
+        .prove()?;
 
         log::debug!("Proving branch node parser...");
 
@@ -102,7 +103,7 @@ impl BranchParser {
         let node_data_target = BranchNodeDataPaddedTarget::add_virtual_safe(&mut builder);
 
         let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
-        partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
+        partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness)?;
 
         let node_data_length_target: Target = builder.add_virtual_target();
 
@@ -110,7 +111,7 @@ impl BranchParser {
         witness.set_target(
             claimed_child_node_nibble_target,
             F::from_canonical_u8(self.claimed_child_node_nibble),
-        );
+        )?;
         let claimed_child_node_nibble_target =
             HalfByteTarget::from_target_safe(claimed_child_node_nibble_target, &mut builder);
 
@@ -165,7 +166,8 @@ impl BranchParser {
                 overall_children_amount,
                 claimed_child_index_in_array,
                 claimed_child_hash,
-            } = builder.recursively_verify_constant_proof(&child_node_parser_proof, &mut witness);
+            } = builder
+                .recursively_verify_constant_proof(&child_node_parser_proof, &mut witness)?;
 
             node_data.connect(&node_data_target, &mut builder);
             initial_read_offset.connect(&parsed_bitmap.resulting_offset, &mut builder);

@@ -1,5 +1,6 @@
 //! ### Circuit that's used to parse encoded leaf node.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::Target,
@@ -67,7 +68,7 @@ enum LeafType {
 }
 
 impl LeafParser {
-    pub fn prove(self) -> ProofWithCircuitData<LeafParserTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<LeafParserTarget>> {
         log::debug!("Proving leaf node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
@@ -81,7 +82,7 @@ impl LeafParser {
         witness.set_target(
             node_data_length_target,
             F::from_canonical_usize(self.node_data.len()),
-        );
+        )?;
 
         let (leaf_type, header_descriptor) =
             if HeaderDescriptor::hashed_value_leaf().prefix_matches(&self.node_data) {
@@ -96,10 +97,10 @@ impl LeafParser {
             };
 
         let node_data_target = LeafNodeDataPaddedTarget::add_virtual_safe(&mut builder);
-        node_data_target.set_witness(&pad_byte_vec(self.node_data), &mut witness);
+        node_data_target.set_witness(&pad_byte_vec(self.node_data), &mut witness)?;
 
         let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
-        partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
+        partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness)?;
 
         let parsed_header = {
             let first_bytes = node_data_target.constant_read_array(0);

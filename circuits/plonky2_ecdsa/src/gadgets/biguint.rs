@@ -3,6 +3,7 @@ use alloc::string::String;
 use alloc::vec;
 #[cfg(not(test))]
 use alloc::vec::Vec;
+use anyhow::{Ok, Result};
 use core::marker::PhantomData;
 use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
 
@@ -282,7 +283,7 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderBiguint<F, D>
 
 pub trait WitnessBigUint<F: PrimeField64>: Witness<F> {
     fn get_biguint_target(&self, target: BigUintTarget) -> BigUint;
-    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint);
+    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint) -> Result<()>;
 }
 
 impl<T: Witness<F>, F: PrimeField64> WitnessBigUint<F> for T {
@@ -296,28 +297,32 @@ impl<T: Witness<F>, F: PrimeField64> WitnessBigUint<F> for T {
             })
     }
 
-    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint) {
+    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint) -> Result<()> {
         let mut limbs = value.to_u32_digits();
         assert!(target.num_limbs() >= limbs.len());
         limbs.resize(target.num_limbs(), 0);
         for i in 0..target.num_limbs() {
-            self.set_u32_target(target.limbs[i], limbs[i]);
+            self.set_u32_target(target.limbs[i], limbs[i])?;
         }
+
+        Ok(())
     }
 }
 
 pub trait GeneratedValuesBigUint<F: PrimeField> {
-    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint);
+    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint) -> Result<()>;
 }
 
 impl<F: PrimeField> GeneratedValuesBigUint<F> for GeneratedValues<F> {
-    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint) {
+    fn set_biguint_target(&mut self, target: &BigUintTarget, value: &BigUint) -> Result<()> {
         let mut limbs = value.to_u32_digits();
         assert!(target.num_limbs() >= limbs.len());
         limbs.resize(target.num_limbs(), 0);
         for i in 0..target.num_limbs() {
-            self.set_u32_target(target.get_limb(i), limbs[i]);
+            self.set_u32_target(target.get_limb(i), limbs[i])?;
         }
+
+        Ok(())
     }
 }
 
@@ -346,13 +351,17 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let a = witness.get_biguint_target(self.a.clone());
         let b = witness.get_biguint_target(self.b.clone());
         let (div, rem) = a.div_rem(&b);
 
-        out_buffer.set_biguint_target(&self.div, &div);
-        out_buffer.set_biguint_target(&self.rem, &rem);
+        out_buffer.set_biguint_target(&self.div, &div)?;
+        out_buffer.set_biguint_target(&self.rem, &rem)
     }
 
     fn serialize(

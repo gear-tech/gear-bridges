@@ -1,5 +1,6 @@
 //! ### Circuit that's used to parse children nodes from encoded branch node.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -74,14 +75,15 @@ pub struct ChildNodeArrayParser {
 }
 
 impl ChildNodeArrayParser {
-    pub fn prove(self) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
-        let inner_proof = self.inner_proof();
+    pub fn prove(self) -> Result<ProofWithCircuitData<ChildNodeArrayParserTarget>> {
+        let inner_proof = self.inner_proof()?;
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut witness);
+        let inner_proof_pis =
+            builder.recursively_verify_constant_proof(&inner_proof, &mut witness)?;
 
         ChildNodeArrayParserTarget {
             node_data: inner_proof_pis.inner.node_data,
@@ -96,7 +98,7 @@ impl ChildNodeArrayParser {
         ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 
-    fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
+    fn inner_proof(self) -> Result<ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>> {
         log::debug!("Proving child node array parser...");
         let claimed_child_hash = array_to_bits(&self.initial_data.claimed_child_hash)
             .try_into()
@@ -121,12 +123,12 @@ impl ChildNodeArrayParser {
                 claimed_child_hash,
             };
 
-            let circuit = Circuit::build(inner_circuit);
+            let circuit = Circuit::build(inner_circuit)?;
 
             cyclic_proof = Some(if let Some(cyclic_proof) = cyclic_proof {
-                circuit.prove_recursive(cyclic_proof.proof())
+                circuit.prove_recursive(cyclic_proof.proof())?
             } else {
-                circuit.prove_initial(self.initial_data.clone())
+                circuit.prove_initial(self.initial_data.clone())?
             });
 
             read_offset += child_length;
@@ -134,7 +136,7 @@ impl ChildNodeArrayParser {
 
         log::debug!("Proven child node array parser");
 
-        cyclic_proof.expect("Expected at least one child node in array")
+        cyclic_proof.ok_or_else(|| anyhow::anyhow!("Expected at least one child node in array"))
     }
 }
 
@@ -173,7 +175,7 @@ impl Circuit {
     fn prove_initial(
         mut self,
         initial_data: InitialData,
-    ) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
+    ) -> Result<ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>> {
         log::debug!("    Proving child node parser recursion layer(initial)...");
 
         let public_inputs = initial_data
@@ -197,7 +199,7 @@ impl Circuit {
 
         let public_inputs = public_inputs.enumerate().collect();
 
-        self.witness.set_bool_target(self.condition, false);
+        self.witness.set_bool_target(self.condition, false)?;
         self.witness.set_proof_with_pis_target::<C, D>(
             &self.inner_cyclic_proof_with_pis,
             &cyclic_base_proof(
@@ -205,7 +207,7 @@ impl Circuit {
                 &self.cyclic_circuit_data.verifier_only,
                 public_inputs,
             ),
-        );
+        )?;
 
         let result =
             ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
@@ -218,11 +220,11 @@ impl Circuit {
     fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {
+    ) -> Result<ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>> {
         log::debug!("    Proving child node parser recursion layer...");
-        self.witness.set_bool_target(self.condition, true);
+        self.witness.set_bool_target(self.condition, true)?;
         self.witness
-            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
+            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof)?;
 
         let result =
             ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
@@ -232,10 +234,10 @@ impl Circuit {
         result
     }
 
-    fn build(inner_circuit: ChildNodeParser) -> Circuit {
+    fn build(inner_circuit: ChildNodeParser) -> Result<Circuit> {
         log::debug!("    Proving child node correctness...");
 
-        let inner_proof = inner_circuit.prove();
+        let inner_proof = inner_circuit.prove()?;
 
         log::debug!("    Proven child node correctness");
 
@@ -245,7 +247,7 @@ impl Circuit {
         let mut builder = CircuitBuilder::new(config);
         let mut pw = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut pw);
+        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut pw)?;
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis = CyclicRecursionTarget::parse(&mut virtual_targets);
@@ -326,17 +328,17 @@ impl Circuit {
 
         let cyclic_circuit_data = builder.build::<C>();
 
-        pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
+        pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only)?;
 
         log::debug!("    Built child node parser recursion layer");
 
-        Circuit {
+        Ok(Circuit {
             cyclic_circuit_data,
             common_data,
             condition,
             inner_cyclic_proof_with_pis,
             witness: pw,
-        }
+        })
     }
 }
 

@@ -1,6 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
+use anyhow::Result;
 use core::marker::PhantomData;
 
 use plonky2::field::extension::Extendable;
@@ -15,7 +16,6 @@ use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::plonk_common::{reduce_with_powers, reduce_with_powers_ext_circuit};
 use plonky2::plonk::vars::{EvaluationTargets, EvaluationVars, EvaluationVarsBase};
-use plonky2::util::ceil_div_usize;
 
 /// A gate which can decompose a number into base B little-endian limbs.
 #[derive(Copy, Clone, Debug)]
@@ -36,7 +36,7 @@ impl<F: RichField + Extendable<D>, const D: usize> U32RangeCheckGate<F, D> {
     pub const BASE: usize = 1 << Self::AUX_LIMB_BITS;
 
     fn aux_limbs_per_input_limb(&self) -> usize {
-        ceil_div_usize(32, Self::AUX_LIMB_BITS)
+        32_usize.div_ceil(Self::AUX_LIMB_BITS)
     }
     pub fn wire_ith_input_limb(&self, i: usize) -> usize {
         debug_assert!(i < self.num_input_limbs);
@@ -199,7 +199,11 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let num_input_limbs = self.gate.num_input_limbs;
         for i in 0..num_input_limbs {
             let sum_value = witness
@@ -218,9 +222,11 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
                 .collect::<Vec<_>>();
 
             for (b, b_value) in limbs.zip(limbs_value) {
-                out_buffer.set_target(b, b_value);
+                out_buffer.set_target(b, b_value)?;
             }
         }
+
+        Ok(())
     }
 
     fn serialize(
@@ -276,7 +282,7 @@ mod tests {
         const D: usize = 4;
         const AUX_LIMB_BITS: usize = 2;
         const BASE: usize = 1 << AUX_LIMB_BITS;
-        const AUX_LIMBS_PER_INPUT_LIMB: usize = ceil_div_usize(32, AUX_LIMB_BITS);
+        const AUX_LIMBS_PER_INPUT_LIMB: usize = 32.div_ceil(AUX_LIMB_BITS);
 
         fn get_wires(input_limbs: Vec<u64>) -> Vec<FF> {
             let num_input_limbs = input_limbs.len();

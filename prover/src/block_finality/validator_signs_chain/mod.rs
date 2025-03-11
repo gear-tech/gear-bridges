@@ -1,5 +1,6 @@
 //! Circuit that's used to prove that majority of validators have signed GRANDPA message.
 
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::{
     iop::{
@@ -66,12 +67,15 @@ pub struct ValidatorSignsChain {
 }
 
 impl ValidatorSignsChain {
-    pub fn prove(self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<ValidatorSignsChainTarget>> {
         log::debug!("Proving validator signs chain...");
 
         let validator_set_hash = self.validator_set_hash.compute_hash();
 
-        let validator_set_hash_proof = self.validator_set_hash.prove();
+        let validator_set_hash_proof = self
+            .validator_set_hash
+            .prove()
+            .expect("Failed to create proof of the validators set hash");
 
         let mut pre_commits = self.pre_commits.clone();
         pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
@@ -93,7 +97,8 @@ impl ValidatorSignsChain {
                         signature: pre_commit.signature,
                         message: self.message,
                     }
-                    .prove(&validator_set_hash_proof);
+                    .prove(&validator_set_hash_proof)
+                    .expect("Failed to create proof of indexed validator signature");
 
                     sender
                         .send((id, proof))
@@ -113,17 +118,18 @@ impl ValidatorSignsChain {
             message: self.message,
         };
         let mut composed_proof =
-            SignComposition::build(&inner_proofs.remove(0)).prove_initial(initial_data);
+            SignComposition::build(&inner_proofs.remove(0))?.prove_initial(initial_data)?;
 
         for inner in inner_proofs {
-            composed_proof = SignComposition::build(&inner).prove_recursive(composed_proof.proof());
+            composed_proof =
+                SignComposition::build(&inner)?.prove_recursive(composed_proof.proof())?;
         }
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
 
         let composed_proof_pis =
-            builder.recursively_verify_constant_proof(&composed_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&composed_proof, &mut witness)?;
 
         // Assert that sign_count > 2/3 * validator_count
         // 3 * sign_count - 2 * validator_count - 1 >= 0
@@ -196,7 +202,7 @@ impl SignComposition {
     fn prove_initial(
         mut self,
         initial_data: SignCompositionInitialData,
-    ) -> ProofWithCircuitData<SignCompositionTarget> {
+    ) -> Result<ProofWithCircuitData<SignCompositionTarget>> {
         log::debug!("    Proving sign composition recursion layer(initial)...");
 
         let validator_set_hash = array_to_bits(&initial_data.validator_set_hash);
@@ -218,7 +224,7 @@ impl SignComposition {
 
         let public_inputs = public_inputs.enumerate().collect();
 
-        self.witness.set_bool_target(self.condition, false);
+        self.witness.set_bool_target(self.condition, false)?;
         self.witness.set_proof_with_pis_target::<C, D>(
             &self.inner_cyclic_proof_with_pis,
             &cyclic_base_proof(
@@ -226,7 +232,7 @@ impl SignComposition {
                 &self.cyclic_circuit_data.verifier_only,
                 public_inputs,
             ),
-        );
+        )?;
 
         let result =
             ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
@@ -239,11 +245,11 @@ impl SignComposition {
     fn prove_recursive(
         mut self,
         composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<SignCompositionTarget> {
+    ) -> Result<ProofWithCircuitData<SignCompositionTarget>> {
         log::debug!("    Proving sign composition recursion layer...");
-        self.witness.set_bool_target(self.condition, true);
+        self.witness.set_bool_target(self.condition, true)?;
         self.witness
-            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
+            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof)?;
 
         let result =
             ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
@@ -253,14 +259,16 @@ impl SignComposition {
         result
     }
 
-    fn build(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> SignComposition {
+    fn build(
+        inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>,
+    ) -> Result<SignComposition> {
         log::debug!("    Building sign composition recursion layer...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut pw = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut pw);
+        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut pw)?;
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis =
@@ -341,16 +349,16 @@ impl SignComposition {
 
         let cyclic_circuit_data = builder.build::<C>();
 
-        pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
+        pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only)?;
 
         log::debug!("    Built sign composition recursion layer");
 
-        SignComposition {
+        Ok(SignComposition {
             cyclic_circuit_data,
             common_data,
             condition,
             inner_cyclic_proof_with_pis,
             witness: pw,
-        }
+        })
     }
 }

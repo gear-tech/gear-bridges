@@ -58,8 +58,11 @@ async fn main() {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let dry_run = args.dry_run;
+
             let relayer =
-                MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage).await;
+                MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage, dry_run)
+                    .await;
 
             metrics
                 .register_service(&relayer)

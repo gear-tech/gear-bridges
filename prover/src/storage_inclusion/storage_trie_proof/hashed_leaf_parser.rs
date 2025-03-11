@@ -1,5 +1,6 @@
 //! Circuit that's used to prove correct parsing of leaf node.
 
+use anyhow::Result;
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -40,13 +41,13 @@ pub struct HashedLeafParser {
 }
 
 impl HashedLeafParser {
-    pub fn prove(self) -> ProofWithCircuitData<HashedLeafParserTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<HashedLeafParserTarget>> {
         const MAX_DATA_LENGTH_ESTIMATION: usize =
             MAX_LEAF_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
         let hasher_proof =
             GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(self.leaf_parser.node_data.clone())
-                .prove();
-        let leaf_parser_proof = self.leaf_parser.prove();
+                .prove()?;
+        let leaf_parser_proof = self.leaf_parser.prove()?;
 
         log::debug!("Composing hasher proof and leaf parser proof...");
 
@@ -54,9 +55,10 @@ impl HashedLeafParser {
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
-        let hasher_target = builder.recursively_verify_constant_proof(&hasher_proof, &mut witness);
+        let hasher_target =
+            builder.recursively_verify_constant_proof(&hasher_proof, &mut witness)?;
         let leaf_parser_target =
-            builder.recursively_verify_constant_proof(&leaf_parser_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&leaf_parser_proof, &mut witness)?;
 
         hasher_target
             .length

@@ -1,5 +1,6 @@
 //! ### Circuits that're used to parse branch and leaf trie nodes.
 
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::{
     iop::{
@@ -83,14 +84,20 @@ impl NodeDataBlockTarget {
     }
 
     /// Set witness for `NodeDataBlockTarget`.
-    pub fn set_witness(&self, data: &[u8; NODE_DATA_BLOCK_BYTES], witness: &mut PartialWitness<F>) {
+    pub fn set_witness(
+        &self,
+        data: &[u8; NODE_DATA_BLOCK_BYTES],
+        witness: &mut PartialWitness<F>,
+    ) -> Result<()> {
         self.0
              .0
             .iter()
             .zip_eq(data.iter())
-            .for_each(|(target, value)| {
+            .try_for_each(|(target, value)| {
                 witness.set_target(target.as_target(), F::from_canonical_u8(*value))
-            });
+            })?;
+
+        Ok(())
     }
 }
 
@@ -141,12 +148,14 @@ impl BranchNodeDataPaddedTarget {
         &self,
         data: &[[u8; NODE_DATA_BLOCK_BYTES]; MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS],
         witness: &mut PartialWitness<F>,
-    ) {
+    ) -> Result<()> {
         self.0
              .0
             .iter()
             .zip_eq(data)
-            .for_each(|(target, data)| target.set_witness(data, witness));
+            .try_for_each(|(target, data)| target.set_witness(data, witness))?;
+
+        Ok(())
     }
 
     /// Read array of constant size starting from specified index. This function checks that `at`

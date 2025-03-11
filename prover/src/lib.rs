@@ -58,6 +58,7 @@ pub mod proving {
             LatestValidatorSet,
         },
     };
+    use anyhow::Result;
     use consts::BLAKE2_DIGEST_SIZE;
     use plonky2::{
         plonk::{
@@ -201,7 +202,7 @@ pub mod proving {
         genesis_config: GenesisConfig,
         next_validator_set_inclusion_proof: StorageInclusion,
         next_validator_set_data: Vec<u8>,
-    ) -> ProofWithCircuitData {
+    ) -> Result<ProofWithCircuitData> {
         let change_from_genesis = NextValidatorSet {
             current_epoch_block_finality,
             next_validator_set_inclusion_proof,
@@ -211,9 +212,9 @@ pub mod proving {
         let proof = LatestValidatorSet {
             change_proof: change_from_genesis,
         }
-        .prove_genesis(genesis_config);
+        .prove_genesis(genesis_config)?;
 
-        ProofWithCircuitData::from_plonky2_repr(&proof)
+        Ok(ProofWithCircuitData::from_plonky2_repr(&proof))
     }
 
     /// Add one more layer to the proof of authority set changes.
@@ -233,7 +234,7 @@ pub mod proving {
         current_epoch_block_finality: BlockFinality,
         next_validator_set_inclusion_proof: StorageInclusion,
         next_validator_set_data: Vec<u8>,
-    ) -> ProofWithCircuitData {
+    ) -> Result<ProofWithCircuitData> {
         let next_change = NextValidatorSet {
             current_epoch_block_finality,
             next_validator_set_inclusion_proof,
@@ -246,9 +247,9 @@ pub mod proving {
         let proof = LatestValidatorSet {
             change_proof: next_change,
         }
-        .prove_recursive(previous_proof.proof());
+        .prove_recursive(previous_proof.proof())?;
 
-        ProofWithCircuitData::from_plonky2_repr(&proof)
+        Ok(ProofWithCircuitData::from_plonky2_repr(&proof))
     }
 
     /// Add one layer on top of authority set change proof chain that will prove that merkle trie
@@ -272,7 +273,7 @@ pub mod proving {
         genesis_config: GenesisConfig,
         message_inclusion_proof: StorageInclusion,
         message_contents: Vec<u8>,
-    ) -> ExportedProofWithCircuitData {
+    ) -> Result<ExportedProofWithCircuitData> {
         let message_sent = MessageSent {
             block_finality: block_finality_proof,
             inclusion_proof: message_inclusion_proof,
@@ -287,7 +288,7 @@ pub mod proving {
             current_validator_set_proof: previous_proof.proof(),
             message_sent,
         }
-        .prove(genesis_config);
+        .prove(genesis_config)?;
 
         proof.export_wrapped()
     }

@@ -60,9 +60,16 @@ pub async fn prove_genesis(
     );
 
     timer.stop_and_record();
-    log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
+    if proof.is_err() {
+        log::warn!(
+            "Genesis prove generation failed in {}ms",
+            now.elapsed().as_millis()
+        );
+    } else {
+        log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
+    }
 
-    Ok(proof)
+    proof
 }
 
 pub async fn prove_validator_set_change(
@@ -103,7 +110,7 @@ pub async fn prove_validator_set_change(
     timer.stop_and_record();
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
 
-    Ok(proof)
+    proof
 }
 
 #[derive(Clone)]
@@ -189,7 +196,7 @@ pub async fn prove_final_with_block_finality(
         genesis_config,
         sent_message_inclusion_proof,
         message_contents,
-    );
+    )?;
 
     let proof = gnark::prove_circuit(&proof);
 

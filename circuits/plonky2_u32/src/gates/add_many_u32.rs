@@ -1,6 +1,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use anyhow::Result;
 use core::marker::PhantomData;
 
 use itertools::unfold;
@@ -17,7 +18,6 @@ use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::vars::{EvaluationTargets, EvaluationVars, EvaluationVarsBase};
-use plonky2::util::ceil_div_usize;
 
 const LOG2_MAX_NUM_ADDENDS: usize = 4;
 const MAX_NUM_ADDENDS: usize = 16;
@@ -69,10 +69,10 @@ impl<F: RichField + Extendable<D>, const D: usize> U32AddManyGate<F, D> {
         2
     }
     pub fn num_result_limbs() -> usize {
-        ceil_div_usize(32, Self::limb_bits())
+        32_usize.div_ceil(Self::limb_bits())
     }
     pub fn num_carry_limbs() -> usize {
-        ceil_div_usize(LOG2_MAX_NUM_ADDENDS, Self::limb_bits())
+        LOG2_MAX_NUM_ADDENDS.div_ceil(Self::limb_bits())
     }
     pub fn num_limbs() -> usize {
         Self::num_result_limbs() + Self::num_carry_limbs()
@@ -310,7 +310,11 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
             .collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let local_wire = |column| Wire {
             row: self.row,
             column,
@@ -335,8 +339,8 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
         let output_carry_wire = local_wire(self.gate.wire_ith_output_carry(self.i));
         let output_result_wire = local_wire(self.gate.wire_ith_output_result(self.i));
 
-        out_buffer.set_wire(output_carry_wire, output_carry);
-        out_buffer.set_wire(output_result_wire, output_result);
+        out_buffer.set_wire(output_carry_wire, output_carry)?;
+        out_buffer.set_wire(output_result_wire, output_result)?;
 
         let num_result_limbs = U32AddManyGate::<F, D>::num_result_limbs();
         let num_carry_limbs = U32AddManyGate::<F, D>::num_carry_limbs();
@@ -357,8 +361,10 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
         for (j, limb) in result_limbs.chain(carry_limbs).enumerate() {
             let wire = local_wire(self.gate.wire_ith_output_jth_limb(self.i, j));
-            out_buffer.set_wire(wire, limb);
+            out_buffer.set_wire(wire, limb)?;
         }
+
+        Ok(())
     }
 
     fn serialize(

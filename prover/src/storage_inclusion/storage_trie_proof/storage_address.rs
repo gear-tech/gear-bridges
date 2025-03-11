@@ -1,5 +1,6 @@
 //! ### Target definition that represents address in substrate storage.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::Target,
@@ -68,9 +69,9 @@ impl StorageAddressTarget {
     }
 
     /// Set witness value for `StorageAddressTarget`.
-    pub fn set_witness(&self, nibbles: &[u8], witness: &mut PartialWitness<F>) {
+    pub fn set_witness(&self, nibbles: &[u8], witness: &mut PartialWitness<F>) -> Result<()> {
         let length = nibbles.len();
-        witness.set_target(self.length, F::from_canonical_usize(length));
+        witness.set_target(self.length, F::from_canonical_usize(length))?;
 
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
         for (target, value) in self
@@ -80,8 +81,10 @@ impl StorageAddressTarget {
             .zip(nibbles.iter().copied().chain(iter::repeat(0)))
         {
             assert!(value < (1 << 4));
-            witness.set_target(target.to_target(), F::from_canonical_u8(value));
+            witness.set_target(target.to_target(), F::from_canonical_u8(value))?;
         }
+
+        Ok(())
     }
 
     /// Create `StorageAddressTarget`.
@@ -247,13 +250,16 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let mut pw = PartialWitness::new();
 
-        let first_address = create_address_target(first_nibbles, &mut builder, &mut pw);
-        let second_address = create_address_target(second_nibbles, &mut builder, &mut pw);
+        let first_address = create_address_target(first_nibbles, &mut builder, &mut pw)
+            .expect("Expected a partial storage address target");
+        let second_address = create_address_target(second_nibbles, &mut builder, &mut pw)
+            .expect("Expected a partial storage address target");
 
         let result = first_address.append(second_address, &mut builder);
 
         if let Some(nibbles) = expected_nibbles {
-            let address = create_address_target(nibbles, &mut builder, &mut pw);
+            let address = create_address_target(nibbles, &mut builder, &mut pw)
+                .expect("Expected a partial storage address target");
             result.connect(&address, &mut builder);
         }
 
@@ -301,7 +307,8 @@ mod tests {
         let address =
             StorageAddressTarget::from_half_byte_targets_safe(targets, length, &mut builder);
 
-        let expected_address = create_address_target(expected_data, &mut builder, &mut pw);
+        let expected_address = create_address_target(expected_data, &mut builder, &mut pw)
+            .expect("Expected a partial storage address target");
 
         address.register_as_public_inputs(&mut builder);
 
@@ -321,10 +328,10 @@ pub mod tests_common {
         nibbles: &[u8],
         builder: &mut CircuitBuilder<F, D>,
         witness: &mut PartialWitness<F>,
-    ) -> StorageAddressTarget {
+    ) -> Result<StorageAddressTarget> {
         assert!(nibbles.len() <= MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
         let length = builder.add_virtual_target();
-        witness.set_target(length, F::from_canonical_usize(nibbles.len()));
+        witness.set_target(length, F::from_canonical_usize(nibbles.len()))?;
 
         let mut nibble_targets = nibbles
             .iter()
@@ -333,13 +340,15 @@ pub mod tests_common {
             .take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES)
             .map(|nibble| {
                 let nibble_target = builder.add_virtual_target();
-                witness.set_target(nibble_target, F::from_canonical_u8(nibble));
-                HalfByteTarget::from_target_safe(nibble_target, builder).to_target()
-            });
+                witness.set_target(nibble_target, F::from_canonical_u8(nibble))?;
+                Ok(HalfByteTarget::from_target_safe(nibble_target, builder).to_target())
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter();
 
-        StorageAddressTarget {
+        Ok(StorageAddressTarget {
             length,
             padded_address: ArrayTarget::parse_exact(&mut nibble_targets),
-        }
+        })
     }
 }

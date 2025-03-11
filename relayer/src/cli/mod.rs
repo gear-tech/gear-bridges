@@ -49,6 +49,8 @@ pub struct GearEthCoreArgs {
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     pub proof_storage_args: ProofStorageArgs,
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 #[derive(Args)]

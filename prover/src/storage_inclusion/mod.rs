@@ -10,6 +10,7 @@
 //! All the above means that any data that's stored in `Leaf` or `HashedValueLeaf` will be parsed,
 //! except ones that have length < 32 bytes.
 
+use anyhow::Result;
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
@@ -63,17 +64,17 @@ pub struct StorageInclusion {
 }
 
 impl StorageInclusion {
-    pub(crate) fn prove(self) -> ProofWithCircuitData<StorageInclusionTarget> {
+    pub(crate) fn prove(self) -> Result<ProofWithCircuitData<StorageInclusionTarget>> {
         let block_header_proof = BlockHeaderParser {
             header_data: self.block_header_data,
         }
-        .prove();
+        .prove()?;
 
         let storage_trie_proof = StorageTrieProof {
             branch_nodes: self.branch_node_data,
             leaf_node_data: self.leaf_node_data,
         }
-        .prove();
+        .prove()?;
 
         log::debug!("Composing block header proof and storage trie proof...");
 
@@ -82,9 +83,9 @@ impl StorageInclusion {
         let mut witness = PartialWitness::new();
 
         let block_header_target =
-            builder.recursively_verify_constant_proof(&block_header_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&block_header_proof, &mut witness)?;
         let storage_trie_target =
-            builder.recursively_verify_constant_proof(&storage_trie_proof, &mut witness);
+            builder.recursively_verify_constant_proof(&storage_trie_proof, &mut witness)?;
 
         block_header_target
             .state_root

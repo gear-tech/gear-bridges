@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::marker::PhantomData;
 
 use plonky2::hash::hash_types::RichField;
@@ -365,7 +366,11 @@ impl<F: RichField + Extendable<D>, const D: usize, C: Curve> SimpleGenerator<F, 
         self.pv.iter().cloned().map(|l| l.target).collect()
     }
 
-    fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
+    fn run_once(
+        &self,
+        witness: &PartitionWitness<F>,
+        out_buffer: &mut GeneratedValues<F>,
+    ) -> Result<()> {
         let mut bits = Vec::new();
         for i in 0..256 {
             bits.push(witness.get_bool_target(self.pv[i]));
@@ -380,8 +385,8 @@ impl<F: RichField + Extendable<D>, const D: usize, C: Curve> SimpleGenerator<F, 
         }
         let point = point_decompress(s.as_slice());
 
-        out_buffer.set_biguint_target(&self.p.x.value, &point.x.to_canonical_biguint());
-        out_buffer.set_biguint_target(&self.p.y.value, &point.y.to_canonical_biguint());
+        out_buffer.set_biguint_target(&self.p.x.value, &point.x.to_canonical_biguint())?;
+        out_buffer.set_biguint_target(&self.p.y.value, &point.y.to_canonical_biguint())
     }
 }
 

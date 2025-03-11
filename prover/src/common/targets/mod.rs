@@ -1,5 +1,6 @@
 //! ### Contains newtypes that structurize target arrays.
 
+use anyhow::Result;
 use itertools::Itertools;
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
@@ -281,12 +282,14 @@ impl Blake2Target {
         &self,
         data: &[bool; BLAKE2_DIGEST_SIZE_IN_BITS],
         witness: &mut PartialWitness<F>,
-    ) {
+    ) -> Result<()> {
         self.0
              .0
             .iter()
             .zip_eq(data.iter())
-            .for_each(|(target, value)| witness.set_bool_target(*target, *value));
+            .try_for_each(|(target, value)| witness.set_bool_target(*target, *value))?;
+
+        Ok(())
     }
 
     /// Check if two `Blake2Target`s are equal. Unlike `connect` this check doesn't add constraint

@@ -1,5 +1,6 @@
 //! ### Contains circuit that's used to compute blake2 hash of generic-length data.
 
+use anyhow::Result;
 use lazy_static::lazy_static;
 use plonky2::{
     gates::noop::NoopGate,
@@ -73,18 +74,18 @@ impl<const DATA_LENGTH: usize> AssertDataLengthValid<DATA_LENGTH> {
 }
 
 impl GenericBlake2 {
-    pub fn prove(self) -> ProofWithCircuitData<GenericBlake2Target> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<GenericBlake2Target>> {
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
         assert!(block_count <= MAX_BLOCK_COUNT);
 
-        let variative_proof = VariativeBlake2 { data: self.data }.prove();
+        let variative_proof = VariativeBlake2 { data: self.data }.prove()?;
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
 
         let block_count_target = builder.add_virtual_target();
-        witness.set_target(block_count_target, F::from_canonical_usize(block_count));
+        witness.set_target(block_count_target, F::from_canonical_usize(block_count))?;
 
         let proof_with_pis_target =
             builder.add_virtual_proof_with_pis(&variative_proof.circuit_data().common);
@@ -110,7 +111,7 @@ impl GenericBlake2 {
         let verifier_data_target =
             builder.random_access_verifier_data(verifier_data_idx, verifier_data_targets);
 
-        witness.set_proof_with_pis_target(&proof_with_pis_target, &variative_proof.proof());
+        witness.set_proof_with_pis_target(&proof_with_pis_target, &variative_proof.proof())?;
         builder.verify_proof::<C>(
             &proof_with_pis_target,
             &verifier_data_target,
@@ -147,6 +148,7 @@ fn blake2_circuit_verifier_data(num_blocks: usize) -> VerifierOnlyCircuitData<C,
         data: vec![0; BLOCK_BYTES * num_blocks],
     }
     .prove()
+    .expect("Correct proof")
     .circuit_data()
     .verifier_only
     .clone()
@@ -167,7 +169,7 @@ struct VariativeBlake2 {
 }
 
 impl VariativeBlake2 {
-    pub fn prove(self) -> ProofWithCircuitData<VariativeBlake2Target> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<VariativeBlake2Target>> {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
@@ -175,13 +177,23 @@ impl VariativeBlake2 {
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
 
         let length_target = builder.add_virtual_target();
-        witness.set_target(length_target, F::from_canonical_usize(self.data.len()));
+        witness.set_target(length_target, F::from_canonical_usize(self.data.len()))?;
 
-        let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec(self.data).map(|byte| {
-            let target = builder.add_virtual_target();
-            witness.set_target(target, F::from_canonical_u8(byte));
-            ByteTarget::from_target_safe(target, &mut builder)
-        });
+        // let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec(self.data).map(|byte| {
+        //     let target = builder.add_virtual_target();
+        //     witness.set_target(target, F::from_canonical_u8(byte))?;
+        //     ByteTarget::from_target_safe(target, &mut builder)
+        // });
+        let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec::<MAX_DATA_BYTES>(self.data)
+            .into_iter()
+            .map(|byte| {
+                let target = builder.add_virtual_target();
+                witness.set_target(target, F::from_canonical_u8(byte))?;
+                Ok(ByteTarget::from_target_safe(target, &mut builder))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Incorrect length"))?;
 
         // Assert that padding is zeroed.
         let mut data_end = builder._false();

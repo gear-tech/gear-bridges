@@ -1,5 +1,6 @@
 //! ### Circuit that's used to parse a single child node from encoded branch node.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -57,7 +58,7 @@ pub struct ChildNodeParser {
 }
 
 impl ChildNodeParser {
-    pub fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
+    pub fn prove(self) -> Result<ProofWithCircuitData<ChildNodeParserTarget>> {
         log::debug!("Proving child node parser...");
 
         let mut config = CircuitConfig::standard_recursion_config();
@@ -68,16 +69,16 @@ impl ChildNodeParser {
         let mut pw = PartialWitness::new();
 
         let node_data = BranchNodeDataPaddedTarget::add_virtual_unsafe(&mut builder);
-        node_data.set_witness(&self.node_data, &mut pw);
+        node_data.set_witness(&self.node_data, &mut pw)?;
 
         let read_offset = builder.add_virtual_target();
-        pw.set_target(read_offset, F::from_canonical_usize(self.read_offset));
+        pw.set_target(read_offset, F::from_canonical_usize(self.read_offset))?;
 
         let assert_child_hash = builder.add_virtual_bool_target_unsafe();
-        pw.set_bool_target(assert_child_hash, self.assert_child_hash);
+        pw.set_bool_target(assert_child_hash, self.assert_child_hash)?;
 
         let claimed_child_hash = Blake2Target::add_virtual_unsafe(&mut builder);
-        claimed_child_hash.set_witness(&self.claimed_child_hash, &mut pw);
+        claimed_child_hash.set_witness(&self.claimed_child_hash, &mut pw)?;
 
         // Read only one byte as we don't support compact integers in other modes than single-byte.
         let encoded_length_size = builder.one();

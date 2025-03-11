@@ -1,6 +1,7 @@
 //! ### Circuit that's used to prove that validator with particular index in validator set have
 //! ### signed GRANDPA message.
 
+use anyhow::Result;
 use plonky2::{
     iop::{
         target::Target,
@@ -51,7 +52,7 @@ impl IndexedValidatorSign {
     pub fn prove(
         &self,
         valiadtor_set_hash_proof: &ProofWithCircuitData<ValidatorSetHashTarget>,
-    ) -> ProofWithCircuitData<IndexedValidatorSignTarget> {
+    ) -> Result<ProofWithCircuitData<IndexedValidatorSignTarget>> {
         log::debug!("    Proving indexed validator sign...");
 
         let sign_proof = SingleValidatorSign {
@@ -59,22 +60,22 @@ impl IndexedValidatorSign {
             signature: self.signature,
             message: self.message,
         }
-        .prove();
+        .prove()?;
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
 
         let validator_set_hash_target =
-            builder.recursively_verify_constant_proof(valiadtor_set_hash_proof, &mut witness);
+            builder.recursively_verify_constant_proof(valiadtor_set_hash_proof, &mut witness)?;
 
         let index_target = builder.add_virtual_target();
-        witness.set_target(index_target, F::from_canonical_usize(self.index));
+        witness.set_target(index_target, F::from_canonical_usize(self.index))?;
 
         let validator = validator_set_hash_target
             .validator_set
             .random_read(index_target, &mut builder);
 
-        let sign_target = builder.recursively_verify_constant_proof(&sign_proof, &mut witness);
+        let sign_target = builder.recursively_verify_constant_proof(&sign_proof, &mut witness)?;
 
         validator.connect(&sign_target.public_key, &mut builder);
 

@@ -29,7 +29,6 @@ mod replay_back;
 mod sync_update;
 
 const SIZE_CHANNEL: usize = 100_000;
-const SIZE_BATCH: u64 = 30 * SLOTS_PER_EPOCH;
 const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 // The constant is intentionally duplicated since vara-runtime is too heavy dependency.
@@ -42,6 +41,8 @@ pub struct Relayer {
     gear_api: GearApi,
 
     metrics: metrics::Updates,
+
+    size_batch: u64,
 }
 
 impl MeteredService for Relayer {
@@ -51,12 +52,13 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
-    pub fn new(program_id: H256, beacon_client: BeaconClient, gear_api: GearApi) -> Self {
+    pub fn new(program_id: H256, beacon_client: BeaconClient, gear_api: GearApi, size_batch: u64) -> Self {
         Self {
             program_id,
             beacon_client,
             gear_api,
             metrics: metrics::Updates::new(),
+            size_batch
         }
     }
 

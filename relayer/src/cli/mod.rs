@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use clap::{Args, Parser, Subcommand};
 
 mod common;
@@ -62,6 +63,11 @@ pub struct EthGearCoreArgs {
     pub gear_args: GearSignerArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
+    #[arg(long= "size-batch", env = "ETH_SIZE_BATCH", default_value = "30")]
+    pub size_batch: NonZeroUsize,
+
+    #[arg(long="size-batch-multiplier", env="ETH_SIZE_BATCH_MULTIPLIER", default_value = "1")]
+    pub size_batch_multiplier: usize,
 }
 
 #[derive(Args)]

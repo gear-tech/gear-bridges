@@ -167,8 +167,15 @@ async fn main() {
 
             let program_id =
                 hex_utils::decode_h256(&args.program_id).expect("Failed to decode program_id");
-
-            let relayer = ethereum_checkpoints::Relayer::new(program_id, beacon_client, gear_api);
+            let multiplier = (args.size_batch_multiplier > 0)
+                .then(|| args.size_batch_multiplier)
+                .unwrap_or(1);
+            let relayer = ethereum_checkpoints::Relayer::new(
+                program_id,
+                beacon_client,
+                gear_api,
+                args.size_batch.get().wrapping_mul(multiplier),
+            );
 
             MetricsBuilder::new()
                 .register_service(&relayer)
@@ -357,6 +364,7 @@ fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         eth_endpoint,
         relayer_address,
         mq_address,
+        ..
     } = &args.ethereum_args;
 
     EthApi::new(
@@ -373,6 +381,7 @@ fn create_eth_client(args: &EthereumArgs) -> EthApi {
         eth_endpoint,
         relayer_address,
         mq_address,
+        ..
     } = args;
 
     EthApi::new(eth_endpoint, mq_address, relayer_address, None)

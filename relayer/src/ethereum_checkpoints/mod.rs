@@ -29,7 +29,7 @@ mod replay_back;
 mod sync_update;
 
 const SIZE_CHANNEL: usize = 100_000;
-const SIZE_BATCH: u64 = 30 * SLOTS_PER_EPOCH;
+const SIZE_BATCH: u64 = 15 * SLOTS_PER_EPOCH;
 const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 // The constant is intentionally duplicated since vara-runtime is too heavy dependency.

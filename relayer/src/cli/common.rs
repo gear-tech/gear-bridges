@@ -74,8 +74,6 @@ pub struct EthereumArgs {
     /// Ethereum address of message queue contract
     #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     pub mq_address: String,
-
-
 }
 
 #[derive(Args)]

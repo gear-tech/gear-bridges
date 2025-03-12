@@ -4,6 +4,7 @@ use clap::Parser;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
+use ethereum_common::SLOTS_PER_EPOCH;
 use gear_rpc_client::GearApi;
 use kill_switch::KillSwitchRelayer;
 use message_relayer::{eth_to_gear, gear_to_eth};
@@ -167,14 +168,16 @@ async fn main() {
 
             let program_id =
                 hex_utils::decode_h256(&args.program_id).expect("Failed to decode program_id");
-            let multiplier = (args.size_batch_multiplier > 0)
-                .then(|| args.size_batch_multiplier)
-                .unwrap_or(1);
+            let multiplier = if args.size_batch_multiplier > 0 {
+                args.size_batch_multiplier
+            } else {
+                1
+            };
             let relayer = ethereum_checkpoints::Relayer::new(
                 program_id,
                 beacon_client,
                 gear_api,
-                args.size_batch.get().wrapping_mul(multiplier),
+                multiplier.saturating_mul(SLOTS_PER_EPOCH),
             );
 
             MetricsBuilder::new()

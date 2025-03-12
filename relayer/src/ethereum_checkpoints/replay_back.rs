@@ -1,20 +1,19 @@
 use super::*;
 use ethereum_beacon_client::{self, BeaconClient};
 
-pub struct ExecutionArgs {
-    pub beacon_client: BeaconClient,
-    pub client: GearApi,
+pub struct Args<'a> {
+    pub beacon_client: &'a BeaconClient,
+    pub client: &'a GearApi,
     pub program_id: [u8; 32],
     pub gas_limit: u64,
     pub replay_back: Option<ReplayBack>,
     pub checkpoint: (Slot, Hash256),
     pub sync_update: SyncCommitteeUpdate,
-    pub size_batch: u64
+    pub size_batch: u64,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn execute(
-    ExecutionArgs {
+pub async fn execute(args: Args<'_>) -> AnyResult<()> {
+    let Args {
         beacon_client,
         client,
         program_id,
@@ -23,8 +22,7 @@ pub async fn execute(
         checkpoint,
         sync_update,
         size_batch,
-    }: ExecutionArgs,
-) -> AnyResult<()> {
+    } = args;
     log::info!("Replaying back started");
 
     let (mut slot_start, _) = checkpoint;

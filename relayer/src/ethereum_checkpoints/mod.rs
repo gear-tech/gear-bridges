@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use checkpoint_light_client_io::{
-    ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH},
+    ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES},
     meta::ReplayBack,
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
@@ -52,13 +52,18 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
-    pub fn new(program_id: H256, beacon_client: BeaconClient, gear_api: GearApi, size_batch: u64) -> Self {
+    pub fn new(
+        program_id: H256,
+        beacon_client: BeaconClient,
+        gear_api: GearApi,
+        size_batch: u64,
+    ) -> Self {
         Self {
             program_id,
             beacon_client,
             gear_api,
             metrics: metrics::Updates::new(),
-            size_batch
+            size_batch,
         }
     }
 
@@ -104,15 +109,16 @@ impl Relayer {
                 replay_back,
                 checkpoint,
             })) => {
-                if let Err(e) = replay_back::execute(
-                    &self.beacon_client,
-                    &self.gear_api,
-                    self.program_id.0,
+                if let Err(e) = replay_back::execute(replay_back::Args {
+                    beacon_client: &self.beacon_client,
+                    client: &self.gear_api,
+                    program_id: self.program_id.0,
                     gas_limit,
                     replay_back,
                     checkpoint,
                     sync_update,
-                )
+                    size_batch: self.size_batch,
+                })
                 .await
                 {
                     log::error!("{e:?}. Exiting");

@@ -5493,7 +5493,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "governance"
+name = "governance-tools"
 version = "0.3.0"
 dependencies = [
  "clap",

@@ -13,6 +13,12 @@ pub use submit_receipt::abi as eth_abi;
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
 
+#[derive(Debug, Clone, Decode, TypeInfo)]
+pub enum Order {
+    Direct,
+    Reverse,
+}
+
 /// VFT Manager service.
 pub struct VftManager<ExecContext> {
     exec_context: ExecContext,
@@ -446,6 +452,24 @@ where
     /// Get current [State::historical_proxy_address].
     pub fn historical_proxy_address(&self) -> ActorId {
         self.state().historical_proxy_address
+    }
+
+    pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
+        fn collect<'a, T: 'a + Copy>(
+            start: u32,
+            count: u32,
+            iter: impl DoubleEndedIterator<Item = &'a T>,
+        ) -> Vec<T> {
+            iter.skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect()
+        }
+    
+        match order {
+            Order::Direct => collect(start, count, submit_receipt::transactions().iter()),
+            Order::Reverse => collect(start, count, submit_receipt::transactions().iter().rev()),
+        }
     }
 
     /// The method is intended for tests and is available only when the feature `gas_calculation`

@@ -9,9 +9,9 @@ mod msg_tracker;
 mod token_operations;
 
 use bridge_builtin_operations::Payload;
-use msg_tracker::{msg_tracker_mut, MessageStatus, TxDetails};
+use msg_tracker::{MessageStatus, TxDetails};
 
-pub use msg_tracker::{msg_tracker_state, MessageInfo as MsgTrackerMessageInfo};
+pub use msg_tracker::{msg_tracker_mut, MessageInfo as MsgTrackerMessageInfo};
 
 /// Initialize state that's used by this VFT Manager method.
 pub fn seed() {

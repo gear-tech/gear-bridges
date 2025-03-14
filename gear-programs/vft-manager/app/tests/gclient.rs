@@ -298,6 +298,7 @@ async fn bench_gas_for_reply() -> Result<()> {
                 },
             },
             slot_start,
+            None,
         )
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)

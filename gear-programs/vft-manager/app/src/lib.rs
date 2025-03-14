@@ -15,22 +15,23 @@ impl Program {
     }
 
     /// The constructor is intended for test purposes and is available only when the feature
-    /// `gas_calculation` is enabled.
-    pub fn gas_calculation(_init_config: InitConfig, _slot_first: u64) -> Self {
-        #[cfg(feature = "gas_calculation")]
+    /// `mocks` is enabled.
+    pub fn gas_calculation(_init_config: InitConfig, _slot_first: u64, _count: Option<u32>) -> Self {
+        #[cfg(feature = "mocks")]
         {
             let self_ = Self::new(_init_config);
 
             let transactions = services::submit_receipt::transactions_mut();
-            for i in 0..services::SIZE_FILL_TRANSACTIONS_STEP {
+            let count = _count.map(|c| c as usize).unwrap_or(services::SIZE_FILL_TRANSACTIONS_STEP);
+            for i in 0..count {
                 transactions.insert((_slot_first, i as u64));
             }
 
             self_
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 
     pub fn vft_manager(&self) -> VftManager<GStdExecContext> {

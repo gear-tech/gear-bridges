@@ -472,21 +472,21 @@ where
         }
     }
 
-    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Populates the collection with processed transactions.
     ///
     /// Returns false when the collection is populated.
     pub fn fill_transactions(&mut self) -> bool {
-        #[cfg(feature = "gas_calculation")]
+        #[cfg(feature = "mocks")]
         {
             submit_receipt::fill_transactions()
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
     /// on the `_supply_type`.
     ///
@@ -497,7 +497,7 @@ where
         _transaction_index: u64,
         _supply_type: TokenSupply,
     ) -> Result<(), Error> {
-        #[cfg(feature = "gas_calculation")]
+        #[cfg(feature = "mocks")]
         {
             use submit_receipt::token_operations;
 
@@ -529,8 +529,8 @@ where
             }
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 }
 

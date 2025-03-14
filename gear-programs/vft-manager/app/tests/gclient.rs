@@ -11,7 +11,7 @@ use sp_runtime::{
 };
 use tokio::sync::Mutex;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
-use vft_manager_client::{traits::*, Config, InitConfig, TokenSupply};
+use vft_manager_client::{traits::*, Config, InitConfig, Order, TokenSupply};
 
 static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((3_000, None, None));
 
@@ -383,6 +383,77 @@ async fn bench_gas_for_reply() -> Result<()> {
         results_min_limit.last(),
         average(&results_min_limit[..])
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn getter_transactions() -> Result<()> {
+    const CAPACITY: usize = 10;
+
+    let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+
+    // deploy VFT-manager
+    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let slot_start = 2_000;
+    let vft_manager_id = factory
+        .gas_calculation(
+            InitConfig {
+                erc20_manager_address: Default::default(),
+                gear_bridge_builtin: Default::default(),
+                historical_proxy_address: Default::default(),
+                config: Config {
+                    gas_for_token_ops: 20_000_000_000,
+                    gas_for_reply_deposit: 10_000_000_000,
+                    gas_to_send_request_to_builtin: 20_000_000_000,
+                    reply_timeout: 100,
+                },
+            },
+            slot_start,
+            Some(CAPACITY as u32),
+        )
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    let service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let result = service.transactions(Order::Direct, CAPACITY as u32, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_empty());
+
+    let result = service.transactions(Order::Reverse, CAPACITY as u32, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_empty());
+
+    let result = service.transactions(Order::Direct, 0, CAPACITY as u32)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    result.into_iter().fold((slot_start as u64, 0u64), |prev, (current_slot, current_index)| {
+        assert_eq!(prev, (current_slot, current_index));
+
+        (current_slot, current_index + 1)
+    });
+
+    let result = service.transactions(Order::Reverse, 0, CAPACITY as u32)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    result.into_iter().fold((slot_start as u64, CAPACITY as u64 - 1), |prev, (current_slot, current_index)| {
+        assert_eq!(prev, (current_slot, current_index));
+
+        (current_slot, current_index - 1)
+    });
 
     Ok(())
 }

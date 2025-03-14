@@ -61,11 +61,6 @@ pub fn init() {
     unsafe { MSG_TRACKER = Some(MessageTracker::default()) }
 }
 
-/// Fetch state of this message tracker.
-pub fn msg_tracker_state() -> Vec<(MessageId, MessageInfo)> {
-    msg_tracker_mut().message_info.clone().into_iter().collect()
-}
-
 /// Get mutable reference to a global message tracker.
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
     #[allow(clippy::deref_addrof)]

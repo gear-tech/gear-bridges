@@ -423,65 +423,68 @@ async fn getter_transactions() -> Result<()> {
     );
 
     let service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
-    let result = service.transactions(Order::Direct, CAPACITY as u32, 1)
+    let result = service
+        .transactions(Order::Direct, CAPACITY as u32, 1)
         .recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
     assert!(result.is_empty());
 
-    let result = service.transactions(Order::Reverse, CAPACITY as u32, 1)
+    let result = service
+        .transactions(Order::Reverse, CAPACITY as u32, 1)
         .recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
     assert!(result.is_empty());
 
-    let result = service.transactions(Order::Direct, 0, CAPACITY as u32)
+    let result = service
+        .transactions(Order::Direct, 0, CAPACITY as u32)
         .recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
-    result.into_iter().fold((slot_start as u64, 0u64), |prev, (current_slot, current_index)| {
-        assert_eq!(prev, (current_slot, current_index));
+    result
+        .into_iter()
+        .fold((slot_start, 0u64), |prev, (current_slot, current_index)| {
+            assert_eq!(prev, (current_slot, current_index));
 
-        (current_slot, current_index + 1)
-    });
+            (current_slot, current_index + 1)
+        });
 
-    let result = service.transactions(Order::Reverse, 0, CAPACITY as u32)
+    let result = service
+        .transactions(Order::Reverse, 0, CAPACITY as u32)
         .recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
-    result.into_iter().fold((slot_start as u64, CAPACITY as u64 - 1), |prev, (current_slot, current_index)| {
-        assert_eq!(prev, (current_slot, current_index));
+    result.into_iter().fold(
+        (slot_start, CAPACITY as u64 - 1),
+        |prev, (current_slot, current_index)| {
+            assert_eq!(prev, (current_slot, current_index));
 
-        (current_slot, current_index - 1)
-    });
+            (current_slot, current_index - 1)
+        },
+    );
 
     Ok(())
 }
 
-
 #[tokio::test]
 async fn msg_tracker_state() -> Result<()> {
-    const CAPACITY: usize = 10;
-
     let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
-    let slot_start = 2_000;
     let vft_manager_id = factory
-        .new(
-            InitConfig {
-                erc20_manager_address: Default::default(),
-                gear_bridge_builtin: Default::default(),
-                historical_proxy_address: Default::default(),
-                config: Config {
-                    gas_for_token_ops: 20_000_000_000,
-                    gas_for_reply_deposit: 10_000_000_000,
-                    gas_to_send_request_to_builtin: 20_000_000_000,
-                    reply_timeout: 100,
-                },
+        .new(InitConfig {
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                reply_timeout: 100,
             },
-        )
+        })
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -494,40 +497,50 @@ async fn msg_tracker_state() -> Result<()> {
 
     let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
     service
-        .insert_message_info(Default::default(), vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin, vft_manager_client::TxDetails {
-            vara_token_id: Default::default(),
-            sender: Default::default(),
-            amount: Default::default(),
-            receiver: Default::default(),
-            token_supply: vft_manager_client::TokenSupply::Ethereum,
-        })
-        .send_recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    let result = service.request_briding_msg_tracker_state(1, 10).recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(result.is_empty());
-
-    let result = service.request_briding_msg_tracker_state(0, 2).recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(result.len(), 1);
-    assert_eq!(
-        result[0],
-        (Default::default(),
-        vft_manager_client::MessageInfo {
-            status: vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
-            details: vft_manager_client::TxDetails {
+        .insert_message_info(
+            Default::default(),
+            vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
+            vft_manager_client::TxDetails {
                 vara_token_id: Default::default(),
                 sender: Default::default(),
                 amount: Default::default(),
                 receiver: Default::default(),
                 token_supply: vft_manager_client::TokenSupply::Ethereum,
             },
-        }
-    ));
+        )
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    let result = service
+        .request_briding_msg_tracker_state(1, 10)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_empty());
+
+    let result = service
+        .request_briding_msg_tracker_state(0, 2)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        result[0],
+        (
+            Default::default(),
+            vft_manager_client::MessageInfo {
+                status: vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
+                details: vft_manager_client::TxDetails {
+                    vara_token_id: Default::default(),
+                    sender: Default::default(),
+                    amount: Default::default(),
+                    receiver: Default::default(),
+                    token_supply: vft_manager_client::TokenSupply::Ethereum,
+                },
+            }
+        )
+    );
 
     Ok(())
 }

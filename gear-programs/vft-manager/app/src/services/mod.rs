@@ -4,8 +4,8 @@ mod error;
 mod token_mapping;
 
 use error::Error;
-use token_mapping::TokenMap;
 use request_bridging::{MessageStatus, TxDetails};
+use token_mapping::TokenMap;
 
 mod request_bridging;
 pub mod submit_receipt;
@@ -411,9 +411,12 @@ where
     /// Get state of a `request_bridging` message tracker.
     pub fn request_briding_msg_tracker_state(
         &self,
-        start: u32, count: u32,
+        start: u32,
+        count: u32,
     ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
-        request_bridging::msg_tracker_mut().message_info.iter()
+        request_bridging::msg_tracker_mut()
+            .message_info
+            .iter()
             .skip(start as usize)
             .take(count as usize)
             .map(|(k, v)| (*k, v.clone()))
@@ -471,7 +474,7 @@ where
                 .copied()
                 .collect()
         }
-    
+
         match order {
             Order::Direct => collect(start, count, submit_receipt::transactions().iter()),
             Order::Reverse => collect(start, count, submit_receipt::transactions().iter().rev()),

@@ -5,6 +5,7 @@ mod token_mapping;
 
 use error::Error;
 use token_mapping::TokenMap;
+use request_bridging::{MessageStatus, TxDetails};
 
 mod request_bridging;
 pub mod submit_receipt;
@@ -485,6 +486,23 @@ where
         #[cfg(feature = "mocks")]
         {
             submit_receipt::fill_transactions()
+        }
+
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
+    }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
+    /// is enabled. Inserts the message info into the corresponding collection.
+    pub fn insert_message_info(
+        &mut self,
+        _msg_id: MessageId,
+        _status: MessageStatus,
+        _details: TxDetails,
+    ) {
+        #[cfg(feature = "mocks")]
+        {
+            request_bridging::msg_tracker_mut().insert_message_info(_msg_id, _status, _details);
         }
 
         #[cfg(not(feature = "mocks"))]

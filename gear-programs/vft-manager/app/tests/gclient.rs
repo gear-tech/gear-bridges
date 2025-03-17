@@ -391,7 +391,8 @@ async fn bench_gas_for_reply() -> Result<()> {
 async fn getter_transactions() -> Result<()> {
     const CAPACITY: usize = 10;
 
-    let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let (api, suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with(suri).unwrap();
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
@@ -469,7 +470,8 @@ async fn getter_transactions() -> Result<()> {
 
 #[tokio::test]
 async fn msg_tracker_state() -> Result<()> {
-    let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let (api, suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with(suri).unwrap();
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));

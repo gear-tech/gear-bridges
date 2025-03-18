@@ -55,7 +55,7 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: nightly-f47d7e0c29a36372908b917cd74aa589d5888f8e # TODO: Change back once https://github.com/foundry-rs/foundry/issues/10102 will be resolved
       - name: Build ethereum smart-contracts
         run: forge build
         working-directory: ./ethereum
@@ -81,7 +81,7 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: nightly-f47d7e0c29a36372908b917cd74aa589d5888f8e # TODO: Change back once https://github.com/foundry-rs/foundry/issues/10102 will be resolved
       - name: Build ethereum smart-contracts
         run: forge build
         working-directory: ./ethereum

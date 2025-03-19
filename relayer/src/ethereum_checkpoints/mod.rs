@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use checkpoint_light_client_io::{
-    ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES, SLOTS_PER_EPOCH},
+    ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES},
     meta::ReplayBack,
     tree_hash::Hash256,
     Handle, HandleResult, Slot, SyncCommitteeUpdate, G2,
@@ -29,7 +29,6 @@ mod replay_back;
 mod sync_update;
 
 const SIZE_CHANNEL: usize = 100_000;
-const SIZE_BATCH: u64 = 30 * SLOTS_PER_EPOCH;
 const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 // The constant is intentionally duplicated since vara-runtime is too heavy dependency.
@@ -42,6 +41,8 @@ pub struct Relayer {
     gear_api: GearApi,
 
     metrics: metrics::Updates,
+
+    size_batch: u64,
 }
 
 impl MeteredService for Relayer {
@@ -51,12 +52,18 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
-    pub fn new(program_id: H256, beacon_client: BeaconClient, gear_api: GearApi) -> Self {
+    pub fn new(
+        program_id: H256,
+        beacon_client: BeaconClient,
+        gear_api: GearApi,
+        size_batch: u64,
+    ) -> Self {
         Self {
             program_id,
             beacon_client,
             gear_api,
             metrics: metrics::Updates::new(),
+            size_batch,
         }
     }
 
@@ -102,15 +109,16 @@ impl Relayer {
                 replay_back,
                 checkpoint,
             })) => {
-                if let Err(e) = replay_back::execute(
-                    &self.beacon_client,
-                    &self.gear_api,
-                    self.program_id.0,
+                if let Err(e) = replay_back::execute(replay_back::Args {
+                    beacon_client: &self.beacon_client,
+                    client: &self.gear_api,
+                    program_id: self.program_id.0,
                     gas_limit,
                     replay_back,
                     checkpoint,
                     sync_update,
-                )
+                    size_batch: self.size_batch,
+                })
                 .await
                 {
                     log::error!("{e:?}. Exiting");

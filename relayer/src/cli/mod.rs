@@ -62,6 +62,12 @@ pub struct EthGearCoreArgs {
     pub gear_args: GearSignerArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
+    #[arg(
+        long = "size-batch-multiplier",
+        env = "ETH_SIZE_BATCH_MULTIPLIER",
+        default_value = "30"
+    )]
+    pub size_batch_multiplier: u64,
 }
 
 #[derive(Args)]

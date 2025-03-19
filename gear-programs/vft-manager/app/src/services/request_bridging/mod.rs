@@ -11,7 +11,8 @@ mod token_operations;
 use bridge_builtin_operations::Payload;
 
 pub use msg_tracker::{
-    msg_tracker_mut, MessageInfo as MsgTrackerMessageInfo, MessageStatus, TxDetails,
+    msg_tracker_mut, msg_tracker_ref, MessageInfo as MsgTrackerMessageInfo, MessageStatus,
+    TxDetails,
 };
 
 /// Initialize state that's used by this VFT Manager method.

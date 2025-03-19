@@ -61,6 +61,12 @@ pub fn init() {
     unsafe { MSG_TRACKER = Some(MessageTracker::default()) }
 }
 
+/// Get reference to a global message tracker.
+pub fn msg_tracker_ref() -> &'static MessageTracker {
+    #[allow(clippy::deref_addrof)]
+    unsafe { (*&raw const MSG_TRACKER).as_ref() }.expect("VftManager::seed() should be called")
+}
+
 /// Get mutable reference to a global message tracker.
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
     #[allow(clippy::deref_addrof)]

@@ -414,7 +414,7 @@ where
         start: u32,
         count: u32,
     ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
-        request_bridging::msg_tracker_mut()
+        request_bridging::msg_tracker_ref()
             .message_info
             .iter()
             .skip(start as usize)

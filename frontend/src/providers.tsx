@@ -5,14 +5,15 @@ import {
   ProviderProps,
 } from '@gear-js/react-hooks';
 import { Alert, alertStyles } from '@gear-js/vara-ui';
+import { AppKitNetwork } from '@reown/appkit/networks';
+import * as allNetworks from '@reown/appkit/networks';
+import { createAppKit } from '@reown/appkit/react';
+import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createWeb3Modal } from '@web3modal/wagmi/react';
-import { defaultWagmiConfig } from '@web3modal/wagmi/react/config';
 import { ComponentType } from 'react';
-import { WagmiProvider, http } from 'wagmi';
-import * as allChains from 'wagmi/chains';
+import { http, WagmiProvider } from 'wagmi';
 
-import { VARA_NODE_ADDRESS, ETH_CHAIN_ID, ETH_NODE_ADDRESS } from './consts';
+import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, VARA_NODE_ADDRESS } from './consts';
 import { BridgeProvider } from './contexts';
 
 function ApiProvider({ children }: ProviderProps) {
@@ -33,37 +34,43 @@ function AlertProvider({ children }: ProviderProps) {
 
 const projectId = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID as string;
 
-const metadata = {
-  name: 'Web3Modal',
-  description: 'Web3Modal Example',
-  url: 'https://vara.network/', // origin must match your domain & subdomain
-  icons: ['https://avatars.githubusercontent.com/u/37784886'],
-};
-
-const getChain = (id: number) => {
-  const result = Object.values(allChains).find((chain) => chain.id === Number(id));
+const getNetwork = (id: number) => {
+  const result = Object.values(allNetworks)
+    .filter((network) => 'id' in network)
+    .find((network) => network.id === id);
 
   if (!result) throw new Error(`Chain with id ${id} not found`);
 
-  return result;
+  return result as AppKitNetwork;
 };
 
-const chains = [getChain(ETH_CHAIN_ID)] as const;
+const networks = [getNetwork(ETH_CHAIN_ID)] as [AppKitNetwork];
 
-const config = defaultWagmiConfig({
-  chains,
+const metadata = {
+  name: 'AppKit',
+  description: 'AppKit Example',
+  url: 'https://vara.network/',
+  icons: ['https://avatars.githubusercontent.com/u/179229932'],
+};
+
+const adapter = new WagmiAdapter({
+  networks,
   projectId,
-  metadata,
   transports: { [ETH_CHAIN_ID]: http(ETH_NODE_ADDRESS) },
-  auth: { email: false },
 });
 
-createWeb3Modal({
+const COINBASE_WALLET_ID = 'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa';
+const TRUST_WALLET_ID = '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0';
+
+createAppKit({
+  adapters: [adapter],
+  networks,
+  metadata,
   projectId,
-  // @ts-expect-error -- revisit after wagmi and web3modal bumps
-  wagmiConfig: config,
-  enableAnalytics: false,
+  features: { analytics: false, email: false, socials: false },
+  enableWalletGuide: false,
   allWallets: 'HIDE',
+  featuredWalletIds: [COINBASE_WALLET_ID, TRUST_WALLET_ID],
   themeMode: 'light',
   themeVariables: {
     '--w3m-font-family': 'Anuphan',
@@ -71,15 +78,8 @@ createWeb3Modal({
   },
 });
 
-declare module 'wagmi' {
-  interface Register {
-    config: typeof config;
-  }
-}
-
 function EthProvider({ children }: ProviderProps) {
-  // @ts-expect-error -- revisit after wagmi and web3modal bumps
-  return <WagmiProvider config={config}>{children}</WagmiProvider>;
+  return <WagmiProvider config={adapter.wagmiConfig}>{children}</WagmiProvider>;
 }
 
 const queryClient = new QueryClient({

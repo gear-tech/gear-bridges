@@ -12,9 +12,12 @@ use crate::{
         BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
+    storage_inclusion::storage_trie_proof::node_parser::{
+        MAX_LEAF_NODE_DATA_LENGTH_IN_BLOCKS, NODE_DATA_BLOCK_BYTES,
+    },
 };
 
-use super::{node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget};
+use super::{node_parser::leaf_parser::LeafParser, storage_address::StorageAddressTarget};
 
 impl_parsable_target_set! {
     /// Public inputs for `HashedLeafParser`.
@@ -25,9 +28,9 @@ impl_parsable_target_set! {
         pub storage_data_hash: Blake2Target,
 
         /// Address composed from all the nodes from root to this.
-        pub partial_address: PartialStorageAddressTarget,
+        pub partial_address: StorageAddressTarget,
         /// Address of storage item.
-        pub final_address: PartialStorageAddressTarget,
+        pub final_address: StorageAddressTarget,
     }
 }
 
@@ -38,10 +41,11 @@ pub struct HashedLeafParser {
 
 impl HashedLeafParser {
     pub fn prove(self) -> ProofWithCircuitData<HashedLeafParserTarget> {
-        let hasher_proof = GenericBlake2 {
-            data: self.leaf_parser.node_data.clone(),
-        }
-        .prove();
+        const MAX_DATA_LENGTH_ESTIMATION: usize =
+            MAX_LEAF_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
+        let hasher_proof =
+            GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(self.leaf_parser.node_data.clone())
+                .prove();
         let leaf_parser_proof = self.leaf_parser.prove();
 
         log::debug!("Composing hasher proof and leaf parser proof...");

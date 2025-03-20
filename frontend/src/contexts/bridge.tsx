@@ -22,4 +22,5 @@ function BridgeProvider({ children }: PropsWithChildren) {
   return <Provider value={value}>{children}</Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- TODO: figure out
 export { BridgeProvider, useBridge };

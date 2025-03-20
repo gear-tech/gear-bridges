@@ -96,7 +96,7 @@ function QueryProvider({ children }: ProviderProps) {
 
 const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider, BridgeProvider];
 
-const withProviders = (Component: ComponentType) => () =>
+const WithProviders = (Component: ComponentType) => () =>
   providers.reduceRight((children, Provider) => <Provider>{children}</Provider>, <Component />);
 
-export { withProviders };
+export { WithProviders };

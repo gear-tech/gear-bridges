@@ -22,7 +22,10 @@ export class Program {
   public readonly registry: TypeRegistry;
   public readonly bridgingPayment: BridgingPayment;
 
-  constructor(public api: GearApi, public programId?: `0x${string}`) {
+  constructor(
+    public api: GearApi,
+    public programId?: `0x${string}`,
+  ) {
     const types: Record<string, any> = {
       InitConfig: { admin_address: '[u8;32]', vft_manager_address: '[u8;32]', config: 'Config' },
       Config: {

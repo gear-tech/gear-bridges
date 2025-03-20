@@ -2,7 +2,7 @@ import { Outlet, ScrollRestoration } from 'react-router-dom';
 
 import { ErrorBoundary, Footer, Header } from './components';
 import { useAccountSync } from './features/wallet';
-import { withProviders } from './providers';
+import { WithProviders } from './providers';
 
 function Component() {
   useAccountSync();
@@ -24,6 +24,6 @@ function Component() {
   );
 }
 
-const App = withProviders(Component);
+const App = WithProviders(Component);
 
 export { App };

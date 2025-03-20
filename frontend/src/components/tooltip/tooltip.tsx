@@ -35,7 +35,6 @@ function TooltipComponent({ value, style }: { value: ReactNode; style: CSSProper
 
       document.body.removeChild(newRoot);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!root) return null;

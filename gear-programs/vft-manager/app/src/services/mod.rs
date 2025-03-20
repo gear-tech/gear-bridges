@@ -4,6 +4,7 @@ mod error;
 mod token_mapping;
 
 use error::Error;
+use request_bridging::{MessageStatus, TxDetails};
 use token_mapping::TokenMap;
 
 mod request_bridging;
@@ -12,6 +13,12 @@ pub mod submit_receipt;
 pub use submit_receipt::abi as eth_abi;
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
+
+#[derive(Debug, Clone, Decode, TypeInfo)]
+pub enum Order {
+    Direct,
+    Reverse,
+}
 
 /// VFT Manager service.
 pub struct VftManager<ExecContext> {
@@ -404,8 +411,16 @@ where
     /// Get state of a `request_bridging` message tracker.
     pub fn request_briding_msg_tracker_state(
         &self,
+        start: u32,
+        count: u32,
     ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
-        request_bridging::msg_tracker_state()
+        request_bridging::msg_tracker_ref()
+            .message_info
+            .iter()
+            .skip(start as usize)
+            .take(count as usize)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect()
     }
 
     /// Get current [token mapping](State::token_map).
@@ -448,21 +463,56 @@ where
         self.state().historical_proxy_address
     }
 
-    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
+        fn collect<'a, T: 'a + Copy>(
+            start: u32,
+            count: u32,
+            iter: impl DoubleEndedIterator<Item = &'a T>,
+        ) -> Vec<T> {
+            iter.skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect()
+        }
+
+        match order {
+            Order::Direct => collect(start, count, submit_receipt::transactions().iter()),
+            Order::Reverse => collect(start, count, submit_receipt::transactions().iter().rev()),
+        }
+    }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Populates the collection with processed transactions.
     ///
     /// Returns false when the collection is populated.
     pub fn fill_transactions(&mut self) -> bool {
-        #[cfg(feature = "gas_calculation")]
+        #[cfg(feature = "mocks")]
         {
             submit_receipt::fill_transactions()
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    /// The method is intended for tests and is available only when the feature `mocks`
+    /// is enabled. Inserts the message info into the corresponding collection.
+    pub fn insert_message_info(
+        &mut self,
+        _msg_id: MessageId,
+        _status: MessageStatus,
+        _details: TxDetails,
+    ) {
+        #[cfg(feature = "mocks")]
+        {
+            request_bridging::msg_tracker_mut().insert_message_info(_msg_id, _status, _details);
+        }
+
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
+    }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
     /// on the `_supply_type`.
     ///
@@ -473,7 +523,7 @@ where
         _transaction_index: u64,
         _supply_type: TokenSupply,
     ) -> Result<(), Error> {
-        #[cfg(feature = "gas_calculation")]
+        #[cfg(feature = "mocks")]
         {
             use submit_receipt::token_operations;
 
@@ -505,8 +555,8 @@ where
             }
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 }
 

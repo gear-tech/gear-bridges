@@ -31,4 +31,4 @@ gclient.workspace = true
 
 [features]
 wasm-binary = []
-gas_calculation = ["vft-manager-app/gas_calculation"]
+mocks = ["vft-manager-app/mocks"]

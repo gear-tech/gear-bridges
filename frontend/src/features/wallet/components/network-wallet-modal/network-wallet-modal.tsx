@@ -1,6 +1,6 @@
 import { useAccount } from '@gear-js/react-hooks';
 import { Button, Modal, ModalProps } from '@gear-js/vara-ui';
-import { useWeb3Modal } from '@web3modal/wagmi/react';
+import { useAppKit } from '@reown/appkit/react';
 import { useEffect } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -18,7 +18,7 @@ function NetworkWalletModal({ close }: Props) {
   const ethAccount = useEthAccount();
 
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
-  const { open: openEthModal } = useWeb3Modal();
+  const { open: openEthModal } = useAppKit();
 
   useEffect(() => {
     if (!account && !ethAccount.isConnected) return;

@@ -5,8 +5,6 @@ WORKDIR /app
 
 COPY ./frontend .
 
-RUN npm install -g pnpm
-
 RUN apk update
 
 RUN apk add xsel
@@ -29,9 +27,9 @@ ENV VITE_VARA_NODE_ADDRESS=${VITE_VARA_NODE_ADDRESS} \
     VITE_ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS=${VITE_ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS} \
     VITE_WRAPPED_VARA_CONTRACT_ADDRESS=${VITE_WRAPPED_VARA_CONTRACT_ADDRESS}
 
-RUN pnpm install
+RUN npm install --force
 
-RUN pnpm build
+RUN npm build
 
 RUN npm install --global serve
 

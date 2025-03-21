@@ -71,9 +71,9 @@ createAppKit({
   enableWalletGuide: false,
   allWallets: 'HIDE',
   featuredWalletIds: [COINBASE_WALLET_ID, TRUST_WALLET_ID],
-  themeMode: 'light',
+  themeMode: 'dark',
   themeVariables: {
-    '--w3m-font-family': 'Anuphan',
+    '--w3m-font-family': 'Geist Variable',
     '--w3m-border-radius-master': '1px',
   },
 });

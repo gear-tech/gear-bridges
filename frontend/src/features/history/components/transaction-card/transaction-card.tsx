@@ -56,40 +56,7 @@ function TransactionCard(props: Props) {
   );
 }
 
-function TransactionCardCompact(props: Props) {
-  const { status, timestamp } = props;
-
-  const [isModalOpen, openModal, closeModal] = useModal();
-
-  return (
-    <>
-      <Card as="button" className={cx(styles.compactCard, styles.button)} onClick={openModal}>
-        <TransactionPair {...props} isCompact />
-
-        <div className={styles.status}>
-          <TransactionStatus status={status} />
-          <TransactionDate timestamp={timestamp} isCompact />
-        </div>
-      </Card>
-
-      {isModalOpen && <TransactionModal close={closeModal} {...props} />}
-    </>
-  );
-}
-
-function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
-  if (isCompact)
-    return (
-      <Card className={styles.compactCard}>
-        <TransactionPair.Skeleton isCompact />
-
-        <div>
-          <TransactionStatus.Skeleton />
-          <TransactionDate.Skeleton isCompact />
-        </div>
-      </Card>
-    );
-
+function TransactionCardSkeleton() {
   return (
     <Card className={styles.wideCard}>
       <TransactionDate.Skeleton />
@@ -111,6 +78,5 @@ function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
 }
 
 TransactionCard.Skeleton = TransactionCardSkeleton;
-TransactionCard.Compact = TransactionCardCompact;
 
 export { TransactionCard };

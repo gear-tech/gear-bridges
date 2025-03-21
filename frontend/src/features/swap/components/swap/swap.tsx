@@ -11,7 +11,7 @@ function Swap() {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
-  const [isEthNetwork, setIsEthNetwork] = useState(ethAccount.isConnected);
+  const [isEthNetwork, setIsEthNetwork] = useState(ethAccount.isConnected && ethAccount.chainId === ETH_CHAIN_ID);
 
   const Form = useMemo(() => {
     // since eth account is reconnecting immediately without any visible loading state,
@@ -25,12 +25,7 @@ function Swap() {
 
   return (
     <Form
-      renderSwapNetworkButton={() => (
-        <SwapNetworkButton
-          onClick={() => setIsEthNetwork((prevValue) => !prevValue)}
-          isActive={(ethAccount.isConnected && ethAccount.chainId === ETH_CHAIN_ID) || Boolean(account)}
-        />
-      )}
+      renderSwapNetworkButton={() => <SwapNetworkButton onClick={() => setIsEthNetwork((prevValue) => !prevValue)} />}
     />
   );
 }

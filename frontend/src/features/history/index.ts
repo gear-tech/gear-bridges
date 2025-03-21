@@ -1,10 +1,9 @@
-import { LatestTransactions, List, TransactionsCounter, TransactionCard } from './components';
+import { List, TransactionsCounter, TransactionCard } from './components';
 import { FIELD_NAME, STATUS_OPTIONS, TIMESTAMP_OPTIONS, TRANSACTIONS_LIMIT } from './consts';
 import { useTransactions, useTransactionsCount, useTransactionFilters } from './hooks';
 import { getAssetOptions } from './utils';
 
 export {
-  LatestTransactions,
   List,
   TransactionsCounter,
   TransactionCard,

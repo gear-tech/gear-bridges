@@ -1,22 +1,8 @@
-.compactCard,
 .wideCard {
   white-space: nowrap;
 
   svg {
     flex-shrink: 0;
-  }
-}
-
-.compactCard {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-
-  .status {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
   }
 }
 

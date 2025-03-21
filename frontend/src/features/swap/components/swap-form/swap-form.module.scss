@@ -1,91 +1,91 @@
-.sections {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.section {
-  padding: 24px 24px 32px;
-
+.form {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
 
+.card {
+  padding: 24px 24px 32px;
+
+  background-color: #0e1217;
   border-radius: 16px;
-  border: 1px double transparent;
-  background-image: linear-gradient(#fff, #fff),
-    linear-gradient(180deg, var(--gradient-start-color) 0%, var(--gradient-end-color) 100%);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
+  border: 1px solid #00ffc433;
 
-  position: relative;
+  position: relative; // for swap network button
 
-  &:first-child {
-    --gradient-start-color: transparent;
-    --gradient-end-color: rgba(232, 232, 239, 0.5);
-
-    &.active {
-      --gradient-end-color: rgba(0, 255, 196, 0.5);
-    }
+  &:not(:last-child) {
+    margin-bottom: 8px;
   }
+}
 
-  &:not(:first-child) {
-    --gradient-start-color: rgba(232, 232, 239, 0.5);
-    --gradient-end-color: #e8e8ef;
+.heading {
+  margin-bottom: 12px;
 
-    &.active {
-      --gradient-start-color: rgba(0, 255, 196, 0.5);
-      --gradient-end-color: #00ffc4;
-    }
-  }
+  font-size: 14px;
+  line-height: 20px;
+  color: #f6f6f6cc;
 }
 
 .row {
-  display: grid;
-  grid-template-columns: 8fr 2fr;
-  align-items: center;
-  gap: 16px;
+  margin-bottom: 12px;
 
-  &:first-child {
-    padding-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+}
 
-    border-bottom: 1px solid #e8e8ef;
-  }
+.toContainer {
+  padding-bottom: 24px;
 
-  > *:only-child {
-    grid-column: span 2;
-  }
+  display: flex;
+  justify-content: space-between;
+
+  border-bottom: 1px solid #00ffc433;
 }
 
 .wallet {
-  display: grid;
-  grid-template-columns: 173px 1fr;
-  gap: 16px;
-
-  overflow: hidden;
-}
-
-.amount {
   display: flex;
-  gap: 8px;
+  gap: 28px;
 
-  .select {
-    flex-shrink: 0;
-    min-width: 95px;
+  svg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .token {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+
+    .symbol {
+      font-weight: 600;
+      font-size: 18px;
+      line-height: 24px;
+    }
+
+    .network {
+      font-size: 14px;
+      line-height: 1;
+      color: #828b8e;
+    }
   }
 }
 
-.destination {
-  display: grid;
-  grid-template-columns: 173px 1fr;
-  gap: 16px;
+.amount {
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 120%;
+  color: #9cacb1;
 
-  gap: 16px;
+  &.active {
+    color: #fff;
+  }
+}
+
+.inputContainer {
+  padding-top: 24px;
 }
 
 .submitContainer {
-  margin-top: 20px;
-
   display: flex;
   align-items: center;
   gap: 8px;

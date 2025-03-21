@@ -1,29 +1,27 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
-import { Button, Select } from '@gear-js/vara-ui';
+import { Button } from '@gear-js/vara-ui';
 import { ComponentProps, useState, JSX } from 'react';
 import { FormProvider } from 'react-hook-form';
 import { parseUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FeeAndTimeFooter, Input } from '@/components';
+import { FormattedBalance, Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useBridge } from '@/contexts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
-import { NetworkWalletField } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
 import { cx, isUndefined } from '@/utils';
 
+import PlusSVG from '../../assets/plus.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useToken } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';
-import { AccountBalance } from '../account-balance/account-balance';
-import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
+import { DetailsAccordion } from '../details-accordion';
 import { FTAllowanceTip } from '../ft-allowance-tip';
-import { NetworkCard } from '../network-card';
 import { SubmitProgressBar } from '../submit-progress-bar';
 
 import styles from './swap-form.module.scss';
@@ -135,75 +133,79 @@ function SwapForm({
 
   return (
     <FormProvider {...form}>
-      <form onSubmit={handleSubmit}>
-        <div className={styles.sections}>
-          <div className={cx(styles.section, !disabled && styles.active)}>
+      <form onSubmit={handleSubmit} className={styles.form}>
+        <div>
+          <div className={styles.card}>
+            <h3 className={styles.heading}>From</h3>
+
             <div className={styles.row}>
               <div className={styles.wallet}>
-                <NetworkCard
-                  destination="From"
-                  SVG={isVaraNetwork ? VaraSVG : EthSVG}
-                  name={isVaraNetwork ? 'Vara' : 'Ethereum'}
-                />
+                {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
 
-                <NetworkWalletField />
+                <div className={styles.token}>
+                  <select
+                    value={pairIndex.toString()}
+                    onChange={({ target }) => setPairIndex(Number(target.value))}
+                    className={styles.select}
+                    disabled={options.length === 0}>
+                    {options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                </div>
               </div>
 
-              <AccountBalance submit={submit} isVaraNetwork={isVaraNetwork} {...accountBalance} />
+              <input type="input" />
             </div>
 
-            <div className={styles.row}>
-              <div className={styles.amount}>
-                <AmountInput />
-
-                <Select
-                  options={options}
-                  value={pairIndex.toString()}
-                  onChange={({ target }) => setPairIndex(Number(target.value))}
-                  className={styles.select}
-                  disabled={options.length === 0}
-                />
-              </div>
-
-              {renderFromBalance()}
-            </div>
-
+            {renderFromBalance()}
             {renderSwapNetworkButton()}
           </div>
 
-          <div className={cx(styles.section, !disabled && styles.active)}>
-            <div className={styles.row}>
-              <div className={styles.destination}>
-                <NetworkCard
-                  destination="To"
-                  SVG={isVaraNetwork ? EthSVG : VaraSVG}
-                  name={isVaraNetwork ? 'Ethereum' : 'Vara'}
-                />
+          <div className={styles.card}>
+            <h3 className={styles.heading}>To</h3>
 
-                <Input
-                  name={FIELD_NAME.ADDRESS}
-                  label={isVaraNetwork ? 'To ERC20 address' : 'To Substrate address'}
-                  block
-                />
+            <div className={styles.toContainer}>
+              <div className={styles.wallet}>
+                {isVaraNetwork ? <EthSVG /> : <VaraSVG />}
+
+                <div className={styles.token}>
+                  <p className={styles.symbol}>{destinationSymbol}</p>
+                  <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                </div>
               </div>
 
-              <Balance
-                heading="Receive"
-                value={!isUndefined(decimals) ? parseUnits(amount || '0', decimals) : 0n}
-                decimals={decimals}
-                symbol={destinationSymbol}
-              />
+              {!isUndefined(decimals) && (
+                <FormattedBalance
+                  value={!isUndefined(decimals) ? parseUnits(amount || '0', decimals) : 0n}
+                  decimals={decimals}
+                  symbol=""
+                  className={cx(styles.amount, Boolean(Number(amount)) && styles.active)}
+                />
+              )}
             </div>
 
-            <FeeAndTimeFooter fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
+            <div className={styles.inputContainer}>
+              <Input
+                icon={PlusSVG}
+                name={FIELD_NAME.ADDRESS}
+                label={isVaraNetwork ? 'ERC20 Address' : 'Substrate Address'}
+                block
+              />
+            </div>
           </div>
         </div>
+
+        <DetailsAccordion fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
 
         <footer className={styles.submitContainer}>
           <Button
             type="submit"
             text={getButtonText()}
-            size="small"
             disabled={disabled || !isBalanceValid()}
             isLoading={
               approve.isLoading ||

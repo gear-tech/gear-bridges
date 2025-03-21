@@ -5,7 +5,6 @@ import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
 import { TOKEN_SVG } from '@/consts';
-import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { NETWORK_SVG } from '../../consts';
@@ -19,12 +18,10 @@ type Props = Pick<
 > & {
   symbols: Record<HexString, string>;
   decimals: Record<HexString, number>;
-  isCompact?: boolean;
 };
 
 function TransactionPair(props: Props) {
-  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, symbols, decimals, isCompact } =
-    props;
+  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, symbols, decimals } = props;
 
   const sourceHex = source as HexString;
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
@@ -41,7 +38,7 @@ function TransactionPair(props: Props) {
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
 
   return (
-    <div className={cx(styles.pair, isCompact && styles.compact)}>
+    <div className={styles.pair}>
       <div className={styles.tx}>
         <div className={styles.icons}>
           <SourceNetworkSVG />
@@ -83,9 +80,9 @@ function TransactionPair(props: Props) {
   );
 }
 
-function TransactionPairSkeleton({ isCompact }: Pick<Props, 'isCompact'>) {
+function TransactionPairSkeleton() {
   return (
-    <div className={cx(styles.pair, isCompact && styles.compact)}>
+    <div className={styles.pair}>
       <div className={styles.tx}>
         <div className={styles.icons}>
           <Skeleton>

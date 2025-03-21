@@ -1,27 +1,11 @@
-import { Container, LinkButton } from '@/components';
-import { ROUTE } from '@/consts';
-import { LatestTransactions } from '@/features/history';
-import { Swap as SwapFeature } from '@/features/swap';
-
-import styles from './home.module.scss';
+import { Container } from '@/components';
+import { Swap } from '@/features/swap';
 
 function Home() {
   return (
-    <Container.Live maxWidth="md" className={styles.container}>
-      <SwapFeature />
-
-      <div className={styles.transactions}>
-        <header className={styles.header}>
-          <h2 className={styles.heading}>Latest Transactions</h2>
-
-          <LinkButton to={ROUTE.TRANSACTIONS} text="Show All" size="small" color="grey" />
-        </header>
-
-        <LatestTransactions />
-
-        <LinkButton to={ROUTE.TRANSACTIONS} text="Load More" size="small" color="grey" block />
-      </div>
-    </Container.Live>
+    <Container maxWidth="md">
+      <Swap />
+    </Container>
   );
 }
 

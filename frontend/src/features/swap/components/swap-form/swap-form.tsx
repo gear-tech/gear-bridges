@@ -23,6 +23,7 @@ import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { SubmitProgressBar } from '../submit-progress-bar';
+import { TokenSelect } from '../token-select';
 
 import styles from './swap-form.module.scss';
 
@@ -140,20 +141,16 @@ function SwapForm({
 
             <div className={styles.row}>
               <div className={styles.wallet}>
-                {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
+                {isVaraNetwork ? <VaraSVG className={styles.networkIcon} /> : <EthSVG className={styles.networkIcon} />}
 
                 <div className={styles.token}>
-                  <select
+                  <TokenSelect
+                    options={options}
                     value={pairIndex.toString()}
                     onChange={({ target }) => setPairIndex(Number(target.value))}
                     className={styles.select}
-                    disabled={options.length === 0}>
-                    {options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    isLoading={options.length === 0}
+                  />
 
                   <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
                 </div>
@@ -171,7 +168,7 @@ function SwapForm({
 
             <div className={styles.toContainer}>
               <div className={styles.wallet}>
-                {isVaraNetwork ? <EthSVG /> : <VaraSVG />}
+                {isVaraNetwork ? <EthSVG className={styles.networkIcon} /> : <VaraSVG className={styles.networkIcon} />}
 
                 <div className={styles.token}>
                   <p className={styles.symbol}>{destinationSymbol}</p>

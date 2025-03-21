@@ -44,3 +44,20 @@ pub const SYNC_COMMITTEE_SIZE: usize = 512;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/beacon-chain.md#domain-types)
 pub const DOMAIN_SYNC_COMMITTEE: [u8; 4] = [0x07, 0x00, 0x00, 0x00];
+
+pub mod electra {
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#execution).
+    pub const MAX_DEPOSIT_REQUESTS_PER_PAYLOAD: u64 = 8_192;
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#execution).
+    pub const MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD: u64 = 16;
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#execution).
+    pub const MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD: u64 = 2;
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#max-operations-per-block).
+    pub const MAX_ATTESTER_SLASHINGS: u64 = 1;
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#max-operations-per-block).
+    pub const MAX_ATTESTATIONS: u64 = 8;
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/phase0/beacon-chain.md#misc-1).
+    pub const MAX_VALIDATORS_PER_COMMITTEE: u64 = 2_048;
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/phase0/beacon-chain.md#misc-1).
+    pub const MAX_COMMITTEES_PER_SLOT: u64 = 64;
+}

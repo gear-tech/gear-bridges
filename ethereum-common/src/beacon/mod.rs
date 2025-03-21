@@ -13,5 +13,11 @@ pub use block_header::BlockHeader;
 pub use common::*;
 pub use execution_payload::ExecutionPayload;
 
+pub mod electra {
+    pub use super::block::electra::Block;
+    pub use super::block_body::electra::BlockBody;
+    pub use super::common::electra::*;
+}
+
 #[cfg(test)]
 mod tests;

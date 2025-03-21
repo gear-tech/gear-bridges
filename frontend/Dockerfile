@@ -29,7 +29,7 @@ ENV VITE_VARA_NODE_ADDRESS=${VITE_VARA_NODE_ADDRESS} \
 
 RUN npm install --force
 
-RUN npm build
+RUN npm run build
 
 RUN npm install --global serve
 

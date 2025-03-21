@@ -20,7 +20,16 @@ const SCHEMA = z.object({
 });
 
 function useTransactionFilters() {
-  const form = useForm({ defaultValues: DEFAULT_VALUES, mode: 'onChange', resolver: zodResolver(SCHEMA) });
+  const form = useForm<typeof DEFAULT_VALUES, unknown, z.infer<typeof SCHEMA>>({
+    defaultValues: DEFAULT_VALUES,
+    mode: 'onChange',
+
+    // @ts-expect-error -- revisit after next pr are released:
+    // https://github.com/react-hook-form/react-hook-form/pull/12638
+    // https://github.com/react-hook-form/resolvers/pull/753
+    resolver: zodResolver(SCHEMA),
+  });
+
   const { watch, formState } = form;
 
   const timestamp = watch(FIELD_NAME.TIMESTAMP);

@@ -1,6 +1,6 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button, Select } from '@gear-js/vara-ui';
-import { ComponentProps, useState } from 'react';
+import { ComponentProps, useState, JSX } from 'react';
 import { FormProvider } from 'react-hook-form';
 import { parseUnits } from 'viem';
 

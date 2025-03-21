@@ -1,4 +1,5 @@
 import { useAccount } from '@gear-js/react-hooks';
+import { JSX } from 'react';
 
 import { useVaraFTBalance, useVaraAccountBalance } from '@/hooks';
 

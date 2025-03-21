@@ -1,3 +1,5 @@
+import { JSX } from 'react';
+
 import { ETH_CHAIN_ID } from '@/consts';
 import { useEthAccount, useEthAccountBalance } from '@/hooks';
 

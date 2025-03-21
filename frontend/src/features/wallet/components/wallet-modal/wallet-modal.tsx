@@ -33,7 +33,7 @@ function WalletModal({ close }: Props) {
         <li key={id}>
           <Button
             className={styles.walletButton}
-            color="light"
+            color="contrast"
             size="small"
             onClick={() => (isConnected ? setWalletId(id) : connect?.())}
             disabled={!isEnabled}
@@ -55,7 +55,7 @@ function WalletModal({ close }: Props) {
       const { address, meta } = _account;
 
       const isActive = address === account?.address;
-      const color = isActive ? 'primary' : 'light';
+      const color = isActive ? 'primary' : 'contrast';
 
       const handleClick = () => {
         if (isActive) return;

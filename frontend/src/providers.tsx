@@ -60,6 +60,7 @@ const config = defaultWagmiConfig({
 
 createWeb3Modal({
   projectId,
+  // @ts-expect-error -- revisit after wagmi and web3modal bumps
   wagmiConfig: config,
   enableAnalytics: false,
   allWallets: 'HIDE',
@@ -77,6 +78,7 @@ declare module 'wagmi' {
 }
 
 function EthProvider({ children }: ProviderProps) {
+  // @ts-expect-error -- revisit after wagmi and web3modal bumps
   return <WagmiProvider config={config}>{children}</WagmiProvider>;
 }
 

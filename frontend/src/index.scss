@@ -1,8 +1,8 @@
 body {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 400;
-  color: #000;
-  background-image: linear-gradient(180deg, rgba(245, 245, 247, 0) 10.17%, #f5f5f7 58.65%);
+  color: #fff;
+  background-color: #13191e;
 
   overflow-x: hidden; // cuz of animated container
 }
@@ -27,7 +27,20 @@ main {
 a {
   text-decoration: none;
   color: inherit;
-  transition: opacity 0.25s;
+  transition: all 0.25s;
+
+  // currently only logo
+  svg path {
+    transition: fill 0.25s;
+  }
+
+  &:hover {
+    color: #00ffc4;
+
+    svg path {
+      fill: #00ffc4;
+    }
+  }
 }
 
 button {

@@ -1,6 +1,6 @@
 import { Outlet, ScrollRestoration } from 'react-router-dom';
 
-import { ErrorBoundary, Footer, Header } from './components';
+import { ErrorBoundary, Header } from './components';
 import { useAccountSync } from './features/wallet';
 import { WithProviders } from './providers';
 
@@ -18,8 +18,6 @@ function Component() {
           <Outlet />
         </ErrorBoundary>
       </main>
-
-      <Footer />
     </>
   );
 }

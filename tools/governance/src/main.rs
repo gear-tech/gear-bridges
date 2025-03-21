@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use gclient::{
-    ext::sp_core::{Decode, Encode, H160},
+    ext::sp_core::{Decode, Encode, H160, H256},
     EventProcessor, GearApi, WSAddress,
 };
 use gear_core::ids::ActorId;
@@ -11,19 +11,40 @@ use gear_core::ids::ActorId;
 struct Cli {
     #[command(subcommand)]
     command: CliCommands,
+
+    #[clap(flatten)]
+    gear_client: GearClientArgs,
+    #[clap(flatten)]
+    contract: ContractArgs,
+    #[clap(flatten)]
+    builtin: BuiltinArg,
 }
 
 #[derive(Subcommand)]
 enum CliCommands {
-    /// Update contracts on etehreum network
-    #[clap(visible_alias("update-eth"))]
+    /// Update contract implementations on etehreum network
+    #[clap(visible_alias("update-impl"))]
     UpdateEthereumContract {
-        #[clap(flatten)]
-        gear_client: GearClientArgs,
-        #[clap(flatten)]
-        contract: ContractArgs,
-        #[clap(flatten)]
-        builtin: BuiltinArg,
+        /// New implementation address
+        #[arg(long, env = "NEW_IMPLEMENTATION_ADDRESS")]
+        new_implementation: String,
+        /// Additional data passed to a new implementation after update
+        #[arg(long, default_value = "0x")]
+        call_data: String,
+    },
+    /// Change proxy admin on ethereum network
+    #[clap(visible_alias("change-proxy-admin"))]
+    ChangeProxyAdmin {
+        /// New proxy admin address
+        #[arg(long, env = "NEW_PROXY_ADMIN_ADDRESS")]
+        new_admin: String,
+    },
+    /// Change governance address on etehreum network
+    #[clap(visible_alias("change-gov"))]
+    ChangeGovernanceAddress {
+        /// New governance address
+        #[arg(long, env = "NEW_GOVERNANCE_ADDRESS")]
+        new_governance: String,
     },
 }
 
@@ -48,9 +69,6 @@ struct ContractArgs {
     /// ProxyUpdater associated with the target contract
     #[arg(long, env = "CONTRACT_PROXY_UPDATER")]
     proxy_updater: String,
-    /// Address of the new contract implementation
-    #[arg(long, env = "NEW_IMPLEMENTATION_ADDRESS")]
-    new_implementation: String,
 }
 
 #[derive(Args)]
@@ -70,19 +88,34 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    match cli.command {
-        CliCommands::UpdateEthereumContract {
-            gear_client,
-            contract,
-            builtin,
-        } => {
-            let gear_api = create_gear_api(gear_client).await;
-            let bridge_builtin_actor = parse_builtin_actor_id(builtin);
-            let contract_info = ContractInfo::parse(contract);
+    let gear_api = create_gear_api(cli.gear_client).await;
+    let bridge_builtin_actor = parse_builtin_actor_id(cli.builtin);
+    let proxy_updater = decode_h160(&cli.contract.proxy_updater);
 
-            update_ethereum_contract(gear_api, bridge_builtin_actor, contract_info).await;
+    let payload = match cli.command {
+        CliCommands::UpdateEthereumContract {
+            new_implementation,
+            call_data,
+        } => [
+            &[0x00],
+            decode_h160(&new_implementation).as_bytes(),
+            &decode_hex(&call_data),
+        ]
+        .concat(),
+        CliCommands::ChangeProxyAdmin { new_admin } => {
+            [&[0x01], decode_h160(&new_admin).as_bytes()].concat()
         }
-    }
+        CliCommands::ChangeGovernanceAddress { new_governance } => {
+            [&[0x02], decode_h256(&new_governance).as_bytes()].concat()
+        }
+    };
+
+    let request = gbuiltin_eth_bridge::Request::SendEthMessage {
+        destination: proxy_updater,
+        payload,
+    };
+
+    submit_builtin_request(gear_api, bridge_builtin_actor, request).await;
 }
 
 async fn create_gear_api(args: GearClientArgs) -> GearApi {
@@ -98,32 +131,14 @@ fn parse_builtin_actor_id(arg: BuiltinArg) -> ActorId {
     ActorId::new(data.try_into().expect("Got input of wrong length"))
 }
 
-struct ContractInfo {
-    proxy_updater: H160,
-    new_implementation: H160,
+fn decode_h256(hex: &str) -> H256 {
+    let data = decode_hex(hex);
+    H256(data.try_into().expect("Wrond gear address length"))
 }
 
-impl ContractInfo {
-    fn parse(args: ContractArgs) -> Self {
-        let proxy_updater = decode_hex(&args.proxy_updater);
-        let proxy_updater = H160(
-            proxy_updater
-                .try_into()
-                .expect("Wrond proxy_updater ethereum address length"),
-        );
-
-        let new_implementation = decode_hex(&args.new_implementation);
-        let new_implementation = H160(
-            new_implementation
-                .try_into()
-                .expect("Wrond new_implementation ethereum address length"),
-        );
-
-        Self {
-            proxy_updater,
-            new_implementation,
-        }
-    }
+fn decode_h160(hex: &str) -> H160 {
+    let data = decode_hex(hex);
+    H160(data.try_into().expect("Wrond ethereum address length"))
 }
 
 fn decode_hex(hex: &str) -> Vec<u8> {
@@ -131,20 +146,14 @@ fn decode_hex(hex: &str) -> Vec<u8> {
     hex::decode(formatted_hex).unwrap_or_else(|_| panic!("Failed to decode hex string {}", hex))
 }
 
-async fn update_ethereum_contract(
+async fn submit_builtin_request(
     gear_api: GearApi,
     bridge_builtin_actor: ActorId,
-    contract_info: ContractInfo,
+    request: gbuiltin_eth_bridge::Request,
 ) {
-    let discriminator = 0x00;
-    let mut payload = vec![discriminator];
-    payload.append(&mut contract_info.new_implementation.as_bytes().to_vec());
+    println!("Submitting request to the bridge built-in...");
 
-    let payload = gbuiltin_eth_bridge::Request::SendEthMessage {
-        destination: contract_info.proxy_updater,
-        payload,
-    }
-    .encode();
+    let payload = request.encode();
 
     let mut listener = gear_api
         .subscribe()

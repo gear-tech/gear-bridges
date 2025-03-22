@@ -2,23 +2,23 @@ import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { ComponentProps, useState, JSX } from 'react';
 import { FormProvider } from 'react-hook-form';
-import { parseUnits } from 'viem';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FormattedBalance, Input } from '@/components';
+import { Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useBridge } from '@/contexts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { useEthAccount } from '@/hooks';
-import { cx, isUndefined } from '@/utils';
+import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
 import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
 import { useSwapForm, useToken } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';
+import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
 import { FTAllowanceTip } from '../ft-allowance-tip';
@@ -137,7 +137,10 @@ function SwapForm({
       <form onSubmit={handleSubmit} className={styles.form}>
         <div>
           <div className={styles.card}>
-            <h3 className={styles.heading}>From</h3>
+            <header className={styles.header}>
+              <h3 className={styles.heading}>From</h3>
+              <AmountInput.Error />
+            </header>
 
             <div className={styles.row}>
               <div className={styles.wallet}>
@@ -156,7 +159,7 @@ function SwapForm({
                 </div>
               </div>
 
-              <input type="input" />
+              <AmountInput />
             </div>
 
             {renderFromBalance()}
@@ -176,14 +179,7 @@ function SwapForm({
                 </div>
               </div>
 
-              {!isUndefined(decimals) && (
-                <FormattedBalance
-                  value={!isUndefined(decimals) ? parseUnits(amount || '0', decimals) : 0n}
-                  decimals={decimals}
-                  symbol=""
-                  className={cx(styles.amount, Boolean(Number(amount)) && styles.active)}
-                />
-              )}
+              <AmountInput.Value decimals={decimals} />
             </div>
 
             <div className={styles.inputContainer}>

@@ -1,28 +1,25 @@
 import ClockSVG from '@/assets/clock.svg?react';
 import { Skeleton } from '@/components';
-import { cx } from '@/utils';
 
 import { Transfer } from '../../types';
 
 import styles from './transaction-date.module.scss';
 
-type Props = Pick<Transfer, 'timestamp'> & {
-  isCompact?: boolean;
-};
+type Props = Pick<Transfer, 'timestamp'>;
 
-function TransactionDate({ timestamp, isCompact }: Props) {
+function TransactionDate({ timestamp }: Props) {
   const date = new Date(timestamp).toLocaleString();
 
   return (
-    <p className={cx(styles.date, isCompact && styles.compact)}>
+    <p className={styles.date}>
       <ClockSVG /> {date}
     </p>
   );
 }
 
-function TransactionDateSkeleton({ isCompact }: Pick<Props, 'isCompact'>) {
+function TransactionDateSkeleton() {
   return (
-    <p className={cx(styles.date, isCompact && styles.compact)}>
+    <p className={styles.date}>
       <Skeleton>
         <ClockSVG />
       </Skeleton>

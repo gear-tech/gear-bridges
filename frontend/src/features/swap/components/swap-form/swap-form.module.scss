@@ -18,6 +18,12 @@
   }
 }
 
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .heading {
   margin-bottom: 12px;
 
@@ -30,6 +36,7 @@
   margin-bottom: 12px;
 
   display: flex;
+  gap: 32px;
   justify-content: space-between;
 }
 
@@ -67,17 +74,6 @@
       line-height: 1;
       color: #828b8e;
     }
-  }
-}
-
-.amount {
-  font-weight: 600;
-  font-size: 32px;
-  line-height: 120%;
-  color: #9cacb1;
-
-  &.active {
-    color: #fff;
   }
 }
 

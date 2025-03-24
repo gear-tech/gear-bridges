@@ -33,7 +33,7 @@ function SwapNetworkButton({ isActive, onClick }: Props) {
     <>
       <Button
         icon={SwapSVG}
-        color="light"
+        color="contrast"
         className={cx(styles.button, isActive && styles.active)}
         onClick={handleClick}
       />

@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot};
 use anyhow::anyhow;
 use ethereum_beacon_client::BeaconClient;
@@ -98,12 +100,32 @@ impl MessageSender {
         mut messages: UnboundedReceiver<TxHashWithSlot>,
         mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
     ) {
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&mut messages, &mut checkpoints)); //.await;
-            if let Err(err) = res {
-                log::error!("Gear message sender failed: {}", err);
+        struct AssertSendSafe<F>(F);
+
+        unsafe impl<F> Send for AssertSendSafe<F> {}
+        unsafe impl<F> Sync for AssertSendSafe<F> {}
+
+        impl<F: Future> Future for AssertSendSafe<F> {
+            type Output = F::Output;
+
+            fn poll(
+                self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Self::Output> {
+                unsafe {
+                    let inner = self.map_unchecked_mut(|s| &mut s.0);
+                    Future::poll(inner, cx)
+                }
             }
-        });
+        }
+        tokio::spawn(AssertSendSafe(async move {
+            loop {
+                let res = self.run_inner(&mut messages, &mut checkpoints).await;
+                if let Err(err) = res {
+                    log::error!("Gear message sender failed: {}", err);
+                }
+            }
+        }));
     }
 
     async fn run_inner(

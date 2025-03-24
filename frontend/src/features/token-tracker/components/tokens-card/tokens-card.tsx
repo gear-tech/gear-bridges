@@ -1,35 +1,28 @@
 import { getTypedEntries, useAccount, useAlert } from '@gear-js/react-hooks';
-import { Modal, Button } from '@gear-js/vara-ui';
+import { Button } from '@gear-js/vara-ui';
 
 import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useBridge } from '@/contexts';
-import { useVaraAccountBalance, useEthAccountBalance, useTokens } from '@/hooks';
+import { useVaraAccountBalance, useEthAccountBalance, useTokens, useVaraFTBalance } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
-import { BalanceCard } from '../card';
+import { BalanceCard } from '../balance-card';
 
-import styles from './token-tracker-modal.module.scss';
+import styles from './tokens-card.module.scss';
 
-type Props = {
-  lockedBalance: bigint | undefined;
-  close: () => void;
-};
-
-function TokenTrackerModal({ lockedBalance, close }: Props) {
+function TokensCard() {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
-  const { setPairIndex } = useBridge();
   const burn = useBurnVaraTokens();
+  const { data: lockedBalance } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);
   const alert = useAlert();
 
   const isVaraNetwork = Boolean(account);
   const networkIndex = isVaraNetwork ? 0 : 1;
 
-  const nativePairIndex = addresses?.findIndex((pair) => pair[networkIndex] === WRAPPED_VARA_CONTRACT_ADDRESS);
   const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
 
   const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
@@ -40,33 +33,20 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   const ethAccountBalance = useEthAccountBalance();
   const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
-  const renderNativeToken = () => (
-    <span className={styles.network}>
-      {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
-      {isVaraNetwork ? 'Vara' : 'Ethereum'}
-    </span>
-  );
-
-  const handleTransferClick = (index: number) => {
-    setPairIndex(index);
-    close();
-  };
-
   const renderBalances = () => {
     if (!ftBalances || !decimals || !symbols)
       return new Array(Object.keys(TOKEN_SVG).length)
         .fill(null)
         .map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
-    return getTypedEntries(ftBalances).map(([address, { balance, pairIndex }]) => (
+    return getTypedEntries(ftBalances).map(([address, balance]) => (
       <li key={address}>
         <BalanceCard
           SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
           value={balance}
           decimals={decimals[address] ?? 0}
-          symbol={symbols[address] ?? 'Unit'}>
-          <Button text="Transfer" color="grey" size="small" onClick={() => handleTransferClick(pairIndex)} />
-        </BalanceCard>
+          symbol={symbols[address] ?? 'Unit'}
+        />
       </li>
     ));
   };
@@ -81,7 +61,16 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
   };
 
   return (
-    <Modal heading="My Tokens" headerAddon={renderNativeToken()} close={close} maxWidth="large">
+    <div className={styles.card}>
+      <header className={styles.header}>
+        <h2>My Tokens</h2>
+
+        <span className={styles.network}>
+          {isVaraNetwork ? <VaraSVG /> : <EthSVG />}
+          {isVaraNetwork ? 'Vara' : 'Ethereum'}
+        </span>
+      </header>
+
       <ul className={styles.list}>
         {!isUndefined(accountBalance.data) && (
           <li>
@@ -89,16 +78,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
               SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.data}
               decimals={isVaraNetwork ? 12 : 18}
-              symbol={isVaraNetwork ? 'VARA' : 'ETH'}>
-              {!isUndefined(nativePairIndex) && nativePairIndex !== -1 && (
-                <Button
-                  text="Transfer"
-                  color="grey"
-                  size="small"
-                  onClick={() => handleTransferClick(nativePairIndex)}
-                />
-              )}
-            </BalanceCard>
+              symbol={isVaraNetwork ? 'VARA' : 'ETH'}
+            />
           </li>
         )}
 
@@ -107,7 +88,7 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
 
       {!isUndefined(lockedBalance) && symbols && decimals && (
         <>
-          <h4 className={styles.heading}>Locked Tokens</h4>
+          <h4 className={styles.lockedHeading}>Locked Tokens</h4>
 
           <BalanceCard
             value={lockedBalance}
@@ -121,8 +102,8 @@ function TokenTrackerModal({ lockedBalance, close }: Props) {
           </BalanceCard>
         </>
       )}
-    </Modal>
+    </div>
   );
 }
 
-export { TokenTrackerModal };
+export { TokensCard };

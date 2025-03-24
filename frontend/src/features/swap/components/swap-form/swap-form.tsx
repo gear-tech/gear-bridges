@@ -7,7 +7,6 @@ import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Input } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useBridge } from '@/contexts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { useEthAccount } from '@/hooks';
@@ -51,9 +50,11 @@ function SwapForm({
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
   const { api, isApiReady } = useApi();
-  const { pairIndex, setPairIndex } = useBridge();
-  const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } =
-    useToken(networkIndex);
+  const [pairIndex, setPairIndex] = useState(0);
+  const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } = useToken(
+    networkIndex,
+    pairIndex,
+  );
   const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();

@@ -4,11 +4,12 @@
   display: flex;
   justify-content: space-between;
 
-  border: 1px solid rgba(#e1e1e3, 0.6);
+  background-color: #ffffff03;
+  border: 1px solid #ffffff0a;
   border-radius: 6px;
 
   &.locked {
-    background-color: rgba(#e1e1e3, 0.2);
+    background-color: #282c30bf;
   }
 }
 
@@ -17,9 +18,9 @@
   align-items: center;
   gap: 8px;
 
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: #f6f6f6e5;
 
   svg {
     width: 24px;

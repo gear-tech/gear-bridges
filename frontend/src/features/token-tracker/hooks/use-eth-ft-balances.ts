@@ -28,10 +28,10 @@ function useEthFTBalances(addresses: FTAddressPair[] | undefined) {
       const address = addresses[pairIndex][1];
       const balance = isUndefined(result) ? 0n : BigInt(result);
 
-      return [address, { balance, pairIndex }] as const;
+      return [address, balance] as const;
     });
 
-    return Object.fromEntries(entries) as Record<HexString, { balance: bigint; pairIndex: number }>;
+    return Object.fromEntries(entries) as Record<HexString, bigint>;
   };
 
   return useReadContracts({

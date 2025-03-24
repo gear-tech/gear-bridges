@@ -1,3 +1,3 @@
-import { LockedBalanceTooltip } from './components';
+import { LockedBalanceTooltip, TokensCard } from './components';
 
-export { LockedBalanceTooltip };
+export { LockedBalanceTooltip, TokensCard };

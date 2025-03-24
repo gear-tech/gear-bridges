@@ -77,7 +77,7 @@ function TransactionModal({
             </p>
           )}
 
-          {timestamp && <TransactionDate timestamp={timestamp} />}
+          {timestamp && <TransactionDate timestamp={timestamp} className={styles.date} />}
         </header>
       )}
 

@@ -1,5 +1,5 @@
 .header {
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 
   display: flex;
   align-items: center;
@@ -11,34 +11,36 @@
   align-items: center;
   gap: 8px;
 
-  font-size: 16px;
-  line-height: 150%;
+  line-height: 140%;
+  color: #f6f6f6e5;
 
   a {
     max-width: 110px;
 
     text-decoration: underline;
-    transition: 0.25s color;
-
-    &:hover {
-      color: #13bc9d;
-    }
   }
 }
 
+.date {
+  font-size: 12px;
+  line-height: 17px;
+  letter-spacing: -0.5px;
+  color: #9cacb1;
+}
+
 .pairs {
-  margin-bottom: 20px;
-  padding-bottom: 20px;
+  margin-bottom: 24px;
+  padding-bottom: 24px;
 
   display: grid;
   grid-template-columns: 1fr 15px 1fr;
   align-items: center;
-  gap: 16px 24px;
+  gap: 20px 24px;
 
-  border-bottom: 1px solid #e1e1e399;
+  border-bottom: 1px solid #00ffc433;
 
   &.loading {
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     padding-bottom: 0;
 
     border-bottom: none;
@@ -47,8 +49,6 @@
 
 .tx,
 .address {
-  padding: 7px 0;
-
   display: flex;
   align-items: center;
 
@@ -62,14 +62,13 @@
 .amount,
 .network,
 .address .value {
-  font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 24px;
+  color: #fff;
 }
 
 .label {
-  font-size: 16px;
-  font-weight: 500;
-  opacity: 0.7;
+  color: #f6f6f6cc;
 }
 
 .network {
@@ -85,7 +84,7 @@
 
 .arrowSvg {
   path {
-    fill: #000;
+    fill: #fff;
   }
 }
 

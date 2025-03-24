@@ -5,7 +5,9 @@ import { Transfer } from '../../types';
 
 import styles from './transaction-date.module.scss';
 
-type Props = Pick<Transfer, 'timestamp'>;
+type Props = Pick<Transfer, 'timestamp'> & {
+  className?: string;
+};
 
 function TransactionDate({ timestamp }: Props) {
   const date = new Date(timestamp).toLocaleString();

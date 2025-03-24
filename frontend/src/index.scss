@@ -29,16 +29,18 @@ a {
   color: inherit;
   transition: all 0.25s;
 
-  // currently only logo
-  svg path {
-    transition: fill 0.25s;
-  }
-
-  &:hover {
-    color: #00ffc4;
-
+  &:not(.linkButton) {
+    // currently only logo
     svg path {
-      fill: #00ffc4;
+      transition: fill 0.25s;
+    }
+
+    &:hover {
+      color: #00ffc4;
+
+      svg path {
+        fill: #00ffc4;
+      }
     }
   }
 }

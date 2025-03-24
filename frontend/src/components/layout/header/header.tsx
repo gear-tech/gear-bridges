@@ -1,10 +1,13 @@
+import { useAccount } from '@gear-js/react-hooks';
 import { CSSProperties, useRef, useState, useEffect } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
 import { TransactionsCounter } from '@/features/history';
+import { LockedBalanceTooltip } from '@/features/token-tracker';
 import { Wallet } from '@/features/wallet';
+import { useEthAccount } from '@/hooks';
 
 import { Container } from '../container';
 
@@ -13,10 +16,15 @@ import styles from './header.module.scss';
 const LINKS = {
   [ROUTE.HOME]: 'Bridge',
   [ROUTE.TRANSACTIONS]: 'Transactions',
+  [ROUTE.TOKEN_TRACKER]: 'My Tokens',
   [ROUTE.FAQ]: 'FAQ',
 } as const;
 
 function Header() {
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
+  const isAnyAccount = account || ethAccount.isConnected;
+
   const { pathname } = useLocation();
   const [linksStyle, setLinksStyle] = useState<CSSProperties>();
 
@@ -30,16 +38,24 @@ function Header() {
   useEffect(() => {
     const linkRef = linkRefs.current[pathname];
 
-    if (!linkRef) return setLinksStyle(undefined);
+    if (!linksRef.current || !linkRef) return setLinksStyle(undefined);
+
+    const linksRect = linksRef.current.getBoundingClientRect();
+    const linkRect = linkRef.getBoundingClientRect();
+    const offset = linkRect.left - linksRect.left;
 
     setLinksStyle({
-      '--active-link-width': `${linkRef.offsetWidth}px`,
-      '--active-link-offset': `${linkRef.offsetLeft}px`,
+      '--active-link-width': `${linkRect.width}px`,
+      '--active-link-offset': `${offset}px`,
     } as CSSProperties);
-  }, [pathname]);
+  }, [pathname, isAnyAccount]);
 
   const renderLinks = () =>
     Object.entries(LINKS).map(([to, text]) => {
+      const isTokensLink = to === ROUTE.TOKEN_TRACKER;
+
+      if (isTokensLink && !isAnyAccount) return;
+
       const setRef = (element: HTMLAnchorElement | null) => {
         linkRefs.current[to] = element;
       };
@@ -49,6 +65,8 @@ function Header() {
           <NavLink to={to} className={styles.link} ref={setRef}>
             {text}
           </NavLink>
+
+          {isTokensLink && <LockedBalanceTooltip />}
         </li>
       );
     });

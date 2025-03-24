@@ -9,7 +9,7 @@ use alloy::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
             WalletFiller,
         },
-        Identity, Provider, ProviderBuilder, RootProvider,
+        Identity, Provider, ProviderBuilder, RootProvider, WalletProvider,
     },
     rpc::types::{BlockId, BlockNumberOrTag, Filter},
     signers::local::PrivateKeySigner,

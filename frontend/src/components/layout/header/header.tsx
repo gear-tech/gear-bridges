@@ -1,10 +1,10 @@
-import { Button } from '@gear-js/vara-ui';
 import { CSSProperties, useRef, useState, useEffect } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
 import { TransactionsCounter } from '@/features/history';
+import { Wallet } from '@/features/wallet';
 
 import { Container } from '../container';
 
@@ -60,7 +60,7 @@ function Header() {
           <LogoSVG />
         </Link>
 
-        <Button text="Connect Wallet" size="x-small" />
+        <Wallet />
       </Container>
 
       <nav className={styles.nav}>

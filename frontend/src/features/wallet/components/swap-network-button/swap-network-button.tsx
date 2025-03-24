@@ -1,10 +1,10 @@
 import { useAccount } from '@gear-js/react-hooks';
+import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
 
 import { useEthAccount, useModal } from '@/hooks';
 
 import SwapSVG from '../../assets/swap.svg?react';
-import { WalletModal } from '../wallet-modal';
 
 import styles from './swap-network-button.module.scss';
 

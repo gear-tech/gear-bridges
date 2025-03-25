@@ -183,7 +183,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
 
     // deploy Vara Fungible Token
     let factory = extended_vft_client::ExtendedVftFactory::new(remoting.clone());
-    let extended_vft_id_1 = factory
+    let extended_vft_id = factory
         .new("TEST_TOKEN".into(), "TT".into(), 20)
         .send_recv(code_id_vft, salt)
         .await
@@ -191,21 +191,21 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
 
     println!(
         "program_id = {:?} (extended_vft)",
-        hex::encode(extended_vft_id_1)
+        hex::encode(extended_vft_id)
     );
 
     let mut service_vft = extended_vft_client::Vft::new(remoting.clone());
     // allow VFT-manager to burn funds
     service_vft
         .grant_burner_role(vft_manager_id)
-        .send_recv(extended_vft_id_1)
+        .send_recv(extended_vft_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
     // mint some tokens to the user
     if !service_vft
         .mint(account, amount)
-        .send_recv(extended_vft_id_1)
+        .send_recv(extended_vft_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?
     {
@@ -216,7 +216,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let amount = amount / 2;
     if !service_vft
         .approve(vft_manager_id, amount)
-        .send_recv(extended_vft_id_1)
+        .send_recv(extended_vft_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?
     {
@@ -227,7 +227,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let eth_token_id = H160::from([1u8; 20]);
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
-        .map_vara_to_eth_address(extended_vft_id_1, eth_token_id, supply_type)
+        .map_vara_to_eth_address(extended_vft_id, eth_token_id, supply_type)
         .send_recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
@@ -240,13 +240,13 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
         GClientRemoting::new(api.clone()).with_suri(suri_unauthorized),
     );
     let reply = service
-        .request_bridging(extended_vft_id_1, amount, Default::default())
+        .request_bridging(extended_vft_id, amount, Default::default())
         .send(vft_manager_id)
         .await;
 
     let balance = service_vft
         .balance_of(account)
-        .recv(extended_vft_id_1)
+        .recv(extended_vft_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 

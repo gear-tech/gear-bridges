@@ -1,6 +1,6 @@
 import { useAccount } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
-import { useWeb3Modal } from '@web3modal/wagmi/react';
+import { useAppKit } from '@reown/appkit/react';
 
 import { useEthAccount, useModal } from '@/hooks';
 import { cx } from '@/utils';
@@ -20,7 +20,7 @@ function SwapNetworkButton({ isActive, onClick }: Props) {
   const ethAccount = useEthAccount();
 
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
-  const { open: openEthModal } = useWeb3Modal();
+  const { open: openEthModal } = useAppKit();
 
   const handleClick = () => {
     if (ethAccount.isConnected) return openSubstrateModal();
@@ -33,7 +33,7 @@ function SwapNetworkButton({ isActive, onClick }: Props) {
     <>
       <Button
         icon={SwapSVG}
-        color="light"
+        color="contrast"
         className={cx(styles.button, isActive && styles.active)}
         onClick={handleClick}
       />

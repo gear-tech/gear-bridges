@@ -1,6 +1,6 @@
 import { useAccount } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
-import { useWalletInfo, useWeb3Modal } from '@web3modal/wagmi/react';
+import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
 import { Skeleton, TruncatedText } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
@@ -22,7 +22,7 @@ function NetworkWalletField() {
 
   const [isModalOpen, openModal, closeModal] = useModal();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
-  const { open: openEthModal } = useWeb3Modal();
+  const { open: openEthModal } = useAppKit();
 
   const isConnected = Boolean(account || ethAccount.address);
 

@@ -1,7 +1,6 @@
-use std::future::Future;
-
 use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot};
 use anyhow::anyhow;
+use backoff::backoff::Backoff;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use futures::executor::block_on;
@@ -14,6 +13,7 @@ use sails_rs::{
     gclient::calls::GClientRemoting,
     Encode,
 };
+
 use tokio::sync::mpsc::UnboundedReceiver;
 use utils_prometheus::{impl_metered_service, MeteredService};
 use vft_manager_client::vft_manager::io::SubmitReceipt;
@@ -100,43 +100,124 @@ impl MessageSender {
         mut messages: UnboundedReceiver<TxHashWithSlot>,
         mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
     ) {
-        struct AssertSendSafe<F>(F);
+        let _ = tokio::task::spawn_blocking(move || {
+            block_on(async move {
+                let mut retries = 0;
+                let mut eth_api = self.eth_api.clone();
+                let mut beacon_client = self.beacon_client.clone();
+                let mut backoff = backoff::ExponentialBackoff::default();
+                loop {
+                    match self.run_inner(&mut messages, &mut checkpoints, &eth_api, &beacon_client).await {
+                        Ok(()) => continue,
+                        Err(err) => {
+                            match self.handle_error(&mut eth_api, &mut beacon_client, err)
+                                .await {
+                                    Ok(()) => continue,
+                                    Err(err) => match err {
+                                        backoff::Error::Permanent(permanent) => {
+                                            log::error!("Gear message sender failed with permanent error: {}", permanent);
+                                        }
 
-        unsafe impl<F> Send for AssertSendSafe<F> {}
-        unsafe impl<F> Sync for AssertSendSafe<F> {}
+                                        backoff::Error::Transient { err, retry_after } => {
+                                            log::error!("Gear message sender failed with transiet error: {}", err);
 
-        impl<F: Future> Future for AssertSendSafe<F> {
-            type Output = F::Output;
-
-            fn poll(
-                self: std::pin::Pin<&mut Self>,
-                cx: &mut std::task::Context<'_>,
-            ) -> std::task::Poll<Self::Output> {
-                unsafe {
-                    let inner = self.map_unchecked_mut(|s| &mut s.0);
-                    Future::poll(inner, cx)
+                                            if let Some(duration) = retry_after {
+                                                log::error!("Retrying after {:?}", duration);
+                                                tokio::time::sleep(duration).await;
+                                                retries += 1;
+                                            } else {
+                                                match backoff.next_backoff() {
+                                                    Some(duration) => {
+                                                        log::error!("Retrying after {:?}", duration);
+                                                        tokio::time::sleep(duration).await;
+                                                        retries += 1;
+                                                    }
+                                                    None => {
+                                                        log::error!("Gear message sender failed (timed out after {retries} retries): {err}");
+                                                        return;
+                                                    }
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
+            });
+        })
+        .await;
+    }
+
+    /// Handle an error. If error is recoverable, return Ok(()), otherwise return Err which
+    /// would terminate the `run` loop.
+    ///
+    /// # Recoverable errors
+    ///
+    /// At the moment only transport errors are considered recoverable. When they happen
+    /// we reconstruct EthApi and GearApi clients which should force a new connection to the
+    /// server.
+    async fn handle_error(
+        &self,
+        eth_api: &mut EthApi,
+        beacon_client: &mut BeaconClient,
+        error: anyhow::Error,
+    ) -> Result<(), backoff::Error<anyhow::Error>> {
+        use gclient::Error as GClientError;
+        use sails_rs::errors::Error as SailsError;
+        use subxt::error::RpcError;
+        use subxt::Error as SubxtError;
+
+        if let Some(err) = error.downcast_ref::<SailsError>() {
+            match err {
+                SailsError::GClient(err) => {
+                    match err {
+                        GClientError::Subxt(err) => {
+                            // while connection failed, it will reconnect automatically
+                            // just return Ok(())
+                            if err.is_disconnected_will_reconnect() {
+                                return Ok(());
+                            }
+                            match err {
+                                SubxtError::Rpc(RpcError::SubscriptionDropped)
+                                | SubxtError::Rpc(RpcError::RequestRejected(_)) => {
+                                    *beacon_client = beacon_client.reconnect().await?;
+                                    *eth_api =
+                                        eth_api.reconnect().map_err(|e| anyhow::Error::new(e))?;
+                                    return Err(backoff::Error::Transient {
+                                        err: error,
+                                        retry_after: None,
+                                    });
+                                }
+
+                                _ => {
+                                    log::error!("Gear message sender failed: {}", err);
+                                    return Err(backoff::Error::Permanent(error));
+                                }
+                            }
+                        }
+
+                        _ => return Ok(()),
+                    }
+                }
+
+                _ => return Ok(()),
             }
         }
-        tokio::spawn(AssertSendSafe(async move {
-            loop {
-                let res = self.run_inner(&mut messages, &mut checkpoints).await;
-                if let Err(err) = res {
-                    log::error!("Gear message sender failed: {}", err);
-                }
-            }
-        }));
+        Ok(())
     }
 
     async fn run_inner(
         &mut self,
         messages: &mut UnboundedReceiver<TxHashWithSlot>,
         checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
+        eth_api: &EthApi,
+        beacon_client: &BeaconClient,
     ) -> anyhow::Result<()> {
         let mut latest_checkpoint_slot = None;
 
         loop {
-            while let Some(checkpoint) = checkpoints.try_recv().ok() {
+            while let Ok(checkpoint) = checkpoints.try_recv() {
                 if latest_checkpoint_slot.unwrap_or_default() < checkpoint {
                     latest_checkpoint_slot = Some(checkpoint);
                 } else {
@@ -149,7 +230,7 @@ impl MessageSender {
                 }
             }
 
-            while let Some(message) = messages.try_recv().ok() {
+            while let Ok(message) = messages.try_recv() {
                 self.waiting_checkpoint.push(message);
             }
 
@@ -162,7 +243,7 @@ impl MessageSender {
                 if self.waiting_checkpoint[i].slot_number
                     <= latest_checkpoint_slot.unwrap_or_default()
                 {
-                    self.submit_message(&self.waiting_checkpoint[i], &gear_api)
+                    self.submit_message(&self.waiting_checkpoint[i], &gear_api, &eth_api, &beacon_client)
                         .await?;
                     let _ = self.waiting_checkpoint.remove(i);
                 }
@@ -180,9 +261,11 @@ impl MessageSender {
         &self,
         message: &TxHashWithSlot,
         gear_api: &GearApi,
+        eth_api: &EthApi,
+        beacon_client: &BeaconClient
     ) -> anyhow::Result<()> {
         let payload =
-            compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
+            compose_payload::compose(&beacon_client, eth_api, message.tx_hash).await?;
 
         log::info!(
             "Sending message in gear_message_sender: tx_index={}, slot={}",

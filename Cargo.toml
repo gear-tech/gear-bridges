@@ -155,6 +155,7 @@ static_assertions = "1.1.0"
 thiserror = { version = "2.0.11", default-features = false }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.23.0", features = ["full"] }
+backoff = { version = "0.4.0" }
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
 unroll = "0.1.5"

@@ -183,7 +183,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
 
     // deploy Vara Fungible Token
     let factory = extended_vft_client::ExtendedVftFactory::new(remoting.clone());
-    let extended_vft_id = factory
+    let extended_vft_id_1 = factory
         .new("TEST_TOKEN".into(), "TT".into(), 20)
         .send_recv(code_id_vft, salt)
         .await
@@ -191,21 +191,21 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
 
     println!(
         "program_id = {:?} (extended_vft)",
-        hex::encode(extended_vft_id)
+        hex::encode(extended_vft_id_1)
     );
 
     let mut service_vft = extended_vft_client::Vft::new(remoting.clone());
     // allow VFT-manager to burn funds
     service_vft
         .grant_burner_role(vft_manager_id)
-        .send_recv(extended_vft_id)
+        .send_recv(extended_vft_id_1)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
     // mint some tokens to the user
     if !service_vft
         .mint(account, amount)
-        .send_recv(extended_vft_id)
+        .send_recv(extended_vft_id_1)
         .await
         .map_err(|e| anyhow!("{e:?}"))?
     {
@@ -216,7 +216,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let amount = amount / 2;
     if !service_vft
         .approve(vft_manager_id, amount)
-        .send_recv(extended_vft_id)
+        .send_recv(extended_vft_id_1)
         .await
         .map_err(|e| anyhow!("{e:?}"))?
     {
@@ -227,7 +227,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let eth_token_id = H160::from([1u8; 20]);
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
-        .map_vara_to_eth_address(extended_vft_id, eth_token_id, supply_type)
+        .map_vara_to_eth_address(extended_vft_id_1, eth_token_id, supply_type)
         .send_recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
@@ -240,13 +240,13 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
         GClientRemoting::new(api.clone()).with_suri(suri_unauthorized),
     );
     let reply = service
-        .request_bridging(extended_vft_id, amount, Default::default())
+        .request_bridging(extended_vft_id_1, amount, Default::default())
         .send(vft_manager_id)
         .await;
 
     let balance = service_vft
         .balance_of(account)
-        .recv(extended_vft_id)
+        .recv(extended_vft_id_1)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
@@ -543,6 +543,125 @@ async fn msg_tracker_state() -> Result<()> {
             }
         )
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn upgrade() -> Result<()> {
+    let (api, suri, suri2, code_id, code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with(suri).unwrap();
+
+    // deploy VFT-manager
+    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let vft_manager_id = factory
+        .new(InitConfig {
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                reply_timeout: 100,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    // upgrade request from a non-authorized source should fail
+    let api_unauthorized = api.clone().with(suri2).unwrap();
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
+    let result = service
+        .upgrade(
+            Default::default(),
+        )
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err(), "result = {result:?}");
+
+    // upgrade request to the running VftManager should fail
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let result = service
+        .upgrade(
+            Default::default(),
+        )
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err(), "result = {result:?}");
+
+    // deploy Vara Fungible Token
+    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let extended_vft_id_1 = factory
+        .new("TEST_TOKEN1".into(), "TT1".into(), 20)
+        .send_recv(code_id_vft, [])
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (extended_vft1)",
+        hex::encode(extended_vft_id_1)
+    );
+
+    let mut service_vft = extended_vft_client::Vft::new(GClientRemoting::new(api.clone()));
+    // mint some tokens to the user
+    if !service_vft
+        .mint(vft_manager_id, 100.into())
+        .send_recv(extended_vft_id_1)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?
+    {
+        return Err(anyhow!("Unable to mint tokens").into());
+    }
+
+    // deploy another Vara Fungible Token
+    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let extended_vft_id_2 = factory
+        .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+        .send_recv(code_id_vft, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (extended_vft2)",
+        hex::encode(extended_vft_id_2)
+    );
+
+    // add token mappings
+    service
+        .map_vara_to_eth_address(extended_vft_id_1, [1u8; 20].into(), TokenSupply::Gear)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+    service
+        .map_vara_to_eth_address(extended_vft_id_2, [2u8; 20].into(), TokenSupply::Ethereum)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    // pause the VftManager
+    service
+        .pause()
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    // upgrade the VftManager
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let result = service
+        .upgrade(
+            Default::default(),
+        )
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_ok(), "result = {result:?}");
 
     Ok(())
 }

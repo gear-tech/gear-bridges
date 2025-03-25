@@ -2,7 +2,6 @@ import { HexString } from '@gear-js/api';
 
 import { Card, CopyButton, Skeleton, TruncatedText } from '@/components';
 import { useModal } from '@/hooks';
-import { cx } from '@/utils';
 
 import { Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
@@ -36,8 +35,8 @@ function TransactionCard(props: Props) {
 
   return (
     <>
-      <Card className={cx(styles.wideCard, styles.button)}>
-        <TransactionDate timestamp={timestamp} />
+      <Card className={styles.card}>
+        <TransactionDate timestamp={timestamp} className={styles.date} />
 
         <p className={styles.transactionHash}>
           <button type="button" onClick={openModal}>
@@ -58,7 +57,7 @@ function TransactionCard(props: Props) {
 
 function TransactionCardSkeleton() {
   return (
-    <Card className={styles.wideCard}>
+    <Card className={styles.card}>
       <TransactionDate.Skeleton />
 
       <p className={styles.transactionHash}>
@@ -66,9 +65,7 @@ function TransactionCardSkeleton() {
           <span>0x000000000</span>
         </Skeleton>
 
-        <Skeleton>
-          <CopyButton value="" />
-        </Skeleton>
+        <Skeleton width="18px" height="18px" />
       </p>
 
       <TransactionPair.Skeleton />
@@ -78,5 +75,4 @@ function TransactionCardSkeleton() {
 }
 
 TransactionCard.Skeleton = TransactionCardSkeleton;
-
 export { TransactionCard };

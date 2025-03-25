@@ -1,5 +1,9 @@
-use sails_rs::{gstd::{self, ExecContext, calls::GStdRemoting}, prelude::*, calls::*};
 use extended_vft_client::traits::*;
+use sails_rs::{
+    calls::*,
+    gstd::{self, calls::GStdRemoting, ExecContext},
+    prelude::*,
+};
 
 mod error;
 mod token_mapping;
@@ -409,10 +413,7 @@ where
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
-    pub async fn upgrade(
-        &mut self,
-        vft_manager_new: ActorId,
-    ) {
+    pub async fn upgrade(&mut self, vft_manager_new: ActorId) {
         self.ensure_admin();
 
         if !self.state().is_paused {
@@ -429,11 +430,12 @@ where
                 .await
                 .expect("Unable to get the balance of VftManager");
 
-            if balance > 0.into() && !service
-                .transfer(vft_manager_new, balance)
-                .send_recv(vft)
-                .await
-                .expect("Unable to request a transfer to the new VftManager")
+            if balance > 0.into()
+                && !service
+                    .transfer(vft_manager_new, balance)
+                    .send_recv(vft)
+                    .await
+                    .expect("Unable to request a transfer to the new VftManager")
             {
                 panic!("Unable to transfer tokens to the new VftManager ({vft:?})");
             }

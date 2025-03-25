@@ -578,11 +578,10 @@ async fn upgrade() -> Result<()> {
 
     // upgrade request from a non-authorized source should fail
     let api_unauthorized = api.clone().with(suri2).unwrap();
-    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
+    let mut service =
+        vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
     let result = service
-        .upgrade(
-            Default::default(),
-        )
+        .upgrade(Default::default())
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await;
@@ -591,9 +590,7 @@ async fn upgrade() -> Result<()> {
     // upgrade request to the running VftManager should fail
     let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
     let result = service
-        .upgrade(
-            Default::default(),
-        )
+        .upgrade(Default::default())
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await;
@@ -664,18 +661,13 @@ async fn upgrade() -> Result<()> {
     // upgrade the VftManager
     let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
     service
-        .upgrade(
-            Default::default(),
-        )
+        .upgrade(Default::default())
         .with_gas_limit(gas_limit)
         .send(vft_manager_id)
         .await
         .unwrap();
 
-    let result = service
-        .erc_20_manager_address()
-        .recv(vft_manager_id)
-        .await;
+    let result = service.erc_20_manager_address().recv(vft_manager_id).await;
     assert!(result.is_err(), "result = {result:?}");
     let error = format!("{result:?}");
     assert!(error.contains("InactiveProgram"));

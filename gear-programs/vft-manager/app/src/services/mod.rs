@@ -1,4 +1,5 @@
-use sails_rs::{gstd::ExecContext, prelude::*};
+use sails_rs::{gstd::{self, ExecContext, calls::GStdRemoting}, prelude::*, calls::*};
+use extended_vft_client::traits::*;
 
 mod error;
 mod token_mapping;
@@ -406,6 +407,39 @@ where
         self.ensure_running()?;
 
         request_bridging::handle_interrupted_transfer(self, msg_id).await
+    }
+
+    pub async fn upgrade(
+        &mut self,
+        vft_manager_new: ActorId,
+    ) {
+        self.ensure_admin();
+
+        if !self.state().is_paused {
+            panic!("Not paused");
+        }
+
+        let vft_manager = gstd::exec::program_id();
+        let mut service = extended_vft_client::Vft::new(GStdRemoting);
+        let mappings = self.state().token_map.read_state();
+        for (vft, _erc20, _supply) in mappings {
+            let balance = service
+                .balance_of(vft_manager)
+                .recv(vft)
+                .await
+                .expect("Unable to get the balance of VftManager");
+
+            if !service
+                .transfer(vft_manager_new, balance)
+                .send_recv(vft)
+                .await
+                .expect("Unable to request a transfer to the new VftManager")
+            {
+                panic!("Unable to transfer tokens to the new VftManager ({vft:?})");
+            }
+        }
+
+        gstd::exec::exit(vft_manager_new);
     }
 
     /// Get state of a `request_bridging` message tracker.

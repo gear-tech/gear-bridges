@@ -429,7 +429,7 @@ where
                 .await
                 .expect("Unable to get the balance of VftManager");
 
-            if !service
+            if balance > 0.into() && !service
                 .transfer(vft_manager_new, balance)
                 .send_recv(vft)
                 .await

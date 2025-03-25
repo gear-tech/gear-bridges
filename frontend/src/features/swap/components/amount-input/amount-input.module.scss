@@ -23,11 +23,15 @@
   text-align: right;
   text-overflow: ellipsis;
 
-  &[aria-invalid='true'] {
+  transition: color 0.25s;
+
+  &[aria-invalid='true'],
+  &[aria-invalid='true']::placeholder {
     color: #ff3757;
   }
 
   &::placeholder {
+    transition: color 0.25s;
     color: #9cacb1;
   }
 }

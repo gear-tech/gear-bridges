@@ -22,7 +22,7 @@ function AmountInput() {
             value={fieldValue}
             onValueChange={({ value }) => field.onChange(value)}
             allowNegative={false}
-            aria-invalid={Boolean(error)}
+            aria-invalid={Boolean(error?.message)}
             thousandSeparator
             className={cx(styles.input, Number(fieldValue) && styles.active)}
           />

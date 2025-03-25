@@ -583,6 +583,7 @@ async fn upgrade() -> Result<()> {
         .upgrade(
             Default::default(),
         )
+        .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await;
     assert!(result.is_err(), "result = {result:?}");
@@ -593,6 +594,7 @@ async fn upgrade() -> Result<()> {
         .upgrade(
             Default::default(),
         )
+        .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await;
     assert!(result.is_err(), "result = {result:?}");
@@ -601,6 +603,7 @@ async fn upgrade() -> Result<()> {
     let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
     let extended_vft_id_1 = factory
         .new("TEST_TOKEN1".into(), "TT1".into(), 20)
+        .with_gas_limit(gas_limit)
         .send_recv(code_id_vft, [])
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
@@ -614,6 +617,7 @@ async fn upgrade() -> Result<()> {
     // mint some tokens to the user
     if !service_vft
         .mint(vft_manager_id, 100.into())
+        .with_gas_limit(gas_limit)
         .send_recv(extended_vft_id_1)
         .await
         .map_err(|e| anyhow!("{e:?}"))?
@@ -625,6 +629,7 @@ async fn upgrade() -> Result<()> {
     let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
     let extended_vft_id_2 = factory
         .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+        .with_gas_limit(gas_limit)
         .send_recv(code_id_vft, salt)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
@@ -637,11 +642,13 @@ async fn upgrade() -> Result<()> {
     // add token mappings
     service
         .map_vara_to_eth_address(extended_vft_id_1, [1u8; 20].into(), TokenSupply::Gear)
+        .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
     service
         .map_vara_to_eth_address(extended_vft_id_2, [2u8; 20].into(), TokenSupply::Ethereum)
+        .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
@@ -649,19 +656,29 @@ async fn upgrade() -> Result<()> {
     // pause the VftManager
     service
         .pause()
+        .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
 
     // upgrade the VftManager
     let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
-    let result = service
+    service
         .upgrade(
             Default::default(),
         )
-        .send_recv(vft_manager_id)
+        .with_gas_limit(gas_limit)
+        .send(vft_manager_id)
+        .await
+        .unwrap();
+
+    let result = service
+        .erc_20_manager_address()
+        .recv(vft_manager_id)
         .await;
-    assert!(result.is_ok(), "result = {result:?}");
+    assert!(result.is_err(), "result = {result:?}");
+    let error = format!("{result:?}");
+    assert!(error.contains("InactiveProgram"));
 
     Ok(())
 }

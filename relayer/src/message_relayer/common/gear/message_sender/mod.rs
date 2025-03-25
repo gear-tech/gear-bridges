@@ -116,6 +116,7 @@ impl MessageSender {
                                     Err(err) => match err {
                                         backoff::Error::Permanent(permanent) => {
                                             log::error!("Gear message sender failed with permanent error: {}", permanent);
+                                            return;
                                         }
 
                                         backoff::Error::Transient { err, retry_after } => {

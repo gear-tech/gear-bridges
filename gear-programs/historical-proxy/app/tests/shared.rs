@@ -35,91 +35,93 @@ pub struct Receipts {
 
 pub fn event() -> EthToVaraEvent {
     // tx 0x180cd2328df9c4356adc77e19e33c5aa2d5395f1b52e70d22c25070a04f16691
-    let tx_index = 15;
+    // let tx_index = 15;
 
-    let receipts: Receipts = serde_json::from_slice(HOLESKY_RECEIPTS_2_498_456.as_ref()).unwrap();
-    let receipts = receipts
-        .result
-        .iter()
-        .map(|tx_receipt| {
-            let receipt = tx_receipt.as_ref();
+    // let receipts: Receipts = serde_json::from_slice(HOLESKY_RECEIPTS_2_498_456.as_ref()).unwrap();
+    // let receipts = receipts
+    //     .result
+    //     .iter()
+    //     .map(|tx_receipt| {
+    //         let receipt = tx_receipt.as_ref();
 
-            tx_receipt
-                .transaction_index
-                .map(|i| (i, eth_utils::map_receipt_envelope(receipt)))
-        })
-        .collect::<Option<Vec<_>>>()
-        .unwrap_or_default();
+    //         tx_receipt
+    //             .transaction_index
+    //             .map(|i| (i, eth_utils::map_receipt_envelope(receipt)))
+    //     })
+    //     .collect::<Option<Vec<_>>>()
+    //     .unwrap_or_default();
 
-    let block: Block = {
-        let response: BeaconBlockResponse =
-            serde_json::from_slice(HOLESKY_BLOCK_2_498_456.as_ref()).unwrap();
+    // let block: Block = {
+    //     let response: BeaconBlockResponse =
+    //         serde_json::from_slice(HOLESKY_BLOCK_2_498_456.as_ref()).unwrap();
 
-        response.data.message.into()
-    };
-    let headers = vec![
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_457.as_ref()).unwrap();
+    //     response.data.message.into()
+    // };
+    // let headers = vec![
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_457.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_458.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_458.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_459.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_459.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_460.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_460.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_461.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_461.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_462.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_462.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_463.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_463.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-        {
-            let response: BeaconBlockHeaderResponse =
-                serde_json::from_slice(HOLESKY_HEADER_2_498_464.as_ref()).unwrap();
+    //         response.data.header.message
+    //     },
+    //     {
+    //         let response: BeaconBlockHeaderResponse =
+    //             serde_json::from_slice(HOLESKY_HEADER_2_498_464.as_ref()).unwrap();
 
-            response.data.header.message
-        },
-    ];
+    //         response.data.header.message
+    //     },
+    // ];
 
-    let MerkleProof { proof, receipt } =
-        eth_utils::generate_merkle_proof(tx_index, &receipts[..]).unwrap();
+    // let MerkleProof { proof, receipt } =
+    //     eth_utils::generate_merkle_proof(tx_index, &receipts[..]).unwrap();
 
-    let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
-    Encodable::encode(&receipt, &mut receipt_rlp);
-    EthToVaraEvent {
-        proof_block: BlockInclusionProof {
-            block: block.clone(),
-            headers: headers.clone(),
-        },
-        proof: proof.clone(),
-        transaction_index: tx_index,
-        receipt_rlp,
-    }
+    // let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
+    // Encodable::encode(&receipt, &mut receipt_rlp);
+    // EthToVaraEvent {
+    //     proof_block: BlockInclusionProof {
+    //         block: block.clone(),
+    //         headers: headers.clone(),
+    //     },
+    //     proof: proof.clone(),
+    //     transaction_index: tx_index,
+    //     receipt_rlp,
+    // }
+
+    todo!("adjust to the post Electra data")
 }

@@ -98,14 +98,6 @@ type Error = enum {
   Paused,
 };
 
-/// Entry for a single message in [MessageTracker].
-type MessageInfo = struct {
-  /// State of the message.
-  status: MessageStatus,
-  /// Request details.
-  details: TxDetails,
-};
-
 /// State in which message processing can be.
 type MessageStatus = enum {
   /// Message to deposit tokens is sent.
@@ -136,21 +128,34 @@ type TxDetails = struct {
   token_supply: TokenSupply,
 };
 
+/// Entry for a single message in [MessageTracker].
+type MessageInfo = struct {
+  /// State of the message.
+  status: MessageStatus,
+  /// Request details.
+  details: TxDetails,
+};
+
+type Order = enum {
+  Direct,
+  Reverse,
+};
+
 constructor {
   /// The constructor is intended for test purposes and is available only when the feature
-  /// `gas_calculation` is enabled.
-  GasCalculation : (_init_config: InitConfig, _slot_first: u64);
+  /// `mocks` is enabled.
+  GasCalculation : (_init_config: InitConfig, _slot_first: u64, _count: opt u32);
   New : (init_config: InitConfig);
 };
 
 service VftManager {
-  /// The method is intended for tests and is available only when the feature `gas_calculation`
+  /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
   /// on the `_supply_type`.
   /// 
   /// Designed for benchmarking gas consumption by the VFT-response processing function.
   CalculateGasForReply : (_slot: u64, _transaction_index: u64, _supply_type: TokenSupply) -> result (null, Error);
-  /// The method is intended for tests and is available only when the feature `gas_calculation`
+  /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Populates the collection with processed transactions.
   /// 
   /// Returns false when the collection is populated.
@@ -164,6 +169,9 @@ service VftManager {
   /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
   /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
+  /// The method is intended for tests and is available only when the feature `mocks`
+  /// is enabled. Inserts the message info into the corresponding collection.
+  InsertMessageInfo : (_msg_id: message_id, _status: MessageStatus, _details: TxDetails) -> null;
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
   /// Pause the `vft-manager`.
@@ -229,7 +237,8 @@ service VftManager {
   /// Get current [State::pause_admin] address.
   query PauseAdmin : () -> actor_id;
   /// Get state of a `request_bridging` message tracker.
-  query RequestBridingMsgTrackerState : () -> vec struct { message_id, MessageInfo };
+  query RequestBridingMsgTrackerState : (start: u32, count: u32) -> vec struct { message_id, MessageInfo };
+  query Transactions : (order: Order, start: u32, count: u32) -> vec struct { u64, u64 };
   /// Get current [token mapping](State::token_map).
   query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
 

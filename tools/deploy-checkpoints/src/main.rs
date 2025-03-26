@@ -70,6 +70,8 @@ async fn main() -> AnyResult<()> {
         Network::Holesky
     } else if network == "sepolia" {
         Network::Sepolia
+    } else if network == "hoodi" {
+        Network::Hoodi
     } else {
         return Err(anyhow!("Network '{network}' is not supported"));
     };

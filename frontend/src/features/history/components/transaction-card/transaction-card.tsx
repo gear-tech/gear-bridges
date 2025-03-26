@@ -2,7 +2,6 @@ import { HexString } from '@gear-js/api';
 
 import { Card, CopyButton, Skeleton, TruncatedText } from '@/components';
 import { useModal } from '@/hooks';
-import { cx } from '@/utils';
 
 import { Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
@@ -36,8 +35,8 @@ function TransactionCard(props: Props) {
 
   return (
     <>
-      <Card className={cx(styles.wideCard, styles.button)}>
-        <TransactionDate timestamp={timestamp} />
+      <Card className={styles.card}>
+        <TransactionDate timestamp={timestamp} className={styles.date} />
 
         <p className={styles.transactionHash}>
           <button type="button" onClick={openModal}>
@@ -56,42 +55,9 @@ function TransactionCard(props: Props) {
   );
 }
 
-function TransactionCardCompact(props: Props) {
-  const { status, timestamp } = props;
-
-  const [isModalOpen, openModal, closeModal] = useModal();
-
+function TransactionCardSkeleton() {
   return (
-    <>
-      <Card as="button" className={cx(styles.compactCard, styles.button)} onClick={openModal}>
-        <TransactionPair {...props} isCompact />
-
-        <div className={styles.status}>
-          <TransactionStatus status={status} />
-          <TransactionDate timestamp={timestamp} isCompact />
-        </div>
-      </Card>
-
-      {isModalOpen && <TransactionModal close={closeModal} {...props} />}
-    </>
-  );
-}
-
-function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
-  if (isCompact)
-    return (
-      <Card className={styles.compactCard}>
-        <TransactionPair.Skeleton isCompact />
-
-        <div>
-          <TransactionStatus.Skeleton />
-          <TransactionDate.Skeleton isCompact />
-        </div>
-      </Card>
-    );
-
-  return (
-    <Card className={styles.wideCard}>
+    <Card className={styles.card}>
       <TransactionDate.Skeleton />
 
       <p className={styles.transactionHash}>
@@ -99,9 +65,7 @@ function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
           <span>0x000000000</span>
         </Skeleton>
 
-        <Skeleton>
-          <CopyButton value="" />
-        </Skeleton>
+        <Skeleton width="18px" height="18px" />
       </p>
 
       <TransactionPair.Skeleton />
@@ -111,6 +75,4 @@ function TransactionCardSkeleton({ isCompact }: { isCompact?: boolean }) {
 }
 
 TransactionCard.Skeleton = TransactionCardSkeleton;
-TransactionCard.Compact = TransactionCardCompact;
-
 export { TransactionCard };

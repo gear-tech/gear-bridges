@@ -1,49 +1,21 @@
-import { useAccount } from '@gear-js/react-hooks';
-import { CSSProperties, ReactNode } from 'react';
+import { ReactNode } from 'react';
 
-import { ETH_CHAIN_ID } from '@/consts';
-import { useEthAccount } from '@/hooks';
 import { cx } from '@/utils';
 
 import styles from './container.module.scss';
 
 type Props = {
   children: ReactNode;
-  maxWidth?: 'xl' | 'md';
+  maxWidth?: `${string}px`;
   className?: string;
 };
 
-const WAVES_COUNT = 5;
-
-function Container({ children, maxWidth = 'xl', className }: Props) {
-  return <div className={cx(styles.container, styles[maxWidth], className)}>{children}</div>;
-}
-
-function Live({ children, ...props }: Props) {
-  const ethAccount = useEthAccount();
-  const { account } = useAccount();
-
-  const isAccount = account || (ethAccount.isConnected && ethAccount.chainId === ETH_CHAIN_ID);
-
-  const renderWaves = () =>
-    new Array(WAVES_COUNT)
-      .fill(null)
-      .map((_, index) => (
-        <span
-          key={index}
-          className={cx(styles.wave, isAccount && styles.active)}
-          style={{ '--i': index } as CSSProperties}
-        />
-      ));
-
+function Container({ children, maxWidth, className }: Props) {
   return (
-    <Container {...props}>
+    <div className={cx(styles.container, className)} style={{ maxWidth }}>
       {children}
-      {renderWaves()}
-    </Container>
+    </div>
   );
 }
-
-Container.Live = Live;
 
 export { Container };

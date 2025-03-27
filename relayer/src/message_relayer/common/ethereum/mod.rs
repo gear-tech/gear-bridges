@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use ethereum_client::EthApi;
 
 use ethereum_beacon_client::BeaconClient;
+use ethereum_common::beacon::electra::Block;
 
 use super::{EthereumBlockNumber, EthereumSlotNumber};
 
@@ -32,7 +33,7 @@ async fn find_slot_by_block_number(
     ))?;
 
     let beacon_block_parent = beacon_client
-        .get_block_by_hash(&beacon_root_parent.0)
+        .get_block_by_hash::<Block>(&beacon_root_parent.0)
         .await?;
 
     // TODO: It's a temporary solution of a problem that we're connecting to a different
@@ -40,7 +41,7 @@ async fn find_slot_by_block_number(
     // available on other.
     for _ in 0..10 {
         let beacon_block_result = beacon_client
-            .find_beacon_block(block.0, &beacon_block_parent)
+            .find_beacon_block(block.0, beacon_block_parent.clone())
             .await;
 
         match beacon_block_result {

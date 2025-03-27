@@ -4,7 +4,7 @@ use super::*;
 #[derive(
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
-pub struct Block {
+pub struct BlockGeneric<BlockBody: tree_hash::TreeHash> {
     #[serde(deserialize_with = "utils::deserialize_u64")]
     pub slot: u64,
     #[serde(deserialize_with = "utils::deserialize_u64")]
@@ -12,4 +12,10 @@ pub struct Block {
     pub parent_root: Hash256,
     pub state_root: Hash256,
     pub body: BlockBody,
+}
+
+pub type Block = BlockGeneric<BlockBody>;
+
+pub mod electra {
+    pub type Block = super::BlockGeneric<crate::beacon::electra::BlockBody>;
 }

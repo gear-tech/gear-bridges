@@ -1,10 +1,9 @@
-use std::sync::mpsc::channel;
-
 use primitive_types::H256;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, TxHash};
 use gear_rpc_client::GearApi;
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::message_relayer::common::{
     gear::{
@@ -65,10 +64,12 @@ pub async fn relay(
         false,
     );
 
-    let [gear_blocks] = gear_block_listener.run();
-    let (deposit_events_sender, deposit_events_receiver) = channel();
-    let checkpoints = checkpoints_extractor.run(gear_blocks);
-    gear_message_sender.run(deposit_events_receiver, checkpoints);
+    let [gear_blocks] = gear_block_listener.run().await;
+    let (deposit_events_sender, deposit_events_receiver) = unbounded_channel();
+    let checkpoints = checkpoints_extractor.run(gear_blocks).await;
+    gear_message_sender
+        .run(deposit_events_receiver, checkpoints)
+        .await;
 
     deposit_events_sender
         .send(TxHashWithSlot {

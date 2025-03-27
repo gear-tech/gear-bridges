@@ -1,11 +1,7 @@
-use std::{
-    sync::mpsc::{channel, Receiver, Sender},
-    time::Duration,
-};
-
-use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
+use std::time::Duration;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::{GSdkArgs, GearBlockNumber};
@@ -44,13 +40,18 @@ impl BlockListener {
         }
     }
 
-    pub fn run<const RECEIVER_COUNT: usize>(self) -> [Receiver<GearBlockNumber>; RECEIVER_COUNT] {
-        let (senders, receivers): (Vec<_>, Vec<_>) = (0..RECEIVER_COUNT).map(|_| channel()).unzip();
+    pub async fn run<const RECEIVER_COUNT: usize>(
+        self,
+    ) -> [UnboundedReceiver<GearBlockNumber>; RECEIVER_COUNT] {
+        let (senders, receivers): (Vec<_>, Vec<_>) =
+            (0..RECEIVER_COUNT).map(|_| unbounded_channel()).unzip();
 
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&senders));
-            if let Err(err) = res {
-                log::error!("Gear block listener failed: {}", err);
+        tokio::task::spawn(async move {
+            loop {
+                let res = self.run_inner(&senders).await;
+                if let Err(err) = res {
+                    log::error!("Gear block listener failed: {}", err);
+                }
             }
         });
 
@@ -59,7 +60,7 @@ impl BlockListener {
             .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(&self, senders: &[Sender<GearBlockNumber>]) -> anyhow::Result<()> {
+    async fn run_inner(&self, senders: &[UnboundedSender<GearBlockNumber>]) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
         self.metrics.latest_block.set(current_block as i64);

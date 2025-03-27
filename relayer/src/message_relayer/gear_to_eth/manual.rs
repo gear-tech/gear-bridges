@@ -1,9 +1,8 @@
-use std::sync::mpsc::channel;
-
 use primitive_types::H256;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::message_relayer::common::{
     ethereum::{
@@ -56,15 +55,17 @@ pub async fn relay(
         block_hash: gear_block_hash,
     };
 
-    let (queued_messages_sender, queued_messages_receiver) = channel();
+    let (queued_messages_sender, queued_messages_receiver) = unbounded_channel();
 
     let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
     let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), gear_api.clone());
     let message_sender = MessageSender::new(eth_api, gear_api);
 
-    let ethereum_blocks = ethereum_block_listener.run();
-    let merkle_roots = merkle_root_extractor.run(ethereum_blocks);
-    message_sender.run(queued_messages_receiver, merkle_roots);
+    let ethereum_blocks = ethereum_block_listener.run().await;
+    let merkle_roots = merkle_root_extractor.run(ethereum_blocks).await;
+    message_sender
+        .run(queued_messages_receiver, merkle_roots)
+        .await;
 
     queued_messages_sender
         .send(message_in_block)

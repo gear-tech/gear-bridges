@@ -126,7 +126,7 @@ async fn main() {
 
                     metrics_builder = metrics_builder.register_service(&relayer);
 
-                    relayer.run();
+                    relayer.run().await;
                 }
                 GearEthTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -147,7 +147,7 @@ async fn main() {
 
                     metrics_builder = metrics_builder.register_service(&relayer);
 
-                    relayer.run();
+                    relayer.run().await;
                 }
             }
 
@@ -241,7 +241,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
-                    relayer.run();
+                    relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -269,13 +269,14 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
-                    relayer.run();
+                    relayer.run().await;
                 }
             }
 
             loop {
                 // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                std::thread::sleep(Duration::from_millis(100));
+                // TODO(playx): is this necessary now? We switched to full async
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
         CliCommands::GearEthManual(args) => {

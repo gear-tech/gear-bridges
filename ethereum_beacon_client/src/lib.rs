@@ -43,6 +43,7 @@ struct CodeResponse {
 pub struct BeaconClient {
     client: Client,
     rpc_url: String,
+    timeout: Option<Duration>,
 }
 
 impl BeaconClient {
@@ -57,7 +58,30 @@ impl BeaconClient {
             .build()
             .expect("Failed to create reqwest http client");
 
-        Ok(Self { client, rpc_url })
+        Ok(Self {
+            client,
+            rpc_url,
+            timeout,
+        })
+    }
+
+    /// Reconnects the client with the same configuration.
+    pub async fn reconnect(&self) -> AnyResult<Self> {
+        let client = ClientBuilder::new();
+        let client = match self.timeout {
+            Some(timeout) => client.timeout(timeout),
+            None => client,
+        };
+
+        let client = client
+            .build()
+            .expect("Failed to create reqwest http client");
+
+        Ok(Self {
+            client,
+            rpc_url: self.rpc_url.clone(),
+            timeout: self.timeout,
+        })
     }
 
     pub async fn get_updates(&self, period: u64, count: u8) -> AnyResult<UpdateResponse> {

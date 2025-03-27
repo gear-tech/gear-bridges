@@ -87,6 +87,8 @@ pub enum TxStatus {
 pub struct EthApi {
     contracts: Contracts<ProviderType, Http<Client>, Ethereum>,
     public_key: Address,
+    wallet: EthereumWallet,
+    url: Url,
 }
 
 impl EthApi {
@@ -118,8 +120,8 @@ impl EthApi {
 
         let provider: ProviderType = ProviderBuilder::new()
             .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(url);
+            .wallet(wallet.clone())
+            .on_http(url.clone());
 
         let contracts = Contracts::new(
             provider,
@@ -130,6 +132,28 @@ impl EthApi {
         Ok(EthApi {
             contracts,
             public_key,
+            url,
+            wallet,
+        })
+    }
+
+    pub fn reconnect(&self) -> Result<EthApi, Error> {
+        let provider: ProviderType = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(self.wallet.clone())
+            .on_http(self.url.clone());
+
+        let contracts = Contracts::new(
+            provider,
+            self.contracts.message_queue_instance.address().0 .0,
+            self.contracts.relayer_instance.address().0 .0,
+        )?;
+
+        Ok(EthApi {
+            contracts,
+            public_key: self.public_key,
+            url: self.url.clone(),
+            wallet: self.wallet.clone(),
         })
     }
 

@@ -1,7 +1,7 @@
 use collections::HashMap;
-use sails_rs::{prelude::*, gstd::calls::GStdRemoting, calls::*, errors::Error as SailsError};
 use extended_vft_client::traits::Vft;
 use gstd::errors::{Error as GStdError, ErrorReplyReason};
+use sails_rs::{calls::*, errors::Error as SailsError, gstd::calls::GStdRemoting, prelude::*};
 
 use super::{error::Error, TokenSupply};
 
@@ -90,9 +90,7 @@ impl TokenMap {
         self.vara_to_eth
             .clone()
             .into_iter()
-            .map(|(vara_token, (eth_token, supply))| {
-                (vara_token, eth_token, supply)
-            })
+            .map(|(vara_token, (eth_token, supply))| (vara_token, eth_token, supply))
             .collect()
     }
 
@@ -120,20 +118,27 @@ impl TokenMap {
         let vft_manager = gstd::exec::program_id();
         let service = extended_vft_client::Vft::new(GStdRemoting);
         for (vft, (erc20, supply)) in &self.vara_to_eth {
-            let vft_new = match vft_map.iter().find_map(|(vft_old, vft_new)| (vft_old == vft).then_some(vft_new)) {
+            let vft_new = match vft_map
+                .iter()
+                .find_map(|(vft_old, vft_new)| (vft_old == vft).then_some(vft_new))
+            {
                 None => vft,
 
-                Some(vft_new) => match service
-                    .balance_of(vft_manager)
-                    .recv(*vft)
-                    .await
-                {
+                Some(vft_new) => match service.balance_of(vft_manager).recv(*vft).await {
                     Ok(_) => vft,
 
-                    Err(e) => if !matches!(e, SailsError::GStd(GStdError::ErrorReply(_, ErrorReplyReason::InactiveActor))) {
-                        panic!("Vft failed: {e:?}")
-                    } else {
-                        vft_new
+                    Err(e) => {
+                        if !matches!(
+                            e,
+                            SailsError::GStd(GStdError::ErrorReply(
+                                _,
+                                ErrorReplyReason::InactiveActor
+                            ))
+                        ) {
+                            panic!("Vft failed: {e:?}")
+                        } else {
+                            vft_new
+                        }
                     }
                 },
             };
@@ -146,9 +151,7 @@ impl TokenMap {
             return;
         }
 
-        if gstd::exec::gas_available()
-            < gas_required
-        {
+        if gstd::exec::gas_available() < gas_required {
             panic!("Please attach more gas");
         }
 

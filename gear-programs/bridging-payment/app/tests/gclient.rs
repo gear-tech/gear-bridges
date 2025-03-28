@@ -117,6 +117,7 @@ async fn teleport_payed() -> Result<()> {
                 gas_for_token_ops: 20_000_000_000,
                 gas_for_reply_deposit: 10_000_000_000,
                 gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 3,
             },
         })

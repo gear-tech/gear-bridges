@@ -176,7 +176,7 @@ function SwapForm({
 
                 <div className={styles.token}>
                   <p className={styles.symbol}>{destinationSymbol}</p>
-                  <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                  <p className={styles.network}>{isVaraNetwork ? 'Ethereum' : 'Vara'}</p>
                 </div>
               </div>
 

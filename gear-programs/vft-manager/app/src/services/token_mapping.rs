@@ -6,12 +6,10 @@ use super::{error::Error, TokenSupply};
 /// Mapping between `VFT` and `ERC20` tokens.
 #[derive(Debug, Default)]
 pub struct TokenMap {
-    /// Mapping from `VFT` token addresses to `ERC20` token addresses.
-    vara_to_eth: HashMap<ActorId, H160>,
+    /// Mapping from `VFT` token addresses to `ERC20` token addresses and the [TokenSupply] type.
+    vara_to_eth: HashMap<ActorId, (H160, TokenSupply)>,
     /// Mapping from `ERC20` token addresses to `VFT` token addresses.
     eth_to_vara: HashMap<H160, ActorId>,
-    /// Mapping from `VFT` token addresses to the [TokenSupply] types.
-    supply_mapping: HashMap<ActorId, TokenSupply>,
 }
 
 impl TokenMap {
@@ -21,7 +19,7 @@ impl TokenMap {
     pub fn insert(&mut self, vara_token_id: ActorId, eth_token_id: H160, supply: TokenSupply) {
         if self
             .vara_to_eth
-            .insert(vara_token_id, eth_token_id)
+            .insert(vara_token_id, (eth_token_id, supply))
             .is_some()
         {
             panic!("Mapping already present");
@@ -34,17 +32,13 @@ impl TokenMap {
         {
             panic!("Mapping already present");
         }
-
-        if self.supply_mapping.insert(vara_token_id, supply).is_some() {
-            panic!("Mapping already present");
-        }
     }
 
     /// Remove token pair from map.
     ///
     /// Will return error if `vara_token_id` don't correspond to the already existing mapping.
     pub fn remove(&mut self, vara_token_id: ActorId) -> H160 {
-        let eth_token_id = self
+        let (eth_token_id, _suply) = self
             .vara_to_eth
             .remove(&vara_token_id)
             .expect("Mapping not found");
@@ -52,11 +46,6 @@ impl TokenMap {
         let _ = self
             .eth_to_vara
             .remove(&eth_token_id)
-            .expect("Mapping not found");
-
-        let _ = self
-            .supply_mapping
-            .remove(&vara_token_id)
             .expect("Mapping not found");
 
         eth_token_id
@@ -69,6 +58,7 @@ impl TokenMap {
         self.vara_to_eth
             .get(vara_token_id)
             .cloned()
+            .map(|(eth_token_id, _supply)| eth_token_id)
             .ok_or(Error::NoCorrespondingEthAddress)
     }
 
@@ -86,9 +76,10 @@ impl TokenMap {
     ///
     /// Will return error if mapping isn't found.
     pub fn get_supply_type(&self, vara_token_id: &ActorId) -> Result<TokenSupply, Error> {
-        self.supply_mapping
+        self.vara_to_eth
             .get(vara_token_id)
             .cloned()
+            .map(|(_eth_token_id, supply)| supply)
             .ok_or(Error::NoCorrespondingVaraAddress)
     }
 
@@ -97,10 +88,7 @@ impl TokenMap {
         self.vara_to_eth
             .clone()
             .into_iter()
-            .map(|(vara_token, eth_token)| {
-                let supply = self
-                    .get_supply_type(&vara_token)
-                    .expect("Should be present due to the TokenMap invariants");
+            .map(|(vara_token, (eth_token, supply))| {
                 (vara_token, eth_token, supply)
             })
             .collect()

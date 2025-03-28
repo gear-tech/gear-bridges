@@ -222,6 +222,7 @@ service VftManager {
   UpdateFeeCharger : (fee_charger_new: opt actor_id) -> null;
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
+  Upgrade : (vft_manager_new: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
   /// Get current [State::erc20_manager_address] address.

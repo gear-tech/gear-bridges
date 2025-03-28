@@ -183,6 +183,8 @@ pub struct Config {
     gas_for_reply_deposit: u64,
     /// Gas limit for gear-eth-bridge built-in actor request.
     gas_to_send_request_to_builtin: u64,
+    /// Required gas to commit changes in [VftManager::update_vfts].
+    gas_for_swap_token_maps: u64,
     /// Timeout in blocks that current program will wait for reply from
     /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
@@ -427,6 +429,13 @@ where
         }
 
         gstd::exec::exit(vft_manager_new);
+    }
+
+    pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
+        self.ensure_admin();
+
+        let gas_required = self.config().gas_for_swap_token_maps;
+        self.state_mut().token_map.update_vfts(gas_required, vft_map).await
     }
 
     /// Get state of a `request_bridging` message tracker.

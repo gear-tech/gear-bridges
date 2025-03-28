@@ -93,4 +93,21 @@ impl TokenMap {
             })
             .collect()
     }
+
+    fn swap_maps(
+        &mut self,
+        vara_to_eth: &mut HashMap<ActorId, (H160, TokenSupply)>,
+        eth_to_vara: &mut HashMap<H160, ActorId>,
+    ) {
+        mem::swap(&mut self.vara_to_eth, vara_to_eth);
+        mem::swap(&mut self.eth_to_vara, eth_to_vara);
+    }
+
+    #[cfg(feature = "mocks")]
+    pub fn calculate_gas_for_token_map_swap(&mut self) {
+        let mut vara_to_eth = Default::default();
+        let mut eth_to_vara = Default::default();
+
+        self.swap_maps(&mut vara_to_eth, &mut eth_to_vara);
+    }
 }

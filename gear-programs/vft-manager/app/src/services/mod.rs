@@ -579,6 +579,22 @@ where
         #[cfg(not(feature = "mocks"))]
         panic!("Please rebuild with enabled `mocks` feature")
     }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
+    /// is enabled.
+    /// 
+    /// Swaps internal hash maps of the TokenMap instance.
+    pub async fn calculate_gas_for_token_map_swap(
+        &mut self,
+    ) {
+        #[cfg(feature = "mocks")]
+        {
+            self.state_mut().token_map.calculate_gas_for_token_map_swap()
+        }
+
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
+    }
 }
 
 impl<T> VftManager<T>

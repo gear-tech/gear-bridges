@@ -674,3 +674,94 @@ async fn upgrade() -> Result<()> {
 
     Ok(())
 }
+
+#[ignore = "Used to benchmark gas usage for swapping collections of TokenMap"]
+#[tokio::test]
+async fn bench_gas_for_token_map_swap() -> Result<()> {
+    const COUNT: usize = 1_000;
+
+    let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with("//Bob").unwrap();
+
+    // deploy VFT-manager
+    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let vft_manager_id = factory
+        .new(
+            InitConfig {
+                erc20_manager_address: Default::default(),
+                gear_bridge_builtin: Default::default(),
+                historical_proxy_address: Default::default(),
+                config: Config {
+                    gas_for_token_ops: 20_000_000_000,
+                    gas_for_reply_deposit: 10_000_000_000,
+                    gas_to_send_request_to_builtin: 20_000_000_000,
+                    reply_timeout: 100,
+                },
+            },
+        )
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    for i in 0..10 {
+        let supply_type = match i > 0 {
+            true => TokenSupply::Ethereum,
+            false => TokenSupply::Gear,
+        };
+
+        service
+            .map_vara_to_eth_address([i; 32].into(), [i; 20].into(), supply_type)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap();
+    }
+
+    println!("prepared");
+
+    let mut results_burned = Vec::with_capacity(COUNT);
+    let mut results_min_limit = Vec::with_capacity(COUNT);
+
+    let account: &[u8; 32] = api.account_id().as_ref();
+    let origin = H256::from_slice(account);
+
+    for _i in 0..COUNT {
+        let gas_info = api.calculate_handle_gas(
+            Some(origin),
+            vft_manager_id,
+            vft_manager_client::vft_manager::io::CalculateGasForTokenMapSwap::ROUTE.to_vec(),
+            0,
+            true,
+        )
+        .await
+        .unwrap();
+
+        results_burned.push(gas_info.burned);
+        results_min_limit.push(gas_info.min_limit);
+    }
+
+    results_burned.sort_unstable();
+    results_min_limit.sort_unstable();
+
+    println!(
+        "burned: min = {:?}, max = {:?}, average = {}",
+        results_burned.first(),
+        results_burned.last(),
+        average(&results_burned[..])
+    );
+    println!(
+        "min_limit: min = {:?}, max = {:?}, average = {}",
+        results_min_limit.first(),
+        results_min_limit.last(),
+        average(&results_min_limit[..])
+    );
+
+    Ok(())
+}

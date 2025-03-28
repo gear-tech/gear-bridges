@@ -1,21 +1,18 @@
 import { useAccount } from '@gear-js/react-hooks';
-import { Button } from '@gear-js/vara-ui';
+import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
 
 import { useEthAccount, useModal } from '@/hooks';
-import { cx } from '@/utils';
 
 import SwapSVG from '../../assets/swap.svg?react';
-import { WalletModal } from '../wallet-modal';
 
 import styles from './swap-network-button.module.scss';
 
 type Props = {
-  isActive: boolean;
   onClick: () => void;
 };
 
-function SwapNetworkButton({ isActive, onClick }: Props) {
+function SwapNetworkButton({ onClick }: Props) {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
@@ -31,12 +28,9 @@ function SwapNetworkButton({ isActive, onClick }: Props) {
 
   return (
     <>
-      <Button
-        icon={SwapSVG}
-        color="contrast"
-        className={cx(styles.button, isActive && styles.active)}
-        onClick={handleClick}
-      />
+      <button type="button" color="contrast" className={styles.button} onClick={handleClick}>
+        <SwapSVG className={styles.icon} />
+      </button>
 
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}
     </>

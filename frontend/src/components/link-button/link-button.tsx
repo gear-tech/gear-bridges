@@ -23,6 +23,7 @@ function LinkButton({
   type = 'internal',
 }: Props) {
   const cn = cx(
+    'linkButton',
     buttonStyles.button,
     buttonStyles[color],
     color !== 'transparent' && buttonStyles[size],

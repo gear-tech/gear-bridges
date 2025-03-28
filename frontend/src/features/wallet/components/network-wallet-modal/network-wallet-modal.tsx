@@ -1,13 +1,12 @@
 import { useAccount } from '@gear-js/react-hooks';
-import { Button, Modal, ModalProps } from '@gear-js/vara-ui';
+import { Modal, ModalProps } from '@gear-js/vara-ui';
+import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
 import { useEffect } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { useEthAccount, useModal } from '@/hooks';
-
-import { WalletModal } from '../wallet-modal';
 
 import styles from './network-wallet-modal.module.scss';
 
@@ -30,9 +29,15 @@ function NetworkWalletModal({ close }: Props) {
   return (
     <>
       <Modal heading="Connect Wallet" close={close} className={styles.modal}>
-        {/* TODO: NetworkCard */}
-        <Button icon={VaraSVG} text="Substrate" onClick={openSubstrateModal} size="small" color="grey" block />
-        <Button icon={EthSVG} text="Ethereum" onClick={() => openEthModal()} size="small" color="grey" block />
+        <button type="button" onClick={openSubstrateModal} className={styles.button}>
+          <VaraSVG />
+          <span>Substrate</span>
+        </button>
+
+        <button type="button" onClick={() => openEthModal()} className={styles.button}>
+          <EthSVG />
+          <span>Ethereum</span>
+        </button>
       </Modal>
 
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}

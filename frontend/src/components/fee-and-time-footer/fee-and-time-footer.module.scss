@@ -5,16 +5,21 @@
 }
 
 .prop {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 2.3fr 7.7fr;
+
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.key {
+  color: #9cacb1;
+
+  svg {
+    margin-right: 8px;
+  }
 }
 
 .value {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-
-  font-size: 14px;
-  font-weight: 500;
-  opacity: 0.7;
+  color: #f6f6f6e5;
 }

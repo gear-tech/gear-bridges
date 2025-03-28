@@ -1,5 +1,7 @@
 use collections::HashMap;
-use sails_rs::prelude::*;
+use sails_rs::{prelude::*, gstd::calls::GStdRemoting, calls::*, errors::Error as SailsError};
+use extended_vft_client::traits::Vft;
+use gstd::errors::{Error as GStdError, ErrorReplyReason};
 
 use super::{error::Error, TokenSupply};
 
@@ -107,6 +109,48 @@ impl TokenMap {
     pub fn calculate_gas_for_token_map_swap(&mut self) {
         let mut vara_to_eth = Default::default();
         let mut eth_to_vara = Default::default();
+
+        self.swap_maps(&mut vara_to_eth, &mut eth_to_vara);
+    }
+
+    pub async fn update_vfts(&mut self, gas_required: u64, vft_map: Vec<(ActorId, ActorId)>) {
+        let mut vara_to_eth = HashMap::with_capacity(self.vara_to_eth.len());
+        let mut eth_to_vara = HashMap::with_capacity(vara_to_eth.len());
+
+        let vft_manager = gstd::exec::program_id();
+        let service = extended_vft_client::Vft::new(GStdRemoting);
+        for (vft, (erc20, supply)) in &self.vara_to_eth {
+            let vft_new = match vft_map.iter().find_map(|(vft_old, vft_new)| (vft_old == vft).then_some(vft_new)) {
+                None => vft,
+
+                Some(vft_new) => match service
+                    .balance_of(vft_manager)
+                    .recv(*vft)
+                    .await
+                {
+                    Ok(_) => vft,
+
+                    Err(e) => if !matches!(e, SailsError::GStd(GStdError::ErrorReply(_, ErrorReplyReason::InactiveActor))) {
+                        panic!("Vft failed: {e:?}")
+                    } else {
+                        vft_new
+                    }
+                },
+            };
+
+            vara_to_eth.insert(*vft_new, (*erc20, *supply));
+            eth_to_vara.insert(*erc20, *vft_new);
+        }
+
+        if eth_to_vara == self.eth_to_vara {
+            return;
+        }
+
+        if gstd::exec::gas_available()
+            < gas_required
+        {
+            panic!("Please attach more gas");
+        }
 
         self.swap_maps(&mut vara_to_eth, &mut eth_to_vara);
     }

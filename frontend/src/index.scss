@@ -13,6 +13,21 @@ body {
   flex-direction: column;
 }
 
+#modal-root {
+  > div > div {
+    background-color: #0e1217;
+    border: 1px solid #00ffc44d;
+    border-radius: 16px;
+
+    > header > div > h3 {
+      font-weight: 600;
+      font-size: 16px;
+      line-height: 24px;
+      color: #f6f6f6e5;
+    }
+  }
+}
+
 main {
   flex: 1;
   padding: 48px 0;

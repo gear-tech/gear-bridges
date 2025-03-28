@@ -1,9 +1,8 @@
-import { ExtrinsicFailedData, HexString } from '@gear-js/api';
+import { ExtrinsicFailedData } from '@gear-js/api';
 import { BaseError, parseUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import { FTAddressPair } from '@/types';
 import { isUndefined } from '@/utils';
 
 import { ERROR_MESSAGE } from './consts';
@@ -31,24 +30,6 @@ const getAmountSchema = (
   });
 };
 
-const getOptions = (addresses: FTAddressPair[] | undefined, symbols: Record<HexString, string> | undefined) => {
-  const varaOptions: { label: string; value: string }[] = [];
-  const ethOptions: { label: string; value: string }[] = [];
-
-  if (!addresses || !symbols) return { varaOptions, ethOptions };
-
-  addresses.forEach(([varaAddress, ethAddress], pairIndex) => {
-    const value = pairIndex.toString();
-    const varaSymbol = symbols[varaAddress];
-    const ethSymbol = symbols[ethAddress];
-
-    varaOptions.push({ label: varaSymbol, value });
-    ethOptions.push({ label: ethSymbol, value });
-  });
-
-  return { varaOptions, ethOptions };
-};
-
 const getMergedBalance = (accountBalance: ReturnType<UseAccountBalance>, ftBalance: ReturnType<UseAccountBalance>) => {
   const isLoading = accountBalance.isLoading || ftBalance.isLoading;
 
@@ -70,4 +51,4 @@ const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailed
   return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
 };
 
-export { getAmountSchema, getOptions, getMergedBalance, getErrorMessage };
+export { getAmountSchema, getMergedBalance, getErrorMessage };

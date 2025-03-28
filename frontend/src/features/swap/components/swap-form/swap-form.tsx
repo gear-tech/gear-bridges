@@ -5,7 +5,7 @@ import { FormProvider } from 'react-hook-form';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { Input } from '@/components';
+import { Input, Skeleton } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
@@ -21,8 +21,8 @@ import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
 import { FTAllowanceTip } from '../ft-allowance-tip';
+import { SelectToken } from '../select-token';
 import { SubmitProgressBar } from '../submit-progress-bar';
-import { TokenSelect } from '../token-select';
 
 import styles from './swap-form.module.scss';
 
@@ -51,7 +51,7 @@ function SwapForm({
 
   const { api, isApiReady } = useApi();
   const [pairIndex, setPairIndex] = useState(0);
-  const { address, destinationAddress, destinationSymbol, options, symbol, decimals, ...bridge } = useToken(
+  const { address, destinationAddress, destinationSymbol, symbol, decimals, ...bridge } = useToken(
     networkIndex,
     pairIndex,
   );
@@ -148,12 +148,12 @@ function SwapForm({
                 {isVaraNetwork ? <VaraSVG className={styles.networkIcon} /> : <EthSVG className={styles.networkIcon} />}
 
                 <div className={styles.token}>
-                  <TokenSelect
-                    options={options}
-                    value={pairIndex.toString()}
-                    onChange={({ target }) => setPairIndex(Number(target.value))}
-                    className={styles.select}
-                    isLoading={options.length === 0}
+                  <SelectToken
+                    pairIndex={pairIndex}
+                    isVaraNetwork={isVaraNetwork}
+                    symbol={symbol}
+                    accountBalance={accountBalance}
+                    onChange={setPairIndex}
                   />
 
                   <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
@@ -175,7 +175,7 @@ function SwapForm({
                 {isVaraNetwork ? <EthSVG className={styles.networkIcon} /> : <VaraSVG className={styles.networkIcon} />}
 
                 <div className={styles.token}>
-                  <p className={styles.symbol}>{destinationSymbol}</p>
+                  <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
                   <p className={styles.network}>{isVaraNetwork ? 'Ethereum' : 'Vara'}</p>
                 </div>
               </div>

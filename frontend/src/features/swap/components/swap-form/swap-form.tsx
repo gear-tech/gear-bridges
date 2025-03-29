@@ -187,7 +187,7 @@ function SwapForm({
               <Input
                 icon={PlusSVG}
                 name={FIELD_NAME.ADDRESS}
-                label={isVaraNetwork ? 'ERC20 Address' : 'Substrate Address'}
+                label="Bridge to"
                 className={styles.input}
                 spellCheck={false}
                 block

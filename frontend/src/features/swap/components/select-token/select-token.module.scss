@@ -23,6 +23,10 @@
   }
 }
 
+.input {
+  margin-bottom: 12px;
+}
+
 .tokens {
   display: flex;
   flex-direction: column;
@@ -87,4 +91,11 @@
 .balance {
   line-height: 20px;
   color: #fff;
+}
+
+.notFound {
+  margin-top: 32px;
+
+  text-align: center;
+  color: #9cacb1;
 }

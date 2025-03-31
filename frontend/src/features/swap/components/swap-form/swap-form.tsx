@@ -1,6 +1,6 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
-import { ComponentProps, useState, JSX } from 'react';
+import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -13,7 +13,8 @@ import { useEthAccount } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
-import { FIELD_NAME, NETWORK_INDEX } from '../../consts';
+import { FIELD_NAME } from '../../consts';
+import { useBridgeContext } from '../../context';
 import { useSwapForm, useToken } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { getMergedBalance } from '../../utils';
@@ -23,31 +24,22 @@ import { DetailsAccordion } from '../details-accordion';
 import { FTAllowanceTip } from '../ft-allowance-tip';
 import { SelectToken } from '../select-token';
 import { SubmitProgressBar } from '../submit-progress-bar';
+import { SwapNetworkButton } from '../swap-network-button';
 
 import styles from './swap-form.module.scss';
 
 type Props = {
-  networkIndex: number;
   disabled: boolean;
   useAccountBalance: UseAccountBalance;
   useFTBalance: UseFTBalance;
   useFTAllowance: UseFTAllowance;
   useHandleSubmit: UseHandleSubmit;
   useFee: UseFee;
-  renderSwapNetworkButton: () => JSX.Element;
 };
 
-function SwapForm({
-  networkIndex,
-  disabled,
-  useHandleSubmit,
-  useAccountBalance,
-  useFTBalance,
-  useFTAllowance,
-  useFee,
-  renderSwapNetworkButton,
-}: Props) {
-  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
+function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
+  const { network } = useBridgeContext();
+  const { index: networkIndex, isVara: isVaraNetwork } = network;
 
   const { api, isApiReady } = useApi();
   const [pairIndex, setPairIndex] = useState(0);
@@ -164,7 +156,7 @@ function SwapForm({
             </div>
 
             {renderFromBalance()}
-            {renderSwapNetworkButton()}
+            <SwapNetworkButton />
           </div>
 
           <div className={styles.card}>

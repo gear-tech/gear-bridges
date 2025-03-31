@@ -3659,6 +3659,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b241177c7107d9829286c2ffdc5eee98d992d6356f3515e7f412f988b1a72fd"
 
 [[package]]
+name = "eth-events-common"
+version = "0.3.0"
+dependencies = [
+ "alloy-rlp",
+ "checkpoint_light_client-io",
+ "ethereum-common",
+ "sails-rs",
+]
+
+[[package]]
 name = "ethbloom"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3733,22 +3743,11 @@ dependencies = [
 name = "ethereum-event-client-app"
 version = "0.3.0"
 dependencies = [
- "alloy-rlp",
- "checkpoint_light_client-io",
+ "eth-events-common",
  "ethereum-common",
- "ethereum-event-client",
- "ethereum-event-client-client",
- "futures",
- "gclient",
  "getrandom 0.2.15",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex",
- "hex-literal",
  "lazy_static",
- "sails-client-gen",
  "sails-rs",
- "sp-core 21.0.0",
- "tokio",
 ]
 
 [[package]]

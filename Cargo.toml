@@ -60,6 +60,7 @@ gear_proof_storage = { path = "gear-programs/proof-storage", default-features = 
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
+eth-events-common = { path = "gear-programs/eth-events-common" }
 ethereum-event-client = { path = "gear-programs/ethereum-event-client" }
 ethereum-event-client-app = { path = "gear-programs/ethereum-event-client/app" }
 ethereum-event-client-client = { path = "gear-programs/ethereum-event-client/client" }

@@ -3,40 +3,55 @@ import { Input, Modal } from '@gear-js/vara-ui';
 import { isUndefined } from '@polkadot/util';
 import { useState } from 'react';
 
+import EthSVG from '@/assets/eth.svg?react';
 import SearchSVG from '@/assets/search.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
+import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton } from '@/components';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useEthFTBalances, useVaraFTBalances, useModal, useTokens } from '@/hooks';
+import {
+  useEthFTBalances,
+  useVaraFTBalances,
+  useTokens,
+  useModal,
+  useVaraAccountBalance,
+  useEthAccountBalance,
+} from '@/hooks';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import { UseAccountBalance } from '../../types';
+import { NETWORK_INDEX } from '../../consts';
+import { useBridgeContext } from '../../context';
 import { getMergedBalance } from '../../utils';
 
 import styles from './select-token.module.scss';
 
 type Props = {
-  pairIndex: number;
-  isVaraNetwork: boolean;
   symbol: string | undefined;
-  accountBalance: ReturnType<UseAccountBalance>;
-  onChange: (value: number) => void;
 };
 
-type ModalProps = Pick<Props, 'isVaraNetwork' | 'pairIndex' | 'accountBalance' | 'onChange'> & {
+type ModalProps = {
   close: () => void;
 };
 
-function SelectTokenModal({ isVaraNetwork, pairIndex, accountBalance, onChange, close }: ModalProps) {
+function SelectTokenModal({ close }: ModalProps) {
+  const { network, pair } = useBridgeContext();
+
   const { addresses, symbols, decimals } = useTokens();
   const varaFtBalances = useVaraFTBalances(addresses);
   const ethFtBalances = useEthFTBalances(addresses);
+  const varaAccountBalance = useVaraAccountBalance();
+  const ethAccountBalance = useEthAccountBalance();
+
+  const [networkIndex, setNetworkIndex] = useState(network.index);
+  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
 
   const [searchQuery, setSearchQuery] = useState('');
 
   const renderTokenBalance = (address: HexString) => {
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
+    const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
+
     const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
     const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
@@ -49,8 +64,8 @@ function SelectTokenModal({ isVaraNetwork, pairIndex, accountBalance, onChange, 
 
   const filteredAddresses =
     addresses && symbols
-      ? addresses.filter(([varaAddress, ethAddress]) => {
-          const address = isVaraNetwork ? varaAddress : ethAddress;
+      ? addresses.filter((addressPair) => {
+          const address = addressPair[networkIndex];
           const lowerCaseSymbol = symbols[address].toLocaleLowerCase();
           const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
 
@@ -61,19 +76,20 @@ function SelectTokenModal({ isVaraNetwork, pairIndex, accountBalance, onChange, 
   const renderTokens = () => {
     if (!addresses || !filteredAddresses || !symbols) return;
 
-    const selectedTokenAddress = addresses[pairIndex][isVaraNetwork ? 0 : 1];
+    const selectedTokenAddress = addresses[pair.index][networkIndex];
 
-    return filteredAddresses.map(([varaAddress, ethAddress], index) => {
-      const address = isVaraNetwork ? varaAddress : ethAddress;
+    return filteredAddresses.map((addressPair, index) => {
+      const address = addressPair[networkIndex];
       const isActive = address === selectedTokenAddress;
       const SVG = TOKEN_SVG[address] ?? TokenPlaceholderSVG;
       const symbol = symbols[address];
-      const network = isVaraNetwork ? 'Vara' : 'Ethereum';
+      const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
-        const indexWithinNonFilteredAddresses = addresses.findIndex((pair) => pair[isVaraNetwork ? 0 : 1] === address);
+        const indexWithinNonFilteredAddresses = addresses.findIndex((_pair) => _pair[networkIndex] === address);
 
-        onChange(indexWithinNonFilteredAddresses);
+        network.setIndex(networkIndex);
+        pair.setIndex(indexWithinNonFilteredAddresses);
         close();
       };
 
@@ -89,7 +105,7 @@ function SelectTokenModal({ isVaraNetwork, pairIndex, accountBalance, onChange, 
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{symbol}</span>
-                <span className={styles.network}>{network}</span>
+                <span className={styles.network}>{networkText}</span>
               </span>
             </span>
 
@@ -102,6 +118,30 @@ function SelectTokenModal({ isVaraNetwork, pairIndex, accountBalance, onChange, 
 
   return (
     <Modal heading="Select Token" maxWidth="490px" close={close}>
+      <div className={styles.networks}>
+        <h4 className={styles.heading}>Network</h4>
+
+        <div className={styles.list}>
+          <button
+            type="button"
+            className={cx(styles.network, networkIndex === NETWORK_INDEX.VARA && styles.active)}
+            disabled={networkIndex === NETWORK_INDEX.VARA}
+            onClick={() => setNetworkIndex(NETWORK_INDEX.VARA)}>
+            <VaraSVG />
+            <p>Vara</p>
+          </button>
+
+          <button
+            type="button"
+            className={cx(styles.network, networkIndex === NETWORK_INDEX.ETH && styles.active)}
+            disabled={networkIndex === NETWORK_INDEX.ETH}
+            onClick={() => setNetworkIndex(NETWORK_INDEX.ETH)}>
+            <EthSVG />
+            <p>Ethereum</p>
+          </button>
+        </div>
+      </div>
+
       <Input
         label="Token Name"
         icon={SearchSVG}
@@ -118,7 +158,7 @@ function SelectTokenModal({ isVaraNetwork, pairIndex, accountBalance, onChange, 
   );
 }
 
-function SelectToken({ pairIndex, isVaraNetwork, symbol, accountBalance, onChange }: Props) {
+function SelectToken({ symbol }: Props) {
   const [isModalOpen, openModal, closeModal] = useModal();
 
   if (!symbol) return <Skeleton width="6rem" height="24px" />;
@@ -130,15 +170,7 @@ function SelectToken({ pairIndex, isVaraNetwork, symbol, accountBalance, onChang
         <ArrowSVG />
       </button>
 
-      {isModalOpen && (
-        <SelectTokenModal
-          isVaraNetwork={isVaraNetwork}
-          pairIndex={pairIndex}
-          accountBalance={accountBalance}
-          onChange={onChange}
-          close={closeModal}
-        />
-      )}
+      {isModalOpen && <SelectTokenModal close={closeModal} />}
     </>
   );
 }

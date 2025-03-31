@@ -38,11 +38,11 @@ type Props = {
 };
 
 function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
-  const { network } = useBridgeContext();
+  const { network, pair } = useBridgeContext();
   const { index: networkIndex, isVara: isVaraNetwork } = network;
+  const { index: pairIndex } = pair;
 
   const { api, isApiReady } = useApi();
-  const [pairIndex, setPairIndex] = useState(0);
   const { address, destinationAddress, destinationSymbol, symbol, decimals, ...bridge } = useToken(
     networkIndex,
     pairIndex,
@@ -140,13 +140,7 @@ function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, 
                 {isVaraNetwork ? <VaraSVG className={styles.networkIcon} /> : <EthSVG className={styles.networkIcon} />}
 
                 <div className={styles.token}>
-                  <SelectToken
-                    pairIndex={pairIndex}
-                    isVaraNetwork={isVaraNetwork}
-                    symbol={symbol}
-                    accountBalance={accountBalance}
-                    onChange={setPairIndex}
-                  />
+                  <SelectToken symbol={symbol} />
 
                   <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
                 </div>

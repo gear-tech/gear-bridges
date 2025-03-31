@@ -1,3 +1,54 @@
+.networks {
+  margin-bottom: 24px;
+
+  font-size: 14px;
+  line-height: 20px;
+
+  .heading {
+    margin-bottom: 8px;
+
+    color: #9cacb1;
+  }
+
+  .list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+
+    .network {
+      padding: 12px;
+
+      text-align: center;
+      color: #fff;
+
+      background-color: #ffffff03;
+      border: 1px solid #ffffff0a;
+      border-radius: 4px;
+
+      transition:
+        background-color 0.25s,
+        border-color 0.25s;
+
+      &:hover {
+        background-color: #13191e;
+        border-color: #0abe92;
+      }
+
+      &.active {
+        background-color: #00ffc307;
+        border-color: #00ffc30d;
+      }
+
+      svg {
+        margin-bottom: 4px;
+
+        width: 32px;
+        height: 32px;
+      }
+    }
+  }
+}
+
 .button {
   display: flex;
   align-items: center;

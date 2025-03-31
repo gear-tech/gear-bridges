@@ -66,7 +66,7 @@ impl PaidMessagesFilter {
         paid_messages: &mut UnboundedReceiver<PaidMessage>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Some(message) = messages.try_recv().ok() {
+            while let Ok(message) = messages.try_recv() {
                 if let Some(msg) = self
                     .pending_messages
                     .insert(message.message.nonce_le, message)
@@ -78,7 +78,7 @@ impl PaidMessagesFilter {
                 }
             }
 
-            while let Some(PaidMessage { nonce }) = paid_messages.try_recv().ok() {
+            while let Ok(PaidMessage { nonce }) = paid_messages.try_recv() {
                 self.pending_nonces.push(nonce);
             }
 

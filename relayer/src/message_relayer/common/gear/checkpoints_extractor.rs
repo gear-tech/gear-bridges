@@ -76,7 +76,7 @@ impl CheckpointsExtractor {
         .await?;
 
         loop {
-            while let Some(block) = blocks.try_recv().ok() {
+            while let Ok(block) = blocks.try_recv() {
                 self.process_block_events(&gear_api, block.0, sender)
                     .await?;
             }

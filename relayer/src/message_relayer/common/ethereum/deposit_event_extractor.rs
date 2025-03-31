@@ -70,7 +70,7 @@ impl DepositEventExtractor {
         blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Some(block) = blocks.try_recv().ok() {
+            while let Ok(block) = blocks.try_recv() {
                 self.process_block_events(block, sender).await?;
             }
         }

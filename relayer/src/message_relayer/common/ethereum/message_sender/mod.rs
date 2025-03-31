@@ -100,7 +100,7 @@ impl MessageSender {
                 }
             }
 
-            while let Some(merkle_root) = merkle_roots.try_recv().ok() {
+            while let Ok(merkle_root) = merkle_roots.try_recv() {
                 match eras.entry(merkle_root.authority_set_id) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().push_merkle_root(merkle_root);

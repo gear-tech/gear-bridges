@@ -58,7 +58,7 @@ impl MessageQueuedEventExtractor {
         blocks: &mut UnboundedReceiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Some(block) = blocks.try_recv().ok() {
+            while let Ok(block) = blocks.try_recv() {
                 self.process_block_events(block, sender).await?;
             }
         }

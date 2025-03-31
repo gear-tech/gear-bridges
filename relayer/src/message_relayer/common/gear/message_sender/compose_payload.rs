@@ -7,12 +7,12 @@ use anyhow::{anyhow, Result as AnyResult};
 use sails_rs::prelude::*;
 
 use checkpoint_light_client_io::ethereum_common::{
-    beacon::light::Block as LightBeaconBlock,
+    beacon,
     utils::{self as eth_utils, MerkleProof},
     SLOTS_PER_EPOCH,
 };
 use ethereum_client::EthApi;
-use ethereum_event_client_client::{BlockInclusionProof, EthToVaraEvent};
+use ethereum_event_client_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 
 pub async fn compose(
     beacon_client: &BeaconClient,
@@ -86,27 +86,37 @@ async fn build_inclusion_proof(
     beacon_root_parent: &[u8; 32],
     block_number: u64,
 ) -> AnyResult<BlockInclusionProof> {
-    let beacon_block_parent = beacon_client.get_block_by_hash(beacon_root_parent).await?;
+    let beacon_block_parent = beacon_client
+        .get_block_by_hash::<beacon::electra::Block>(beacon_root_parent)
+        .await?;
 
-    let beacon_block = LightBeaconBlock::from(
-        beacon_client
-            .find_beacon_block(block_number, &beacon_block_parent)
-            .await?,
-    );
+    let beacon_block = beacon_client
+        .find_beacon_block(block_number, beacon_block_parent)
+        .await?;
+    let beacon_block = beacon_client
+        .get_block::<beacon::electra::Block>(beacon_block.slot)
+        .await?;
 
     let slot = beacon_block.slot;
+    let block = BlockGenericForBlockBody {
+        slot,
+        proposer_index: beacon_block.proposer_index,
+        parent_root: beacon_block.parent_root,
+        state_root: beacon_block.state_root,
+        body: beacon_block.body.into(),
+    };
     if slot % SLOTS_PER_EPOCH == 0 {
         return Ok(BlockInclusionProof {
-            block: beacon_block,
+            block,
             headers: vec![],
         });
     }
 
-    let epoch_next = 1 + eth_utils::calculate_epoch(beacon_block.slot);
+    let epoch_next = 1 + eth_utils::calculate_epoch(slot);
     let slot_checkpoint = epoch_next * SLOTS_PER_EPOCH;
 
     Ok(BlockInclusionProof {
-        block: beacon_block,
+        block,
         headers: beacon_client
             .request_headers(slot + 1, slot_checkpoint + 1)
             .await?

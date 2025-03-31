@@ -6,11 +6,11 @@ type EthToVaraEvent = struct {
 };
 
 type BlockInclusionProof = struct {
-  block: Block,
+  block: BlockGenericForBlockBody,
   headers: vec BlockHeader,
 };
 
-type Block = struct {
+type BlockGenericForBlockBody = struct {
   slot: u64,
   proposer_index: u64,
   parent_root: h256,
@@ -31,6 +31,7 @@ type BlockBody = struct {
   execution_payload: ExecutionPayload,
   bls_to_execution_changes: h256,
   blob_kzg_commitments: h256,
+  execution_requests: h256,
 };
 
 /// A homogenous collection of a fixed number of byte values.

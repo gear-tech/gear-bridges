@@ -3,7 +3,7 @@
 use super::{error::Error, RefCell, State};
 use checkpoint_light_client_io::{Handle, HandleResult};
 use ethereum_common::{
-    beacon::{light::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
+    beacon::{light::electra::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     hash_db, memory_db,
     patricia_trie::TrieDB,
     tree_hash::TreeHash,

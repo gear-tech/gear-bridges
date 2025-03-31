@@ -2,10 +2,6 @@
   display: flex;
   align-items: center;
   gap: 16px;
-
-  &.compact {
-    width: 65%;
-  }
 }
 
 .tx {
@@ -24,29 +20,35 @@
   flex-shrink: 0;
 
   display: flex;
+  align-items: flex-end;
 
   svg,
   span {
-    width: 32px;
-    height: 32px;
-
     border-radius: 50%;
 
+    &:first-child {
+      width: 32px;
+      height: 32px;
+    }
+
     &:last-child {
-      margin-left: -12px;
-      box-shadow: -2px 0px 0px 0px rgba(0, 0, 0, 0.1);
+      width: 20px;
+      height: 20px;
+
+      margin-left: -10px;
+      box-shadow: -1px 0 0px 0px #000;
     }
   }
 }
 
 .amount {
-  font-size: 16px;
   font-weight: 600;
-  line-height: 150%;
+  line-height: 24px;
+  color: #f6f6f6e5;
 }
 
 .address {
-  color: #838897;
-  line-height: 141.667%;
-  letter-spacing: -0.5px;
+  font-size: 11px;
+  line-height: 180%;
+  color: #9cacb1;
 }

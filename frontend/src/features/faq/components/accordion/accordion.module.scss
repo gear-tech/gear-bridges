@@ -1,21 +1,43 @@
 .accordion {
   padding: 0;
-  overflow: hidden;
 
-  transition: border-color 0.25s;
+  display: grid;
+  grid-template-rows: min-content 0fr;
+  gap: 0;
+
+  transition: all 0.25s;
+
+  &:hover {
+    border-color: #00ffc433;
+  }
 
   svg {
     flex-shrink: 0;
 
     transition: all 0.25s;
+
+    path {
+      transition: all 0.25s;
+    }
+  }
+}
+
+.open {
+  padding-bottom: 24px;
+
+  grid-template-rows: min-content 1fr;
+  gap: 4px;
+
+  border-color: #00ffc433;
+
+  svg {
+    transform: rotate(180deg);
   }
 
-  &.open {
-    border-color: #00ffc4;
+  .text {
+    opacity: 1;
 
-    svg {
-      transform: rotate(180deg);
-    }
+    transition: opacity 0.5s;
   }
 }
 
@@ -24,29 +46,36 @@
   padding: 16px 24px;
 
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 
-  background-color: transparent;
-  transition: background-color 0.25s;
+  color: #f6f6f6e5;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 140%;
+
+  transition: color 0.25s;
 
   &:hover {
-    background-color: #f0f0f0;
+    color: #00ffc4;
+
+    svg path {
+      stroke: #00ffc4;
+      stroke-opacity: 1;
+    }
   }
 }
 
-.heading {
-  color: #000;
-  font-size: 18px;
-  font-style: normal;
-  font-weight: 700;
-  line-height: 133.333%;
-}
-
 .text {
-  padding: 0 24px 16px;
+  opacity: 0;
+  overflow: hidden;
 
-  color: #535352;
-  font-size: 16px;
-  line-height: 160%;
+  padding: 0 24px;
+
+  color: #f6f6f6cc;
+  font-size: 14px;
+  line-height: 20px;
+
+  transition: opacity 0.1s;
 }

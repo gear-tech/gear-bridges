@@ -1,4 +1,5 @@
 .status {
+  max-height: 22px;
   padding: 2px 16px;
 
   display: flex;
@@ -6,28 +7,32 @@
   justify-content: center;
   gap: 8px;
 
-  font-size: 12px;
   font-weight: 600;
-  line-height: 150%;
+  font-size: 12px;
+  line-height: 18px;
 
   border-radius: 4px;
 }
 
 .Completed {
-  color: #13bc9d;
+  color: #00ffc4;
 
-  background-color: rgba(14, 211, 163, 0.07);
+  background-color: #00ffc40f;
 }
 
 .Failed {
-  color: #9b0000;
+  color: #ff3757;
 
-  background-color: rgba(155, 0, 0, 0.07);
+  background-color: #ff37571a;
 }
 
 .InProgress,
 .Pending {
-  color: #838897;
+  color: #f6f6f6cc;
 
-  background-color: rgba(131, 136, 151, 0.07);
+  background-color: #ffffff3d;
+
+  svg path {
+    fill: #f6f6f6cc;
+  }
 }

@@ -105,7 +105,7 @@ impl MessageSender {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,
                         Err(err) => {
-                            log::error!("Gear messenger failed with: {err}");
+                            log::error!("Gear message sender failed with: {err}");
                         }
                     }
                 }

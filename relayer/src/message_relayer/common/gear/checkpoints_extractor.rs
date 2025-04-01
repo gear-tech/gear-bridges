@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
@@ -53,7 +52,7 @@ impl CheckpointsExtractor {
 
         tokio::task::spawn(async move {
             loop {
-                let res = block_on(self.run_inner(&sender, &mut blocks));
+                let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
                     log::error!("Checkpoints extractor failed: {}", err);
                 }

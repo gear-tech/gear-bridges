@@ -151,6 +151,9 @@ pub struct State {
     fee_charger: Option<ActorId>,
     /// Is the `vft-manager` currently on pause.
     is_paused: bool,
+    /// Address of the new vft-manager program which the current should upgrade to.
+    /// It is required to handle cases when gas exhausted during execution of `upgrade` method.
+    vft_manager_new: Option<ActorId>,
 }
 
 /// Config that should be provided to this service on initialization.
@@ -323,6 +326,10 @@ where
             panic!("Already unpaused");
         }
 
+        if state.vft_manager_new.is_some() {
+            panic!("Upgrading")
+        }
+
         self.state_mut().is_paused = false;
 
         self.notify_on(Event::Unpaused)
@@ -419,6 +426,20 @@ where
         if !self.state().is_paused {
             panic!("Not paused");
         }
+
+        if self
+            .state()
+            .vft_manager_new
+            .map(|address| address != vft_manager_new)
+            .unwrap_or(false)
+        {
+            panic!(
+                "Upgrade called with vft_manager_new = {:?}",
+                self.state().vft_manager_new
+            );
+        }
+
+        self.state_mut().vft_manager_new = Some(vft_manager_new);
 
         let vft_manager = gstd::exec::program_id();
         let mut service = extended_vft_client::Vft::new(GStdRemoting);
@@ -612,6 +633,7 @@ where
                 historical_proxy_address: config.historical_proxy_address,
                 fee_charger: None,
                 is_paused: false,
+                vft_manager_new: None,
             });
             CONFIG = Some(config.config);
         }

@@ -5,10 +5,17 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useVaraAccountBalance, useEthAccountBalance, useTokens, useVaraFTBalance } from '@/hooks';
+import {
+  useVaraAccountBalance,
+  useEthAccountBalance,
+  useTokens,
+  useVaraFTBalance,
+  useVaraFTBalances,
+  useEthFTBalances,
+} from '@/hooks';
 import { isUndefined } from '@/utils';
 
-import { useVaraFTBalances, useEthFTBalances, useBurnVaraTokens } from '../../hooks';
+import { useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../balance-card';
 
 import styles from './tokens-card.module.scss';

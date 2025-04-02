@@ -595,7 +595,6 @@ where
                 erc20_manager_address: config.erc20_manager_address,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                fee_charger: None,
                 is_paused: false,
                 vft_manager_new: None,
             });

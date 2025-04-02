@@ -189,6 +189,10 @@ service VftManager {
   /// Allowance should be granted to the current program to spend `amount` tokens
   /// from the source address.
   RequestBridging : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  /// Change [State::admin]. Can be called only by a [State::admin].
+  SetAdmin : (new_admin: actor_id) -> null;
+  /// Change [State::pause_admin]. Can be called only by a [State::admin].
+  SetPauseAdmin : (new_pause_admin: actor_id) -> null;
   /// Submit rlp-encoded transaction receipt.
   /// 
   /// This receipt is decoded under the hood and checked that it's a valid receipt from tx

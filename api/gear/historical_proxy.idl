@@ -8,14 +8,13 @@ type ProxyError = enum {
   ReplyFailure: str,
   /// Failed to decode reply.
   DecodeFailure: str,
-  /// `ethereum-event-client` returned error.
+  /// `eth-events-*` returned error.
   EthereumEventClient: Error,
 };
 
 type Error = enum {
   DecodeReceiptEnvelopeFailure,
   FailedEthTransaction,
-  AlreadyProcessed,
   SendFailure,
   ReplyFailure,
   HandleResultDecodeFailure,
@@ -23,9 +22,6 @@ type Error = enum {
   InvalidBlockProof,
   TrieDbFailure,
   InvalidReceiptProof,
-  ReplyTimeout,
-  ReplyHook,
-  InvalidMessage,
 };
 
 constructor {
@@ -38,7 +34,7 @@ service HistoricalProxy {
   /// 
   /// This function can be called only by an admin.
   AddEndpoint : (slot: u64, endpoint: actor_id) -> null;
-  /// Redirect message to `ethereum-event-client` program which is valid for `slot`.
+  /// Redirect message to `eth-events-*` program which is valid for `slot`.
   /// If message is relayed successfully then reply is sent to `client` address
   /// to `client_route` route.
   /// 

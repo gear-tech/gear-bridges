@@ -1,5 +1,7 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
+import { WalletModal } from '@gear-js/wallet-connect';
+import { useAppKit } from '@reown/appkit/react';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
@@ -9,7 +11,7 @@ import { Input, Skeleton } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
-import { useEthAccount } from '@/hooks';
+import { useEthAccount, useModal } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
@@ -29,7 +31,6 @@ import { SwapNetworkButton } from '../swap-network-button';
 import styles from './swap-form.module.scss';
 
 type Props = {
-  disabled: boolean;
   useAccountBalance: UseAccountBalance;
   useFTBalance: UseFTBalance;
   useFTAllowance: UseFTAllowance;
@@ -37,12 +38,12 @@ type Props = {
   useFee: UseFee;
 };
 
-function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
+function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
   const { network, pair } = useBridgeContext();
   const { index: networkIndex, isVara: isVaraNetwork } = network;
   const { index: pairIndex } = pair;
 
-  const { api, isApiReady } = useApi();
+  const { api } = useApi();
   const { address, destinationAddress, destinationSymbol, symbol, decimals, ...bridge } = useToken(
     networkIndex,
     pairIndex,
@@ -56,6 +57,10 @@ function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, 
 
   const { account } = useAccount();
   const ethAccount = useEthAccount();
+  const isNetworkAccountConnected = (network.isVara && Boolean(account)) || (!network.isVara && ethAccount.isConnected);
+
+  const { open: openEthWalletModal } = useAppKit();
+  const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
   const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
 
   const openTransacionModal = (amount: string, receiver: string) => {
@@ -86,7 +91,6 @@ function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, 
     accountBalance,
     ftBalance,
     decimals,
-    disabled,
     submit.mutateAsync,
   );
 
@@ -104,9 +108,8 @@ function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, 
     );
   };
 
-  const isBalanceValid = () => {
-    if (!isApiReady || accountBalance.isLoading || config.isLoading) return true; // not valid ofc, but we don't want to render error
-    if (!accountBalance.data || isUndefined(fee.value)) return false;
+  const isEnoughBalance = () => {
+    if (!api || isUndefined(fee.value) || !accountBalance.data) return false;
 
     const requiredBalance = isVaraNetwork ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
 
@@ -114,62 +117,75 @@ function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, 
   };
 
   const getButtonText = () => {
-    if (!isBalanceValid()) return isVaraNetwork ? 'Not enough VARA' : 'Not enough ETH';
+    if (!isEnoughBalance()) return `Not Enough ${isVaraNetwork ? 'VARA' : 'ETH'}`;
 
     if (mint?.isPending) return 'Locking...';
     if (approve.isPending) return 'Approving...';
-    if (submit.isPending) return 'Swapping...';
+    if (submit.isPending) return 'Transferring...';
 
     return 'Transfer';
+  };
+
+  const handleConnectWalletButtonClick = () => {
+    const openWalletModal = isVaraNetwork ? openSubstrateWalletModal : openEthWalletModal;
+
+    void openWalletModal();
   };
 
   const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} />;
 
   return (
-    <FormProvider {...form}>
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <div>
-          <div className={styles.card}>
-            <header className={styles.header}>
-              <h3 className={styles.heading}>From</h3>
-              <AmountInput.Error />
-            </header>
+    <>
+      <FormProvider {...form}>
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <div>
+            <div className={styles.card}>
+              <header className={styles.header}>
+                <h3 className={styles.heading}>From</h3>
+                <AmountInput.Error />
+              </header>
 
-            <div className={styles.row}>
-              <div className={styles.wallet}>
-                {isVaraNetwork ? <VaraSVG className={styles.networkIcon} /> : <EthSVG className={styles.networkIcon} />}
+              <div className={styles.row}>
+                <div className={styles.wallet}>
+                  {isVaraNetwork ? (
+                    <VaraSVG className={styles.networkIcon} />
+                  ) : (
+                    <EthSVG className={styles.networkIcon} />
+                  )}
 
-                <div className={styles.token}>
-                  <SelectToken symbol={symbol} />
-
-                  <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                  <div className={styles.token}>
+                    <SelectToken symbol={symbol} />
+                    <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                  </div>
                 </div>
+
+                <AmountInput />
               </div>
 
-              <AmountInput />
+              {renderFromBalance()}
+              <SwapNetworkButton />
             </div>
 
-            {renderFromBalance()}
-            <SwapNetworkButton />
-          </div>
+            <div className={styles.card}>
+              <h3 className={styles.heading}>To</h3>
 
-          <div className={styles.card}>
-            <h3 className={styles.heading}>To</h3>
+              <div className={styles.toContainer}>
+                <div className={styles.wallet}>
+                  {isVaraNetwork ? (
+                    <EthSVG className={styles.networkIcon} />
+                  ) : (
+                    <VaraSVG className={styles.networkIcon} />
+                  )}
 
-            <div className={styles.toContainer}>
-              <div className={styles.wallet}>
-                {isVaraNetwork ? <EthSVG className={styles.networkIcon} /> : <VaraSVG className={styles.networkIcon} />}
-
-                <div className={styles.token}>
-                  <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
-                  <p className={styles.network}>{isVaraNetwork ? 'Ethereum' : 'Vara'}</p>
+                  <div className={styles.token}>
+                    <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
+                    <p className={styles.network}>{isVaraNetwork ? 'Ethereum' : 'Vara'}</p>
+                  </div>
                 </div>
+
+                <AmountInput.Value decimals={decimals} />
               </div>
 
-              <AmountInput.Value decimals={decimals} />
-            </div>
-
-            <div className={styles.inputContainer}>
               <Input
                 icon={PlusSVG}
                 name={FIELD_NAME.ADDRESS}
@@ -180,40 +196,45 @@ function SwapForm({ disabled, useHandleSubmit, useAccountBalance, useFTBalance, 
               />
             </div>
           </div>
-        </div>
 
-        <DetailsAccordion fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
+          <DetailsAccordion fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
 
-        <footer className={styles.submitContainer}>
-          <Button
-            type="submit"
-            text={getButtonText()}
-            disabled={disabled || !isBalanceValid()}
-            isLoading={
-              approve.isLoading ||
-              submit.isPending ||
-              accountBalance.isLoading ||
-              ftBalance.isLoading ||
-              config.isLoading ||
-              bridge.isLoading ||
-              allowance.isLoading
-            }
-            block
-          />
+          <footer className={styles.submitContainer}>
+            {isNetworkAccountConnected ? (
+              <Button
+                type="submit"
+                text={getButtonText()}
+                disabled={!isEnoughBalance()}
+                isLoading={
+                  approve.isLoading ||
+                  submit.isPending ||
+                  accountBalance.isLoading ||
+                  ftBalance.isLoading ||
+                  config.isLoading ||
+                  bridge.isLoading ||
+                  allowance.isLoading
+                }
+                block
+              />
+            ) : (
+              <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
+            )}
 
-          <FTAllowanceTip
-            allowance={allowance.data}
-            decimals={decimals}
-            symbol={symbol}
-            amount={amount}
-            isVaraNetwork={isVaraNetwork}
-            isLoading={bridge.isLoading || allowance.isLoading}
-          />
-        </footer>
-      </form>
+            <FTAllowanceTip
+              allowance={allowance.data}
+              decimals={decimals}
+              symbol={symbol}
+              amount={amount}
+              isVaraNetwork={isVaraNetwork}
+              isLoading={bridge.isLoading || allowance.isLoading}
+            />
+          </footer>
+        </form>
+      </FormProvider>
 
+      {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
       {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
-    </FormProvider>
+    </>
   );
 }
 

@@ -76,7 +76,7 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!addresses || !filteredAddresses || !symbols) return;
 
-    const selectedTokenAddress = addresses[pair.index][networkIndex];
+    const selectedTokenAddress = addresses[pair.index][network.index];
 
     return filteredAddresses.map((addressPair, index) => {
       const address = addressPair[networkIndex];

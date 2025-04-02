@@ -1,6 +1,5 @@
 import { useAlert } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
@@ -23,7 +22,6 @@ function useSwapForm(
   accountBalance: Values,
   ftBalance: Values,
   decimals: number | undefined,
-  disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
   const alert = useAlert();
@@ -61,11 +59,6 @@ function useSwapForm(
 
     onSubmit(values).then(onSuccess).catch(onError);
   });
-
-  useEffect(() => {
-    reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [disabled]);
 
   const setMaxBalance = () => {
     const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;

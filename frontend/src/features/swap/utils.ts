@@ -14,7 +14,8 @@ const getAmountSchema = (
   ftBalanceValue: bigint | undefined,
   decimals: number | undefined,
 ) => {
-  if (isUndefined(accountBalanceValue) || isUndefined(ftBalanceValue) || isUndefined(decimals)) return z.bigint();
+  if (isUndefined(accountBalanceValue) || isUndefined(ftBalanceValue) || isUndefined(decimals))
+    return z.string().transform((value) => BigInt(value));
 
   const schema = z
     .string()

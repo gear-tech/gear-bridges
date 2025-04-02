@@ -134,7 +134,7 @@ where
             receipt_rlp,
             transaction_index,
             block_number,
-            slot: _,
+            slot,
         } = eth_events::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
                 .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {:?}", e)))?

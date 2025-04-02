@@ -13,17 +13,11 @@ contract Deploy is Script {
     function run() public {
         vm.startBroadcast(vm.envUint("ETHEREUM_DEPLOYMENT_PRIVATE_KEY"));
 
-        ERC20Mock token_1 = new ERC20Mock("mockToken1");
-        ERC20Mock token_2 = new ERC20Mock("mockToken2");
-        ERC20Mock token_3 = new ERC20Mock("mockToken3");
-        ERC20Mock token_4 = new ERC20Mock("mockToken4");
-        ERC20Mock token_5 = new ERC20Mock("mockToken5");
+        ERC20Mock token_1 = new ERC20Mock("USDC");
+        ERC20Mock token_2 = new ERC20Mock("USDT");
 
-        console.log("Token1:", address(token_1));
-        console.log("Token2:", address(token_2));
-        console.log("Token3:", address(token_3));
-        console.log("Token4:", address(token_4));
-        console.log("Token5:", address(token_5));
+        console.log("USDC:", address(token_1));
+        console.log("USDT:", address(token_2));
 
         vm.stopBroadcast();
     }

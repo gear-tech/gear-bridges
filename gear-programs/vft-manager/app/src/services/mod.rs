@@ -145,10 +145,6 @@ pub struct State {
     ///
     /// Can be adjusted by the [State::admin].
     historical_proxy_address: ActorId,
-    /// Address of the program that charges fees for bridging funds to Ethereum.
-    ///
-    /// If it is None then requests to bridge funds are rejected.
-    fee_charger: Option<ActorId>,
     /// Is the `vft-manager` currently on pause.
     is_paused: bool,
     /// Address of the new vft-manager program which the current should upgrade to.
@@ -210,13 +206,6 @@ where
         self.ensure_admin();
 
         self.state_mut().historical_proxy_address = historical_proxy_address_new;
-    }
-
-    /// Change [State::fee_charger]. Can be called only by a [State::admin].
-    pub fn update_fee_charger(&mut self, fee_charger_new: Option<ActorId>) {
-        self.ensure_admin();
-
-        self.state_mut().fee_charger = fee_charger_new;
     }
 
     /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
@@ -374,31 +363,6 @@ where
         self.ensure_running()?;
 
         let sender = self.exec_context.actor_id();
-
-        request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
-    }
-
-    /// Request bridging of tokens from Gear to Ethereum with payed fee. The source address
-    /// should be allowed to call the method.
-    ///
-    /// Allowance should be granted to the current program to spend `amount` tokens
-    /// from the `sender` address.
-    pub async fn request_bridging_payed(
-        &mut self,
-        sender: ActorId,
-        vara_token_id: ActorId,
-        amount: U256,
-        receiver: H160,
-    ) -> Result<(U256, H160), Error> {
-        let source = self.exec_context.actor_id();
-        if !self
-            .state()
-            .fee_charger
-            .map(|fee_charger| fee_charger == source)
-            .unwrap_or(false)
-        {
-            panic!("Not a fee charger");
-        }
 
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
     }
@@ -631,7 +595,6 @@ where
                 erc20_manager_address: config.erc20_manager_address,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                fee_charger: None,
                 is_paused: false,
                 vft_manager_new: None,
             });

@@ -189,12 +189,6 @@ service VftManager {
   /// Allowance should be granted to the current program to spend `amount` tokens
   /// from the source address.
   RequestBridging : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
-  /// Request bridging of tokens from Gear to Ethereum with payed fee. The source address
-  /// should be allowed to call the method.
-  /// 
-  /// Allowance should be granted to the current program to spend `amount` tokens
-  /// from the `sender` address.
-  RequestBridgingPayed : (sender: actor_id, vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   /// Change [State::admin]. Can be called only by a [State::admin].
   SetAdmin : (new_admin: actor_id) -> null;
   /// Change [State::pause_admin]. Can be called only by a [State::admin].
@@ -218,10 +212,9 @@ service VftManager {
   UpdateConfig : (config: Config) -> null;
   /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
   UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
-  /// Change [State::fee_charger]. Can be called only by a [State::admin].
-  UpdateFeeCharger : (fee_charger_new: opt actor_id) -> null;
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
+  Upgrade : (vft_manager_new: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
   /// Get current [State::erc20_manager_address] address.

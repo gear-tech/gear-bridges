@@ -1,5 +1,6 @@
 import { CSSProperties } from 'react';
 
+import { Card } from '@/components';
 import { cx } from '@/utils';
 
 import { UseHandleSubmit } from '../../types';
@@ -52,13 +53,13 @@ function SubmitProgressBar({ mint, approve, submit }: Props) {
   const status = getStatus();
 
   return (
-    <div className={cx(styles.container, isPending && styles.loading, errorMessage && styles.error)}>
+    <Card className={cx(styles.container, isPending && styles.loading, errorMessage && styles.error)}>
       <p className={styles.text}>
         {errorMessage ? `${ERROR_TEXT[status]} transaction failed: ${errorMessage}` : TEXT[status]}
       </p>
 
       <div className={styles.bar} style={{ '--width': `${PERCENTAGE[status]}%` } as CSSProperties} />
-    </div>
+    </Card>
   );
 }
 

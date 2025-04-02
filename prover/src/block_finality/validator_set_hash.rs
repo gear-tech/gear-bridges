@@ -16,7 +16,7 @@ use crate::{
         targets::{Blake2Target, PaddedValidatorSetTarget, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
-    consts::ED25519_PUBLIC_KEY_SIZE,
+    consts::{ED25519_PUBLIC_KEY_SIZE, MAX_VALIDATOR_COUNT},
     impl_target_set,
     prelude::*,
 };
@@ -57,9 +57,10 @@ impl ValidatorSetHash {
 
         let validator_count = self.validator_set.len();
 
-        let hasher_proof = GenericBlake2 {
-            data: self.validator_set.into_iter().flatten().collect(),
-        }
+        const MAX_DATA_LENGTH_ESTIMATION: usize = ED25519_PUBLIC_KEY_SIZE * MAX_VALIDATOR_COUNT;
+        let hasher_proof = GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(
+            self.validator_set.into_iter().flatten().collect(),
+        )
         .prove();
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());

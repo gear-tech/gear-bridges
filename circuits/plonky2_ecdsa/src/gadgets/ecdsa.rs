@@ -98,13 +98,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_ecdsa_circuit_narrow() -> Result<()> {
         test_ecdsa_circuit_with_config(CircuitConfig::standard_ecc_config())
     }
 
     #[test]
-    #[ignore]
     fn test_ecdsa_circuit_wide() -> Result<()> {
         test_ecdsa_circuit_with_config(CircuitConfig::wide_ecc_config())
     }

@@ -93,7 +93,7 @@ impl MessageSender {
                         entry.get_mut().push_message(message);
                     }
                     Entry::Vacant(entry) => {
-                        let mut era = Era::new(self.era_metrics.clone());
+                        let mut era = Era::new(authority_set_id, self.era_metrics.clone());
                         era.push_message(message);
 
                         entry.insert(era);
@@ -107,7 +107,8 @@ impl MessageSender {
                         entry.get_mut().push_merkle_root(merkle_root);
                     }
                     Entry::Vacant(entry) => {
-                        let mut era = Era::new(self.era_metrics.clone());
+                        let mut era =
+                            Era::new(merkle_root.authority_set_id, self.era_metrics.clone());
                         era.push_merkle_root(merkle_root);
 
                         entry.insert(era);

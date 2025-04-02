@@ -38,6 +38,7 @@ ENV PATH="/root/.foundry/bin:${PATH}"
 COPY . .
 
 # Build relayer
+RUN rustup toolchain install
 RUN cargo build -p relayer --release
 
 # Compose final image

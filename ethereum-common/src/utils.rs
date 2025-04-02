@@ -1,5 +1,5 @@
 use super::{
-    beacon::{Block, BlockHeader, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
+    beacon::{BlockHeader, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
     memory_db,
     patricia_trie::{TrieDB, TrieDBMut},
     trie_db::{Recorder, Trie, TrieMut},
@@ -72,13 +72,13 @@ pub struct BeaconBlockHeaderData {
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
 #[derive(Deserialize, Debug)]
-pub struct BeaconBlockResponse {
-    pub data: BeaconBlockData,
+pub struct BeaconBlockResponse<Block> {
+    pub data: BeaconBlockData<Block>,
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
 #[derive(Deserialize, Debug)]
-pub struct BeaconBlockData {
+pub struct BeaconBlockData<Block> {
     pub message: Block,
 }
 
@@ -143,17 +143,17 @@ pub struct UpdateData {
 pub type UpdateResponse = Vec<UpdateData>;
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_epoch_at_slot).
-pub fn calculate_epoch(slot: u64) -> u64 {
+pub const fn calculate_epoch(slot: u64) -> u64 {
     slot / SLOTS_PER_EPOCH
 }
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_epoch_at_slot).
-pub fn calculate_period(slot: u64) -> u64 {
+pub const fn calculate_period(slot: u64) -> u64 {
     calculate_epoch(slot) / EPOCHS_PER_SYNC_COMMITTEE
 }
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_start_slot_at_epoch).
-pub fn calculate_slot(period: u64) -> u64 {
+pub const fn calculate_slot(period: u64) -> u64 {
     period * SLOTS_PER_EPOCH * EPOCHS_PER_SYNC_COMMITTEE
 }
 

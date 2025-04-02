@@ -1,33 +1,36 @@
 .balance {
   display: flex;
-  flex-direction: column;
-
-  white-space: nowrap;
-  color: #010500;
-}
-
-.header {
-  display: flex;
   align-items: center;
-  gap: 16px;
 
-  font-size: 12px;
-
-  button {
-    padding: 1px 8px;
-
-    color: #56b99f;
-
-    background-color: rgba(#00ffc4, 0.1);
-  }
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: #828b8e;
 }
 
 .heading {
-  line-height: 24px;
+  margin-right: 16px;
 }
 
-.value {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
+.button {
+  margin-left: 8px;
+  padding: 0 8px;
+
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 24px;
+  color: #56b99f;
+
+  background-color: rgba(#00ffc4, 0.1);
+  border-radius: 4px;
+
+  transition: opacity 0.25s;
+
+  &:hover {
+    opacity: 0.5;
+  }
+
+  &:disabled {
+    opacity: 0.25;
+  }
 }

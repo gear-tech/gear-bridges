@@ -29,7 +29,7 @@ function CopyButton({ value, SVG = CopySVG, onCopy = () => {} }: Props) {
 
   const copyToClipboard = () => navigator.clipboard.writeText(value).then(onSuccess, onError);
 
-  return <Button icon={SVG} color="transparent" onClick={copyToClipboard} />;
+  return <Button icon={SVG} color="transparent" onClick={copyToClipboard} size="x-small" />;
 }
 
 export { CopyButton };

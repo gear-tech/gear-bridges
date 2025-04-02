@@ -86,7 +86,10 @@ export class Program {
   public readonly registry: TypeRegistry;
   public readonly vftManager: VftManager;
 
-  constructor(public api: GearApi, public programId?: `0x${string}`) {
+  constructor(
+    public api: GearApi,
+    public programId?: `0x${string}`,
+  ) {
     const types: Record<string, any> = {
       InitConfig: {
         erc20_manager_address: 'H160',

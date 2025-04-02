@@ -1,6 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
+import { JSX } from 'react';
 
 import { CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton, TruncatedText } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
@@ -76,7 +77,7 @@ function TransactionModal({
             </p>
           )}
 
-          {timestamp && <TransactionDate timestamp={timestamp} />}
+          {timestamp && <TransactionDate timestamp={timestamp} className={styles.date} />}
         </header>
       )}
 

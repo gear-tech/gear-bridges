@@ -94,14 +94,8 @@ type Error = enum {
   TransactionTooOld,
   /// Ethereum transaction was already processed by VFT Manager service.
   AlreadyProcessed,
-};
-
-/// Entry for a single message in [MessageTracker].
-type MessageInfo = struct {
-  /// State of the message.
-  status: MessageStatus,
-  /// Request details.
-  details: TxDetails,
+  /// Vft-manager is paused and cannot process the request.
+  Paused,
 };
 
 /// State in which message processing can be.
@@ -134,21 +128,34 @@ type TxDetails = struct {
   token_supply: TokenSupply,
 };
 
+/// Entry for a single message in [MessageTracker].
+type MessageInfo = struct {
+  /// State of the message.
+  status: MessageStatus,
+  /// Request details.
+  details: TxDetails,
+};
+
+type Order = enum {
+  Direct,
+  Reverse,
+};
+
 constructor {
   /// The constructor is intended for test purposes and is available only when the feature
-  /// `gas_calculation` is enabled.
-  GasCalculation : (_init_config: InitConfig, _slot_first: u64);
+  /// `mocks` is enabled.
+  GasCalculation : (_init_config: InitConfig, _slot_first: u64, _count: opt u32);
   New : (init_config: InitConfig);
 };
 
 service VftManager {
-  /// The method is intended for tests and is available only when the feature `gas_calculation`
+  /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
   /// on the `_supply_type`.
   /// 
   /// Designed for benchmarking gas consumption by the VFT-response processing function.
   CalculateGasForReply : (_slot: u64, _transaction_index: u64, _supply_type: TokenSupply) -> result (null, Error);
-  /// The method is intended for tests and is available only when the feature `gas_calculation`
+  /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Populates the collection with processed transactions.
   /// 
   /// Returns false when the collection is populated.
@@ -162,8 +169,19 @@ service VftManager {
   /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
   /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
+  /// The method is intended for tests and is available only when the feature `mocks`
+  /// is enabled. Inserts the message info into the corresponding collection.
+  InsertMessageInfo : (_msg_id: message_id, _status: MessageStatus, _details: TxDetails) -> null;
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
+  /// Pause the `vft-manager`.
+  /// 
+  /// When `vft-manager` is paused it means that any requests to
+  /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
+  /// will be rejected.
+  /// 
+  /// Can be called only by a [State::admin] or [State::pause_admin].
+  Pause : () -> null;
   /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
   /// Request bridging of tokens from Gear to Ethereum.
@@ -178,6 +196,12 @@ service VftManager {
   /// 
   /// This method can be called only by [State::historical_proxy_address] program.
   SubmitReceipt : (slot: u64, transaction_index: u64, receipt_rlp: vec u8) -> result (null, Error);
+  /// Unpause the `vft-manager`.
+  /// 
+  /// It will effectively cancel effect of the [VftManager::pause].
+  /// 
+  /// Can be called only by a [State::admin] or [State::pause_admin].
+  Unpause : () -> null;
   /// Change [Config]. Can be called only by a [State::admin].
   /// 
   /// For more info see [Config] docs.
@@ -186,6 +210,7 @@ service VftManager {
   UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
+  Upgrade : (vft_manager_new: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
   /// Get current [State::erc20_manager_address] address.
@@ -196,8 +221,13 @@ service VftManager {
   query GetConfig : () -> Config;
   /// Get current [State::historical_proxy_address].
   query HistoricalProxyAddress : () -> actor_id;
+  /// Check if `vft-manager` is currently paused.
+  query IsPaused : () -> bool;
+  /// Get current [State::pause_admin] address.
+  query PauseAdmin : () -> actor_id;
   /// Get state of a `request_bridging` message tracker.
-  query RequestBridingMsgTrackerState : () -> vec struct { message_id, MessageInfo };
+  query RequestBridingMsgTrackerState : (start: u32, count: u32) -> vec struct { message_id, MessageInfo };
+  query Transactions : (order: Order, start: u32, count: u32) -> vec struct { u64, u64 };
   /// Get current [token mapping](State::token_map).
   query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
 
@@ -218,6 +248,14 @@ service VftManager {
     /// When this event is emitted it means that `VFT` tokens were locked/burned and
     /// a message to the gear-eth-bridge built-in actor was successfully submitted.
     BridgingRequested: struct { nonce: u256, vara_token_id: actor_id, amount: u256, sender: actor_id, receiver: h160 };
+    /// Vft-manager was paused by an admin.
+    /// 
+    /// It means that any user requests to it will be rejected.
+    Paused;
+    /// Vft-manager was unpaused by an admin.
+    /// 
+    /// It means that normal operation is continued after the pause.
+    Unpaused;
   }
 };
 

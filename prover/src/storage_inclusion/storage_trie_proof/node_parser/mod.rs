@@ -11,7 +11,7 @@ use plonky2::{
 use plonky2_field::types::{Field, PrimeField64};
 use plonky2_u32::gadgets::multiple_comparison::list_le_circuit;
 
-use super::storage_address::PartialStorageAddressTarget;
+use super::storage_address::StorageAddressTarget;
 use crate::{
     common::{
         pad_byte_vec,
@@ -23,12 +23,10 @@ use crate::{
 };
 
 pub mod branch_parser;
-// TODO: Rename to `prefix_parser`.
 mod header_parser;
 pub mod leaf_parser;
 mod nibble_parser;
 
-// TODO: Compute these 2 constans based on existing ones?
 /// Aligned with blake2 block size to optimize generic hasher circuit.
 pub const NODE_DATA_BLOCK_BYTES: usize = 128;
 // TODO: Assert that child node data length <= 32 in `branch_node_parser``
@@ -39,6 +37,7 @@ pub const NODE_DATA_BLOCK_BYTES: usize = 128;
 ///
 /// Which gives upper bound for branch node encoded data length = 563.
 pub const MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS: usize = 5;
+pub const MAX_LEAF_NODE_DATA_LENGTH_IN_BLOCKS: usize = 1;
 
 impl_array_target_wrapper!(NodeDataBlockTarget, ByteTarget, NODE_DATA_BLOCK_BYTES);
 
@@ -137,7 +136,6 @@ impl BranchNodeDataPaddedTarget {
         Self(ArrayTarget(targets))
     }
 
-    // TODO REFACTOR: Implement set_witness for all `ParsableTargetSet`s?
     /// Set `BranchNodeDataPaddedTarget` witness.
     pub fn set_witness(
         &self,

@@ -1,9 +1,15 @@
-use sails_rs::{gstd::ExecContext, prelude::*};
+use extended_vft_client::traits::*;
+use sails_rs::{
+    calls::*,
+    gstd::{self, calls::GStdRemoting, ExecContext},
+    prelude::*,
+};
 
 mod error;
 mod token_mapping;
 
 use error::Error;
+use request_bridging::{MessageStatus, TxDetails};
 use token_mapping::TokenMap;
 
 mod request_bridging;
@@ -12,6 +18,12 @@ pub mod submit_receipt;
 pub use submit_receipt::abi as eth_abi;
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
+
+#[derive(Debug, Clone, Decode, TypeInfo)]
+pub enum Order {
+    Direct,
+    Reverse,
+}
 
 /// VFT Manager service.
 pub struct VftManager<ExecContext> {
@@ -88,6 +100,14 @@ enum Event {
         /// Receiver of the tokens on the Ethereum side.
         receiver: H160,
     },
+    /// Vft-manager was paused by an admin.
+    ///
+    /// It means that any user requests to it will be rejected.
+    Paused,
+    /// Vft-manager was unpaused by an admin.
+    ///
+    /// It means that normal operation is continued after the pause.
+    Unpaused,
 }
 
 static mut STATE: Option<State> = None;
@@ -103,7 +123,13 @@ pub struct State {
     /// - Updating [State::erc20_manager_address]
     /// - Updating [State::historical_proxy_address]
     /// - Managing token mapping in [State::token_map]
+    /// - Pausing/unpausing the current program
+    /// - Changing [State::pause_admin]
+    /// - Changing [State::admin]
     admin: ActorId,
+    /// Governance of this program. This address is in charge of
+    /// pausing and unpausing the current program.
+    pause_admin: ActorId,
     /// Address of the `ERC20Manager` contract address on Ethereum.
     ///
     /// Can be adjusted by the [State::admin].
@@ -119,6 +145,11 @@ pub struct State {
     ///
     /// Can be adjusted by the [State::admin].
     historical_proxy_address: ActorId,
+    /// Is the `vft-manager` currently on pause.
+    is_paused: bool,
+    /// Address of the new vft-manager program which the current should upgrade to.
+    /// It is required to handle cases when gas exhausted during execution of `upgrade` method.
+    vft_manager_new: Option<ActorId>,
 }
 
 /// Config that should be provided to this service on initialization.
@@ -221,10 +252,84 @@ where
         }
     }
 
+    /// Change [State::admin]. Can be called only by a [State::admin].
+    pub fn set_admin(&mut self, new_admin: ActorId) {
+        self.ensure_admin();
+
+        self.state_mut().admin = new_admin;
+    }
+
+    /// Change [State::pause_admin]. Can be called only by a [State::admin].
+    pub fn set_pause_admin(&mut self, new_pause_admin: ActorId) {
+        self.ensure_admin();
+
+        self.state_mut().pause_admin = new_pause_admin;
+    }
+
     /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
         if self.state().admin != self.exec_context.actor_id() {
             panic!("Not admin")
+        }
+    }
+
+    /// Pause the `vft-manager`.
+    ///
+    /// When `vft-manager` is paused it means that any requests to
+    /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
+    /// will be rejected.
+    ///
+    /// Can be called only by a [State::admin] or [State::pause_admin].
+    pub fn pause(&mut self) {
+        let sender = self.exec_context.actor_id();
+        let state = &self.state();
+
+        if sender != state.admin && sender != state.pause_admin {
+            panic!("Access rejected");
+        }
+
+        if state.is_paused {
+            panic!("Already paused");
+        }
+
+        self.state_mut().is_paused = true;
+
+        self.notify_on(Event::Paused)
+            .expect("Failed to deposit event");
+    }
+
+    /// Unpause the `vft-manager`.
+    ///
+    /// It will effectively cancel effect of the [VftManager::pause].
+    ///
+    /// Can be called only by a [State::admin] or [State::pause_admin].
+    pub fn unpause(&mut self) {
+        let sender = self.exec_context.actor_id();
+        let state = &self.state();
+
+        if sender != state.admin && sender != state.pause_admin {
+            panic!("Access rejected");
+        }
+
+        if !state.is_paused {
+            panic!("Already unpaused");
+        }
+
+        if state.vft_manager_new.is_some() {
+            panic!("Upgrading")
+        }
+
+        self.state_mut().is_paused = false;
+
+        self.notify_on(Event::Unpaused)
+            .expect("Failed to deposit event");
+    }
+
+    fn ensure_running(&self) -> Result<(), Error> {
+        if self.state().is_paused {
+            Err(Error::Paused)
+        } else {
+            Ok(())
         }
     }
 
@@ -240,6 +345,8 @@ where
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<(), Error> {
+        self.ensure_running()?;
+
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
     }
 
@@ -253,6 +360,8 @@ where
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
+        self.ensure_running()?;
+
         let sender = self.exec_context.actor_id();
 
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
@@ -270,14 +379,69 @@ where
         &mut self,
         msg_id: MessageId,
     ) -> Result<(), Error> {
+        self.ensure_running()?;
+
         request_bridging::handle_interrupted_transfer(self, msg_id).await
+    }
+
+    pub async fn upgrade(&mut self, vft_manager_new: ActorId) {
+        self.ensure_admin();
+
+        if !self.state().is_paused {
+            panic!("Not paused");
+        }
+
+        if self
+            .state()
+            .vft_manager_new
+            .map(|address| address != vft_manager_new)
+            .unwrap_or(false)
+        {
+            panic!(
+                "Upgrade called with vft_manager_new = {:?}",
+                self.state().vft_manager_new
+            );
+        }
+
+        self.state_mut().vft_manager_new = Some(vft_manager_new);
+
+        let vft_manager = gstd::exec::program_id();
+        let mut service = extended_vft_client::Vft::new(GStdRemoting);
+        let mappings = self.state().token_map.read_state();
+        for (vft, _erc20, _supply) in mappings {
+            let balance = service
+                .balance_of(vft_manager)
+                .recv(vft)
+                .await
+                .expect("Unable to get the balance of VftManager");
+
+            if balance > 0.into()
+                && !service
+                    .transfer(vft_manager_new, balance)
+                    .send_recv(vft)
+                    .await
+                    .expect("Unable to request a transfer to the new VftManager")
+            {
+                panic!("Unable to transfer tokens to the new VftManager ({vft:?})");
+            }
+        }
+
+        gstd::exec::exit(vft_manager_new);
     }
 
     /// Get state of a `request_bridging` message tracker.
     pub fn request_briding_msg_tracker_state(
         &self,
+        start: u32,
+        count: u32,
     ) -> Vec<(MessageId, request_bridging::MsgTrackerMessageInfo)> {
-        request_bridging::msg_tracker_state()
+        request_bridging::msg_tracker_ref()
+            .message_info
+            .iter()
+            .skip(start as usize)
+            .take(count as usize)
+            .map(|(k, v)| (*k, v.clone()))
+            .collect()
     }
 
     /// Get current [token mapping](State::token_map).
@@ -300,6 +464,16 @@ where
         self.state().admin
     }
 
+    /// Get current [State::pause_admin] address.
+    pub fn pause_admin(&self) -> ActorId {
+        self.state().pause_admin
+    }
+
+    /// Check if `vft-manager` is currently paused.
+    pub fn is_paused(&self) -> bool {
+        self.state().is_paused
+    }
+
     /// Get current [Config].
     pub fn get_config(&self) -> Config {
         self.config().clone()
@@ -310,21 +484,56 @@ where
         self.state().historical_proxy_address
     }
 
-    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
+        fn collect<'a, T: 'a + Copy>(
+            start: u32,
+            count: u32,
+            iter: impl DoubleEndedIterator<Item = &'a T>,
+        ) -> Vec<T> {
+            iter.skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect()
+        }
+
+        match order {
+            Order::Direct => collect(start, count, submit_receipt::transactions().iter()),
+            Order::Reverse => collect(start, count, submit_receipt::transactions().iter().rev()),
+        }
+    }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Populates the collection with processed transactions.
     ///
     /// Returns false when the collection is populated.
     pub fn fill_transactions(&mut self) -> bool {
-        #[cfg(feature = "gas_calculation")]
+        #[cfg(feature = "mocks")]
         {
             submit_receipt::fill_transactions()
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    /// The method is intended for tests and is available only when the feature `gas_calculation`
+    /// The method is intended for tests and is available only when the feature `mocks`
+    /// is enabled. Inserts the message info into the corresponding collection.
+    pub fn insert_message_info(
+        &mut self,
+        _msg_id: MessageId,
+        _status: MessageStatus,
+        _details: TxDetails,
+    ) {
+        #[cfg(feature = "mocks")]
+        {
+            request_bridging::msg_tracker_mut().insert_message_info(_msg_id, _status, _details);
+        }
+
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
+    }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
     /// on the `_supply_type`.
     ///
@@ -335,7 +544,7 @@ where
         _transaction_index: u64,
         _supply_type: TokenSupply,
     ) -> Result<(), Error> {
-        #[cfg(feature = "gas_calculation")]
+        #[cfg(feature = "mocks")]
         {
             use submit_receipt::token_operations;
 
@@ -367,8 +576,8 @@ where
             }
         }
 
-        #[cfg(not(feature = "gas_calculation"))]
-        panic!("Please rebuild with enabled `gas_calculation` feature")
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
     }
 }
 
@@ -381,10 +590,14 @@ where
         unsafe {
             STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                erc20_manager_address: config.erc20_manager_address,
                 admin: exec_context.actor_id(),
+                pause_admin: exec_context.actor_id(),
+                erc20_manager_address: config.erc20_manager_address,
+                token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                ..Default::default()
+                fee_charger: None,
+                is_paused: false,
+                vft_manager_new: None,
             });
             CONFIG = Some(config.config);
         }

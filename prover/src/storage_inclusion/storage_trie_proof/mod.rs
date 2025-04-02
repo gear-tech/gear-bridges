@@ -14,7 +14,7 @@ use super::BranchNodeData;
 
 use self::{
     branch_node_chain::BranchNodeChainParserTarget, hashed_leaf_parser::HashedLeafParser,
-    node_parser::leaf_parser::LeafParser, storage_address::PartialStorageAddressTarget,
+    node_parser::leaf_parser::LeafParser, storage_address::StorageAddressTarget,
 };
 
 mod branch_node_chain;
@@ -33,7 +33,7 @@ impl_target_set! {
         /// Blake2 hash of data present in storage.
         pub data_hash: Blake2Target,
         /// Address by which storage gets read.
-        pub address: PartialStorageAddressTarget
+        pub address: StorageAddressTarget
     }
 }
 

@@ -7,10 +7,14 @@ use primitive_types::H256;
 use prometheus::IntCounter;
 use utils_prometheus::impl_metered_service;
 
-use crate::message_relayer::common::{GearBlockNumber, MessageInBlock, RelayedMerkleRoot};
+use crate::message_relayer::common::{
+    AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+};
 
 pub struct Era {
-    latest_merkle_root: Option<RelayedMerkleRoot>,
+    authority_set_id: AuthoritySetId,
+
+    merkle_roots: BTreeMap<GearBlockNumber, RelayedMerkleRoot>,
     messages: BTreeMap<GearBlockNumber, Vec<Message>>,
     pending_txs: Vec<RelayMessagePendingTx>,
 
@@ -41,9 +45,11 @@ impl_metered_service! {
 }
 
 impl Era {
-    pub fn new(metrics: Metrics) -> Self {
+    pub fn new(authority_set_id: AuthoritySetId, metrics: Metrics) -> Self {
         Self {
-            latest_merkle_root: None,
+            authority_set_id,
+
+            merkle_roots: BTreeMap::new(),
             messages: BTreeMap::new(),
             pending_txs: vec![],
 
@@ -63,13 +69,7 @@ impl Era {
     }
 
     pub fn push_merkle_root(&mut self, merkle_root: RelayedMerkleRoot) {
-        if let Some(mr) = self.latest_merkle_root.as_ref() {
-            if mr.block < merkle_root.block {
-                self.latest_merkle_root = Some(merkle_root);
-            }
-        } else {
-            self.latest_merkle_root = Some(merkle_root);
-        }
+        let _ = self.merkle_roots.insert(merkle_root.block, merkle_root);
     }
 
     pub fn pending_tx_count(&self) -> usize {
@@ -77,7 +77,7 @@ impl Era {
     }
 
     pub async fn process(&mut self, gear_api: &GearApi, eth_api: &EthApi) -> anyhow::Result<()> {
-        let Some(latest_merkle_root) = self.latest_merkle_root else {
+        let Some(latest_merkle_root) = self.find_latest_valid_merkle_root(eth_api).await? else {
             return Ok(());
         };
 
@@ -137,11 +137,11 @@ impl Era {
 
     async fn try_finalize_tx(
         &mut self,
-        tx: usize,
+        tx_idx: usize,
         eth_api: &EthApi,
         gear_api: &GearApi,
     ) -> anyhow::Result<bool> {
-        let tx = &mut self.pending_txs[tx];
+        let tx = &self.pending_txs[tx_idx];
         let status = eth_api.get_tx_status(tx.hash).await?;
 
         let nonce = H256::from(tx.message.nonce_le);
@@ -166,29 +166,39 @@ impl Era {
                     return Ok(true);
                 }
 
-                let merkle_root_block = self
-                    .latest_merkle_root
-                    .ok_or(anyhow::anyhow!(
-                        "Cannot finalize era without any merkle roots"
-                    ))?
-                    .block;
+                let merkle_root = self.find_latest_valid_merkle_root(eth_api).await?;
 
-                if merkle_root_block < tx.message_block {
-                    anyhow::bail!(
-                        "Cannot relay message at block #{}: latest merkle root is at block #{}",
-                        tx.message_block,
-                        merkle_root_block
+                let Some(merkle_root) = merkle_root else {
+                    log::warn!(
+                        "No valid merkle roots were found for message with nonce {} in era #{}",
+                        nonce,
+                        self.authority_set_id
                     );
+
+                    return Ok(false);
+                };
+
+                if merkle_root.block < tx.message_block {
+                    log::warn!(
+                        "Message with nonce {} in era {} requires merkle root for block >= #{} 
+                        but latest found merkle root is for block #{}",
+                        nonce,
+                        self.authority_set_id,
+                        tx.message_block,
+                        merkle_root.block
+                    );
+
+                    return Ok(false);
                 }
 
                 let merkle_root_block_hash =
-                    gear_api.block_number_to_hash(merkle_root_block.0).await?;
+                    gear_api.block_number_to_hash(merkle_root.block.0).await?;
 
                 let tx_hash = submit_message(
                     gear_api,
                     eth_api,
                     &tx.message,
-                    merkle_root_block,
+                    merkle_root.block,
                     merkle_root_block_hash,
                 )
                 .await?;
@@ -202,11 +212,29 @@ impl Era {
                     hex::encode(tx_hash.0)
                 );
 
-                tx.hash = tx_hash;
+                self.pending_txs[tx_idx].hash = tx_hash;
 
                 Ok(false)
             }
         }
+    }
+
+    async fn find_latest_valid_merkle_root(
+        &self,
+        eth_api: &EthApi,
+    ) -> anyhow::Result<Option<RelayedMerkleRoot>> {
+        for (_, root) in self.merkle_roots.iter().rev() {
+            let root_exists = eth_api
+                .read_chainhead_merkle_root(root.block.0)
+                .await?
+                .is_some();
+
+            if root_exists {
+                return Ok(Some(*root));
+            }
+        }
+
+        Ok(None)
     }
 }
 

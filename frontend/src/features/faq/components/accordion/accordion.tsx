@@ -17,12 +17,11 @@ function Accordion({ heading, text }: Props) {
   return (
     <Card className={cx(styles.accordion, isOpen && styles.open)}>
       <button className={styles.button} onClick={isOpen ? close : open}>
-        <h2 className={styles.heading}>{heading}</h2>
-
+        <h2>{heading}</h2>
         <ArrowSVG />
       </button>
 
-      {isOpen && <p className={styles.text}>{text}</p>}
+      <p className={styles.text}>{text}</p>
     </Card>
   );
 }

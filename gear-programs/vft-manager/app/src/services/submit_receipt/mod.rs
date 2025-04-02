@@ -14,6 +14,12 @@ static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 /// program can store.
 const TX_HISTORY_DEPTH: usize = 50_000_000;
 
+/// Get reference to a transactions storage.
+pub fn transactions() -> &'static BTreeSet<(u64, u64)> {
+    #[allow(clippy::deref_addrof)]
+    unsafe { (*&raw const TRANSACTIONS).as_ref() }.expect("Program should be constructed")
+}
+
 /// Get mutable reference to a transactions storage.
 pub fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     #[allow(clippy::deref_addrof)]

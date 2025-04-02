@@ -239,4 +239,95 @@ async fn proxy() {
 
     let result = result.recv().await.unwrap().expect("proxy failed");
     assert_eq!(result.0, message.receipt_rlp);
+
+    // returned slot should be correct regardless the input slot
+    let slot_expected = message.proof_block.block.slot;
+    let result = proxy_client
+        .redirect(
+            // intentionally submit different slot whithin the same epoch
+            1 + slot_expected,
+            message.encode(),
+            admin,
+            <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+        )
+        .with_gas_limit(gas_limit / 100 * 95)
+        .send(proxy_program_id)
+        .await
+        .unwrap();
+    let message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.source == ethereum_event_client_program_id.into()
+                    && message.destination == admin.into()
+                    && message.details.is_none() =>
+            {
+                let request = Handle::decode(&mut &message.payload.0[..]).ok()?;
+
+                match request {
+                    Handle::GetCheckpointFor { slot } if slot == 2_498_456 => {
+                        println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
+                        Some(message.id)
+                    }
+                    _ => None,
+                }
+            }
+
+            _ => None,
+        })
+        .await
+        .unwrap();
+
+    let reply = HandleResult::Checkpoint(Ok((
+        2_496_464,
+        hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
+    )));
+
+    let mut listener = api.subscribe().await.unwrap();
+    let (message_id, _, _) = match api
+        .send_reply(message_id.into(), reply, gas_limit / 100 * 95, 0)
+        .await
+    {
+        Ok(reply) => reply,
+        Err(err) => {
+            let block = api.last_block_number().await.unwrap();
+            println!(
+                "failed to send reply to {:?}: {:?}, block={}",
+                message_id, err, block
+            );
+            let result = result.recv().await.unwrap().unwrap();
+            println!("{:?}", result);
+            crate::panic!("{:?}", err);
+        }
+    };
+
+    println!("Checkpoint reply with ID {:?}", message_id);
+
+    let _message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == admin.into() && message.details.is_none() =>
+            {
+                let route = vft_manager::io::SubmitReceipt::ROUTE;
+                if message
+                    .payload
+                    .0
+                    .starts_with(route)
+                {
+                    let slice = &message
+                    .payload
+                    .0[route.len()..];
+                    let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(&mut &slice[..]).unwrap();
+
+                    assert_eq!(slot, slot_expected);
+
+                    Some(())
+                } else {
+                    None
+                }
+            }
+
+            _ => None,
+        })
+        .await
+        .unwrap();
 }

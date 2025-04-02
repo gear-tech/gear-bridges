@@ -103,12 +103,12 @@ type CheckedProofs = struct {
   receipt_rlp: vec u8,
   transaction_index: u64,
   block_number: u64,
+  slot: u64,
 };
 
 type Error = enum {
   DecodeReceiptEnvelopeFailure,
   FailedEthTransaction,
-  AlreadyProcessed,
   SendFailure,
   ReplyFailure,
   HandleResultDecodeFailure,
@@ -116,9 +116,6 @@ type Error = enum {
   InvalidBlockProof,
   TrieDbFailure,
   InvalidReceiptProof,
-  ReplyTimeout,
-  ReplyHook,
-  InvalidMessage,
 };
 
 constructor {
@@ -126,7 +123,6 @@ constructor {
 };
 
 service EthereumEventClient {
-  /// Check proofs and return receipt if successfull, error otherwise.
   CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
   query Admin : () -> actor_id;
   query CheckpointLightClientAddress : () -> actor_id;

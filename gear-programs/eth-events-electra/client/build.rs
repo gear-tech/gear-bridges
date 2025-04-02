@@ -3,10 +3,10 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let out_dir_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let idl_file_path = out_dir_path.join("ethereum_event_client.idl");
+    let idl_file_path = out_dir_path.join("eth_events_electra.idl");
 
     // Generate IDL file for the program
-    sails_idl_gen::generate_idl_to_file::<ethereum_event_client_app::EthereumEventClientProgram>(
+    sails_idl_gen::generate_idl_to_file::<eth_events_electra_app::EthereumEventClientProgram>(
         &idl_file_path,
     )
     .unwrap();
@@ -24,7 +24,7 @@ fn main() {
             "ethereum_common::beacon::light::ExecutionPayload",
         )
         .generate_to(
-            PathBuf::from(env::var("OUT_DIR").unwrap()).join("ethereum_event_client_client.rs"),
+            PathBuf::from(env::var("OUT_DIR").unwrap()).join("eth_events_electra_client.rs"),
         )
         .unwrap();
 }

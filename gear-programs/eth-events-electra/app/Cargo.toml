@@ -1,5 +1,5 @@
 [package]
-name = "ethereum-event-client-app"
+name = "eth-events-electra-app"
 version.workspace = true
 edition.workspace = true
 

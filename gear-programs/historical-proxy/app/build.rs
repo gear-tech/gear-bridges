@@ -9,7 +9,7 @@ fn main() {
         path.pop();
 
         path.push("api/gear/");
-        path.push("ethereum_event_client.idl");
+        path.push("eth_events_electra.idl");
 
         path
     };
@@ -25,6 +25,14 @@ fn main() {
             "ExecutionPayload",
             "ethereum_common::beacon::light::ExecutionPayload",
         )
-        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("ethereum_event_client.rs"))
+        .with_external_type(
+            "Error",
+            "eth_events_common::Error",
+        )
+        .with_external_type(
+            "CheckedProofs",
+            "eth_events_common::CheckedProofs",
+        )
+        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("eth_events_electra_client.rs"))
         .unwrap();
 }

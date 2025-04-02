@@ -3669,6 +3669,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "eth-events-electra"
+version = "0.3.0"
+dependencies = [
+ "eth-events-electra-app",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "eth-events-electra-app"
+version = "0.3.0"
+dependencies = [
+ "eth-events-common",
+ "ethereum-common",
+ "getrandom 0.2.15",
+ "lazy_static",
+ "sails-rs",
+]
+
+[[package]]
+name = "eth-events-electra-client"
+version = "0.3.0"
+dependencies = [
+ "eth-events-electra-app",
+ "ethereum-common",
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
 name = "ethbloom"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3728,38 +3760,6 @@ dependencies = [
  "tree_hash",
  "tree_hash_derive",
  "trie-db 0.22.6",
-]
-
-[[package]]
-name = "ethereum-event-client"
-version = "0.3.0"
-dependencies = [
- "ethereum-event-client-app",
- "sails-idl-gen",
- "sails-rs",
-]
-
-[[package]]
-name = "ethereum-event-client-app"
-version = "0.3.0"
-dependencies = [
- "eth-events-common",
- "ethereum-common",
- "getrandom 0.2.15",
- "lazy_static",
- "sails-rs",
-]
-
-[[package]]
-name = "ethereum-event-client-client"
-version = "0.3.0"
-dependencies = [
- "ethereum-common",
- "ethereum-event-client-app",
- "mockall 0.12.1",
- "sails-client-gen",
- "sails-idl-gen",
- "sails-rs",
 ]
 
 [[package]]
@@ -5956,9 +5956,10 @@ dependencies = [
  "alloy",
  "alloy-rlp",
  "checkpoint_light_client-io",
+ "eth-events-common",
+ "eth-events-electra",
+ "eth-events-electra-client",
  "ethereum-common",
- "ethereum-event-client",
- "ethereum-event-client-client",
  "futures",
  "gclient",
  "gear-core 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -10219,9 +10220,9 @@ dependencies = [
  "clap",
  "derive_more 0.99.18",
  "dotenv",
+ "eth-events-electra-client",
  "ethereum-client",
  "ethereum-common",
- "ethereum-event-client-client",
  "ethereum_beacon_client",
  "futures",
  "gclient",

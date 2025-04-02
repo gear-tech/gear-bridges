@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 
 #[cfg(target_arch = "wasm32")]
-pub use ethereum_event_client_app::wasm::*;
+pub use eth_events_electra_app::wasm::*;
 
 #[cfg(feature = "wasm-binary")]
 #[cfg(not(target_arch = "wasm32"))]

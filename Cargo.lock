@@ -3669,6 +3669,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "eth-events-deneb"
+version = "0.3.0"
+dependencies = [
+ "eth-events-deneb-app",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "eth-events-deneb-app"
+version = "0.3.0"
+dependencies = [
+ "eth-events-common",
+ "ethereum-common",
+ "getrandom 0.2.15",
+ "lazy_static",
+ "sails-rs",
+]
+
+[[package]]
+name = "eth-events-deneb-client"
+version = "0.3.0"
+dependencies = [
+ "eth-events-deneb-app",
+ "ethereum-common",
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
 name = "eth-events-electra"
 version = "0.3.0"
 dependencies = [

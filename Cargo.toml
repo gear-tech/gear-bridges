@@ -17,6 +17,8 @@ members = [
     "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
+    "gear-programs/eth-events-deneb/app",
+    "gear-programs/eth-events-deneb/client",
     "gear-programs/eth-events-electra/app",
     "gear-programs/eth-events-electra/client",
     "gear-programs/wrapped-vara",
@@ -61,6 +63,9 @@ checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io"
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
 eth-events-common = { path = "gear-programs/eth-events-common" }
+eth-events-deneb = { path = "gear-programs/eth-events-deneb" }
+eth-events-deneb-app = { path = "gear-programs/eth-events-deneb/app" }
+eth-events-deneb-client = { path = "gear-programs/eth-events-deneb/client" }
 eth-events-electra = { path = "gear-programs/eth-events-electra" }
 eth-events-electra-app = { path = "gear-programs/eth-events-electra/app" }
 eth-events-electra-client = { path = "gear-programs/eth-events-electra/client" }

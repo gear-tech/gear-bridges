@@ -11,8 +11,8 @@ use checkpoint_light_client_io::ethereum_common::{
     utils::{self as eth_utils, MerkleProof},
     SLOTS_PER_EPOCH,
 };
-use ethereum_client::EthApi;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
+use ethereum_client::EthApi;
 
 pub async fn compose(
     beacon_client: &BeaconClient,

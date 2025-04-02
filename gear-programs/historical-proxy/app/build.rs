@@ -25,14 +25,10 @@ fn main() {
             "ExecutionPayload",
             "ethereum_common::beacon::light::ExecutionPayload",
         )
-        .with_external_type(
-            "Error",
-            "eth_events_common::Error",
+        .with_external_type("Error", "eth_events_common::Error")
+        .with_external_type("CheckedProofs", "eth_events_common::CheckedProofs")
+        .generate_to(
+            PathBuf::from(env::var("OUT_DIR").unwrap()).join("eth_events_electra_client.rs"),
         )
-        .with_external_type(
-            "CheckedProofs",
-            "eth_events_common::CheckedProofs",
-        )
-        .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("eth_events_electra_client.rs"))
         .unwrap();
 }

@@ -125,8 +125,7 @@ where
         drop(state);
         // 1) check if proofs are correct and receive data for further processing
         let check_proofs = {
-            let mut payload =
-                eth_events::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
+            let mut payload = eth_events::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
             payload.extend_from_slice(&proofs);
             payload
         };
@@ -138,26 +137,13 @@ where
             slot: _,
         } = eth_events::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
-                .map_err(|e| {
-                    ProxyError::SendFailure(format!(
-                        "failed to send message: {:?}",
-                        e
-                    ))
-                })?
+                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {:?}", e)))?
                 .await
                 .map_err(|e| {
-                    ProxyError::ReplyFailure(format!(
-                        "failed to receive reply: {:?}",
-                        e
-                    ))
+                    ProxyError::ReplyFailure(format!("failed to receive reply: {:?}", e))
                 })?,
         )
-        .map_err(|e| {
-            ProxyError::DecodeFailure(format!(
-                "failed to decode reply: {:?}",
-                e
-            ))
-        })?
+        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {:?}", e)))?
         .map_err(ProxyError::EthereumEventClient)?;
 
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.

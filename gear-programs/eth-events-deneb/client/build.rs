@@ -12,10 +12,7 @@ fn main() {
     ClientGenerator::from_idl_path(&idl_file_path)
         .with_mocks("mocks")
         .with_external_type("BlockHeader", "ethereum_common::beacon::BlockHeader")
-        .with_external_type(
-            "BlockBody",
-            "ethereum_common::beacon::light::BlockBody",
-        )
+        .with_external_type("BlockBody", "ethereum_common::beacon::light::BlockBody")
         .with_external_type(
             "ExecutionPayload",
             "ethereum_common::beacon::ExecutionPayload",

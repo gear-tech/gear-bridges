@@ -1,15 +1,15 @@
 #![no_std]
 
 use cell::RefCell;
-use sails_rs::{
-    gstd::{ExecContext, GStdExecContext},
-    prelude::*,
-};
 use eth_events_common::{CheckedProofs, Error, Proofs, State};
 use ethereum_common::{
     beacon::{light::electra::Block as LightBeaconBlock, BlockHeader as BeaconBlockHeader},
     tree_hash::TreeHash,
     H256,
+};
+use sails_rs::{
+    gstd::{ExecContext, GStdExecContext},
+    prelude::*,
 };
 
 pub struct EthereumEventClientProgram(RefCell<State>);
@@ -84,6 +84,7 @@ impl<'a> Service<'a> {
             transaction_index,
             receipt_rlp,
         }
-        .check().await
+        .check()
+        .await
     }
 }

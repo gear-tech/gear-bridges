@@ -1,10 +1,10 @@
 use alloy::rpc::types::TransactionReceipt;
 use alloy_rlp::Encodable;
+use eth_events_deneb_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
-use eth_events_deneb_client::{BlockInclusionProof, EthToVaraEvent, BlockGenericForBlockBody};
 use serde::Deserialize;
 
 pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
@@ -55,7 +55,7 @@ pub fn event() -> EthToVaraEvent {
         let response: BeaconBlockResponse<Block> =
             serde_json::from_slice(HOLESKY_BLOCK_2_498_456.as_ref()).unwrap();
 
-        response.data.message.into()
+        response.data.message
     };
     let headers = vec![
         {
@@ -123,10 +123,7 @@ pub fn event() -> EthToVaraEvent {
     };
 
     EthToVaraEvent {
-        proof_block: BlockInclusionProof {
-            block,
-            headers,
-        },
+        proof_block: BlockInclusionProof { block, headers },
         proof: proof.clone(),
         transaction_index: tx_index,
         receipt_rlp,

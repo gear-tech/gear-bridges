@@ -75,7 +75,7 @@ impl Proofs {
 
         // verify the proof of block inclusion
         let checkpoint = request_checkpoint(checkpoint_light_client_address, slot).await?;
-    
+
         headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
         let Continue(block_root_parent) =
             headers
@@ -95,15 +95,15 @@ impl Proofs {
         if block_root != block_root_parent {
             return Err(Error::InvalidBlockProof);
         }
-    
+
         // verify Merkle-PATRICIA proof
         let mut memory_db = memory_db::new();
         for proof_node in &proof {
             memory_db.insert(hash_db::EMPTY_PREFIX, proof_node);
         }
-    
+
         let trie = TrieDB::new(&memory_db, &receipts_root).map_err(|_| Error::TrieDbFailure)?;
-    
+
         let (key_db, value_db) =
             eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
         match trie.get(&key_db) {
@@ -131,7 +131,10 @@ fn decode_and_check_receipt(receipt_rlp: &[u8]) -> Result<ReceiptEnvelope, Error
     Ok(receipt)
 }
 
-async fn request_checkpoint(checkpoint_light_client_address: ActorId, slot: u64) -> Result<H256, Error> {
+async fn request_checkpoint(
+    checkpoint_light_client_address: ActorId,
+    slot: u64,
+) -> Result<H256, Error> {
     let request = Handle::GetCheckpointFor { slot }.encode();
     let reply = msg::send_bytes_for_reply(checkpoint_light_client_address, &request, 0, 0)
         .map_err(|_| Error::SendFailure)?

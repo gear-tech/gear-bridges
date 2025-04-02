@@ -83,9 +83,8 @@ async fn proxy() {
 
     let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt) = connect_to_node().await;
     println!("node spun up, code uploaded, gas_limit={}", gas_limit);
-    let factory = eth_events_deneb_client::EthEventsDenebFactory::new(
-        GClientRemoting::new(api.clone()),
-    );
+    let factory =
+        eth_events_deneb_client::EthEventsDenebFactory::new(GClientRemoting::new(api.clone()));
     let ethereum_event_client_program_id = factory
         .new(admin)
         .with_gas_limit(gas_limit)
@@ -302,21 +301,18 @@ async fn proxy() {
 
     println!("Checkpoint reply with ID {:?}", message_id);
 
-    let _message_id = listener
+    listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
                 if message.destination == admin.into() && message.details.is_none() =>
             {
                 let route = vft_manager::io::SubmitReceipt::ROUTE;
-                if message
-                    .payload
-                    .0
-                    .starts_with(route)
-                {
-                    let slice = &message
-                    .payload
-                    .0[route.len()..];
-                    let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(&mut &slice[..]).unwrap();
+                if message.payload.0.starts_with(route) {
+                    let slice = &message.payload.0[route.len()..];
+                    let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(
+                        &mut &slice[..],
+                    )
+                    .unwrap();
 
                     assert_eq!(slot, slot_expected);
 

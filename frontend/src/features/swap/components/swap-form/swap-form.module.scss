@@ -1,3 +1,23 @@
+@keyframes toTop {
+  from {
+    transform: translateY(377%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes toBottom {
+  from {
+    transform: translateY(-377%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
 .form {
   display: flex;
   flex-direction: column;
@@ -13,8 +33,18 @@
 
   position: relative; // for swap network button
 
-  &:not(:last-child) {
+  &:first-child {
     margin-bottom: 8px;
+
+    .wallet {
+      animation: toTop 0.25s ease;
+    }
+  }
+
+  &:last-child {
+    .wallet {
+      animation: toBottom 0.25s ease;
+    }
   }
 }
 
@@ -53,6 +83,8 @@
 .wallet {
   display: flex;
   gap: 28px;
+
+  z-index: 1; // for transform animation
 
   .networkIcon {
     width: 48px;

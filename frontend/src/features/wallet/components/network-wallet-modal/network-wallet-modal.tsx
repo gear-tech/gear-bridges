@@ -31,7 +31,7 @@ function NetworkWalletModal({ close }: Props) {
       <Modal heading="Connect Wallet" close={close} className={styles.modal}>
         <button type="button" onClick={openSubstrateModal} className={styles.button}>
           <VaraSVG />
-          <span>Substrate</span>
+          <span>Vara</span>
         </button>
 
         <button type="button" onClick={() => openEthModal()} className={styles.button}>

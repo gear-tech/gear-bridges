@@ -1,10 +1,12 @@
-import { useAlert } from '@gear-js/react-hooks';
+import { useAlert, useAccount } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
+import { useEthAccount } from '@/hooks';
 import { isUndefined, logger } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
@@ -24,6 +26,8 @@ function useSwapForm(
   decimals: number | undefined,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
   const alert = useAlert();
 
   const valueSchema = getAmountSchema(isNativeToken, accountBalance.data, ftBalance.data, decimals);
@@ -70,6 +74,11 @@ function useSwapForm(
 
     setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate });
   };
+
+  useEffect(() => {
+    form.clearErrors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, ethAccount.address]);
 
   return { form, amount, handleSubmit, setMaxBalance };
 }

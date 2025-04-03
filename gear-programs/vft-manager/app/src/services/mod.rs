@@ -1,7 +1,7 @@
 use extended_vft_client::traits::*;
 use sails_rs::{
     calls::*,
-    gstd::{self, calls::GStdRemoting, ExecContext, msg},
+    gstd::{self, calls::GStdRemoting, msg, ExecContext},
     prelude::*,
 };
 

@@ -1,13 +1,13 @@
 [package]
-name = "ethereum-event-client"
+name = "eth-events-electra"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-ethereum-event-client-app.workspace = true
+eth-events-electra-app.workspace = true
 
 [build-dependencies]
-ethereum-event-client-app.workspace = true
+eth-events-electra-app.workspace = true
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-idl-gen.workspace = true
 

@@ -17,8 +17,10 @@ members = [
     "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/io",
-    "gear-programs/ethereum-event-client/app",
-    "gear-programs/ethereum-event-client/client",
+    "gear-programs/eth-events-deneb/app",
+    "gear-programs/eth-events-deneb/client",
+    "gear-programs/eth-events-electra/app",
+    "gear-programs/eth-events-electra/client",
     "gear-programs/wrapped-vara",
     "gear-programs/wrapped-vara/app",
     "gear-programs/wrapped-vara/client",
@@ -60,9 +62,13 @@ gear_proof_storage = { path = "gear-programs/proof-storage", default-features = 
 checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
-ethereum-event-client = { path = "gear-programs/ethereum-event-client" }
-ethereum-event-client-app = { path = "gear-programs/ethereum-event-client/app" }
-ethereum-event-client-client = { path = "gear-programs/ethereum-event-client/client" }
+eth-events-common = { path = "gear-programs/eth-events-common" }
+eth-events-deneb = { path = "gear-programs/eth-events-deneb" }
+eth-events-deneb-app = { path = "gear-programs/eth-events-deneb/app" }
+eth-events-deneb-client = { path = "gear-programs/eth-events-deneb/client" }
+eth-events-electra = { path = "gear-programs/eth-events-electra" }
+eth-events-electra-app = { path = "gear-programs/eth-events-electra/app" }
+eth-events-electra-client = { path = "gear-programs/eth-events-electra/client" }
 historical-proxy-app = { path = "gear-programs/historical-proxy/app" }
 historical-proxy-client = { path = "gear-programs/historical-proxy/client" }
 historical-proxy = { path = "gear-programs/historical-proxy" }

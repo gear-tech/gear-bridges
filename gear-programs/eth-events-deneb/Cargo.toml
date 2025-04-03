@@ -1,0 +1,15 @@
+[package]
+name = "eth-events-deneb"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+eth-events-deneb-app.workspace = true
+
+[build-dependencies]
+eth-events-deneb-app.workspace = true
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
+
+[features]
+wasm-binary = []

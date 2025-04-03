@@ -1,8 +1,8 @@
 // Incorporate code generated based on the IDL file
 #[allow(dead_code)]
 #[allow(clippy::module_inception)]
-pub(crate) mod ethereum_event_client {
-    include!(concat!(env!("OUT_DIR"), "/ethereum_event_client.rs"));
+pub(crate) mod eth_events {
+    include!(concat!(env!("OUT_DIR"), "/eth_events_electra_client.rs"));
 }
 
 use sails_rs::{calls::ActionIo, gstd};
@@ -34,21 +34,21 @@ enum Event {
 
 /// Historical Proxy service.
 ///
-/// `etereum-event-client` programs can become outdated with Ethereum updates, so
-/// every `ethereum-event-client` ever deployed is valid for some Ethereum slot interval.
+/// `eth-events-*` programs can become outdated with Ethereum updates, so
+/// every `eth-events-*` ever deployed is valid for some Ethereum slot interval.
 ///
-/// When Ethereum updates in a way incompatible with `ethereum-event-cleint`(or if we need to
-/// update `ethereum-event-client` for some other reason) we need to deploy a new version of
-/// `ethereum-event-client` and still have access to the old one(in order to process
+/// When Ethereum updates in a way incompatible with `eth-events-*`(or if we need to
+/// update `eth-events-*` for some other reason) we need to deploy a new version of
+/// `eth-events-*` and still have access to the old one (in order to process
 /// historical transactions).
 ///
-/// This service provides such an access. For every `ethereum-event-client` ever deployed
-/// it maps Ethereum slot from which this `ethereum-event-client` is valid from.
+/// This service provides such an access. For every `eth-events-*` ever deployed
+/// it maps Ethereum slot from which this `eth-events-*` is valid from.
 ///
 /// When user makes request to the Historical Proxy service he will specify Ethereum slot number
-/// where the target transaction was sent. Historical Proxy will decide which `ethereum-event-client`
+/// where the target transaction was sent. Historical Proxy will decide which `eth-events-*`
 /// is responsible of processing transactions for this slot and will redirect user request to it.
-/// If `ethereum-event-client` returned success its reply will be redirected to the program
+/// If `eth-events-*` returned success its reply will be redirected to the program
 /// that user have specified in his request. For more info see `redirect` implementation.
 pub struct HistoricalProxyService<'a, ExecContext> {
     state: &'a RefCell<ProxyState>,
@@ -97,7 +97,7 @@ where
         self.state.borrow().endpoints.endpoints()
     }
 
-    /// Redirect message to `ethereum-event-client` program which is valid for `slot`.
+    /// Redirect message to `eth-events-*` program which is valid for `slot`.
     /// If message is relayed successfully then reply is sent to `client` address
     /// to `client_route` route.
     ///
@@ -125,39 +125,27 @@ where
         drop(state);
         // 1) check if proofs are correct and receive data for further processing
         let check_proofs = {
-            let mut payload =
-                ethereum_event_client::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
+            let mut payload = eth_events::ethereum_event_client::io::CheckProofs::ROUTE.to_vec();
             payload.extend_from_slice(&proofs);
             payload
         };
 
-        let ethereum_event_client::CheckedProofs {
+        let eth_events_common::CheckedProofs {
             receipt_rlp,
             transaction_index,
             block_number,
-        } = ethereum_event_client::ethereum_event_client::io::CheckProofs::decode_reply(
+            slot,
+        } = eth_events::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
-                .map_err(|e| {
-                    ProxyError::SendFailure(format!(
-                        "failed to send message to ethereum-event-client: {:?}",
-                        e
-                    ))
-                })?
+                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {:?}", e)))?
                 .await
                 .map_err(|e| {
-                    ProxyError::ReplyFailure(format!(
-                        "failed to receive reply from ethereum-event-client: {:?}",
-                        e
-                    ))
+                    ProxyError::ReplyFailure(format!("failed to receive reply: {:?}", e))
                 })?,
         )
-        .map_err(|e| {
-            ProxyError::DecodeFailure(format!(
-                "failed to decode reply from ethereum-event-client: {:?}",
-                e
-            ))
-        })?
+        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {:?}", e)))?
         .map_err(ProxyError::EthereumEventClient)?;
+
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
         let submit_receipt = {
             let params = (slot, transaction_index, receipt_rlp.clone());

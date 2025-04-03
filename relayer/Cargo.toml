@@ -23,7 +23,7 @@ checkpoint_light_client = { workspace = true, features = ["std"] }
 clap.workspace = true
 derive_more.workspace = true
 dotenv.workspace = true
-ethereum-event-client-client.workspace = true
+eth-events-electra-client.workspace = true
 historical-proxy-client.workspace = true
 vft-manager-client.workspace = true
 ethereum_beacon_client.workspace = true

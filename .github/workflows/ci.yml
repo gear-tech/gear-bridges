@@ -170,6 +170,7 @@ jobs:
             "./api/ethereum/IMessageQueue.json"
 
             "./api/gear/bridging_payment.idl"
+            "./api/gear/eth_events_deneb.idl"
             "./api/gear/eth_events_electra.idl"
             "./api/gear/vft_manager.idl"
             "./api/gear/wrapped_vara.idl"
@@ -183,6 +184,7 @@ jobs:
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
 
             "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
+            "./target/wasm32-unknown-unknown/release/eth_events_deneb.idl"
             "./target/wasm32-unknown-unknown/release/eth_events_electra.idl"
             "./target/wasm32-unknown-unknown/release/vft_manager.idl"
             "./target/wasm32-unknown-unknown/release/wrapped_vara.idl"

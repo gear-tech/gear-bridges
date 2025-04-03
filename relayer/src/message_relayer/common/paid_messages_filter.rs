@@ -1,7 +1,5 @@
-use std::{
-    collections::HashMap,
-    sync::mpsc::{channel, Receiver, Sender},
-};
+use std::collections::HashMap;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -40,16 +38,18 @@ impl PaidMessagesFilter {
         }
     }
 
-    pub fn run(
+    pub async fn run(
         mut self,
-        messages: Receiver<MessageInBlock>,
-        paid_messages: Receiver<PaidMessage>,
-    ) -> Receiver<MessageInBlock> {
-        let (sender, receiver) = channel();
+        mut messages: UnboundedReceiver<MessageInBlock>,
+        mut paid_messages: UnboundedReceiver<PaidMessage>,
+    ) -> UnboundedReceiver<MessageInBlock> {
+        let (sender, receiver) = unbounded_channel();
 
         tokio::spawn(async move {
             loop {
-                let res = self.run_inner(&sender, &messages, &paid_messages);
+                let res = self
+                    .run_inner(&sender, &mut messages, &mut paid_messages)
+                    .await;
                 if let Err(err) = res {
                     log::error!("Paid messages filter failed: {}", err);
                 }
@@ -59,14 +59,14 @@ impl PaidMessagesFilter {
         receiver
     }
 
-    fn run_inner(
+    async fn run_inner(
         &mut self,
-        sender: &Sender<MessageInBlock>,
-        messages: &Receiver<MessageInBlock>,
-        paid_messages: &Receiver<PaidMessage>,
+        sender: &UnboundedSender<MessageInBlock>,
+        messages: &mut UnboundedReceiver<MessageInBlock>,
+        paid_messages: &mut UnboundedReceiver<PaidMessage>,
     ) -> anyhow::Result<()> {
         loop {
-            for message in messages.try_iter() {
+            while let Ok(message) = messages.try_recv() {
                 if let Some(msg) = self
                     .pending_messages
                     .insert(message.message.nonce_le, message)
@@ -78,7 +78,7 @@ impl PaidMessagesFilter {
                 }
             }
 
-            for PaidMessage { nonce } in paid_messages.try_iter() {
+            while let Ok(PaidMessage { nonce }) = paid_messages.try_recv() {
                 self.pending_nonces.push(nonce);
             }
 

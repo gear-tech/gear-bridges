@@ -97,17 +97,19 @@ impl Relayer {
         })
     }
 
-    pub fn run(self) {
-        let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run();
-        let ethereum_blocks = self.ethereum_block_listener.run();
+    pub async fn run(self) {
+        let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run().await;
+        let ethereum_blocks = self.ethereum_block_listener.run().await;
 
-        let messages = self.message_sent_listener.run(gear_blocks_0);
-        let paid_messages = self.message_paid_listener.run(gear_blocks_1);
+        let messages = self.message_sent_listener.run(gear_blocks_0).await;
+        let paid_messages = self.message_paid_listener.run(gear_blocks_1).await;
 
-        let filtered_messages = self.paid_messages_filter.run(messages, paid_messages);
+        let filtered_messages = self.paid_messages_filter.run(messages, paid_messages).await;
 
-        let merkle_roots = self.merkle_root_extractor.run(ethereum_blocks);
+        let merkle_roots = self.merkle_root_extractor.run(ethereum_blocks).await;
 
-        self.message_sender.run(filtered_messages, merkle_roots);
+        self.message_sender
+            .run(filtered_messages, merkle_roots)
+            .await;
     }
 }

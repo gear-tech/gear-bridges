@@ -1,8 +1,6 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-
-use futures::executor::block_on;
 use prometheus::IntCounter;
 use sails_rs::H160;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, FeePaidEntry};
@@ -52,13 +50,18 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<TxHashWithSlot> {
-        let (sender, receiver) = channel();
+    pub async fn run(
+        self,
+        mut blocks: UnboundedReceiver<EthereumBlockNumber>,
+    ) -> UnboundedReceiver<TxHashWithSlot> {
+        let (sender, receiver) = unbounded_channel();
 
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&sender, &blocks));
-            if let Err(err) = res {
-                log::error!("Deposit event extractor failed: {}", err);
+        tokio::task::spawn(async move {
+            loop {
+                let res = self.run_inner(&sender, &mut blocks).await;
+                if let Err(err) = res {
+                    log::error!("Deposit event extractor failed: {}", err);
+                }
             }
         });
 
@@ -67,11 +70,11 @@ impl MessagePaidEventExtractor {
 
     async fn run_inner(
         &self,
-        sender: &Sender<TxHashWithSlot>,
-        blocks: &Receiver<EthereumBlockNumber>,
+        sender: &UnboundedSender<TxHashWithSlot>,
+        blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
-            for block in blocks.try_iter() {
+            while let Ok(block) = blocks.try_recv() {
                 self.process_block_events(block, sender).await?;
             }
         }
@@ -80,7 +83,7 @@ impl MessagePaidEventExtractor {
     async fn process_block_events(
         &self,
         block: EthereumBlockNumber,
-        sender: &Sender<TxHashWithSlot>,
+        sender: &UnboundedSender<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
         let events = self
             .eth_api

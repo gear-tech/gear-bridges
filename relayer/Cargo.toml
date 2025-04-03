@@ -50,6 +50,7 @@ sled.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
 utils-prometheus.workspace = true
+subxt.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true

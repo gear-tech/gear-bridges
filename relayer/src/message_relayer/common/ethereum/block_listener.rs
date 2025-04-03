@@ -1,7 +1,5 @@
-use std::{
-    sync::mpsc::{channel, Receiver, Sender},
-    time::Duration,
-};
+use std::time::Duration;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use ethereum_client::EthApi;
 use prometheus::IntGauge;
@@ -43,8 +41,8 @@ impl BlockListener {
         }
     }
 
-    pub fn run(self) -> Receiver<EthereumBlockNumber> {
-        let (sender, receiver) = channel();
+    pub async fn run(self) -> UnboundedReceiver<EthereumBlockNumber> {
+        let (sender, receiver) = unbounded_channel();
 
         tokio::spawn(async move {
             loop {
@@ -58,7 +56,7 @@ impl BlockListener {
         receiver
     }
 
-    async fn run_inner(&self, sender: &Sender<EthereumBlockNumber>) -> anyhow::Result<()> {
+    async fn run_inner(&self, sender: &UnboundedSender<EthereumBlockNumber>) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
         self.metrics.latest_block.set(current_block as i64);

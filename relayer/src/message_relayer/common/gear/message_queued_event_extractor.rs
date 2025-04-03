@@ -1,8 +1,6 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-
-use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntCounter;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::common::{GearBlockNumber, MessageInBlock};
@@ -36,13 +34,18 @@ impl MessageQueuedEventExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<GearBlockNumber>) -> Receiver<MessageInBlock> {
-        let (sender, receiver) = channel();
+    pub async fn run(
+        self,
+        mut blocks: UnboundedReceiver<GearBlockNumber>,
+    ) -> UnboundedReceiver<MessageInBlock> {
+        let (sender, receiver) = unbounded_channel();
 
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&sender, &blocks));
-            if let Err(err) = res {
-                log::error!("Message queued extractor failed: {}", err);
+        tokio::task::spawn(async move {
+            loop {
+                let res = self.run_inner(&sender, &mut blocks).await;
+                if let Err(err) = res {
+                    log::error!("Message queued extractor failed: {}", err);
+                }
             }
         });
 
@@ -51,11 +54,11 @@ impl MessageQueuedEventExtractor {
 
     async fn run_inner(
         &self,
-        sender: &Sender<MessageInBlock>,
-        blocks: &Receiver<GearBlockNumber>,
+        sender: &UnboundedSender<MessageInBlock>,
+        blocks: &mut UnboundedReceiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
-            for block in blocks.try_iter() {
+            while let Ok(block) = blocks.try_recv() {
                 self.process_block_events(block, sender).await?;
             }
         }
@@ -64,7 +67,7 @@ impl MessageQueuedEventExtractor {
     async fn process_block_events(
         &self,
         block: GearBlockNumber,
-        sender: &Sender<MessageInBlock>,
+        sender: &UnboundedSender<MessageInBlock>,
     ) -> anyhow::Result<()> {
         let block_hash = self.gear_api.block_number_to_hash(block.0).await?;
 

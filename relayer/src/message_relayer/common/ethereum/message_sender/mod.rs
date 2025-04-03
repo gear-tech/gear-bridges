@@ -1,10 +1,7 @@
-use std::{
-    collections::{btree_map::Entry, BTreeMap},
-    sync::mpsc::Receiver,
-};
+use std::collections::{btree_map::Entry, BTreeMap};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use ethereum_client::EthApi;
-use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::{Gauge, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -57,23 +54,25 @@ impl MessageSender {
         }
     }
 
-    pub fn run(
+    pub async fn run(
         self,
-        messages: Receiver<MessageInBlock>,
-        merkle_roots: Receiver<RelayedMerkleRoot>,
+        mut messages: UnboundedReceiver<MessageInBlock>,
+        mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
     ) {
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&messages, &merkle_roots));
-            if let Err(err) = res {
-                log::error!("Ethereum message sender failed: {}", err);
+        tokio::task::spawn(async move {
+            loop {
+                let res = self.run_inner(&mut messages, &mut merkle_roots).await;
+                if let Err(err) = res {
+                    log::error!("Ethereum message sender failed: {}", err);
+                }
             }
         });
     }
 
     async fn run_inner(
         &self,
-        messages: &Receiver<MessageInBlock>,
-        merkle_roots: &Receiver<RelayedMerkleRoot>,
+        messages: &mut UnboundedReceiver<MessageInBlock>,
+        merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
     ) -> anyhow::Result<()> {
         let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
 
@@ -81,7 +80,7 @@ impl MessageSender {
             let fee_payer_balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(fee_payer_balance);
 
-            for message in messages.try_iter() {
+            while let Some(message) = messages.recv().await {
                 let authority_set_id = AuthoritySetId(
                     self.gear_api
                         .signed_by_authority_set_id(message.block_hash)
@@ -101,7 +100,7 @@ impl MessageSender {
                 }
             }
 
-            for merkle_root in merkle_roots.try_iter() {
+            while let Ok(merkle_root) = merkle_roots.try_recv() {
                 match eras.entry(merkle_root.authority_set_id) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().push_merkle_root(merkle_root);

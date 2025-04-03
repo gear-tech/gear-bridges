@@ -190,3 +190,89 @@ pub struct SyncCommittee {
     pub pubkeys: base_types::FixedArray<BLSPubKey, SYNC_COMMITTEE_SIZE>,
     pub aggregate_pubkey: BLSPubKey,
 }
+
+pub mod electra {
+    use super::*;
+    use crate::electra::*;
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#depositrequest).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct DepositRequest {
+        pubkey: BLSPubKey,
+        withdrawal_credentials: Bytes32,
+        amount: u64,
+        signature: SignatureBytes,
+        index: u64,
+    }
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#withdrawalrequest).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct WithdrawalRequest {
+        source_address: Address,
+        validator_pubkey: BLSPubKey,
+        amount: u64,
+    }
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#consolidationrequest).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct ConsolidationRequest {
+        source_address: Address,
+        source_pubkey: BLSPubKey,
+        target_pubkey: BLSPubKey,
+    }
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#executionrequests).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct ExecutionRequests {
+        deposits: base_types::List<DepositRequest, { MAX_DEPOSIT_REQUESTS_PER_PAYLOAD as usize }>,
+        withdrawals:
+            base_types::List<WithdrawalRequest, { MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD as usize }>,
+        consolidations: base_types::List<
+            ConsolidationRequest,
+            { MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD as usize },
+        >,
+    }
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#indexedattestation).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct IndexedAttestation {
+        pub attesting_indices: base_types::List<
+            u64,
+            { (MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT) as usize },
+        >,
+        pub data: AttestationData,
+        pub signature: SignatureBytes,
+    }
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#attestation).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct Attestation {
+        pub aggregation_bits: base_types::Bitlist<
+            { (MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT) as usize },
+        >,
+        pub data: AttestationData,
+        pub signature: SignatureBytes,
+        pub committee_bits: base_types::Bitvector<{ MAX_COMMITTEES_PER_SLOT as usize }>,
+    }
+
+    /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#attesterslashing).
+    #[derive(
+        Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    )]
+    pub struct AttesterSlashing {
+        pub attestation_1: IndexedAttestation,
+        pub attestation_2: IndexedAttestation,
+    }
+}

@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 bridging-payment-client.workspace = true
 ethereum-client.workspace = true
-gear_proof_storage.workspace = true
+gear_proof_storage = { workspace = true, features = ["std"] }
 gear-rpc-client.workspace = true
 prover.workspace = true
 
@@ -23,7 +23,7 @@ checkpoint-light-client-io.workspace = true
 clap.workspace = true
 derive_more.workspace = true
 dotenv.workspace = true
-ethereum-event-client-client.workspace = true
+eth-events-electra-client.workspace = true
 historical-proxy-client.workspace = true
 vft-manager-client.workspace = true
 ethereum_beacon_client.workspace = true
@@ -47,9 +47,10 @@ sails-rs = { workspace = true, features = ["gclient"] }
 serde.workspace = true
 serde_json.workspace = true
 sled.workspace = true
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
 utils-prometheus.workspace = true
+subxt.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true

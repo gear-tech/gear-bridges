@@ -1,7 +1,6 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use ethereum_client::EthApi;
-use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -42,13 +41,18 @@ impl MerkleRootExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<RelayedMerkleRoot> {
-        let (sender, receiver) = channel();
+    pub async fn run(
+        self,
+        mut blocks: UnboundedReceiver<EthereumBlockNumber>,
+    ) -> UnboundedReceiver<RelayedMerkleRoot> {
+        let (sender, receiver) = unbounded_channel();
 
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&blocks, &sender));
-            if let Err(err) = res {
-                log::error!("Merkle root extractor failed: {}", err);
+        tokio::task::spawn(async move {
+            loop {
+                let res = self.run_inner(&mut blocks, &sender).await;
+                if let Err(err) = res {
+                    log::error!("Merkle root extractor failed: {}", err);
+                }
             }
         });
 
@@ -57,11 +61,11 @@ impl MerkleRootExtractor {
 
     async fn run_inner(
         &self,
-        blocks: &Receiver<EthereumBlockNumber>,
-        sender: &Sender<RelayedMerkleRoot>,
+        blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
+        sender: &UnboundedSender<RelayedMerkleRoot>,
     ) -> anyhow::Result<()> {
         loop {
-            for block in blocks.try_iter() {
+            while let Ok(block) = blocks.try_recv() {
                 let merkle_roots = self
                     .eth_api
                     .fetch_merkle_roots_in_range(block.0, block.0)

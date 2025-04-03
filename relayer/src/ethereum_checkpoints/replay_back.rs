@@ -2,17 +2,31 @@ use super::*;
 use checkpoint_light_client_client::traits::ServiceReplayBack as _;
 use ethereum_beacon_client::{self, BeaconClient};
 
-#[allow(clippy::too_many_arguments)]
-pub async fn execute(
-    beacon_client: &BeaconClient,
-    remoting: &GClientRemoting,
-    program_id: [u8; 32],
-    gas_limit: u64,
-    replay_back: Option<ReplayBack>,
-    checkpoint: (Slot, Hash256),
-    sync_update: SyncCommitteeUpdate,
-    sync_aggregate_encoded: Vec<u8>,
-) -> AnyResult<()> {
+pub struct Args<'a> {
+    pub beacon_client: &'a BeaconClient,
+    pub remoting: &'a GClientRemoting,
+    pub program_id: [u8; 32],
+    pub gas_limit: u64,
+    pub replay_back: Option<ReplayBack>,
+    pub checkpoint: (Slot, Hash256),
+    pub sync_update: SyncCommitteeUpdate,
+    pub size_batch: u64,
+    pub sync_aggregate_encoded: Vec<u8>,
+}
+
+pub async fn execute(args: Args<'_>) -> AnyResult<()> {
+    let Args {
+        beacon_client,
+        remoting,
+        program_id,
+        gas_limit,
+        replay_back,
+        checkpoint,
+        sync_update,
+        size_batch,
+        sync_aggregate_encoded,
+    } = args;
+
     log::info!("Replaying back started");
 
     let (mut slot_start, _) = checkpoint;
@@ -21,7 +35,7 @@ pub async fn execute(
         last_header: slot_end,
     }) = replay_back
     {
-        let slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH)
+        let slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, size_batch)
             .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}."))?;
 
         replay_back_slots(
@@ -45,7 +59,7 @@ pub async fn execute(
     let slot_last = sync_update.finalized_header.slot;
     for update in updates {
         let slot_end = update.data.finalized_header.slot;
-        let mut slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, SIZE_BATCH)
+        let mut slots_batch_iter = SlotsBatchIter::new(slot_start, slot_end, size_batch)
             .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_end = {slot_end}."))?;
 
         slot_start = slot_end;
@@ -84,7 +98,7 @@ pub async fn execute(
         }
     }
 
-    let mut slots_batch_iter = SlotsBatchIter::new(slot_start, slot_last, SIZE_BATCH)
+    let mut slots_batch_iter = SlotsBatchIter::new(slot_start, slot_last, size_batch)
         .ok_or(anyhow!("Failed to create slots_batch::Iter with slot_start = {slot_start}, slot_last = {slot_last}."))?;
 
     replay_back_slots_start(

@@ -39,6 +39,7 @@ impl CheckpointLightClientProgram {
         };
 
         if !merkle::is_current_committee_proof_valid(
+            &network,
             &update.finalized_header,
             &sync_committee_current,
             &sync_committee_current_branch,

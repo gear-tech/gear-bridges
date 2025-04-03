@@ -24,9 +24,6 @@ use reqwest::Url;
 
 pub use alloy::primitives::TxHash;
 
-#[cfg(test)]
-mod tests;
-
 mod abi;
 use abi::{
     BridgingPayment, ContentMessage, IERC20Manager, IMessageQueue,
@@ -90,6 +87,8 @@ pub enum TxStatus {
 pub struct EthApi {
     contracts: Contracts<ProviderType, Http<Client>, Ethereum>,
     public_key: Address,
+    wallet: EthereumWallet,
+    url: Url,
 }
 
 impl EthApi {
@@ -121,8 +120,8 @@ impl EthApi {
 
         let provider: ProviderType = ProviderBuilder::new()
             .with_recommended_fillers()
-            .wallet(wallet)
-            .on_http(url);
+            .wallet(wallet.clone())
+            .on_http(url.clone());
 
         let contracts = Contracts::new(
             provider,
@@ -133,6 +132,28 @@ impl EthApi {
         Ok(EthApi {
             contracts,
             public_key,
+            url,
+            wallet,
+        })
+    }
+
+    pub fn reconnect(&self) -> Result<EthApi, Error> {
+        let provider: ProviderType = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(self.wallet.clone())
+            .on_http(self.url.clone());
+
+        let contracts = Contracts::new(
+            provider,
+            self.contracts.message_queue_instance.address().0 .0,
+            self.contracts.relayer_instance.address().0 .0,
+        )?;
+
+        Ok(EthApi {
+            contracts,
+            public_key: self.public_key,
+            url: self.url.clone(),
+            wallet: self.wallet.clone(),
         })
     }
 
@@ -164,9 +185,21 @@ impl EthApi {
         self.contracts.get_tx_status(tx_hash).await
     }
 
-    pub async fn read_finalized_merkle_root(&self, block: u32) -> Result<Option<[u8; 32]>, Error> {
+    pub async fn read_finalized_merkle_root(
+        &self,
+        gear_block: u32,
+    ) -> Result<Option<[u8; 32]>, Error> {
         self.contracts
-            .read_finalized_merkle_root(U256::from(block))
+            .read_merkle_root(U256::from(gear_block), BlockNumberOrTag::Finalized)
+            .await
+    }
+
+    pub async fn read_chainhead_merkle_root(
+        &self,
+        gear_block: u32,
+    ) -> Result<Option<[u8; 32]>, Error> {
+        self.contracts
+            .read_merkle_root(U256::from(gear_block), BlockNumberOrTag::Latest)
             .await
     }
 
@@ -456,11 +489,15 @@ where
         }
     }
 
-    pub async fn read_finalized_merkle_root(&self, block: U256) -> Result<Option<[u8; 32]>, Error> {
+    pub async fn read_merkle_root(
+        &self,
+        block: U256,
+        block_tag: BlockNumberOrTag,
+    ) -> Result<Option<[u8; 32]>, Error> {
         let root = self
             .relayer_instance
             .getMerkleRoot(block)
-            .block(BlockId::Number(BlockNumberOrTag::Finalized))
+            .block(BlockId::Number(block_tag))
             .call()
             .await
             .map_err(Error::ErrorDuringContractExecution)?

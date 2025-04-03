@@ -1,6 +1,7 @@
 use checkpoint_light_client_client::service_checkpoint_for::io as checkpoint_for_io;
-use ethereum_event_client_client::traits::*;
+use eth_events_deneb_client::traits::*;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress};
+use gear_core::ids::prelude::*;
 use hex_literal::hex;
 use historical_proxy_client::traits::*;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
@@ -21,11 +22,13 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         let proxy_code_id = match lock.1 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api
+                let code_id = api
                     .upload_code(historical_proxy::WASM_BINARY)
                     .await
-                    .unwrap();
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(historical_proxy::WASM_BINARY));
                 lock.1 = Some(code_id);
+
                 code_id
             }
         };
@@ -33,11 +36,13 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4
         let ethereum_event_client_code_id = match lock.2 {
             Some(code_id) => code_id,
             None => {
-                let (code_id, _) = api
-                    .upload_code(ethereum_event_client::WASM_BINARY)
+                let code_id = api
+                    .upload_code(eth_events_deneb::WASM_BINARY)
                     .await
-                    .unwrap();
+                    .map(|(code_id, ..)| code_id)
+                    .unwrap_or_else(|_| CodeId::generate(eth_events_deneb::WASM_BINARY));
                 lock.2 = Some(code_id);
+
                 code_id
             }
         };
@@ -75,9 +80,8 @@ async fn proxy() {
 
     let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt) = connect_to_node().await;
     println!("node spun up, code uploaded, gas_limit={}", gas_limit);
-    let factory = ethereum_event_client_client::EthereumEventClientFactory::new(
-        GClientRemoting::new(api.clone()),
-    );
+    let factory =
+        eth_events_deneb_client::EthEventsDenebFactory::new(GClientRemoting::new(api.clone()));
     let ethereum_event_client_program_id = factory
         .new(admin)
         .with_gas_limit(gas_limit)
@@ -239,4 +243,100 @@ async fn proxy() {
 
     let result = result.recv().await.unwrap().expect("proxy failed");
     assert_eq!(result.0, message.receipt_rlp);
+
+    // returned slot should be correct regardless the input slot
+    let slot_expected = message.proof_block.block.slot;
+    let result = proxy_client
+        .redirect(
+            // intentionally submit different slot whithin the same epoch
+            1 + slot_expected,
+            message.encode(),
+            admin,
+            <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+        )
+        .with_gas_limit(gas_limit / 100 * 95)
+        .send(proxy_program_id)
+        .await
+        .unwrap();
+    let message_id = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.source == ethereum_event_client_program_id.into()
+                    && message.destination == admin.into()
+                    && message.details.is_none()
+                    && message.payload.0.starts_with(checkpoint_for_io::Get::ROUTE) =>
+            {
+                let encoded = &message.payload.0[checkpoint_for_io::Get::ROUTE.len()..];
+                let slot: <checkpoint_for_io::Get as ActionIo>::Params =
+                    Decode::decode(&mut &encoded[..]).ok()?;
+
+                if slot == 2_498_456 {
+                    println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
+                    Some(message.id)
+                } else {
+                    None
+                }
+            }
+
+            _ => None,
+        })
+        .await
+        .unwrap();
+
+    let reply: <checkpoint_for_io::Get as ActionIo>::Reply = Ok((
+        2_496_464,
+        hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
+    ));
+    let payload = {
+        let mut result = checkpoint_for_io::Get::ROUTE.to_vec();
+        reply.encode_to(&mut result);
+
+        result
+    };
+
+    let mut listener = api.subscribe().await.unwrap();
+    let (message_id, _, _) = match api
+        .send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+        .await
+    {
+        Ok(reply) => reply,
+        Err(err) => {
+            let block = api.last_block_number().await.unwrap();
+            println!(
+                "failed to send reply to {:?}: {:?}, block={}",
+                message_id, err, block
+            );
+            let result = result.recv().await.unwrap().unwrap();
+            println!("{:?}", result);
+            crate::panic!("{:?}", err);
+        }
+    };
+
+    println!("Checkpoint reply with ID {:?}", message_id);
+
+    listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == admin.into() && message.details.is_none() =>
+            {
+                let route = vft_manager::io::SubmitReceipt::ROUTE;
+                if message.payload.0.starts_with(route) {
+                    let slice = &message.payload.0[route.len()..];
+                    let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(
+                        &mut &slice[..],
+                    )
+                    .unwrap();
+
+                    assert_eq!(slot, slot_expected);
+
+                    Some(())
+                } else {
+                    None
+                }
+            }
+
+            _ => None,
+        })
+        .await
+        .unwrap();
 }

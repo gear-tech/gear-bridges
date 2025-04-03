@@ -1,4 +1,4 @@
-import { NetworkWalletField, SwapNetworkButton } from './components';
+import { SwapNetworkButton, Wallet } from './components';
 import { useAccountSync } from './hooks';
 
-export { NetworkWalletField, SwapNetworkButton, useAccountSync };
+export { SwapNetworkButton, Wallet, useAccountSync };

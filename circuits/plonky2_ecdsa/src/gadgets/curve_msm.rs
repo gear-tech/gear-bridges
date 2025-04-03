@@ -95,7 +95,6 @@ mod tests {
     use crate::gadgets::nonnative::CircuitBuilderNonNative;
 
     #[test]
-    #[ignore]
     fn test_curve_msm() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;

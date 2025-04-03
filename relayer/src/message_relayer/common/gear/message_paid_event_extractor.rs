@@ -1,10 +1,8 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-
-use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use primitive_types::H256;
 use prometheus::IntCounter;
 use sails_rs::events::EventIo;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
@@ -43,13 +41,18 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub fn run(self, blocks: Receiver<GearBlockNumber>) -> Receiver<PaidMessage> {
-        let (sender, receiver) = channel();
+    pub async fn run(
+        self,
+        mut blocks: UnboundedReceiver<GearBlockNumber>,
+    ) -> UnboundedReceiver<PaidMessage> {
+        let (sender, receiver) = unbounded_channel();
 
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&sender, &blocks));
-            if let Err(err) = res {
-                log::error!("Message paid event extractor failed: {}", err);
+        tokio::task::spawn(async move {
+            loop {
+                let res = self.run_inner(&sender, &mut blocks).await;
+                if let Err(err) = res {
+                    log::error!("Message paid event extractor failed: {}", err);
+                }
             }
         });
 
@@ -58,11 +61,11 @@ impl MessagePaidEventExtractor {
 
     async fn run_inner(
         &self,
-        sender: &Sender<PaidMessage>,
-        blocks: &Receiver<GearBlockNumber>,
+        sender: &UnboundedSender<PaidMessage>,
+        blocks: &mut UnboundedReceiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
-            for block in blocks.try_iter() {
+            while let Ok(block) = blocks.try_recv() {
                 self.process_block_events(block.0, sender).await?;
             }
         }
@@ -71,7 +74,7 @@ impl MessagePaidEventExtractor {
     async fn process_block_events(
         &self,
         block: u32,
-        sender: &Sender<PaidMessage>,
+        sender: &UnboundedSender<PaidMessage>,
     ) -> anyhow::Result<()> {
         let block_hash = self.gear_api.block_number_to_hash(block).await?;
 
@@ -97,7 +100,7 @@ impl MessagePaidEventExtractor {
             let user_reply = BridgingPaymentEvents::decode_event(message.payload)
                 .map_err(|_| anyhow::anyhow!("Failed to decode bridging payment event"))?;
 
-            let BridgingPaymentEvents::TeleportVaraToEth { nonce, .. } = user_reply;
+            let BridgingPaymentEvents::BridgingPaid { nonce } = user_reply;
 
             let mut nonce_le = [0; 32];
             nonce.to_little_endian(&mut nonce_le);

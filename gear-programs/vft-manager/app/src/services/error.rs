@@ -43,4 +43,7 @@ pub enum Error {
     TransactionTooOld,
     /// Ethereum transaction was already processed by VFT Manager service.
     AlreadyProcessed,
+
+    /// Vft-manager is paused and cannot process the request.
+    Paused,
 }

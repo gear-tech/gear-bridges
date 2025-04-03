@@ -12,7 +12,7 @@ primitive-types.workspace = true
 reqwest.workspace = true
 binary-merkle-tree.workspace = true
 ahash.workspace = true
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 keccak-hash.workspace = true
 sp-core = { workspace = true, features = ["std"] }
 alloy.workspace = true

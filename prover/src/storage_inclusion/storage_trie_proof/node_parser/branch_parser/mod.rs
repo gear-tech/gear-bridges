@@ -30,7 +30,7 @@ use crate::{
             branch_parser::child_node_array_parser::ChildNodeArrayParserTarget,
             compose_padded_node_data,
         },
-        storage_address::PartialStorageAddressTarget,
+        storage_address::StorageAddressTarget,
     },
 };
 use bitmap_parser::BitmapParserInputTarget;
@@ -50,9 +50,9 @@ impl_parsable_target_set! {
         pub child_node_hash: Blake2Target,
         /// Address that was previously composed from all the partial addresses found in nodes from
         /// the root to the current node.
-        pub partial_address: PartialStorageAddressTarget,
+        pub partial_address: StorageAddressTarget,
         /// `partial_address` with current node nibbles amd child nibble appended.
-        pub resulting_partial_address: PartialStorageAddressTarget,
+        pub resulting_partial_address: StorageAddressTarget,
     }
 }
 
@@ -101,7 +101,7 @@ impl BranchParser {
 
         let node_data_target = BranchNodeDataPaddedTarget::add_virtual_safe(&mut builder);
 
-        let partial_address_target = PartialStorageAddressTarget::add_virtual_unsafe(&mut builder);
+        let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
         partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
 
         let node_data_length_target: Target = builder.add_virtual_target();
@@ -139,7 +139,7 @@ impl BranchParser {
             nibble_parser::define(input, &mut builder)
         };
 
-        let child_nibble_address_part = PartialStorageAddressTarget::from_single_nibble_target(
+        let child_nibble_address_part = StorageAddressTarget::from_single_nibble_target(
             claimed_child_node_nibble_target,
             &mut builder,
         );

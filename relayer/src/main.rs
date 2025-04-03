@@ -4,6 +4,7 @@ use clap::Parser;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
+use ethereum_common::SLOTS_PER_EPOCH;
 use gear_rpc_client::GearApi;
 use kill_switch::KillSwitchRelayer;
 use message_relayer::{eth_to_gear, gear_to_eth};
@@ -125,7 +126,7 @@ async fn main() {
 
                     metrics_builder = metrics_builder.register_service(&relayer);
 
-                    relayer.run();
+                    relayer.run().await;
                 }
                 GearEthTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -146,7 +147,7 @@ async fn main() {
 
                     metrics_builder = metrics_builder.register_service(&relayer);
 
-                    relayer.run();
+                    relayer.run().await;
                 }
             }
 
@@ -167,8 +168,17 @@ async fn main() {
 
             let program_id =
                 hex_utils::decode_h256(&args.program_id).expect("Failed to decode program_id");
-
-            let relayer = ethereum_checkpoints::Relayer::new(program_id, beacon_client, gear_api);
+            let multiplier = if args.size_batch_multiplier > 0 {
+                args.size_batch_multiplier
+            } else {
+                1
+            };
+            let relayer = ethereum_checkpoints::Relayer::new(
+                program_id,
+                beacon_client,
+                gear_api,
+                multiplier.saturating_mul(SLOTS_PER_EPOCH),
+            );
 
             MetricsBuilder::new()
                 .register_service(&relayer)
@@ -231,7 +241,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
-                    relayer.run();
+                    relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -259,13 +269,14 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
-                    relayer.run();
+                    relayer.run().await;
                 }
             }
 
             loop {
                 // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                std::thread::sleep(Duration::from_millis(100));
+                // TODO(playx): is this necessary now? We switched to full async
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
         CliCommands::GearEthManual(args) => {
@@ -357,6 +368,7 @@ fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         eth_endpoint,
         relayer_address,
         mq_address,
+        ..
     } = &args.ethereum_args;
 
     EthApi::new(
@@ -373,6 +385,7 @@ fn create_eth_client(args: &EthereumArgs) -> EthApi {
         eth_endpoint,
         relayer_address,
         mq_address,
+        ..
     } = args;
 
     EthApi::new(eth_endpoint, mq_address, relayer_address, None)

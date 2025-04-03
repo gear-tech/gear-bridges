@@ -1,3 +1,4 @@
-import { TokenTracker } from './token-tracker';
+import { LockedBalanceTooltip } from './locked-balance-tooltip';
+import { TokensCard } from './tokens-card';
 
-export { TokenTracker };
+export { LockedBalanceTooltip, TokensCard };

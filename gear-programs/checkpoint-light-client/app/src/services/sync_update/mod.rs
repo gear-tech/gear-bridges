@@ -81,14 +81,19 @@ pub async fn verify(
 
     let mut finalized_header_update = None;
     if update_slot_finalized > stored_finalized_slot {
-        if merkle::is_finality_proof_valid(&attested_header, &finalized_header, &finality_branch) {
+        if merkle::is_finality_proof_valid(
+            network,
+            &attested_header,
+            &finalized_header,
+            &finality_branch,
+        ) {
             finalized_header_update = Some(finalized_header);
         } else {
             return Err(SyncCommitteeUpdateError::InvalidFinalityProof);
         }
     }
 
-    let committee_update = match committee_update.verify(store_period) {
+    let committee_update = match committee_update.verify(network, store_period) {
         Ok(committee_update) => committee_update,
         Err(committee::Error::InvalidNextSyncCommitteeProof) => {
             return Err(SyncCommitteeUpdateError::InvalidNextSyncCommitteeProof)

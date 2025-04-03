@@ -61,26 +61,16 @@ pub fn init() {
     unsafe { MSG_TRACKER = Some(MessageTracker::default()) }
 }
 
-/// Fetch state of this message tracker.
-pub fn msg_tracker_state() -> Vec<(MessageId, MessageInfo)> {
-    unsafe {
-        MSG_TRACKER
-            .as_mut()
-            .expect("VftManager::seed() should be called")
-    }
-    .message_info
-    .clone()
-    .into_iter()
-    .collect()
+/// Get reference to a global message tracker.
+pub fn msg_tracker_ref() -> &'static MessageTracker {
+    #[allow(clippy::deref_addrof)]
+    unsafe { (*&raw const MSG_TRACKER).as_ref() }.expect("VftManager::seed() should be called")
 }
 
 /// Get mutable reference to a global message tracker.
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
-    unsafe {
-        MSG_TRACKER
-            .as_mut()
-            .expect("VftManager::seed() should be called")
-    }
+    #[allow(clippy::deref_addrof)]
+    unsafe { (*&raw mut MSG_TRACKER).as_mut() }.expect("VftManager::seed() should be called")
 }
 
 impl MessageTracker {

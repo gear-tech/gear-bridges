@@ -306,7 +306,7 @@ async fn replay_back_and_updating() -> Result<()> {
     decoder.read_to_end(&mut headers).unwrap();
 
     let headers_all: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
-    let size_batch = 40 * SLOTS_PER_EPOCH as usize;
+    let size_batch = 30 * SLOTS_PER_EPOCH as usize;
     let mut service =
         checkpoint_light_client_client::ServiceReplayBack::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();

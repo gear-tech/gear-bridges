@@ -31,3 +31,4 @@ gclient.workspace = true
 
 [features]
 wasm-binary = []
+mocks = ["vft-manager-app/mocks"]

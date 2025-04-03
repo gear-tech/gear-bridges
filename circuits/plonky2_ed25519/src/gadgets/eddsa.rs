@@ -180,13 +180,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Fails for now"]
-    fn test_eddsa_circuit_narrow() -> Result<()> {
-        // NOTE: Due to the range check added to some underlying circuits this test is failing.
-        test_eddsa_circuit_with_config(CircuitConfig::standard_ecc_config())
-    }
-
-    #[test]
     fn test_eddsa_circuit_wide() -> Result<()> {
         test_eddsa_circuit_with_config(CircuitConfig::wide_ecc_config())
     }

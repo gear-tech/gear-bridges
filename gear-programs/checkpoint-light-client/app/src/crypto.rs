@@ -19,11 +19,11 @@ pub async fn verify_sync_committee_signature(
     pub_keys: Vec<G1>,
     attested_header: &BeaconBlockHeader,
     signature: &G2,
-    _signature_slot: u64,
+    signature_slot: u64,
 ) -> bool {
     let domain = signing_root::compute_domain(
         DOMAIN_SYNC_COMMITTEE,
-        network.fork_version(),
+        network.fork_version(signature_slot),
         network.genesis_validators_root(),
     );
     let signing_root = signing_root::compute(attested_header.tree_hash_root(), domain);

@@ -99,13 +99,15 @@ impl Relayer {
         })
     }
 
-    pub fn run(self) {
-        let [gear_blocks] = self.gear_block_listener.run();
-        let ethereum_blocks = self.ethereum_block_listener.run();
+    pub async fn run(self) {
+        let [gear_blocks] = self.gear_block_listener.run().await;
+        let ethereum_blocks = self.ethereum_block_listener.run().await;
 
-        let deposit_events = self.deposit_event_extractor.run(ethereum_blocks);
-        let checkpoints = self.checkpoints_extractor.run(gear_blocks);
+        let deposit_events = self.deposit_event_extractor.run(ethereum_blocks).await;
+        let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
 
-        self.gear_message_sender.run(deposit_events, checkpoints);
+        self.gear_message_sender
+            .run(deposit_events, checkpoints)
+            .await;
     }
 }

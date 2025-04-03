@@ -12,7 +12,8 @@ use sails_rs::{
     gclient::calls::GClientRemoting,
     Encode,
 };
-use std::sync::mpsc::Receiver;
+
+use tokio::sync::mpsc::UnboundedReceiver;
 use utils_prometheus::{impl_metered_service, MeteredService};
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
@@ -93,28 +94,35 @@ impl MessageSender {
         }
     }
 
-    pub fn run(
+    pub async fn run(
         mut self,
-        messages: Receiver<TxHashWithSlot>,
-        checkpoints: Receiver<EthereumSlotNumber>,
+        mut messages: UnboundedReceiver<TxHashWithSlot>,
+        mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
     ) {
-        tokio::task::spawn_blocking(move || loop {
-            let res = block_on(self.run_inner(&messages, &checkpoints));
-            if let Err(err) = res {
-                log::error!("Gear message sender failed: {}", err);
-            }
-        });
+        let _ = tokio::task::spawn_blocking(move || {
+            block_on(async move {
+                loop {
+                    match self.run_inner(&mut messages, &mut checkpoints).await {
+                        Ok(_) => continue,
+                        Err(err) => {
+                            log::error!("Gear message sender failed with: {err}");
+                        }
+                    }
+                }
+            });
+        })
+        .await;
     }
 
     async fn run_inner(
         &mut self,
-        messages: &Receiver<TxHashWithSlot>,
-        checkpoints: &Receiver<EthereumSlotNumber>,
+        messages: &mut UnboundedReceiver<TxHashWithSlot>,
+        checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
         let mut latest_checkpoint_slot = None;
 
         loop {
-            for checkpoint in checkpoints.try_iter() {
+            while let Ok(checkpoint) = checkpoints.try_recv() {
                 if latest_checkpoint_slot.unwrap_or_default() < checkpoint {
                     latest_checkpoint_slot = Some(checkpoint);
                 } else {
@@ -127,7 +135,7 @@ impl MessageSender {
                 }
             }
 
-            for message in messages.try_iter() {
+            while let Ok(message) = messages.try_recv() {
                 self.waiting_checkpoint.push(message);
             }
 

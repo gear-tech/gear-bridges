@@ -1,0 +1,13 @@
+[package]
+name = "eth-events-electra-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+eth-events-common.workspace = true
+ethereum-common.workspace = true
+sails-rs.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["custom"] }
+lazy_static = { workspace = true, features = ["spin_no_std"] }

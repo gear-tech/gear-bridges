@@ -18,8 +18,10 @@ members = [
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/app",
     "gear-programs/checkpoint-light-client/client",
-    "gear-programs/ethereum-event-client/app",
-    "gear-programs/ethereum-event-client/client",
+    "gear-programs/eth-events-deneb/app",
+    "gear-programs/eth-events-deneb/client",
+    "gear-programs/eth-events-electra/app",
+    "gear-programs/eth-events-electra/client",
     "gear-programs/wrapped-vara",
     "gear-programs/wrapped-vara/app",
     "gear-programs/wrapped-vara/client",
@@ -63,9 +65,13 @@ checkpoint-light-client = { path = "gear-programs/checkpoint-light-client" }
 checkpoint-light-client-app = { path = "gear-programs/checkpoint-light-client/app" }
 checkpoint-light-client-client = { path = "gear-programs/checkpoint-light-client/client" }
 checkpoint-light-client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
-ethereum-event-client = { path = "gear-programs/ethereum-event-client" }
-ethereum-event-client-app = { path = "gear-programs/ethereum-event-client/app" }
-ethereum-event-client-client = { path = "gear-programs/ethereum-event-client/client" }
+eth-events-common = { path = "gear-programs/eth-events-common" }
+eth-events-deneb = { path = "gear-programs/eth-events-deneb" }
+eth-events-deneb-app = { path = "gear-programs/eth-events-deneb/app" }
+eth-events-deneb-client = { path = "gear-programs/eth-events-deneb/client" }
+eth-events-electra = { path = "gear-programs/eth-events-electra" }
+eth-events-electra-app = { path = "gear-programs/eth-events-electra/app" }
+eth-events-electra-client = { path = "gear-programs/eth-events-electra/client" }
 historical-proxy-app = { path = "gear-programs/historical-proxy/app" }
 historical-proxy-client = { path = "gear-programs/historical-proxy/client" }
 historical-proxy = { path = "gear-programs/historical-proxy" }
@@ -155,7 +161,7 @@ serde_json = "1.0"
 sha2 = "0.10"
 sled = "0.34.7"
 static_assertions = "1.1.0"
-thiserror = "1.0.61"
+thiserror = { version = "2.0.11", default-features = false }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.23.0", features = ["full"] }
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
@@ -165,7 +171,6 @@ unroll = "0.1.5"
 # Gear/Substrate deps
 gstd = { version = "1.6.2", features = ["nightly"] }
 gtest = "1.6.2"
-gwasm-builder = { version = "1.6.2", package = "gear-wasm-builder" }
 gmeta = "1.6.2"
 gear-wasm-builder = { version = "1.6.2", default-features = false }
 gsdk = "1.6.2"
@@ -194,12 +199,12 @@ primitive-types = { version = "0.12.2", default-features = false }
 binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
 
 # Alloy deps
-alloy-consensus = { version = "0.5.2", default-features = false }
-alloy-eips = { version = "0.5.2", default-features = false }
-alloy-rlp = { version = "0.3.8", default-features = false }
-alloy-primitives = { version = "0.8.9", default-features = false }
-alloy-sol-types = { version = "0.8.9", default-features = false }
-alloy = { version = "0.5.2", package = "alloy", features = [
+alloy-consensus = { version = "=0.5.2", default-features = false }
+alloy-eips = { version = "=0.5.2", default-features = false }
+alloy-rlp = { version = "=0.3.8", default-features = false }
+alloy-primitives = { version = "=0.8.9", default-features = false }
+alloy-sol-types = { version = "=0.8.9", default-features = false }
+alloy = { version = "=0.5.2", package = "alloy", features = [
     "sol-types",
     "contract",
     "pubsub",

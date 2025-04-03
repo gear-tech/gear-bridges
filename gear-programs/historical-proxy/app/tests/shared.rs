@@ -1,10 +1,10 @@
 use alloy::rpc::types::TransactionReceipt;
 use alloy_rlp::Encodable;
+use eth_events_deneb_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
-    beacon::light::Block,
+    beacon::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
-use ethereum_event_client_client::{BlockInclusionProof, EthToVaraEvent};
 use serde::Deserialize;
 
 pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
@@ -52,10 +52,10 @@ pub fn event() -> EthToVaraEvent {
         .unwrap_or_default();
 
     let block: Block = {
-        let response: BeaconBlockResponse =
+        let response: BeaconBlockResponse<Block> =
             serde_json::from_slice(HOLESKY_BLOCK_2_498_456.as_ref()).unwrap();
 
-        response.data.message.into()
+        response.data.message
     };
     let headers = vec![
         {
@@ -113,11 +113,17 @@ pub fn event() -> EthToVaraEvent {
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
     Encodable::encode(&receipt, &mut receipt_rlp);
+
+    let block = BlockGenericForBlockBody {
+        slot: block.slot,
+        proposer_index: block.proposer_index,
+        parent_root: block.parent_root,
+        state_root: block.state_root,
+        body: block.body.into(),
+    };
+
     EthToVaraEvent {
-        proof_block: BlockInclusionProof {
-            block: block.clone(),
-            headers: headers.clone(),
-        },
+        proof_block: BlockInclusionProof { block, headers },
         proof: proof.clone(),
         transaction_index: tx_index,
         receipt_rlp,

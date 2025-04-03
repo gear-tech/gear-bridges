@@ -1,0 +1,48 @@
+.input,
+.amount {
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 120%;
+  color: #9cacb1;
+
+  &:not([aria-invalid='true']).active {
+    color: #fff;
+  }
+}
+
+.input {
+  appearance: none;
+  padding: 0;
+  font-family: inherit;
+  background-color: transparent;
+  border: none;
+  outline: none;
+
+  width: 100%;
+
+  text-align: right;
+  text-overflow: ellipsis;
+
+  transition: color 0.25s;
+
+  &[aria-invalid='true'],
+  &[aria-invalid='true']::placeholder {
+    color: #ff3757;
+  }
+
+  &::placeholder {
+    transition: color 0.25s;
+    color: #9cacb1;
+  }
+}
+
+.error {
+  padding: 0 10px;
+
+  font-size: 12px;
+  line-height: 20px;
+  color: #ff3757;
+
+  background-color: #ff37571a;
+  border-radius: 8px;
+}

@@ -1,17 +1,7 @@
-import { useMemo } from 'react';
-
-import { useBridge } from '@/contexts';
 import { useTokens } from '@/hooks';
 
-import { NETWORK_INDEX } from '../consts';
-import { getOptions } from '../utils';
-
-function useToken(networkIndex: number) {
-  const { pairIndex } = useBridge();
+function useToken(networkIndex: number, pairIndex: number) {
   const { addresses, symbols, decimals: tokenDecimals, isLoading } = useTokens();
-
-  const { varaOptions, ethOptions } = useMemo(() => getOptions(addresses, symbols), [addresses, symbols]);
-  const options = networkIndex === NETWORK_INDEX.VARA ? varaOptions : ethOptions;
 
   const address = addresses?.[pairIndex][networkIndex];
   const destinationAddress = addresses?.[pairIndex][Number(!networkIndex)];
@@ -19,7 +9,7 @@ function useToken(networkIndex: number) {
   const destinationSymbol = destinationAddress ? symbols?.[destinationAddress] : undefined;
   const decimals = address ? tokenDecimals?.[address] : undefined;
 
-  return { address, destinationAddress, destinationSymbol, options, symbol, decimals, isLoading };
+  return { address, destinationAddress, destinationSymbol, symbol, decimals, isLoading };
 }
 
 export { useToken };

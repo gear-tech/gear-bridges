@@ -4,9 +4,6 @@ Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge faci
 
 ## Security
 
-> [!CAUTION]
-> This code has not yet been fully audited and therefore shouldn't be used in production.
-
 [Ethernal](https://ethernal.tech/) team have performed partial [audit](audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):
 
 - [prover](https://github.com/gear-tech/gear-bridges/tree/d42251c3c9d94309a7855d6d774c6054a139a674/prover)
@@ -15,6 +12,11 @@ Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge faci
 
 > [!WARNING]
 > One of the conclusions of this audit was that malicious node which relayer is connected to can cause the proof generation process to be halt. So all deployed relayers **MUST** use their own dedicated gear node which is known to be non-malicious.
+
+They've also performed another [audit](audits/ethernal_2.pdf) which covered the following scope for the commit [8b1018bd](https://github.com/gear-tech/gear-bridges/commit/8b1018bd8a2b882a2b9d4fc84c12666144b54efd):
+
+- `gear` [programs](https://github.com/gear-tech/gear-bridges/tree/8b1018bd8a2b882a2b9d4fc84c12666144b54efd/gear-programs)
+- `ethereum` [smart-contracts](https://github.com/gear-tech/gear-bridges/tree/8b1018bd8a2b882a2b9d4fc84c12666144b54efd/ethereum/src)
 
 ## High-Level Design
 
@@ -40,7 +42,7 @@ This repository contains the implementation of a token bridging protocol built o
 - **MessageQueue(proxy)[^1]**: Used to recover messages from Merkle tries. A user can request a message to be relayed further onto Ethereum by providing proof of inclusion of a message actually included in the Merkle trie, given that this Merkle root was already relayed by `gear->eth protocol relayer` (or another party). This is also the exit point of the generic Gear -> Eth bridging protocol.
 - **Checkpoint-Light-Client**: Lazy ethereum light client that maintains `sync committee` validator list and is capable of verifying block headers using it.
 - **Ethereum-Event-Client**: Program on Gear that's capable of verifying that some event was included into some block. To check validity of the block it requests data from `checkpoint-light-client`.
-- **Historical-Proxy**: Program on Gear that maintains historical `ethereum-event-client` program addresses and redirects requests to a `ethereum-event-client` responsible of processing requested transaction. Serves as an exit point from core Ethereum -> Gear protocol.
+- **Historical-Proxy**: Program on Gear that maintains historical `eth-events-*` program addresses and redirects requests to a `eth-events-*` responsible of processing requested transaction. Serves as an exit point from core Ethereum -> Gear protocol.
 - **Gear -> Eth Protocol Relayer**: Reads Gear state, generates ZK-proofs, and submits them to Ethereum. Capable of creating two types of ZK-proofs: proof of authority set changes and proof of inclusion of Merkle trie root into the storage of `pallet-gear-eth-bridge`. Proofs of authority set changes are intermediate and stored in on-chain `proof storage` while proofs of Merkle trie root inclusion are submitted to Ethereum.
 - **Eth -> Gear Protocol Relayer**: Relayer that monitors `sync committee` changes and blocks signed by it on Ethereum and updates state of `checkpoint-light-client` using it.
 
@@ -78,8 +80,8 @@ This repository contains the implementation of a token bridging protocol built o
 - The `ERC20Manager` locks/burns `ERC20` tokens and emits an event.
 - Eventually, the `eth->gear protocol relayer` (or another party) sumbits to `checkpoint-light-client` ethereum block which has block number bigger than one where event have been emitted.
 - Eventually, the `eth->gear token relayer` (or another party) submits this event to `historical-proxy`
-- `historical-proxy` verifies this event by sending a message to `ethereum-event-client`.
-- `ethereum-event-client` verifies that block where event is present is a valid finalized block on ethereum by calling `checkpoint-light-client`.
+- `historical-proxy` verifies this event by sending a message to the corresponding `eth-events-*`.
+- `eth-events-*` verifies that block where event is present is a valid finalized block on ethereum by calling `checkpoint-light-client`.
 - `historical-proxy` routes user bridging request to `vft-manager`
 - `vft-manager` sends message to a `vft` program that corresponds to a `ERC20` token that've been locked/burned in step 4. This message is either `transfer`(in the case when token supply is on Gear) or `mint`(in the case when token supply is on Ethereum).
 - `vft` program mints/transfers tokens to a user address.

@@ -30,7 +30,7 @@ use crate::{
                 inlined_data_parser::InlinedDataParserInputTarget,
             },
         },
-        storage_address::PartialStorageAddressTarget,
+        storage_address::StorageAddressTarget,
     },
 };
 
@@ -47,9 +47,9 @@ impl_parsable_target_set! {
         /// Expected blake2b hash of data stored in this leaf.
         pub storage_data_hash: Blake2Target,
         /// Address that was previously composed by parsing all the parent nodes.
-        pub partial_address: PartialStorageAddressTarget,
+        pub partial_address: StorageAddressTarget,
         /// Final address of storage item.
-        pub final_address: PartialStorageAddressTarget
+        pub final_address: StorageAddressTarget
     }
 }
 
@@ -98,7 +98,7 @@ impl LeafParser {
         let node_data_target = LeafNodeDataPaddedTarget::add_virtual_safe(&mut builder);
         node_data_target.set_witness(&pad_byte_vec(self.node_data), &mut witness);
 
-        let partial_address_target = PartialStorageAddressTarget::add_virtual_unsafe(&mut builder);
+        let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
         partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
 
         let parsed_header = {
@@ -121,7 +121,7 @@ impl LeafParser {
             LeafType::HashedValueLeaf => {
                 let parsed_data = {
                     let input = HashedDataParserInputTarget {
-                        first_node_data_block: node_data_target.clone(),
+                        node_data: node_data_target.clone(),
                         read_offset: parsed_nibbles.resulting_offset,
                     };
                     hashed_data_parser::define(input, &mut builder)
@@ -132,7 +132,7 @@ impl LeafParser {
             LeafType::Leaf => {
                 let parsed_data = {
                     let input = InlinedDataParserInputTarget {
-                        first_node_data_block: node_data_target.clone(),
+                        node_data: node_data_target.clone(),
                         read_offset: parsed_nibbles.resulting_offset,
                     };
                     inlined_data_parser::define(input, &mut builder)

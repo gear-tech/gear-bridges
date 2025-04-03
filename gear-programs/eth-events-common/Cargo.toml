@@ -1,0 +1,10 @@
+[package]
+name = "eth-events-common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alloy-rlp.workspace = true
+checkpoint-light-client-client.workspace = true
+ethereum-common.workspace = true
+sails-rs.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "eth-events-electra-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ethereum-common.workspace = true
+mockall = { workspace = true, optional = true }
+sails-rs.workspace = true
+
+[build-dependencies]
+eth-events-electra-app.workspace = true
+sails-client-gen.workspace = true
+sails-idl-gen.workspace = true
+
+[features]
+mocks = ["sails-rs/mockall", "dep:mockall"]

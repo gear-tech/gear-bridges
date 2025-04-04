@@ -1,32 +1,20 @@
 [package]
-name = "checkpoint_light_client-io"
+name = "checkpoint-light-client-io"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-ethereum-common.workspace = true
-parity-scale-codec.workspace = true
-scale-info.workspace = true
-serde.workspace = true
-ark-serialize.workspace = true
 ark-bls12-381 = { workspace = true, features = ["curve"] }
 ark-scale.workspace = true
-ark-ec.workspace = true
-ark-ff.workspace = true
-tree_hash_derive.workspace = true
-gstd.workspace = true
-gmeta.workspace = true
+ark-serialize.workspace = true
+ethereum-common.workspace = true
+sails-rs.workspace = true
 
 [features]
 default = ["std"]
 std = [
-    "ethereum-common/std",
-    "parity-scale-codec/std",
-    "scale-info/std",
-    "serde/std",
-    "ark-serialize/std",
     "ark-bls12-381/std",
     "ark-scale/std",
-    "ark-ec/std",
-    "ark-ff/std",
+    "ark-serialize/std",
+    "ethereum-common/std",
 ]

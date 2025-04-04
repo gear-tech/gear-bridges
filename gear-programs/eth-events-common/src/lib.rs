@@ -1,6 +1,6 @@
 #![no_std]
 
-use checkpoint_light_client_io::{Handle, HandleResult};
+use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
 use ethereum_common::{
     beacon::BlockHeader as BeaconBlockHeader,
     hash_db, memory_db,
@@ -11,7 +11,7 @@ use ethereum_common::{
     H256,
 };
 use ops::ControlFlow::*;
-use sails_rs::{gstd::msg, prelude::*};
+use sails_rs::{calls::*, gstd::calls::GStdRemoting, prelude::*};
 
 #[derive(Clone, Debug, Encode, Decode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -135,17 +135,15 @@ async fn request_checkpoint(
     checkpoint_light_client_address: ActorId,
     slot: u64,
 ) -> Result<H256, Error> {
-    let request = Handle::GetCheckpointFor { slot }.encode();
-    let reply = msg::send_bytes_for_reply(checkpoint_light_client_address, &request, 0, 0)
-        .map_err(|_| Error::SendFailure)?
+    let service = ServiceCheckpointFor::new(GStdRemoting);
+    let result = service
+        .get(slot)
+        .recv(checkpoint_light_client_address)
         .await
-        .map_err(|_| Error::ReplyFailure)?;
+        .map_err(|_| Error::SendFailure)?;
 
-    match HandleResult::decode(&mut reply.as_slice())
-        .map_err(|_| Error::HandleResultDecodeFailure)?
-    {
-        HandleResult::Checkpoint(Ok((_slot, hash))) => Ok(hash),
-        HandleResult::Checkpoint(Err(_)) => Err(Error::MissingCheckpoint),
-        _ => panic!("Unexpected result to `GetCheckpointFor` request"),
+    match result {
+        Ok((_slot, hash)) => Ok(hash),
+        Err(_) => Err(Error::MissingCheckpoint),
     }
 }

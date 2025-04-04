@@ -1,28 +1,40 @@
-use super::*;
+use checkpoint_light_client_io::{Slot, SyncCommitteeKeys};
 use circular_buffer::CircularBuffer;
-use io::{
-    ethereum_common::{network::Network, Hash256, SLOTS_PER_EPOCH},
-    BeaconBlockHeader, CheckpointError, SyncCommitteeKeys,
-};
+use ethereum_common::{beacon::BlockHeader as BeaconBlockHeader, network::Network, Hash256};
+use sails_rs::{prelude::*, rc::Rc};
+
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum CheckpointError {
+    OutDated,
+    NotPresent,
+}
 
 pub struct State<const N: usize> {
     pub network: Network,
     pub finalized_header: BeaconBlockHeader,
-    pub sync_committee_current: Box<SyncCommitteeKeys>,
-    pub sync_committee_next: Box<SyncCommitteeKeys>,
+    pub sync_committee_current: Rc<SyncCommitteeKeys>,
+    pub sync_committee_next: Rc<SyncCommitteeKeys>,
     pub checkpoints: Checkpoints<N>,
     pub replay_back: Option<ReplayBackState>,
 }
 
 pub struct ReplayBackState {
     pub finalized_header: BeaconBlockHeader,
-    pub sync_committee_next: Option<Box<SyncCommitteeKeys>>,
+    pub sync_committee_next: Option<Rc<SyncCommitteeKeys>>,
     pub checkpoints: Vec<(Slot, Hash256)>,
     pub last_header: BeaconBlockHeader,
 }
 
 #[derive(Debug, Clone)]
 pub struct Checkpoints<const N: usize>(Box<CircularBuffer<N, (Slot, Hash256)>>);
+
+impl<const N: usize> Default for Checkpoints<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<const N: usize> Checkpoints<N> {
     pub fn new() -> Self {
@@ -84,10 +96,11 @@ fn empty_checkpoints() {
         Err(CheckpointError::NotPresent),
     ));
 
-    assert!(matches!(checkpoints.checkpoint_by_index(0), None,));
-    assert!(matches!(checkpoints.last(), None,));
+    assert!(checkpoints.checkpoint_by_index(0).is_none());
+    assert!(checkpoints.last().is_none());
 }
 
+#[cfg(test)]
 #[track_caller]
 fn compare_checkpoints<const COUNT: usize>(
     data: &[(Slot, Hash256)],

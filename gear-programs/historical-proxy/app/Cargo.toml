@@ -30,8 +30,8 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 alloy = { workspace = true }
 alloy-rlp = { workspace = true }
+checkpoint-light-client-client.workspace = true
 ethereum-common =  { workspace = true, features = ["std"] }
-checkpoint_light_client-io = { workspace = true }
 hex-literal = { workspace = true }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

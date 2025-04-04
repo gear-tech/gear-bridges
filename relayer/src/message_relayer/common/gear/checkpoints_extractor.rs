@@ -1,13 +1,14 @@
+use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
+use anyhow::anyhow;
+use checkpoint_light_client_client::Order;
+use gear_core::message::ReplyCode;
 use gear_rpc_client::GearApi;
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::Decode;
 use primitive_types::H256;
 use prometheus::IntGauge;
+use sails_rs::calls::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
-
-use checkpoint_light_client_io::meta::{Order, State, StateRequest};
-
-use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
 
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
@@ -88,26 +89,31 @@ impl CheckpointsExtractor {
         block: u32,
         sender: &UnboundedSender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
+        use checkpoint_light_client_client::service_state::io;
+
         let block_hash = gear_api.block_number_to_hash(block).await?;
 
-        let request = StateRequest {
-            order: Order::Reverse,
-            index_start: 0,
-            count: 1,
-        }
-        .encode();
+        let payload = io::Get::encode_call(Order::Reverse, 0, 1);
+        let api = gclient::GearApi::from(gear_api.api.clone());
+        let origin = H256::from_slice(api.account_id().as_ref());
+        let gas_limit = api.block_gas_limit()?;
 
-        let state = gear_api
-            .api
-            .read_state(
-                self.checkpoint_light_client_address,
-                request,
+        let reply_info = api
+            .calculate_reply_for_handle_at(
+                Some(origin),
+                self.checkpoint_light_client_address.into(),
+                payload,
+                gas_limit,
+                0,
                 Some(block_hash),
             )
             .await?;
 
-        let state = hex::decode(&state[2..])?;
-        let state = State::decode(&mut &state[..])?;
+        let state: <io::Get as ActionIo>::Reply = match reply_info.code {
+            ReplyCode::Success(_) => Decode::decode(&mut &reply_info.payload[..])?,
+            ReplyCode::Error(reason) => Err(anyhow!("Failed to query state, reason: {reason:?}"))?,
+            ReplyCode::Unsupported => Err(anyhow!("Failed to query state"))?,
+        };
 
         assert!(state.checkpoints.len() <= 1);
 

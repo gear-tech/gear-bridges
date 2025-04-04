@@ -16,7 +16,8 @@ members = [
     "gear-programs/vft-manager/client",
     "gear-programs/vft-service",
     "gear-programs/*",
-    "gear-programs/checkpoint-light-client/io",
+    "gear-programs/checkpoint-light-client/app",
+    "gear-programs/checkpoint-light-client/client",
     "gear-programs/eth-events-deneb/app",
     "gear-programs/eth-events-deneb/client",
     "gear-programs/eth-events-electra/app",
@@ -58,10 +59,12 @@ bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
 vft-manager = { path = "gear-programs/vft-manager" }
 vft-manager-app = { path = "gear-programs/vft-manager/app" }
 vft-manager-client = { path = "gear-programs/vft-manager/client" }
-gear_proof_storage = { path = "gear-programs/proof-storage", default-features = false }
-checkpoint_light_client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
+gear_proof_storage = { path = "gear-programs/proof-storage" }
 utils-prometheus = { path = "utils-prometheus" }
-checkpoint_light_client = { path = "gear-programs/checkpoint-light-client", default-features = false }
+checkpoint-light-client = { path = "gear-programs/checkpoint-light-client" }
+checkpoint-light-client-app = { path = "gear-programs/checkpoint-light-client/app" }
+checkpoint-light-client-client = { path = "gear-programs/checkpoint-light-client/client" }
+checkpoint-light-client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
 eth-events-common = { path = "gear-programs/eth-events-common" }
 eth-events-deneb = { path = "gear-programs/eth-events-deneb" }
 eth-events-deneb-app = { path = "gear-programs/eth-events-deneb/app" }

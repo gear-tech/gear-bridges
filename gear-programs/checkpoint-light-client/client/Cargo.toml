@@ -1,0 +1,18 @@
+[package]
+name = "checkpoint-light-client-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+checkpoint-light-client-io.workspace = true
+ethereum-common.workspace = true
+mockall = { workspace = true, optional = true }
+sails-rs.workspace = true
+
+[build-dependencies]
+checkpoint-light-client-app.workspace = true
+sails-client-gen.workspace = true
+sails-idl-gen.workspace = true
+
+[features]
+mocks = ["sails-rs/mockall", "dep:mockall"]

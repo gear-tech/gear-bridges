@@ -19,7 +19,7 @@ type Props = {
 function SubmitTooltip({ allowance, decimals, symbol, amount, children }: Props) {
   const { network } = useBridgeContext();
 
-  if (isUndefined(allowance) || !decimals || !symbol) return;
+  if (isUndefined(allowance) || !decimals || !symbol) return children;
 
   const formattedAllowance = formatUnits(allowance, decimals);
   const contractName = network.isVara ? 'VFT Manager' : 'ETH Bridging Payment';

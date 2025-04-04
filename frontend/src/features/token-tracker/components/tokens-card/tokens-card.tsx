@@ -2,7 +2,6 @@ import { getTypedEntries, useAccount, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 
 import EthSVG from '@/assets/eth.svg?react';
-import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import {
@@ -13,7 +12,7 @@ import {
   useVaraFTBalances,
   useEthFTBalances,
 } from '@/hooks';
-import { isUndefined } from '@/utils';
+import { getTokenSVG, isUndefined } from '@/utils';
 
 import { useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../balance-card';
@@ -49,7 +48,7 @@ function TokensCard() {
     return getTypedEntries(ftBalances).map(([address, balance]) => (
       <li key={address}>
         <BalanceCard
-          SVG={TOKEN_SVG[address] ?? TokenPlaceholderSVG}
+          SVG={getTokenSVG(address)}
           value={balance}
           decimals={decimals[address] ?? 0}
           symbol={symbols[address] ?? 'Unit'}
@@ -99,7 +98,7 @@ function TokensCard() {
 
           <BalanceCard
             value={lockedBalance}
-            SVG={TOKEN_SVG[WRAPPED_VARA_CONTRACT_ADDRESS] ?? TokenPlaceholderSVG}
+            SVG={getTokenSVG(WRAPPED_VARA_CONTRACT_ADDRESS)}
             decimals={decimals[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 0}
             symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
             locked>

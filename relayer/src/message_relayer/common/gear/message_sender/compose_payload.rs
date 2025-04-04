@@ -4,6 +4,7 @@ use alloy::{network::primitives::BlockTransactionsKind, primitives::TxHash, prov
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
+use prometheus::IntCounter;
 use sails_rs::prelude::*;
 
 use checkpoint_light_client_io::ethereum_common::{
@@ -18,23 +19,37 @@ pub async fn compose(
     beacon_client: &BeaconClient,
     eth_client: &EthApi,
     tx_hash: TxHash,
+    eth_errors: Option<&IntCounter>,
+    beacon_errors: Option<&IntCounter>,
 ) -> AnyResult<EthToVaraEvent> {
     let provider = eth_client.raw_provider();
 
     let receipt = provider
         .get_transaction_receipt(tx_hash)
-        .await?
+        .await
+        .map_err(|e| {
+            eth_errors.map(|e| e.inc());
+            anyhow!("Failed to get transaction receipt: {e:?}")
+        })?
         .ok_or(anyhow!("Transaction receipt is missing"))?;
 
     let block = match receipt.block_hash {
         Some(hash) => provider
             .get_block_by_hash(hash, BlockTransactionsKind::Hashes)
-            .await?
+            .await
+            .map_err(|e| {
+                eth_errors.map(|e| e.inc());
+                anyhow!("Failed to get block by hash: {e:?}")
+            })?
             .ok_or(anyhow!("Ethereum block (hash) is missing"))?,
         None => match receipt.block_number {
             Some(number) => provider
                 .get_block_by_number(BlockNumberOrTag::Number(number), false)
-                .await?
+                .await
+                .map_err(|e| {
+                    eth_errors.map(|e| e.inc());
+                    anyhow!("Failed to get block by number: {e:?}")
+                })?
                 .ok_or(anyhow!("Ethereum block (number) is missing"))?,
             None => return Err(anyhow!("Unable to get Ethereum block")),
         },
@@ -46,8 +61,13 @@ pub async fn compose(
         .ok_or(anyhow!("Unable to determine root of parent beacon block"))?;
     let block_number = block.header.number;
 
-    let proof_block =
-        build_inclusion_proof(beacon_client, &beacon_root_parent, block_number).await?;
+    let proof_block = build_inclusion_proof(
+        beacon_client,
+        &beacon_root_parent,
+        block_number,
+        beacon_errors,
+    )
+    .await?;
 
     // receipt Merkle-proof
     let tx_index = receipt
@@ -55,7 +75,11 @@ pub async fn compose(
         .ok_or(anyhow!("Unable to determine transaction index"))?;
     let receipts = provider
         .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
-        .await?
+        .await
+        .map_err(|e| {
+            eth_errors.map(|e| e.inc());
+            anyhow!("Failed to get block receipts: {e:?}")
+        })?
         .unwrap_or_default()
         .iter()
         .map(|tx_receipt| {
@@ -85,6 +109,7 @@ async fn build_inclusion_proof(
     beacon_client: &BeaconClient,
     beacon_root_parent: &[u8; 32],
     block_number: u64,
+    beacon_errors: Option<&IntCounter>,
 ) -> AnyResult<BlockInclusionProof> {
     let beacon_block_parent = beacon_client
         .get_block_by_hash::<beacon::electra::Block>(beacon_root_parent)
@@ -92,10 +117,18 @@ async fn build_inclusion_proof(
 
     let beacon_block = beacon_client
         .find_beacon_block(block_number, beacon_block_parent)
-        .await?;
+        .await
+        .map_err(|e| {
+            beacon_errors.map(|e| e.inc());
+            e
+        })?;
     let beacon_block = beacon_client
         .get_block::<beacon::electra::Block>(beacon_block.slot)
-        .await?;
+        .await
+        .map_err(|e| {
+            beacon_errors.map(|e| e.inc());
+            e
+        })?;
 
     let slot = beacon_block.slot;
     let block = BlockGenericForBlockBody {
@@ -119,7 +152,11 @@ async fn build_inclusion_proof(
         block,
         headers: beacon_client
             .request_headers(slot + 1, slot_checkpoint + 1)
-            .await?
+            .await
+            .map_err(|e| {
+                beacon_errors.map(|e| e.inc());
+                e
+            })?
             .into_iter()
             .collect(),
     })

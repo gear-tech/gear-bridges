@@ -6,7 +6,7 @@ use futures::executor::block_on;
 use gclient::{GearApi, WSAddress};
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
-use prometheus::IntGauge;
+use prometheus::{IntCounter, IntGauge};
 use sails_rs::{
     calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
@@ -62,7 +62,23 @@ impl_metered_service! {
         fee_payer_balance: IntGauge = IntGauge::new(
             "gear_message_sender_fee_payer_balance",
             "Transaction fee payer balance",
-        )
+        ),
+        rpc_errors: IntCounter = IntCounter::new(
+            "gear_message_sender_rpc_errors",
+            "Number of RPC errors",
+        ),
+        gear_api_errors: IntCounter = IntCounter::new(
+            "gear_message_sender_gear_api_errors",
+            "Number of Gear API errors",
+        ),
+        eth_api_erros: IntCounter = IntCounter::new(
+            "gear_message_sender_eth_api_errors",
+            "Number of Ethereum API errors",
+        ),
+        beacon_api_errors: IntCounter = IntCounter::new(
+            "gear_message_sender_beacon_api_errors",
+            "Number of Beacon API errors",
+        ),
     }
 }
 
@@ -167,8 +183,14 @@ impl MessageSender {
         message: &TxHashWithSlot,
         gear_api: &GearApi,
     ) -> anyhow::Result<()> {
-        let payload =
-            compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
+        let payload = compose_payload::compose(
+            &self.beacon_client,
+            &self.eth_api,
+            message.tx_hash,
+            Some(&self.metrics.eth_api_erros),
+            Some(&self.metrics.beacon_api_errors),
+        )
+        .await?;
 
         log::info!(
             "Sending message in gear_message_sender: tx_index={}, slot={}",
@@ -195,6 +217,7 @@ impl MessageSender {
             .send_recv(self.historical_proxy_address.into())
             .await
             .map_err(|e| {
+                self.metrics.gear_api_errors.inc();
                 anyhow::anyhow!(
                     "Failed to send message to historical proxy address: {:?}",
                     e

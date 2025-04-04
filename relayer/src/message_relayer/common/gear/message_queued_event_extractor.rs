@@ -1,5 +1,5 @@
 use gear_rpc_client::GearApi;
-use prometheus::IntCounter;
+use prometheus::{Histogram, HistogramOpts, IntCounter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -23,6 +23,12 @@ impl_metered_service! {
             "message_queued_event_extractor_total_messages_found",
             "Total amount of messages discovered",
         ),
+        messages_per_block: Histogram = Histogram::with_opts(
+            HistogramOpts::new(
+                "message_queued_event_extractor_messages_per_block",
+                "Number of MessageQueued events processed per Gear block",
+            ).buckets(prometheus::exponential_buckets(1.0, 1.5, 50)?) // TODO(playX18): Experiment with this value more
+        )
     }
 }
 
@@ -72,7 +78,11 @@ impl MessageQueuedEventExtractor {
         let block_hash = self.gear_api.block_number_to_hash(block.0).await?;
 
         let messages = self.gear_api.message_queued_events(block_hash).await?;
+
         if !messages.is_empty() {
+            self.metrics
+                .messages_per_block
+                .observe(messages.len() as f64);
             log::info!(
                 "Found {} queued messages in block #{}",
                 messages.len(),

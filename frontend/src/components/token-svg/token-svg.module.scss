@@ -1,0 +1,20 @@
+.container {
+  display: flex;
+  align-items: flex-end;
+}
+
+.tokenSvg,
+.networkSvg {
+  flex-shrink: 0;
+
+  border-radius: 50%;
+}
+
+.tokenSvg {
+  width: 100%;
+  height: 100%;
+}
+
+.networkSvg {
+  box-shadow: -1px 0 0px 0px #000;
+}

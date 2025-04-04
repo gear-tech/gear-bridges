@@ -4,7 +4,7 @@ use crate::State;
 use crate::{crypto, utils};
 use cell::RefCell;
 use checkpoint_light_client_io::{
-    Error as SyncCommitteeUpdateError, SyncCommitteeKeys, ReplayBack, Slot,
+    Error as SyncCommitteeUpdateError, ReplayBack, Slot, SyncCommitteeKeys,
     Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP,
 };
 use ethereum_common::{

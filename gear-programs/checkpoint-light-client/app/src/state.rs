@@ -1,4 +1,4 @@
-use checkpoint_light_client_io::{SyncCommitteeKeys, Slot};
+use checkpoint_light_client_io::{Slot, SyncCommitteeKeys};
 use circular_buffer::CircularBuffer;
 use ethereum_common::{beacon::BlockHeader as BeaconBlockHeader, network::Network, Hash256};
 use sails_rs::{prelude::*, rc::Rc};

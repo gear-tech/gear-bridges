@@ -7,8 +7,13 @@ type Props = {
   className?: string;
 };
 
-function TruncatedText({ value, className }: Props) {
-  return <span className={cx(styles.text, className)}>{value}</span>;
+function TruncatedText({ value, className, ...props }: Props) {
+  return (
+    // spreading props for tooltip to work
+    <span className={cx(styles.text, className)} {...props}>
+      {value}
+    </span>
+  );
 }
 
 export { TruncatedText };

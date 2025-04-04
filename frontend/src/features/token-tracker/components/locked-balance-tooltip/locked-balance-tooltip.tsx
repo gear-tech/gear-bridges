@@ -9,7 +9,11 @@ function LockedBalanceTooltip() {
 
   if (!lockedBalance) return;
 
-  return <Tooltip SVG={WarningSVG} value="You have tokens available to unlock" />;
+  return (
+    <Tooltip value="You have tokens available to unlock">
+      <WarningSVG />
+    </Tooltip>
+  );
 }
 
 export { LockedBalanceTooltip };

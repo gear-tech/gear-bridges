@@ -23,9 +23,9 @@ import { getMergedBalance } from '../../utils';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
-import { FTAllowanceTip } from '../ft-allowance-tip';
 import { SelectToken } from '../select-token';
 import { SubmitProgressBar } from '../submit-progress-bar';
+import { SubmitTooltip } from '../submit-tooltip';
 import { SwapNetworkButton } from '../swap-network-button';
 
 import styles from './swap-form.module.scss';
@@ -199,8 +199,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
           <DetailsAccordion fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
 
-          <footer className={styles.submitContainer}>
-            {isNetworkAccountConnected ? (
+          {isNetworkAccountConnected ? (
+            <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>
               <Button
                 type="submit"
                 text={getButtonText()}
@@ -216,19 +216,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 }
                 block
               />
-            ) : (
-              <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
-            )}
-
-            <FTAllowanceTip
-              allowance={allowance.data}
-              decimals={decimals}
-              symbol={symbol}
-              amount={amount}
-              isVaraNetwork={isVaraNetwork}
-              isLoading={bridge.isLoading || allowance.isLoading}
-            />
-          </footer>
+            </SubmitTooltip>
+          ) : (
+            <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
+          )}
         </form>
       </FormProvider>
 

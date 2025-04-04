@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use prometheus::{Gauge, IntGauge};
+use prometheus::{Gauge, Histogram, HistogramOpts, IntGauge};
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
@@ -28,7 +28,11 @@ impl_metered_service! {
         fee_payer_balance: Gauge = Gauge::new(
             "merkle_root_relayer_fee_payer_balance",
             "Transaction fee payer balance",
-        )
+        ),
+        eth_finalized_block_latency: Histogram = Histogram::with_opts(HistogramOpts::new(
+            "merkle_root_relayer_eth_finalized_block_latency",
+            "Latency for fetching finalized block number from Ethereumm",
+        ).buckets(prometheus::exponential_buckets(0.01, 2.0, 10)?)),
     }
 }
 
@@ -110,11 +114,15 @@ impl MerkleRootRelayer {
 
         self.sync_authority_set_completely().await?;
 
+        let timer = self.metrics.eth_finalized_block_latency.start_timer();
+
         self.eras.process(self.proof_storage.as_mut()).await?;
 
         self.submit_merkle_root().await?;
 
-        self.try_finalize_submitted_merkle_root().await
+        self.try_finalize_submitted_merkle_root().await?;
+        drop(timer);
+        Ok(())
     }
 
     async fn sync_authority_set_completely(&mut self) -> anyhow::Result<()> {
@@ -328,6 +336,10 @@ impl_metered_service! {
             "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
         ),
         last_sealed_era: IntGauge = IntGauge::new("last_sealed_era", "Latest era that have been sealed"),
+        pending_finalization_queue_size: IntGauge = IntGauge::new(
+            "merkle_root_relayer_pending_finalization_queue_size",
+            "Number of eras sealed but pending finalization",
+        )
     }
 }
 
@@ -367,6 +379,10 @@ impl Eras {
 
         self.try_seal(proof_storage).await?;
         self.try_finalize().await?;
+
+        self.metrics
+            .pending_finalization_queue_size
+            .set(self.sealed_not_finalized.len() as i64);
 
         log::info!("Eras processed");
 

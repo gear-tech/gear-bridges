@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { CSSProperties } from 'react';
 
 import { NETWORK_INDEX } from '@/features/swap/consts';
 import { getTokenSVG } from '@/utils';
@@ -22,8 +23,7 @@ type Props = {
 
 function TokenSVG({ address, networkIndex, sizes }: Props) {
   const [size, smallSize] = sizes;
-  const style = { width: `${size}px`, height: `${size}px` };
-  const networkStyle = { width: `${smallSize}px`, height: `${smallSize}px`, marginLeft: `-${smallSize / 2}px` };
+  const style = { '--size': `${size}px`, '--small-size': `${smallSize}px` } as CSSProperties;
 
   const SVG = address ? getTokenSVG(address) : Skeleton;
   const NetworkSVG = NETWORK_SVG[networkIndex];
@@ -31,9 +31,23 @@ function TokenSVG({ address, networkIndex, sizes }: Props) {
   return (
     <div className={styles.container} style={style}>
       <SVG className={styles.tokenSvg} />
-      <NetworkSVG className={styles.networkSvg} style={networkStyle} />
+      <NetworkSVG className={styles.networkSvg} />
     </div>
   );
 }
+
+function TokenSVGSkeleton({ sizes }: Pick<Props, 'sizes'>) {
+  const [size, smallSize] = sizes;
+  const style = { '--size': `${size}px`, '--small-size': `${smallSize}px` } as CSSProperties;
+
+  return (
+    <div className={styles.container} style={style}>
+      <Skeleton className={styles.tokenSvg} />
+      <Skeleton className={styles.networkSvg} />
+    </div>
+  );
+}
+
+TokenSVG.Skeleton = TokenSVGSkeleton;
 
 export { TokenSVG };

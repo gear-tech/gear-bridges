@@ -82,14 +82,9 @@
 
 .wallet {
   display: flex;
-  gap: 28px;
+  gap: 16px;
 
   z-index: 1; // for transform animation
-
-  .networkIcon {
-    width: 48px;
-    height: 48px;
-  }
 
   .token {
     display: flex;

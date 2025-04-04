@@ -3,7 +3,7 @@ import { getVaraAddress } from '@gear-js/react-hooks';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
+import { Address, FormattedBalance, Skeleton } from '@/components';
 import { TOKEN_SVG } from '@/consts';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -53,7 +53,7 @@ function TransactionPair(props: Props) {
             className={styles.amount}
           />
 
-          <TruncatedText value={formattedSenderAddress} className={styles.address} />
+          <Address value={formattedSenderAddress} className={styles.address} />
         </div>
       </div>
 
@@ -73,7 +73,7 @@ function TransactionPair(props: Props) {
             className={styles.amount}
           />
 
-          <TruncatedText value={formattedReceiverAddress} className={styles.address} />
+          <Address value={formattedReceiverAddress} className={styles.address} />
         </div>
       </div>
     </div>

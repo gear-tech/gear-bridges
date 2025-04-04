@@ -1,3 +1,4 @@
+import { Address } from './address';
 import { Card } from './card';
 import { CopyButton } from './copy-button';
 import { FeeAndTimeFooter } from './fee-and-time-footer';
@@ -25,4 +26,5 @@ export {
   Tooltip,
   FeeAndTimeFooter,
   FormattedBalance,
+  Address,
 };

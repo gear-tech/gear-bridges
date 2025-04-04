@@ -16,3 +16,7 @@
     opacity: 0;
   }
 }
+
+.positioner {
+  z-index: 11; // to be above modal
+}

@@ -15,7 +15,7 @@ function Tooltip({ value, children }: Props) {
         <BaseTooltip.Trigger render={children as ReactElement<Record<string, unknown>>} />
 
         <BaseTooltip.Portal>
-          <BaseTooltip.Positioner sideOffset={8}>
+          <BaseTooltip.Positioner sideOffset={8} className={styles.positioner}>
             <BaseTooltip.Popup className={styles.popup}>{value}</BaseTooltip.Popup>
           </BaseTooltip.Positioner>
         </BaseTooltip.Portal>

@@ -2122,7 +2122,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint-light-client-io"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ark-bls12-381",
  "ark-scale 0.0.12",

@@ -1,5 +1,5 @@
 use ark_serialize::CanonicalSerialize;
-use checkpoint_light_client_io::{Keys, G1};
+use checkpoint_light_client_io::{SyncCommitteeKeys, G1};
 use ethereum_common::{
     base_types::{Bitvector, BytesFixed, FixedArray},
     beacon::{BLSPubKey, SyncCommittee},
@@ -9,7 +9,7 @@ use sails_rs::prelude::*;
 
 pub fn construct_sync_committee(
     aggregate_pubkey: BLSPubKey,
-    public_keys: &Keys,
+    public_keys: &SyncCommitteeKeys,
 ) -> Option<SyncCommittee> {
     let mut pub_keys = Vec::with_capacity(SYNC_COMMITTEE_SIZE);
     for pub_key in public_keys.0.iter() {
@@ -28,7 +28,7 @@ pub fn construct_sync_committee(
 }
 
 pub fn get_participating_keys(
-    committee: &Keys,
+    committee: &SyncCommitteeKeys,
     bitfield: &Bitvector<SYNC_COMMITTEE_SIZE>,
 ) -> Vec<G1> {
     bitfield

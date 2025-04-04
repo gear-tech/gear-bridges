@@ -1,6 +1,6 @@
 use ark_serialize::CanonicalDeserialize;
 use checkpoint_light_client_io::{
-    ArkScale, G1TypeInfo, G2TypeInfo, Keys as SyncCommitteeKeys, Update as SyncCommitteeUpdate, G1,
+    ArkScale, G1TypeInfo, G2TypeInfo, SyncCommitteeKeys, Update as SyncCommitteeUpdate, G1,
     G2,
 };
 use ethereum_common::{

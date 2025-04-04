@@ -50,7 +50,7 @@ impl ark_scale::ArkScaleMaxEncodedLen for G2TypeInfo {
     }
 }
 
-pub type Keys = FixedArray<ArkScale<G1TypeInfo>, SYNC_COMMITTEE_SIZE>;
+pub type SyncCommitteeKeys = FixedArray<ArkScale<G1TypeInfo>, SYNC_COMMITTEE_SIZE>;
 
 #[derive(Clone, Debug, Decode, Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
@@ -61,7 +61,7 @@ pub struct Update {
     pub finalized_header: BeaconBlockHeader,
     pub sync_committee_signature: ArkScale<G2TypeInfo>,
     pub sync_committee_next_aggregate_pubkey: Option<BLSPubKey>,
-    pub sync_committee_next_pub_keys: Option<Box<Keys>>,
+    pub sync_committee_next_pub_keys: Option<Box<SyncCommitteeKeys>>,
     pub sync_committee_next_branch: Option<Vec<[u8; 32]>>,
     pub finality_branch: Vec<[u8; 32]>,
 }
@@ -71,7 +71,7 @@ pub struct Update {
 #[scale_info(crate = sails_rs::scale_info)]
 pub struct Init {
     pub network: Network,
-    pub sync_committee_current_pub_keys: Box<Keys>,
+    pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
     pub sync_committee_current_aggregate_pubkey: BLSPubKey,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
     pub update: Update,

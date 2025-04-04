@@ -5,14 +5,14 @@ import styles from './tooltip.module.scss';
 
 type Props = {
   value: ReactNode;
-  children: ReactElement<Record<string, unknown>>;
+  children: ReactElement;
 };
 
 function Tooltip({ value, children }: Props) {
   return (
     <BaseTooltip.Provider>
       <BaseTooltip.Root>
-        <BaseTooltip.Trigger render={children} />
+        <BaseTooltip.Trigger render={children as ReactElement<Record<string, unknown>>} />
 
         <BaseTooltip.Portal>
           <BaseTooltip.Positioner sideOffset={8}>

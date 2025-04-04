@@ -1,6 +1,7 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
+import { isUndefined } from '@polkadot/util';
 import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
 import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
@@ -44,7 +45,7 @@ function Wallet() {
     <>
       {isConnected ? (
         <div className={styles.wallet}>
-          {balance.data ? (
+          {!isUndefined(balance.data) ? (
             <div className={styles.balance}>
               <WalletSVG />
               <FormattedBalance value={balance.data} decimals={decimals} symbol={symbol} />

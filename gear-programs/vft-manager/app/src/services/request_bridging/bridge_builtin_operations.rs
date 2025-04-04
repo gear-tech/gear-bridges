@@ -60,7 +60,7 @@ pub async fn send_message_to_bridge_builtin(
         gear_bridge_builtin,
         bytes,
         config.gas_to_send_request_to_builtin,
-        0,
+        config.fee_bridge,
         config.gas_for_reply_deposit,
     )
     .map_err(|_| Error::SendFailure)?

@@ -87,6 +87,8 @@ async fn setup_for_test() -> Fixture {
             gas_for_reply_deposit: 15_000_000_000,
             gas_to_send_request_to_builtin: 15_000_000_000,
             reply_timeout: 100,
+            fee_bridge: 0,
+            fee_incoming: 0,
         },
     };
     let vft_manager_program_id = VftManagerFactoryC::new(remoting.clone())

@@ -1,7 +1,7 @@
 use extended_vft_client::traits::*;
 use sails_rs::{
     calls::*,
-    gstd::{self, calls::GStdRemoting, ExecContext},
+    gstd::{self, calls::GStdRemoting, msg, ExecContext},
     prelude::*,
 };
 
@@ -186,6 +186,10 @@ pub struct Config {
     /// Timeout in blocks that current program will wait for reply from
     /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
+    /// Fee to pay `gear-eth-bridge` built-in actor.
+    fee_bridge: u128,
+    /// Incoming fee.
+    fee_incoming: u128,
 }
 
 /// VFT Manager service implementation.
@@ -361,6 +365,12 @@ where
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
         self.ensure_running()?;
+
+        let value = msg::value();
+        let fee = self.config().fee_incoming;
+        if value != fee {
+            panic!("Please attach exactly {fee} value");
+        }
 
         let sender = self.exec_context.actor_id();
 

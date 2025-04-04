@@ -435,7 +435,10 @@ where
         self.ensure_admin();
 
         let gas_required = self.config().gas_for_swap_token_maps;
-        self.state_mut().token_map.update_vfts(gas_required, vft_map).await
+        self.state_mut()
+            .token_map
+            .update_vfts(gas_required, vft_map)
+            .await
     }
 
     /// Get state of a `request_bridging` message tracker.
@@ -591,14 +594,14 @@ where
 
     /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled.
-    /// 
+    ///
     /// Swaps internal hash maps of the TokenMap instance.
-    pub async fn calculate_gas_for_token_map_swap(
-        &mut self,
-    ) {
+    pub async fn calculate_gas_for_token_map_swap(&mut self) {
         #[cfg(feature = "mocks")]
         {
-            self.state_mut().token_map.calculate_gas_for_token_map_swap()
+            self.state_mut()
+                .token_map
+                .calculate_gas_for_token_map_swap()
         }
 
         #[cfg(not(feature = "mocks"))]

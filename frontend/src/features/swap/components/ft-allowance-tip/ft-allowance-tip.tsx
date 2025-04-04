@@ -1,7 +1,9 @@
 import { formatUnits, parseUnits } from 'viem';
 
-import { Tooltip } from '@/components';
+import { Skeleton, Tooltip } from '@/components';
 import { isUndefined } from '@/utils';
+
+import QuestionSVG from '../../assets/question.svg?react';
 
 import styles from './ft-allowance-tip.module.scss';
 
@@ -17,7 +19,7 @@ type Props = {
 function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork, isLoading }: Props) {
   const isEmpty = isUndefined(allowance) || !decimals || !symbol;
 
-  if (isLoading || isEmpty) return <Tooltip.Skeleton disabled={!isLoading && isEmpty} />;
+  if (isLoading || isEmpty) return <Skeleton width="16px" height="16px" disabled={!isLoading && isEmpty} />;
 
   const formattedAllowance = formatUnits(allowance, decimals);
   const contractName = isVaraNetwork ? 'VFT Manager' : 'ETH Bridging Payment';
@@ -46,8 +48,9 @@ function FTAllowanceTip({ allowance, decimals, symbol, amount, isVaraNetwork, is
 
           <p className={styles.subheading}>{getSubheading()}</p>
         </>
-      }
-    />
+      }>
+      <QuestionSVG />
+    </Tooltip>
   );
 }
 

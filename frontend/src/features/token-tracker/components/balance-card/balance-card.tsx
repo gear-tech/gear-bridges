@@ -20,7 +20,7 @@ function BalanceCard({ locked, value, decimals, SVG, symbol, children }: Props) 
     <div className={cx(styles.card, locked && styles.locked)}>
       <span className={styles.balance}>
         <SVG />
-        <FormattedBalance value={value} decimals={decimals} symbol={symbol} tooltipPosition="right" />
+        <FormattedBalance value={value} decimals={decimals} symbol={symbol} />
       </span>
 
       {children}

@@ -5,7 +5,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
-import {ERC20GearSupply} from "./ERC20GearSupply.sol";
+import {ERC20GearSupply} from "../src/erc20/ERC20GearSupply.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 
 contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {

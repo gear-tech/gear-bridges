@@ -168,6 +168,7 @@ jobs:
             "./api/ethereum/ERC20ManagerBridgingPayment.json"
             "./api/ethereum/IERC20Manager.json"
             "./api/ethereum/IMessageQueue.json"
+            "./api/ethereum/EthereumToken.json"
 
             "./api/gear/bridging_payment.idl"
             "./api/gear/eth_events_deneb.idl"
@@ -182,6 +183,7 @@ jobs:
             "./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json"
             "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
+            "./ethereum/out/EthereumToken.sol/EthereumToken.json"
 
             "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
             "./target/wasm32-unknown-unknown/release/eth_events_deneb.idl"

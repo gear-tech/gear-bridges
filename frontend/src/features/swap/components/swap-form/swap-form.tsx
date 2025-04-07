@@ -9,6 +9,7 @@ import { Input, Skeleton, TokenSVG } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
+import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal } from '@/hooks';
 import { isUndefined } from '@/utils';
 
@@ -130,6 +131,13 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     void openWalletModal();
   };
 
+  const renderTokenPrice = () => {
+    // to map through token ids without storing eth addresses
+    const varaAddress = network.isVara ? address : destinationAddress;
+
+    return <TokenPrice address={varaAddress} amount={amount} />;
+  };
+
   const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} />;
 
   return (
@@ -156,14 +164,18 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 <AmountInput />
               </div>
 
-              {renderFromBalance()}
+              <div className={styles.balanceFooter}>
+                {renderFromBalance()}
+                {renderTokenPrice()}
+              </div>
+
               <SwapNetworkButton />
             </div>
 
             <div className={styles.card}>
               <h3 className={styles.heading}>To</h3>
 
-              <div className={styles.toContainer}>
+              <div className={styles.row}>
                 <div className={styles.wallet}>
                   <TokenSVG address={destinationAddress} networkIndex={Number(!networkIndex)} sizes={[48, 28]} />
 
@@ -175,6 +187,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
                 <AmountInput.Value decimals={decimals} />
               </div>
+
+              <div className={styles.priceFooter}>{renderTokenPrice()}</div>
 
               <Input
                 icon={PlusSVG}

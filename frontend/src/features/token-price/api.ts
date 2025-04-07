@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
+const API_URL = import.meta.env.VITE_TOKEN_PRICE_API_URL as string;
+
 const TOKEN_ID = {
   VARA: 'vara-network',
   ETH: 'ethereum',
@@ -18,8 +20,6 @@ type Response = {
 };
 
 const getTokenPrices = async () => {
-  const API_URL = 'https://api.coingecko.com/api/v3/simple/price';
-
   const params = new URLSearchParams({
     ids: TOKEN_IDS.join(','),
     vs_currencies: 'usd',

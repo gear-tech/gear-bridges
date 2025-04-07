@@ -11,8 +11,6 @@ const TOKEN_ID = {
 
 const TOKEN_IDS = Object.values(TOKEN_ID);
 
-const PRECISION = 3;
-
 type TokenId = (typeof TOKEN_ID)[keyof typeof TOKEN_ID];
 
 type Response = {
@@ -23,7 +21,6 @@ const getTokenPrices = async () => {
   const params = new URLSearchParams({
     ids: TOKEN_IDS.join(','),
     vs_currencies: 'usd',
-    precision: PRECISION.toString(),
   });
 
   const url = `${API_URL}?${params.toString()}`;
@@ -42,4 +39,4 @@ function useTokenPrices() {
   });
 }
 
-export { TOKEN_ID, PRECISION, useTokenPrices };
+export { TOKEN_ID, useTokenPrices };

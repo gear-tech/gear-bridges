@@ -4,7 +4,7 @@ import { Skeleton } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { PRECISION, TOKEN_ID, useTokenPrices } from '../../api';
+import { TOKEN_ID, useTokenPrices } from '../../api';
 
 import styles from './token-price.module.scss';
 
@@ -20,7 +20,7 @@ const TOKEN_ADDRESS_ID = {
   '0x03': TOKEN_ID.USDT,
 } as const;
 
-const round = (value: number) => Number(value.toFixed(PRECISION));
+const round = (value: number) => Number(value.toFixed(3));
 
 function TokenPrice({ address, amount }: Props) {
   const amountNum = Number(amount);

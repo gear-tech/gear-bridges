@@ -131,21 +131,18 @@ use lazy_static::lazy_static;
 use prometheus::{opts, register_int_counter, IntCounter};
 
 lazy_static! {
-    static ref LOG_ERRORS_TOTAL: IntCounter = register_int_counter!(
-        opts!(
-            "log_errors_total",
-            "Total number of ERROR level logs recorded."
-            // You could add const_labels here if needed
-        )
-    )
+    static ref LOG_ERRORS_TOTAL: IntCounter = register_int_counter!(opts!(
+        "log_errors_total",
+        "Total number of ERROR level logs recorded."
+    ))
     .expect("Failed to register LOG_ERRORS_TOTAL counter");
 }
 
 lazy_static! {
-    static ref LOG_ERRORS_BY_TARGET_TOTAL: IntCounterVec = register_int_counter_vec! (
+    static ref LOG_ERRORS_BY_TARGET_TOTAL: IntCounterVec = register_int_counter_vec!(
         "log_errors_by_target_total",
         "Total number of ERROR level logs recorded, partitioned by log target.",
-        &["target"] // Define the label name
+        &["target"]
     )
     .expect("Failed to register LOG_ERRORS_BY_TARGET_TOTAL counter");
 }

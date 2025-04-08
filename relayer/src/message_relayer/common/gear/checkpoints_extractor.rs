@@ -1,4 +1,3 @@
-use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
 use anyhow::anyhow;
 use checkpoint_light_client_client::Order;
@@ -6,7 +5,6 @@ use gear_core::message::ReplyCode;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
-use prometheus::IntCounter;
 use prometheus::IntGauge;
 use sails_rs::calls::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};

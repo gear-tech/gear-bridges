@@ -28,7 +28,11 @@ impl_metered_service! {
                 "message_queued_event_extractor_messages_per_block",
                 "Number of MessageQueued events processed per Gear block",
             ).buckets(prometheus::exponential_buckets(1.0, 1.5, 50)?) // TODO(playX18): Experiment with this value more
-        )
+        ),
+        restarts: IntCounter = IntCounter::new(
+            "message_queued_event_extractor_restarts",
+            "Number of restarts of the message queued event extractor due to errors",
+        ),
     }
 }
 
@@ -50,6 +54,7 @@ impl MessageQueuedEventExtractor {
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
+                    self.metrics.restarts.inc();
                     log::error!("Message queued extractor failed: {}", err);
                 }
             }

@@ -1,11 +1,11 @@
+use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 use gear_rpc_client::GearApi;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
+use prometheus::IntCounter;
 use prometheus::IntGauge;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
-
-use checkpoint_light_client_io::meta::{Order, State, StateRequest};
 
 use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
 
@@ -31,6 +31,10 @@ impl_metered_service! {
             "checkpoint_extractor_latest_checkpoint_slot",
             "Latest slot found in checkpoint light client program state",
         ),
+        restarts: IntGauge = IntGauge::new(
+            "checkpoint_extractor_restarts",
+            "Number of restarts of the checkpoint extractor due to errors",
+        ),
     }
 }
 
@@ -55,6 +59,7 @@ impl CheckpointsExtractor {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
                     log::error!("Checkpoints extractor failed: {}", err);
+                    self.metrics.restarts.inc();
                 }
             }
         });

@@ -6,7 +6,7 @@ use futures::executor::block_on;
 use gclient::{GearApi, WSAddress};
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
-use prometheus::IntGauge;
+use prometheus::{IntCounter, IntGauge};
 use sails_rs::{
     calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
@@ -63,6 +63,10 @@ impl_metered_service! {
             "gear_message_sender_fee_payer_balance",
             "Transaction fee payer balance",
         ),
+        restarts: IntCounter = IntCounter::new(
+            "gear_message_sender_restarts",
+            "Number of restarts of the message sender",
+        ),
     }
 }
 
@@ -105,6 +109,7 @@ impl MessageSender {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,
                         Err(err) => {
+                            self.metrics.restarts.inc();
                             log::error!("Gear message sender failed with: {err}");
                         }
                     }

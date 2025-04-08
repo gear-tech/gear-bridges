@@ -1,40 +1,36 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec::Vec};
-
-pub mod meta;
-pub mod replay_back;
-pub mod sync_update;
-
-pub use sync_update::SyncCommitteeUpdate;
-
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
     self,
-    beacon::{
-        BLSPubKey, Block as BeaconBlock, BlockHeader as BeaconBlockHeader, Bytes32, SyncAggregate,
-    },
+    base_types::FixedArray,
+    beacon::{BLSPubKey, BlockHeader as BeaconBlockHeader},
     network::Network,
-    tree_hash, SYNC_COMMITTEE_SIZE,
+    Hash256, SYNC_COMMITTEE_SIZE,
 };
-use ethereum_common::{base_types::FixedArray, Hash256};
-use parity_scale_codec::{Decode, Encode};
-use scale_info::TypeInfo;
+use sails_rs::prelude::*;
 
+pub type Slot = u64;
+
+/// The struct contains slots of the finalized and the last checked headers.
+/// This is the state of the checkpoint backfilling process.
+#[derive(Clone, Debug, Decode, Encode, PartialEq, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct ReplayBack {
+    pub finalized_header: Slot,
+    pub last_header: Slot,
+}
+
+// The constant defines how many epochs may be skipped.
+pub const MAX_EPOCHS_GAP: u64 = 3;
 // <G1 as SWCurveConfig>::serialized_size(Compress::No)
 pub const G1_UNCOMPRESSED_SIZE: usize = 96;
-
 // <G2 as SWCurveConfig>::serialized_size(Compress::No)
 pub const G2_UNCOMPRESSED_SIZE: usize = 192;
 
 pub type ArkScale<T> = ark_scale::ArkScale<T, { ark_scale::HOST_CALL }>;
-
-pub type Slot = u64;
 
 #[derive(Debug, Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct G1TypeInfo(pub G1);
@@ -56,40 +52,71 @@ impl ark_scale::ArkScaleMaxEncodedLen for G2TypeInfo {
 
 pub type SyncCommitteeKeys = FixedArray<ArkScale<G1TypeInfo>, SYNC_COMMITTEE_SIZE>;
 
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub struct Update {
+    pub signature_slot: u64,
+    pub attested_header: BeaconBlockHeader,
+    pub finalized_header: BeaconBlockHeader,
+    pub sync_committee_signature: ArkScale<G2TypeInfo>,
+    pub sync_committee_next_aggregate_pubkey: Option<BLSPubKey>,
+    pub sync_committee_next_pub_keys: Option<Box<SyncCommitteeKeys>>,
+    pub sync_committee_next_branch: Option<Vec<[u8; 32]>>,
+    pub finality_branch: Vec<[u8; 32]>,
+}
+
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
 pub struct Init {
     pub network: Network,
     pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
     pub sync_committee_current_aggregate_pubkey: BLSPubKey,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
-    pub update: SyncCommitteeUpdate,
+    pub update: Update,
+    pub sync_aggregate_encoded: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Decode, Encode, TypeInfo)]
-pub enum CheckpointError {
-    OutDated,
-    NotPresent,
-}
-
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub enum Handle {
-    GetCheckpointFor {
-        slot: Slot,
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum Error {
+    InvalidTimestamp,
+    InvalidPeriod,
+    LowVoteCount,
+    NotActual,
+    InvalidSignature,
+    InvalidFinalityProof,
+    InvalidNextSyncCommitteeProof,
+    InvalidPublicKeys,
+    InvalidSyncAggregate,
+    ReplayBackRequired {
+        replay_back: Option<ReplayBack>,
+        checkpoint: (Slot, Hash256),
     },
-    SyncUpdate(SyncCommitteeUpdate),
-    ReplayBackStart {
-        sync_update: SyncCommitteeUpdate,
-        headers: Vec<BeaconBlockHeader>,
-    },
-    ReplayBack(Vec<BeaconBlockHeader>),
-    GetState(meta::StateRequest),
 }
 
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
-pub enum HandleResult {
-    Checkpoint(Result<(Slot, Hash256), CheckpointError>),
-    SyncUpdate(Result<(), sync_update::Error>),
-    ReplayBackStart(Result<replay_back::StatusStart, replay_back::Error>),
-    ReplayBack(Option<replay_back::Status>),
-    State(meta::State),
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum ReplayBackStatus {
+    InProcess,
+    Finished,
+}
+
+#[derive(Clone, Debug, Decode, Encode, TypeInfo)]
+#[codec(crate = sails_rs::scale_codec)]
+#[scale_info(crate = sails_rs::scale_info)]
+pub enum ReplayBackError {
+    AlreadyStarted,
+    NotStarted,
+    Verify(Error),
+    NoFinalityUpdate,
+}
+
+impl From<Error> for ReplayBackError {
+    fn from(e: Error) -> Self {
+        ReplayBackError::Verify(e)
+    }
 }

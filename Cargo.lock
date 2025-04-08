@@ -2070,39 +2070,65 @@ dependencies = [
 ]
 
 [[package]]
-name = "checkpoint_light_client"
+name = "checkpoint-light-client"
 version = "0.3.0"
 dependencies = [
- "ark-serialize 0.4.2",
- "checkpoint_light_client-io",
- "circular-buffer",
- "gbuiltin-bls381 1.6.1",
- "gear-wasm-builder 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "getrandom 0.2.15",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex-literal",
- "lazy_static",
- "parity-scale-codec",
- "primitive-types 0.12.2",
- "tree_hash_derive",
+ "checkpoint-light-client-app",
+ "sails-idl-gen",
+ "sails-rs",
 ]
 
 [[package]]
-name = "checkpoint_light_client-io"
+name = "checkpoint-light-client-app"
 version = "0.3.0"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
- "ark-ff 0.4.2",
+ "ark-scale 0.0.12",
+ "ark-serialize 0.4.2",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
+ "circular-buffer",
+ "ethereum-common",
+ "ethereum_beacon_client",
+ "futures",
+ "gbuiltin-bls381 1.7.0",
+ "gclient",
+ "getrandom 0.2.15",
+ "hex",
+ "hex-literal",
+ "lazy_static",
+ "ruzstd",
+ "sails-rs",
+ "serde_json",
+ "sp-core 21.0.0",
+ "tokio",
+ "tree_hash_derive",
+]
+
+[[package]]
+name = "checkpoint-light-client-client"
+version = "0.3.0"
+dependencies = [
+ "checkpoint-light-client-app",
+ "checkpoint-light-client-io",
+ "ethereum-common",
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+]
+
+[[package]]
+name = "checkpoint-light-client-io"
+version = "0.3.0"
+dependencies = [
+ "ark-bls12-381",
  "ark-scale 0.0.12",
  "ark-serialize 0.4.2",
  "ethereum-common",
- "gmeta 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "parity-scale-codec",
- "scale-info",
- "serde",
- "tree_hash_derive",
+ "sails-rs",
 ]
 
 [[package]]
@@ -3035,14 +3061,16 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "clap",
  "dotenv",
  "ethereum_beacon_client",
  "gclient",
  "hex",
  "parity-scale-codec",
+ "sails-rs",
  "tokio",
 ]
 
@@ -3641,7 +3669,7 @@ name = "eth-events-common"
 version = "0.3.0"
 dependencies = [
  "alloy-rlp",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-client",
  "ethereum-common",
  "sails-rs",
 ]
@@ -3739,7 +3767,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sp-core 21.0.0",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
@@ -3794,7 +3822,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-io",
  "ethereum-common",
  "futures",
  "hex",
@@ -4581,9 +4609,8 @@ dependencies = [
 
 [[package]]
 name = "gbuiltin-bls381"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f43e801303b63970495dd98bb7426d8cb6b214fbfe8b592691b84bb7e3d6ef2"
+version = "1.6.2"
+source = "git+https://github.com/gear-tech/gear.git?tag=v1.6.2#93eb5b59abc5b3567355e5ca9f20bdf39eace498"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -4596,8 +4623,9 @@ dependencies = [
 
 [[package]]
 name = "gbuiltin-bls381"
-version = "1.6.2"
-source = "git+https://github.com/gear-tech/gear.git?tag=v1.6.2#93eb5b59abc5b3567355e5ca9f20bdf39eace498"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "797566ac6a65cc80b105988fe2f7a9c0ef56fc9d30690e2d1c5afd9a5b26f601"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -5328,7 +5356,7 @@ dependencies = [
  "gstd 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-scale-codec",
  "scale-info",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -5965,7 +5993,7 @@ version = "0.3.0"
 dependencies = [
  "alloy",
  "alloy-rlp",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-client",
  "eth-events-common",
  "eth-events-deneb",
  "eth-events-deneb-client",
@@ -10225,8 +10253,8 @@ dependencies = [
  "axum",
  "bridging-payment-client",
  "cgo_oligami",
- "checkpoint_light_client",
- "checkpoint_light_client-io",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
  "clap",
  "derive_more 0.99.18",
  "dotenv",
@@ -10260,7 +10288,7 @@ dependencies = [
  "sled",
  "sp-core 21.0.0",
  "subxt",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "tokio",
  "utils-prometheus",
  "vft-manager-client",
@@ -13756,11 +13784,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.11"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d452f284b73e6d76dd36758a0c8684b1d5be31f92b89d07fd5822175732206fc"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
 dependencies = [
- "thiserror-impl 2.0.11",
+ "thiserror-impl 2.0.12",
 ]
 
 [[package]]
@@ -13776,9 +13804,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.11"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26afc1baea8a989337eeb52b6e72a039780ce45c3edfcc9c5b9d112feeb173c2"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
 dependencies = [
  "proc-macro2",
  "quote",

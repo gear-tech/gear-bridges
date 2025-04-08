@@ -41,10 +41,6 @@ impl_metered_service! {
             "ethereum_message_sender_total_failed_txs_because_processed",
             "Amount of txs sent to ethereum and failed because they've already been processed",
         ),
-        gear_api_errors: IntCounter = IntCounter::new(
-            "ethereum_message_sender_gear_api_errors",
-            "Errors encountered during Gear API calls within Ethereum message sender",
-        ),
         total_relayed_messages: IntCounter = IntCounter::new(
             "ethereum_message_sender_total_relayed_messages",
             "Total amount of messages relayed to Ethereum and finalized",
@@ -102,7 +98,6 @@ impl Era {
 
             for message in messages {
                 let tx_hash = submit_message(
-                    &self.metrics,
                     gear_api,
                     eth_api,
                     message,
@@ -204,18 +199,15 @@ impl Era {
                 let merkle_root_block_hash = gear_api
                     .block_number_to_hash(merkle_root.block.0)
                     .await
-                    .map_err(|e| {
+                    .inspect_err(|e| {
                         log::error!(
                             "Failed to get merkle root block hash for block #{}: {}",
                             merkle_root.block,
                             e
                         );
-                        self.metrics.gear_api_errors.inc();
-                        e
                     })?;
 
                 let tx_hash = submit_message(
-                    &self.metrics,
                     gear_api,
                     eth_api,
                     &tx.message,
@@ -260,7 +252,6 @@ impl Era {
 }
 
 async fn submit_message(
-    metrics: &Metrics,
     gear_api: &GearApi,
     eth_api: &EthApi,
     message: &Message,
@@ -278,14 +269,12 @@ async fn submit_message(
     let proof = gear_api
         .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
         .await
-        .map_err(|e| {
+        .inspect_err(|e| {
             log::error!(
                 "Failed to fetch merkle proof for message with nonce {}: {}",
                 hex::encode(message.nonce_le),
                 e
             );
-            metrics.gear_api_errors.inc();
-            e
         })?;
 
     let tx_hash = eth_api

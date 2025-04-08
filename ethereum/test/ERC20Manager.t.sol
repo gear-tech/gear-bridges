@@ -7,7 +7,7 @@ import {ERC20Manager} from "../src/ERC20Manager.sol";
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
-import {ERC20GearSupply} from "../src/ERC20GearSupply.sol";
+import {ERC20GearSupply} from "../src/erc20/ERC20GearSupply.sol";
 
 contract ERC20ManagerTest is Test {
     address constant MESSAGE_QUEUE = address(500);

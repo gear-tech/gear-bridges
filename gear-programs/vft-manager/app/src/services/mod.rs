@@ -1,7 +1,7 @@
 use extended_vft_client::traits::*;
 use sails_rs::{
     calls::*,
-    gstd::{self, calls::GStdRemoting, ExecContext},
+    gstd::{self, calls::GStdRemoting, msg, ExecContext},
     prelude::*,
 };
 
@@ -72,6 +72,8 @@ enum Event {
         vara_token_id: ActorId,
         /// `ERC20` token address that was added into mapping.
         eth_token_id: H160,
+        /// Type of the token supply.
+        supply_type: TokenSupply,
     },
     /// Token mapping was removed.
     ///
@@ -83,6 +85,8 @@ enum Event {
         vara_token_id: ActorId,
         /// `ERC20` token address that was removed from mapping.
         eth_token_id: H160,
+        /// Type of the token supply.
+        supply_type: TokenSupply,
     },
     /// Bridging of tokens from Gear to Ethereum was requested.
     ///
@@ -186,6 +190,10 @@ pub struct Config {
     /// Timeout in blocks that current program will wait for reply from
     /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
+    /// Fee to pay `gear-eth-bridge` built-in actor.
+    fee_bridge: u128,
+    /// Incoming fee.
+    fee_incoming: u128,
 }
 
 /// VFT Manager service implementation.
@@ -224,6 +232,7 @@ where
         self.notify_on(Event::TokenMappingAdded {
             vara_token_id,
             eth_token_id,
+            supply_type,
         })
         .expect("Failed to emit event");
     }
@@ -232,11 +241,12 @@ where
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
 
-        let eth_token_id = self.state_mut().token_map.remove(vara_token_id);
+        let (eth_token_id, supply_type) = self.state_mut().token_map.remove(vara_token_id);
 
         self.notify_on(Event::TokenMappingRemoved {
             vara_token_id,
             eth_token_id,
+            supply_type,
         })
         .expect("Failed to emit event");
     }
@@ -361,6 +371,12 @@ where
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
         self.ensure_running()?;
+
+        let value = msg::value();
+        let fee = self.config().fee_incoming;
+        if value != fee {
+            panic!("Please attach exactly {fee} value");
+        }
 
         let sender = self.exec_context.actor_id();
 

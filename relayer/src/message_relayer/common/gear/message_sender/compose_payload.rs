@@ -154,7 +154,7 @@ async fn build_inclusion_proof(
             .request_headers(slot + 1, slot_checkpoint + 1)
             .await
             .map_err(|e| {
-                beacon_errors.map(|e| e.inc());
+                beacon_errors.inspect(|e| e.inc());
                 e
             })?
             .into_iter()

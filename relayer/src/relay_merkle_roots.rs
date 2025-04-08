@@ -121,7 +121,15 @@ impl MerkleRootRelayer {
         self.submit_merkle_root().await?;
 
         self.try_finalize_submitted_merkle_root().await?;
-        drop(timer);
+        if self
+            .latest_submitted_merkle_root
+            .as_ref()
+            .is_some_and(|x| x.finalized)
+        {
+            timer.stop_and_record();
+        } else {
+            timer.stop_and_discard();
+        }
         Ok(())
     }
 

@@ -14503,6 +14503,8 @@ name = "utils-prometheus"
 version = "0.3.0"
 dependencies = [
  "axum",
+ "lazy_static",
+ "log",
  "prometheus",
  "tokio",
 ]

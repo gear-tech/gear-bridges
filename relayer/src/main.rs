@@ -11,7 +11,7 @@ use message_relayer::{eth_to_gear, gear_to_eth};
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
-use utils_prometheus::MetricsBuilder;
+use utils_prometheus::{MetricsBuilder, PrometheusErrorCounterLogger};
 
 mod cli;
 mod common;
@@ -33,7 +33,7 @@ use cli::{
 async fn main() {
     let _ = dotenv::dotenv();
 
-    pretty_env_logger::formatted_timed_builder()
+    let logger = pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
         .filter(Some("prover"), log::LevelFilter::Info)
@@ -42,7 +42,10 @@ async fn main() {
         .filter(Some("metrics"), log::LevelFilter::Info)
         .format_timestamp_secs()
         .parse_default_env()
-        .init();
+        .build();
+
+    PrometheusErrorCounterLogger::init(logger, log::LevelFilter::Info)
+        .expect("Failed to initialize logger");
 
     let cli = Cli::parse();
 

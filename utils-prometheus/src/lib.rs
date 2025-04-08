@@ -1,5 +1,8 @@
 use axum::{routing::get, Router};
-use prometheus::{core::Collector, Encoder, Registry, TextEncoder};
+use log::{Level, Log, Metadata, Record, SetLoggerError};
+use prometheus::{
+    core::Collector, register_int_counter_vec, Encoder, IntCounterVec, Registry, TextEncoder,
+};
 use tokio::net::TcpListener;
 
 pub struct MetricsBuilder {
@@ -121,5 +124,63 @@ impl Metrics {
             .expect("Failed to encode metrics");
 
         String::from_utf8(buffer).expect("Failed to convert metrics to string")
+    }
+}
+
+use lazy_static::lazy_static;
+use prometheus::{opts, register_int_counter, IntCounter};
+
+lazy_static! {
+    static ref LOG_ERRORS_TOTAL: IntCounter = register_int_counter!(
+        opts!(
+            "log_errors_total",
+            "Total number of ERROR level logs recorded."
+            // You could add const_labels here if needed
+        )
+    )
+    .expect("Failed to register LOG_ERRORS_TOTAL counter");
+}
+
+lazy_static! {
+    static ref LOG_ERRORS_BY_TARGET_TOTAL: IntCounterVec = register_int_counter_vec! (
+        "log_errors_by_target_total",
+        "Total number of ERROR level logs recorded, partitioned by log target.",
+        &["target"] // Define the label name
+    )
+    .expect("Failed to register LOG_ERRORS_BY_TARGET_TOTAL counter");
+}
+
+pub struct PrometheusErrorCounterLogger<L: Log> {
+    inner: L, // The logger that will actually print/write logs
+}
+
+impl<L: Log> Log for PrometheusErrorCounterLogger<L> {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        // Delegate to the underlying logger to decide if a level is enabled
+        self.inner.enabled(metadata)
+    }
+
+    fn log(&self, record: &Record) {
+        if record.level() == Level::Error {
+            LOG_ERRORS_TOTAL.inc();
+            LOG_ERRORS_BY_TARGET_TOTAL
+                .with_label_values(&[record.target()])
+                .inc();
+        }
+
+        self.inner.log(record);
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
+    }
+}
+
+impl<L: Log + 'static> PrometheusErrorCounterLogger<L> {
+    pub fn init(inner: L, max_level: log::LevelFilter) -> Result<(), SetLoggerError> {
+        let wrapper = Box::new(PrometheusErrorCounterLogger { inner });
+        log::set_boxed_logger(wrapper)?;
+        log::set_max_level(max_level); // Set the desired max level
+        Ok(())
     }
 }

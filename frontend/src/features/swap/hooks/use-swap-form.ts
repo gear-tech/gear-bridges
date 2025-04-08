@@ -1,4 +1,4 @@
-import { useAlert } from '@gear-js/react-hooks';
+import { useAlert, useAccount } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -6,6 +6,7 @@ import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
+import { useEthAccount } from '@/hooks';
 import { isUndefined, logger } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
@@ -23,9 +24,10 @@ function useSwapForm(
   accountBalance: Values,
   ftBalance: Values,
   decimals: number | undefined,
-  disabled: boolean,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
   const alert = useAlert();
 
   const valueSchema = getAmountSchema(isNativeToken, accountBalance.data, ftBalance.data, decimals);
@@ -62,11 +64,6 @@ function useSwapForm(
     onSubmit(values).then(onSuccess).catch(onError);
   });
 
-  useEffect(() => {
-    reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [disabled]);
-
   const setMaxBalance = () => {
     const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
     if (isUndefined(decimals)) throw new Error('Decimals are not defined');
@@ -77,6 +74,11 @@ function useSwapForm(
 
     setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate });
   };
+
+  useEffect(() => {
+    form.clearErrors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, ethAccount.address]);
 
   return { form, amount, handleSubmit, setMaxBalance };
 }

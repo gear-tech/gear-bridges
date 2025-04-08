@@ -32,6 +32,10 @@ type Config = struct {
   /// Timeout in blocks that current program will wait for reply from
   /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
   reply_timeout: u32,
+  /// Fee to pay `gear-eth-bridge` built-in actor.
+  fee_bridge: u128,
+  /// Incoming fee.
+  fee_incoming: u128,
 };
 
 /// Type of the token supply.

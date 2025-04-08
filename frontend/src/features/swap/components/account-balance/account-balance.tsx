@@ -45,7 +45,6 @@ function AccountBalance({ data: value, isLoading, isVaraNetwork, submit }: Props
 
       {isBalanceError && (
         <Tooltip
-          SVG={DangerSVG}
           value={
             <>
               <p>{error.message}</p>
@@ -54,8 +53,9 @@ function AccountBalance({ data: value, isLoading, isVaraNetwork, submit }: Props
                 At least {formatUnits(error.requiredValue, decimals)} {symbol} is needed
               </p>
             </>
-          }
-        />
+          }>
+          <DangerSVG />
+        </Tooltip>
       )}
     </div>
   );

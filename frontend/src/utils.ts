@@ -1,5 +1,9 @@
-import { decodeAddress, encodeAddress } from '@gear-js/api';
+import { decodeAddress, encodeAddress, HexString } from '@gear-js/api';
 import { z } from 'zod';
+
+import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
+
+import { TOKEN_SVG } from './consts';
 
 const cx = (...args: unknown[]) =>
   args
@@ -35,4 +39,6 @@ const isUndefined = (value: unknown): value is undefined => value === undefined;
 
 const isNumeric = (value: string) => /^\d+$/.test(value);
 
-export { cx, isValidAddress, logger, asOptionalField, isUndefined, isNumeric };
+const getTokenSVG = (address: HexString) => TOKEN_SVG[address] || TokenPlaceholderSVG;
+
+export { cx, isValidAddress, logger, asOptionalField, isUndefined, isNumeric, getTokenSVG };

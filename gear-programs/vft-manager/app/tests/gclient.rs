@@ -172,6 +172,8 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
                 gas_to_send_request_to_builtin: 10_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
             },
         })
         .send_recv(code_id, salt)
@@ -298,6 +300,8 @@ async fn bench_gas_for_reply() -> Result<()> {
                     gas_to_send_request_to_builtin: 20_000_000_000,
                     gas_for_swap_token_maps: 1_500_000_000,
                     reply_timeout: 100,
+                    fee_bridge: 0,
+                    fee_incoming: 0,
                 },
             },
             slot_start,
@@ -412,6 +416,8 @@ async fn getter_transactions() -> Result<()> {
                     gas_to_send_request_to_builtin: 20_000_000_000,
                     gas_for_swap_token_maps: 1_500_000_000,
                     reply_timeout: 100,
+                    fee_bridge: 0,
+                    fee_incoming: 0,
                 },
             },
             slot_start,
@@ -490,6 +496,8 @@ async fn msg_tracker_state() -> Result<()> {
                 gas_to_send_request_to_builtin: 20_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
             },
         })
         .with_gas_limit(gas_limit)
@@ -570,6 +578,8 @@ async fn upgrade() -> Result<()> {
                 gas_to_send_request_to_builtin: 20_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
             },
         })
         .with_gas_limit(gas_limit)

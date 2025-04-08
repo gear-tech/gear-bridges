@@ -27,7 +27,13 @@ impl Network {
         let epoch_electra = self.epoch_electra();
         let epoch = utils::calculate_epoch(slot);
         match self {
-            Mainnet => hex!("04000000"),
+            Mainnet => {
+                if epoch >= epoch_electra {
+                    return hex!("05000000");
+                }
+
+                hex!("04000000")
+            }
 
             Sepolia => {
                 if epoch >= epoch_electra {
@@ -56,14 +62,13 @@ impl Network {
         }
     }
 
-    // https://github.com/ethereum/EIPs/blob/e7d6d3a75b646bdcf6b957623c92c10e749163ce/EIPS/eip-7600.md#activation
+    // https://github.com/ethereum/EIPs/blob/55ec2d12e4738585338acdabd1c6400dc7235144/EIPS/eip-7600.md#activation
     pub const fn epoch_electra(&self) -> u64 {
         match self {
             Holesky => 115_968,
             Sepolia => 222_464,
-            // According to https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/config.yaml#L41
             Hoodi => 2_048,
-            _ => todo!(),
+            Mainnet => 364_032,
         }
     }
 }

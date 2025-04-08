@@ -72,6 +72,8 @@ enum Event {
         vara_token_id: ActorId,
         /// `ERC20` token address that was added into mapping.
         eth_token_id: H160,
+        /// Type of the token supply.
+        supply_type: TokenSupply,
     },
     /// Token mapping was removed.
     ///
@@ -83,6 +85,8 @@ enum Event {
         vara_token_id: ActorId,
         /// `ERC20` token address that was removed from mapping.
         eth_token_id: H160,
+        /// Type of the token supply.
+        supply_type: TokenSupply,
     },
     /// Bridging of tokens from Gear to Ethereum was requested.
     ///
@@ -228,6 +232,7 @@ where
         self.notify_on(Event::TokenMappingAdded {
             vara_token_id,
             eth_token_id,
+            supply_type,
         })
         .expect("Failed to emit event");
     }
@@ -236,11 +241,12 @@ where
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
 
-        let eth_token_id = self.state_mut().token_map.remove(vara_token_id);
+        let (eth_token_id, supply_type) = self.state_mut().token_map.remove(vara_token_id);
 
         self.notify_on(Event::TokenMappingRemoved {
             vara_token_id,
             eth_token_id,
+            supply_type,
         })
         .expect("Failed to emit event");
     }

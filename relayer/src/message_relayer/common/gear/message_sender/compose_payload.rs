@@ -28,7 +28,7 @@ pub async fn compose(
         .get_transaction_receipt(tx_hash)
         .await
         .map_err(|e| {
-            eth_errors.map(|e| e.inc());
+            if let Some(e) = eth_errors { e.inc() }
             anyhow!("Failed to get transaction receipt: {e:?}")
         })?
         .ok_or(anyhow!("Transaction receipt is missing"))?;
@@ -38,7 +38,7 @@ pub async fn compose(
             .get_block_by_hash(hash, BlockTransactionsKind::Hashes)
             .await
             .map_err(|e| {
-                eth_errors.map(|e| e.inc());
+                if let Some(e) = eth_errors { e.inc() }
                 anyhow!("Failed to get block by hash: {e:?}")
             })?
             .ok_or(anyhow!("Ethereum block (hash) is missing"))?,
@@ -47,7 +47,7 @@ pub async fn compose(
                 .get_block_by_number(BlockNumberOrTag::Number(number), false)
                 .await
                 .map_err(|e| {
-                    eth_errors.map(|e| e.inc());
+                    if let Some(e) = eth_errors { e.inc() }
                     anyhow!("Failed to get block by number: {e:?}")
                 })?
                 .ok_or(anyhow!("Ethereum block (number) is missing"))?,
@@ -77,7 +77,7 @@ pub async fn compose(
         .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
         .await
         .map_err(|e| {
-            eth_errors.map(|e| e.inc());
+            if let Some(e) = eth_errors { e.inc() }
             anyhow!("Failed to get block receipts: {e:?}")
         })?
         .unwrap_or_default()
@@ -118,16 +118,14 @@ async fn build_inclusion_proof(
     let beacon_block = beacon_client
         .find_beacon_block(block_number, beacon_block_parent)
         .await
-        .map_err(|e| {
-            beacon_errors.map(|e| e.inc());
-            e
+        .inspect_err(|_| {
+            if let Some(e) = beacon_errors { e.inc() }
         })?;
     let beacon_block = beacon_client
         .get_block::<beacon::electra::Block>(beacon_block.slot)
         .await
-        .map_err(|e| {
-            beacon_errors.map(|e| e.inc());
-            e
+        .inspect_err(|_| {
+            if let Some(e) = beacon_errors { e.inc() }
         })?;
 
     let slot = beacon_block.slot;
@@ -153,9 +151,8 @@ async fn build_inclusion_proof(
         headers: beacon_client
             .request_headers(slot + 1, slot_checkpoint + 1)
             .await
-            .map_err(|e| {
+            .inspect_err(|_| {
                 beacon_errors.inspect(|e| e.inc());
-                e
             })?
             .into_iter()
             .collect(),

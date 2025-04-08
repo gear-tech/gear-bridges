@@ -5,9 +5,7 @@ import { useAppKit } from '@reown/appkit/react';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
-import EthSVG from '@/assets/eth.svg?react';
-import VaraSVG from '@/assets/vara.svg?react';
-import { Input, Skeleton } from '@/components';
+import { Input, Skeleton, TokenSVG } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
@@ -23,9 +21,9 @@ import { getMergedBalance } from '../../utils';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
-import { FTAllowanceTip } from '../ft-allowance-tip';
 import { SelectToken } from '../select-token';
 import { SubmitProgressBar } from '../submit-progress-bar';
+import { SubmitTooltip } from '../submit-tooltip';
 import { SwapNetworkButton } from '../swap-network-button';
 
 import styles from './swap-form.module.scss';
@@ -147,11 +145,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
               <div className={styles.row}>
                 <div className={styles.wallet}>
-                  {isVaraNetwork ? (
-                    <VaraSVG className={styles.networkIcon} />
-                  ) : (
-                    <EthSVG className={styles.networkIcon} />
-                  )}
+                  <TokenSVG address={address} networkIndex={networkIndex} sizes={[48, 28]} />
 
                   <div className={styles.token}>
                     <SelectToken symbol={symbol} />
@@ -171,11 +165,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
               <div className={styles.toContainer}>
                 <div className={styles.wallet}>
-                  {isVaraNetwork ? (
-                    <EthSVG className={styles.networkIcon} />
-                  ) : (
-                    <VaraSVG className={styles.networkIcon} />
-                  )}
+                  <TokenSVG address={destinationAddress} networkIndex={Number(!networkIndex)} sizes={[48, 28]} />
 
                   <div className={styles.token}>
                     <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
@@ -199,8 +189,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
           <DetailsAccordion fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
 
-          <footer className={styles.submitContainer}>
-            {isNetworkAccountConnected ? (
+          {isNetworkAccountConnected ? (
+            <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>
               <Button
                 type="submit"
                 text={getButtonText()}
@@ -216,19 +206,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 }
                 block
               />
-            ) : (
-              <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
-            )}
-
-            <FTAllowanceTip
-              allowance={allowance.data}
-              decimals={decimals}
-              symbol={symbol}
-              amount={amount}
-              isVaraNetwork={isVaraNetwork}
-              isLoading={bridge.isLoading || allowance.isLoading}
-            />
-          </footer>
+            </SubmitTooltip>
+          ) : (
+            <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
+          )}
         </form>
       </FormProvider>
 

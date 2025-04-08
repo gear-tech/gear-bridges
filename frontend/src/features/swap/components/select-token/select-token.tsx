@@ -5,10 +5,9 @@ import { useState } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
 import SearchSVG from '@/assets/search.svg?react';
-import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FormattedBalance, Skeleton } from '@/components';
-import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
+import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import {
   useEthFTBalances,
   useVaraFTBalances,
@@ -81,7 +80,6 @@ function SelectTokenModal({ close }: ModalProps) {
     return filteredAddresses.map((addressPair, index) => {
       const address = addressPair[networkIndex];
       const isActive = address === selectedTokenAddress;
-      const SVG = TOKEN_SVG[address] ?? TokenPlaceholderSVG;
       const symbol = symbols[address];
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
@@ -101,7 +99,7 @@ function SelectTokenModal({ close }: ModalProps) {
             onClick={handleClick}
             disabled={isActive}>
             <span className={styles.wallet}>
-              <SVG />
+              <TokenSVG address={address} networkIndex={networkIndex} sizes={[32, 20]} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{symbol}</span>

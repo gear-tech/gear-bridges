@@ -3,7 +3,7 @@ import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
 import { JSX } from 'react';
 
-import { CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton, TruncatedText } from '@/components';
+import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } from '@/components';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
 import { cx } from '@/utils';
@@ -70,7 +70,7 @@ function TransactionModal({
           {txHash && (
             <p className={styles.transactionHash}>
               <a href={explorerUrl} target="_blank" rel="noreferrer">
-                <TruncatedText value={txHash} />
+                <Address value={txHash} />
               </a>
 
               <CopyButton value={txHash} />
@@ -118,14 +118,14 @@ function TransactionModal({
 
         <span className={styles.address}>
           <span className={styles.label}>From</span>
-          <TruncatedText value={formattedSenderAddress} className={styles.value} />
+          <Address value={formattedSenderAddress} className={styles.value} />
         </span>
 
         <ArrowSVG className={styles.arrowSvg} />
 
         <span className={styles.address}>
           <span className={styles.label}>To</span>
-          <TruncatedText value={formattedReceiverAddress} className={styles.value} />
+          <Address value={formattedReceiverAddress} className={styles.value} />
         </span>
       </div>
 

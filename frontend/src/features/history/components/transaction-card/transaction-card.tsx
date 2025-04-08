@@ -1,6 +1,6 @@
 import { HexString } from '@gear-js/api';
 
-import { Card, CopyButton, Skeleton, TruncatedText } from '@/components';
+import { Address, Card, CopyButton, Skeleton } from '@/components';
 import { useModal } from '@/hooks';
 
 import { Transfer } from '../../types';
@@ -40,7 +40,7 @@ function TransactionCard(props: Props) {
 
         <p className={styles.transactionHash}>
           <button type="button" onClick={openModal}>
-            <TruncatedText value={txHash} />
+            <Address value={txHash} />
           </button>
 
           <CopyButton value={txHash} />

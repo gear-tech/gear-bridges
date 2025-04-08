@@ -712,6 +712,8 @@ async fn bench_gas_for_token_map_swap() -> Result<()> {
                 gas_to_send_request_to_builtin: 20_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
             },
         })
         .with_gas_limit(gas_limit)
@@ -800,6 +802,8 @@ async fn update_vfts() -> Result<()> {
                 gas_to_send_request_to_builtin: 20_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
             },
         })
         .with_gas_limit(gas_limit)
@@ -842,6 +846,8 @@ async fn update_vfts() -> Result<()> {
                 gas_to_send_request_to_builtin: 20_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
             },
         })
         .with_gas_limit(gas_limit)

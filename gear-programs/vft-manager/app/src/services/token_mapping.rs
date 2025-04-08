@@ -39,8 +39,8 @@ impl TokenMap {
     /// Remove token pair from map.
     ///
     /// Will return error if `vara_token_id` don't correspond to the already existing mapping.
-    pub fn remove(&mut self, vara_token_id: ActorId) -> H160 {
-        let (eth_token_id, _suply) = self
+    pub fn remove(&mut self, vara_token_id: ActorId) -> (H160, TokenSupply) {
+        let (eth_token_id, supply_type) = self
             .vara_to_eth
             .remove(&vara_token_id)
             .expect("Mapping not found");
@@ -50,7 +50,7 @@ impl TokenMap {
             .remove(&eth_token_id)
             .expect("Mapping not found");
 
-        eth_token_id
+        (eth_token_id, supply_type)
     }
 
     /// Get `ERC20` token address by `VFT` token address.

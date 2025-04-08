@@ -252,13 +252,13 @@ service VftManager {
     /// 
     /// This means that VFT Manager service now supports specified
     /// [vara_token_id](Event::TokenMappingAdded::vara_token_id)/[eth_token_id](Event::TokenMappingAdded::eth_token_id) pair.
-    TokenMappingAdded: struct { vara_token_id: actor_id, eth_token_id: h160 };
+    TokenMappingAdded: struct { vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply };
     /// Token mapping was removed.
     /// 
     /// This means that VFT Manager service doesn't support specified
     /// [vara_token_id](Event::TokenMappingRemoved::vara_token_id)/[eth_token_id](Event::TokenMappingRemoved::eth_token_id)
     /// pair anymore.
-    TokenMappingRemoved: struct { vara_token_id: actor_id, eth_token_id: h160 };
+    TokenMappingRemoved: struct { vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply };
     /// Bridging of tokens from Gear to Ethereum was requested.
     /// 
     /// When this event is emitted it means that `VFT` tokens were locked/burned and

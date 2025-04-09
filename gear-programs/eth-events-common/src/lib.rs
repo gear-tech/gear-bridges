@@ -29,7 +29,6 @@ pub enum Error {
 }
 
 pub struct State {
-    pub admin: ActorId,
     pub checkpoint_light_client_address: ActorId,
 }
 

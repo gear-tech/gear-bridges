@@ -124,7 +124,6 @@ constructor {
 
 service EthereumEventClient {
   CheckProofs : (message: EthToVaraEvent) -> result (CheckedProofs, Error);
-  query Admin : () -> actor_id;
   query CheckpointLightClientAddress : () -> actor_id;
 };
 

@@ -1,4 +1,5 @@
 import ClockSVG from '@/assets/clock.svg?react';
+import { TOKEN_ID, TokenPrice } from '@/features/token-price';
 import { cx } from '@/utils';
 
 import { Skeleton } from '../layout';
@@ -8,7 +9,7 @@ import GasSVG from './gas.svg?react';
 
 type Props = {
   fee: string | undefined;
-  symbol: string;
+  symbol: 'VARA' | 'ETH';
   className?: string;
 };
 
@@ -20,7 +21,10 @@ function FeeAndTimeFooter({ fee, symbol, className }: Props) {
           <GasSVG /> Expected Fee:
         </span>
 
-        <span className={styles.value}>{fee ? `${fee} ${symbol}` : <Skeleton width="3.5rem" />}</span>
+        <span className={styles.value}>
+          {fee ? `${fee} ${symbol}` : <Skeleton width="3.5rem" />}
+          <TokenPrice id={symbol === 'VARA' ? TOKEN_ID.VARA : TOKEN_ID.ETH} amount={fee} />
+        </span>
       </p>
 
       <p className={styles.prop}>

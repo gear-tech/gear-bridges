@@ -357,8 +357,9 @@ async fn update_admin() {
     let admin_new = api_unauthorized.account_id();
     let admin_new = <[u8; 32]>::from(admin_new.clone());
     let admin_new = ActorId::from(admin_new);
-    let mut proxy_client =
-        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api_unauthorized.clone()));
+    let mut proxy_client = historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(
+        api_unauthorized.clone(),
+    ));
     let result = proxy_client
         .update_admin(admin_new)
         .with_gas_limit(gas_limit)

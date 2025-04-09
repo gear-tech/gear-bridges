@@ -84,8 +84,8 @@ vft-service = { path = "gear-programs/vft-service" }
 # Contracts' deps
 
 # Provides wasm binary
-extended-vft = { git = "https://github.com/gear-foundation/standards/", rev = "a59ecb537ee3bb394baf18a720c5bb20c5c3afd1" }
-extended-vft-client = { git = "https://github.com/gear-foundation/standards/", rev = "a59ecb537ee3bb394baf18a720c5bb20c5c3afd1" }
+extended-vft = { git = "https://github.com/gear-foundation/standards/", rev = "541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b" }
+extended-vft-client = { git = "https://github.com/gear-foundation/standards/", rev = "541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b" }
 
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
@@ -169,34 +169,34 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { version = "1.6.2", features = ["nightly"] }
-gtest = "1.6.2"
-gmeta = "1.6.2"
-gear-wasm-builder = { version = "1.6.2", default-features = false }
-gsdk = "1.6.2"
-gclient = "1.6.2"
-gear-core = "1.6.2"
-gbuiltin-bls381 = "1.6.1"
-gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.6.2" }
-pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.6.2", default-features = false, features = [
+gstd = { version = "1.7.1", features = ["nightly"] }
+gtest = "1.7.1"
+gmeta = "1.7.1"
+gear-wasm-builder = { version = "1.7.1", default-features = false }
+gsdk = "1.7.1"
+gclient = "1.7.1"
+gear-core = "1.7.1"
+gbuiltin-bls381 = "1.7.1"
+gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.7.1" }
+pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.7.1", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = "0.6.1"
-sails-client-gen = "0.6.1"
-sails-rs = "0.6.1"
+sails-idl-gen = "0.7.3"
+sails-client-gen = "0.7.3"
+sails-rs = "0.7.3"
 
 subxt = "0.37.0"
-sc-consensus-grandpa = { version = "0.10.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
-sp-runtime = { version = "24.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
-sp-consensus-grandpa = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
-parity-scale-codec = { version = "3.6.4", default-features = false, features = [
+sc-consensus-grandpa = { version = "0.30.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gshep/gear-polkadot-stable2409", default-features = false }
+sp-runtime = { version = "39.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gshep/gear-polkadot-stable2409", default-features = false }
+sp-consensus-grandpa = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gshep/gear-polkadot-stable2409", default-features = false }
+parity-scale-codec = { version = "3.7.4", default-features = false, features = [
     "derive",
 ] }
-trie-db = { version = "0.28.0", default-features = false }
-sp-trie = { version = "22.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
-sp-core = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
+trie-db = { version = "0.29.0", default-features = false }
+sp-trie = { version = "37.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gshep/gear-polkadot-stable2409", default-features = false }
+sp-core = { version = "34.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gshep/gear-polkadot-stable2409", default-features = false }
 primitive-types = { version = "0.12.2", default-features = false }
-binary-merkle-tree = { version = "4.0.0-dev", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-v1.4.0", default-features = false }
+binary-merkle-tree = { version = "15.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gshep/gear-polkadot-stable2409", default-features = false }
 
 # Alloy deps
 alloy-consensus = { version = "=0.5.2", default-features = false }
@@ -222,4 +222,4 @@ alloy = { version = "=0.5.2", package = "alloy", features = [
 ] }
 
 [patch."https://github.com/gear-tech/gear"]
-gsys = "1.6.2"
+gsys = "1.7.1"

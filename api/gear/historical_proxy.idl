@@ -50,6 +50,10 @@ service HistoricalProxy {
   /// - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
   /// - `ProxyError`: if redirect failed
   Redirect : (slot: u64, proofs: vec u8, client: actor_id, client_route: vec u8) -> result (struct { vec u8, vec u8 }, ProxyError);
+  /// Update the current service admin to `admin_new`.
+  /// 
+  /// This function can be called only by the admin.
+  UpdateAdmin : (admin_new: actor_id) -> null;
   /// Get current service admin.
   query Admin : () -> actor_id;
   /// Get endpoint for the specified `slot`.

@@ -3014,13 +3014,13 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "dotenv",
- "extended-vft",
- "extended-vft-client",
  "gclient",
  "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "sails-rs",
  "tokio",
+ "vft",
+ "vft-client",
 ]
 
 [[package]]

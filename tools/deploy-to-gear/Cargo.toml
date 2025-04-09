@@ -4,13 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-extended-vft = { workspace = true, features = ["wasm-binary"] }
-extended-vft-client.workspace = true
+vft = { workspace = true, features = ["wasm-binary"] }
+vft-client.workspace = true
 
 clap.workspace = true
 dotenv.workspace = true
-gclient.workspace = true
 gear-core.workspace = true
+gclient.workspace = true
 hex.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true

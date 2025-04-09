@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand};
-use extended_vft_client::{traits::Vft, Vft as VftClient};
-use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
-use gear_core::ids::ProgramId;
-use sails_rs::{calls::Call, gclient::calls::GClientRemoting, prelude::*};
+use gclient::{GearApi, WSAddress};
+use gear_core::ids::prelude::*;
+use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
+use vft_client::traits::*;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -29,9 +29,17 @@ struct ExtendedVftArgs {
         env = "GEAR_RPC"
     )]
     gear_endpoint: String,
+
     /// Port of the Gear RPC endpoint
     #[arg(long = "gear-port", default_value = "443", env = "GEAR_PORT")]
     gear_port: u16,
+
+    /// Substrate URI that identifies a user by a mnemonic phrase or
+    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
+    /// etc.). The password for URI should be specified in the same `suri`,
+    /// separated by the ':' char
+    #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
+    gear_suri: String,
 
     /// Name of the token that will be set during initialization
     #[arg(long = "token-name", short = 'n', default_value = "VftToken")]
@@ -49,10 +57,6 @@ struct ExtendedVftArgs {
     /// ActorId that will be allowed to burn tokens
     #[arg(long = "burn-admin")]
     burn_admin: Option<String>,
-
-    /// Whether to NOT revoke the admin role after the deployment
-    #[arg(long, action)]
-    dont_revoke_admin_role: bool,
 }
 
 #[tokio::main]
@@ -64,13 +68,11 @@ async fn main() {
     match cli.command {
         CliCommands::ExtendedVft(args) => {
             let address = WSAddress::new(&args.gear_endpoint, Some(args.gear_port));
-            let gear_api = GearApi::init(address)
+            let gear_api = GearApi::builder()
+                .suri(args.gear_suri)
+                .build(address)
                 .await
                 .expect("Failed to initialize GearApi");
-            let listener = gear_api
-                .subscribe()
-                .await
-                .expect("Failed to subscribe to listener");
 
             let str_to_actorid = |s: String| {
                 let s = if &s[..2] == "0x" { &s[2..] } else { &s };
@@ -78,74 +80,54 @@ async fn main() {
                 ActorId::new(data.try_into().expect("Got input of wrong length"))
             };
 
-            let params = ExtendedVftParams {
+            let params = VftParams {
                 name: args.token_name,
                 symbol: args.token_symbol,
                 decimals: args.token_decimals,
 
                 mint_admin: args.mint_admin.map(str_to_actorid),
                 burn_admin: args.burn_admin.map(str_to_actorid),
-
-                revoke_admin_role: !args.dont_revoke_admin_role,
             };
 
-            upload_extended_vft(params, gear_api, listener).await;
+            upload_extended_vft(params, gear_api).await;
         }
     }
 }
 
-struct ExtendedVftParams {
+struct VftParams {
     name: String,
     symbol: String,
     decimals: u8,
     mint_admin: Option<ActorId>,
     burn_admin: Option<ActorId>,
-    revoke_admin_role: bool,
 }
 
-async fn upload_extended_vft(params: ExtendedVftParams, api: GearApi, mut listener: EventListener) {
-    let payload = [
-        "New".encode(),
-        (params.name, params.symbol, params.decimals).encode(),
-    ]
-    .concat();
-
+async fn upload_extended_vft(params: VftParams, api: GearApi) {
     let gas_limit = api
-        .calculate_upload_gas(
-            None,
-            extended_vft::WASM_BINARY.to_vec(),
-            payload.clone(),
-            0,
-            true,
-        )
+        .block_gas_limit()
+        .expect("Unable to get block gas limit");
+    let code_id = api
+        .upload_code(vft::WASM_BINARY)
         .await
-        .expect("Failed to calculate gas limit")
-        .min_limit;
+        .map(|(code_id, ..)| code_id)
+        .unwrap_or_else(|_| CodeId::generate(vft::WASM_BINARY));
+    println!("Code uploaded: {code_id:?}");
 
-    let (message_id, program_id, _) = api
-        .upload_program_bytes(
-            extended_vft::WASM_BINARY,
-            gclient::now_micros().to_le_bytes(),
-            payload,
-            gas_limit,
-            0,
-        )
+    let remoting = GClientRemoting::new(api);
+    let factory = vft_client::VftFactory::new(remoting.clone());
+
+    let program_id = factory
+        .new(params.name, params.symbol, params.decimals)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [])
         .await
         .expect("Failed to upload program");
+    println!("Program constructed");
 
-    let program_id = ProgramId::from(program_id);
-
-    assert!(listener
-        .message_processed(message_id)
-        .await
-        .expect("Message is not processed")
-        .succeed());
-
-    let remoting = GClientRemoting::new(api.clone());
-    let mut vft = VftClient::new(remoting);
+    let mut vft = vft_client::VftAdmin::new(remoting.clone());
 
     if let Some(minter) = params.mint_admin {
-        vft.grant_minter_role(minter)
+        vft.set_minter(minter)
             .send_recv(program_id)
             .await
             .expect("Failed to grand minter role");
@@ -154,7 +136,7 @@ async fn upload_extended_vft(params: ExtendedVftParams, api: GearApi, mut listen
     }
 
     if let Some(burner) = params.burn_admin {
-        vft.grant_burner_role(burner)
+        vft.set_burner(burner)
             .send_recv(program_id)
             .await
             .expect("Failed to grand burner role");
@@ -162,26 +144,21 @@ async fn upload_extended_vft(params: ExtendedVftParams, api: GearApi, mut listen
         println!("Granted burner role");
     }
 
-    if params.revoke_admin_role {
-        let current_admin = ActorId::new(*api.account_id().as_ref());
+    // Allocating underlying shards.
+    let mut vft_extension = vft_client::VftExtension::new(remoting);
+    while vft_extension
+        .allocate_next_balances_shard()
+        .send_recv(program_id)
+        .await
+        .expect("Failed to allocate next balances shard")
+    {}
 
-        vft.revoke_minter_role(current_admin)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to revoke minter role");
+    while vft_extension
+        .allocate_next_allowances_shard()
+        .send_recv(program_id)
+        .await
+        .expect("Failed to allocate next allowances shard")
+    {}
 
-        vft.revoke_burner_role(current_admin)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to revoke burner role");
-
-        vft.revoke_admin_role(current_admin)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to revoke admin role");
-
-        println!("Revoked all admin roles from deployer");
-    }
-
-    println!("Program deployed at {:?}", program_id);
+    println!("Program deployed at {program_id:?}");
 }

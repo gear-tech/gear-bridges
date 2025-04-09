@@ -11,20 +11,17 @@ import styles from './submit-progress-bar.module.scss';
 type Props = {
   submit: Omit<ReturnType<UseHandleSubmit>[0], 'mutateAsync'>;
   approve: ReturnType<UseHandleSubmit>[1];
-  mint: ReturnType<UseHandleSubmit>[2];
 };
 
 const PERCENTAGE = {
   default: 0,
-  mint: 25,
-  approve: 50,
-  transfer: 75,
+  approve: 33,
+  transfer: 66,
   success: 100,
 } as const;
 
 const TEXT = {
   default: '',
-  mint: 'Locking',
   approve: 'Approving',
   transfer: 'Transferring',
   success: 'Your transfer request was successful',
@@ -32,18 +29,16 @@ const TEXT = {
 
 const ERROR_TEXT = {
   default: '',
-  mint: 'Lock',
   approve: 'Approve',
   transfer: 'Transfer',
   success: '',
 } as const;
 
-function SubmitProgressBar({ mint, approve, submit }: Props) {
+function SubmitProgressBar({ approve, submit }: Props) {
   const { isSuccess, isPending, error } = submit;
   const errorMessage = error ? getErrorMessage(error) : '';
 
   const getStatus = () => {
-    if (mint?.isPending || mint?.error) return 'mint';
     if (approve.isPending || approve.error) return 'approve';
     if (submit.isPending || submit.error) return 'transfer';
     if (isSuccess) return 'success';

@@ -75,7 +75,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const [submit, approve, mint] = useHandleSubmit(
+  const [submit, approve] = useHandleSubmit(
     address,
     fee.value,
     allowance.data,
@@ -118,7 +118,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const getButtonText = () => {
     if (!isEnoughBalance()) return `Not Enough ${isVaraNetwork ? 'VARA' : 'ETH'}`;
 
-    if (mint?.isPending) return 'Locking...';
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Transferring...';
 
@@ -138,7 +137,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     return <TokenPrice address={varaAddress} amount={amount} />;
   };
 
-  const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} />;
+  const renderProgressBar = () => <SubmitProgressBar approve={approve} submit={submit} />;
 
   return (
     <>

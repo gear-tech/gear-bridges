@@ -1,5 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
+import { SubmittableExtrinsic } from '@polkadot/api/types';
+import { ISubmittableResult } from '@polkadot/types/types';
 import { useMutation } from '@tanstack/react-query';
 
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
@@ -10,6 +12,7 @@ import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
 import { useMint } from './use-mint';
+import { useSignAndSend } from './use-sign-and-send';
 import { useTransfer, useTransferGasLimit } from './use-transfer';
 import { useVFTManagerAddress } from './use-vft-manager-address';
 
@@ -28,6 +31,7 @@ function useHandleVaraSubmit(
   const { data: vftManagerAddress, isLoading: isVftManagerAddressLoading } = useVFTManagerAddress();
   const { data: transferGasLimit, isLoading: isGasLimitLoading } = useTransferGasLimit();
   const isLoading = isVftManagerAddressLoading || isGasLimitLoading;
+  const signAndSend = useSignAndSend();
 
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
     if (!ftAddress) throw new Error('Fungible token address is not found');
@@ -79,28 +83,24 @@ function useHandleVaraSubmit(
   };
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
+    if (!isApiReady) throw new Error('API is not initialized');
+
     const { mintTx, approveTx, transferTx } = await validateBalance(amount, accountAddress);
+
+    const extrinsics = [mintTx?.extrinsic, approveTx?.extrinsic, transferTx?.extrinsic].filter(
+      Boolean,
+    ) as SubmittableExtrinsic<'promise', ISubmittableResult>[];
+
+    const extrinsic = api.tx.utility.batchAll(extrinsics);
 
     openTransactionModal(amount.toString(), accountAddress);
 
-    if (mintTx) {
-      await mint.sendTransactionAsync(mintTx);
-    } else {
-      mint.reset();
-    }
-
-    if (approveTx) {
-      await approve.sendTransactionAsync(approveTx);
-    } else {
-      approve.reset();
-    }
-
-    return transfer.sendTransactionAsync(transferTx);
+    return signAndSend.mutateAsync({ extrinsic });
   };
 
   const submit = useMutation({ mutationFn: onSubmit });
 
-  return [submit, { ...approve, isLoading }, mint] as const;
+  return [submit, { ...approve, isLoading }] as const;
 }
 
 export { useHandleVaraSubmit };

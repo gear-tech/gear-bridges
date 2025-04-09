@@ -340,3 +340,55 @@ async fn proxy() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn update_admin() {
+    let (api, admin, proxy_code_id, _relay_code_id, gas_limit, salt) = connect_to_node().await;
+    let proxy_program_id =
+        historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
+            .new()
+            .with_gas_limit(gas_limit)
+            .send_recv(proxy_code_id, salt)
+            .await
+            .unwrap();
+
+    // Unauthorized user is not able to change the admin
+    let api_unauthorized = api.clone().with("//Bob").unwrap();
+    let admin_new = api_unauthorized.account_id();
+    let admin_new = <[u8; 32]>::from(admin_new.clone());
+    let admin_new = ActorId::from(admin_new);
+    let mut proxy_client =
+        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api_unauthorized.clone()));
+    let result = proxy_client
+        .update_admin(admin_new)
+        .with_gas_limit(gas_limit)
+        .send_recv(proxy_program_id)
+        .await;
+    assert!(result.is_err());
+
+    let admin_current = proxy_client
+        .admin()
+        .with_gas_limit(gas_limit)
+        .recv(proxy_program_id)
+        .await
+        .unwrap();
+    assert_eq!(admin_current, admin);
+
+    // The authorized user changes the admin
+    let mut proxy_client =
+        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
+    let result = proxy_client
+        .update_admin(admin_new)
+        .with_gas_limit(gas_limit)
+        .send_recv(proxy_program_id)
+        .await;
+    assert!(result.is_ok());
+
+    let admin_current = proxy_client
+        .admin()
+        .with_gas_limit(gas_limit)
+        .recv(proxy_program_id)
+        .await
+        .unwrap();
+    assert_eq!(admin_current, admin_new);
+}

@@ -72,6 +72,20 @@ where
         self.state.borrow().admin
     }
 
+    /// Update the current service admin to `admin_new`.
+    ///
+    /// This function can be called only by the admin.
+    pub fn update_admin(&mut self, admin_new: ActorId) {
+        let source = self.exec_context.actor_id();
+
+        let mut state = self.state.borrow_mut();
+        if source != state.admin {
+            panic!("Not an admin");
+        }
+
+        state.admin = admin_new;
+    }
+
     /// Get endpoint for the specified `slot`.
     pub fn endpoint_for(&self, slot: Slot) -> Result<ActorId, ProxyError> {
         self.state.borrow().endpoints.endpoint_for(slot)

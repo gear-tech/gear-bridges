@@ -33,7 +33,7 @@ impl_metered_service! {
             "checkpoint_extractor_latest_checkpoint_slot",
             "Latest slot found in checkpoint light client program state",
         ),
-        restarts: IntCounter = IntGauge::new(
+        restarts: IntCounter = IntCounter::new(
             "checkpoint_extractor_restarts",
             "Number of restarts of the checkpoint extractor due to errors",
         ),

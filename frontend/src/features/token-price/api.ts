@@ -40,3 +40,4 @@ function useTokenPrices() {
 }
 
 export { TOKEN_ID, useTokenPrices };
+export type { TokenId };

@@ -1471,6 +1471,78 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "awesome-sails"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "derive_more 2.0.1",
+ "sails-rs",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "awesome-sails-services"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails-vft-admin-service",
+ "awesome-sails-vft-extension-service",
+ "awesome-sails-vft-metadata-service",
+ "awesome-sails-vft-service",
+]
+
+[[package]]
+name = "awesome-sails-vft-admin-service"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails",
+ "awesome-sails-vft-service",
+ "sails-rs",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "awesome-sails-vft-extension-service"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails",
+ "awesome-sails-vft-service",
+ "sails-rs",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "awesome-sails-vft-metadata-service"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails",
+ "sails-rs",
+]
+
+[[package]]
+name = "awesome-sails-vft-service"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails",
+ "awesome-sails-vft-service-utils",
+ "sails-rs",
+]
+
+[[package]]
+name = "awesome-sails-vft-service-utils"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails",
+ "sails-rs",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "axum"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3050,7 +3122,16 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
 dependencies = [
- "derive_more-impl",
+ "derive_more-impl 1.0.0",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl 2.0.1",
 ]
 
 [[package]]
@@ -3058,6 +3139,18 @@ name = "derive_more-impl"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.89",
+ "unicode-xid",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15145,6 +15238,34 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vft"
+version = "0.3.0"
+dependencies = [
+ "sails-idl-gen",
+ "sails-rs",
+ "vft-app",
+]
+
+[[package]]
+name = "vft-app"
+version = "0.3.0"
+dependencies = [
+ "awesome-sails-services",
+ "sails-rs",
+]
+
+[[package]]
+name = "vft-client"
+version = "0.3.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+ "vft-app",
+]
 
 [[package]]
 name = "vft-manager"

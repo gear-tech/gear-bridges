@@ -7,19 +7,14 @@ use ethereum_common::{
     tree_hash::TreeHash,
     H256,
 };
-use sails_rs::{
-    gstd::{ExecContext, GStdExecContext},
-    prelude::*,
-};
+use sails_rs::prelude::*;
 
 pub struct Program(RefCell<State>);
 
 #[sails_rs::program]
 impl Program {
     pub fn new(checkpoint_light_client_address: ActorId) -> Self {
-        let exec_context = GStdExecContext::new();
         Self(RefCell::new(State {
-            admin: exec_context.actor_id(),
             checkpoint_light_client_address,
         }))
     }
@@ -55,10 +50,6 @@ pub struct Service<'a> {
 impl<'a> Service<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
-    }
-
-    pub fn admin(&self) -> ActorId {
-        self.state.borrow().admin
     }
 
     pub fn checkpoint_light_client_address(&self) -> ActorId {

@@ -29,9 +29,17 @@ function TokenPrice({ address, amount }: Props) {
   const tokenId = address ? TOKEN_ADDRESS_ID[address] : undefined;
   const price = tokenId && data ? data[tokenId]?.usd : undefined;
 
+  const getPrice = () => {
+    if (!price) return 0;
+
+    const value = price * amountNum;
+
+    return isNaN(value) ? 0 : round(value);
+  };
+
   return (
     <p className={styles.price}>
-      {isUndefined(price) ? <Skeleton width="2rem" disabled={!isLoading} /> : `$ ${round(price * amountNum)}`}
+      {isUndefined(price) ? <Skeleton width="2rem" disabled={!isLoading} /> : `$ ${getPrice()}`}
     </p>
   );
 }

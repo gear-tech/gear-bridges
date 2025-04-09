@@ -41,8 +41,8 @@ impl_metered_service! {
             "ethereum_message_sender_total_failed_txs_because_processed",
             "Amount of txs sent to ethereum and failed because they've already been processed",
         ),
-        total_relayed_messages: IntCounter = IntCounter::new(
-            "ethereum_message_sender_total_relayed_messages",
+        total_finalized_messages: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_finalized_messages",
             "Total amount of messages relayed to Ethereum and finalized",
         ),
     }
@@ -157,7 +157,7 @@ impl Era {
                     tx.message_block,
                     nonce
                 );
-                self.metrics.total_relayed_messages.inc();
+                self.metrics.total_finalized_messages.inc();
                 Ok(true)
             }
             TxStatus::Pending => Ok(false),

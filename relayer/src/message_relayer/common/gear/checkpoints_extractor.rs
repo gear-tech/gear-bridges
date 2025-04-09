@@ -5,6 +5,7 @@ use gear_core::message::ReplyCode;
 use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
+use prometheus::IntCounter;
 use prometheus::IntGauge;
 use sails_rs::calls::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -32,7 +33,7 @@ impl_metered_service! {
             "checkpoint_extractor_latest_checkpoint_slot",
             "Latest slot found in checkpoint light client program state",
         ),
-        restarts: IntGauge = IntGauge::new(
+        restarts: IntCounter = IntGauge::new(
             "checkpoint_extractor_restarts",
             "Number of restarts of the checkpoint extractor due to errors",
         ),

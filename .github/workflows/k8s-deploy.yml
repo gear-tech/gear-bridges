@@ -2,7 +2,7 @@ name: Frontend
 on:
   workflow_dispatch:
   push:
-    branches: ['main']
+    branches: ["main"]
     paths:
       - frontend/**
 
@@ -52,10 +52,10 @@ jobs:
             VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS=${{ secrets.VITE_BRIDGING_PAYMENT_CONTRACT_ADDRESS }}
             VITE_ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS=${{ secrets.VITE_ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS }}
             VITE_WRAPPED_VARA_CONTRACT_ADDRESS=${{ secrets.VITE_WRAPPED_VARA_CONTRACT_ADDRESS }}
+            VITE_TOKEN_PRICE_API_URL=${{ secrets.VITE_TOKEN_PRICE_API_URL }}
 
   deploy-to-k8s-staging:
-    needs:
-      [build-frontend-image-staging]
+    needs: [build-frontend-image-staging]
     runs-on: ubuntu-latest
 
     steps:

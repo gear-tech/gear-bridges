@@ -1,4 +1,9 @@
-use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot};
+use std::time::Duration;
+
+use crate::{
+    common,
+    message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot},
+};
 use anyhow::anyhow;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
@@ -101,11 +106,38 @@ impl MessageSender {
     ) {
         let _ = tokio::task::spawn_blocking(move || {
             block_on(async move {
+                let base_delay = Duration::from_secs(1);
+                let mut attempts = 0;
+                const MAX_ATTEMPTS: u32 = 5;
                 loop {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,
                         Err(err) => {
-                            log::error!("Gear message sender failed with: {err}");
+                            attempts += 1;
+                            let delay = base_delay * 2u32.pow(attempts - 1);
+                            log::error!(
+                                "Gear message sender failed (attempt {}/{}): {}. Retrying in {:?}",
+                                attempts,
+                                MAX_ATTEMPTS,
+                                err,
+                                delay
+                            );
+                            if attempts >= MAX_ATTEMPTS {
+                                log::error!("Max attempts reached, exiting...");
+                                break;
+                            }
+
+                            tokio::time::sleep(delay).await;
+
+                            if common::is_transport_error_recoverable(&err) {
+                                self.eth_api = match self.eth_api.reconnect() {
+                                    Ok(eth_api) => eth_api,
+                                    Err(err) => {
+                                        log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                        break;
+                                    }
+                                };
+                            }
                         }
                     }
                 }

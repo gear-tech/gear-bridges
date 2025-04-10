@@ -93,26 +93,26 @@ impl MerkleRootRelayer {
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 5;
         loop {
+            attempts += 1;
             let now = Instant::now();
             let res = self.main_loop().await;
 
             if let Err(err) = res {
-                attempts += 1;
+                let delay = base_delay * 2u32.pow(attempts - 1);
+                log::error!(
+                    "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
+                    attempts,
+                    MAX_ATTEMPTS,
+                    err,
+                    delay
+                );
+                if attempts >= MAX_ATTEMPTS {
+                    log::error!("Max attempts reached. Exiting...");
+                    return Err(err.context("Max attempts reached"));
+                }
+                tokio::time::sleep(delay).await;
+
                 if common::is_transport_error_recoverable(&err) {
-                    log::warn!(
-                        "Main loop error (attempt {}/{}): {}. Retrying...",
-                        attempts,
-                        MAX_ATTEMPTS,
-                        err
-                    );
-                    if attempts >= MAX_ATTEMPTS {
-                        log::error!("Max reconnection attempts reached. Exiting...");
-                        return Err(err.context("Max reconnection attempts reached"));
-                    }
-
-                    let delay = base_delay * 2u32.pow(attempts - 1);
-                    tokio::time::sleep(delay).await;
-
                     self.eth_api = self
                         .eth_api
                         .reconnect()
@@ -121,9 +121,6 @@ impl MerkleRootRelayer {
                         })
                         .map_err(|err| anyhow::anyhow!(err))?;
                     self.eras.update_eth_api(self.eth_api.clone());
-                } else {
-                    log::error!("Unrecoverable error in main loop: {}", err);
-                    return Err(err);
                 }
             }
 

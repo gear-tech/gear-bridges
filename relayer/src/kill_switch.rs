@@ -117,6 +117,7 @@ impl KillSwitchRelayer {
         const MAX_ATTEMPTS: u32 = 5;
 
         loop {
+            attempts += 1;
             let now = Instant::now();
             let res = match &self.state {
                 State::Normal => self.main_loop().await,
@@ -126,30 +127,29 @@ impl KillSwitchRelayer {
             };
 
             if let Err(err) = res {
+                let delay = base_delay * 2u32.pow(attempts - 1);
+                log::error!(
+                    "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
+                    attempts,
+                    MAX_ATTEMPTS,
+                    err,
+                    delay
+                );
+                if attempts >= MAX_ATTEMPTS {
+                    log::error!("Max attempts reached, exiting ..");
+                    return Err(err);
+                }
+                tokio::time::sleep(base_delay * attempts).await;
                 if common::is_transport_error_recoverable(&err) {
-                    attempts += 1;
-                    log::warn!(
-                        "Main loop error: (attempt {}/{}): {}",
-                        attempts,
-                        MAX_ATTEMPTS,
-                        err
-                    );
-                    if attempts > MAX_ATTEMPTS {
+                    if attempts >= MAX_ATTEMPTS {
                         log::error!("Max attempts reached, exiting ..");
                         return Err(err);
                     }
-                    log::warn!(
-                        "Retrying in {:?} seconds ..",
-                        base_delay * (attempts as u32)
-                    );
-                    tokio::time::sleep(base_delay * (attempts as u32)).await;
+
                     self.eth_api = self
                         .eth_api
                         .reconnect()
                         .map_err(|e| anyhow::anyhow!("Failed to reconnect: {}", e))?;
-                } else {
-                    log::error!("Fatal error, exiting ..");
-                    return Err(err);
                 }
             }
 

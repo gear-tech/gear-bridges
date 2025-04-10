@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use ethereum_client::EthApi;
@@ -5,8 +7,11 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{
-    AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
+use crate::{
+    common,
+    message_relayer::common::{
+        AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
+    },
 };
 
 pub struct MerkleRootExtractor {
@@ -42,16 +47,45 @@ impl MerkleRootExtractor {
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut blocks: UnboundedReceiver<EthereumBlockNumber>,
     ) -> UnboundedReceiver<RelayedMerkleRoot> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            let base_delay = Duration::from_secs(1);
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 5;
             loop {
                 let res = self.run_inner(&mut blocks, &sender).await;
                 if let Err(err) = res {
-                    log::error!("Merkle root extractor failed: {}", err);
+                    attempts += 1;
+                    log::error!(
+                        "Merkle root extractor failed (attempt {}/{}): {}. Retrying in {:?}...",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        err,
+                        base_delay * 2u32.pow(attempts - 1),
+                    );
+                    if attempts >= MAX_ATTEMPTS {
+                        log::error!("Merkle root extractor failed {} times: {}", attempts, err);
+                        break;
+                    }
+
+                    tokio::time::sleep(base_delay * 2u32.pow(attempts - 1)).await;
+
+                    if common::is_transport_error_recoverable(&err) {
+                        self.eth_api = match self.eth_api.reconnect() {
+                            Ok(eth_api) => eth_api,
+                            Err(err) => {
+                                log::error!("Failed to reconnect to Ethereum: {}", err);
+                                break;
+                            }
+                        };
+                    } else {
+                        log::error!("Merkle root extractor failed: {}", err);
+                        break;
+                    }
                 }
             }
         });

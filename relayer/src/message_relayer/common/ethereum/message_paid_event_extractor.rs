@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -6,7 +8,10 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, FeePaidEntry};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{EthereumBlockNumber, TxHashWithSlot};
+use crate::{
+    common,
+    message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
+};
 
 use super::find_slot_by_block_number;
 
@@ -51,16 +56,43 @@ impl MessagePaidEventExtractor {
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut blocks: UnboundedReceiver<EthereumBlockNumber>,
     ) -> UnboundedReceiver<TxHashWithSlot> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            let base_delay = Duration::from_secs(1);
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 5;
+
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
-                    log::error!("Deposit event extractor failed: {}", err);
+                    attempts += 1;
+                    log::error!(
+                        "Deposit event extractor failed (attempt {}/{}): {}",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        err
+                    );
+
+                    if attempts >= MAX_ATTEMPTS {
+                        log::error!("Max attempts reached, exiting...");
+                        break;
+                    }
+
+                    tokio::time::sleep(base_delay * 2u32.pow(attempts - 1)).await;
+
+                    if common::is_transport_error_recoverable(&err) {
+                        self.eth_api = match self.eth_api.reconnect() {
+                            Ok(eth_api) => eth_api,
+                            Err(err) => {
+                                log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                break;
+                            }
+                        };
+                    }
                 }
             }
         });

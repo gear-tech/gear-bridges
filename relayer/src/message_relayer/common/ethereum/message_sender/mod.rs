@@ -74,21 +74,22 @@ impl MessageSender {
                 let res = self.run_inner(&mut messages, &mut merkle_roots).await;
                 if let Err(err) = res {
                     attempts += 1;
+                    let delay = base_delay * 2u32.pow(attempts - 1);
+                    log::error!(
+                        "Ethereum message sender failed (attempt: {}/{}): {}. Retrying in {:?}",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        err,
+                        delay
+                    );
+                    if attempts >= MAX_ATTEMPTS {
+                        log::error!("Maximum attempts reached, exiting...");
+                        break;
+                    }
+
+                    tokio::time::sleep(delay).await;
+
                     if common::is_transport_error_recoverable(&err) {
-                        log::warn!(
-                            "Ethereum message sender failed (attempt: {}/{}): {}. Retrying in {:?}",
-                            attempts,
-                            MAX_ATTEMPTS,
-                            err,
-                            base_delay * 2u32.pow(attempts)
-                        );
-
-                        if attempts >= MAX_ATTEMPTS {
-                            log::error!("Ethereum message sender failed too many times: {}", err);
-                            break;
-                        }
-
-                        tokio::time::sleep(base_delay * 2u32.pow(attempts)).await;
                         match self.eth_api.reconnect().inspect_err(|e| {
                             log::error!("Failed to reconnect to Ethereum: {}", e);
                         }) {
@@ -97,8 +98,6 @@ impl MessageSender {
                                 break;
                             }
                         }
-                    } else {
-                        log::error!("Ethereum message sender failed: {}", err);
                     }
                 }
             }

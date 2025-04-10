@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use prometheus::{Gauge, Histogram, HistogramOpts, IntGauge};
+use prometheus::{Gauge, Histogram, HistogramOpts, HistogramTimer, IntGauge};
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use gear_rpc_client::GearApi;
@@ -54,6 +54,7 @@ struct SubmittedMerkleRoot {
     tx_hash: TxHash,
     proof: FinalProof,
     finalized: bool,
+    timer: Option<HistogramTimer>,
 }
 
 impl MeteredService for MerkleRootRelayer {
@@ -114,22 +115,12 @@ impl MerkleRootRelayer {
 
         self.sync_authority_set_completely().await?;
 
-        let timer = self.metrics.eth_finalized_block_latency.start_timer();
-
         self.eras.process(self.proof_storage.as_mut()).await?;
 
         self.submit_merkle_root().await?;
 
         self.try_finalize_submitted_merkle_root().await?;
-        if self
-            .latest_submitted_merkle_root
-            .as_ref()
-            .is_some_and(|x| x.finalized)
-        {
-            timer.stop_and_record();
-        } else {
-            timer.stop_and_discard();
-        }
+
         Ok(())
     }
 
@@ -241,6 +232,7 @@ impl MerkleRootRelayer {
             tx_hash,
             proof,
             finalized: false,
+            timer: Some(self.metrics.eth_finalized_block_latency.start_timer()),
         });
 
         Ok(())
@@ -268,7 +260,11 @@ impl MerkleRootRelayer {
         match tx_status {
             TxStatus::Finalized => {
                 submitted_merkle_root.finalized = true;
-
+                submitted_merkle_root
+                    .timer
+                    .take()
+                    .ok_or(anyhow::anyhow!("timer not found"))?
+                    .stop_and_record();
                 log::info!(
                     "Tx containing merkle root 0x{} finalized",
                     hex::encode(submitted_merkle_root.proof.merkle_root)
@@ -292,6 +288,11 @@ impl MerkleRootRelayer {
                     );
 
                     submitted_merkle_root.finalized = true;
+                    submitted_merkle_root
+                        .timer
+                        .take()
+                        .ok_or(anyhow::anyhow!("timer not found"))?
+                        .stop_and_record();
                     return Ok(());
                 }
 

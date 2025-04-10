@@ -3805,37 +3805,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "extended-vft"
-version = "1.1.0"
-source = "git+https://github.com/gear-foundation/standards/?rev=541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b#541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b"
-dependencies = [
- "extended-vft-app",
- "sails-idl-gen",
- "sails-rs",
-]
-
-[[package]]
-name = "extended-vft-app"
-version = "0.1.0"
-source = "git+https://github.com/gear-foundation/standards/?rev=541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b#541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b"
-dependencies = [
- "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "sails-rs",
- "vft-service 1.1.0",
-]
-
-[[package]]
-name = "extended-vft-client"
-version = "0.1.0"
-source = "git+https://github.com/gear-foundation/standards/?rev=541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b#541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b"
-dependencies = [
- "extended-vft-app",
- "sails-client-gen",
- "sails-idl-gen",
- "sails-rs",
-]
-
-[[package]]
 name = "faccess"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15275,8 +15244,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "blake2",
- "extended-vft",
- "extended-vft-client",
  "gclient",
  "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest",
@@ -15285,6 +15252,8 @@ dependencies = [
  "sails-rs",
  "scale-info",
  "tokio",
+ "vft",
+ "vft-client",
  "vft-manager",
  "vft-manager-app",
  "vft-manager-client",
@@ -15341,18 +15310,6 @@ dependencies = [
  "gtest",
  "log",
  "sails-rs",
-]
-
-[[package]]
-name = "vft-service"
-version = "1.1.0"
-source = "git+https://github.com/gear-foundation/standards/?rev=541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b#541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b"
-dependencies = [
- "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "log",
- "parity-scale-codec",
- "sails-rs",
- "scale-info",
 ]
 
 [[package]]
@@ -16553,7 +16510,7 @@ version = "0.3.0"
 dependencies = [
  "sails-client-gen",
  "sails-rs",
- "vft-service 0.3.0",
+ "vft-service",
 ]
 
 [[package]]

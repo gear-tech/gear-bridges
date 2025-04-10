@@ -421,11 +421,19 @@ where
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let mut service = vft_client::VftExtension::new(GStdRemoting);
+        let vft_manager = gstd::exec::program_id();
+        let mut service = vft_client::Vft::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {
-            if !service
-                    .transfer_all(vft_manager_new)
+            let balance = service
+                .balance_of(vft_manager)
+                .recv(vft)
+                .await
+                .expect("Unable to get the balance of VftManager");
+
+            if balance > 0.into()
+                && !service
+                    .transfer(vft_manager_new, balance)
                     .send_recv(vft)
                     .await
                     .expect("Unable to request a transfer to the new VftManager")

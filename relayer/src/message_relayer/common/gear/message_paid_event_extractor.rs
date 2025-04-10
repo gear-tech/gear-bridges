@@ -29,6 +29,10 @@ impl_metered_service! {
             "message_paid_event_extractor_total_messages_found",
             "Total amount of paid messages discovered",
         ),
+        restarts: IntCounter = IntCounter::new(
+            "message_paid_event_extractor_restarts",
+            "Number of restarts of the message paid event extractor due to errors",
+        ),
     }
 }
 
@@ -52,6 +56,7 @@ impl MessagePaidEventExtractor {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
                     log::error!("Message paid event extractor failed: {}", err);
+                    self.metrics.restarts.inc();
                 }
             }
         });

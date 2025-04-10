@@ -7,3 +7,5 @@ edition.workspace = true
 axum.workspace = true
 prometheus.workspace = true
 tokio.workspace = true
+log.workspace = true
+lazy_static.workspace = true

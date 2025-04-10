@@ -41,6 +41,10 @@ impl_metered_service! {
             "ethereum_message_sender_total_failed_txs_because_processed",
             "Amount of txs sent to ethereum and failed because they've already been processed",
         ),
+        total_finalized_messages: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_finalized_messages",
+            "Total amount of messages relayed to Ethereum and finalized",
+        ),
     }
 }
 
@@ -153,6 +157,7 @@ impl Era {
                     tx.message_block,
                     nonce
                 );
+                self.metrics.total_finalized_messages.inc();
                 Ok(true)
             }
             TxStatus::Pending => Ok(false),
@@ -191,8 +196,16 @@ impl Era {
                     return Ok(false);
                 }
 
-                let merkle_root_block_hash =
-                    gear_api.block_number_to_hash(merkle_root.block.0).await?;
+                let merkle_root_block_hash = gear_api
+                    .block_number_to_hash(merkle_root.block.0)
+                    .await
+                    .inspect_err(|e| {
+                        log::error!(
+                            "Failed to get merkle root block hash for block #{}: {}",
+                            merkle_root.block,
+                            e
+                        );
+                    })?;
 
                 let tx_hash = submit_message(
                     gear_api,
@@ -255,7 +268,14 @@ async fn submit_message(
 
     let proof = gear_api
         .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
-        .await?;
+        .await
+        .inspect_err(|e| {
+            log::error!(
+                "Failed to fetch merkle proof for message with nonce {}: {}",
+                hex::encode(message.nonce_le),
+                e
+            );
+        })?;
 
     let tx_hash = eth_api
         .provide_content_message(

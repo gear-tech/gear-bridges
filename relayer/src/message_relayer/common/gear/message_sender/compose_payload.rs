@@ -23,18 +23,30 @@ pub async fn compose(
 
     let receipt = provider
         .get_transaction_receipt(tx_hash)
-        .await?
+        .await
+        .map_err(|e| {
+            log::error!("RPC transport error: {e:?}");
+            anyhow!("Failed to get transaction receipt: {e:?}")
+        })?
         .ok_or(anyhow!("Transaction receipt is missing"))?;
 
     let block = match receipt.block_hash {
         Some(hash) => provider
             .get_block_by_hash(hash, BlockTransactionsKind::Hashes)
-            .await?
+            .await
+            .map_err(|e| {
+                log::error!("RPC transport error: {e:?}");
+                anyhow!("Failed to get block by hash: {e:?}")
+            })?
             .ok_or(anyhow!("Ethereum block (hash) is missing"))?,
         None => match receipt.block_number {
             Some(number) => provider
                 .get_block_by_number(BlockNumberOrTag::Number(number), false)
-                .await?
+                .await
+                .map_err(|e| {
+                    log::error!("RPC transport error: {e:?}");
+                    anyhow!("Failed to get block by number: {e:?}")
+                })?
                 .ok_or(anyhow!("Ethereum block (number) is missing"))?,
             None => return Err(anyhow!("Unable to get Ethereum block")),
         },
@@ -55,7 +67,11 @@ pub async fn compose(
         .ok_or(anyhow!("Unable to determine transaction index"))?;
     let receipts = provider
         .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
-        .await?
+        .await
+        .map_err(|e| {
+            log::error!("RPC transport error: {e:?}");
+            anyhow!("Failed to get block receipts: {e:?}")
+        })?
         .unwrap_or_default()
         .iter()
         .map(|tx_receipt| {
@@ -92,10 +108,16 @@ async fn build_inclusion_proof(
 
     let beacon_block = beacon_client
         .find_beacon_block(block_number, beacon_block_parent)
-        .await?;
+        .await
+        .inspect_err(|e| {
+            log::error!("Failed to find beacon block: {e:?}");
+        })?;
     let beacon_block = beacon_client
         .get_block::<beacon::electra::Block>(beacon_block.slot)
-        .await?;
+        .await
+        .inspect_err(|e| {
+            log::error!("Failed to get beacon block: {e:?}");
+        })?;
 
     let slot = beacon_block.slot;
     let block = BlockGenericForBlockBody {
@@ -119,7 +141,10 @@ async fn build_inclusion_proof(
         block,
         headers: beacon_client
             .request_headers(slot + 1, slot_checkpoint + 1)
-            .await?
+            .await
+            .inspect_err(|e| {
+                log::error!("Failed to request headers: {e:?}");
+            })?
             .into_iter()
             .collect(),
     })

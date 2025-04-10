@@ -8,7 +8,7 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
+    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -89,12 +89,39 @@ impl MerkleRootRelayer {
     pub async fn run(mut self) -> anyhow::Result<()> {
         log::info!("Starting relayer");
 
+        let base_delay = Duration::from_secs(1);
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 5;
         loop {
+            attempts += 1;
             let now = Instant::now();
             let res = self.main_loop().await;
 
             if let Err(err) = res {
-                log::error!("{}", err);
+                let delay = base_delay * 2u32.pow(attempts - 1);
+                log::error!(
+                    "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
+                    attempts,
+                    MAX_ATTEMPTS,
+                    err,
+                    delay
+                );
+                if attempts >= MAX_ATTEMPTS {
+                    log::error!("Max attempts reached. Exiting...");
+                    return Err(err.context("Max attempts reached"));
+                }
+                tokio::time::sleep(delay).await;
+
+                if common::is_transport_error_recoverable(&err) {
+                    self.eth_api = self
+                        .eth_api
+                        .reconnect()
+                        .inspect_err(|err| {
+                            log::error!("Failed to reconnect to Ethereum: {}", err);
+                        })
+                        .map_err(|err| anyhow::anyhow!(err))?;
+                    self.eras.update_eth_api(self.eth_api.clone());
+                }
             }
 
             let main_loop_duration = now.elapsed();
@@ -360,6 +387,10 @@ impl Eras {
 
             metrics,
         })
+    }
+
+    fn update_eth_api(&mut self, eth_api: EthApi) {
+        self.eth_api = eth_api;
     }
 
     pub async fn process(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {

@@ -15298,8 +15298,6 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "ethereum-common",
- "extended-vft",
- "extended-vft-client",
  "futures",
  "gbuiltin-eth-bridge",
  "gclient",
@@ -15316,6 +15314,8 @@ dependencies = [
  "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gshep%2Fgear-polkadot-stable2409)",
  "sp-runtime 39.0.1 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gshep%2Fgear-polkadot-stable2409)",
  "tokio",
+ "vft",
+ "vft-client",
  "vft-manager",
  "vft-manager-client",
 ]

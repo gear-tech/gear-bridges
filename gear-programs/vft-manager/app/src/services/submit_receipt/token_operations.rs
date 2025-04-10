@@ -1,15 +1,39 @@
 use super::super::{Config, Error};
-use extended_vft_client::vft::io as vft_io;
+use vft_client::{
+    vft::io::TransferFrom,
+    vft_admin::io::Mint,
+};
 use gstd::msg;
 use sails_rs::{calls::ActionIo, prelude::*};
 
-async fn send<Action: ActionIo<Reply = bool>>(
+trait Reply
+{
+    fn check(&self);
+}
+
+impl Reply for () {
+    fn check(&self) {}
+}
+
+impl Reply for bool {
+    fn check(&self) {
+        if !*self {
+            panic!("Request to transfer tokens failed");
+        }
+    }
+}
+
+async fn send<Action>(
     slot: u64,
     transaction_index: u64,
     token_id: ActorId,
     params: &Action::Params,
     config: &Config,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    Action: ActionIo,
+    Action::Reply: Reply,
+{
     let payload = Action::encode_call(params);
 
     // We don't need to send the message with the fixed limit of gas.
@@ -28,14 +52,17 @@ async fn send<Action: ActionIo<Reply = bool>>(
     Ok(())
 }
 
-fn handle_reply<Action: ActionIo<Reply = bool>>(slot: u64, transaction_index: u64) {
+fn handle_reply<Action>(slot: u64, transaction_index: u64)
+where
+    Action: ActionIo,
+    Action::Reply: Reply,
+{
     let reply_bytes = msg::load_bytes()
         .expect("May fail because of the insufficient gas only but the limit was specified by the caller; qed");
-    let result = Action::decode_reply(&reply_bytes)
+    let reply = Action::decode_reply(&reply_bytes)
         .expect("May fail only if there is no VFT-program at the specified address; qed");
-    if !result {
-        panic!("Request to mint/transfer tokens failed");
-    }
+
+    reply.check();
 
     // To that point we have a successful response from the VFT and enough gas to save
     // the information about processed Ethereum transaction.
@@ -60,7 +87,7 @@ pub async fn mint(
     amount: U256,
     config: &Config,
 ) -> Result<(), Error> {
-    send::<vft_io::Mint>(
+    send::<Mint>(
         slot,
         transaction_index,
         token_id,
@@ -85,7 +112,7 @@ pub async fn unlock(
 ) -> Result<(), Error> {
     let sender = gstd::exec::program_id();
 
-    send::<vft_io::TransferFrom>(
+    send::<TransferFrom>(
         slot,
         transaction_index,
         token_id,

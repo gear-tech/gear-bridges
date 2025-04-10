@@ -1,4 +1,4 @@
-use extended_vft_client::traits::*;
+use vft_client::traits::*;
 use sails_rs::{
     calls::*,
     gstd::{self, calls::GStdRemoting, msg, ExecContext},
@@ -421,19 +421,11 @@ where
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let vft_manager = gstd::exec::program_id();
-        let mut service = extended_vft_client::Vft::new(GStdRemoting);
+        let mut service = vft_client::VftExtension::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {
-            let balance = service
-                .balance_of(vft_manager)
-                .recv(vft)
-                .await
-                .expect("Unable to get the balance of VftManager");
-
-            if balance > 0.into()
-                && !service
-                    .transfer(vft_manager_new, balance)
+            if !service
+                    .transfer_all(vft_manager_new)
                     .send_recv(vft)
                     .await
                     .expect("Unable to request a transfer to the new VftManager")

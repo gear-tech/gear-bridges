@@ -1,4 +1,7 @@
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::{
+    collections::{btree_map::Entry, BTreeMap},
+    time::Duration,
+};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use ethereum_client::EthApi;
@@ -6,7 +9,10 @@ use gear_rpc_client::GearApi;
 use prometheus::{Gauge, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
+use crate::{
+    common,
+    message_relayer::common::{AuthoritySetId, MessageInBlock},
+};
 
 mod era;
 use era::{Era, Metrics as EraMetrics};
@@ -55,15 +61,45 @@ impl MessageSender {
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut messages: UnboundedReceiver<MessageInBlock>,
         mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
     ) {
         tokio::task::spawn(async move {
+            let base_delay = Duration::from_secs(1);
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 5;
+
             loop {
                 let res = self.run_inner(&mut messages, &mut merkle_roots).await;
                 if let Err(err) = res {
-                    log::error!("Ethereum message sender failed: {}", err);
+                    attempts += 1;
+                    if common::is_transport_error_recoverable(&err) {
+                        log::warn!(
+                            "Ethereum message sender failed (attempt: {}/{}): {}. Retrying in {:?}",
+                            attempts,
+                            MAX_ATTEMPTS,
+                            err,
+                            base_delay * 2u32.pow(attempts)
+                        );
+
+                        if attempts >= MAX_ATTEMPTS {
+                            log::error!("Ethereum message sender failed too many times: {}", err);
+                            break;
+                        }
+
+                        tokio::time::sleep(base_delay * 2u32.pow(attempts)).await;
+                        match self.eth_api.reconnect().inspect_err(|e| {
+                            log::error!("Failed to reconnect to Ethereum: {}", e);
+                        }) {
+                            Ok(eth_api) => self.eth_api = eth_api,
+                            Err(_) => {
+                                break;
+                            }
+                        }
+                    } else {
+                        log::error!("Ethereum message sender failed: {}", err);
+                    }
                 }
             }
         });

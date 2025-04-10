@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, str::FromStr};
+use std::{future::Future, marker::PhantomData, str::FromStr};
 
 use alloy::{
     contract::Event,

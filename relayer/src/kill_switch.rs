@@ -12,7 +12,7 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
+    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -111,6 +111,11 @@ impl KillSwitchRelayer {
         self.spawn_block_finality_archiver()?;
 
         log::info!("Starting kill switch relayer");
+
+        let base_delay = Duration::from_secs(1);
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 5;
+
         loop {
             let now = Instant::now();
             let res = match &self.state {
@@ -121,7 +126,31 @@ impl KillSwitchRelayer {
             };
 
             if let Err(err) = res {
-                log::error!("{}", err);
+                if common::is_transport_error_recoverable(&err) {
+                    attempts += 1;
+                    log::warn!(
+                        "Main loop error: (attempt {}/{}): {}",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        err
+                    );
+                    if attempts > MAX_ATTEMPTS {
+                        log::error!("Max attempts reached, exiting ..");
+                        return Err(err);
+                    }
+                    log::warn!(
+                        "Retrying in {:?} seconds ..",
+                        base_delay * (attempts as u32)
+                    );
+                    tokio::time::sleep(base_delay * (attempts as u32)).await;
+                    self.eth_api = self
+                        .eth_api
+                        .reconnect()
+                        .map_err(|e| anyhow::anyhow!("Failed to reconnect: {}", e))?;
+                } else {
+                    log::error!("Fatal error, exiting ..");
+                    return Err(err);
+                }
             }
 
             let main_loop_duration = now.elapsed();

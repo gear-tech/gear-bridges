@@ -1,3 +1,4 @@
+use alloy::transports::{RpcError, TransportErrorKind};
 use prover::proving::GenesisConfig;
 
 use crate::{
@@ -86,4 +87,58 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
         .await?;
 
     Ok(tx_hash)
+}
+
+
+pub(crate) fn is_rpc_transport_error_recoverable(err: &RpcError<TransportErrorKind>) -> bool {
+    match err {
+        RpcError::Transport(transport) => match transport {
+            TransportErrorKind::MissingBatchResponse(_) => true,
+            TransportErrorKind::BackendGone => true,
+            TransportErrorKind::PubsubUnavailable => false,
+            TransportErrorKind::HttpError(_) => false,
+            TransportErrorKind::Custom(_) => false,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
+    if let Some(err) = err.downcast_ref::<ethereum_client::Error>() {
+        match err {
+            ethereum_client::Error::ErrorInHTTPTransport(err) => {
+                return is_rpc_transport_error_recoverable(err)
+            }
+            _ => (),
+        }
+    }
+
+    // raw provider calls return `RpcError`.
+    if let Some(err) = err.downcast_ref::<RpcError<TransportErrorKind>>() {
+        return is_rpc_transport_error_recoverable(err);
+    }
+
+    // sails calls return gclient error which can contain subxt error with rpc transport error
+    if let Some(err) = err.downcast_ref::<gclient::Error>() {
+        match err {
+            gclient::Error::Subxt(err) => {
+                if err.is_disconnected_will_reconnect() {
+                    return true;
+                }
+                match err {
+                    subxt::Error::Rpc(rpc) => match rpc {
+                        subxt::error::RpcError::SubscriptionDropped => return true,
+                        subxt::error::RpcError::DisconnectedWillReconnect(_) => return true,
+                        _ => (),
+                    },
+                    _ => (),
+                }
+            }
+
+            _ => (),
+        }
+    }
+
+    false
 }

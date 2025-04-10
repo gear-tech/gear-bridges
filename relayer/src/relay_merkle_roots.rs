@@ -8,7 +8,7 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
+    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -89,12 +89,42 @@ impl MerkleRootRelayer {
     pub async fn run(mut self) -> anyhow::Result<()> {
         log::info!("Starting relayer");
 
+        let base_delay = Duration::from_secs(1);
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 5;
         loop {
             let now = Instant::now();
             let res = self.main_loop().await;
 
             if let Err(err) = res {
-                log::error!("{}", err);
+                attempts += 1;
+                if common::is_transport_error_recoverable(&err) {
+                    log::warn!(
+                        "Main loop error (attempt {}/{}): {}. Retrying...",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        err
+                    );
+                    if attempts >= MAX_ATTEMPTS {
+                        log::error!("Max reconnection attempts reached. Exiting...");
+                        return Err(err.context("Max reconnection attempts reached"));
+                    }
+
+                    let delay = base_delay * 2u32.pow(attempts - 1);
+                    tokio::time::sleep(delay).await;
+
+                    self.eth_api = self
+                        .eth_api
+                        .reconnect()
+                        .inspect_err(|err| {
+                            log::error!("Failed to reconnect to Ethereum: {}", err);
+                        })
+                        .map_err(|err| anyhow::anyhow!(err))?;
+                    self.eras.update_eth_api(self.eth_api.clone());
+                } else {
+                    log::error!("Unrecoverable error in main loop: {}", err);
+                    return Err(err);
+                }
             }
 
             let main_loop_duration = now.elapsed();
@@ -360,6 +390,10 @@ impl Eras {
 
             metrics,
         })
+    }
+
+    fn update_eth_api(&mut self, eth_api: EthApi) {
+        self.eth_api = eth_api;
     }
 
     pub async fn process(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {

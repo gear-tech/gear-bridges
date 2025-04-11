@@ -88,10 +88,6 @@ vft-client = { path = "gear-programs/vft/client" }
 
 # Contracts' deps
 
-# Provides wasm binary
-extended-vft = { git = "https://github.com/gear-foundation/standards/", rev = "541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b" }
-extended-vft-client = { git = "https://github.com/gear-foundation/standards/", rev = "541cbf053c0c9df99bd2a00f3c13c5cfb702ab1b" }
-
 plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
 plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }

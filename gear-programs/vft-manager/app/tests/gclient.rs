@@ -142,7 +142,7 @@ fn average(array: &[u64]) -> u64 {
             let a = array[i - 1];
             let b = array[i];
 
-            a / 2 + b / 2 + a % 2 + b % 2
+            a / 2 + b / 2 + (a % 2 + b % 2) / 2
         }
 
         // odd

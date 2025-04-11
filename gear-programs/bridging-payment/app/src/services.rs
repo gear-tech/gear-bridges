@@ -1,10 +1,10 @@
 //! Bridging Payment service implementation.
 
+use gstd::{exec, static_mut, static_ref};
 use sails_rs::{
     gstd::{msg, ExecContext},
     prelude::*,
 };
-use gstd::{exec, static_mut, static_ref};
 
 /// Bridging Payment service.
 pub struct BridgingPayment<ExecContext> {

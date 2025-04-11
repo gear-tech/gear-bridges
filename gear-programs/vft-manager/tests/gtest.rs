@@ -1,7 +1,7 @@
 use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
-use vft_client::{traits::*, VftFactory as VftFactoryC, Vft as VftC, VftAdmin as VftAdminC};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
+use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_app::services::eth_abi::ERC20_MANAGER;
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
@@ -127,20 +127,20 @@ async fn setup_for_test() -> Fixture {
         .await
         .unwrap();
 
-        // Allocating underlying shards.
-        while vft_extension
-            .allocate_next_balances_shard()
-            .send_recv(eth_supply_vft)
-            .await
-            .expect("Failed to allocate next balances shard")
-        {}
-    
-        while vft_extension
-            .allocate_next_allowances_shard()
-            .send_recv(eth_supply_vft)
-            .await
-            .expect("Failed to allocate next allowances shard")
-        {}
+    // Allocating underlying shards.
+    while vft_extension
+        .allocate_next_balances_shard()
+        .send_recv(eth_supply_vft)
+        .await
+        .expect("Failed to allocate next balances shard")
+    {}
+
+    while vft_extension
+        .allocate_next_allowances_shard()
+        .send_recv(eth_supply_vft)
+        .await
+        .expect("Failed to allocate next allowances shard")
+    {}
 
     let mut vft = VftAdminC::new(remoting.clone());
     vft.set_minter(vft_manager_program_id)
@@ -194,8 +194,7 @@ async fn test_gear_supply_token() {
 
     let mut vft = VftAdminC::new(remoting.clone());
 
-    vft
-        .mint(account_id, amount)
+    vft.mint(account_id, amount)
         .send_recv(gear_supply_vft)
         .await
         .unwrap();

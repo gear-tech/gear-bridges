@@ -1,10 +1,10 @@
-use vft_client::traits::*;
+use gstd::{exec, static_mut, static_ref};
 use sails_rs::{
     calls::*,
     gstd::{calls::GStdRemoting, msg, ExecContext},
     prelude::*,
 };
-use gstd::{exec, static_mut, static_ref};
+use vft_client::traits::*;
 
 mod error;
 mod token_mapping;

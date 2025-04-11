@@ -1,6 +1,4 @@
 use anyhow::anyhow;
-use vft::WASM_BINARY as WASM_VFT;
-use vft_client::traits::*;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::{gas::GasInfo, ids::prelude::*};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
@@ -10,6 +8,8 @@ use sp_runtime::{
     MultiSignature,
 };
 use tokio::sync::Mutex;
+use vft::WASM_BINARY as WASM_VFT;
+use vft_client::traits::*;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, Order, TokenSupply};
 
@@ -193,10 +193,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    println!(
-        "program_id = {:?} (extended_vft)",
-        hex::encode(vft_id)
-    );
+    println!("program_id = {:?} (extended_vft)", hex::encode(vft_id));
 
     // Allocating underlying shards.
     let mut vft_extension = vft_client::VftExtension::new(remoting.clone());
@@ -254,9 +251,8 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     // about the allowance (e.g., by monitoring transactions or allowances on-chain)
     // and submits `request_bridging` to the VFT-manager on the user behalf. It is worth noting
     // that VFT-manager has burner role so is able to call burn functionality on any user funds.
-    let mut service = vft_manager_client::VftManager::new(
-        remoting.clone().with_suri(suri_unauthorized),
-    );
+    let mut service =
+        vft_manager_client::VftManager::new(remoting.clone().with_suri(suri_unauthorized));
     let reply = service
         .request_bridging(vft_id, amount, Default::default())
         .send(vft_manager_id)
@@ -632,10 +628,7 @@ async fn upgrade() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    println!(
-        "program_id = {:?} (extended_vft1)",
-        hex::encode(vft_id_1)
-    );
+    println!("program_id = {:?} (extended_vft1)", hex::encode(vft_id_1));
 
     // Allocating underlying shards.
     let mut vft_extension = vft_client::VftExtension::new(remoting.clone());
@@ -671,10 +664,7 @@ async fn upgrade() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    println!(
-        "program_id = {:?} (extended_vft2)",
-        hex::encode(vft_id_2)
-    );
+    println!("program_id = {:?} (extended_vft2)", hex::encode(vft_id_2));
 
     // Allocating underlying shards.
     while vft_extension

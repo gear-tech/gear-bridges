@@ -1,6 +1,6 @@
 use collections::btree_set::BTreeSet;
-use sails_rs::{gstd::ExecContext, prelude::*};
 use gstd::{static_mut, static_ref};
+use sails_rs::{gstd::ExecContext, prelude::*};
 
 use super::{error::Error, TokenSupply, VftManager};
 

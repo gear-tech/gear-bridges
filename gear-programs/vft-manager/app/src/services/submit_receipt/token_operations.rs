@@ -1,13 +1,9 @@
 use super::super::{Config, Error};
-use vft_client::{
-    vft::io::TransferFrom,
-    vft_admin::io::Mint,
-};
 use gstd::msg;
 use sails_rs::{calls::ActionIo, prelude::*};
+use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
 
-trait Reply
-{
+trait Reply {
     fn check(&self);
 }
 

@@ -85,7 +85,11 @@ async fn main() {
     let updater = Uploader::new(gear_api, minter, burner);
 
     match cli.command {
-        CliCommands::Vft(args) => updater.upload_vft(args.token_name, args.token_symbol, args.token_decimals,).await,
+        CliCommands::Vft(args) => {
+            updater
+                .upload_vft(args.token_name, args.token_symbol, args.token_decimals)
+                .await
+        }
 
         CliCommands::VftVara => updater.upload_vft_vara().await,
     }
@@ -99,12 +103,10 @@ struct Uploader {
 }
 
 impl Uploader {
-    fn new(api: GearApi, 
-        minter: Option<ActorId>,
-        burner: Option<ActorId>,
-    ) -> Self {
+    fn new(api: GearApi, minter: Option<ActorId>, burner: Option<ActorId>) -> Self {
         Self {
-            gas_limit: api.block_gas_limit()
+            gas_limit: api
+                .block_gas_limit()
                 .expect("Unable to get block gas limit"),
             api,
             minter,
@@ -112,15 +114,12 @@ impl Uploader {
         }
     }
 
-    async fn upload_code(
-        &self,
-        wasm_binary: &[u8],
-    ) -> CodeId {
+    async fn upload_code(&self, wasm_binary: &[u8]) -> CodeId {
         self.api
-                    .upload_code(wasm_binary)
-                    .await
-                    .map(|(code_id, ..)| code_id)
-                    .unwrap_or_else(|_| CodeId::generate(wasm_binary))
+            .upload_code(wasm_binary)
+            .await
+            .map(|(code_id, ..)| code_id)
+            .unwrap_or_else(|_| CodeId::generate(wasm_binary))
     }
 
     async fn upload_common(self, program_id: ActorId) {
@@ -187,13 +186,8 @@ impl Uploader {
         println!("Program deployed");
     }
 
-    async fn upload_vft(self, name: String,
-        symbol: String,
-        decimals: u8,
-    ) {
-        let code_id = self
-            .upload_code(vft::WASM_BINARY)
-            .await;
+    async fn upload_vft(self, name: String, symbol: String, decimals: u8) {
+        let code_id = self.upload_code(vft::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
 
         let factory = vft_client::VftFactory::new(GClientRemoting::new(self.api.clone()));
@@ -209,9 +203,7 @@ impl Uploader {
     }
 
     async fn upload_vft_vara(self) {
-        let code_id = self
-            .upload_code(vft_vara::WASM_BINARY)
-            .await;
+        let code_id = self.upload_code(vft_vara::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
 
         let factory = vft_vara_client::VftVaraFactory::new(GClientRemoting::new(self.api.clone()));

@@ -225,4 +225,4 @@ alloy = { version = "=0.5.2", package = "alloy", features = [
 ] }
 
 [patch."https://github.com/gear-tech/gear"]
-gsys = "1.7.1"
+gsys = "=1.7.1"

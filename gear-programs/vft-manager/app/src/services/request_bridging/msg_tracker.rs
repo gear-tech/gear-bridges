@@ -1,5 +1,5 @@
 use super::super::TokenSupply;
-use gstd::{prelude::collections::HashMap, MessageId, static_mut, static_ref};
+use gstd::{prelude::collections::HashMap, static_mut, static_ref, MessageId};
 use sails_rs::prelude::*;
 
 static mut MSG_TRACKER: Option<MessageTracker> = None;

@@ -6,8 +6,9 @@ use awesome_sails_services::{
         utils::{Allowances, Balances},
     },
     vft_admin::{
-        self, Authorities,
+        self,
         utils::{Pausable, Pause},
+        Authorities,
     },
     vft_extension,
     vft_metadata::{self, Metadata},

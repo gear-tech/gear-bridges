@@ -1,5 +1,5 @@
 [package]
-name = "wrapped-vara-client"
+name = "vft-vara-client"
 version.workspace = true
 edition.workspace = true
 
@@ -8,7 +8,7 @@ mockall = { workspace = true, optional = true }
 sails-rs.workspace = true
 
 [build-dependencies]
-wrapped-vara-app.workspace = true
+vft-vara-app.workspace = true
 sails-client-gen.workspace = true
 sails-idl-gen.workspace = true
 

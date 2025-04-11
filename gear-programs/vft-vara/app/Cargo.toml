@@ -1,0 +1,8 @@
+[package]
+name = "vft-vara-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+awesome-sails-services = { workspace = true, features = ["vft-native-exchange"] }
+sails-rs.workspace = true

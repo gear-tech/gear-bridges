@@ -1,11 +1,10 @@
 //! Bridging Payment service implementation.
 
+use gstd::{exec, static_mut, static_ref};
 use sails_rs::{
     gstd::{msg, ExecContext},
     prelude::*,
 };
-
-use gstd::exec;
 
 /// Bridging Payment service.
 pub struct BridgingPayment<ExecContext> {
@@ -53,13 +52,11 @@ where
     }
 
     fn state(&self) -> &State {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw const STATE).as_ref() }.expect("BridgingPayment::seed() should be called")
+        unsafe { static_ref!(STATE).as_ref() }.expect("BridgingPayment::seed() should be called")
     }
 
     fn state_mut(&mut self) -> &mut State {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw mut STATE).as_mut() }.expect("BridgingPayment::seed() should be called")
+        unsafe { static_mut!(STATE).as_mut() }.expect("BridgingPayment::seed() should be called")
     }
 }
 

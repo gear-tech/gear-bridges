@@ -393,7 +393,7 @@ impl GearApi {
 
         Ok(session_keys
             .into_iter()
-            .map(|sc| sc.1.grandpa.0 .0)
+            .map(|sc| sc.1.grandpa.0)
             .collect::<Vec<_>>())
     }
 

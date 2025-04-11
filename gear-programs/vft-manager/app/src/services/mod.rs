@@ -188,7 +188,7 @@ pub struct Config {
     /// Gas limit for gear-eth-bridge built-in actor request.
     gas_to_send_request_to_builtin: u64,
     /// Timeout in blocks that current program will wait for reply from
-    /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
+    /// the other programs such as VFT and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
     /// Fee to pay `gear-eth-bridge` built-in actor.
     fee_bridge: u128,

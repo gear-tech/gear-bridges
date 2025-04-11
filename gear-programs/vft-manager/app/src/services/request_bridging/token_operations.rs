@@ -215,22 +215,22 @@ fn handle_reply_hook(msg_id: MessageId) {
     };
 }
 
-/// Decode reply received from the `extended-vft::Burn` method.
+/// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
     Burn::decode_reply(bytes).map_err(|_| Error::BurnTokensDecode).map(|_| true)
 }
 
-/// Decode reply received from the `extended-vft::TransferFrom` method.
+/// Decode reply received from the TransferFrom method.
 fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
     TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }
 
-/// Decode reply received from the `extended-vft::Mint` method.
+/// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
     Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecode).map(|_| true)
 }
 
-/// Decode reply received from the `extended-vft::TransferFrom` method.
+/// Decode reply received from the TransferFrom method.
 fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
     TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }

@@ -19,11 +19,11 @@ pub enum Error {
     /// Message sent to the program failed.
     MessageFailed,
 
-    /// Failed to decode `extended-vft::Burn` reply.
+    /// Failed to decode Burn reply.
     BurnTokensDecode,
-    /// Failed to decode `extended-vft::TransferFrom` reply.
+    /// Failed to decode TransferFrom reply.
     TransferFromDecode,
-    /// Failed to decode `extended-vft::Mint` reply.
+    /// Failed to decode Mint reply.
     MintTokensDecode,
 
     /// Failed to decode payload from gear-eth-bridge built-in actor.

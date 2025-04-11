@@ -1,9 +1,10 @@
 use vft_client::traits::*;
 use sails_rs::{
     calls::*,
-    gstd::{self, calls::GStdRemoting, msg, ExecContext},
+    gstd::{calls::GStdRemoting, msg, ExecContext},
     prelude::*,
 };
+use gstd::{exec, static_mut, static_ref};
 
 mod error;
 mod token_mapping;
@@ -421,7 +422,7 @@ where
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let vft_manager = gstd::exec::program_id();
+        let vft_manager = exec::program_id();
         let mut service = vft_client::Vft::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {
@@ -442,7 +443,7 @@ where
             }
         }
 
-        gstd::exec::exit(vft_manager_new);
+        exec::exit(vft_manager_new);
     }
 
     /// Get state of a `request_bridging` message tracker.
@@ -628,19 +629,16 @@ where
 
     /// Get a reference to the global [State].
     fn state(&self) -> &State {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw const STATE).as_ref() }.expect("VftManager::seed() should be called")
+        unsafe { static_ref!(STATE).as_ref() }.expect("VftManager::seed() should be called")
     }
 
     /// Get a mutable reference to the global [State].
     fn state_mut(&mut self) -> &mut State {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw mut STATE).as_mut() }.expect("VftManager::seed() should be called")
+        unsafe { static_mut!(STATE).as_mut() }.expect("VftManager::seed() should be called")
     }
 
     /// Get a reference to the global [Config].
     fn config(&self) -> &Config {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw const CONFIG).as_ref() }.expect("VftManager::seed() should be called")
+        unsafe { static_ref!(CONFIG).as_ref() }.expect("VftManager::seed() should be called")
     }
 }

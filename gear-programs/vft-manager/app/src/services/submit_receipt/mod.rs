@@ -1,5 +1,6 @@
 use collections::btree_set::BTreeSet;
 use sails_rs::{gstd::ExecContext, prelude::*};
+use gstd::{static_mut, static_ref};
 
 use super::{error::Error, TokenSupply, VftManager};
 
@@ -16,14 +17,12 @@ const TX_HISTORY_DEPTH: usize = 50_000_000;
 
 /// Get reference to a transactions storage.
 pub fn transactions() -> &'static BTreeSet<(u64, u64)> {
-    #[allow(clippy::deref_addrof)]
-    unsafe { (*&raw const TRANSACTIONS).as_ref() }.expect("Program should be constructed")
+    unsafe { static_ref!(TRANSACTIONS).as_ref() }.expect("Program should be constructed")
 }
 
 /// Get mutable reference to a transactions storage.
 pub fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
-    #[allow(clippy::deref_addrof)]
-    unsafe { (*&raw mut TRANSACTIONS).as_mut() }.expect("Program should be constructed")
+    unsafe { static_mut!(TRANSACTIONS).as_mut() }.expect("Program should be constructed")
 }
 
 /// Initialize state that's used by this VFT Manager method.

@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 vft = { workspace = true, features = ["wasm-binary"] }
 vft-client.workspace = true
+vft-vara = { workspace = true, features = ["wasm-binary"] }
+vft-vara-client.workspace = true
 
 clap.workspace = true
 dotenv.workspace = true

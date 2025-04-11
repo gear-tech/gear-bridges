@@ -3032,6 +3032,8 @@ dependencies = [
  "tokio",
  "vft",
  "vft-client",
+ "vft-vara",
+ "vft-vara-client",
 ]
 
 [[package]]

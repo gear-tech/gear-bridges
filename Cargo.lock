@@ -15301,18 +15301,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vft-service"
-version = "0.3.0"
-dependencies = [
- "env_logger 0.9.3",
- "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest",
- "log",
- "sails-rs",
-]
-
-[[package]]
 name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16487,41 +16475,6 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "wrapped-vara"
-version = "0.3.0"
-dependencies = [
- "gclient",
- "gtest",
- "sails-client-gen",
- "sails-idl-gen",
- "sails-rs",
- "tokio",
- "wrapped-vara",
- "wrapped-vara-app",
- "wrapped-vara-client",
-]
-
-[[package]]
-name = "wrapped-vara-app"
-version = "0.3.0"
-dependencies = [
- "sails-client-gen",
- "sails-rs",
- "vft-service",
-]
-
-[[package]]
-name = "wrapped-vara-client"
-version = "0.3.0"
-dependencies = [
- "mockall 0.12.1",
- "sails-client-gen",
- "sails-idl-gen",
- "sails-rs",
- "wrapped-vara-app",
 ]
 
 [[package]]

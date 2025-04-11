@@ -14,7 +14,6 @@ members = [
     "gear-programs/vft-manager",
     "gear-programs/vft-manager/app",
     "gear-programs/vft-manager/client",
-    "gear-programs/vft-service",
     "gear-programs/*",
     "gear-programs/checkpoint-light-client/app",
     "gear-programs/checkpoint-light-client/client",
@@ -22,9 +21,6 @@ members = [
     "gear-programs/eth-events-deneb/client",
     "gear-programs/eth-events-electra/app",
     "gear-programs/eth-events-electra/client",
-    "gear-programs/wrapped-vara",
-    "gear-programs/wrapped-vara/app",
-    "gear-programs/wrapped-vara/client",
     "gear-programs/historical-proxy",
     "gear-programs/historical-proxy/app",
     "gear-programs/historical-proxy/client",
@@ -77,11 +73,6 @@ eth-events-electra-client = { path = "gear-programs/eth-events-electra/client" }
 historical-proxy-app = { path = "gear-programs/historical-proxy/app" }
 historical-proxy-client = { path = "gear-programs/historical-proxy/client" }
 historical-proxy = { path = "gear-programs/historical-proxy" }
-
-wrapped-vara = { path = "gear-programs/wrapped-vara" }
-wrapped-vara-app = { path = "gear-programs/wrapped-vara/app" }
-wrapped-vara-client = { path = "gear-programs/wrapped-vara/client" }
-vft-service = { path = "gear-programs/vft-service" }
 vft = { path = "gear-programs/vft" }
 vft-app = { path = "gear-programs/vft/app" }
 vft-client = { path = "gear-programs/vft/client" }

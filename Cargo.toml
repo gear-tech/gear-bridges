@@ -26,6 +26,8 @@ members = [
     "gear-programs/historical-proxy/client",
     "gear-programs/vft/app",
     "gear-programs/vft/client",
+    "gear-programs/vft-vara/app",
+    "gear-programs/vft-vara/client",
     "utils-prometheus",
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
@@ -76,6 +78,9 @@ historical-proxy = { path = "gear-programs/historical-proxy" }
 vft = { path = "gear-programs/vft" }
 vft-app = { path = "gear-programs/vft/app" }
 vft-client = { path = "gear-programs/vft/client" }
+vft-vara = { path = "gear-programs/vft-vara" }
+vft-vara-app = { path = "gear-programs/vft-vara/app" }
+vft-vara-client = { path = "gear-programs/vft-vara/client" }
 
 # Contracts' deps
 

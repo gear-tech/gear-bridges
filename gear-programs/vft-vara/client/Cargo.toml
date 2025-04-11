@@ -1,0 +1,16 @@
+[package]
+name = "vft-vara-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mockall = { workspace = true, optional = true }
+sails-rs.workspace = true
+
+[build-dependencies]
+vft-vara-app.workspace = true
+sails-client-gen.workspace = true
+sails-idl-gen.workspace = true
+
+[features]
+mocks = ["sails-rs/mockall", "dep:mockall"]

@@ -1488,6 +1488,7 @@ dependencies = [
  "awesome-sails-vft-admin-service",
  "awesome-sails-vft-extension-service",
  "awesome-sails-vft-metadata-service",
+ "awesome-sails-vft-native-exchange-service",
  "awesome-sails-vft-service",
 ]
 
@@ -1519,6 +1520,16 @@ version = "0.1.0"
 source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
 dependencies = [
  "awesome-sails",
+ "sails-rs",
+]
+
+[[package]]
+name = "awesome-sails-vft-native-exchange-service"
+version = "0.1.0"
+source = "git+https://github.com/gear-tech/awesome-sails?tag=v0.1.0#e427bd6992fc64d7213588acefad036fb8c513fd"
+dependencies = [
+ "awesome-sails",
+ "awesome-sails-vft-service",
  "sails-rs",
 ]
 
@@ -15298,6 +15309,34 @@ dependencies = [
  "sails-idl-gen",
  "sails-rs",
  "vft-manager-app",
+]
+
+[[package]]
+name = "vft-vara"
+version = "0.3.0"
+dependencies = [
+ "sails-idl-gen",
+ "sails-rs",
+ "vft-vara-app",
+]
+
+[[package]]
+name = "vft-vara-app"
+version = "0.3.0"
+dependencies = [
+ "awesome-sails-services",
+ "sails-rs",
+]
+
+[[package]]
+name = "vft-vara-client"
+version = "0.3.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+ "vft-vara-app",
 ]
 
 [[package]]

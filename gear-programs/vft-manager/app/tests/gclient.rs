@@ -825,7 +825,8 @@ async fn update_vfts() -> Result<()> {
     let api = api.with(suri).unwrap();
 
     // deploy VFT-manager
-    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let remoting = GClientRemoting::new(api.clone());
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
         .new(InitConfig {
             erc20_manager_address: Default::default(),
@@ -893,7 +894,7 @@ async fn update_vfts() -> Result<()> {
     println!("program_id = {:?} (vft)", hex::encode(vft));
 
     // deploy Vara Fungible Token
-    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let factory = vft_client::VftFactory::new(remoting.clone());
     let extended_vft_id_1 = factory
         .new("TEST_TOKEN1".into(), "TT1".into(), 20)
         .with_gas_limit(gas_limit)
@@ -907,7 +908,7 @@ async fn update_vfts() -> Result<()> {
     );
 
     // deploy another Vara Fungible Token
-    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let factory = vft_client::VftFactory::new(remoting.clone());
     let extended_vft_id_2 = factory
         .new("TEST_TOKEN2".into(), "TT2".into(), 20)
         .with_gas_limit(gas_limit)
@@ -920,7 +921,7 @@ async fn update_vfts() -> Result<()> {
         hex::encode(extended_vft_id_2)
     );
 
-    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
         .map_vara_to_eth_address(vft, [1u8; 20].into(), TokenSupply::Gear)
         .with_gas_limit(gas_limit)

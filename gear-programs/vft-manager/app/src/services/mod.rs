@@ -188,6 +188,8 @@ pub struct Config {
     gas_for_reply_deposit: u64,
     /// Gas limit for gear-eth-bridge built-in actor request.
     gas_to_send_request_to_builtin: u64,
+    /// Required gas to commit changes in [VftManager::update_vfts].
+    gas_for_swap_token_maps: u64,
     /// Timeout in blocks that current program will wait for reply from
     /// the other programs such as VFT and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
@@ -446,6 +448,16 @@ where
         exec::exit(vft_manager_new);
     }
 
+    pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
+        self.ensure_admin();
+
+        let gas_required = self.config().gas_for_swap_token_maps;
+        self.state_mut()
+            .token_map
+            .update_vfts(gas_required, vft_map)
+            .await
+    }
+
     /// Get state of a `request_bridging` message tracker.
     pub fn request_briding_msg_tracker_state(
         &self,
@@ -591,6 +603,22 @@ where
                     .await
                 }
             }
+        }
+
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
+    }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
+    /// is enabled.
+    ///
+    /// Swaps internal hash maps of the TokenMap instance.
+    pub async fn calculate_gas_for_token_map_swap(&mut self) {
+        #[cfg(feature = "mocks")]
+        {
+            self.state_mut()
+                .token_map
+                .calculate_gas_for_token_map_swap()
         }
 
         #[cfg(not(feature = "mocks"))]

@@ -7,6 +7,7 @@ use sp_runtime::{
     traits::{IdentifyAccount, Verify},
     MultiSignature,
 };
+use std::collections::HashMap;
 use tokio::sync::Mutex;
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
@@ -171,6 +172,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
                 gas_for_token_ops: 10_000_000_000,
                 gas_for_reply_deposit: 10_000_000_000,
                 gas_to_send_request_to_builtin: 10_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
                 fee_bridge: 0,
                 fee_incoming: 0,
@@ -308,6 +310,7 @@ async fn bench_gas_for_reply() -> Result<()> {
                     gas_for_token_ops: 20_000_000_000,
                     gas_for_reply_deposit: 10_000_000_000,
                     gas_to_send_request_to_builtin: 20_000_000_000,
+                    gas_for_swap_token_maps: 1_500_000_000,
                     reply_timeout: 100,
                     fee_bridge: 0,
                     fee_incoming: 0,
@@ -423,6 +426,7 @@ async fn getter_transactions() -> Result<()> {
                     gas_for_token_ops: 20_000_000_000,
                     gas_for_reply_deposit: 10_000_000_000,
                     gas_to_send_request_to_builtin: 20_000_000_000,
+                    gas_for_swap_token_maps: 1_500_000_000,
                     reply_timeout: 100,
                     fee_bridge: 0,
                     fee_incoming: 0,
@@ -502,6 +506,7 @@ async fn msg_tracker_state() -> Result<()> {
                 gas_for_token_ops: 20_000_000_000,
                 gas_for_reply_deposit: 10_000_000_000,
                 gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
                 fee_bridge: 0,
                 fee_incoming: 0,
@@ -584,6 +589,7 @@ async fn upgrade() -> Result<()> {
                 gas_for_token_ops: 20_000_000_000,
                 gas_for_reply_deposit: 10_000_000_000,
                 gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
                 reply_timeout: 100,
                 fee_bridge: 0,
                 fee_incoming: 0,
@@ -716,6 +722,278 @@ async fn upgrade() -> Result<()> {
     assert!(result.is_err(), "result = {result:?}");
     let error = format!("{result:?}");
     assert!(error.contains("InactiveProgram"));
+
+    Ok(())
+}
+
+#[ignore = "Used to benchmark gas usage for swapping collections of TokenMap"]
+#[tokio::test]
+async fn bench_gas_for_token_map_swap() -> Result<()> {
+    const COUNT: usize = 1_000;
+
+    let (api, _suri, _suri2, code_id, _code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with("//Bob").unwrap();
+
+    // deploy VFT-manager
+    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let vft_manager_id = factory
+        .new(InitConfig {
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    for i in 0..10 {
+        let supply_type = match i > 0 {
+            true => TokenSupply::Ethereum,
+            false => TokenSupply::Gear,
+        };
+
+        service
+            .map_vara_to_eth_address([i; 32].into(), [i; 20].into(), supply_type)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap();
+    }
+
+    println!("prepared");
+
+    let mut results_burned = Vec::with_capacity(COUNT);
+    let mut results_min_limit = Vec::with_capacity(COUNT);
+
+    let account: &[u8; 32] = api.account_id().as_ref();
+    let origin = H256::from_slice(account);
+
+    for _i in 0..COUNT {
+        let gas_info = api
+            .calculate_handle_gas(
+                Some(origin),
+                vft_manager_id,
+                vft_manager_client::vft_manager::io::CalculateGasForTokenMapSwap::ROUTE.to_vec(),
+                0,
+                true,
+            )
+            .await
+            .unwrap();
+
+        results_burned.push(gas_info.burned);
+        results_min_limit.push(gas_info.min_limit);
+    }
+
+    results_burned.sort_unstable();
+    results_min_limit.sort_unstable();
+
+    println!(
+        "burned: min = {:?}, max = {:?}, average = {}",
+        results_burned.first(),
+        results_burned.last(),
+        average(&results_burned[..])
+    );
+    println!(
+        "min_limit: min = {:?}, max = {:?}, average = {}",
+        results_min_limit.first(),
+        results_min_limit.last(),
+        average(&results_min_limit[..])
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn update_vfts() -> Result<()> {
+    let (api, suri, suri2, code_id, code_id_vft, gas_limit, salt) = connect_to_node().await?;
+    let api = api.with(suri).unwrap();
+
+    // deploy VFT-manager
+    let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
+    let vft_manager_id = factory
+        .new(InitConfig {
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    // non-authorized user cannot update VFT-addresses
+    let api_unauthorized = api.clone().with(suri2).unwrap();
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized));
+    let result = service
+        .update_vfts([].to_vec())
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err());
+
+    // deploy another VFT-manager that used as an upgraded VFT
+    let salt2 = {
+        let mut salt_new = Vec::with_capacity(2 * salt.len());
+
+        salt_new.extend_from_slice(&salt);
+        salt_new.extend_from_slice(&salt);
+
+        salt_new
+    };
+    let vft = factory
+        .new(InitConfig {
+            erc20_manager_address: Default::default(),
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt2.clone())
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft)", hex::encode(vft));
+
+    // deploy Vara Fungible Token
+    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let extended_vft_id_1 = factory
+        .new("TEST_TOKEN1".into(), "TT1".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (extended_vft1)",
+        hex::encode(extended_vft_id_1)
+    );
+
+    // deploy another Vara Fungible Token
+    let factory = extended_vft_client::ExtendedVftFactory::new(GClientRemoting::new(api.clone()));
+    let extended_vft_id_2 = factory
+        .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, salt2)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (extended_vft2)",
+        hex::encode(extended_vft_id_2)
+    );
+
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    service
+        .map_vara_to_eth_address(vft, [1u8; 20].into(), TokenSupply::Gear)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+    service
+        .map_vara_to_eth_address(extended_vft_id_1, [2u8; 20].into(), TokenSupply::Ethereum)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+    service
+        .map_vara_to_eth_address(extended_vft_id_2, [3u8; 20].into(), TokenSupply::Ethereum)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    // pause the VftManager
+    service
+        .pause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft)
+        .await
+        .unwrap();
+
+    // upgrade the VftManager so it exits
+    service
+        .upgrade(Default::default())
+        .with_gas_limit(gas_limit)
+        .send(vft)
+        .await
+        .unwrap();
+
+    service
+        .update_vfts(
+            [
+                // upgraded "VFT"
+                (vft, Default::default()),
+                // the VFT isn't upgraded so should stay the same
+                (extended_vft_id_1, [1u8; 32].into()),
+            ]
+            .to_vec(),
+        )
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    let mut expected: HashMap<_, _> = [
+        (
+            ActorId::default(),
+            (H160::from([1u8; 20]), TokenSupply::Gear),
+        ),
+        (extended_vft_id_1, ([2u8; 20].into(), TokenSupply::Ethereum)),
+        (extended_vft_id_2, ([3u8; 20].into(), TokenSupply::Ethereum)),
+    ]
+    .into();
+    for (vft, erc20, supply) in service
+        .vara_to_eth_addresses()
+        .with_gas_limit(gas_limit)
+        .recv(vft_manager_id)
+        .await
+        .unwrap()
+        .into_iter()
+    {
+        let (expected_erc20, expected_supply) = expected.remove(&vft).unwrap();
+        assert_eq!(expected_erc20, erc20);
+        assert_eq!(expected_supply, supply);
+    }
+
+    assert!(expected.is_empty());
 
     Ok(())
 }

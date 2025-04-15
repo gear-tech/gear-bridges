@@ -209,7 +209,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 text={getButtonText()}
                 disabled={!isEnoughBalance()}
                 isLoading={
-                  approve.isLoading ||
                   submit.isPending ||
                   accountBalance.isLoading ||
                   ftBalance.isLoading ||

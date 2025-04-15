@@ -14,7 +14,7 @@ function useFTSymbols(addresses: FTAddressPair[] | undefined) {
   const readVaraSymbol = (address: HexString) => {
     if (!api) throw new Error('Api is not initialized');
 
-    return new VftProgram(api, address).vft.symbol();
+    return new VftProgram(api, address).vftMetadata.symbol();
   };
 
   const readEthSymbol = (address: HexString) =>

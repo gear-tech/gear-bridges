@@ -38,8 +38,7 @@ type UseHandleSubmit = (
       isSuccess: boolean;
       error: Error | null;
     },
-    { isPending: boolean; isLoading?: boolean; error: Error | null },
-    { isPending: boolean; error: Error | null }?,
+    { isPending: boolean; error: Error | null },
   ]
 >;
 

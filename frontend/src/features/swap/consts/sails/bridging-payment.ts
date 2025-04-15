@@ -2,20 +2,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { GearApi, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, H160, ActorId, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import { TransactionBuilder, ActorId, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 
-export interface InitConfig {
+export interface State {
+  /**
+   * Admin of this service. Admin is in charge of:
+   * - Changing fee
+   * - Withdrawing collected fees from the program address
+   * - Updating [State] of this service
+   */
   admin_address: ActorId;
-  vft_manager_address: ActorId;
-  config: Config;
-}
-
-export interface Config {
+  /**
+   * Fee amount that will be charged from users.
+   */
   fee: number | string | bigint;
-  gas_for_reply_deposit: number | string | bigint;
-  gas_to_send_request_to_vft_manager: number | string | bigint;
-  reply_timeout: number;
-  gas_for_request_to_vft_manager_msg: number | string | bigint;
 }
 
 export class Program {
@@ -24,17 +24,10 @@ export class Program {
 
   constructor(
     public api: GearApi,
-    public programId?: `0x${string}`,
+    private _programId?: `0x${string}`,
   ) {
     const types: Record<string, any> = {
-      InitConfig: { admin_address: '[u8;32]', vft_manager_address: '[u8;32]', config: 'Config' },
-      Config: {
-        fee: 'u128',
-        gas_for_reply_deposit: 'u64',
-        gas_to_send_request_to_vft_manager: 'u64',
-        reply_timeout: 'u32',
-        gas_for_request_to_vft_manager_msg: 'u64',
-      },
+      State: { admin_address: '[u8;32]', fee: 'u128' },
     };
 
     this.registry = new TypeRegistry();
@@ -44,33 +37,44 @@ export class Program {
     this.bridgingPayment = new BridgingPayment(this);
   }
 
-  newCtorFromCode(code: Uint8Array | Buffer, init_config: InitConfig): TransactionBuilder<null> {
+  public get programId(): `0x${string}` {
+    if (!this._programId) throw new Error(`Program ID is not set`);
+    return this._programId;
+  }
+
+  /**
+   * Create Bridging Payment program.
+   */
+  newCtorFromCode(code: Uint8Array | Buffer, initial_state: State): TransactionBuilder<null> {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
       'upload_program',
-      ['New', init_config],
-      '(String, InitConfig)',
+      ['New', initial_state],
+      '(String, State)',
       'String',
       code,
     );
 
-    this.programId = builder.programId;
+    this._programId = builder.programId;
     return builder;
   }
 
-  newCtorFromCodeId(codeId: `0x${string}`, init_config: InitConfig) {
+  /**
+   * Create Bridging Payment program.
+   */
+  newCtorFromCodeId(codeId: `0x${string}`, initial_state: State) {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
       'create_program',
-      ['New', init_config],
-      '(String, InitConfig)',
+      ['New', initial_state],
+      '(String, State)',
       'String',
       codeId,
     );
 
-    this.programId = builder.programId;
+    this._programId = builder.programId;
     return builder;
   }
 }
@@ -78,23 +82,32 @@ export class Program {
 export class BridgingPayment {
   constructor(private _program: Program) {}
 
-  public makeRequest(
-    amount: number | string | bigint,
-    receiver: H160,
-    vara_token_id: ActorId,
-  ): TransactionBuilder<null> {
+  /**
+   * Pay fees for message processing to the admin.
+   *
+   * This method requires that **exactly** [Config::fee] must
+   * be attached as a value when sending message to this method.
+   *
+   * Current fee amount can be retreived by calling `get_state`.
+   */
+  public payFees(nonce: number | string | bigint): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'MakeRequest', amount, receiver, vara_token_id],
-      '(String, String, U256, H160, [u8;32])',
+      ['BridgingPayment', 'PayFees', nonce],
+      '(String, String, U256)',
       'Null',
       this._program.programId,
     );
   }
 
+  /**
+   * Withdraw fees that were collected from user requests.
+   *
+   * This method can be called only by admin.
+   */
   public reclaimFee(): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -108,19 +121,29 @@ export class BridgingPayment {
     );
   }
 
-  public setConfig(config: Config): TransactionBuilder<null> {
+  /**
+   * Set new admin.
+   *
+   * This method can be called only by admin.
+   */
+  public setAdmin(new_admin: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'SetConfig', config],
-      '(String, String, Config)',
+      ['BridgingPayment', 'SetAdmin', new_admin],
+      '(String, String, [u8;32])',
       'Null',
       this._program.programId,
     );
   }
 
+  /**
+   * Set fee that this program will take from incoming requests.
+   *
+   * This method can be called only by admin.
+   */
   public setFee(fee: number | string | bigint): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -134,27 +157,17 @@ export class BridgingPayment {
     );
   }
 
-  public updateVftManagerAddress(new_vft_manager_address: ActorId): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      ['BridgingPayment', 'UpdateVftManagerAddress', new_vft_manager_address],
-      '(String, String, [u8;32])',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public async adminAddress(
+  /**
+   * Get current service [State].
+   */
+  public async getState(
     originAddress?: string,
     value?: number | string | bigint,
     atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['BridgingPayment', 'AdminAddress']).toHex();
+  ): Promise<State> {
+    const payload = this._program.registry.createType('(String, String)', ['BridgingPayment', 'GetState']).toHex();
     const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId!,
+      destination: this._program.programId,
       origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
       payload,
       value: value || 0,
@@ -162,58 +175,15 @@ export class BridgingPayment {
       at: atBlock,
     });
     if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+    const result = this._program.registry.createType('(String, String, State)', reply.payload);
+    return result[2].toJSON() as unknown as State;
   }
 
-  public async getConfig(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Config> {
-    const payload = this._program.registry.createType('(String, String)', ['BridgingPayment', 'GetConfig']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId!,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
-    const result = this._program.registry.createType('(String, String, Config)', reply.payload);
-    return result[2].toJSON() as unknown as Config;
-  }
-
-  public async vftManagerAddress(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry
-      .createType('(String, String)', ['BridgingPayment', 'VftManagerAddress'])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId!,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
-  }
-
-  public subscribeToTeleportVaraToEthEvent(
-    callback: (data: {
-      nonce: number | string | bigint;
-      sender: ActorId;
-      amount: number | string | bigint;
-      receiver: H160;
-      eth_token_id: H160;
-    }) => void | Promise<void>,
+  /**
+   * Fee for the message processing by relayer was paid.
+   */
+  public subscribeToBridgingPaidEvent(
+    callback: (data: { nonce: number | string | bigint }) => void | Promise<void>,
   ): Promise<() => void> {
     return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
@@ -221,20 +191,11 @@ export class BridgingPayment {
       }
 
       const payload = message.payload.toHex();
-      if (getServiceNamePrefix(payload) === 'BridgingPayment' && getFnNamePrefix(payload) === 'TeleportVaraToEth') {
+      if (getServiceNamePrefix(payload) === 'BridgingPayment' && getFnNamePrefix(payload) === 'BridgingPaid') {
         callback(
           this._program.registry
-            .createType(
-              '(String, String, {"nonce":"U256","sender":"[u8;32]","amount":"U256","receiver":"H160","eth_token_id":"H160"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as {
-            nonce: number | string | bigint;
-            sender: ActorId;
-            amount: number | string | bigint;
-            receiver: H160;
-            eth_token_id: H160;
-          },
+            .createType('(String, String, {"nonce":"U256"})', message.payload)[2]
+            .toJSON() as unknown as { nonce: number | string | bigint },
         );
       }
     });

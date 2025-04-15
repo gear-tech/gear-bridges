@@ -1,7 +1,7 @@
 use collections::HashMap;
-use extended_vft_client::traits::Vft;
 use gstd::errors::{Error as GStdError, ErrorReplyReason};
 use sails_rs::{calls::*, errors::Error as SailsError, gstd::calls::GStdRemoting, prelude::*};
+use vft_client::traits::Vft;
 
 use super::{error::Error, TokenSupply};
 
@@ -116,7 +116,7 @@ impl TokenMap {
         let mut eth_to_vara = HashMap::with_capacity(vara_to_eth.len());
 
         let vft_manager = gstd::exec::program_id();
-        let service = extended_vft_client::Vft::new(GStdRemoting);
+        let service = vft_client::Vft::new(GStdRemoting);
         for (vft, (erc20, supply)) in &self.vara_to_eth {
             let vft_new = match vft_map
                 .iter()

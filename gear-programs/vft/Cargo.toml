@@ -1,0 +1,15 @@
+[package]
+name = "vft"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vft-app.workspace = true
+
+[build-dependencies]
+vft-app.workspace = true
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
+
+[features]
+wasm-binary = []

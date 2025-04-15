@@ -2,6 +2,15 @@ import { HexString } from '@gear-js/api';
 
 import { Skeleton } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import {
+  WRAPPED_ETH_CONTRACT_ADDRESS,
+  WRAPPED_USDC_CONTRACT_ADDRESS,
+  WRAPPED_USDT_CONTRACT_ADDRESS,
+  ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
+  ETH_WRAPPED_VARA_CONTRACT_ADDRESS,
+  USDC_CONTRACT_ADDRESS,
+  USDT_CONTRACT_ADDRESS,
+} from '@/consts/env';
 import { cx, isUndefined } from '@/utils';
 
 import { TOKEN_ID, TokenId, useTokenPrices } from '../../api';
@@ -19,9 +28,14 @@ type Props = AddressProps | IdProps;
 
 const TOKEN_ADDRESS_ID = {
   [WRAPPED_VARA_CONTRACT_ADDRESS]: TOKEN_ID.VARA,
-  '0x01': TOKEN_ID.ETH,
-  '0x02': TOKEN_ID.USDC,
-  '0x03': TOKEN_ID.USDT,
+  [WRAPPED_ETH_CONTRACT_ADDRESS]: TOKEN_ID.ETH,
+  [WRAPPED_USDC_CONTRACT_ADDRESS]: TOKEN_ID.USDC,
+  [WRAPPED_USDT_CONTRACT_ADDRESS]: TOKEN_ID.USDT,
+
+  [ETH_WRAPPED_ETH_CONTRACT_ADDRESS]: TOKEN_ID.ETH,
+  [ETH_WRAPPED_VARA_CONTRACT_ADDRESS]: TOKEN_ID.VARA,
+  [USDC_CONTRACT_ADDRESS]: TOKEN_ID.USDC,
+  [USDT_CONTRACT_ADDRESS]: TOKEN_ID.USDT,
 } as const;
 
 const round = (value: number) => Number(value.toFixed(3));

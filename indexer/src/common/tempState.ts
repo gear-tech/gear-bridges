@@ -81,7 +81,9 @@ export class TempState {
   }
 
   private async _getCompleted() {
-    const completed = await this._ctx.store.find(CompletedTransfer, { where: { destNetwork: this._network } });
+    const completed = await this._ctx.store.find(CompletedTransfer, {
+      where: { destNetwork: this._network },
+    });
 
     for (const c of completed) {
       this._completed.set(c.nonce, c);
@@ -127,16 +129,35 @@ export class TempState {
     transfer.receiver = transfer.receiver.toLowerCase();
     transfer.nonce = transfer.nonce;
     this._transfers.set(transfer.nonce, transfer);
-
+    
     this._ctx.log.info(`Transfer requested: ${transfer.nonce}`);
   }
 
   public transferCompleted(nonce: string, ts: Date) {
     this._completed.set(
       nonce,
-      new CompletedTransfer({ id: randomUUID(), nonce, destNetwork: this._network, timestamp: ts }),
+      new CompletedTransfer({
+        id: randomUUID(),
+        nonce,
+        destNetwork: this._network,
+        timestamp: ts,
+      }),
     );
     this._ctx.log.info(`Transfer completed: ${nonce}`);
+  }
+
+  public async transferStatus(nonce: string, status: Status) {
+    if (this._transfers.has(nonce)) {
+      this._transfers.get(nonce)!.status = status;
+    } else {
+      const transfer = await this._ctx.store.findOneBy(Transfer, { nonce });
+      if (!transfer) {
+        this._ctx.log.error(`Failed to update status for ${nonce}`);
+        return;
+      }
+      this._transfers.set(nonce, transfer);
+    }
+    this._ctx.log.info(`Transfer changed status: ${status}`);
   }
 
   private _getTransfers(nonces: string[]) {

@@ -75,7 +75,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const [submit, approve] = useHandleSubmit(
+  const [submit, approve, payFee] = useHandleSubmit(
     address,
     fee.value,
     allowance.data,
@@ -137,7 +137,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     return <TokenPrice address={varaAddress} amount={amount} />;
   };
 
-  const renderProgressBar = () => <SubmitProgressBar approve={approve} submit={submit} />;
+  const renderProgressBar = () => <SubmitProgressBar approve={approve} submit={submit} payFee={payFee} />;
 
   return (
     <>
@@ -209,6 +209,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 text={getButtonText()}
                 disabled={!isEnoughBalance()}
                 isLoading={
+                  payFee?.isPending ||
                   submit.isPending ||
                   accountBalance.isLoading ||
                   ftBalance.isLoading ||

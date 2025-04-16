@@ -39,6 +39,7 @@ type UseHandleSubmit = (
       error: Error | null;
     },
     { isPending: boolean; error: Error | null },
+    { isPending: boolean; error: Error | null }?,
   ]
 >;
 

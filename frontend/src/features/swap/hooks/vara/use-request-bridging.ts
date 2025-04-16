@@ -1,14 +1,8 @@
-import { useProgram, usePrepareProgramTransaction, useSendProgramTransaction, useApi } from '@gear-js/react-hooks';
+import { useProgram, usePrepareProgramTransaction, useSendProgramTransaction } from '@gear-js/react-hooks';
 
 import { VFT_MANAGER_CONTRACT_ADDRESS, VftManagerProgram } from '@/consts';
 
-function useTransferGasLimit() {
-  const { api } = useApi();
-
-  return api?.blockGasLimit.toBigInt();
-}
-
-function useTransfer() {
+function useRequestBridging() {
   const { data: program } = useProgram({
     library: VftManagerProgram,
     id: VFT_MANAGER_CONTRACT_ADDRESS,
@@ -21,4 +15,4 @@ function useTransfer() {
   return { ...send, prepareTransactionAsync };
 }
 
-export { useTransferGasLimit, useTransfer };
+export { useRequestBridging };

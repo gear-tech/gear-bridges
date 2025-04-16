@@ -110,7 +110,9 @@ impl CheckpointsExtractor {
             .await?;
 
         let state: <io::Get as ActionIo>::Reply = match reply_info.code {
-            ReplyCode::Success(_) => Decode::decode(&mut &reply_info.payload[..])?,
+            ReplyCode::Success(_) => {
+                Decode::decode(&mut &reply_info.payload[io::Get::ROUTE.len()..])?
+            }
             ReplyCode::Error(reason) => Err(anyhow!("Failed to query state, reason: {reason:?}"))?,
             ReplyCode::Unsupported => Err(anyhow!("Failed to query state"))?,
         };

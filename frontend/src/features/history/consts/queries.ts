@@ -16,6 +16,7 @@ const TRANSFERS_QUERY = graphql(`
       sourceNetwork
       status
       timestamp
+      nonce
     }
   }
 `);

@@ -1,4 +1,3 @@
-/* eslint-disable */
 import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/core';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
@@ -9,15 +8,15 @@ export type MakeEmpty<T extends { [key: string]: unknown }, K extends keyof T> =
 export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
 /** All built-in and custom scalars, mapped to their actual values */
 export type Scalars = {
-  ID: { input: string; output: string; }
-  String: { input: string; output: string; }
-  Boolean: { input: boolean; output: boolean; }
-  Int: { input: number; output: number; }
-  Float: { input: number; output: number; }
+  ID: { input: string; output: string };
+  String: { input: string; output: string };
+  Boolean: { input: boolean; output: boolean };
+  Int: { input: number; output: number };
+  Float: { input: number; output: number };
   /** Big number integer */
-  BigInt: { input: string; output: string; }
+  BigInt: { input: string; output: string };
   /** A date-time string in simplified extended ISO 8601 format (YYYY-MM-DDTHH:mm:ss.sssZ) */
-  DateTime: { input: string; output: string; }
+  DateTime: { input: string; output: string };
 };
 
 export type CompletedTransfer = {
@@ -25,6 +24,7 @@ export type CompletedTransfer = {
   destNetwork: Network;
   id: Scalars['String']['output'];
   nonce: Scalars['String']['output'];
+  timestamp: Maybe<Scalars['DateTime']['output']>;
 };
 
 export type CompletedTransferEdge = {
@@ -51,7 +51,13 @@ export enum CompletedTransferOrderByInput {
   NonceAscNullsLast = 'nonce_ASC_NULLS_LAST',
   NonceDesc = 'nonce_DESC',
   NonceDescNullsFirst = 'nonce_DESC_NULLS_FIRST',
-  NonceDescNullsLast = 'nonce_DESC_NULLS_LAST'
+  NonceDescNullsLast = 'nonce_DESC_NULLS_LAST',
+  TimestampAsc = 'timestamp_ASC',
+  TimestampAscNullsFirst = 'timestamp_ASC_NULLS_FIRST',
+  TimestampAscNullsLast = 'timestamp_ASC_NULLS_LAST',
+  TimestampDesc = 'timestamp_DESC',
+  TimestampDescNullsFirst = 'timestamp_DESC_NULLS_FIRST',
+  TimestampDescNullsLast = 'timestamp_DESC_NULLS_LAST',
 }
 
 export type CompletedTransferWhereInput = {
@@ -96,6 +102,15 @@ export type CompletedTransferWhereInput = {
   nonce_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   nonce_not_startsWith: InputMaybe<Scalars['String']['input']>;
   nonce_startsWith: InputMaybe<Scalars['String']['input']>;
+  timestamp_eq: InputMaybe<Scalars['DateTime']['input']>;
+  timestamp_gt: InputMaybe<Scalars['DateTime']['input']>;
+  timestamp_gte: InputMaybe<Scalars['DateTime']['input']>;
+  timestamp_in: InputMaybe<Array<Scalars['DateTime']['input']>>;
+  timestamp_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  timestamp_lt: InputMaybe<Scalars['DateTime']['input']>;
+  timestamp_lte: InputMaybe<Scalars['DateTime']['input']>;
+  timestamp_not_eq: InputMaybe<Scalars['DateTime']['input']>;
+  timestamp_not_in: InputMaybe<Array<Scalars['DateTime']['input']>>;
 };
 
 export type CompletedTransfersConnection = {
@@ -107,7 +122,7 @@ export type CompletedTransfersConnection = {
 
 export enum Network {
   Ethereum = 'Ethereum',
-  Gear = 'Gear'
+  Gear = 'Gear',
 }
 
 export type PageInfo = {
@@ -149,7 +164,7 @@ export enum PairOrderByInput {
   IdAscNullsLast = 'id_ASC_NULLS_LAST',
   IdDesc = 'id_DESC',
   IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
-  IdDescNullsLast = 'id_DESC_NULLS_LAST'
+  IdDescNullsLast = 'id_DESC_NULLS_LAST',
 }
 
 export type PairWhereInput = {
@@ -229,11 +244,9 @@ export type Query = {
   transfersConnection: TransfersConnection;
 };
 
-
 export type QueryCompletedTransferByIdArgs = {
   id: Scalars['String']['input'];
 };
-
 
 export type QueryCompletedTransfersArgs = {
   limit: InputMaybe<Scalars['Int']['input']>;
@@ -242,7 +255,6 @@ export type QueryCompletedTransfersArgs = {
   where: InputMaybe<CompletedTransferWhereInput>;
 };
 
-
 export type QueryCompletedTransfersConnectionArgs = {
   after: InputMaybe<Scalars['String']['input']>;
   first: InputMaybe<Scalars['Int']['input']>;
@@ -250,11 +262,9 @@ export type QueryCompletedTransfersConnectionArgs = {
   where: InputMaybe<CompletedTransferWhereInput>;
 };
 
-
 export type QueryPairByIdArgs = {
   id: Scalars['String']['input'];
 };
-
 
 export type QueryPairsArgs = {
   limit: InputMaybe<Scalars['Int']['input']>;
@@ -263,7 +273,6 @@ export type QueryPairsArgs = {
   where: InputMaybe<PairWhereInput>;
 };
 
-
 export type QueryPairsConnectionArgs = {
   after: InputMaybe<Scalars['String']['input']>;
   first: InputMaybe<Scalars['Int']['input']>;
@@ -271,11 +280,9 @@ export type QueryPairsConnectionArgs = {
   where: InputMaybe<PairWhereInput>;
 };
 
-
 export type QueryTransferByIdArgs = {
   id: Scalars['String']['input'];
 };
-
 
 export type QueryTransfersArgs = {
   limit: InputMaybe<Scalars['Int']['input']>;
@@ -283,7 +290,6 @@ export type QueryTransfersArgs = {
   orderBy: InputMaybe<Array<TransferOrderByInput>>;
   where: InputMaybe<TransferWhereInput>;
 };
-
 
 export type QueryTransfersConnectionArgs = {
   after: InputMaybe<Scalars['String']['input']>;
@@ -308,13 +314,14 @@ export enum Status {
   Completed = 'Completed',
   Failed = 'Failed',
   InProgress = 'InProgress',
-  Pending = 'Pending'
+  Pending = 'Pending',
 }
 
 export type Transfer = {
   __typename?: 'Transfer';
   amount: Scalars['BigInt']['output'];
   blockNumber: Scalars['String']['output'];
+  completedAt: Maybe<Scalars['DateTime']['output']>;
   destNetwork: Network;
   destination: Scalars['String']['output'];
   id: Scalars['String']['output'];
@@ -347,6 +354,12 @@ export enum TransferOrderByInput {
   BlockNumberDesc = 'blockNumber_DESC',
   BlockNumberDescNullsFirst = 'blockNumber_DESC_NULLS_FIRST',
   BlockNumberDescNullsLast = 'blockNumber_DESC_NULLS_LAST',
+  CompletedAtAsc = 'completedAt_ASC',
+  CompletedAtAscNullsFirst = 'completedAt_ASC_NULLS_FIRST',
+  CompletedAtAscNullsLast = 'completedAt_ASC_NULLS_LAST',
+  CompletedAtDesc = 'completedAt_DESC',
+  CompletedAtDescNullsFirst = 'completedAt_DESC_NULLS_FIRST',
+  CompletedAtDescNullsLast = 'completedAt_DESC_NULLS_LAST',
   DestNetworkAsc = 'destNetwork_ASC',
   DestNetworkAscNullsFirst = 'destNetwork_ASC_NULLS_FIRST',
   DestNetworkAscNullsLast = 'destNetwork_ASC_NULLS_LAST',
@@ -412,7 +425,7 @@ export enum TransferOrderByInput {
   TxHashAscNullsLast = 'txHash_ASC_NULLS_LAST',
   TxHashDesc = 'txHash_DESC',
   TxHashDescNullsFirst = 'txHash_DESC_NULLS_FIRST',
-  TxHashDescNullsLast = 'txHash_DESC_NULLS_LAST'
+  TxHashDescNullsLast = 'txHash_DESC_NULLS_LAST',
 }
 
 export type TransferWhereInput = {
@@ -444,6 +457,15 @@ export type TransferWhereInput = {
   blockNumber_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   blockNumber_not_startsWith: InputMaybe<Scalars['String']['input']>;
   blockNumber_startsWith: InputMaybe<Scalars['String']['input']>;
+  completedAt_eq: InputMaybe<Scalars['DateTime']['input']>;
+  completedAt_gt: InputMaybe<Scalars['DateTime']['input']>;
+  completedAt_gte: InputMaybe<Scalars['DateTime']['input']>;
+  completedAt_in: InputMaybe<Array<Scalars['DateTime']['input']>>;
+  completedAt_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  completedAt_lt: InputMaybe<Scalars['DateTime']['input']>;
+  completedAt_lte: InputMaybe<Scalars['DateTime']['input']>;
+  completedAt_not_eq: InputMaybe<Scalars['DateTime']['input']>;
+  completedAt_not_in: InputMaybe<Array<Scalars['DateTime']['input']>>;
   destNetwork_eq: InputMaybe<Network>;
   destNetwork_in: InputMaybe<Array<Network>>;
   destNetwork_isNull: InputMaybe<Scalars['Boolean']['input']>;
@@ -602,16 +624,148 @@ export type TransfersQueryQueryVariables = Exact<{
   where: InputMaybe<TransferWhereInput>;
 }>;
 
-
-export type TransfersQueryQuery = { __typename?: 'Query', transfers: Array<{ __typename?: 'Transfer', amount: string, txHash: string, destNetwork: Network, destination: string, id: string, receiver: string, sender: string, source: string, sourceNetwork: Network, status: Status, timestamp: string }> };
+export type TransfersQueryQuery = {
+  __typename?: 'Query';
+  transfers: Array<{
+    __typename?: 'Transfer';
+    amount: string;
+    txHash: string;
+    destNetwork: Network;
+    destination: string;
+    id: string;
+    receiver: string;
+    sender: string;
+    source: string;
+    sourceNetwork: Network;
+    status: Status;
+    timestamp: string;
+    nonce: string;
+  }>;
+};
 
 export type TransfersConnectionQueryQueryVariables = Exact<{
   where: InputMaybe<TransferWhereInput>;
 }>;
 
+export type TransfersConnectionQueryQuery = {
+  __typename?: 'Query';
+  transfersConnection: { __typename?: 'TransfersConnection'; totalCount: number };
+};
 
-export type TransfersConnectionQueryQuery = { __typename?: 'Query', transfersConnection: { __typename?: 'TransfersConnection', totalCount: number } };
-
-
-export const TransfersQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransfersQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"limit"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"offset"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TransferWhereInput"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"transfers"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"limit"},"value":{"kind":"Variable","name":{"kind":"Name","value":"limit"}}},{"kind":"Argument","name":{"kind":"Name","value":"offset"},"value":{"kind":"Variable","name":{"kind":"Name","value":"offset"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"timestamp_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"amount"}},{"kind":"Field","name":{"kind":"Name","value":"txHash"}},{"kind":"Field","name":{"kind":"Name","value":"destNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"destination"}},{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"receiver"}},{"kind":"Field","name":{"kind":"Name","value":"sender"}},{"kind":"Field","name":{"kind":"Name","value":"source"}},{"kind":"Field","name":{"kind":"Name","value":"sourceNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"timestamp"}}]}}]}}]} as unknown as DocumentNode<TransfersQueryQuery, TransfersQueryQueryVariables>;
-export const TransfersConnectionQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransfersConnectionQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"where"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TransferWhereInput"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"transfersConnection"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"timestamp_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"where"},"value":{"kind":"Variable","name":{"kind":"Name","value":"where"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}}]}}]}}]} as unknown as DocumentNode<TransfersConnectionQueryQuery, TransfersConnectionQueryQueryVariables>;
+export const TransfersQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'TransfersQuery' },
+      variableDefinitions: [
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'limit' } },
+          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'Int' } } },
+        },
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'offset' } },
+          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'Int' } } },
+        },
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'where' } },
+          type: { kind: 'NamedType', name: { kind: 'Name', value: 'TransferWhereInput' } },
+        },
+      ],
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'transfers' },
+            arguments: [
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'limit' },
+                value: { kind: 'Variable', name: { kind: 'Name', value: 'limit' } },
+              },
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'offset' },
+                value: { kind: 'Variable', name: { kind: 'Name', value: 'offset' } },
+              },
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'orderBy' },
+                value: { kind: 'EnumValue', value: 'timestamp_DESC' },
+              },
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'where' },
+                value: { kind: 'Variable', name: { kind: 'Name', value: 'where' } },
+              },
+            ],
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [
+                { kind: 'Field', name: { kind: 'Name', value: 'amount' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'txHash' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'destNetwork' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'destination' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'id' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'receiver' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'sender' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'source' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'sourceNetwork' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'status' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'timestamp' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'nonce' } },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<TransfersQueryQuery, TransfersQueryQueryVariables>;
+export const TransfersConnectionQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'TransfersConnectionQuery' },
+      variableDefinitions: [
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'where' } },
+          type: { kind: 'NamedType', name: { kind: 'Name', value: 'TransferWhereInput' } },
+        },
+      ],
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'transfersConnection' },
+            arguments: [
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'orderBy' },
+                value: { kind: 'EnumValue', value: 'timestamp_DESC' },
+              },
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'where' },
+                value: { kind: 'Variable', name: { kind: 'Name', value: 'where' } },
+              },
+            ],
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<TransfersConnectionQueryQuery, TransfersConnectionQueryQueryVariables>;

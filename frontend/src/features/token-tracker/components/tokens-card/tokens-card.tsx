@@ -4,6 +4,7 @@ import { Button } from '@gear-js/vara-ui';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import {
   useVaraAccountBalance,
   useEthAccountBalance,
@@ -11,10 +12,11 @@ import {
   useVaraFTBalance,
   useVaraFTBalances,
   useEthFTBalances,
+  useEthFTBalance,
 } from '@/hooks';
-import { getTokenSVG, isUndefined } from '@/utils';
+import { getErrorMessage, getTokenSVG, isUndefined } from '@/utils';
 
-import { useBurnVaraTokens } from '../../hooks';
+import { useBurnEthTokens, useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../balance-card';
 
 import styles from './tokens-card.module.scss';
@@ -22,17 +24,27 @@ import styles from './tokens-card.module.scss';
 function TokensCard() {
   const { account } = useAccount();
   const { addresses, decimals, symbols } = useTokens();
-  const burn = useBurnVaraTokens();
-  const { data: lockedBalance } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);
   const alert = useAlert();
+
+  const burnVara = useBurnVaraTokens();
+  const burnEth = useBurnEthTokens();
+  const burn = account ? burnVara : burnEth;
+
+  // TODO: is there any reason not to fetch it from useFTBalances hook?
+  const { data: varaLockedBalance, refetch: refetchLockedVara } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);
+  const { data: ethLockedBalance, refetch: refetchLockedEth } = useEthFTBalance(ETH_WRAPPED_ETH_CONTRACT_ADDRESS);
+  const lockedBalance = account ? varaLockedBalance : ethLockedBalance;
 
   const isVaraNetwork = Boolean(account);
   const networkIndex = isVaraNetwork ? 0 : 1;
 
-  const nonNativeAddresses = addresses?.filter((pair) => pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS);
+  const nonNativeAddresses = addresses?.filter(
+    (pair) =>
+      pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS && pair[networkIndex] !== ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
+  );
 
-  const { data: varaFtBalances } = useVaraFTBalances(nonNativeAddresses);
-  const { data: ethFtBalances } = useEthFTBalances(nonNativeAddresses);
+  const { data: varaFtBalances, refetch: refetchVaraBalances } = useVaraFTBalances(nonNativeAddresses);
+  const { data: ethFtBalances, refetch: refetchEthBalances } = useEthFTBalances(nonNativeAddresses);
   const ftBalances = varaFtBalances || ethFtBalances;
 
   const varaAccountBalance = useVaraAccountBalance();
@@ -60,10 +72,21 @@ function TokensCard() {
   const handleUnlockBalanceClick = () => {
     if (isUndefined(lockedBalance)) throw new Error('Locked balance is not found');
 
-    burn
-      .sendTransactionAsync({ args: [lockedBalance] })
-      .then(() => alert.success('Tokens unlocked successfully'))
-      .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
+    const sendTx = account
+      ? () => burnVara.sendTransactionAsync({ args: [lockedBalance] })
+      : () => burnEth.mutateAsync(lockedBalance);
+
+    const refetchBalances = account ? refetchVaraBalances : refetchEthBalances;
+    const refetchLockedBalance = account ? refetchLockedVara : refetchLockedEth;
+
+    sendTx()
+      .then(async () => {
+        alert.success('Tokens unlocked successfully');
+
+        await refetchLockedBalance();
+        return refetchBalances();
+      })
+      .catch((error: Error) => alert.error(getErrorMessage(error)));
   };
 
   return (
@@ -98,9 +121,9 @@ function TokensCard() {
 
           <BalanceCard
             value={lockedBalance}
-            SVG={getTokenSVG(WRAPPED_VARA_CONTRACT_ADDRESS)}
-            decimals={decimals[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 0}
-            symbol={symbols[WRAPPED_VARA_CONTRACT_ADDRESS] ?? 'Unit'}
+            SVG={getTokenSVG(account ? WRAPPED_VARA_CONTRACT_ADDRESS : ETH_WRAPPED_ETH_CONTRACT_ADDRESS)}
+            decimals={decimals[account ? WRAPPED_VARA_CONTRACT_ADDRESS : ETH_WRAPPED_ETH_CONTRACT_ADDRESS] ?? 0}
+            symbol={symbols[account ? WRAPPED_VARA_CONTRACT_ADDRESS : ETH_WRAPPED_ETH_CONTRACT_ADDRESS] ?? 'Unit'}
             locked>
             {Boolean(lockedBalance) && (
               <Button text="Unlock" size="small" onClick={handleUnlockBalanceClick} isLoading={burn.isPending} />

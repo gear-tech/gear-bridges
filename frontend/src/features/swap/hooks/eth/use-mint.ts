@@ -4,9 +4,8 @@ import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
+import { ETH_TOKEN_ABI } from '@/consts';
 import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
-
-import { ETH_TOKEN_ABI } from '../../consts';
 
 function useMint(address: HexString | undefined) {
   const { writeContractAsync } = useWriteContract();

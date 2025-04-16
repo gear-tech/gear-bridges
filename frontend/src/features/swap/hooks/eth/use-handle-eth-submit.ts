@@ -53,7 +53,9 @@ function useHandleEthSubmit(
     if (isUndefined(accountBalance)) throw new Error('Account balance is not defined');
 
     const isMintRequired = ftAddress === ETH_WRAPPED_ETH_CONTRACT_ADDRESS && amount > ftBalance;
+    console.log('isMintRequired: ', isMintRequired);
     const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
+    console.log('valueToMint: ', valueToMint);
     const mintGasLimit = isMintRequired ? await mint.getGasLimit(valueToMint) : BigInt(0);
 
     const isApproveRequired = amount > allowance;

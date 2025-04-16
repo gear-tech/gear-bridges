@@ -1,10 +1,9 @@
 import { CSSProperties } from 'react';
 
 import { Card } from '@/components';
-import { cx } from '@/utils';
+import { cx, getErrorMessage } from '@/utils';
 
 import { UseHandleSubmit } from '../../types';
-import { getErrorMessage } from '../../utils';
 
 import styles from './submit-progress-bar.module.scss';
 

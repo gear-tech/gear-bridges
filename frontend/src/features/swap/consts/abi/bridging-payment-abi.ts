@@ -62,7 +62,26 @@ const BRIDGING_PAYMENT_ABI = [
     stateMutability: 'view',
   },
   { type: 'event', name: 'FeePaid', inputs: [], anonymous: false },
+  {
+    type: 'error',
+    name: 'AddressEmptyCode',
+    inputs: [{ name: 'target', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'FailedCall', inputs: [] },
+  {
+    type: 'error',
+    name: 'InsufficientBalance',
+    inputs: [
+      { name: 'balance', type: 'uint256', internalType: 'uint256' },
+      { name: 'needed', type: 'uint256', internalType: 'uint256' },
+    ],
+  },
   { type: 'error', name: 'NotAnAdmin', inputs: [] },
+  {
+    type: 'error',
+    name: 'SafeERC20FailedOperation',
+    inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
+  },
 ] as const;
 
 export { BRIDGING_PAYMENT_ABI };

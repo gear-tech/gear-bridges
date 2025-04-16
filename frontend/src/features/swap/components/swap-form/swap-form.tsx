@@ -7,6 +7,7 @@ import { FormProvider } from 'react-hook-form';
 
 import { Input, Skeleton, TokenSVG } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { TokenPrice } from '@/features/token-price';
@@ -47,7 +48,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     networkIndex,
     pairIndex,
   );
-  const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
+  const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS || address === ETH_WRAPPED_ETH_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
@@ -75,7 +76,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const [submit, approve, payFee] = useHandleSubmit(
+  const [submit, approve, payFee, mint] = useHandleSubmit(
     address,
     fee.value,
     allowance.data,
@@ -137,7 +138,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     return <TokenPrice address={varaAddress} amount={amount} />;
   };
 
-  const renderProgressBar = () => <SubmitProgressBar approve={approve} submit={submit} payFee={payFee} />;
+  const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} payFee={payFee} />;
 
   return (
     <>
@@ -209,6 +210,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 text={getButtonText()}
                 disabled={!isEnoughBalance()}
                 isLoading={
+                  mint?.isPending ||
                   payFee?.isPending ||
                   submit.isPending ||
                   accountBalance.isLoading ||

@@ -1,17 +1,18 @@
 import { TypeormDatabase } from '@subsquid/typeorm-store';
 import { randomUUID } from 'crypto';
-import { BridgingRequested, Relayed, TokenMapping } from './types';
+import { BridgingPaidEvent, BridgingRequested, Relayed, TokenMapping } from './types';
 import { ethNonce, gearNonce, TempState } from '../common';
 import { ProcessorContext, processor } from './processor';
 import { Network, Status, Transfer } from '../model';
 import { isUserMessageSent } from './util';
 import { config } from './config';
-import { Codec } from './codec';
+import { Decoder } from './codec';
 
 const tempState = new TempState(Network.Gear);
 
-let vftManagerDecoder: Codec;
-let hisotricalProxy: Codec;
+let vftManagerDecoder: Decoder;
+let hisotricalProxyDecoder: Decoder;
+let bridgingPaymentDecoder: Decoder;
 
 const handler = async (ctx: ProcessorContext) => {
   await tempState.new(ctx);
@@ -79,19 +80,30 @@ const handler = async (ctx: ProcessorContext) => {
             }
           }
           case config.hisotricalProxy: {
-            const service = hisotricalProxy.service(msg.payload);
+            const service = hisotricalProxyDecoder.service(msg.payload);
             if (service !== 'HistoricalProxy') continue;
-            const method = hisotricalProxy.method(msg.payload);
+            const method = hisotricalProxyDecoder.method(msg.payload);
             if (method !== 'Relayed') continue;
 
-            const { block_number, transaction_index } = hisotricalProxy.decodeEvent<Relayed>(
+            const { block_number, transaction_index } = hisotricalProxyDecoder.decodeEvent<Relayed>(
               service,
               method,
               msg.payload,
             );
 
             const nonce = ethNonce(`${block_number}${transaction_index}`);
-            promises.push(tempState.transferCompleted(nonce, timestamp));
+            tempState.transferCompleted(nonce, timestamp);
+            break;
+          }
+          case config.bridgingPayment: {
+            const service = bridgingPaymentDecoder.service(msg.payload);
+            if (service !== 'BridgingPayment') continue;
+            const method = bridgingPaymentDecoder.method(msg.payload);
+            if (method !== 'BridgingPaid') continue;
+
+            const { nonce } = bridgingPaymentDecoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
+
+            promises.push(tempState.transferStatus(gearNonce(nonce), Status.InProgress));
             break;
           }
         }
@@ -105,8 +117,9 @@ const handler = async (ctx: ProcessorContext) => {
 };
 
 export const runProcessor = async () => {
-  vftManagerDecoder = await Codec.create('./assets/vft_manager.idl');
-  hisotricalProxy = await Codec.create('./assets/historical_proxy.idl');
+  vftManagerDecoder = await Decoder.create('./assets/vft_manager.idl');
+  hisotricalProxyDecoder = await Decoder.create('./assets/historical_proxy.idl');
+  bridgingPaymentDecoder = await Decoder.create('./assets/bridging_payment.idl');
 
   processor.run(
     new TypeormDatabase({

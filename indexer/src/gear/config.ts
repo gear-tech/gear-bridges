@@ -5,5 +5,6 @@ export const config = {
   rpcUrl: getEnv('GEAR_RPC_URL', 'https://testnet.vara.network'),
   vftManager: getEnv('GEAR_VFT_MANAGER'),
   hisotricalProxy: getEnv('GEAR_HISTORICAL_PROXY'),
+  bridgingPayment: getEnv('BRIDGING_PAYMENT'),
   fromBlock: Number(getEnv('GEAR_FROM_BLOCK', '11000000')),
 };

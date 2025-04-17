@@ -5,3 +5,4 @@ libs = ["lib"]
 evm_version = "cancun"
 optimizer = true
 no_match_test = "skip"
+solc-version = "0.8.28"

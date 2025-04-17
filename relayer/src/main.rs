@@ -33,7 +33,7 @@ use cli::{
 async fn main() {
     let _ = dotenv::dotenv();
 
-    let logger = pretty_env_logger::formatted_timed_builder()
+    pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
         .filter(Some("prover"), log::LevelFilter::Info)

@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use clap::{Args, Parser, Subcommand};
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
@@ -34,6 +36,9 @@ struct Cli {
     /// ActorId that will be allowed to burn tokens
     #[arg(long = "burn-admin")]
     burner: Option<String>,
+
+    #[arg(long = "salt")]
+    salt: Option<H256>,
 
     #[command(subcommand)]
     command: CliCommands,
@@ -82,7 +87,7 @@ async fn main() {
     };
     let minter = cli.minter.map(str_to_actorid);
     let burner = cli.burner.map(str_to_actorid);
-    let updater = Uploader::new(gear_api, minter, burner);
+    let updater = Uploader::new(gear_api, minter, burner, cli.salt);
 
     match cli.command {
         CliCommands::Vft(args) => {
@@ -100,10 +105,16 @@ struct Uploader {
     gas_limit: u64,
     minter: Option<ActorId>,
     burner: Option<ActorId>,
+    salt: Option<H256>,
 }
 
 impl Uploader {
-    fn new(api: GearApi, minter: Option<ActorId>, burner: Option<ActorId>) -> Self {
+    fn new(
+        api: GearApi,
+        minter: Option<ActorId>,
+        burner: Option<ActorId>,
+        salt: Option<H256>,
+    ) -> Self {
         Self {
             gas_limit: api
                 .block_gas_limit()
@@ -111,6 +122,7 @@ impl Uploader {
             api,
             minter,
             burner,
+            salt,
         }
     }
 
@@ -192,10 +204,19 @@ impl Uploader {
 
         let factory = vft_client::VftFactory::new(GClientRemoting::new(self.api.clone()));
 
+        let salt = self.salt.unwrap_or_else(|| {
+            H256::from(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("System time before UNIX EPOCH")
+                    .as_secs(),
+            )
+        });
+
         let program_id = factory
             .new(name, symbol, decimals)
             .with_gas_limit(self.gas_limit)
-            .send_recv(code_id, [])
+            .send_recv(code_id, salt.as_bytes())
             .await
             .expect("Failed to upload program");
 
@@ -208,10 +229,19 @@ impl Uploader {
 
         let factory = vft_vara_client::VftVaraFactory::new(GClientRemoting::new(self.api.clone()));
 
+        let salt = self.salt.unwrap_or_else(|| {
+            H256::from(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("System time before UNIX EPOCH")
+                    .as_secs(),
+            )
+        });
+
         let program_id = factory
             .new()
             .with_gas_limit(self.gas_limit)
-            .send_recv(code_id, [])
+            .send_recv(code_id, salt.as_bytes())
             .await
             .expect("Failed to upload program");
 

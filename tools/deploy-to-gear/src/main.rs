@@ -204,14 +204,7 @@ impl Uploader {
 
         let factory = vft_client::VftFactory::new(GClientRemoting::new(self.api.clone()));
 
-        let salt = self.salt.unwrap_or_else(|| {
-            H256::from(
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("System time before UNIX EPOCH")
-                    .as_secs(),
-            )
-        });
+        let salt = self.salt.unwrap_or_else(|| H256::random());
 
         let program_id = factory
             .new(name, symbol, decimals)
@@ -229,14 +222,7 @@ impl Uploader {
 
         let factory = vft_vara_client::VftVaraFactory::new(GClientRemoting::new(self.api.clone()));
 
-        let salt = self.salt.unwrap_or_else(|| {
-            H256::from(
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("System time before UNIX EPOCH")
-                    .as_secs(),
-            )
-        });
+        let salt = self.salt.unwrap_or_else(|| H256::random());
 
         let program_id = factory
             .new()

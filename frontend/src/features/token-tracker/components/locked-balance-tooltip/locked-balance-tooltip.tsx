@@ -1,8 +1,7 @@
+import WarningSVG from '@/assets/warning.svg?react';
 import { Tooltip } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraFTBalance } from '@/hooks';
-
-import WarningSVG from '../../assets/warning.svg?react';
 
 function LockedBalanceTooltip() {
   const { data: lockedBalance } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);

@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use clap::{Args, Parser, Subcommand};
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;

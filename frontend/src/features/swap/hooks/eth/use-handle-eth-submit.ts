@@ -2,12 +2,12 @@ import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
 import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
-import { estimateFeesPerGas, estimateGas, watchContractEvent } from 'wagmi/actions';
+import { estimateFeesPerGas, estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import { isUndefined } from '@/utils';
 
-import { BRIDGING_PAYMENT_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { ERC20_MANAGER_ABI, ERC20_MANAGER_CONTRACT_ADDRESS, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
 import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues } from '../../types';
 
@@ -30,16 +30,17 @@ function useHandleEthSubmit(
   const config = useConfig();
 
   const getTransferGasLimit = (amount: bigint, accountAddress: HexString) => {
+    if (isUndefined(fee)) throw new Error('Fee is not defined');
     if (!ftAddress) throw new Error('Fungible token address is not defined');
 
     const encodedData = encodeFunctionData({
-      abi: BRIDGING_PAYMENT_ABI,
-      functionName: 'requestBridging',
-      args: [ftAddress, amount, accountAddress],
+      abi: ERC20_MANAGER_ABI,
+      functionName: 'requestBridgingPayingFee',
+      args: [ftAddress, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
     });
 
     return estimateGas(config, {
-      to: ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+      to: ERC20_MANAGER_CONTRACT_ADDRESS,
       data: encodedData,
       value: fee,
     });
@@ -53,9 +54,7 @@ function useHandleEthSubmit(
     if (isUndefined(accountBalance)) throw new Error('Account balance is not defined');
 
     const isMintRequired = ftAddress === ETH_WRAPPED_ETH_CONTRACT_ADDRESS && amount > ftBalance;
-    console.log('isMintRequired: ', isMintRequired);
     const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
-    console.log('valueToMint: ', valueToMint);
     const mintGasLimit = isMintRequired ? await mint.getGasLimit(valueToMint) : BigInt(0);
 
     const isApproveRequired = amount > allowance;
@@ -84,33 +83,17 @@ function useHandleEthSubmit(
     if (!ftAddress) throw new Error('Fungible token address is not defined');
     if (!fee) throw new Error('Fee is not defined');
 
-    return writeContractAsync({
-      abi: BRIDGING_PAYMENT_ABI,
-      address: ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-      functionName: 'requestBridging',
-      args: [ftAddress, amount, accountAddress],
+    const hash = await writeContractAsync({
+      abi: ERC20_MANAGER_ABI,
+      address: ERC20_MANAGER_CONTRACT_ADDRESS,
+      functionName: 'requestBridgingPayingFee',
+      args: [ftAddress, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
       value: fee,
       gas: gasLimit,
     });
+
+    return waitForTransactionReceipt(config, { hash });
   };
-
-  const watch = () =>
-    new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => {
-        unwatch();
-        reject(error);
-      };
-
-      const onLogs = () => {
-        unwatch();
-        resolve();
-      };
-
-      const address = ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS;
-      const abi = BRIDGING_PAYMENT_ABI;
-
-      const unwatch = watchContractEvent(config, { address, abi, eventName: 'FeePaid', onLogs, onError });
-    });
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
     const { valueToMint, isMintRequired, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } =
@@ -130,7 +113,7 @@ function useHandleEthSubmit(
       approve.reset();
     }
 
-    return transfer(amount, accountAddress, transferGasLimit).then(() => watch());
+    return transfer(amount, accountAddress, transferGasLimit);
   };
 
   const submit = useMutation({ mutationFn: onSubmit });

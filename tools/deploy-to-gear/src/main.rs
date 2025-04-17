@@ -36,7 +36,7 @@ struct Cli {
     burner: Option<String>,
 
     #[arg(long = "salt")]
-    salt: Option<H256>,
+    salt: Option<String>,
 
     #[command(subcommand)]
     command: CliCommands,
@@ -85,7 +85,19 @@ async fn main() {
     };
     let minter = cli.minter.map(str_to_actorid);
     let burner = cli.burner.map(str_to_actorid);
-    let updater = Uploader::new(gear_api, minter, burner, cli.salt);
+    let salt = match cli.salt {
+        Some(salt) => hex::decode(salt)
+            .inspect_err(|err| {
+                println!("Failed to decode salt: {err}, using random salt");
+            })
+            .ok(),
+        _ => {
+            println!("Salt is not provided, using random salt");
+            None
+        }
+    };
+
+    let updater = Uploader::new(gear_api, minter, burner, salt);
 
     match cli.command {
         CliCommands::Vft(args) => {
@@ -103,7 +115,7 @@ struct Uploader {
     gas_limit: u64,
     minter: Option<ActorId>,
     burner: Option<ActorId>,
-    salt: Option<H256>,
+    salt: Option<Vec<u8>>,
 }
 
 impl Uploader {
@@ -111,7 +123,7 @@ impl Uploader {
         api: GearApi,
         minter: Option<ActorId>,
         burner: Option<ActorId>,
-        salt: Option<H256>,
+        salt: Option<Vec<u8>>,
     ) -> Self {
         Self {
             gas_limit: api
@@ -202,12 +214,14 @@ impl Uploader {
 
         let factory = vft_client::VftFactory::new(GClientRemoting::new(self.api.clone()));
 
-        let salt = self.salt.unwrap_or_else(H256::random);
-
+        let salt = self
+            .salt
+            .clone()
+            .unwrap_or_else(|| H256::random().0.to_vec());
         let program_id = factory
             .new(name, symbol, decimals)
             .with_gas_limit(self.gas_limit)
-            .send_recv(code_id, salt.as_bytes())
+            .send_recv(code_id, &salt)
             .await
             .expect("Failed to upload program");
 
@@ -220,12 +234,15 @@ impl Uploader {
 
         let factory = vft_vara_client::VftVaraFactory::new(GClientRemoting::new(self.api.clone()));
 
-        let salt = self.salt.unwrap_or_else(H256::random);
+        let salt = self
+            .salt
+            .clone()
+            .unwrap_or_else(|| H256::random().0.to_vec());
 
         let program_id = factory
             .new()
             .with_gas_limit(self.gas_limit)
-            .send_recv(code_id, salt.as_bytes())
+            .send_recv(code_id, &salt)
             .await
             .expect("Failed to upload program");
 

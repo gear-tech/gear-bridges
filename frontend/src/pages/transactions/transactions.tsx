@@ -1,8 +1,9 @@
+import { useAccount } from '@gear-js/react-hooks';
 import { useMemo } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import SearchSVG from '@/assets/search.svg?react';
-import { Container, Input, Select, Skeleton } from '@/components';
+import { Container, Input, Select, Skeleton, Checkbox } from '@/components';
 import {
   useTransactions,
   useTransactionsCount,
@@ -15,11 +16,15 @@ import {
   TransactionCard,
   TRANSACTIONS_LIMIT,
 } from '@/features/history';
-import { useTokens } from '@/hooks';
+import { useEthAccount, useTokens } from '@/hooks';
 
 import styles from './transactions.module.scss';
 
 function Transactions() {
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
+  const isAccountConnected = Boolean(account || ethAccount.address);
+
   const { form, filters } = useTransactionFilters();
   const [transactionsCount, isTransactionsCountLoading] = useTransactionsCount(filters);
   const [transactions, isFetching, hasNextPage, fetchNextPage] = useTransactions(transactionsCount, filters);
@@ -31,17 +36,23 @@ function Transactions() {
     <Container>
       <header>
         <FormProvider {...form}>
-          <form className={styles.filters} onSubmit={(e) => e.preventDefault()}>
-            <Select name={FIELD_NAME.TIMESTAMP} label="Date" options={TIMESTAMP_OPTIONS} />
-            <Select name={FIELD_NAME.STATUS} label="Status" options={STATUS_OPTIONS} />
-            <Select name={FIELD_NAME.ASSET} label="Asset" options={assetOptions} disabled={isLoading} />
-            <Input name={FIELD_NAME.SEARCH} label="Search" icon={SearchSVG} />
+          <form onSubmit={(e) => e.preventDefault()}>
+            <div className={styles.filters}>
+              <Select name={FIELD_NAME.TIMESTAMP} label="Date" options={TIMESTAMP_OPTIONS} />
+              <Select name={FIELD_NAME.STATUS} label="Status" options={STATUS_OPTIONS} />
+              <Select name={FIELD_NAME.ASSET} label="Asset" options={assetOptions} disabled={isLoading} />
+              <Input name={FIELD_NAME.SEARCH} label="Search (Block Number)" icon={SearchSVG} />
+            </div>
+
+            <p className={styles.counter}>
+              {isTransactionsCountLoading ? <Skeleton width="100px" /> : `${transactionsCount} results`}
+
+              {isAccountConnected && (
+                <Checkbox name={FIELD_NAME.OWNER} type="switch" label="My Transactions" className={styles.switch} />
+              )}
+            </p>
           </form>
         </FormProvider>
-
-        <p className={styles.counter}>
-          {isTransactionsCountLoading ? <Skeleton width="100px" /> : `${transactionsCount} results`}
-        </p>
       </header>
 
       <List

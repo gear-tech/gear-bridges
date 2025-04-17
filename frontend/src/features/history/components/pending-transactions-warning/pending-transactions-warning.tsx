@@ -1,12 +1,15 @@
 import { useAccount } from '@gear-js/react-hooks';
+import { Link } from 'react-router-dom';
 
 import WarningSVG from '@/assets/warning.svg?react';
-import { Tooltip } from '@/components';
+import { ROUTE } from '@/consts';
 
 import { useTransactionsCount } from '../../hooks';
 import { Status, TransferWhereInput } from '../../types';
 
-function PendingTransactionsTooltip() {
+import styles from './pending-transactions-warning.module.scss';
+
+function PendingTransactionsWarning() {
   const { account } = useAccount(); // fee payment is a standalone transaction only for vara network
 
   const [txsCount] = useTransactionsCount(
@@ -16,10 +19,15 @@ function PendingTransactionsTooltip() {
   if (!account || !txsCount) return;
 
   return (
-    <Tooltip value="You have transactions awaiting fee payment">
-      <WarningSVG />
-    </Tooltip>
+    <div className={styles.container}>
+      <WarningSVG className={styles.icon} />
+
+      <p>
+        You have transactions awaiting fee payment.{' '}
+        <Link to={`${ROUTE.TRANSACTIONS}?owner=true&status=${Status.Pending}`}>Navigate</Link>
+      </p>
+    </div>
   );
 }
 
-export { PendingTransactionsTooltip };
+export { PendingTransactionsWarning };

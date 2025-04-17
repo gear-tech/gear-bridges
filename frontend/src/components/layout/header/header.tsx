@@ -4,7 +4,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
-import { PendingTransactionsTooltip, TransactionsCounter } from '@/features/history';
+import { TransactionsCounter } from '@/features/history';
 import { LockedBalanceTooltip } from '@/features/token-tracker';
 import { Wallet } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
@@ -52,7 +52,6 @@ function Header() {
 
   const renderLinks = () =>
     Object.entries(LINKS).map(([to, text]) => {
-      const isTransactionsLink = to === ROUTE.TRANSACTIONS;
       const isTokensLink = to === ROUTE.TOKEN_TRACKER;
 
       if (isTokensLink && !isAnyAccount) return;
@@ -68,7 +67,6 @@ function Header() {
           </NavLink>
 
           {isTokensLink && <LockedBalanceTooltip />}
-          {isTransactionsLink && <PendingTransactionsTooltip />}
         </li>
       );
     });

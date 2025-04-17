@@ -1,6 +1,6 @@
 import { List } from './list';
-import { PendingTransactionsTooltip } from './pending-transactions-tooltip';
+import { PendingTransactionsWarning } from './pending-transactions-warning';
 import { TransactionCard } from './transaction-card';
 import { TransactionsCounter } from './transactions-counter';
 
-export { List, TransactionCard, TransactionsCounter, PendingTransactionsTooltip };
+export { List, TransactionCard, TransactionsCounter, PendingTransactionsWarning };

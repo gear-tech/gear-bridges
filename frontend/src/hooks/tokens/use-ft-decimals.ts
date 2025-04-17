@@ -14,7 +14,7 @@ function useFTDecimals(addresses: FTAddressPair[] | undefined) {
   const readVaraDecimals = (address: HexString) => {
     if (!api) throw new Error('Api is not initialized');
 
-    return new VftProgram(api, address).vft.decimals();
+    return new VftProgram(api, address).vftMetadata.decimals();
   };
 
   const readEthDecimals = (address: HexString) =>

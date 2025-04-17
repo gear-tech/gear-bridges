@@ -1,18 +1,18 @@
 import { useProgram, usePrepareProgramTransaction, useSendProgramTransaction } from '@gear-js/react-hooks';
 
-import { WrappedVaraProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { VFT_MANAGER_CONTRACT_ADDRESS, VftManagerProgram } from '@/consts';
 
-function useMint() {
+function useRequestBridging() {
   const { data: program } = useProgram({
-    library: WrappedVaraProgram,
-    id: WRAPPED_VARA_CONTRACT_ADDRESS,
+    library: VftManagerProgram,
+    id: VFT_MANAGER_CONTRACT_ADDRESS,
   });
 
-  const params = { program, serviceName: 'vftNativeExchange' as const, functionName: 'mint' as const };
+  const params = { program, serviceName: 'vftManager' as const, functionName: 'requestBridging' as const };
   const { prepareTransactionAsync } = usePrepareProgramTransaction(params);
   const send = useSendProgramTransaction(params);
 
   return { ...send, prepareTransactionAsync };
 }
 
-export { useMint };
+export { useRequestBridging };

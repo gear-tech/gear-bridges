@@ -8,6 +8,7 @@ import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import {
   useEthFTBalances,
   useVaraFTBalances,
@@ -51,7 +52,7 @@ function SelectTokenModal({ close }: ModalProps) {
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
-    const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS;
+    const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS || address === ETH_WRAPPED_ETH_CONTRACT_ADDRESS;
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
     const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
 

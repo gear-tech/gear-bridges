@@ -1,4 +1,6 @@
-import { decodeAddress, encodeAddress, HexString } from '@gear-js/api';
+import { decodeAddress, encodeAddress, ExtrinsicFailedData, HexString } from '@gear-js/api';
+import { BaseError } from 'wagmi';
+import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
@@ -41,4 +43,14 @@ const isNumeric = (value: string) => /^\d+$/.test(value);
 
 const getTokenSVG = (address: HexString) => TOKEN_SVG[address] || TokenPlaceholderSVG;
 
-export { cx, isValidAddress, logger, asOptionalField, isUndefined, isNumeric, getTokenSVG };
+// string is only for cancelled sign and send popup error during useSendProgramTransaction
+// reevaluate after @gear-js/react-hooks update
+const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
+  if (typeof error === 'object' && 'docs' in error) {
+    return error.docs || error.method || error.name;
+  }
+
+  return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
+};
+
+export { cx, isValidAddress, logger, asOptionalField, isUndefined, isNumeric, getTokenSVG, getErrorMessage };

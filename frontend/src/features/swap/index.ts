@@ -1,4 +1,4 @@
 import { Swap } from './components';
-import { useVFTManagerAddress } from './hooks';
+import {} from './hooks';
 
-export { Swap, useVFTManagerAddress };
+export { Swap };

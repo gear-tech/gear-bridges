@@ -163,6 +163,7 @@ jobs:
 
       - name: Build workspace
         run: cargo build --release --all-targets
+
       - name: Check that files match
         run: |
           stored=(

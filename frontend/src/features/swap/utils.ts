@@ -1,6 +1,4 @@
-import { ExtrinsicFailedData } from '@gear-js/api';
-import { BaseError, parseUnits } from 'viem';
-import { WriteContractErrorType } from 'wagmi/actions';
+import { parseUnits } from 'viem';
 import { z } from 'zod';
 
 import { isUndefined } from '@/utils';
@@ -42,14 +40,4 @@ const getMergedBalance = (accountBalance: ReturnType<UseAccountBalance>, ftBalan
   return { data, isLoading };
 };
 
-// string is only for cancelled sign and send popup error during useSendProgramTransaction
-// reevaluate after @gear-js/react-hooks update
-const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
-  if (typeof error === 'object' && 'docs' in error) {
-    return error.docs || error.method || error.name;
-  }
-
-  return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
-};
-
-export { getAmountSchema, getMergedBalance, getErrorMessage };
+export { getAmountSchema, getMergedBalance };

@@ -7,11 +7,11 @@ import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
 import { useEthAccount } from '@/hooks';
-import { isUndefined, logger } from '@/utils';
+import { isUndefined, logger, getErrorMessage } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { FormattedValues } from '../types';
-import { getAmountSchema, getErrorMessage, getMergedBalance } from '../utils';
+import { getAmountSchema, getMergedBalance } from '../utils';
 
 type Values = {
   data: bigint | undefined;

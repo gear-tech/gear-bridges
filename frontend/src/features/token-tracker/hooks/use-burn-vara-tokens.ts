@@ -10,7 +10,7 @@ function useBurnVaraTokens() {
 
   return useSendProgramTransaction({
     program,
-    serviceName: 'tokenizer',
+    serviceName: 'vftNativeExchange',
     functionName: 'burn',
   });
 }

@@ -2,7 +2,7 @@ import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-ho
 
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS, QUERY_NAME, SERVICE_NAME } from '../../consts';
+import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
 
 function useVaraFee() {
   const { getFormattedBalanceValue } = useBalanceFormat();
@@ -14,8 +14,8 @@ function useVaraFee() {
 
   const { data: config, isPending } = useProgramQuery({
     program,
-    serviceName: SERVICE_NAME.BRIDGING_PAYMENT,
-    functionName: QUERY_NAME.GET_CONFIG,
+    serviceName: 'bridgingPayment',
+    functionName: 'getState',
     args: [],
   });
 

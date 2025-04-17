@@ -9,7 +9,7 @@ function useEthFee() {
   const { data, isLoading } = useReadContract({
     abi: BRIDGING_PAYMENT_ABI,
     address: ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-    functionName: 'getFee',
+    functionName: 'fee',
   });
 
   const fee = {

@@ -1,8 +1,5 @@
 use axum::{routing::get, Router};
-use log::{Level, Log, Metadata, Record, SetLoggerError};
-use prometheus::{
-    core::Collector, register_int_counter_vec, Encoder, IntCounterVec, Registry, TextEncoder,
-};
+use prometheus::{core::Collector, Encoder, Registry, TextEncoder};
 use tokio::net::TcpListener;
 
 pub struct MetricsBuilder {

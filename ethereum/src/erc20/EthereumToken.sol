@@ -22,7 +22,7 @@ contract EthereumToken is ERC20 {
     function tokenize() public payable {
         _mint(msg.sender, msg.value);
 
-        emit Tokenized(msg.value, msg.sender);
+        emit Tokenized(msg.sender, msg.value);
     }
 
     /** @dev Convert `EthereumToken` ERC-20 token into native Ethereum.
@@ -35,6 +35,6 @@ contract EthereumToken is ERC20 {
         _burn(msg.sender, amount);
         payable(msg.sender).transfer(amount);
 
-        emit Released(amount, msg.sender);
+        emit Released(msg.sender, amount);
     }
 }

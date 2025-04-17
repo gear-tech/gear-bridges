@@ -1,67 +1,28 @@
 pragma solidity ^0.8.24;
 
-abstract contract BridgingPayment {
-    event FeePaid();
+import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-    error NotAnAdmin();
+contract BridgingPayment is IBridgingPayment, Ownable {
+    address public immutable erc20Manager;
+    uint256 public fee;
 
-    address public underlying;
-
-    uint256 fee;
-    address payable admin;
-
-    constructor(address _underlying, address _admin, uint256 _fee) payable {
-        underlying = _underlying;
-        admin = payable(_admin);
+    constructor(address _erc20Manager, uint256 _fee, address initialOwner) Ownable(initialOwner) {
+        erc20Manager = _erc20Manager;
         fee = _fee;
     }
 
-    /** @dev Deduct a `fee` from the user and transfer it to the `admin` address.
-     *  This function reverts if user don't have enough funds to pay the fee.
-     */
-    function deductFee() internal {
-        admin.transfer(fee);
+    function payFee() external payable {
+        require(msg.sender == erc20Manager, "only erc20 manager may call fee payment");
+
+        require(msg.value == fee, "incorrect fee amount");
+
+        payable(owner()).transfer(msg.value);
 
         emit FeePaid();
     }
 
-    /** @dev Set fee that'll be deducted from user when he sends requests to the contract.
-     * This function can be called only by an admin.
-     *
-     * @param newFee new fee amount
-     */
-    function setFee(uint256 newFee) public {
-        if (msg.sender != admin) {
-            revert NotAnAdmin();
-        } else {
-            fee = newFee;
-        }
-    }
-
-    /** @dev Set new admin for a contract. This function can be called only by an admin.
-     *
-     * @param newAdmin new admin address
-     */
-    function setAdmin(address newAdmin) public {
-        if (msg.sender != admin) {
-            revert NotAnAdmin();
-        } else {
-            admin = payable(newAdmin);
-        }
-    }
-
-    /** @dev Get current admin address. */
-    function getAdmin() public view returns (address) {
-        return admin;
-    }
-
-    /** @dev Get address of the contract that will be called when sending request to `BridgingPayment`. */
-    function getUnderlyingAddress() public view returns (address) {
-        return underlying;
-    }
-
-    /** @dev Get current fee amount. */
-    function getFee() public view returns (uint256) {
-        return fee;
+    function setFee(uint256 _fee) external onlyOwner {
+        fee = _fee;
     }
 }

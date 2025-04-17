@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
 import {ERC20GearSupply} from "../src/erc20/ERC20GearSupply.sol";
@@ -43,6 +44,11 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         }
 
         emit BridgingRequested(msg.sender, to, token, amount);
+    }
+
+    function requestBridgingPayingFee(address token, uint256 amount, bytes32 to, address bridgingPayment) public payable {
+        IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
+        requestBridging(token, amount, to);
     }
 
     /** @dev Accept bridging request made on other side of bridge.
@@ -98,31 +104,5 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         address token
     ) public view returns (SupplyType) {
         return tokenSupplyType[token];
-    }
-}
-
-contract ERC20ManagerBridgingPayment is BridgingPayment {
-    using SafeERC20 for IERC20;
-
-    constructor(
-        address _underlying,
-        address _admin,
-        uint256 _fee
-    ) BridgingPayment(_underlying, _admin, _fee) {}
-
-    /** @dev Call `requestBridging` function from `ERC20Manager` contract. This function also
-     * deducting some fee in native tokens from such a call. For further info see `ERC20Manager::requestBridging`.
-     */
-    function requestBridging(
-        address token,
-        uint256 amount,
-        bytes32 to
-    ) public payable {
-        deductFee();
-
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        IERC20(token).approve(underlying, amount);
-
-        ERC20Manager(underlying).requestBridging(token, amount, to);
     }
 }

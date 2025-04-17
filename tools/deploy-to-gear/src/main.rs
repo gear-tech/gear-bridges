@@ -64,10 +64,10 @@ struct VftArgs {
 #[derive(Args)]
 struct CommonArgs {
     /// ActorId that will be allowed to mint new tokens
-    #[arg(long = "minter")]
+    #[arg(long)]
     minter: Option<String>,
     /// ActorId that will be allowed to burn tokens
-    #[arg(long = "burner")]
+    #[arg(long)]
     burner: Option<String>,
 }
 

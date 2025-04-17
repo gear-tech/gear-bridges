@@ -62,7 +62,7 @@ impl BlockListener {
                     );
                     if attempts >= MAX_ATTEMPTS {
                         log::error!("Maximum attempts reached, exiting...");
-                        break;
+                        return;
                     }
                     if common::is_transport_error_recoverable(&err) {
                         tokio::time::sleep(base_delay * 2u32.pow(attempts - 1)).await;
@@ -71,7 +71,7 @@ impl BlockListener {
                             Ok(api) => api,
                             Err(err) => {
                                 log::error!("Failed to reconnect to Ethereum API: {}", err);
-                                break;
+                                return;
                             }
                         }
                     }

@@ -141,11 +141,6 @@ impl KillSwitchRelayer {
                 }
                 tokio::time::sleep(base_delay * attempts).await;
                 if common::is_transport_error_recoverable(&err) {
-                    if attempts >= MAX_ATTEMPTS {
-                        log::error!("Max attempts reached, exiting ..");
-                        return Err(err);
-                    }
-
                     self.eth_api = self
                         .eth_api
                         .reconnect()

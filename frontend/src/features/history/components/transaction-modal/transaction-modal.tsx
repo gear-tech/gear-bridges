@@ -1,16 +1,19 @@
 import { HexString } from '@gear-js/api';
-import { getVaraAddress } from '@gear-js/react-hooks';
-import { Modal } from '@gear-js/vara-ui';
+import { getVaraAddress, useAccount, useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { Button, Modal } from '@gear-js/vara-ui';
+import { isUndefined } from '@polkadot/util';
+import { useQueryClient } from '@tanstack/react-query';
 import { JSX } from 'react';
 
 import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } from '@/components';
+import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
-import { cx } from '@/utils';
+import { cx, getErrorMessage } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { NETWORK_SVG } from '../../consts';
-import { Network, Transfer } from '../../types';
+import { Network, Status, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
 import { TransactionStatus } from '../transaction-status';
 
@@ -23,9 +26,24 @@ type Props = Pick<
   txHash?: Transfer['txHash'];
   timestamp?: Transfer['timestamp'];
   status?: Transfer['status'];
+  nonce?: Transfer['nonce'];
   close: () => void;
   renderProgressBar?: () => JSX.Element;
 };
+
+// TODO: reuse hook from @features/swap
+function usePayFee() {
+  const { data: program } = useProgram({
+    library: BridgingPaymentProgram,
+    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+  });
+
+  return useSendProgramTransaction({
+    program,
+    serviceName: 'bridgingPayment',
+    functionName: 'payFees',
+  });
+}
 
 function TransactionModal({
   status,
@@ -38,6 +56,7 @@ function TransactionModal({
   destination,
   sender,
   receiver,
+  nonce,
   renderProgressBar,
   close,
 }: Props) {
@@ -47,6 +66,12 @@ function TransactionModal({
   const { fee: varaFee } = useVaraFee();
   const { fee: ethFee } = useEthFee();
   const fee = isGearNetwork ? varaFee : ethFee;
+
+  const { account } = useAccount();
+  const payFee = usePayFee();
+  const alert = useAlert();
+  const queryClient = useQueryClient();
+  const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.Pending;
 
   const explorerUrl = `${isGearNetwork ? 'https://vara.subscan.io/extrinsic' : 'https://etherscan.io/tx'}/${txHash}`;
 
@@ -58,6 +83,23 @@ function TransactionModal({
 
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
+
+  const handlePayFeeButtonClick = () => {
+    if (!nonce) throw new Error('Nonce is not found');
+    if (isUndefined(fee.value)) throw new Error('Fee is not found');
+
+    const nonceHex = `0x${nonce.padStart(64, '0')}`;
+
+    payFee
+      .sendTransactionAsync({ args: [nonceHex], value: fee.value })
+      .then(() => {
+        close();
+        alert.success('Fee paid successfully');
+
+        return queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      })
+      .catch((error: Error) => alert.error(getErrorMessage(error)));
+  };
 
   return (
     <Modal
@@ -134,8 +176,22 @@ function TransactionModal({
       <footer className={styles.footer}>
         <FeeAndTimeFooter fee={fee.formattedValue} symbol={isGearNetwork ? 'VARA' : 'ETH'} />
 
-        {txHash && (
-          <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
+        {(txHash || isPayFeeButtonVisible) && (
+          <div className={styles.buttons}>
+            {txHash && (
+              <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
+            )}
+
+            {isPayFeeButtonVisible && (
+              <Button
+                text="Pay Fee"
+                size="small"
+                isLoading={payFee.isPending}
+                onClick={handlePayFeeButtonClick}
+                block
+              />
+            )}
+          </div>
         )}
       </footer>
     </Modal>

@@ -23,6 +23,7 @@ type Props = Pick<
   | 'txHash'
   | 'sender'
   | 'receiver'
+  | 'nonce'
 > & {
   decimals: Record<HexString, number>;
   symbols: Record<HexString, string>;

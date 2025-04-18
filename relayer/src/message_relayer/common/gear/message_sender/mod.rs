@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot},
@@ -106,9 +104,8 @@ impl MessageSender {
     ) {
         let _ = tokio::task::spawn_blocking(move || {
             block_on(async move {
-                
                 let mut attempts = 0;
-                
+
                 loop {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,

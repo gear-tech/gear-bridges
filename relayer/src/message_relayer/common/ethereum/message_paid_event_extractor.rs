@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -9,7 +7,7 @@ use ethereum_client::{EthApi, FeePaidEntry};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{self, MAX_RETRIES},
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
 };
 
@@ -62,9 +60,7 @@ impl MessagePaidEventExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            
             let mut attempts = 0;
-            
 
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;

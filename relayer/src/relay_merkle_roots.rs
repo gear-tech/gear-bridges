@@ -8,7 +8,10 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::{
+        self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
+        BASE_RETRY_DELAY, MAX_RETRIES,
+    },
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -89,9 +92,8 @@ impl MerkleRootRelayer {
     pub async fn run(mut self) -> anyhow::Result<()> {
         log::info!("Starting relayer");
 
-        
         let mut attempts = 0;
-        
+
         loop {
             attempts += 1;
             let now = Instant::now();

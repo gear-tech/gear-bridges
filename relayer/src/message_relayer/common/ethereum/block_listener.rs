@@ -5,7 +5,10 @@ use ethereum_client::EthApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::{common::{self, BASE_RETRY_DELAY, MAX_RETRIES}, message_relayer::common::EthereumBlockNumber};
+use crate::{
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    message_relayer::common::EthereumBlockNumber,
+};
 
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 
@@ -45,9 +48,7 @@ impl BlockListener {
         let (sender, receiver) = unbounded_channel();
 
         tokio::spawn(async move {
-            
             let mut attempts = 0;
-            
 
             loop {
                 let res = self.run_inner(&sender).await;

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use ethereum_client::EthApi;
@@ -53,9 +51,8 @@ impl MerkleRootExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            
             let mut attempts = 0;
-            
+
             loop {
                 let res = self.run_inner(&mut blocks, &sender).await;
                 if let Err(err) = res {

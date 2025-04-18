@@ -1,7 +1,4 @@
-use std::{
-    collections::{btree_map::Entry, BTreeMap},
-    time::Duration,
-};
+use std::collections::{btree_map::Entry, BTreeMap};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use ethereum_client::EthApi;
@@ -66,9 +63,7 @@ impl MessageSender {
         mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
     ) {
         tokio::task::spawn(async move {
-            
             let mut attempts = 0;
-            
 
             loop {
                 let res = self.run_inner(&mut messages, &mut merkle_roots).await;

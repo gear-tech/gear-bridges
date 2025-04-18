@@ -12,7 +12,10 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::{
+        self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
+        BASE_RETRY_DELAY, MAX_RETRIES,
+    },
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -112,9 +115,7 @@ impl KillSwitchRelayer {
 
         log::info!("Starting kill switch relayer");
 
-        
         let mut attempts = 0;
-        
 
         loop {
             attempts += 1;

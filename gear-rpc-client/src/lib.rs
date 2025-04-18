@@ -59,6 +59,12 @@ pub struct GearApi {
     pub api: gsdk::Api,
 }
 
+impl From<gsdk::Api> for GearApi {
+    fn from(api: gsdk::Api) -> Self {
+        GearApi { api }
+    }
+}
+
 impl GearApi {
     pub async fn new(domain: &str, port: u16, retries: u8) -> anyhow::Result<GearApi> {
         let uri: &str = &format!("{domain}:{port}");

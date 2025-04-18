@@ -7,9 +7,7 @@ COPY api/gear/historical_proxy.idl .
 COPY api/gear/bridging_payment.idl .
 COPY api/ethereum/IERC20Manager.json .
 COPY api/ethereum/IMessageQueue.json .
-COPY indexer/scripts/abi.js .
-RUN node abi.js IERC20Manager.json .
-RUN node abi.js IMessageQueue.json .
+COPY api/ethereum/IBridgingPayment.json .
 
 FROM node AS node-with-gyp
 RUN apk add g++ make python3

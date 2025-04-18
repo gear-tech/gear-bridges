@@ -6,7 +6,10 @@ export interface BridgingRequested {
   readonly receiver: string;
 }
 
-export interface TokenMapping {
+export interface TokenMappingAdded {
   readonly vara_token_id: string;
   readonly eth_token_id: string;
+  readonly supply_type: 'Ethereum' | 'Gear';
 }
+
+export type TokenMappingRemoved = TokenMappingAdded;

@@ -1,6 +1,6 @@
 import { TypeormDatabase } from '@subsquid/typeorm-store';
 import { randomUUID } from 'crypto';
-import { BridgingPaidEvent, BridgingRequested, Relayed, TokenMapping } from './types';
+import { BridgingPaidEvent, BridgingRequested, Relayed, TokenMappingAdded, TokenMappingRemoved } from './types';
 import { ethNonce, gearNonce, TempState } from '../common';
 import { ProcessorContext, processor } from './processor';
 import { Network, Status, Transfer } from '../model';
@@ -57,21 +57,26 @@ const handler = async (ctx: ProcessorContext) => {
                 break;
               }
               case 'TokenMappingAdded': {
-                const { vara_token_id, eth_token_id } = vftManagerDecoder.decodeEvent<TokenMapping>(
+                const { vara_token_id, eth_token_id, supply_type } = vftManagerDecoder.decodeEvent<TokenMappingAdded>(
                   service,
                   method,
                   msg.payload,
                 );
-                tempState.addPair(vara_token_id, eth_token_id);
+
+                tempState.addPair(
+                  vara_token_id.toLowerCase(),
+                  eth_token_id.toLowerCase(),
+                  supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
+                );
                 break;
               }
               case 'TokenMappingRemoved': {
-                const { vara_token_id, eth_token_id } = vftManagerDecoder.decodeEvent<TokenMapping>(
+                const { vara_token_id, eth_token_id } = vftManagerDecoder.decodeEvent<TokenMappingRemoved>(
                   service,
                   method,
                   msg.payload,
                 );
-                tempState.removePair(vara_token_id, eth_token_id);
+                promises.push(tempState.removePair(vara_token_id.toLowerCase(), eth_token_id.toLowerCase()));
                 break;
               }
               default: {

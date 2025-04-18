@@ -1,4 +1,5 @@
 import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_} from "@subsquid/typeorm-store"
+import {Network} from "./_network"
 
 @Entity_()
 export class Pair {
@@ -14,4 +15,7 @@ export class Pair {
 
     @StringColumn_({nullable: false})
     ethToken!: string
+
+    @Column_("varchar", {length: 8, nullable: false})
+    tokenSupply!: Network
 }

@@ -103,22 +103,31 @@ export class TempState {
     }
   }
 
-  public addPair(gear: string, eth: string) {
+  public addPair(gear: string, eth: string, supply: Network) {
     const pair = new Pair({
       id: randomUUID(),
       gearToken: gear.toLowerCase(),
       ethToken: eth.toLowerCase(),
+      tokenSupply: supply,
     });
     if (this._network === Network.Ethereum) this._tokens.set(eth, pair);
     else this._tokens.set(gear, pair);
 
     this._addedTokens.push(pair);
 
-    this._ctx.log.info({ gear, eth }, 'Pair added');
+    this._ctx.log.info({ gear, eth, supply }, 'Pair added');
   }
 
-  public removePair(gear: string, eth: string) {
-    // TODO
+  public async removePair(gear: string, eth: string) {
+    const index = this._addedTokens.findIndex(({ gearToken, ethToken }) => gearToken === gear && ethToken === eth);
+    if (index > 0) {
+      this._addedTokens.splice(index);
+    } else {
+      const pair = await this._ctx.store.findOneBy(Pair, { gearToken: gear, ethToken: eth });
+      if (!pair) return;
+
+      await this._ctx.store.remove(pair);
+    }
   }
 
   public transferRequested(transfer: Transfer) {

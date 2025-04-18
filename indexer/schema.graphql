@@ -1,41 +1,42 @@
 enum Network {
-    Ethereum
-    Gear
+  Ethereum
+  Gear
 }
 
 enum Status {
-    Pending
-    InProgress
-    Completed
-    Failed
+  Pending
+  InProgress
+  Completed
+  Failed
 }
 
 type Transfer @entity {
-    id: ID!
-    txHash: String!
-    blockNumber: String!
-    timestamp: DateTime! @index
-    completedAt: DateTime
-    nonce: String! @index
-    sourceNetwork: Network!
-    source: String! @index
-    destNetwork: Network!
-    destination: String! @index
-    status: Status!
-    sender: String! @index
-    receiver: String! @index
-    amount: BigInt!
+  id: ID!
+  txHash: String!
+  blockNumber: String!
+  timestamp: DateTime! @index
+  completedAt: DateTime
+  nonce: String! @index
+  sourceNetwork: Network!
+  source: String! @index
+  destNetwork: Network!
+  destination: String! @index
+  status: Status!
+  sender: String! @index
+  receiver: String! @index
+  amount: BigInt!
 }
 
 type Pair @entity {
-    id: ID!
-    gearToken: String!
-    ethToken: String!
+  id: ID!
+  gearToken: String!
+  ethToken: String!
+  tokenSupply: Network!
 }
 
 type CompletedTransfer @entity {
-    id: ID!
-    nonce: String! @index @unique
-    destNetwork: Network!
-    timestamp: DateTime
+  id: ID!
+  nonce: String! @index @unique
+  destNetwork: Network!
+  timestamp: DateTime
 }

@@ -129,8 +129,8 @@ export class TempState {
     transfer.receiver = transfer.receiver.toLowerCase();
     transfer.nonce = transfer.nonce;
     this._transfers.set(transfer.nonce, transfer);
-    
-    this._ctx.log.info(`Transfer requested: ${transfer.nonce}`);
+
+    this._ctx.log.info(`${transfer.nonce}: Transfer requested in block ${transfer.blockNumber}`);
   }
 
   public transferCompleted(nonce: string, ts: Date) {
@@ -143,7 +143,7 @@ export class TempState {
         timestamp: ts,
       }),
     );
-    this._ctx.log.info(`Transfer completed: ${nonce}`);
+    this._ctx.log.info(`${nonce}: Transfer completed`);
   }
 
   public async transferStatus(nonce: string, status: Status) {
@@ -152,12 +152,13 @@ export class TempState {
     } else {
       const transfer = await this._ctx.store.findOneBy(Transfer, { nonce });
       if (!transfer) {
-        this._ctx.log.error(`Failed to update status for ${nonce}`);
+        this._ctx.log.error(`${nonce}: Failed to update transfer status`);
         return;
       }
+      transfer.status = Status.InProgress;
       this._transfers.set(nonce, transfer);
     }
-    this._ctx.log.info(`Transfer changed status: ${status}`);
+    this._ctx.log.info(`${nonce}: Transfer changed status to ${status}`);
   }
 
   private _getTransfers(nonces: string[]) {

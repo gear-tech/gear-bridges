@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use alloy::transports::{RpcError, TransportErrorKind};
 use prover::proving::GenesisConfig;
 
 use crate::{
@@ -87,3 +90,49 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
 
     Ok(tx_hash)
 }
+
+pub(crate) fn is_rpc_transport_error_recoverable(err: &RpcError<TransportErrorKind>) -> bool {
+    match err {
+        RpcError::Transport(transport) => match transport {
+            TransportErrorKind::MissingBatchResponse(_) => true,
+            TransportErrorKind::BackendGone => true,
+            TransportErrorKind::PubsubUnavailable => false,
+            TransportErrorKind::HttpError(_) => false,
+            TransportErrorKind::Custom(_) => false,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
+    if let Some(ethereum_client::Error::ErrorInHTTPTransport(err)) =
+        err.downcast_ref::<ethereum_client::Error>()
+    {
+        return is_rpc_transport_error_recoverable(err);
+    }
+
+    // raw provider calls return `RpcError`.
+    if let Some(err) = err.downcast_ref::<RpcError<TransportErrorKind>>() {
+        return is_rpc_transport_error_recoverable(err);
+    }
+
+    // sails calls return gclient error which can contain subxt error with rpc transport error
+    if let Some(gclient::Error::Subxt(err)) = err.downcast_ref::<gclient::Error>() {
+        if err.is_disconnected_will_reconnect() {
+            return true;
+        }
+        if let subxt::Error::Rpc(rpc) = err {
+            match rpc {
+                subxt::error::RpcError::SubscriptionDropped => return true,
+                subxt::error::RpcError::DisconnectedWillReconnect(_) => return true,
+                _ => (),
+            }
+        }
+    }
+
+    false
+}
+
+pub const MAX_RETRIES: u32 = 5;
+pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(1);

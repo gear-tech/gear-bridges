@@ -5,8 +5,11 @@ use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{
-    AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
+use crate::{
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    message_relayer::common::{
+        AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
+    },
 };
 
 pub struct MerkleRootExtractor {
@@ -42,16 +45,44 @@ impl MerkleRootExtractor {
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut blocks: UnboundedReceiver<EthereumBlockNumber>,
     ) -> UnboundedReceiver<RelayedMerkleRoot> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            let mut attempts = 0;
+
             loop {
                 let res = self.run_inner(&mut blocks, &sender).await;
                 if let Err(err) = res {
-                    log::error!("Merkle root extractor failed: {}", err);
+                    attempts += 1;
+                    log::error!(
+                        "Merkle root extractor failed (attempt {}/{}): {}. Retrying in {:?}...",
+                        attempts,
+                        MAX_RETRIES,
+                        err,
+                        BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
+                    );
+                    if attempts >= MAX_RETRIES {
+                        log::error!("Merkle root extractor failed {} times: {}", attempts, err);
+                        break;
+                    }
+
+                    tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
+
+                    if common::is_transport_error_recoverable(&err) {
+                        self.eth_api = match self.eth_api.reconnect() {
+                            Ok(eth_api) => eth_api,
+                            Err(err) => {
+                                log::error!("Failed to reconnect to Ethereum: {}", err);
+                                break;
+                            }
+                        };
+                    } else {
+                        log::error!("Merkle root extractor failed: {}", err);
+                        break;
+                    }
                 }
             }
         });

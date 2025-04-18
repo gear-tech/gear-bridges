@@ -6,7 +6,10 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, FeePaidEntry};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{EthereumBlockNumber, TxHashWithSlot};
+use crate::{
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
+};
 
 use super::find_slot_by_block_number;
 
@@ -51,16 +54,41 @@ impl MessagePaidEventExtractor {
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut blocks: UnboundedReceiver<EthereumBlockNumber>,
     ) -> UnboundedReceiver<TxHashWithSlot> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            let mut attempts = 0;
+
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
-                    log::error!("Deposit event extractor failed: {}", err);
+                    attempts += 1;
+                    log::error!(
+                        "Deposit event extractor failed (attempt {}/{}): {}",
+                        attempts,
+                        MAX_RETRIES,
+                        err
+                    );
+
+                    if attempts >= MAX_RETRIES {
+                        log::error!("Max attempts reached, exiting...");
+                        break;
+                    }
+
+                    tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
+
+                    if common::is_transport_error_recoverable(&err) {
+                        self.eth_api = match self.eth_api.reconnect() {
+                            Ok(eth_api) => eth_api,
+                            Err(err) => {
+                                log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                break;
+                            }
+                        };
+                    }
                 }
             }
         });

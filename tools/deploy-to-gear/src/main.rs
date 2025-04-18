@@ -28,14 +28,7 @@ struct Cli {
     #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
     gear_suri: String,
 
-    /// ActorId that will be allowed to mint new tokens
-    #[arg(long = "mint-admin")]
-    minter: Option<String>,
-    /// ActorId that will be allowed to burn tokens
-    #[arg(long = "burn-admin")]
-    burner: Option<String>,
-
-    #[arg(long = "salt")]
+    #[arg(long)]
     salt: Option<String>,
 
     #[command(subcommand)]
@@ -48,7 +41,11 @@ enum CliCommands {
     /// Deploy VFT contract
     Vft(VftArgs),
     /// Deploy VFT-VARA contract
-    VftVara,
+    VftVara(RolesArgs),
+    AllocateShards {
+        /// Program ID of the VFT contract
+        program_id: String,
+    },
 }
 
 #[derive(Args)]
@@ -62,6 +59,19 @@ struct VftArgs {
     /// Decimals of the token that will be set during initialization
     #[arg(long = "token-decimals", short = 'd', default_value = "18")]
     token_decimals: u8,
+
+    #[command(flatten)]
+    roles: RolesArgs,
+}
+
+#[derive(Args)]
+struct RolesArgs {
+    /// ActorId that will be allowed to mint new tokens
+    #[arg(long)]
+    minter: Option<String>,
+    /// ActorId that will be allowed to burn tokens
+    #[arg(long)]
+    burner: Option<String>,
 }
 
 #[tokio::main]
@@ -83,30 +93,48 @@ async fn main() {
 
         ActorId::new(data.try_into().expect("Got input of wrong length"))
     };
-    let minter = cli.minter.map(str_to_actorid);
-    let burner = cli.burner.map(str_to_actorid);
+
     let salt = match cli.salt {
-        Some(salt) => hex::decode(salt)
-            .inspect_err(|err| {
-                println!("Failed to decode salt: {err}, using random salt");
-            })
-            .ok(),
+        Some(salt) => {
+            let s = if &salt[..2] == "0x" {
+                &salt[2..]
+            } else {
+                &salt
+            };
+            hex::decode(s)
+                .inspect_err(|err| {
+                    println!("Failed to decode salt: {err}, using random salt");
+                })
+                .ok()
+        }
         _ => {
             println!("Salt is not provided, using random salt");
             None
         }
     };
 
-    let updater = Uploader::new(gear_api, minter, burner, salt);
-
     match cli.command {
         CliCommands::Vft(args) => {
-            updater
+            let minter = args.roles.minter.map(str_to_actorid);
+            let burner = args.roles.burner.map(str_to_actorid);
+
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
+            uploader
                 .upload_vft(args.token_name, args.token_symbol, args.token_decimals)
                 .await
         }
 
-        CliCommands::VftVara => updater.upload_vft_vara().await,
+        CliCommands::VftVara(args) => {
+            let minter = args.minter.map(str_to_actorid);
+            let burner = args.burner.map(str_to_actorid);
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
+            uploader.upload_vft_vara().await;
+        }
+        CliCommands::AllocateShards { program_id } => {
+            let program_id = str_to_actorid(program_id);
+            let uploader = Uploader::new(gear_api, None, None, salt);
+            uploader.allocate_shards(program_id).await;
+        }
     }
 }
 
@@ -134,6 +162,30 @@ impl Uploader {
             burner,
             salt,
         }
+    }
+
+    async fn allocate_shards(self, program_id: ActorId) {
+        let remoting = GClientRemoting::new(self.api.clone());
+        Self::allocate_shards_impl(remoting, program_id, self.gas_limit).await;
+    }
+
+    async fn allocate_shards_impl(remoting: GClientRemoting, program_id: ActorId, gas_limit: u64) {
+        let mut vft_extension = vft_client::VftExtension::new(remoting);
+        while vft_extension
+            .allocate_next_balances_shard()
+            .with_gas_limit(gas_limit)
+            .send_recv(program_id)
+            .await
+            .expect("Failed to allocate next balances shard")
+        {}
+
+        while vft_extension
+            .allocate_next_allowances_shard()
+            .with_gas_limit(gas_limit)
+            .send_recv(program_id)
+            .await
+            .expect("Failed to allocate next allowances shard")
+        {}
     }
 
     async fn upload_code(&self, wasm_binary: &[u8]) -> CodeId {
@@ -187,24 +239,7 @@ impl Uploader {
             println!("Granted burner role");
         }
 
-        // Allocating underlying shards.
-        let mut vft_extension = vft_client::VftExtension::new(remoting);
-        while vft_extension
-            .allocate_next_balances_shard()
-            .with_gas_limit(self.gas_limit)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to allocate next balances shard")
-        {}
-
-        while vft_extension
-            .allocate_next_allowances_shard()
-            .with_gas_limit(self.gas_limit)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to allocate next allowances shard")
-        {}
-
+        Self::allocate_shards_impl(remoting, program_id, self.gas_limit).await;
         println!("Program deployed");
     }
 

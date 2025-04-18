@@ -41,7 +41,7 @@ enum CliCommands {
     /// Deploy VFT contract
     Vft(VftArgs),
     /// Deploy VFT-VARA contract
-    VftVara(CommonArgs),
+    VftVara(RolesArgs),
     AllocateShards {
         /// Program ID of the VFT contract
         program_id: String,
@@ -61,11 +61,11 @@ struct VftArgs {
     token_decimals: u8,
 
     #[command(flatten)]
-    common: CommonArgs,
+    roles: RolesArgs,
 }
 
 #[derive(Args)]
-struct CommonArgs {
+struct RolesArgs {
     /// ActorId that will be allowed to mint new tokens
     #[arg(long)]
     minter: Option<String>,
@@ -115,8 +115,8 @@ async fn main() {
 
     match cli.command {
         CliCommands::Vft(args) => {
-            let minter = args.common.minter.map(str_to_actorid);
-            let burner = args.common.burner.map(str_to_actorid);
+            let minter = args.roles.minter.map(str_to_actorid);
+            let burner = args.roles.burner.map(str_to_actorid);
 
             let uploader = Uploader::new(gear_api, minter, burner, salt);
             uploader

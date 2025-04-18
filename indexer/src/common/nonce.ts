@@ -1,4 +1,4 @@
-import { Codec, Src, TypeKind } from '@subsquid/scale-codec';
+import { Codec, TypeKind } from '@subsquid/scale-codec';
 import { hexToBigInt } from '@polkadot/util';
 import * as crypto from 'node:crypto';
 

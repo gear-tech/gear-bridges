@@ -1,9 +1,10 @@
-use extended_vft_client::traits::*;
+use gstd::{exec, static_mut, static_ref};
 use sails_rs::{
     calls::*,
-    gstd::{self, calls::GStdRemoting, msg, ExecContext},
+    gstd::{calls::GStdRemoting, msg, ExecContext},
     prelude::*,
 };
+use vft_client::traits::*;
 
 mod error;
 mod token_mapping;
@@ -187,8 +188,10 @@ pub struct Config {
     gas_for_reply_deposit: u64,
     /// Gas limit for gear-eth-bridge built-in actor request.
     gas_to_send_request_to_builtin: u64,
+    /// Required gas to commit changes in [VftManager::update_vfts].
+    gas_for_swap_token_maps: u64,
     /// Timeout in blocks that current program will wait for reply from
-    /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
+    /// the other programs such as VFT and `gear-eth-bridge` built-in actor.
     reply_timeout: u32,
     /// Fee to pay `gear-eth-bridge` built-in actor.
     fee_bridge: u128,
@@ -421,8 +424,8 @@ where
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let vft_manager = gstd::exec::program_id();
-        let mut service = extended_vft_client::Vft::new(GStdRemoting);
+        let vft_manager = exec::program_id();
+        let mut service = vft_client::Vft::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {
             let balance = service
@@ -442,7 +445,17 @@ where
             }
         }
 
-        gstd::exec::exit(vft_manager_new);
+        exec::exit(vft_manager_new);
+    }
+
+    pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
+        self.ensure_admin();
+
+        let gas_required = self.config().gas_for_swap_token_maps;
+        self.state_mut()
+            .token_map
+            .update_vfts(gas_required, vft_map)
+            .await
     }
 
     /// Get state of a `request_bridging` message tracker.
@@ -595,6 +608,22 @@ where
         #[cfg(not(feature = "mocks"))]
         panic!("Please rebuild with enabled `mocks` feature")
     }
+
+    /// The method is intended for tests and is available only when the feature `mocks`
+    /// is enabled.
+    ///
+    /// Swaps internal hash maps of the TokenMap instance.
+    pub async fn calculate_gas_for_token_map_swap(&mut self) {
+        #[cfg(feature = "mocks")]
+        {
+            self.state_mut()
+                .token_map
+                .calculate_gas_for_token_map_swap()
+        }
+
+        #[cfg(not(feature = "mocks"))]
+        panic!("Please rebuild with enabled `mocks` feature")
+    }
 }
 
 impl<T> VftManager<T>
@@ -628,19 +657,16 @@ where
 
     /// Get a reference to the global [State].
     fn state(&self) -> &State {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw const STATE).as_ref() }.expect("VftManager::seed() should be called")
+        unsafe { static_ref!(STATE).as_ref() }.expect("VftManager::seed() should be called")
     }
 
     /// Get a mutable reference to the global [State].
     fn state_mut(&mut self) -> &mut State {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw mut STATE).as_mut() }.expect("VftManager::seed() should be called")
+        unsafe { static_mut!(STATE).as_mut() }.expect("VftManager::seed() should be called")
     }
 
     /// Get a reference to the global [Config].
     fn config(&self) -> &Config {
-        #[allow(clippy::deref_addrof)]
-        unsafe { (*&raw const CONFIG).as_ref() }.expect("VftManager::seed() should be called")
+        unsafe { static_ref!(CONFIG).as_ref() }.expect("VftManager::seed() should be called")
     }
 }

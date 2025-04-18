@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { getFnNamePrefix, getServiceNamePrefix, Sails } from 'sails-js';
 import { SailsIdlParser } from 'sails-js-parser';
 
-export class Codec {
+export class Decoder {
   constructor(private sails: Sails) {}
 
   static async create(idlPath: string) {
@@ -11,7 +11,7 @@ export class Codec {
     const vft = new Sails(parser);
     vft.parseIdl(fs.readFileSync(idlPath, 'utf-8'));
 
-    return new Codec(vft);
+    return new Decoder(vft);
   }
 
   decodeInput<T>(data: `0x${string}`): T {

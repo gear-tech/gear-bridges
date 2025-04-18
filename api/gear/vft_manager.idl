@@ -27,8 +27,10 @@ type Config = struct {
   gas_for_reply_deposit: u64,
   /// Gas limit for gear-eth-bridge built-in actor request.
   gas_to_send_request_to_builtin: u64,
+  /// Required gas to commit changes in [VftManager::update_vfts].
+  gas_for_swap_token_maps: u64,
   /// Timeout in blocks that current program will wait for reply from
-  /// the other programs such as `extended-vft` and `gear-eth-bridge` built-in actor.
+  /// the other programs such as VFT and `gear-eth-bridge` built-in actor.
   reply_timeout: u32,
   /// Fee to pay `gear-eth-bridge` built-in actor.
   fee_bridge: u128,
@@ -78,11 +80,11 @@ type Error = enum {
   InvalidMessageStatus,
   /// Message sent to the program failed.
   MessageFailed,
-  /// Failed to decode `extended-vft::Burn` reply.
+  /// Failed to decode Burn reply.
   BurnTokensDecode,
-  /// Failed to decode `extended-vft::TransferFrom` reply.
+  /// Failed to decode TransferFrom reply.
   TransferFromDecode,
-  /// Failed to decode `extended-vft::Mint` reply.
+  /// Failed to decode Mint reply.
   MintTokensDecode,
   /// Failed to decode payload from gear-eth-bridge built-in actor.
   BuiltinDecode,
@@ -160,6 +162,11 @@ service VftManager {
   /// Designed for benchmarking gas consumption by the VFT-response processing function.
   CalculateGasForReply : (_slot: u64, _transaction_index: u64, _supply_type: TokenSupply) -> result (null, Error);
   /// The method is intended for tests and is available only when the feature `mocks`
+  /// is enabled.
+  /// 
+  /// Swaps internal hash maps of the TokenMap instance.
+  CalculateGasForTokenMapSwap : () -> null;
+  /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Populates the collection with processed transactions.
   /// 
   /// Returns false when the collection is populated.
@@ -218,6 +225,7 @@ service VftManager {
   UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
+  UpdateVfts : (vft_map: vec struct { actor_id, actor_id }) -> null;
   Upgrade : (vft_manager_new: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;

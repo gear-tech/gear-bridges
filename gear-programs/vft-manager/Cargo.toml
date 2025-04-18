@@ -14,8 +14,8 @@ sails-idl-gen.workspace = true
 [dev-dependencies]
 vft-manager = { path = ".", features = ["wasm-binary"] }
 vft-manager-client = { path = "client" }
-extended-vft = { workspace = true, features = ["wasm-binary"] }
-extended-vft-client.workspace = true
+vft = { workspace = true, features = ["wasm-binary"] }
+vft-client.workspace = true
 
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true

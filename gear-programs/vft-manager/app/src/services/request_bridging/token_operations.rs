@@ -1,7 +1,10 @@
 use gstd::{msg, MessageId};
 use sails_rs::{calls::ActionIo, prelude::*};
 
-use extended_vft_client::vft::io as vft_io;
+use vft_client::{
+    vft::io::TransferFrom,
+    vft_admin::io::{Burn, Mint},
+};
 
 use crate::services::TokenSupply;
 
@@ -19,7 +22,7 @@ pub async fn burn(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    let bytes: Vec<u8> = vft_io::Burn::encode_call(sender, amount);
+    let bytes: Vec<u8> = Burn::encode_call(sender, amount);
 
     send_message_with_gas_for_reply(
         vara_token_id,
@@ -47,7 +50,7 @@ pub async fn lock(
     msg_id: MessageId,
 ) -> Result<(), Error> {
     let receiver = gstd::exec::program_id();
-    let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, receiver, amount);
+    let bytes: Vec<u8> = TransferFrom::encode_call(sender, receiver, amount);
 
     send_message_with_gas_for_reply(
         vara_token_id,
@@ -75,7 +78,7 @@ pub async fn mint(
 ) -> Result<(), Error> {
     let msg_tracker = msg_tracker_mut();
 
-    let bytes: Vec<u8> = vft_io::Mint::encode_call(receiver, amount);
+    let bytes: Vec<u8> = Mint::encode_call(receiver, amount);
     send_message_with_gas_for_reply(
         token_id,
         bytes,
@@ -104,7 +107,7 @@ pub async fn unlock(
     let msg_tracker = msg_tracker_mut();
 
     let sender = gstd::exec::program_id();
-    let bytes: Vec<u8> = vft_io::TransferFrom::encode_call(sender, receiver, amount);
+    let bytes: Vec<u8> = TransferFrom::encode_call(sender, receiver, amount);
 
     send_message_with_gas_for_reply(
         vara_token_id,
@@ -212,22 +215,26 @@ fn handle_reply_hook(msg_id: MessageId) {
     };
 }
 
-/// Decode reply received from the `extended-vft::Burn` method.
+/// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::Burn::decode_reply(bytes).map_err(|_| Error::BurnTokensDecode)
+    Burn::decode_reply(bytes)
+        .map_err(|_| Error::BurnTokensDecode)
+        .map(|_| true)
 }
 
-/// Decode reply received from the `extended-vft::TransferFrom` method.
+/// Decode reply received from the TransferFrom method.
 fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
+    TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }
 
-/// Decode reply received from the `extended-vft::Mint` method.
+/// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::Mint::decode_reply(bytes).map_err(|_| Error::MintTokensDecode)
+    Mint::decode_reply(bytes)
+        .map_err(|_| Error::MintTokensDecode)
+        .map(|_| true)
 }
 
-/// Decode reply received from the `extended-vft::TransferFrom` method.
+/// Decode reply received from the TransferFrom method.
 fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    vft_io::TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
+    TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
 }

@@ -1,4 +1,4 @@
-import { List, TransactionsCounter, TransactionCard } from './components';
+import { List, TransactionsCounter, TransactionCard, PendingTransactionsWarning } from './components';
 import { FIELD_NAME, STATUS_OPTIONS, TIMESTAMP_OPTIONS, TRANSACTIONS_LIMIT } from './consts';
 import { useTransactions, useTransactionsCount, useTransactionFilters } from './hooks';
 import { getAssetOptions } from './utils';
@@ -7,6 +7,7 @@ export {
   List,
   TransactionsCounter,
   TransactionCard,
+  PendingTransactionsWarning,
   useTransactions,
   useTransactionsCount,
   useTransactionFilters,

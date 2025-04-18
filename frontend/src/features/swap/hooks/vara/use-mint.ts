@@ -8,7 +8,7 @@ function useMint() {
     id: WRAPPED_VARA_CONTRACT_ADDRESS,
   });
 
-  const params = { program, serviceName: 'tokenizer' as const, functionName: 'mint' as const };
+  const params = { program, serviceName: 'vftNativeExchange' as const, functionName: 'mint' as const };
   const { prepareTransactionAsync } = usePrepareProgramTransaction(params);
   const send = useSendProgramTransaction(params);
 

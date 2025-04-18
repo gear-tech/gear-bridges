@@ -1,5 +1,5 @@
 use super::super::TokenSupply;
-use gstd::{prelude::collections::HashMap, MessageId};
+use gstd::{prelude::collections::HashMap, static_mut, static_ref, MessageId};
 use sails_rs::prelude::*;
 
 static mut MSG_TRACKER: Option<MessageTracker> = None;
@@ -63,14 +63,12 @@ pub fn init() {
 
 /// Get reference to a global message tracker.
 pub fn msg_tracker_ref() -> &'static MessageTracker {
-    #[allow(clippy::deref_addrof)]
-    unsafe { (*&raw const MSG_TRACKER).as_ref() }.expect("VftManager::seed() should be called")
+    unsafe { static_ref!(MSG_TRACKER).as_ref() }.expect("VftManager::seed() should be called")
 }
 
 /// Get mutable reference to a global message tracker.
 pub fn msg_tracker_mut() -> &'static mut MessageTracker {
-    #[allow(clippy::deref_addrof)]
-    unsafe { (*&raw mut MSG_TRACKER).as_mut() }.expect("VftManager::seed() should be called")
+    unsafe { static_mut!(MSG_TRACKER).as_mut() }.expect("VftManager::seed() should be called")
 }
 
 impl MessageTracker {

@@ -4,7 +4,7 @@ import { useReadContract } from 'wagmi';
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
 import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
 
-import { ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { ERC20_MANAGER_CONTRACT_ADDRESS } from '../../consts';
 
 function useEthFTAllowance(address: HexString | undefined) {
   const ethAccount = useEthAccount();
@@ -13,7 +13,7 @@ function useEthFTAllowance(address: HexString | undefined) {
     address,
     abi: FUNGIBLE_TOKEN_ABI,
     functionName: 'allowance',
-    args: ethAccount.address ? [ethAccount.address, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS] : undefined,
+    args: ethAccount.address ? [ethAccount.address, ERC20_MANAGER_CONTRACT_ADDRESS] : undefined,
     query: { enabled: Boolean(ethAccount.address) },
   });
 

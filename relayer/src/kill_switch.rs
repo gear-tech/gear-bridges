@@ -12,7 +12,7 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
+    common::{self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount, BASE_RETRY_DELAY, MAX_RETRIES},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -112,9 +112,9 @@ impl KillSwitchRelayer {
 
         log::info!("Starting kill switch relayer");
 
-        let base_delay = Duration::from_secs(1);
+        
         let mut attempts = 0;
-        const MAX_ATTEMPTS: u32 = 5;
+        
 
         loop {
             attempts += 1;
@@ -127,19 +127,19 @@ impl KillSwitchRelayer {
             };
 
             if let Err(err) = res {
-                let delay = base_delay * 2u32.pow(attempts - 1);
+                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                 log::error!(
                     "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
                     attempts,
-                    MAX_ATTEMPTS,
+                    MAX_RETRIES,
                     err,
                     delay
                 );
-                if attempts >= MAX_ATTEMPTS {
+                if attempts >= MAX_RETRIES {
                     log::error!("Max attempts reached, exiting ..");
                     return Err(err);
                 }
-                tokio::time::sleep(base_delay * attempts).await;
+                tokio::time::sleep(BASE_RETRY_DELAY * attempts).await;
                 if common::is_transport_error_recoverable(&err) {
                     self.eth_api = self
                         .eth_api

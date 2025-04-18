@@ -8,7 +8,7 @@ use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common,
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{
         AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
     },
@@ -53,9 +53,9 @@ impl MerkleRootExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            let base_delay = Duration::from_secs(1);
+            
             let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 5;
+            
             loop {
                 let res = self.run_inner(&mut blocks, &sender).await;
                 if let Err(err) = res {
@@ -63,16 +63,16 @@ impl MerkleRootExtractor {
                     log::error!(
                         "Merkle root extractor failed (attempt {}/{}): {}. Retrying in {:?}...",
                         attempts,
-                        MAX_ATTEMPTS,
+                        MAX_RETRIES,
                         err,
-                        base_delay * 2u32.pow(attempts - 1),
+                        BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
                     );
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= MAX_RETRIES {
                         log::error!("Merkle root extractor failed {} times: {}", attempts, err);
                         break;
                     }
 
-                    tokio::time::sleep(base_delay * 2u32.pow(attempts - 1)).await;
+                    tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
                     if common::is_transport_error_recoverable(&err) {
                         self.eth_api = match self.eth_api.reconnect() {

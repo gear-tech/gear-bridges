@@ -9,7 +9,7 @@ use ethereum_client::{EthApi, FeePaidEntry};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common,
+    common::{self, MAX_RETRIES},
     message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
 };
 
@@ -62,9 +62,9 @@ impl MessagePaidEventExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            let base_delay = Duration::from_secs(1);
+            
             let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 5;
+            
 
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
@@ -73,16 +73,16 @@ impl MessagePaidEventExtractor {
                     log::error!(
                         "Deposit event extractor failed (attempt {}/{}): {}",
                         attempts,
-                        MAX_ATTEMPTS,
+                        MAX_RETRIES,
                         err
                     );
 
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= MAX_RETRIES {
                         log::error!("Max attempts reached, exiting...");
                         break;
                     }
 
-                    tokio::time::sleep(base_delay * 2u32.pow(attempts - 1)).await;
+                    tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
                     if common::is_transport_error_recoverable(&err) {
                         self.eth_api = match self.eth_api.reconnect() {

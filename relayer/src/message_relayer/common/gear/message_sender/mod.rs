@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    common,
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot},
 };
 use anyhow::anyhow;
@@ -106,23 +106,23 @@ impl MessageSender {
     ) {
         let _ = tokio::task::spawn_blocking(move || {
             block_on(async move {
-                let base_delay = Duration::from_secs(1);
+                
                 let mut attempts = 0;
-                const MAX_ATTEMPTS: u32 = 5;
+                
                 loop {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,
                         Err(err) => {
                             attempts += 1;
-                            let delay = base_delay * 2u32.pow(attempts - 1);
+                            let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                             log::error!(
                                 "Gear message sender failed (attempt {}/{}): {}. Retrying in {:?}",
                                 attempts,
-                                MAX_ATTEMPTS,
+                                MAX_RETRIES,
                                 err,
                                 delay
                             );
-                            if attempts >= MAX_ATTEMPTS {
+                            if attempts >= MAX_RETRIES {
                                 log::error!("Max attempts reached, exiting...");
                                 break;
                             }

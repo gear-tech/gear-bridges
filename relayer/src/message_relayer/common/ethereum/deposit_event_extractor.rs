@@ -9,7 +9,7 @@ use ethereum_client::{DepositEventEntry, EthApi};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common,
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
 };
 
@@ -58,23 +58,23 @@ impl DepositEventExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            let base_delay = Duration::from_secs(1);
+            
             let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 5;
+            
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
                     attempts += 1;
-                    let delay = base_delay * 2u32.pow(attempts - 1);
+                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
 
                     log::error!(
                         "Deposit event extractor failed (attempt {}/{}): {}. Retrying in {:?}",
                         attempts,
-                        MAX_ATTEMPTS,
+                        MAX_RETRIES,
                         err,
                         delay
                     );
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= MAX_RETRIES {
                         log::error!("Maximum attempts reached, exiting...");
                         break;
                     }

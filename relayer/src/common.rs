@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use alloy::transports::{RpcError, TransportErrorKind};
 use prover::proving::GenesisConfig;
 
@@ -131,3 +133,6 @@ pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
 
     false
 }
+
+pub const MAX_RETRIES: u32 = 5;
+pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(1);

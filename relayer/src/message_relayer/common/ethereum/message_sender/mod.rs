@@ -10,7 +10,7 @@ use prometheus::{Gauge, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common,
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{AuthoritySetId, MessageInBlock},
 };
 
@@ -66,23 +66,23 @@ impl MessageSender {
         mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
     ) {
         tokio::task::spawn(async move {
-            let base_delay = Duration::from_secs(1);
+            
             let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 5;
+            
 
             loop {
                 let res = self.run_inner(&mut messages, &mut merkle_roots).await;
                 if let Err(err) = res {
                     attempts += 1;
-                    let delay = base_delay * 2u32.pow(attempts - 1);
+                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                     log::error!(
                         "Ethereum message sender failed (attempt: {}/{}): {}. Retrying in {:?}",
                         attempts,
-                        MAX_ATTEMPTS,
+                        MAX_RETRIES,
                         err,
                         delay
                     );
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= MAX_RETRIES {
                         log::error!("Maximum attempts reached, exiting...");
                         break;
                     }

@@ -5,7 +5,7 @@ use ethereum_client::EthApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::{common, message_relayer::common::EthereumBlockNumber};
+use crate::{common::{self, BASE_RETRY_DELAY, MAX_RETRIES}, message_relayer::common::EthereumBlockNumber};
 
 const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 
@@ -45,9 +45,9 @@ impl BlockListener {
         let (sender, receiver) = unbounded_channel();
 
         tokio::spawn(async move {
-            let base_delay = Duration::from_secs(1);
+            
             let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 5;
+            
 
             loop {
                 let res = self.run_inner(&sender).await;
@@ -57,15 +57,15 @@ impl BlockListener {
                         "Ethereum block listener failed (attempt {}/{}): {}. Retrying in {:?}",
                         err,
                         attempts,
-                        MAX_ATTEMPTS,
-                        base_delay * 2u32.pow(attempts - 1),
+                        MAX_RETRIES,
+                        BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
                     );
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= MAX_RETRIES {
                         log::error!("Maximum attempts reached, exiting...");
                         return;
                     }
                     if common::is_transport_error_recoverable(&err) {
-                        tokio::time::sleep(base_delay * 2u32.pow(attempts - 1)).await;
+                        tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
                         self.eth_api = match self.eth_api.reconnect() {
                             Ok(api) => api,

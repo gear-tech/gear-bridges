@@ -3,6 +3,9 @@ pragma solidity ^0.8.24;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract EthereumToken is ERC20 {
+    event Tokenized(address indexed owner, uint256 amount);
+    event Released(address indexed owner, uint256 amount);
+
     constructor(
         string memory _name,
         string memory _symbol
@@ -18,6 +21,8 @@ contract EthereumToken is ERC20 {
      */
     function tokenize() public payable {
         _mint(msg.sender, msg.value);
+
+        emit Tokenized(msg.sender, msg.value);
     }
 
     /** @dev Convert `EthereumToken` ERC-20 token into native Ethereum.
@@ -29,5 +34,7 @@ contract EthereumToken is ERC20 {
     function release(uint256 amount) public {
         _burn(msg.sender, amount);
         payable(msg.sender).transfer(amount);
+
+        emit Released(msg.sender, amount);
     }
 }

@@ -1,12 +1,10 @@
 import { HexString } from '@gear-js/api';
 import { useReadContract } from 'wagmi';
 
-import { FUNGIBLE_TOKEN_ABI } from '@/consts';
-import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
+import { FUNGIBLE_TOKEN_ABI } from '../consts';
 
-import { FUNCTION_NAME } from '../../consts/eth';
-
-const abi = FUNGIBLE_TOKEN_ABI;
+import { useInvalidateOnBlock } from './common';
+import { useEthAccount } from './use-eth-account';
 
 function useEthFTBalance(address: HexString | undefined) {
   const ethAccount = useEthAccount();
@@ -14,8 +12,8 @@ function useEthFTBalance(address: HexString | undefined) {
 
   const state = useReadContract({
     address,
-    abi,
-    functionName: FUNCTION_NAME.FUNGIBLE_TOKEN_BALANCE,
+    abi: FUNGIBLE_TOKEN_ABI,
+    functionName: 'balanceOf',
     args: ethAccount.address ? [ethAccount.address] : undefined,
 
     query: { enabled },

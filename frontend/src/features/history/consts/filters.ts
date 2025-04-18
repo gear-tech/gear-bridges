@@ -6,6 +6,7 @@ const FIELD_NAME = {
   STATUS: 'status',
   ASSET: 'asset',
   SEARCH: 'search',
+  OWNER: 'owner',
 } as const;
 
 const TIMESTAMP_OPTIONS = [
@@ -30,6 +31,7 @@ const DEFAULT_VALUES = {
   [FIELD_NAME.STATUS]: STATUS_OPTIONS[0].value as Status | '',
   [FIELD_NAME.ASSET]: '',
   [FIELD_NAME.SEARCH]: '',
+  [FIELD_NAME.OWNER]: false,
 };
 
 export { FIELD_NAME, DEFAULT_VALUES, TIMESTAMP_OPTIONS, STATUS_OPTIONS };

@@ -9,6 +9,7 @@ function useTransactionsCount(where: TransferWhereInput | null = null) {
   const { data, isLoading } = useQuery({
     queryKey: ['transactionsCount', where],
     queryFn: () => request(INDEXER_ADDRESS, TRANSFERS_CONNECTION_QUERY, { where }),
+    refetchInterval: 10000,
   });
 
   return [data?.transfersConnection.totalCount, isLoading] as const;

@@ -92,10 +92,10 @@ jobs:
       - name: Run tests
         run: cargo test --release --workspace
           --exclude prover
-          --exclude plonky2_blake2b256 
-          --exclude plonky2_ecdsa 
-          --exclude plonky2_ed25519 
-          --exclude plonky2_sha512 
+          --exclude plonky2_blake2b256
+          --exclude plonky2_ecdsa
+          --exclude plonky2_ed25519
+          --exclude plonky2_sha512
           --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
       - name: Run solidity tests
         run: |
@@ -106,7 +106,7 @@ jobs:
         run: docker stop $NODE_CONTAINER_NAME
   check-zk-circuits-changed:
     runs-on: kuberunner
-    outputs: 
+    outputs:
       circuits_changed: ${{ steps.filter.outputs.circuits }}
       prover_changed: ${{ steps.filter.outputs.prover }}
     steps:
@@ -127,18 +127,18 @@ jobs:
     if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 
+        uses: actions/checkout@v4
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache: false
       - name: Run tests
-        run: cargo test --release 
+        run: cargo test --release
           -p prover
-          -p plonky2_blake2b256 
-          -p plonky2_ecdsa 
-          -p plonky2_ed25519 
-          -p plonky2_sha512 
+          -p plonky2_blake2b256
+          -p plonky2_ecdsa
+          -p plonky2_ed25519
+          -p plonky2_sha512
           -p plonky2_u32
   check-api-files:
     runs-on: kuberunner
@@ -149,23 +149,25 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache: false
+
       - name: Install golang
         uses: actions/setup-go@v5
         with:
           go-version: '1.20.1'
+
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: nightly-4923529c743f25a0f37503a7bcf7c68caa6901f1
+
       - name: Build ethereum smart-contracts
-        run: forge build --force --no-cache
-        working-directory: ./ethereum
+        run: forge build --force --no-cache --root ethereum
+
       - name: Build workspace
         run: cargo build --release --all-targets
+
       - name: Check that files match
         run: |
           stored=(
-            "./api/ethereum/ERC20ManagerBridgingPayment.json"
+            "./api/ethereum/IBridgingPayment.json"
             "./api/ethereum/IERC20Manager.json"
             "./api/ethereum/IMessageQueue.json"
             "./api/ethereum/EthereumToken.json"
@@ -180,7 +182,7 @@ jobs:
           )
 
           generated=(
-            "./ethereum/out/ERC20Manager.sol/ERC20ManagerBridgingPayment.json"
+            "./ethereum/out/IBridgingPayment.sol/IBridgingPayment.json"
             "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
             "./ethereum/out/EthereumToken.sol/EthereumToken.json"

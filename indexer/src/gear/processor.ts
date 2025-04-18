@@ -28,7 +28,11 @@ export const processor = new SubstrateBatchProcessor()
       timestamp: true,
     },
   })
-  .addGearUserMessageSent({ programId: [config.vftManager, config.hisotricalProxy], extrinsic: true, call: true })
+  .addGearUserMessageSent({
+    programId: [config.vftManager, config.hisotricalProxy, config.bridgingPayment],
+    extrinsic: true,
+    call: true,
+  })
   .setBlockRange({
     from: config.fromBlock,
   });

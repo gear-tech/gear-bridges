@@ -4,7 +4,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {ERC20Manager} from "../src/ERC20Manager.sol";
-import {ERC20ManagerBridgingPayment as BridgingPayment} from "../src/ERC20Manager.sol";
+import {BridgingPayment} from "../src/BridgingPayment.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {ProxyUpdater} from "../src/ProxyUpdater.sol";
 
@@ -42,11 +42,7 @@ contract Deploy is Script {
             address(erc20_manager_proxy_updater)
         );
 
-        BridgingPayment bridging_payment = new BridgingPayment(
-            address(erc20_manager_proxy),
-            bridging_payment_admin,
-            fee
-        );
+        BridgingPayment bridging_payment = new BridgingPayment(address(erc20_manager_proxy), fee, bridging_payment_admin);
 
         console.log("ERC20Manager:", address(erc20_manager));
         console.log("ERC20Manager Proxy:", address(erc20_manager_proxy));

@@ -28,6 +28,9 @@ struct Cli {
     #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
     gear_suri: String,
 
+    #[arg(long)]
+    salt: Option<String>,
+
     #[command(subcommand)]
     command: CliCommands,
 }
@@ -91,12 +94,31 @@ async fn main() {
         ActorId::new(data.try_into().expect("Got input of wrong length"))
     };
 
+    let salt = match cli.salt {
+        Some(salt) => {
+            let s = if &salt[..2] == "0x" {
+                &salt[2..]
+            } else {
+                &salt
+            };
+            hex::decode(s)
+                .inspect_err(|err| {
+                    println!("Failed to decode salt: {err}, using random salt");
+                })
+                .ok()
+        }
+        _ => {
+            println!("Salt is not provided, using random salt");
+            None
+        }
+    };
+
     match cli.command {
         CliCommands::Vft(args) => {
             let minter = args.common.minter.map(str_to_actorid);
             let burner = args.common.burner.map(str_to_actorid);
 
-            let uploader = Uploader::new(gear_api, minter, burner);
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
             uploader
                 .upload_vft(args.token_name, args.token_symbol, args.token_decimals)
                 .await
@@ -105,12 +127,12 @@ async fn main() {
         CliCommands::VftVara(args) => {
             let minter = args.minter.map(str_to_actorid);
             let burner = args.burner.map(str_to_actorid);
-            let uploader = Uploader::new(gear_api, minter, burner);
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
             uploader.upload_vft_vara().await;
         }
         CliCommands::AllocateShards { program_id } => {
             let program_id = str_to_actorid(program_id);
-            let uploader = Uploader::new(gear_api, None, None);
+            let uploader = Uploader::new(gear_api, None, None, salt);
             uploader.allocate_shards(program_id).await;
         }
     }
@@ -121,10 +143,16 @@ struct Uploader {
     gas_limit: u64,
     minter: Option<ActorId>,
     burner: Option<ActorId>,
+    salt: Option<Vec<u8>>,
 }
 
 impl Uploader {
-    fn new(api: GearApi, minter: Option<ActorId>, burner: Option<ActorId>) -> Self {
+    fn new(
+        api: GearApi,
+        minter: Option<ActorId>,
+        burner: Option<ActorId>,
+        salt: Option<Vec<u8>>,
+    ) -> Self {
         Self {
             gas_limit: api
                 .block_gas_limit()
@@ -132,6 +160,7 @@ impl Uploader {
             api,
             minter,
             burner,
+            salt,
         }
     }
 
@@ -220,10 +249,14 @@ impl Uploader {
 
         let factory = vft_client::VftFactory::new(GClientRemoting::new(self.api.clone()));
 
+        let salt = self
+            .salt
+            .clone()
+            .unwrap_or_else(|| H256::random().0.to_vec());
         let program_id = factory
             .new(name, symbol, decimals)
             .with_gas_limit(self.gas_limit)
-            .send_recv(code_id, [])
+            .send_recv(code_id, &salt)
             .await
             .expect("Failed to upload program");
 
@@ -236,10 +269,15 @@ impl Uploader {
 
         let factory = vft_vara_client::VftVaraFactory::new(GClientRemoting::new(self.api.clone()));
 
+        let salt = self
+            .salt
+            .clone()
+            .unwrap_or_else(|| H256::random().0.to_vec());
+
         let program_id = factory
             .new()
             .with_gas_limit(self.gas_limit)
-            .send_recv(code_id, [])
+            .send_recv(code_id, &salt)
             .await
             .expect("Failed to upload program");
 

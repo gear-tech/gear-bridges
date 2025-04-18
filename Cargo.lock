@@ -4174,7 +4174,7 @@ dependencies = [
  "sp-debug-derive 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-genesis-builder 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-inherents 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-io 38.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-io 38.0.1",
  "sp-metadata-ir 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-runtime 39.0.5",
  "sp-staking 36.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4287,7 +4287,7 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-core 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-io 38.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-io 38.0.1",
  "sp-runtime 39.0.5",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-version 37.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4633,7 +4633,7 @@ dependencies = [
  "primitive-types 0.12.2",
  "sp-arithmetic 26.1.0",
  "sp-core 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-io 38.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-io 38.0.1",
  "sp-runtime 39.0.5",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -5750,9 +5750,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.8"
+version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5017294ff4bb30944501348f6f8e42e6ad28f42c8bbef7a74029aff064a4e3c2"
+checksum = "75249d144030531f8dee69fe9cea04d3edf809a017ae445e2abdff6629e86633"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -6129,7 +6129,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "h2 0.4.8",
+ "h2 0.4.9",
  "http 1.1.0",
  "http-body 1.0.1",
  "httparse",
@@ -9793,9 +9793,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.94"
+version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31971752e70b8b2686d7e46ec17fb38dad4051d94024c88df49b667caea9c84"
+checksum = "02b3e5e68a3a1a02aad3ec490a98007cbc13c37cbe84a3cd7b8e406d76e7f778"
 dependencies = [
  "unicode-ident",
 ]
@@ -12430,7 +12430,7 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-core 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-io 38.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-io 38.0.1",
 ]
 
 [[package]]
@@ -13011,33 +13011,6 @@ dependencies = [
 [[package]]
 name = "sp-io"
 version = "38.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59ef7eb561bb4839cc8424ce58c5ea236cbcca83f26fcc0426d8decfe8aa97d4"
-dependencies = [
- "bytes",
- "docify",
- "ed25519-dalek",
- "libsecp256k1",
- "log",
- "parity-scale-codec",
- "polkavm-derive",
- "rustversion",
- "secp256k1",
- "sp-core 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-crypto-hashing 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-externalities 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-keystore 0.40.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-runtime-interface 28.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-state-machine 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-tracing 17.1.0",
- "sp-trie 37.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tracing",
- "tracing-core",
-]
-
-[[package]]
-name = "sp-io"
-version = "38.0.0"
 source = "git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409#34d6e8023a2ef8ef429126bcc81da264c097b086"
 dependencies = [
  "bytes",
@@ -13083,6 +13056,33 @@ dependencies = [
  "sp-state-machine 0.43.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
  "sp-tracing 17.0.1 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
  "sp-trie 37.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
+ "tracing",
+ "tracing-core",
+]
+
+[[package]]
+name = "sp-io"
+version = "38.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a47cb95e32bd5f7e2d8d6cd222a14c207a8da05b3f5ab9699d338e99c791320d"
+dependencies = [
+ "bytes",
+ "docify",
+ "ed25519-dalek",
+ "libsecp256k1",
+ "log",
+ "parity-scale-codec",
+ "polkavm-derive",
+ "rustversion",
+ "secp256k1",
+ "sp-core 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-crypto-hashing 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-externalities 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-keystore 0.40.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-runtime-interface 28.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-state-machine 0.43.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-tracing 17.1.0",
+ "sp-trie 37.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
  "tracing-core",
 ]
@@ -13277,7 +13277,7 @@ dependencies = [
  "sp-application-crypto 38.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-arithmetic 26.1.0",
  "sp-core 34.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sp-io 38.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sp-io 38.0.1",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sp-weights 31.1.0",
  "tracing",

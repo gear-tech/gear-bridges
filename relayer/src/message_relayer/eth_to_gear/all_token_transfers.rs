@@ -1,11 +1,11 @@
 use std::iter;
 
+use anyhow::Context;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
-use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
@@ -20,6 +20,8 @@ use crate::message_relayer::common::{
     GSdkArgs,
 };
 
+use super::api_provider::ApiProviderConnection;
+
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
     ethereum_block_listener: EthereumBlockListener,
@@ -28,6 +30,8 @@ pub struct Relayer {
     checkpoints_extractor: CheckpointsExtractor,
 
     gear_message_sender: MessageSender,
+
+    api_provider: ApiProviderConnection,
 }
 
 impl MeteredService for Relayer {
@@ -52,10 +56,13 @@ impl Relayer {
         checkpoint_light_client_address: H256,
         historical_proxy_address: H256,
         vft_manager_address: H256,
+        mut api_provider: ApiProviderConnection,
     ) -> anyhow::Result<Self> {
         let from_gear_block = {
-            let gear_api =
-                GearApi::new(&args.vara_domain, args.vara_port, args.vara_rpc_retries).await?;
+            let gear_api = api_provider
+                .request_connection()
+                .await
+                .context("Failed to get GearApi")?;
             let from_gear_block = gear_api.latest_finalized_block().await?;
 
             gear_api.block_hash_to_number(from_gear_block).await?
@@ -96,6 +103,7 @@ impl Relayer {
             checkpoints_extractor,
 
             gear_message_sender,
+            api_provider,
         })
     }
 

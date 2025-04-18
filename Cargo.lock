@@ -10412,6 +10412,7 @@ dependencies = [
  "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-rpc-client",
  "gear_proof_storage",
+ "gsdk",
  "hex",
  "historical-proxy-client",
  "keccak-hash 0.10.0",

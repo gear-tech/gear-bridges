@@ -7,7 +7,10 @@ use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
 use gear_rpc_client::GearApi;
 use kill_switch::KillSwitchRelayer;
-use message_relayer::{eth_to_gear, gear_to_eth};
+use message_relayer::{
+    eth_to_gear::{self, api_provider::ApiProvider},
+    gear_to_eth,
+};
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
@@ -206,7 +209,13 @@ async fn main() {
                 vara_port: gear_args.common.port,
                 vara_rpc_retries: gear_args.common.retries,
             };
-
+            let (provider, conn) = ApiProvider::new(
+                gear_args.suri.clone(),
+                gsdk_args.vara_port,
+                gsdk_args.vara_rpc_retries,
+            )
+            .await
+            .expect("Failed to create API provider");
             let checkpoint_light_client_address =
                 hex_utils::decode_h256(&checkpoint_light_client_address)
                     .expect("Failed to parse address");
@@ -231,6 +240,7 @@ async fn main() {
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,
+                        conn,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -241,6 +251,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
+                    provider.spawn().await;
                     relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
@@ -259,6 +270,7 @@ async fn main() {
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,
+                        conn,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -268,7 +280,7 @@ async fn main() {
                         .build()
                         .run(prometheus_args.endpoint)
                         .await;
-
+                    provider.spawn().await;
                     relayer.run().await;
                 }
             }

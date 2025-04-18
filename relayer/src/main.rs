@@ -43,7 +43,6 @@ async fn main() {
         .format_timestamp_secs()
         .parse_default_env()
         .init();
-
     let cli = Cli::parse();
 
     match cli.command {

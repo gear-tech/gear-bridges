@@ -1,4 +1,5 @@
 use gear_rpc_client::GearApi;
+use prometheus::IntCounter;
 use prometheus::IntGauge;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -26,7 +27,11 @@ impl_metered_service! {
         latest_block: IntGauge = IntGauge::new(
             "gear_block_listener_latest_block",
             "Latest gear block discovered by gear block listener",
-        )
+        ),
+        restarts: IntCounter = IntCounter::new(
+            "gear_block_listener_restarts",
+            "Number of restarts of the gear block listener due to errors",
+        ),
     }
 }
 
@@ -51,6 +56,7 @@ impl BlockListener {
                 let res = self.run_inner(&senders).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {}", err);
+                    self.metrics.restarts.inc();
                 }
             }
         });

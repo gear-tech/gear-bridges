@@ -12,7 +12,10 @@ use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount},
+    common::{
+        self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
+        BASE_RETRY_DELAY, MAX_RETRIES,
+    },
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -111,7 +114,11 @@ impl KillSwitchRelayer {
         self.spawn_block_finality_archiver()?;
 
         log::info!("Starting kill switch relayer");
+
+        let mut attempts = 0;
+
         loop {
+            attempts += 1;
             let now = Instant::now();
             let res = match &self.state {
                 State::Normal => self.main_loop().await,
@@ -121,7 +128,25 @@ impl KillSwitchRelayer {
             };
 
             if let Err(err) = res {
-                log::error!("{}", err);
+                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+                log::error!(
+                    "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
+                    attempts,
+                    MAX_RETRIES,
+                    err,
+                    delay
+                );
+                if attempts >= MAX_RETRIES {
+                    log::error!("Max attempts reached, exiting ..");
+                    return Err(err);
+                }
+                tokio::time::sleep(BASE_RETRY_DELAY * attempts).await;
+                if common::is_transport_error_recoverable(&err) {
+                    self.eth_api = self
+                        .eth_api
+                        .reconnect()
+                        .map_err(|e| anyhow::anyhow!("Failed to reconnect: {}", e))?;
+                }
             }
 
             let main_loop_duration = now.elapsed();

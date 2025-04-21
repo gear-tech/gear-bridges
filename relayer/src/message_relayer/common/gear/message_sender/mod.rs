@@ -1,6 +1,7 @@
-use crate::message_relayer::{
-    common::{EthereumSlotNumber, TxHashWithSlot},
+use crate::{
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     eth_to_gear::api_provider::ApiProviderConnection,
+    message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
@@ -94,11 +95,30 @@ impl MessageSender {
     ) {
         let _ = tokio::task::spawn_blocking(move || {
             block_on(async move {
+                let mut attempts = 0;
+
                 loop {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,
                         Err(err) => {
                             log::error!("Gear message sender failed with: {err}");
+
+                            attempts += 1;
+                            let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+                            log::error!(
+                                "Gear message sender failed (attempt {}/{}): {}. Retrying in {:?}",
+                                attempts,
+                                MAX_RETRIES,
+                                err,
+                                delay
+                            );
+                            if attempts >= MAX_RETRIES {
+                                log::error!("Max attempts reached, exiting...");
+                                break;
+                            }
+
+                            tokio::time::sleep(delay).await;
+
                             match self.api_provider.reconnect().await {
                                 Ok(()) => {
                                     log::info!("Gear message sender reconnected");
@@ -107,6 +127,16 @@ impl MessageSender {
                                     log::error!("Gear message sender unable to reconnect: {err}");
                                     return;
                                 }
+                            }
+
+                            if common::is_transport_error_recoverable(&err) {
+                                self.eth_api = match self.eth_api.reconnect() {
+                                    Ok(eth_api) => eth_api,
+                                    Err(err) => {
+                                        log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                        break;
+                                    }
+                                };
                             }
                         }
                     }

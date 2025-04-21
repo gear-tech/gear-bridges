@@ -6,7 +6,10 @@ use gear_rpc_client::GearApi;
 use prometheus::{Gauge, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{AuthoritySetId, MessageInBlock};
+use crate::{
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    message_relayer::common::{AuthoritySetId, MessageInBlock},
+};
 
 mod era;
 use era::{Era, Metrics as EraMetrics};
@@ -55,15 +58,42 @@ impl MessageSender {
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut messages: UnboundedReceiver<MessageInBlock>,
         mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
     ) {
         tokio::task::spawn(async move {
+            let mut attempts = 0;
+
             loop {
                 let res = self.run_inner(&mut messages, &mut merkle_roots).await;
                 if let Err(err) = res {
-                    log::error!("Ethereum message sender failed: {}", err);
+                    attempts += 1;
+                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+                    log::error!(
+                        "Ethereum message sender failed (attempt: {}/{}): {}. Retrying in {:?}",
+                        attempts,
+                        MAX_RETRIES,
+                        err,
+                        delay
+                    );
+                    if attempts >= MAX_RETRIES {
+                        log::error!("Maximum attempts reached, exiting...");
+                        break;
+                    }
+
+                    tokio::time::sleep(delay).await;
+
+                    if common::is_transport_error_recoverable(&err) {
+                        match self.eth_api.reconnect().inspect_err(|e| {
+                            log::error!("Failed to reconnect to Ethereum: {}", e);
+                        }) {
+                            Ok(eth_api) => self.eth_api = eth_api,
+                            Err(_) => {
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         });

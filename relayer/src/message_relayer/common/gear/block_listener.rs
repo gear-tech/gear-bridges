@@ -1,4 +1,3 @@
-use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -49,24 +48,15 @@ impl BlockListener {
             (0..RECEIVER_COUNT).map(|_| unbounded_channel()).unzip();
 
         tokio::task::spawn(async move {
-            let mut gear_api = match self.api_provider.request_connection().await {
-                Ok(api) => api,
-                Err(err) => {
-                    log::error!(
-                        "Gear block listener failed to establish connection: {}",
-                        err
-                    );
-                    return;
-                }
-            };
-
             loop {
-                let res = self.run_inner(&senders, &gear_api).await;
+                let res = self.run_inner(&senders).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {}", err);
 
-                    gear_api = match self.api_provider.request_connection().await {
-                        Ok(api) => api,
+                    match self.api_provider.reconnect().await {
+                        Ok(()) => {
+                            log::info!("Gear block listener reconnected");
+                        }
                         Err(err) => {
                             log::error!("Gear block listener unable to reconnect: {}", err);
                             return;
@@ -81,15 +71,11 @@ impl BlockListener {
             .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(
-        &self,
-        senders: &[UnboundedSender<GearBlockNumber>],
-        gear_api: &GearApi,
-    ) -> anyhow::Result<()> {
+    async fn run_inner(&self, senders: &[UnboundedSender<GearBlockNumber>]) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
         self.metrics.latest_block.set(current_block as i64);
-
+        let gear_api = self.api_provider.client();
         loop {
             let finalized_head = gear_api.latest_finalized_block().await?;
             let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;

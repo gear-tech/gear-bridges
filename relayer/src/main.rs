@@ -116,7 +116,7 @@ async fn main() {
 
             let mut metrics_builder = MetricsBuilder::new();
 
-            let (provider, conn) = ApiProvider::new(
+            let provider = ApiProvider::new(
                 gsdk_args.vara_domain.clone(),
                 gsdk_args.vara_port,
                 gsdk_args.vara_rpc_retries,
@@ -130,7 +130,7 @@ async fn main() {
                         gear_api,
                         eth_api,
                         args.from_block,
-                        conn,
+                        provider.connection(),
                     )
                     .await
                     .unwrap();
@@ -152,7 +152,7 @@ async fn main() {
                         eth_api,
                         args.from_block,
                         bridging_payment_address,
-                        conn,
+                        provider.connection(),
                     )
                     .await
                     .unwrap();
@@ -218,7 +218,7 @@ async fn main() {
                 vara_port: gear_args.common.port,
                 vara_rpc_retries: gear_args.common.retries,
             };
-            let (provider, conn) = ApiProvider::new(
+            let provider = ApiProvider::new(
                 gsdk_args.vara_domain.clone(),
                 gsdk_args.vara_port,
                 gsdk_args.vara_rpc_retries,
@@ -241,7 +241,6 @@ async fn main() {
                         .expect("Failed to parse address");
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
-                        gsdk_args,
                         gear_args.suri,
                         eth_api,
                         beacon_client,
@@ -249,7 +248,7 @@ async fn main() {
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,
-                        conn,
+                        provider.connection(),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -271,7 +270,6 @@ async fn main() {
                             .expect("Failed to parse address");
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
-                        gsdk_args,
                         gear_args.suri,
                         eth_api,
                         beacon_client,
@@ -279,7 +277,7 @@ async fn main() {
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,
-                        conn,
+                        provider.connection(),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -344,7 +342,7 @@ async fn main() {
                 .0
                 .into();
 
-            let (provider, conn) = ApiProvider::new(
+            let provider = ApiProvider::new(
                 gear_client_args.vara_domain.clone(),
                 gear_client_args.vara_port,
                 gear_client_args.vara_rpc_retries,
@@ -353,8 +351,7 @@ async fn main() {
             .expect("Failed to create API provider");
 
             eth_to_gear::manual::relay(
-                conn,
-                gear_client_args,
+                provider.connection(),
                 gear_args.suri,
                 eth_api,
                 beacon_client,

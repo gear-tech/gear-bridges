@@ -9,15 +9,14 @@ use crate::message_relayer::common::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
     },
-    EthereumSlotNumber, GSdkArgs, TxHashWithSlot,
+    EthereumSlotNumber, TxHashWithSlot,
 };
 
 use super::api_provider::ApiProviderConnection;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
-    mut api_provider: ApiProviderConnection,
-    gear_client_args: GSdkArgs,
+    api_provider: ApiProviderConnection,
     gear_suri: String,
 
     eth_api: EthApi,
@@ -32,10 +31,7 @@ pub async fn relay(
     tx_hash: TxHash,
     slot: u64,
 ) {
-    let gear_api = api_provider
-        .request_connection()
-        .await
-        .expect("Failed to get GearApi");
+    let gear_api = api_provider.client();
 
     let from_gear_block = gear_api
         .latest_finalized_block()
@@ -53,7 +49,7 @@ pub async fn relay(
         CheckpointsExtractor::new(api_provider.clone(), checkpoint_light_client_address);
 
     let gear_message_sender = MessageSender::new(
-        gear_client_args,
+        api_provider,
         gear_suri,
         eth_api,
         beacon_client,

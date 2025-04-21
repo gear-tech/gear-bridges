@@ -21,26 +21,21 @@ struct ApiConnectionResponse {
 /// a connection is cloned the session number is reset to `None`.
 pub struct ApiProviderConnection {
     sender: UnboundedSender<ApiConnectionRequest>,
-    session: Option<u64>,
+    session: u64,
+    api: Api,
 }
 
 impl ApiProviderConnection {
-    fn new(sender: UnboundedSender<ApiConnectionRequest>) -> Self {
-        Self {
-            sender,
-            session: None,
-        }
-    }
-
-    /// Request a new API connection from the [`ApiProvider`]. This will return a new
-    /// [`GearApi`] instance which can be used to interact with the API.
-    pub async fn request_connection(&mut self) -> anyhow::Result<GearApi> {
+    /// Explicit reconnect reqest to the [`ApiProvider`]. This will
+    /// update current connection to include latest session number
+    /// and API connection.
+    ///
+    /// When this function errors it indicates that the provider
+    /// has failed and no further connections can be made.
+    pub async fn reconnect(&mut self) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
-        // set session to 0 if it's None, this will allow us to reuse any existing connection
-        // if there is one.
-        let session = self.session.unwrap_or(0);
         let request = ApiConnectionRequest {
-            session,
+            session: 0,
             receiver: tx,
         };
         self.sender
@@ -49,8 +44,21 @@ impl ApiProviderConnection {
         let response = rx
             .await
             .context("failed to receive API connection response")?;
-        self.session = Some(response.session);
-        Ok(GearApi::from(response.api))
+        self.session = response.session;
+        self.api = response.api;
+        Ok(())
+    }
+
+    /// Request a new API connection from the [`ApiProvider`]. This will return a new
+    /// [`GearApi`](gclient::GearApi) instance with specified suri.
+    pub fn gclient_client(&mut self, suri: &str) -> anyhow::Result<gclient::GearApi> {
+        gclient::GearApi::from(self.api.clone())
+            .with(suri)
+            .map_err(|e| anyhow::anyhow!("failed to set suri: {}", e))
+    }
+
+    pub fn client(&self) -> GearApi {
+        GearApi::from(self.api.clone())
     }
 }
 
@@ -58,7 +66,8 @@ impl Clone for ApiProviderConnection {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
-            session: None,
+            session: 0, // pass session 0 to reuse any existing connection
+            api: self.api.clone(),
         }
     }
 }
@@ -72,14 +81,11 @@ pub struct ApiProvider {
     api: Api,
 
     receiver: UnboundedReceiver<ApiConnectionRequest>,
+    sender: UnboundedSender<ApiConnectionRequest>,
 }
 
 impl ApiProvider {
-    pub async fn new(
-        domain: String,
-        port: u16,
-        retries: u8,
-    ) -> anyhow::Result<(Self, ApiProviderConnection)> {
+    pub async fn new(domain: String, port: u16, retries: u8) -> anyhow::Result<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let uri: &str = &format!("{domain}:{port}");
         let api = Api::builder()
@@ -87,18 +93,24 @@ impl ApiProvider {
             .build(uri)
             .await
             .context("failed to connect to API")?;
-        let conn = ApiProviderConnection::new(sender.clone());
-        Ok((
-            Self {
-                session: 0,
-                domain,
-                port,
-                retries,
-                api,
-                receiver,
-            },
-            conn,
-        ))
+
+        Ok(Self {
+            session: 0,
+            domain,
+            port,
+            retries,
+            api,
+            receiver,
+            sender,
+        })
+    }
+
+    pub fn connection(&self) -> ApiProviderConnection {
+        ApiProviderConnection {
+            sender: self.sender.clone(),
+            session: self.session,
+            api: self.api.clone(),
+        }
     }
 
     pub fn spawn(mut self) {

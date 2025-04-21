@@ -219,7 +219,7 @@ async fn main() {
                 vara_rpc_retries: gear_args.common.retries,
             };
             let (provider, conn) = ApiProvider::new(
-                gear_args.suri.clone(),
+                gsdk_args.vara_domain.clone(),
                 gsdk_args.vara_port,
                 gsdk_args.vara_rpc_retries,
             )

@@ -7,7 +7,10 @@ use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
 use gear_rpc_client::GearApi;
 use kill_switch::KillSwitchRelayer;
-use message_relayer::{eth_to_gear, gear_to_eth};
+use message_relayer::{
+    eth_to_gear::{self, api_provider::ApiProvider},
+    gear_to_eth,
+};
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
@@ -113,19 +116,28 @@ async fn main() {
 
             let mut metrics_builder = MetricsBuilder::new();
 
+            let provider = ApiProvider::new(
+                gsdk_args.vara_domain.clone(),
+                gsdk_args.vara_port,
+                gsdk_args.vara_rpc_retries,
+            )
+            .await
+            .expect("Failed to create API provider");
+
             match args.command {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         gear_api,
-                        gsdk_args,
                         eth_api,
                         args.from_block,
+                        provider.connection(),
                     )
                     .await
                     .unwrap();
 
                     metrics_builder = metrics_builder.register_service(&relayer);
 
+                    provider.spawn();
                     relayer.run().await;
                 }
                 GearEthTokensCommands::PaidTokenTransfers {
@@ -137,16 +149,16 @@ async fn main() {
 
                     let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
                         gear_api,
-                        gsdk_args,
                         eth_api,
                         args.from_block,
                         bridging_payment_address,
+                        provider.connection(),
                     )
                     .await
                     .unwrap();
 
                     metrics_builder = metrics_builder.register_service(&relayer);
-
+                    provider.spawn();
                     relayer.run().await;
                 }
             }
@@ -206,7 +218,13 @@ async fn main() {
                 vara_port: gear_args.common.port,
                 vara_rpc_retries: gear_args.common.retries,
             };
-
+            let provider = ApiProvider::new(
+                gsdk_args.vara_domain.clone(),
+                gsdk_args.vara_port,
+                gsdk_args.vara_rpc_retries,
+            )
+            .await
+            .expect("Failed to create API provider");
             let checkpoint_light_client_address =
                 hex_utils::decode_h256(&checkpoint_light_client_address)
                     .expect("Failed to parse address");
@@ -223,7 +241,6 @@ async fn main() {
                         .expect("Failed to parse address");
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
-                        gsdk_args,
                         gear_args.suri,
                         eth_api,
                         beacon_client,
@@ -231,6 +248,7 @@ async fn main() {
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,
+                        provider.connection(),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -241,6 +259,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
+                    provider.spawn();
                     relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
@@ -251,7 +270,6 @@ async fn main() {
                             .expect("Failed to parse address");
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
-                        gsdk_args,
                         gear_args.suri,
                         eth_api,
                         beacon_client,
@@ -259,6 +277,7 @@ async fn main() {
                         checkpoint_light_client_address,
                         historical_proxy_address,
                         vft_manager_address,
+                        provider.connection(),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -268,7 +287,7 @@ async fn main() {
                         .build()
                         .run(prometheus_args.endpoint)
                         .await;
-
+                    provider.spawn();
                     relayer.run().await;
                 }
             }
@@ -323,8 +342,16 @@ async fn main() {
                 .0
                 .into();
 
+            let provider = ApiProvider::new(
+                gear_client_args.vara_domain.clone(),
+                gear_client_args.vara_port,
+                gear_client_args.vara_rpc_retries,
+            )
+            .await
+            .expect("Failed to create API provider");
+
             eth_to_gear::manual::relay(
-                gear_client_args,
+                provider.connection(),
                 gear_args.suri,
                 eth_api,
                 beacon_client,
@@ -336,7 +363,7 @@ async fn main() {
                 slot,
             )
             .await;
-
+            provider.spawn();
             loop {
                 // relay() spawns thread and exits, so we need to add this loop after calling run.
                 tokio::time::sleep(Duration::from_secs(1)).await;

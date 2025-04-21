@@ -1,12 +1,12 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::common::{EthereumSlotNumber, GSdkArgs, TxHashWithSlot},
+    eth_to_gear::api_provider::ApiProviderConnection,
+    message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
 };
-use anyhow::anyhow;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use futures::executor::block_on;
-use gclient::{GearApi, WSAddress};
+use gclient::GearApi;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -22,17 +22,8 @@ use vft_manager_client::vft_manager::io::SubmitReceipt;
 
 mod compose_payload;
 
-async fn create_gclient_client(args: &GSdkArgs, suri: &str) -> anyhow::Result<GearApi> {
-    GearApi::builder()
-        .retries(args.vara_rpc_retries)
-        .suri(suri)
-        .build(WSAddress::new(&args.vara_domain, args.vara_port))
-        .await
-        .map_err(|e| anyhow!("Failed to build GearApi: {e:?}"))
-}
-
 pub struct MessageSender {
-    args: GSdkArgs,
+    api_provider: ApiProviderConnection,
     suri: String,
     eth_api: EthApi,
     beacon_client: BeaconClient,
@@ -72,7 +63,7 @@ impl_metered_service! {
 impl MessageSender {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        args: GSdkArgs,
+        api_provider: ApiProviderConnection,
         suri: String,
         eth_api: EthApi,
         beacon_client: BeaconClient,
@@ -82,7 +73,7 @@ impl MessageSender {
         decode_reply: bool,
     ) -> Self {
         Self {
-            args,
+            api_provider,
             suri,
             eth_api,
             beacon_client,
@@ -110,6 +101,8 @@ impl MessageSender {
                     match self.run_inner(&mut messages, &mut checkpoints).await {
                         Ok(_) => continue,
                         Err(err) => {
+                            log::error!("Gear message sender failed with: {err}");
+
                             attempts += 1;
                             let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                             log::error!(
@@ -125,6 +118,16 @@ impl MessageSender {
                             }
 
                             tokio::time::sleep(delay).await;
+
+                            match self.api_provider.reconnect().await {
+                                Ok(()) => {
+                                    log::info!("Gear message sender reconnected");
+                                }
+                                Err(err) => {
+                                    log::error!("Gear message sender unable to reconnect: {err}");
+                                    return;
+                                }
+                            }
 
                             if common::is_transport_error_recoverable(&err) {
                                 self.eth_api = match self.eth_api.reconnect() {
@@ -172,7 +175,7 @@ impl MessageSender {
                 continue;
             }
 
-            let gear_api = create_gclient_client(&self.args, &self.suri).await?;
+            let gear_api = self.api_provider.gclient_client(&self.suri)?;
             for i in (0..self.waiting_checkpoint.len()).rev() {
                 if self.waiting_checkpoint[i].slot_number
                     <= latest_checkpoint_slot.unwrap_or_default()

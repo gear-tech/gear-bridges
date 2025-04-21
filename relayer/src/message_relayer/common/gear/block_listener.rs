@@ -1,15 +1,16 @@
-use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{GSdkArgs, GearBlockNumber};
+use crate::message_relayer::{
+    common::GearBlockNumber, eth_to_gear::api_provider::ApiProviderConnection,
+};
 
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 pub struct BlockListener {
-    args: GSdkArgs,
+    api_provider: ApiProviderConnection,
     from_block: u32,
 
     metrics: Metrics,
@@ -31,9 +32,9 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(args: GSdkArgs, from_block: u32) -> Self {
+    pub fn new(api_provider: ApiProviderConnection, from_block: u32) -> Self {
         Self {
-            args,
+            api_provider,
             from_block,
 
             metrics: Metrics::new(),
@@ -41,7 +42,7 @@ impl BlockListener {
     }
 
     pub async fn run<const RECEIVER_COUNT: usize>(
-        self,
+        mut self,
     ) -> [UnboundedReceiver<GearBlockNumber>; RECEIVER_COUNT] {
         let (senders, receivers): (Vec<_>, Vec<_>) =
             (0..RECEIVER_COUNT).map(|_| unbounded_channel()).unzip();
@@ -51,6 +52,16 @@ impl BlockListener {
                 let res = self.run_inner(&senders).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {}", err);
+
+                    match self.api_provider.reconnect().await {
+                        Ok(()) => {
+                            log::info!("Gear block listener reconnected");
+                        }
+                        Err(err) => {
+                            log::error!("Gear block listener unable to reconnect: {err}");
+                            return;
+                        }
+                    };
                 }
             }
         });
@@ -64,14 +75,7 @@ impl BlockListener {
         let mut current_block = self.from_block;
 
         self.metrics.latest_block.set(current_block as i64);
-
-        let gear_api = GearApi::new(
-            &self.args.vara_domain,
-            self.args.vara_port,
-            self.args.vara_rpc_retries,
-        )
-        .await?;
-
+        let gear_api = self.api_provider.client();
         loop {
             let finalized_head = gear_api.latest_finalized_block().await?;
             let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;

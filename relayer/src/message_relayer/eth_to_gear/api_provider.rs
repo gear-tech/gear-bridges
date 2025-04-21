@@ -131,7 +131,7 @@ impl ApiProvider {
                     }
                     continue;
                 }
-                
+
                 let uri: &str = &format!("{}:{}", self.domain, self.port);
                 self.api = match Api::builder().retries(self.retries).build(uri).await {
                     Ok(api) => api,

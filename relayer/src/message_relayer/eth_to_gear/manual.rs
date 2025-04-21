@@ -2,7 +2,6 @@ use primitive_types::H256;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, TxHash};
-use gear_rpc_client::GearApi;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::message_relayer::common::{
@@ -13,8 +12,11 @@ use crate::message_relayer::common::{
     EthereumSlotNumber, GSdkArgs, TxHashWithSlot,
 };
 
+use super::api_provider::ApiProviderConnection;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
+    mut api_provider: ApiProviderConnection,
     gear_client_args: GSdkArgs,
     gear_suri: String,
 
@@ -30,13 +32,10 @@ pub async fn relay(
     tx_hash: TxHash,
     slot: u64,
 ) {
-    let gear_api = GearApi::new(
-        &gear_client_args.vara_domain,
-        gear_client_args.vara_port,
-        gear_client_args.vara_rpc_retries,
-    )
-    .await
-    .expect("Failed to create GearApi");
+    let gear_api = api_provider
+        .request_connection()
+        .await
+        .expect("Failed to get GearApi");
 
     let from_gear_block = gear_api
         .latest_finalized_block()
@@ -48,10 +47,10 @@ pub async fn relay(
         .await
         .expect("Failed to fetch block number by hash");
 
-    let gear_block_listener = GearBlockListener::new(gear_client_args.clone(), from_gear_block);
+    let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
 
     let checkpoints_extractor =
-        CheckpointsExtractor::new(gear_client_args.clone(), checkpoint_light_client_address);
+        CheckpointsExtractor::new(api_provider.clone(), checkpoint_light_client_address);
 
     let gear_message_sender = MessageSender::new(
         gear_client_args,

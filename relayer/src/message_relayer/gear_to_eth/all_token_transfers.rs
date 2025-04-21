@@ -4,16 +4,18 @@ use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::{
-    ethereum::{
-        block_listener::BlockListener as EthereumBlockListener,
-        merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            block_listener::BlockListener as EthereumBlockListener,
+            merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+        },
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            message_queued_event_extractor::MessageQueuedEventExtractor,
+        },
     },
-    gear::{
-        block_listener::BlockListener as GearBlockListener,
-        message_queued_event_extractor::MessageQueuedEventExtractor,
-    },
-    GSdkArgs,
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 
 pub struct Relayer {
@@ -40,9 +42,9 @@ impl MeteredService for Relayer {
 impl Relayer {
     pub async fn new(
         gear_api: GearApi,
-        args: GSdkArgs,
         eth_api: EthApi,
         from_block: Option<u32>,
+        api_provider: ApiProviderConnection,
     ) -> anyhow::Result<Self> {
         let from_gear_block = if let Some(block) = from_block {
             block
@@ -53,7 +55,7 @@ impl Relayer {
 
         let from_eth_block = eth_api.finalized_block_number().await?;
 
-        let gear_block_listener = GearBlockListener::new(args, from_gear_block);
+        let gear_block_listener = GearBlockListener::new(api_provider, from_gear_block);
 
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 

@@ -30,8 +30,6 @@ pub struct Relayer {
     checkpoints_extractor: CheckpointsExtractor,
 
     gear_message_sender: MessageSender,
-
-    api_provider: ApiProviderConnection,
 }
 
 impl MeteredService for Relayer {
@@ -67,7 +65,7 @@ impl Relayer {
 
             gear_api.block_hash_to_number(from_gear_block).await?
         };
-        let gear_block_listener = GearBlockListener::new(args.clone(), from_gear_block);
+        let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
@@ -79,7 +77,7 @@ impl Relayer {
         );
 
         let checkpoints_extractor =
-            CheckpointsExtractor::new(args.clone(), checkpoint_light_client_address);
+            CheckpointsExtractor::new(api_provider.clone(), checkpoint_light_client_address);
 
         let route =
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
@@ -103,7 +101,6 @@ impl Relayer {
             checkpoints_extractor,
 
             gear_message_sender,
-            api_provider,
         })
     }
 

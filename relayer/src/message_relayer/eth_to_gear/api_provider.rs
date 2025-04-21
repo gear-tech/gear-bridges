@@ -52,13 +52,6 @@ impl ApiProviderConnection {
         self.session = Some(response.session);
         Ok(GearApi::from(response.api))
     }
-
-    /// Returns the session number of the connection.
-    ///
-    /// Returns `None` if the connection has not been established yet.
-    pub fn session(&self) -> Option<u64> {
-        self.session
-    }
 }
 
 impl Clone for ApiProviderConnection {
@@ -73,7 +66,7 @@ impl Clone for ApiProviderConnection {
 /// A service which provides API connections to services which request it.
 pub struct ApiProvider {
     session: u64,
-    doman: String,
+    domain: String,
     port: u16,
     retries: u8,
     api: Api,
@@ -98,7 +91,7 @@ impl ApiProvider {
         Ok((
             Self {
                 session: 0,
-                doman: domain,
+                domain,
                 port,
                 retries,
                 api,
@@ -108,7 +101,7 @@ impl ApiProvider {
         ))
     }
 
-    pub async fn spawn(mut self) {
+    pub fn spawn(mut self) {
         tokio::spawn(async move {
             while let Ok(request) = self.receiver.try_recv() {
                 if request.session < self.session {
@@ -126,7 +119,7 @@ impl ApiProvider {
                     }
                     continue;
                 }
-                let uri: &str = &format!("{}:{}", self.doman, self.port);
+                let uri: &str = &format!("{}:{}", self.domain, self.port);
                 self.api = match Api::builder().retries(self.retries).build(uri).await {
                     Ok(api) => api,
                     Err(err) => {

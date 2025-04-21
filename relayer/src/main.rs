@@ -116,19 +116,28 @@ async fn main() {
 
             let mut metrics_builder = MetricsBuilder::new();
 
+            let (provider, conn) = ApiProvider::new(
+                gsdk_args.vara_domain.clone(),
+                gsdk_args.vara_port,
+                gsdk_args.vara_rpc_retries,
+            )
+            .await
+            .expect("Failed to create API provider");
+
             match args.command {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         gear_api,
-                        gsdk_args,
                         eth_api,
                         args.from_block,
+                        conn,
                     )
                     .await
                     .unwrap();
 
                     metrics_builder = metrics_builder.register_service(&relayer);
 
+                    provider.spawn();
                     relayer.run().await;
                 }
                 GearEthTokensCommands::PaidTokenTransfers {
@@ -140,16 +149,16 @@ async fn main() {
 
                     let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
                         gear_api,
-                        gsdk_args,
                         eth_api,
                         args.from_block,
                         bridging_payment_address,
+                        conn,
                     )
                     .await
                     .unwrap();
 
                     metrics_builder = metrics_builder.register_service(&relayer);
-
+                    provider.spawn();
                     relayer.run().await;
                 }
             }
@@ -251,7 +260,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
 
-                    provider.spawn().await;
+                    provider.spawn();
                     relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
@@ -280,7 +289,7 @@ async fn main() {
                         .build()
                         .run(prometheus_args.endpoint)
                         .await;
-                    provider.spawn().await;
+                    provider.spawn();
                     relayer.run().await;
                 }
             }
@@ -335,7 +344,16 @@ async fn main() {
                 .0
                 .into();
 
+            let (provider, conn) = ApiProvider::new(
+                gear_client_args.vara_domain.clone(),
+                gear_client_args.vara_port,
+                gear_client_args.vara_rpc_retries,
+            )
+            .await
+            .expect("Failed to create API provider");
+
             eth_to_gear::manual::relay(
+                conn,
                 gear_client_args,
                 gear_args.suri,
                 eth_api,
@@ -348,7 +366,7 @@ async fn main() {
                 slot,
             )
             .await;
-
+            provider.spawn();
             loop {
                 // relay() spawns thread and exits, so we need to add this loop after calling run.
                 tokio::time::sleep(Duration::from_secs(1)).await;

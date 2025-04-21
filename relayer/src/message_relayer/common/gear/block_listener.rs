@@ -4,12 +4,14 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{GSdkArgs, GearBlockNumber};
+use crate::message_relayer::{
+    common::GearBlockNumber, eth_to_gear::api_provider::ApiProviderConnection,
+};
 
 const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
 
 pub struct BlockListener {
-    args: GSdkArgs,
+    api_provider: ApiProviderConnection,
     from_block: u32,
 
     metrics: Metrics,
@@ -31,9 +33,9 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(args: GSdkArgs, from_block: u32) -> Self {
+    pub fn new(api_provider: ApiProviderConnection, from_block: u32) -> Self {
         Self {
-            args,
+            api_provider,
             from_block,
 
             metrics: Metrics::new(),
@@ -41,16 +43,35 @@ impl BlockListener {
     }
 
     pub async fn run<const RECEIVER_COUNT: usize>(
-        self,
+        mut self,
     ) -> [UnboundedReceiver<GearBlockNumber>; RECEIVER_COUNT] {
         let (senders, receivers): (Vec<_>, Vec<_>) =
             (0..RECEIVER_COUNT).map(|_| unbounded_channel()).unzip();
 
         tokio::task::spawn(async move {
+            let mut gear_api = match self.api_provider.request_connection().await {
+                Ok(api) => api,
+                Err(err) => {
+                    log::error!(
+                        "Gear block listener failed to establish connection: {}",
+                        err
+                    );
+                    return;
+                }
+            };
+
             loop {
-                let res = self.run_inner(&senders).await;
+                let res = self.run_inner(&senders, &gear_api).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {}", err);
+
+                    gear_api = match self.api_provider.request_connection().await {
+                        Ok(api) => api,
+                        Err(err) => {
+                            log::error!("Gear block listener unable to reconnect: {}", err);
+                            return;
+                        }
+                    };
                 }
             }
         });
@@ -60,17 +81,14 @@ impl BlockListener {
             .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(&self, senders: &[UnboundedSender<GearBlockNumber>]) -> anyhow::Result<()> {
+    async fn run_inner(
+        &self,
+        senders: &[UnboundedSender<GearBlockNumber>],
+        gear_api: &GearApi,
+    ) -> anyhow::Result<()> {
         let mut current_block = self.from_block;
 
         self.metrics.latest_block.set(current_block as i64);
-
-        let gear_api = GearApi::new(
-            &self.args.vara_domain,
-            self.args.vara_port,
-            self.args.vara_rpc_retries,
-        )
-        .await?;
 
         loop {
             let finalized_head = gear_api.latest_finalized_block().await?;

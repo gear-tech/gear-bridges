@@ -1,4 +1,7 @@
-use crate::message_relayer::common::{EthereumSlotNumber, GSdkArgs, GearBlockNumber};
+use crate::message_relayer::{
+    common::{EthereumSlotNumber, GearBlockNumber},
+    eth_to_gear::api_provider::ApiProviderConnection,
+};
 use anyhow::anyhow;
 use checkpoint_light_client_client::Order;
 use gear_core::message::ReplyCode;
@@ -13,7 +16,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
 
-    args: GSdkArgs,
+    api_provider: ApiProviderConnection,
 
     latest_checkpoint: Option<EthereumSlotNumber>,
 
@@ -36,10 +39,10 @@ impl_metered_service! {
 }
 
 impl CheckpointsExtractor {
-    pub fn new(args: GSdkArgs, checkpoint_light_client_address: H256) -> Self {
+    pub fn new(api_provider: ApiProviderConnection, checkpoint_light_client_address: H256) -> Self {
         Self {
             checkpoint_light_client_address,
-            args,
+            api_provider,
             latest_checkpoint: None,
             metrics: Metrics::new(),
         }
@@ -52,10 +55,27 @@ impl CheckpointsExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            let mut gear_api = match self.api_provider.request_connection().await {
+                Ok(api) => api,
+                Err(err) => {
+                    log::error!(
+                        "Checkpoints extractor failed to establish connection: {}",
+                        err
+                    );
+                    return;
+                }
+            };
             loop {
-                let res = self.run_inner(&sender, &mut blocks).await;
+                let res = self.run_inner(&sender, &mut blocks, &gear_api).await;
                 if let Err(err) = res {
                     log::error!("Checkpoints extractor failed: {}", err);
+                    gear_api = match self.api_provider.request_connection().await {
+                        Ok(api) => api,
+                        Err(err) => {
+                            log::error!("Checkpoints extractor unable to reconnect: {}", err);
+                            return;
+                        }
+                    };
                 }
             }
         });
@@ -67,17 +87,11 @@ impl CheckpointsExtractor {
         &mut self,
         sender: &UnboundedSender<EthereumSlotNumber>,
         blocks: &mut UnboundedReceiver<GearBlockNumber>,
+        gear_api: &GearApi,
     ) -> anyhow::Result<()> {
-        let gear_api = GearApi::new(
-            &self.args.vara_domain,
-            self.args.vara_port,
-            self.args.vara_rpc_retries,
-        )
-        .await?;
-
         loop {
             while let Ok(block) = blocks.try_recv() {
-                self.process_block_events(&gear_api, block.0, sender)
+                self.process_block_events(gear_api, block.0, sender)
                     .await?;
             }
         }

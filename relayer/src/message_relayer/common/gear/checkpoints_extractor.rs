@@ -63,7 +63,7 @@ impl CheckpointsExtractor {
                             log::info!("Checkpoints extractor reconnected");
                         }
                         Err(err) => {
-                            log::error!("Checkpoints extractor unable to reconnect: {}", err);
+                            log::error!("Checkpoints extractor unable to reconnect: {err}");
                             return;
                         }
                     };

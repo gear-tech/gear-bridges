@@ -66,7 +66,7 @@ impl Clone for ApiProviderConnection {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
-            session: 0, // pass session 0 to reuse any existing connection
+            session: self.session,
             api: self.api.clone(),
         }
     }
@@ -131,6 +131,7 @@ impl ApiProvider {
                     }
                     continue;
                 }
+                
                 let uri: &str = &format!("{}:{}", self.domain, self.port);
                 self.api = match Api::builder().retries(self.retries).build(uri).await {
                     Ok(api) => api,

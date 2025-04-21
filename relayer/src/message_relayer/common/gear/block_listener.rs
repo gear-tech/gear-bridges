@@ -58,7 +58,7 @@ impl BlockListener {
                             log::info!("Gear block listener reconnected");
                         }
                         Err(err) => {
-                            log::error!("Gear block listener unable to reconnect: {}", err);
+                            log::error!("Gear block listener unable to reconnect: {err}");
                             return;
                         }
                     };

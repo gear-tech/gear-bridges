@@ -65,7 +65,7 @@ async fn connect_to_node() -> (GearApi, ActorId, CodeId, GasUnit, [u8; 4]) {
         let api2 = GearApi::init_with(WSAddress::dev(), suri).await.unwrap();
 
         let account_id: &[u8; 32] = api2.account_id().as_ref();
-        api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+        api.transfer_keep_alive((*account_id).into(), 300_000_000_000_000)
             .await
             .unwrap();
 

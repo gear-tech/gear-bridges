@@ -42,7 +42,7 @@ async fn create_account(api: &GearApi, suri: &str) -> Result<()> {
     let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();
     let account_id: &[u8; 32] = account.as_ref();
 
-    api.transfer_keep_alive((*account_id).into(), 100_000_000_000_000)
+    api.transfer_keep_alive((*account_id).into(), 500_000_000_000_000)
         .await?;
 
     Ok(())

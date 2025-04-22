@@ -115,7 +115,9 @@ impl ApiProvider {
 
     pub fn spawn(mut self) {
         tokio::spawn(async move {
-            while let Ok(request) = self.receiver.try_recv() {
+            while let Some(request) = self.receiver.recv().await {
+                log::info!("Current session #{}, request session #{}", self.session, request.session);
+
                 if request.session < self.session {
                     let response = ApiConnectionResponse {
                         session: request.session,
@@ -123,10 +125,10 @@ impl ApiProvider {
                     };
                     match request.receiver.send(response) {
                         Ok(_) => {
-                            log::info!("Session #{} reuses API connection", request.session);
+                            log::info!("Session reuses API connection");
                         }
                         Err(_) => {
-                            log::error!("Failed to send response for session #{}", request.session);
+                            log::error!("Failed to send response for the session");
                         }
                     }
                     continue;
@@ -136,15 +138,16 @@ impl ApiProvider {
                 self.api = match Api::builder().retries(self.retries).build(uri).await {
                     Ok(api) => api,
                     Err(err) => {
-                        log::error!("Failed to create API connection: {}", err);
-                        return Err(err);
+                        log::error!("Failed to create API connection: {err}");
+                        return;
                     }
                 };
                 self.session += 1;
                 log::info!(
-                    "established new API connection with session number {}",
+                    "Established new API connection with session number {}",
                     self.session
                 );
+
                 // TODO: Implement a backoff strategy for the connection
                 let rem = self.session % 10;
                 let sleep_time = if rem < 3 {
@@ -163,15 +166,13 @@ impl ApiProvider {
                 };
                 match request.receiver.send(response) {
                     Ok(_) => {
-                        log::info!("Session #{} got new API connection", self.session);
+                        log::info!("Session got new API connection");
                     }
                     Err(_) => {
-                        log::error!("Failed to send response for session #{}", self.session);
+                        log::error!("Failed to send response for the session");
                     }
                 }
             }
-
-            Ok(())
         });
     }
 }

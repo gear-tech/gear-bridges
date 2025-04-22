@@ -5,7 +5,11 @@ use crate::{
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
-use futures::executor::block_on;
+use futures::{
+    executor::block_on,
+    future::{self, Either},
+    pin_mut,
+};
 use gclient::GearApi;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
@@ -16,7 +20,7 @@ use sails_rs::{
     Encode,
 };
 
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::{sync::mpsc::UnboundedReceiver, time::Duration};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
@@ -98,8 +102,8 @@ impl MessageSender {
                 let mut attempts = 0;
 
                 loop {
-                    match self.run_inner(&mut messages, &mut checkpoints).await {
-                        Ok(_) => continue,
+                    match run_inner(&mut self, &mut messages, &mut checkpoints).await {
+                        Ok(_) => break,
                         Err(err) => {
                             log::error!("Gear message sender failed with: {err}");
 
@@ -144,54 +148,6 @@ impl MessageSender {
             });
         })
         .await;
-    }
-
-    async fn run_inner(
-        &mut self,
-        messages: &mut UnboundedReceiver<TxHashWithSlot>,
-        checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
-    ) -> anyhow::Result<()> {
-        let mut latest_checkpoint_slot = None;
-
-        loop {
-            while let Ok(checkpoint) = checkpoints.try_recv() {
-                if latest_checkpoint_slot.unwrap_or_default() < checkpoint {
-                    latest_checkpoint_slot = Some(checkpoint);
-                } else {
-                    log::error!(
-                        "Received checkpoints not in sequential order. \
-                        Previously found checkpoint: {:?} and new checkpoint is {}",
-                        latest_checkpoint_slot,
-                        checkpoint
-                    );
-                }
-            }
-
-            while let Ok(message) = messages.try_recv() {
-                self.waiting_checkpoint.push(message);
-            }
-
-            if self.waiting_checkpoint.is_empty() {
-                continue;
-            }
-
-            let gear_api = self.api_provider.gclient_client(&self.suri)?;
-            for i in (0..self.waiting_checkpoint.len()).rev() {
-                if self.waiting_checkpoint[i].slot_number
-                    <= latest_checkpoint_slot.unwrap_or_default()
-                {
-                    self.submit_message(&self.waiting_checkpoint[i], &gear_api)
-                        .await?;
-                    let _ = self.waiting_checkpoint.remove(i);
-                }
-            }
-
-            self.update_balance_metric(&gear_api).await?;
-
-            self.metrics
-                .messages_waiting_checkpoint
-                .set(self.waiting_checkpoint.len() as i64);
-        }
     }
 
     async fn submit_message(
@@ -264,5 +220,75 @@ impl MessageSender {
         self.metrics.fee_payer_balance.set(balance);
 
         Ok(())
+    }
+}
+
+async fn run_inner(
+    self_: &mut MessageSender,
+    messages: &mut UnboundedReceiver<TxHashWithSlot>,
+    checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
+) -> anyhow::Result<()> {
+    let mut latest_checkpoint_slot = None;
+
+    loop {
+        let gear_api = self_.api_provider.gclient_client(&self_.suri)?;
+        self_.update_balance_metric(&gear_api).await?;
+
+        let recv_message = messages.recv();
+        pin_mut!(recv_message);
+
+        let recv_checkpoints = checkpoints.recv();
+        pin_mut!(recv_checkpoints);
+
+        match future::select(recv_message, recv_checkpoints).await {
+            Either::Left((None, _)) => {
+                log::info!("Channel with messages closed. Exiting");
+                return Ok(());
+            }
+
+            Either::Right((None, _)) => {
+                log::info!("Channel with paid messages closed. Exiting");
+                return Ok(());
+            }
+
+            Either::Left((Some(message), _)) => self_.waiting_checkpoint.push(message),
+
+            Either::Right((Some(checkpoint), _)) => {
+                if latest_checkpoint_slot.unwrap_or_default() < checkpoint {
+                    latest_checkpoint_slot = Some(checkpoint);
+                } else {
+                    log::error!(
+                        "Received checkpoints not in sequential order. \
+                    Previously found checkpoint: {:?} and new checkpoint is {}",
+                        latest_checkpoint_slot,
+                        checkpoint
+                    );
+                }
+            }
+        }
+
+        if self_.waiting_checkpoint.is_empty() {
+            log::info!("There are no waiting checkpoints.");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            continue;
+        }
+
+        for i in (0..self_.waiting_checkpoint.len()).rev() {
+            if self_.waiting_checkpoint[i].slot_number <= latest_checkpoint_slot.unwrap_or_default()
+            {
+                self_
+                    .submit_message(&self_.waiting_checkpoint[i], &gear_api)
+                    .await?;
+                let _ = self_.waiting_checkpoint.remove(i);
+            }
+        }
+
+        self_.update_balance_metric(&gear_api).await?;
+
+        self_
+            .metrics
+            .messages_waiting_checkpoint
+            .set(self_.waiting_checkpoint.len() as i64);
     }
 }

@@ -10,6 +10,10 @@ use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::common::{AuthoritySetId, MessageInBlock},
 };
+use futures::{
+    future::{self, Either},
+    pin_mut,
+};
 
 mod era;
 use era::{Era, Metrics as EraMetrics};
@@ -66,31 +70,29 @@ impl MessageSender {
             let mut attempts = 0;
 
             loop {
-                let res = self.run_inner(&mut messages, &mut merkle_roots).await;
-                if let Err(err) = res {
-                    attempts += 1;
-                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                    log::error!(
-                        "Ethereum message sender failed (attempt: {}/{}): {}. Retrying in {:?}",
-                        attempts,
-                        MAX_RETRIES,
-                        err,
-                        delay
+                match run_inner(&mut self, &mut messages, &mut merkle_roots).await {
+                    Ok(_) => break,
+                    Err(e) => {
+                        attempts += 1;
+                        let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+                        log::error!(
+                        "Ethereum message sender failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
                     );
-                    if attempts >= MAX_RETRIES {
-                        log::error!("Maximum attempts reached, exiting...");
-                        break;
-                    }
+                        if attempts >= MAX_RETRIES {
+                            log::error!("Maximum attempts reached, exiting...");
+                            break;
+                        }
 
-                    tokio::time::sleep(delay).await;
+                        tokio::time::sleep(delay).await;
 
-                    if common::is_transport_error_recoverable(&err) {
-                        match self.eth_api.reconnect().inspect_err(|e| {
-                            log::error!("Failed to reconnect to Ethereum: {}", e);
-                        }) {
-                            Ok(eth_api) => self.eth_api = eth_api,
-                            Err(_) => {
-                                break;
+                        if common::is_transport_error_recoverable(&e) {
+                            match self.eth_api.reconnect().inspect_err(|e| {
+                                log::error!("Failed to reconnect to Ethereum: {e}");
+                            }) {
+                                Ok(eth_api) => self.eth_api = eth_api,
+                                Err(_) => {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -98,21 +100,40 @@ impl MessageSender {
             }
         });
     }
+}
 
-    async fn run_inner(
-        &self,
-        messages: &mut UnboundedReceiver<MessageInBlock>,
-        merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
-    ) -> anyhow::Result<()> {
-        let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
+async fn run_inner(
+    self_: &mut MessageSender,
+    messages: &mut UnboundedReceiver<MessageInBlock>,
+    merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
+) -> anyhow::Result<()> {
+    let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
 
-        loop {
-            let fee_payer_balance = self.eth_api.get_approx_balance().await?;
-            self.metrics.fee_payer_balance.set(fee_payer_balance);
+    loop {
+        let fee_payer_balance = self_.eth_api.get_approx_balance().await?;
+        self_.metrics.fee_payer_balance.set(fee_payer_balance);
 
-            while let Some(message) = messages.recv().await {
+        let recv_message = messages.recv();
+        pin_mut!(recv_message);
+
+        let recv_merkle_roots = merkle_roots.recv();
+        pin_mut!(recv_merkle_roots);
+
+        match future::select(recv_message, recv_merkle_roots).await {
+            Either::Left((None, _)) => {
+                log::info!("Channel with messages closed. Exiting");
+                return Ok(());
+            }
+
+            Either::Right((None, _)) => {
+                log::info!("Channel with paid messages closed. Exiting");
+                return Ok(());
+            }
+
+            Either::Left((Some(message), _)) => {
                 let authority_set_id = AuthoritySetId(
-                    self.gear_api
+                    self_
+                        .gear_api
                         .signed_by_authority_set_id(message.block_hash)
                         .await?,
                 );
@@ -122,7 +143,7 @@ impl MessageSender {
                         entry.get_mut().push_message(message);
                     }
                     Entry::Vacant(entry) => {
-                        let mut era = Era::new(authority_set_id, self.era_metrics.clone());
+                        let mut era = Era::new(authority_set_id, self_.era_metrics.clone());
                         era.push_message(message);
 
                         entry.insert(era);
@@ -130,50 +151,50 @@ impl MessageSender {
                 }
             }
 
-            while let Ok(merkle_root) = merkle_roots.try_recv() {
+            Either::Right((Some(merkle_root), _)) => {
                 match eras.entry(merkle_root.authority_set_id) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().push_merkle_root(merkle_root);
                     }
                     Entry::Vacant(entry) => {
                         let mut era =
-                            Era::new(merkle_root.authority_set_id, self.era_metrics.clone());
+                            Era::new(merkle_root.authority_set_id, self_.era_metrics.clone());
                         era.push_merkle_root(merkle_root);
 
                         entry.insert(era);
                     }
                 }
             }
+        }
 
-            let latest_era = eras.last_key_value().map(|(k, _)| *k);
-            let Some(latest_era) = latest_era else {
+        let latest_era = eras.last_key_value().map(|(k, _)| *k);
+        let Some(latest_era) = latest_era else {
+            continue;
+        };
+
+        let mut finalized_eras = vec![];
+
+        for (&era_id, era) in eras.iter_mut() {
+            let res = era.process(&self_.gear_api, &self_.eth_api).await;
+            if let Err(err) = res {
+                log::error!("Failed to process era #{}: {}", era_id, err);
                 continue;
-            };
-
-            let mut finalized_eras = vec![];
-
-            for (&era_id, era) in eras.iter_mut() {
-                let res = era.process(&self.gear_api, &self.eth_api).await;
-                if let Err(err) = res {
-                    log::error!("Failed to process era #{}: {}", era_id, err);
-                    continue;
-                }
-
-                let finalized = era.try_finalize(&self.eth_api, &self.gear_api).await?;
-
-                // Latest era cannot be finalized.
-                if finalized && era_id != latest_era {
-                    log::info!("Era #{} finalized", era_id);
-                    finalized_eras.push(era_id);
-                }
             }
 
-            let pending_tx_count: usize = eras.iter().map(|era| era.1.pending_tx_count()).sum();
-            self.metrics.pending_tx_count.set(pending_tx_count as i64);
+            let finalized = era.try_finalize(&self_.eth_api, &self_.gear_api).await?;
 
-            for finalized in finalized_eras {
-                eras.remove(&finalized);
+            // Latest era cannot be finalized.
+            if finalized && era_id != latest_era {
+                log::info!("Era #{} finalized", era_id);
+                finalized_eras.push(era_id);
             }
+        }
+
+        let pending_tx_count: usize = eras.iter().map(|era| era.1.pending_tx_count()).sum();
+        self_.metrics.pending_tx_count.set(pending_tx_count as i64);
+
+        for finalized in finalized_eras {
+            eras.remove(&finalized);
         }
     }
 }

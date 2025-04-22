@@ -116,7 +116,11 @@ impl ApiProvider {
     pub fn spawn(mut self) {
         tokio::spawn(async move {
             while let Some(request) = self.receiver.recv().await {
-                log::info!("Current session #{}, request session #{}", self.session, request.session);
+                log::info!(
+                    "Current session #{}, request session #{}",
+                    self.session,
+                    request.session
+                );
 
                 if request.session < self.session {
                     let response = ApiConnectionResponse {

@@ -40,7 +40,7 @@ pub async fn relay(
 
     let message = message_queued_events
         .into_iter()
-        .find(|m| U256::from_little_endian(&m.nonce_le[..]) == message_nonce)
+        .find(|m| U256::from_little_endian(&m.nonce_le) == message_nonce)
         .unwrap_or_else(|| {
             panic!(
                 "Message with nonce {} is not found in gear block {}",

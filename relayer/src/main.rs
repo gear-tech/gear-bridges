@@ -11,6 +11,7 @@ use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
     gear_to_eth,
 };
+use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
@@ -299,7 +300,9 @@ async fn main() {
             }
         }
         CliCommands::GearEthManual(args) => {
-            let nonce = hex_utils::decode_h256(&args.nonce).expect("Failed to parse message nonce");
+            let nonce =
+                hex_utils::decode_byte_vec(&args.nonce).expect("Failed to parse message nonce");
+            let nonce = U256::from_big_endian(&nonce[..]);
             let eth_api = create_eth_signer_client(&args.ethereum_args);
             let gear_api = create_gear_client(&args.gear_args).await;
 

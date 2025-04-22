@@ -1,4 +1,4 @@
-use primitive_types::H256;
+use primitive_types::U256;
 
 use ethereum_client::EthApi;
 use gear_rpc_client::GearApi;
@@ -15,7 +15,7 @@ use crate::message_relayer::common::{
 pub async fn relay(
     gear_api: GearApi,
     eth_api: EthApi,
-    message_nonce: H256,
+    message_nonce: U256,
     gear_block: u32,
     from_eth_block: Option<u64>,
 ) {
@@ -40,12 +40,11 @@ pub async fn relay(
 
     let message = message_queued_events
         .into_iter()
-        .find(|m| m.nonce_le == message_nonce.as_bytes())
+        .find(|m| U256::from_little_endian(&m.nonce_le[..]) == message_nonce)
         .unwrap_or_else(|| {
             panic!(
                 "Message with nonce {} is not found in gear block {}",
-                hex::encode(message_nonce.as_bytes()),
-                gear_block
+                message_nonce, gear_block
             )
         });
 

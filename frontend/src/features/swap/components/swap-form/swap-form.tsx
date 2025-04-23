@@ -11,7 +11,7 @@ import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { TokenPrice } from '@/features/token-price';
-import { useEthAccount, useModal } from '@/hooks';
+import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
@@ -62,6 +62,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const { open: openEthWalletModal } = useAppKit();
   const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
   const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
+
+  const varaSymbol = useVaraSymbol();
 
   const openTransacionModal = (amount: string, receiver: string) => {
     if (!address || !destinationAddress) throw new Error('Address is not defined');
@@ -117,7 +119,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const getButtonText = () => {
-    if (!isEnoughBalance()) return `Not Enough ${isVaraNetwork ? 'VARA' : 'ETH'}`;
+    if (!isEnoughBalance()) return `Not Enough ${isVaraNetwork ? varaSymbol : 'ETH'}`;
 
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Transferring...';
@@ -201,7 +203,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <DetailsAccordion fee={fee.formattedValue} symbol={isVaraNetwork ? 'VARA' : 'ETH'} />
+          <DetailsAccordion fee={fee.formattedValue} isVaraNetwork={isVaraNetwork} />
 
           {isNetworkAccountConnected ? (
             <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>

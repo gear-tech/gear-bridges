@@ -13,6 +13,7 @@ import {
   useVaraFTBalances,
   useEthFTBalances,
   useEthFTBalance,
+  useVaraSymbol,
 } from '@/hooks';
 import { getErrorMessage, getTokenSVG, isUndefined } from '@/utils';
 
@@ -23,6 +24,7 @@ import styles from './tokens-card.module.scss';
 
 function TokensCard() {
   const { account } = useAccount();
+  const varaSymbol = useVaraSymbol();
   const { addresses, decimals, symbols } = useTokens();
   const alert = useAlert();
 
@@ -101,13 +103,13 @@ function TokensCard() {
       </header>
 
       <ul className={styles.list}>
-        {!isUndefined(accountBalance.data) && (
+        {!isUndefined(accountBalance.data) && varaSymbol && (
           <li>
             <BalanceCard
               SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.data}
               decimals={isVaraNetwork ? 12 : 18}
-              symbol={isVaraNetwork ? 'VARA' : 'ETH'}
+              symbol={isVaraNetwork ? varaSymbol : 'ETH'}
             />
           </li>
         )}

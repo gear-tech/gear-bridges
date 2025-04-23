@@ -5,6 +5,7 @@ import { ISubmittableResult } from '@polkadot/types/types';
 import { useMutation } from '@tanstack/react-query';
 
 import { VFT_MANAGER_CONTRACT_ADDRESS, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { useVaraSymbol } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import { InsufficientAccountBalanceError } from '../../errors';
@@ -26,6 +27,7 @@ function useHandleVaraSubmit(
 ) {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
+  const varaSymbol = useVaraSymbol();
   const mint = useMint();
   const approve = useApprove(ftAddress);
   const requestBridging = useRequestBridging();
@@ -39,6 +41,7 @@ function useHandleVaraSubmit(
     if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
     if (!isApiReady) throw new Error('API is not initialized');
     if (isUndefined(accountBalance)) throw new Error('Account balance is not found');
+    if (!varaSymbol) throw new Error('Vara symbol is not found');
 
     const isMintRequired = ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && amount > ftBalance;
     const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
@@ -72,7 +75,7 @@ function useHandleVaraSubmit(
     const requiredBalance =
       valueToMint + totalGasLimit + totalEstimatedFee + feeValue + api.existentialDeposit.toBigInt();
 
-    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError('VARA', requiredBalance);
+    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError(varaSymbol, requiredBalance);
 
     return {
       mintTx: preparedMint.transaction,

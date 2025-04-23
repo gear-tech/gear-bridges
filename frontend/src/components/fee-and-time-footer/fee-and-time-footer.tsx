@@ -1,5 +1,6 @@
 import ClockSVG from '@/assets/clock.svg?react';
 import { TOKEN_ID, TokenPrice } from '@/features/token-price';
+import { useVaraSymbol } from '@/hooks';
 import { cx } from '@/utils';
 
 import { Skeleton } from '../layout';
@@ -9,11 +10,16 @@ import GasSVG from './gas.svg?react';
 
 type Props = {
   fee: string | undefined;
-  symbol: 'VARA' | 'ETH';
+  isVaraNetwork: boolean;
   className?: string;
 };
 
-function FeeAndTimeFooter({ fee, symbol, className }: Props) {
+function FeeAndTimeFooter({ fee, isVaraNetwork, className }: Props) {
+  const varaSymbol = useVaraSymbol();
+
+  const tokenId = isVaraNetwork ? TOKEN_ID.VARA : TOKEN_ID.ETH;
+  const symbol = isVaraNetwork ? varaSymbol : 'ETH';
+
   return (
     <footer className={cx(styles.footer, className)}>
       <p className={styles.prop}>
@@ -22,8 +28,8 @@ function FeeAndTimeFooter({ fee, symbol, className }: Props) {
         </span>
 
         <span className={styles.value}>
-          {fee ? `${fee} ${symbol}` : <Skeleton width="3.5rem" />}
-          <TokenPrice id={symbol === 'VARA' ? TOKEN_ID.VARA : TOKEN_ID.ETH} amount={fee} />
+          {fee && symbol ? `${fee} ${symbol}` : <Skeleton width="3.5rem" />}
+          <TokenPrice id={tokenId} amount={fee} />
         </span>
       </p>
 

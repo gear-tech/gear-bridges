@@ -7,6 +7,7 @@ import { useEthFTBalances } from './use-eth-ft-balances';
 import { useVaraAccountBalance } from './use-vara-account-balance';
 import { useVaraFTBalance } from './use-vara-ft-balance';
 import { useVaraFTBalances } from './use-vara-ft-balances';
+import { useVaraSymbol } from './use-vara-symbol';
 
 export {
   useEthAccount,
@@ -22,4 +23,5 @@ export {
   useVaraFTBalances,
   useEthFTBalance,
   useEthFTBalances,
+  useVaraSymbol,
 };

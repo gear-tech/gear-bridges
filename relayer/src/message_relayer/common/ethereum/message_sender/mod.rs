@@ -113,20 +113,20 @@ async fn run_inner(
         let fee_payer_balance = self_.eth_api.get_approx_balance().await?;
         self_.metrics.fee_payer_balance.set(fee_payer_balance);
 
-        let recv_message = messages.recv();
-        pin_mut!(recv_message);
+        let recv_messages = messages.recv();
+        pin_mut!(recv_messages);
 
         let recv_merkle_roots = merkle_roots.recv();
         pin_mut!(recv_merkle_roots);
 
-        match future::select(recv_message, recv_merkle_roots).await {
+        match future::select(recv_messages, recv_merkle_roots).await {
             Either::Left((None, _)) => {
                 log::info!("Channel with messages closed. Exiting");
                 return Ok(());
             }
 
             Either::Right((None, _)) => {
-                log::info!("Channel with paid messages closed. Exiting");
+                log::info!("Channel with merkle roots closed. Exiting");
                 return Ok(());
             }
 
@@ -177,7 +177,7 @@ async fn run_inner(
         for (&era_id, era) in eras.iter_mut() {
             let res = era.process(&self_.gear_api, &self_.eth_api).await;
             if let Err(err) = res {
-                log::error!("Failed to process era #{}: {}", era_id, err);
+                log::error!("Failed to process era #{era_id}: {err}");
                 continue;
             }
 
@@ -185,7 +185,7 @@ async fn run_inner(
 
             // Latest era cannot be finalized.
             if finalized && era_id != latest_era {
-                log::info!("Era #{} finalized", era_id);
+                log::info!("Era #{era_id} finalized");
                 finalized_eras.push(era_id);
             }
         }

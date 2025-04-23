@@ -69,13 +69,13 @@ async fn run_inner(
     paid_messages: &mut UnboundedReceiver<PaidMessage>,
 ) -> anyhow::Result<()> {
     loop {
-        let recv_message = messages.recv();
-        pin_mut!(recv_message);
+        let recv_messages = messages.recv();
+        pin_mut!(recv_messages);
 
         let recv_paid_messages = paid_messages.recv();
         pin_mut!(recv_paid_messages);
 
-        match future::select(recv_message, recv_paid_messages).await {
+        match future::select(recv_messages, recv_paid_messages).await {
             Either::Left((None, _)) => {
                 log::info!("Channel with messages closed. Exiting");
                 return Ok(());

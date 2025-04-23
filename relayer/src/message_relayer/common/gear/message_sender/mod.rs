@@ -234,20 +234,20 @@ async fn run_inner(
         let gear_api = self_.api_provider.gclient_client(&self_.suri)?;
         self_.update_balance_metric(&gear_api).await?;
 
-        let recv_message = messages.recv();
-        pin_mut!(recv_message);
+        let recv_messages = messages.recv();
+        pin_mut!(recv_messages);
 
         let recv_checkpoints = checkpoints.recv();
         pin_mut!(recv_checkpoints);
 
-        match future::select(recv_message, recv_checkpoints).await {
+        match future::select(recv_messages, recv_checkpoints).await {
             Either::Left((None, _)) => {
                 log::info!("Channel with messages closed. Exiting");
                 return Ok(());
             }
 
             Either::Right((None, _)) => {
-                log::info!("Channel with paid messages closed. Exiting");
+                log::info!("Channel with checkpoints closed. Exiting");
                 return Ok(());
             }
 

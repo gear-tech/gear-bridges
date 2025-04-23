@@ -26,7 +26,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: indexer
-        run: npm install
+        run: npm ci
 
       - name: Copy api files
         run: |

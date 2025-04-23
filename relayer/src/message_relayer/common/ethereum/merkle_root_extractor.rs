@@ -96,7 +96,7 @@ impl MerkleRootExtractor {
         sender: &UnboundedSender<RelayedMerkleRoot>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Ok(block) = blocks.try_recv() {
+            while let Some(block) = blocks.recv().await {
                 let merkle_roots = self
                     .eth_api
                     .fetch_merkle_roots_in_range(block.0, block.0)

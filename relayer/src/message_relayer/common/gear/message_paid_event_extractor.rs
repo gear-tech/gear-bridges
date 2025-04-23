@@ -65,7 +65,7 @@ impl MessagePaidEventExtractor {
         blocks: &mut UnboundedReceiver<GearBlockNumber>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Ok(block) = blocks.try_recv() {
+            while let Some(block) = blocks.recv().await {
                 self.process_block_events(block.0, sender).await?;
             }
         }

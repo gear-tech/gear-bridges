@@ -120,8 +120,8 @@ export class TempState {
 
   public async removePair(gear: string, eth: string) {
     const index = this._addedTokens.findIndex(({ gearToken, ethToken }) => gearToken === gear && ethToken === eth);
-    if (index > 0) {
-      this._addedTokens.splice(index);
+    if (index >= 0) {
+      this._addedTokens.splice(index, 1);
     } else {
       const pair = await this._ctx.store.findOneBy(Pair, { gearToken: gear, ethToken: eth });
       if (!pair) return;

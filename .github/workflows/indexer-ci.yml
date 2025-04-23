@@ -31,8 +31,9 @@ jobs:
       - name: Copy api files
         run: |
           mkdir -p indexer/assets
-          node indexer/scripts/abi.js api/ethereum/IERC20Manager.json indexer/assets
-          node indexer/scripts/abi.js api/ethereum/IMessageQueue.json indexer/assets
+          cp api/ethereum/IERC20Manager.json indexer/assets/
+          cp api/ethereum/IMessageQueue.json indexer/assets/
+          cp api/ethereum/IBridgingPayment.json indexer/assets/
 
       - name: Build
         working-directory: indexer

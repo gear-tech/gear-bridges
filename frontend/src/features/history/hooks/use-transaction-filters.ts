@@ -91,7 +91,7 @@ function useTransactionFilters() {
     }
 
     if (debouncedSearch && !searchError) where.blockNumber_eq = debouncedSearch;
-    if (owner && accountAddress) where.sender_eq = accountAddress;
+    if (owner && accountAddress) where.sender_containsInsensitive = accountAddress;
 
     return where;
   }, [timestamp, status, asset, searchError, debouncedSearch, owner, accountAddress]);

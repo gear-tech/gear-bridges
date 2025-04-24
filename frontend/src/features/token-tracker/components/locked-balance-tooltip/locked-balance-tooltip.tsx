@@ -1,10 +1,13 @@
 import WarningSVG from '@/assets/warning.svg?react';
 import { Tooltip } from '@/components';
 import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { useVaraFTBalance } from '@/hooks';
+import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
+import { useEthFTBalance, useVaraFTBalance } from '@/hooks';
 
 function LockedBalanceTooltip() {
-  const { data: lockedBalance } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);
+  const { data: lockedVaraBalance } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);
+  const { data: lockedEthBalance } = useEthFTBalance(ETH_WRAPPED_ETH_CONTRACT_ADDRESS);
+  const lockedBalance = lockedVaraBalance || lockedEthBalance;
 
   if (!lockedBalance) return;
 

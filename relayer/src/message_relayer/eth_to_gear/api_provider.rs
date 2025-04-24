@@ -124,7 +124,7 @@ impl ApiProvider {
 
                 if request.session < self.session {
                     let response = ApiConnectionResponse {
-                        session: request.session,
+                        session: self.session,
                         api: self.api.clone(),
                     };
                     match request.receiver.send(response) {

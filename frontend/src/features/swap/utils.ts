@@ -1,4 +1,4 @@
-import { parseUnits } from 'viem';
+import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 
 import { isUndefined } from '@/utils';
@@ -11,8 +11,14 @@ const getAmountSchema = (
   accountBalanceValue: bigint | undefined,
   ftBalanceValue: bigint | undefined,
   decimals: number | undefined,
+  existentialDeposit: bigint | undefined,
 ) => {
-  if (isUndefined(accountBalanceValue) || isUndefined(ftBalanceValue) || isUndefined(decimals))
+  if (
+    isUndefined(accountBalanceValue) ||
+    isUndefined(ftBalanceValue) ||
+    isUndefined(decimals) ||
+    isUndefined(existentialDeposit)
+  )
     return z.string().transform((value) => BigInt(value));
 
   const schema = z
@@ -24,9 +30,19 @@ const getAmountSchema = (
   if (!isNativeToken)
     return schema.refine((value) => value <= ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE });
 
-  return schema.refine((value) => value <= accountBalanceValue + ftBalanceValue, {
-    message: ERROR_MESSAGE.NO_FT_BALANCE,
-  });
+  return schema
+    .refine(
+      (value) => {
+        const valueToMint = value - ftBalanceValue;
+
+        // vft balance is like wallet balance, existentialDeposit is a minimum required amount to transfer if balance is 0
+        return Boolean(ftBalanceValue) || valueToMint >= existentialDeposit;
+      },
+      { message: `Minimum amount is ${formatUnits(existentialDeposit, decimals)}` },
+    )
+    .refine((value) => value <= accountBalanceValue + ftBalanceValue, {
+      message: ERROR_MESSAGE.NO_FT_BALANCE,
+    });
 };
 
 const getMergedBalance = (accountBalance: ReturnType<UseAccountBalance>, ftBalance: ReturnType<UseAccountBalance>) => {

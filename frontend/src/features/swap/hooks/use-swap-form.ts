@@ -1,4 +1,4 @@
-import { useAlert, useAccount } from '@gear-js/react-hooks';
+import { useAlert, useAccount, useApi } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -26,11 +26,19 @@ function useSwapForm(
   decimals: number | undefined,
   onSubmit: (values: FormattedValues) => Promise<unknown>,
 ) {
+  const { api } = useApi();
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const alert = useAlert();
 
-  const valueSchema = getAmountSchema(isNativeToken, accountBalance.data, ftBalance.data, decimals);
+  const valueSchema = getAmountSchema(
+    isNativeToken,
+    accountBalance.data,
+    ftBalance.data,
+    decimals,
+    isVaraNetwork ? api?.existentialDeposit.toBigInt() : 0n,
+  );
+
   const addressSchema = isVaraNetwork ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
   const schema = z.object({

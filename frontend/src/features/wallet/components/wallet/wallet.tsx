@@ -5,7 +5,7 @@ import { isUndefined } from '@polkadot/util';
 import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
 import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
-import { useEthAccount, useEthAccountBalance, useModal, useVaraAccountBalance } from '@/hooks';
+import { useEthAccount, useEthAccountBalance, useModal, useVaraAccountBalance, useVaraSymbol } from '@/hooks';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { WALLET_SVGS } from '../../consts';
@@ -17,6 +17,7 @@ function Wallet() {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
   const varaAccountBalance = useVaraAccountBalance();
+  const varaSymbol = useVaraSymbol();
   const SVG = account ? WALLET_SVGS[account.meta.source as keyof typeof WALLET_SVGS] : undefined;
 
   const ethAccount = useEthAccount();
@@ -34,12 +35,13 @@ function Wallet() {
 
   // it's probably worth to check isConnecting too, but there is a bug:
   // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-  if (!isAccountReady || ethAccount.isReconnecting || !api) return <Skeleton width="11rem" height="2rem" />;
+  if (!isAccountReady || ethAccount.isReconnecting || !api || !varaSymbol)
+    return <Skeleton width="11rem" height="2rem" />;
 
   const isConnected = Boolean(account || ethAccount.address);
   const balance = account ? varaAccountBalance : ethAccountBalance;
   const decimals = account ? api.registry.chainDecimals[0] : 18;
-  const symbol = account ? 'VARA' : 'ETH';
+  const symbol = account ? varaSymbol : 'ETH';
 
   return (
     <>

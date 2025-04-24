@@ -45,8 +45,8 @@ impl Program {
         balances.set_minimum_balance(1_000_000_000_000u64.into());
 
         let metadata = Metadata::new(
-            String::from("Vara Network Wrapped Token"),
-            String::from("WVARA"),
+            String::from("Vara Network Token"),
+            String::from("TVARA"),
             12,
         );
 

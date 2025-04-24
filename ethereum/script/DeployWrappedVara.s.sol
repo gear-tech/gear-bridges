@@ -16,8 +16,8 @@ contract Deploy is Script {
 
         WrappedVara token = new WrappedVara(
             erc20_manager_proxy_address,
-            "Wrapped VARA",
-            "WVARA"
+            "Wrapped Vara Network Token",
+            "wTVARA"
         );
         console.log("Address:", address(token));
 

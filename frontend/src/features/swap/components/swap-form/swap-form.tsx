@@ -154,7 +154,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
                   <div className={styles.token}>
                     <SelectToken symbol={symbol} />
-                    <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                    <p className={styles.network}>{isVaraNetwork ? 'Vara Testnet' : 'Ethereum Holesky'}</p>
                   </div>
                 </div>
 
@@ -178,7 +178,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
                   <div className={styles.token}>
                     <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
-                    <p className={styles.network}>{isVaraNetwork ? 'Ethereum' : 'Vara'}</p>
+                    <p className={styles.network}>{isVaraNetwork ? 'Ethereum Holesky' : 'Vara Testnet'}</p>
                   </div>
                 </div>
 

@@ -44,11 +44,7 @@ impl Program {
         let mut balances = Balances::default();
         balances.set_minimum_balance(1_000_000_000_000u64.into());
 
-        let metadata = Metadata::new(
-            String::from("Vara Network Token"),
-            String::from("VARA"),
-            12,
-        );
+        let metadata = Metadata::new(String::from("Vara Network Token"), String::from("VARA"), 12);
 
         Self {
             authorities: RefCell::new(Authorities::from_one(msg::source())),

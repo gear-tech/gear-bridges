@@ -2,13 +2,15 @@ use std::collections::{btree_map::Entry, BTreeMap};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use ethereum_client::EthApi;
-use gear_rpc_client::GearApi;
 use prometheus::{Gauge, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::common::{AuthoritySetId, MessageInBlock},
+    message_relayer::{
+        common::{AuthoritySetId, MessageInBlock},
+        eth_to_gear::api_provider::ApiProviderConnection,
+    },
 };
 use futures::{
     future::{self, Either},
@@ -22,7 +24,7 @@ use crate::message_relayer::common::RelayedMerkleRoot;
 
 pub struct MessageSender {
     eth_api: EthApi,
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
 
     metrics: Metrics,
     era_metrics: EraMetrics,
@@ -51,10 +53,10 @@ impl_metered_service! {
 }
 
 impl MessageSender {
-    pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
+    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection) -> Self {
         Self {
             eth_api,
-            gear_api,
+            api_provider,
 
             metrics: Metrics::new(),
             era_metrics: EraMetrics::new(),
@@ -85,6 +87,17 @@ impl MessageSender {
 
                         tokio::time::sleep(delay).await;
 
+                        match self.api_provider.reconnect().await {
+                            Ok(()) => {
+                                log::info!("Ethereum message sender reconnected");
+                            }
+
+                            Err(err) => {
+                                log::error!("Ethereum message sender unable to reconnect: {err}");
+                                return;
+                            }
+                        }
+
                         if common::is_transport_error_recoverable(&e) {
                             match self.eth_api.reconnect().inspect_err(|e| {
                                 log::error!("Failed to reconnect to Ethereum: {e}");
@@ -108,7 +121,7 @@ async fn run_inner(
     merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
 ) -> anyhow::Result<()> {
     let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
-
+    let gear_api = self_.api_provider.client();
     loop {
         let fee_payer_balance = self_.eth_api.get_approx_balance().await?;
         self_.metrics.fee_payer_balance.set(fee_payer_balance);
@@ -132,8 +145,7 @@ async fn run_inner(
 
             Either::Left((Some(message), _)) => {
                 let authority_set_id = AuthoritySetId(
-                    self_
-                        .gear_api
+                    gear_api
                         .signed_by_authority_set_id(message.block_hash)
                         .await?,
                 );
@@ -175,13 +187,13 @@ async fn run_inner(
         let mut finalized_eras = vec![];
 
         for (&era_id, era) in eras.iter_mut() {
-            let res = era.process(&self_.gear_api, &self_.eth_api).await;
+            let res = era.process(&gear_api, &self_.eth_api).await;
             if let Err(err) = res {
                 log::error!("Failed to process era #{era_id}: {err}");
                 continue;
             }
 
-            let finalized = era.try_finalize(&self_.eth_api, &self_.gear_api).await?;
+            let finalized = era.try_finalize(&self_.eth_api, &gear_api).await?;
 
             // Latest era cannot be finalized.
             if finalized && era_id != latest_era {

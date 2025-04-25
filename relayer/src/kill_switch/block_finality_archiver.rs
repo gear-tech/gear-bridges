@@ -2,9 +2,11 @@ use futures::StreamExt;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
 
-use gear_rpc_client::{dto, GearApi};
+use gear_rpc_client::dto;
 use prometheus::IntGauge;
 use utils_prometheus::impl_metered_service;
+
+use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 
 impl_metered_service! {
     pub(crate) struct Metrics {
@@ -22,15 +24,15 @@ pub struct BlockFinalityProofWithHash {
 }
 
 pub struct BlockFinalityArchiver {
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
     storage: sled::Db,
     metrics: Metrics,
 }
 
 impl BlockFinalityArchiver {
-    pub fn new(gear_api: GearApi, storage: sled::Db, metrics: Metrics) -> Self {
+    pub fn new(api_provider: ApiProviderConnection, storage: sled::Db, metrics: Metrics) -> Self {
         Self {
-            gear_api,
+            api_provider,
             storage,
             metrics,
         }
@@ -42,6 +44,15 @@ impl BlockFinalityArchiver {
                 log::error!(
                     "resubscribing to justifications subscription stream after an error {err:#?}"
                 );
+                match self.api_provider.reconnect().await {
+                    Ok(()) => {
+                        log::info!("Gear block listener reconnected");
+                    }
+                    Err(err) => {
+                        log::error!("Gear block listener unable to reconnect: {err}");
+                        return;
+                    }
+                }
             } else {
                 log::info!("justifications subscription stream closed, exiting");
                 break;
@@ -50,7 +61,9 @@ impl BlockFinalityArchiver {
     }
 
     pub async fn main_loop(&mut self) -> anyhow::Result<()> {
-        let mut stream = self.gear_api.subscribe_grandpa_justifications().await?;
+        let gear_api = self.api_provider.client();
+
+        let mut stream = gear_api.subscribe_grandpa_justifications().await?;
 
         loop {
             let justification = stream
@@ -66,8 +79,7 @@ impl BlockFinalityArchiver {
                 justification.round
             );
 
-            let (hash, finality_proof) =
-                self.gear_api.produce_finality_proof(justification).await?;
+            let (hash, finality_proof) = gear_api.produce_finality_proof(justification).await?;
 
             self.storage.insert(
                 block_number.to_be_bytes(),

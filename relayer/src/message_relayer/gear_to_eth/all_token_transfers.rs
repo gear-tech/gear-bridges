@@ -1,7 +1,6 @@
 use std::iter;
 
 use ethereum_client::EthApi;
-use gear_rpc_client::GearApi;
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::{
@@ -41,7 +40,6 @@ impl MeteredService for Relayer {
 
 impl Relayer {
     pub async fn new(
-        gear_api: GearApi,
         eth_api: EthApi,
         from_block: Option<u32>,
         api_provider: ApiProviderConnection,
@@ -49,21 +47,22 @@ impl Relayer {
         let from_gear_block = if let Some(block) = from_block {
             block
         } else {
+            let gear_api = api_provider.client();
             let block = gear_api.latest_finalized_block().await?;
             gear_api.block_hash_to_number(block).await?
         };
 
         let from_eth_block = eth_api.finalized_block_number().await?;
 
-        let gear_block_listener = GearBlockListener::new(api_provider, from_gear_block);
+        let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
 
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
-        let message_sent_listener = MessageQueuedEventExtractor::new(gear_api.clone());
+        let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
-        let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), gear_api.clone());
+        let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
 
-        let message_sender = MessageSender::new(eth_api, gear_api);
+        let message_sender = MessageSender::new(eth_api, api_provider);
 
         Ok(Self {
             gear_block_listener,

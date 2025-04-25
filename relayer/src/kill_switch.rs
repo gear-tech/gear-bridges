@@ -5,7 +5,6 @@ use std::{
 
 use block_finality_archiver::{BlockFinalityArchiver, BlockFinalityProofWithHash};
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
-use gear_rpc_client::GearApi;
 use parity_scale_codec::Decode;
 use prometheus::{Gauge, IntCounter, IntGauge};
 use prover::proving::GenesisConfig;
@@ -16,6 +15,7 @@ use crate::{
         self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
         BASE_RETRY_DELAY, MAX_RETRIES,
     },
+    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -65,7 +65,7 @@ enum State {
 }
 
 pub struct KillSwitchRelayer {
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
     eth_api: EthApi,
     genesis_config: GenesisConfig,
     proof_storage: Box<dyn ProofStorage>,
@@ -90,7 +90,7 @@ impl MeteredService for KillSwitchRelayer {
 
 impl KillSwitchRelayer {
     pub async fn new(
-        gear_api: GearApi,
+        api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
@@ -98,7 +98,7 @@ impl KillSwitchRelayer {
         block_finality_storage: sled::Db,
     ) -> Self {
         Self {
-            gear_api,
+            api_provider,
             eth_api,
             genesis_config,
             proof_storage,
@@ -140,7 +140,19 @@ impl KillSwitchRelayer {
                     log::error!("Max attempts reached, exiting ..");
                     return Err(err);
                 }
+
                 tokio::time::sleep(BASE_RETRY_DELAY * attempts).await;
+                match self.api_provider.reconnect().await {
+                    Ok(()) => {
+                        log::info!("Gear block listener reconnected");
+                    }
+
+                    Err(err) => {
+                        log::error!("Gear block listener unable to reconnect: {err}");
+                        return Err(anyhow::anyhow!("Failed to reconnect: {}", err));
+                    }
+                }
+
                 if common::is_transport_error_recoverable(&err) {
                     self.eth_api = self
                         .eth_api
@@ -159,7 +171,7 @@ impl KillSwitchRelayer {
     fn spawn_block_finality_archiver(&self) -> anyhow::Result<()> {
         log::info!("Spawning block finality archiver");
         let mut block_finality_saver = BlockFinalityArchiver::new(
-            self.gear_api.clone(),
+            self.api_provider.clone(),
             self.block_finality_storage.clone(),
             self.block_finality_metrics.clone(),
         );
@@ -264,13 +276,12 @@ impl KillSwitchRelayer {
     }
 
     async fn sync_authority_set_id(&mut self) -> anyhow::Result<SyncStepCount> {
-        let finalized_head = self
-            .gear_api
+        let gear_api = self.api_provider.client();
+        let finalized_head = gear_api
             .latest_finalized_block()
             .await
             .expect("should not fail");
-        let latest_authority_set_id = self
-            .gear_api
+        let latest_authority_set_id = gear_api
             .authority_set_id(finalized_head)
             .await
             .expect("should not fail");
@@ -286,7 +297,7 @@ impl KillSwitchRelayer {
         }
 
         sync_authority_set_id(
-            &self.gear_api,
+            &gear_api,
             self.proof_storage.as_mut(),
             self.genesis_config,
             latest_authority_set_id,
@@ -348,11 +359,11 @@ impl KillSwitchRelayer {
     }
 
     async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> anyhow::Result<bool> {
-        let block_hash = self
-            .gear_api
+        let gear_api = self.api_provider.client();
+        let block_hash = gear_api
             .block_number_to_hash(event.block_number as u32)
             .await?;
-        let merkle_root = self.gear_api.fetch_queue_merkle_root(block_hash).await?;
+        let merkle_root = gear_api.fetch_queue_merkle_root(block_hash).await?;
 
         let is_matches = merkle_root == event.merkle_root;
 
@@ -384,13 +395,15 @@ impl KillSwitchRelayer {
             block_hash,
         );
 
-        let authority_set_id = self.gear_api.signed_by_authority_set_id(block_hash).await?;
+        let gear_api = self.api_provider.client();
+
+        let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
         let inner_proof = self
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
 
         prover_interface::prove_final_with_block_finality(
-            &self.gear_api,
+            &gear_api,
             inner_proof,
             self.genesis_config,
             (block_hash, block_finality),

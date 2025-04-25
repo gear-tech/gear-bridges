@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use prometheus::{Gauge, IntGauge};
 
 use ethereum_client::{EthApi, TxHash, TxStatus};
-use gear_rpc_client::GearApi;
 use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -12,6 +11,7 @@ use crate::{
         self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
         BASE_RETRY_DELAY, MAX_RETRIES,
     },
+    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -36,7 +36,7 @@ impl_metered_service! {
 }
 
 pub struct MerkleRootRelayer {
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
     eth_api: EthApi,
 
     proof_storage: Box<dyn ProofStorage>,
@@ -67,19 +67,19 @@ impl MeteredService for MerkleRootRelayer {
 
 impl MerkleRootRelayer {
     pub async fn new(
-        gear_api: GearApi,
+        api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
     ) -> MerkleRootRelayer {
-        let eras = Eras::new(None, gear_api.clone(), eth_api.clone(), genesis_config)
+        let eras = Eras::new(None, api_provider.clone(), eth_api.clone(), genesis_config)
             .await
             .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
 
         let metrics = Metrics::new();
 
         MerkleRootRelayer {
-            gear_api,
+            api_provider,
             eth_api,
             genesis_config,
             proof_storage,
@@ -113,6 +113,17 @@ impl MerkleRootRelayer {
                     return Err(err.context("Max attempts reached"));
                 }
                 tokio::time::sleep(delay).await;
+
+                match self.api_provider.reconnect().await {
+                    Ok(()) => {
+                        log::info!("Merkle root relayer reconnected successfully");
+                    }
+
+                    Err(err) => {
+                        log::error!("Failed to reconnect to Gear API: {}", err);
+                        return Err(err.context("Failed to reconnect to Gear API"));
+                    }
+                }
 
                 if common::is_transport_error_recoverable(&err) {
                     self.eth_api = self
@@ -164,13 +175,12 @@ impl MerkleRootRelayer {
     }
 
     async fn sync_authority_set(&mut self) -> anyhow::Result<SyncStepCount> {
-        let finalized_head = self
-            .gear_api
+        let gear_api = self.api_provider.client();
+        let finalized_head = gear_api
             .latest_finalized_block()
             .await
             .expect("should not fail");
-        let latest_authority_set_id = self
-            .gear_api
+        let latest_authority_set_id = gear_api
             .authority_set_id(finalized_head)
             .await
             .expect("should not fail");
@@ -186,7 +196,7 @@ impl MerkleRootRelayer {
         }
 
         sync_authority_set_id(
-            &self.gear_api,
+            &gear_api,
             self.proof_storage.as_mut(),
             self.genesis_config,
             latest_authority_set_id,
@@ -198,13 +208,12 @@ impl MerkleRootRelayer {
     async fn submit_merkle_root(&mut self) -> anyhow::Result<()> {
         log::info!("Submitting merkle root to ethereum");
 
-        let finalized_head = self.gear_api.latest_finalized_block().await?;
-        let finalized_block_number = self.gear_api.block_hash_to_number(finalized_head).await?;
+        let gear_api = self.api_provider.client();
 
-        let merkle_root = self
-            .gear_api
-            .fetch_queue_merkle_root(finalized_head)
-            .await?;
+        let finalized_head = gear_api.latest_finalized_block().await?;
+        let finalized_block_number = gear_api.block_hash_to_number(finalized_head).await?;
+
+        let merkle_root = gear_api.fetch_queue_merkle_root(finalized_head).await?;
 
         if merkle_root.is_zero() {
             log::info!(
@@ -230,16 +239,13 @@ impl MerkleRootRelayer {
             finalized_block_number,
         );
 
-        let authority_set_id = self
-            .gear_api
-            .signed_by_authority_set_id(finalized_head)
-            .await?;
+        let authority_set_id = gear_api.signed_by_authority_set_id(finalized_head).await?;
         let inner_proof = self
             .proof_storage
             .get_proof_for_authority_set_id(authority_set_id)?;
 
         let proof = prover_interface::prove_final(
-            &self.gear_api,
+            &gear_api,
             inner_proof,
             self.genesis_config,
             finalized_head,
@@ -329,7 +335,7 @@ struct Eras {
     last_sealed: u64,
     sealed_not_finalized: Vec<SealedNotFinalizedEra>,
 
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
     eth_api: EthApi,
 
     genesis_config: GenesisConfig,
@@ -363,13 +369,14 @@ impl_metered_service! {
 impl Eras {
     pub async fn new(
         last_sealed: Option<u64>,
-        gear_api: GearApi,
+        api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
     ) -> anyhow::Result<Self> {
         let last_sealed = if let Some(l) = last_sealed {
             l
         } else {
+            let gear_api = api_provider.client();
             let latest = gear_api.latest_finalized_block().await?;
             let set_id = gear_api.authority_set_id(latest).await?;
             set_id.max(2) - 1
@@ -382,7 +389,7 @@ impl Eras {
         Ok(Self {
             last_sealed,
             sealed_not_finalized: vec![],
-            gear_api,
+            api_provider,
             eth_api,
 
             genesis_config,
@@ -407,8 +414,9 @@ impl Eras {
     }
 
     async fn try_seal(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
-        let latest = self.gear_api.latest_finalized_block().await?;
-        let current_era = self.gear_api.signed_by_authority_set_id(latest).await?;
+        let gear_api = self.api_provider.client();
+        let latest = gear_api.latest_finalized_block().await?;
+        let current_era = gear_api.signed_by_authority_set_id(latest).await?;
 
         while self.last_sealed + 2 <= current_era {
             log::info!("Sealing era #{}", self.last_sealed + 1);
@@ -428,16 +436,14 @@ impl Eras {
         authority_set_id: u64,
         proof_storage: &dyn ProofStorage,
     ) -> anyhow::Result<()> {
-        let block = self
-            .gear_api
-            .find_era_first_block(authority_set_id + 1)
-            .await?;
+        let gear_api = self.api_provider.client();
+        let block = gear_api.find_era_first_block(authority_set_id + 1).await?;
         let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
         let proof =
-            prover_interface::prove_final(&self.gear_api, inner_proof, self.genesis_config, block)
+            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block)
                 .await?;
 
-        let block_number = self.gear_api.block_hash_to_number(block).await?;
+        let block_number = gear_api.block_hash_to_number(block).await?;
 
         assert_eq!(
             proof.block_number, block_number,
@@ -446,7 +452,7 @@ impl Eras {
             in the case of the first block in the era"
         );
 
-        let queue_merkle_root = self.gear_api.fetch_queue_merkle_root(block).await?;
+        let queue_merkle_root = gear_api.fetch_queue_merkle_root(block).await?;
 
         if queue_merkle_root.is_zero() {
             log::info!(

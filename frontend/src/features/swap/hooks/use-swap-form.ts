@@ -46,12 +46,8 @@ function useSwapForm(
     [FIELD_NAME.ADDRESS]: addressSchema,
   });
 
-  const form = useForm<typeof DEFAULT_VALUES, unknown, z.infer<typeof schema>>({
+  const form = useForm({
     defaultValues: DEFAULT_VALUES,
-
-    // @ts-expect-error -- revisit after next pr are released:
-    // https://github.com/react-hook-form/react-hook-form/pull/12638
-    // https://github.com/react-hook-form/resolvers/pull/753
     resolver: zodResolver(schema),
   });
 

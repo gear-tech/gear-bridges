@@ -53,9 +53,8 @@ function useHandleEthSubmit(
     definedAssert(ftBalance, 'Fungible token balance');
     definedAssert(accountBalance, 'Account balance');
 
-    const isMintRequired = token.isNative && amount > ftBalance;
-    const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
-    const mintGasLimit = isMintRequired ? await mint.getGasLimit(valueToMint) : BigInt(0);
+    const valueToMint = amount - ftBalance;
+    const mintGasLimit = await mint.getGasLimit(valueToMint);
 
     const isApproveRequired = amount > allowance;
     const approveGasLimit = isApproveRequired ? await approve.getGasLimit(amount) : BigInt(0);
@@ -76,7 +75,7 @@ function useHandleEthSubmit(
 
     if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
 
-    return { valueToMint, isMintRequired, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit };
+    return { valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit };
   };
 
   const transfer = async (amount: bigint, accountAddress: HexString, gasLimit: bigint | undefined) => {
@@ -96,16 +95,14 @@ function useHandleEthSubmit(
   };
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    const { valueToMint, isMintRequired, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } =
-      await validateBalance(amount, accountAddress);
+    const { valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } = await validateBalance(
+      amount,
+      accountAddress,
+    );
 
     openTransactionModal(amount.toString(), accountAddress);
 
-    if (isMintRequired) {
-      await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
-    } else {
-      mint.reset();
-    }
+    await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
 
     if (isApproveRequired) {
       await approve.mutateAsync({ amount, gas: approveGasLimit });

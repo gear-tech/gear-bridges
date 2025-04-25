@@ -46,7 +46,7 @@ impl Program {
 
         let metadata = Metadata::new(
             String::from("Vara Network Token"),
-            String::from("TVARA"),
+            String::from("VARA"),
             12,
         );
 

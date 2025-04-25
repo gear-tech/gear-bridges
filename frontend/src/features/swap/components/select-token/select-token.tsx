@@ -7,8 +7,6 @@ import EthSVG from '@/assets/eth.svg?react';
 import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
-import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import {
   useEthFTBalances,
   useVaraFTBalances,
@@ -17,12 +15,11 @@ import {
   useVaraAccountBalance,
   useEthAccountBalance,
 } from '@/hooks';
-import { cx } from '@/utils';
+import { cx, isNativeToken } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { NETWORK_INDEX } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { getMergedBalance } from '../../utils';
 
 import styles from './select-token.module.scss';
 
@@ -52,9 +49,8 @@ function SelectTokenModal({ close }: ModalProps) {
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
-    const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS || address === ETH_WRAPPED_ETH_CONTRACT_ADDRESS;
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
-    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
+    const balance = isNativeToken(address) ? accountBalance : ftBalance;
 
     if (!decimals || balance.isLoading) return <Skeleton width="5rem" />;
     if (isUndefined(balance.data)) return;

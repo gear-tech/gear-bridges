@@ -10,8 +10,9 @@ import { useEthAccount } from '@/hooks';
 import { isUndefined, logger, getErrorMessage } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
+import { useBridgeContext } from '../context';
 import { FormattedValues } from '../types';
-import { getAmountSchema, getMergedBalance } from '../utils';
+import { getAmountSchema } from '../utils';
 
 type Values = {
   data: bigint | undefined;
@@ -20,7 +21,6 @@ type Values = {
 
 function useSwapForm(
   isVaraNetwork: boolean,
-  isNativeToken: boolean,
   accountBalance: Values,
   ftBalance: Values,
   decimals: number | undefined,
@@ -30,9 +30,10 @@ function useSwapForm(
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const alert = useAlert();
+  const { token } = useBridgeContext();
 
   const valueSchema = getAmountSchema(
-    isNativeToken,
+    token.isNative,
     accountBalance.data,
     ftBalance.data,
     decimals,
@@ -69,7 +70,7 @@ function useSwapForm(
   });
 
   const setMaxBalance = () => {
-    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
+    const balance = token.isNative ? accountBalance : ftBalance;
     if (isUndefined(decimals)) throw new Error('Decimals are not defined');
     if (isUndefined(balance.data)) throw new Error('Balance is not defined');
 

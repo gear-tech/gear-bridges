@@ -79,7 +79,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const [submit, approve, payFee, mint] = useHandleSubmit(
-    address,
     fee.value,
     allowance.data,
     ftBalance.data,

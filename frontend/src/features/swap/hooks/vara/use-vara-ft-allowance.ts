@@ -1,15 +1,13 @@
 import { HexString } from '@gear-js/api';
-import { useAccount, useProgram, useProgramQuery } from '@gear-js/react-hooks';
+import { useAccount, useProgramQuery } from '@gear-js/react-hooks';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS, VftProgram } from '@/consts';
+import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
+import { useVFTProgram } from '@/hooks';
 
 function useVaraFTAllowance(address: HexString | undefined) {
   const { account } = useAccount();
 
-  const { data: program } = useProgram({
-    library: VftProgram,
-    id: address,
-  });
+  const { data: program } = useVFTProgram(address);
 
   return useProgramQuery({
     program,

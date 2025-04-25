@@ -4,46 +4,49 @@ import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
 import { useMutation } from '@tanstack/react-query';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraSymbol } from '@/hooks';
-import { isUndefined } from '@/utils';
+import { definedAssert } from '@/utils';
 
+import { useBridgeContext } from '../../context';
 import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues } from '../../types';
 
-import { useApprove } from './use-approve';
-import { useMint } from './use-mint';
 import { usePayFee } from './use-pay-fee';
-import { useRequestBridging } from './use-request-bridging';
+import { usePrepareApprove } from './use-prepare-approve';
+import { usePrepareMint } from './use-prepare-mint';
+import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
 
 function useHandleVaraSubmit(
-  ftAddress: HexString | undefined,
   feeValue: bigint | undefined,
   allowance: bigint | undefined,
   ftBalance: bigint | undefined,
   accountBalance: bigint | undefined,
   openTransactionModal: (amount: string, receiver: string) => void,
 ) {
-  const { api, isApiReady } = useApi();
+  const { api } = useApi();
   const { account } = useAccount();
+  const { token } = useBridgeContext();
   const varaSymbol = useVaraSymbol();
-  const mint = useMint();
-  const approve = useApprove(ftAddress);
-  const requestBridging = useRequestBridging();
-  const payFee = usePayFee(ftAddress, feeValue);
+
+  const mint = usePrepareMint();
+  const approve = usePrepareApprove();
+  const requestBridging = usePrepareRequestBridging();
+
+  const payFee = usePayFee(feeValue);
   const signAndSend = useSignAndSend();
 
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
-    if (!ftAddress) throw new Error('Fungible token address is not found');
-    if (isUndefined(feeValue)) throw new Error('Fee is not found');
-    if (isUndefined(allowance)) throw new Error('Allowance is not found');
-    if (isUndefined(ftBalance)) throw new Error('FT balance is not found');
-    if (!isApiReady) throw new Error('API is not initialized');
-    if (isUndefined(accountBalance)) throw new Error('Account balance is not found');
-    if (!varaSymbol) throw new Error('Vara symbol is not found');
+    definedAssert(api, 'API');
+    definedAssert(varaSymbol, 'Vara symbol');
+    definedAssert(token.address, 'Fungible token address');
+    definedAssert(feeValue, 'Fee value');
+    definedAssert(allowance, 'Allowance');
+    definedAssert(ftBalance, 'Fungible token balance');
+    definedAssert(accountBalance, 'Account balance');
 
-    const isMintRequired = ftAddress === WRAPPED_VARA_CONTRACT_ADDRESS && amount > ftBalance;
+    const isMintRequired = token.isNative && amount > ftBalance;
     const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
     const isApproveRequired = amount > allowance;
     const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
@@ -59,7 +62,7 @@ function useHandleVaraSubmit(
 
     const preparedRequestBridging = await requestBridging.prepareTransactionAsync({
       gasLimit: maxGasLimit,
-      args: [ftAddress, amount, accountAddress],
+      args: [token.address, amount, accountAddress],
     });
 
     // TODO: replace with calculated values after https://github.com/gear-tech/sails/issues/474 is resolved
@@ -85,10 +88,9 @@ function useHandleVaraSubmit(
   };
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    if (!ftAddress) throw new Error('Fungible token address is not found');
-    if (isUndefined(feeValue)) throw new Error('Fee is not found');
-    if (!account) throw new Error('Account is not found');
-    if (!isApiReady) throw new Error('API is not initialized');
+    definedAssert(api, 'API');
+    definedAssert(account, 'Account');
+    definedAssert(feeValue, 'Fee value');
 
     const { mintTx, approveTx, transferTx } = await validateBalance(amount, accountAddress);
 

@@ -1,12 +1,9 @@
-import { useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { useSendProgramTransaction } from '@gear-js/react-hooks';
 
-import { WrappedVaraProgram, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
+import { useWrappedVaraProgram } from '@/hooks';
 
 function useBurnVaraTokens() {
-  const { data: program } = useProgram({
-    library: WrappedVaraProgram,
-    id: WRAPPED_VARA_CONTRACT_ADDRESS,
-  });
+  const { data: program } = useWrappedVaraProgram();
 
   return useSendProgramTransaction({
     program,

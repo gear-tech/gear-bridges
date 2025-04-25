@@ -22,7 +22,7 @@ function SubmitTooltip({ allowance, decimals, symbol, amount, children }: Props)
   if (isUndefined(allowance) || !decimals || !symbol) return children;
 
   const formattedAllowance = formatUnits(allowance, decimals);
-  const contractName = network.isVara ? 'VFT Manager' : 'ETH Bridging Payment';
+  const contractName = network.isVara ? 'VFT Manager' : 'ERC20 Manager';
 
   const getSubheading = () => {
     if (!allowance) return `Tokens will be approved first, followed by a transfer message.`;

@@ -1,15 +1,12 @@
 import { HexString } from '@gear-js/api';
-import { useAccount, useProgram, useProgramQuery } from '@gear-js/react-hooks';
+import { useAccount, useProgramQuery } from '@gear-js/react-hooks';
 
-import { VftProgram } from '@/consts';
+import { useVFTProgram } from './use-vft-program';
 
 function useVaraFTBalance(address: HexString | undefined) {
   const { account } = useAccount();
 
-  const { data: program } = useProgram({
-    library: VftProgram,
-    id: address,
-  });
+  const { data: program } = useVFTProgram(address);
 
   return useProgramQuery({
     program,

@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 
-import { TOKEN_SVG } from './consts';
+import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from './consts';
 
 const cx = (...args: unknown[]) =>
   args
@@ -38,7 +38,7 @@ const logger = {
 const asOptionalField = <T extends z.ZodTypeAny>(schema: T) => schema.or(z.literal(''));
 
 const isUndefined = (value: unknown): value is undefined => value === undefined;
-
+const isNull = (value: unknown): value is null => value === null;
 const isNumeric = (value: string) => /^\d+$/.test(value);
 
 const getTokenSVG = (address: HexString) => TOKEN_SVG[address] || TokenPlaceholderSVG;
@@ -53,4 +53,24 @@ const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailed
   return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
 };
 
-export { cx, isValidAddress, logger, asOptionalField, isUndefined, isNumeric, getTokenSVG, getErrorMessage };
+const isNativeToken = (address: HexString) =>
+  [WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS].includes(address);
+
+// asserts can't use arrow functions
+function definedAssert<T>(value: T, name: string): asserts value is NonNullable<T> {
+  if (isUndefined(value) || isNull(value)) throw new Error(`${name} is not defined`);
+}
+
+export {
+  cx,
+  isValidAddress,
+  logger,
+  asOptionalField,
+  isUndefined,
+  isNull,
+  isNumeric,
+  getTokenSVG,
+  getErrorMessage,
+  isNativeToken,
+  definedAssert,
+};

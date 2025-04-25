@@ -18,6 +18,10 @@ import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
 
+const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
+const BRIDGING_REQUEST_GAS_LIMIT = 150_000_000_000n;
+const APPROXIMATE_PAY_FEE_GAS_LIMIT = 10_000_000_000n;
+
 function useHandleVaraSubmit(
   feeValue: bigint | undefined,
   allowance: bigint | undefined,
@@ -49,8 +53,6 @@ function useHandleVaraSubmit(
     const isMintRequired = token.isNative && amount > ftBalance;
     const valueToMint = isMintRequired ? amount - ftBalance : BigInt(0);
     const isApproveRequired = amount > allowance;
-    const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
-    const maxGasLimit = api.blockGasLimit.toBigInt();
 
     const preparedMint = isMintRequired
       ? await mint.prepareTransactionAsync({ args: [], value: valueToMint })
@@ -61,20 +63,22 @@ function useHandleVaraSubmit(
       : DEFAULT_TX;
 
     const preparedRequestBridging = await requestBridging.prepareTransactionAsync({
-      gasLimit: maxGasLimit,
+      gasLimit: BRIDGING_REQUEST_GAS_LIMIT,
       args: [token.address, amount, accountAddress],
     });
 
-    // TODO: replace with calculated values after https://github.com/gear-tech/sails/issues/474 is resolved
-    const mintGasLimit = BigInt(isMintRequired ? 20000000000 : 0);
-    const approveGasLimit = BigInt(isApproveRequired ? 20000000000 : 0);
+    const mintGasLimit = preparedMint.transaction?.gasInfo.min_limit.toBigInt() ?? 0n;
+    const approveGasLimit = preparedApprove.transaction?.gasInfo.min_limit.toBigInt() ?? 0n;
 
     // cuz we don't know payFees gas limit yet
-    const transferGasLimit = maxGasLimit * 2n;
-    const transferEstimatedFee = preparedRequestBridging.awaited.fee * 2n;
+    const bridgingEstimatedFee = preparedRequestBridging.awaited.fee * 2n;
 
-    const totalGasLimit = (mintGasLimit + approveGasLimit + transferGasLimit) * api.valuePerGas.toBigInt();
-    const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + transferEstimatedFee;
+    const totalGasLimit =
+      (mintGasLimit + approveGasLimit + BRIDGING_REQUEST_GAS_LIMIT + APPROXIMATE_PAY_FEE_GAS_LIMIT) *
+      api.valuePerGas.toBigInt();
+
+    const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + bridgingEstimatedFee;
+
     const requiredBalance =
       valueToMint + totalGasLimit + totalEstimatedFee + feeValue + api.existentialDeposit.toBigInt();
 

@@ -1,4 +1,10 @@
-import { useApi, useProgram, useAccount, useSendProgramTransaction } from '@gear-js/react-hooks';
+import {
+  useApi,
+  useProgram,
+  useAccount,
+  useSendProgramTransaction,
+  usePrepareProgramTransaction,
+} from '@gear-js/react-hooks';
 
 import { VFT_MANAGER_CONTRACT_ADDRESS, VftManagerProgram } from '@/consts';
 import { isUndefined } from '@/utils';
@@ -27,6 +33,12 @@ function usePayFee(feeValue: bigint | undefined) {
     functionName: 'payFees',
   });
 
+  const { prepareTransactionAsync } = usePrepareProgramTransaction({
+    program,
+    serviceName: 'bridgingPayment',
+    functionName: 'payFees',
+  });
+
   const payFees = ({ amount, accountAddress }: FormattedValues) => {
     if (!token.address) throw new Error('Fungible token address is not found');
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
@@ -47,6 +59,10 @@ function usePayFee(feeValue: bigint | undefined) {
           receiver !== accountAddress
         )
           return;
+
+        void prepareTransactionAsync({ args: [nonce], value: feeValue }).then(({ transaction }) =>
+          console.log(transaction.gasInfo.min_limit.toString()),
+        );
 
         sendTransactionAsync({ args: [nonce], value: feeValue })
           .then(() => resolve(undefined))

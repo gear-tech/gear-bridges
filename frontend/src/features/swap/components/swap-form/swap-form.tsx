@@ -198,7 +198,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <DetailsAccordion fee={isVaraNetwork ? '18' : '0.0000005'} isVaraNetwork={isVaraNetwork} />
+          <DetailsAccordion isVaraNetwork={isVaraNetwork} />
 
           {isNetworkAccountConnected ? (
             <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>

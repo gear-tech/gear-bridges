@@ -5,11 +5,15 @@ import { useVFTManagerProgram } from '@/hooks';
 function usePrepareRequestBridging() {
   const { data: program } = useVFTManagerProgram();
 
-  return usePrepareProgramTransaction({
+  return {
     program,
-    serviceName: 'vftManager',
-    functionName: 'requestBridging',
-  });
+
+    ...usePrepareProgramTransaction({
+      program,
+      serviceName: 'vftManager',
+      functionName: 'requestBridging',
+    }),
+  };
 }
 
 export { usePrepareRequestBridging };

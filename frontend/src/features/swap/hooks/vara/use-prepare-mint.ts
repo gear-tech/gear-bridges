@@ -5,11 +5,15 @@ import { useWrappedVaraProgram } from '@/hooks';
 function usePrepareMint() {
   const { data: program } = useWrappedVaraProgram();
 
-  return usePrepareProgramTransaction({
+  return {
     program,
-    serviceName: 'vftNativeExchange',
-    functionName: 'mint',
-  });
+
+    ...usePrepareProgramTransaction({
+      program,
+      serviceName: 'vftNativeExchange',
+      functionName: 'mint',
+    }),
+  };
 }
 
 export { usePrepareMint };

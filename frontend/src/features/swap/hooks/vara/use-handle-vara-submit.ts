@@ -19,7 +19,7 @@ import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
 
 const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
-const BRIDGING_REQUEST_GAS_LIMIT = 150_000_000_000n;
+const BRIDGING_REQUEST_GAS_LIMIT = 15_000_000_000n;
 const APPROXIMATE_PAY_FEE_GAS_LIMIT = 10_000_000_000n;
 
 function useHandleVaraSubmit(
@@ -37,9 +37,9 @@ function useHandleVaraSubmit(
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
+  const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const payFee = usePayFee(feeValue);
-  const signAndSend = useSignAndSend();
 
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
     definedAssert(api, 'API');
@@ -95,10 +95,13 @@ function useHandleVaraSubmit(
 
     const { mintTx, approveTx, transferTx } = await validateBalance(amount, accountAddress);
 
-    const extrinsics = [mintTx.extrinsic, approveTx?.extrinsic, transferTx?.extrinsic].filter(
+    const extrinsics = [mintTx.extrinsic, approveTx?.extrinsic, transferTx.extrinsic].filter(
       Boolean,
     ) as SubmittableExtrinsic<'promise', ISubmittableResult>[];
 
+    // event subscription to get nonce from bridging request reply, and send pay fee transaction.
+    // since we're already checking replies in useSignAndSend,
+    // would be nice to have the ability to decode it's payload there. perhaps some api in sails-js can be implemented?
     const { result, unsubscribe } = payFee.awaitBridgingRequest({ amount, accountAddress });
 
     openTransactionModal(amount.toString(), accountAddress);

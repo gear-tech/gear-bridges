@@ -9,14 +9,16 @@ import styles from './fee-and-time-footer.module.scss';
 import GasSVG from './gas.svg?react';
 
 type Props = {
-  fee: string | undefined;
+  // TODO: uncomment once we won't need hardcoded values
+  // fee: string | undefined;
   isVaraNetwork: boolean;
   className?: string;
 };
 
-function FeeAndTimeFooter({ fee, isVaraNetwork, className }: Props) {
+function FeeAndTimeFooter({ isVaraNetwork, className }: Props) {
   const varaSymbol = useVaraSymbol();
 
+  const fee = isVaraNetwork ? '18' : '0.0000005';
   const tokenId = isVaraNetwork ? TOKEN_ID.VARA : TOKEN_ID.ETH;
   const symbol = isVaraNetwork ? varaSymbol : 'ETH';
 

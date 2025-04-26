@@ -174,7 +174,7 @@ function TransactionModal({
       {renderProgressBar?.()}
 
       <footer className={styles.footer}>
-        <FeeAndTimeFooter fee={fee.formattedValue} isVaraNetwork={isGearNetwork} />
+        <FeeAndTimeFooter isVaraNetwork={isGearNetwork} />
 
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>

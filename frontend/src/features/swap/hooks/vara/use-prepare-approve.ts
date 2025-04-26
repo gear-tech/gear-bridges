@@ -8,11 +8,15 @@ function usePrepareApprove() {
   const { token } = useBridgeContext();
   const { data: program } = useVFTProgram(token.address);
 
-  return usePrepareProgramTransaction({
+  return {
     program,
-    serviceName: 'vft',
-    functionName: 'approve',
-  });
+
+    ...usePrepareProgramTransaction({
+      program,
+      serviceName: 'vft',
+      functionName: 'approve',
+    }),
+  };
 }
 
 export { usePrepareApprove };

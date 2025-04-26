@@ -1,13 +1,10 @@
 import { HexString } from '@gear-js/api';
-import { useProgram, useProgramQuery } from '@gear-js/react-hooks';
+import { useProgramQuery } from '@gear-js/react-hooks';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS, VftManagerProgram } from '@/consts';
+import { useVFTManagerProgram } from '../use-vft-manager-program';
 
 function useFTAddresses() {
-  const { data: vftManagerProgram } = useProgram({
-    library: VftManagerProgram,
-    id: VFT_MANAGER_CONTRACT_ADDRESS,
-  });
+  const { data: vftManagerProgram } = useVFTManagerProgram();
 
   return useProgramQuery({
     program: vftManagerProgram,

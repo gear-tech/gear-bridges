@@ -5,6 +5,7 @@ import {
   ETH_CHAIN_ID,
   VFT_MANAGER_CONTRACT_ADDRESS,
   WRAPPED_VARA_CONTRACT_ADDRESS,
+  ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
 } from './env';
 import { TOKEN_SVG } from './icons';
 import { ROUTE } from './routing';
@@ -20,6 +21,7 @@ export {
   TOKEN_SVG,
   VFT_MANAGER_CONTRACT_ADDRESS,
   WRAPPED_VARA_CONTRACT_ADDRESS,
+  ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
   VftManagerProgram,
   VftProgram,
   WrappedVaraProgram,

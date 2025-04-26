@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
 import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
@@ -6,8 +5,12 @@ import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { ETH_TOKEN_ABI } from '@/consts';
 import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
+import { definedAssert } from '@/utils';
 
-function useMint(address: HexString | undefined) {
+import { useBridgeContext } from '../../context';
+
+function useMint() {
+  const { token } = useBridgeContext();
   const { writeContractAsync } = useWriteContract();
   const config = useConfig();
 
@@ -24,14 +27,14 @@ function useMint(address: HexString | undefined) {
   };
 
   const getGasLimit = (value: bigint) => {
-    if (!address) throw new Error('Fungible token address is not defined');
+    definedAssert(token.address, 'Fungible token address');
 
     const data = encodeFunctionData({
       abi: ETH_TOKEN_ABI,
       functionName: 'tokenize',
     });
 
-    return estimateGas(config, { to: address, data, value });
+    return estimateGas(config, { to: token.address, data, value });
   };
 
   return { ...useMutation({ mutationFn: mint }), getGasLimit };

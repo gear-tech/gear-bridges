@@ -73,7 +73,7 @@ function TransactionModal({
   const queryClient = useQueryClient();
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.Pending;
 
-  const explorerUrl = `${isGearNetwork ? 'https://vara.subscan.io/extrinsic' : 'https://etherscan.io/tx'}/${txHash}`;
+  const explorerUrl = `${isGearNetwork ? 'https://vara.subscan.io/extrinsic' : 'https://holesky.etherscan.io/tx'}/${txHash}`;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
@@ -174,7 +174,7 @@ function TransactionModal({
       {renderProgressBar?.()}
 
       <footer className={styles.footer}>
-        <FeeAndTimeFooter fee={fee.formattedValue} isVaraNetwork={isGearNetwork} />
+        <FeeAndTimeFooter isVaraNetwork={isGearNetwork} />
 
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>

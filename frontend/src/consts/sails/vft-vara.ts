@@ -1,8 +1,15 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, decodeAddress } from '@gear-js/api';
+import { GearApi, HexString, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, ActorId, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import {
+  TransactionBuilder,
+  ActorId,
+  throwOnErrorReply,
+  getServiceNamePrefix,
+  getFnNamePrefix,
+  ZERO_ADDRESS,
+} from 'sails-js';
 
 export class Program {
   public readonly registry: TypeRegistry;
@@ -34,7 +41,7 @@ export class Program {
     return this._programId;
   }
 
-  newCtorFromCode(code: Uint8Array | Buffer): TransactionBuilder<null> {
+  newCtorFromCode(code: Uint8Array | Buffer | HexString): TransactionBuilder<null> {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
@@ -125,7 +132,7 @@ export class Vft {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, U256)', reply.payload);
     return result[2].toBigInt() as unknown as bigint;
   }
@@ -147,7 +154,7 @@ export class Vft {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, U256)', reply.payload);
     return result[2].toBigInt() as unknown as bigint;
   }
@@ -166,7 +173,7 @@ export class Vft {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, U256)', reply.payload);
     return result[2].toBigInt() as unknown as bigint;
   }
@@ -409,7 +416,7 @@ export class VftAdmin {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
     return result[2].toJSON() as unknown as ActorId;
   }
@@ -428,7 +435,7 @@ export class VftAdmin {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
     return result[2].toJSON() as unknown as ActorId;
   }
@@ -447,7 +454,7 @@ export class VftAdmin {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, bool)', reply.payload);
     return result[2].toJSON() as unknown as boolean;
   }
@@ -466,7 +473,7 @@ export class VftAdmin {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
     return result[2].toJSON() as unknown as ActorId;
   }
@@ -485,7 +492,7 @@ export class VftAdmin {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
     return result[2].toJSON() as unknown as ActorId;
   }
@@ -748,7 +755,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, Option<(U256, u32)>)', reply.payload);
     return result[2].toJSON() as unknown as [number | string | bigint, number] | null;
   }
@@ -771,7 +778,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType(
       '(String, String, Vec<(([u8;32], [u8;32]), (U256, u32))>)',
       reply.payload,
@@ -796,7 +803,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, Option<U256>)', reply.payload);
     return result[2].toJSON() as unknown as number | string | bigint | null;
   }
@@ -819,7 +826,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, Vec<([u8;32], U256)>)', reply.payload);
     return result[2].toJSON() as unknown as Array<[ActorId, number | string | bigint]>;
   }
@@ -838,7 +845,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, u32)', reply.payload);
     return result[2].toNumber() as unknown as number;
   }
@@ -857,7 +864,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, U256)', reply.payload);
     return result[2].toBigInt() as unknown as bigint;
   }
@@ -876,7 +883,7 @@ export class VftExtension {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, U256)', reply.payload);
     return result[2].toBigInt() as unknown as bigint;
   }
@@ -902,7 +909,7 @@ export class VftMetadata {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, u8)', reply.payload);
     return result[2].toNumber() as unknown as number;
   }
@@ -924,7 +931,7 @@ export class VftMetadata {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, String)', reply.payload);
     return result[2].toString() as unknown as string;
   }
@@ -946,7 +953,7 @@ export class VftMetadata {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, String)', reply.payload);
     return result[2].toString() as unknown as string;
   }

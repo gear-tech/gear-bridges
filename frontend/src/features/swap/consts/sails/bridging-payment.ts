@@ -1,9 +1,19 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, decodeAddress } from '@gear-js/api';
+import { GearApi, HexString, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, ActorId, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import {
+  TransactionBuilder,
+  ActorId,
+  throwOnErrorReply,
+  getServiceNamePrefix,
+  getFnNamePrefix,
+  ZERO_ADDRESS,
+} from 'sails-js';
 
+/**
+ * Global state of the Bridging Payment service.
+ */
 export interface State {
   /**
    * Admin of this service. Admin is in charge of:
@@ -45,7 +55,7 @@ export class Program {
   /**
    * Create Bridging Payment program.
    */
-  newCtorFromCode(code: Uint8Array | Buffer, initial_state: State): TransactionBuilder<null> {
+  newCtorFromCode(code: Uint8Array | Buffer | HexString, initial_state: State): TransactionBuilder<null> {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
@@ -174,7 +184,7 @@ export class BridgingPayment {
       gasLimit: this._program.api.blockGasLimit.toBigInt(),
       at: atBlock,
     });
-    if (!reply.code.isSuccess) throw new Error(this._program.registry.createType('String', reply.payload).toString());
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
     const result = this._program.registry.createType('(String, String, State)', reply.payload);
     return result[2].toJSON() as unknown as State;
   }

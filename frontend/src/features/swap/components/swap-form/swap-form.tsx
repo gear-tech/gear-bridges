@@ -6,8 +6,6 @@ import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input, Skeleton, TokenSVG } from '@/components';
-import { WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { TokenPrice } from '@/features/token-price';
@@ -19,7 +17,6 @@ import { FIELD_NAME } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm, useToken } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
-import { getMergedBalance } from '../../utils';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
@@ -39,16 +36,16 @@ type Props = {
 };
 
 function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
-  const { network, pair } = useBridgeContext();
+  const { network, pair, token } = useBridgeContext();
   const { index: networkIndex, isVara: isVaraNetwork } = network;
   const { index: pairIndex } = pair;
+  const { isNative: isNativeToken } = token;
 
   const { api } = useApi();
   const { address, destinationAddress, destinationSymbol, symbol, decimals, ...bridge } = useToken(
     networkIndex,
     pairIndex,
   );
-  const isNativeToken = address === WRAPPED_VARA_CONTRACT_ADDRESS || address === ETH_WRAPPED_ETH_CONTRACT_ADDRESS;
 
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
@@ -79,7 +76,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const [submit, approve, payFee, mint] = useHandleSubmit(
-    address,
     fee.value,
     allowance.data,
     ftBalance.data,
@@ -89,7 +85,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     isVaraNetwork,
-    isNativeToken,
     accountBalance,
     ftBalance,
     decimals,
@@ -97,7 +92,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   );
 
   const renderFromBalance = () => {
-    const balance = isNativeToken ? getMergedBalance(accountBalance, ftBalance) : ftBalance;
+    const balance = isNativeToken ? accountBalance : ftBalance;
 
     return (
       <Balance
@@ -159,7 +154,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
                   <div className={styles.token}>
                     <SelectToken symbol={symbol} />
-                    <p className={styles.network}>{isVaraNetwork ? 'Vara' : 'Ethereum'}</p>
+                    <p className={styles.network}>{isVaraNetwork ? 'Vara Testnet' : 'Ethereum Holesky'}</p>
                   </div>
                 </div>
 
@@ -183,7 +178,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
                   <div className={styles.token}>
                     <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
-                    <p className={styles.network}>{isVaraNetwork ? 'Ethereum' : 'Vara'}</p>
+                    <p className={styles.network}>{isVaraNetwork ? 'Ethereum Holesky' : 'Vara Testnet'}</p>
                   </div>
                 </div>
 
@@ -203,7 +198,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <DetailsAccordion fee={fee.formattedValue} isVaraNetwork={isVaraNetwork} />
+          <DetailsAccordion isVaraNetwork={isVaraNetwork} />
 
           {isNetworkAccountConnected ? (
             <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>

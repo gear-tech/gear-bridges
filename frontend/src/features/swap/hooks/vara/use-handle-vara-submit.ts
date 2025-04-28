@@ -19,7 +19,7 @@ import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
 
 const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
-const BRIDGING_REQUEST_GAS_LIMIT = 15_000_000_000n;
+const BRIDGING_REQUEST_GAS_LIMIT = 150_000_000_000n;
 const APPROXIMATE_PAY_FEE_GAS_LIMIT = 10_000_000_000n;
 
 function useHandleVaraSubmit(

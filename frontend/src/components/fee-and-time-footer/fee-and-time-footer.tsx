@@ -40,7 +40,7 @@ function FeeAndTimeFooter({ isVaraNetwork, className }: Props) {
           <ClockSVG /> Bridge Time:
         </span>
 
-        <span className={styles.value}>~30 mins</span>
+        <span className={styles.value}>~20 mins</span>
       </p>
     </footer>
   );

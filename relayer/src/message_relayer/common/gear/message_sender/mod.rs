@@ -155,8 +155,14 @@ impl MessageSender {
         message: &TxHashWithSlot,
         gear_api: &GearApi,
     ) -> anyhow::Result<()> {
-        let payload =
-            compose_payload::compose(&self.beacon_client, &self.eth_api, message.tx_hash).await?;
+        let payload = compose_payload::compose(
+            &self.beacon_client,
+            gear_api,
+            &self.eth_api,
+            message.tx_hash,
+            self.historical_proxy_address.into(),
+        )
+        .await?;
 
         log::info!(
             "Sending message in gear_message_sender: tx_index={}, slot={}",

@@ -6,6 +6,7 @@ import {
   VFT_MANAGER_CONTRACT_ADDRESS,
   WRAPPED_VARA_CONTRACT_ADDRESS,
   ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
+  GTM_ID,
 } from './env';
 import { TOKEN_SVG } from './icons';
 import { ROUTE } from './routing';
@@ -22,6 +23,7 @@ export {
   VFT_MANAGER_CONTRACT_ADDRESS,
   WRAPPED_VARA_CONTRACT_ADDRESS,
   ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
+  GTM_ID,
   VftManagerProgram,
   VftProgram,
   WrappedVaraProgram,

@@ -2,15 +2,18 @@ import '@gear-js/vara-ui/dist/style.css';
 import { useAccount } from '@gear-js/react-hooks';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import TagManager from 'react-gtm-module';
 import { Navigate, Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 
 import { App } from './app';
-import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, ROUTE, VARA_NODE_ADDRESS } from './consts';
+import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, ROUTE, VARA_NODE_ADDRESS, GTM_ID } from './consts';
 import { useEthAccount } from './hooks';
 import { NotFound, Home, Transactions, FAQ, TokenTracker } from './pages';
 import { logger } from './utils';
 
 import './index.scss';
+
+if (GTM_ID) TagManager.initialize({ gtmId: GTM_ID });
 
 logger.info('Vara network address', VARA_NODE_ADDRESS);
 logger.info('Eth network address', ETH_NODE_ADDRESS);

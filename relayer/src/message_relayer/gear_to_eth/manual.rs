@@ -1,19 +1,21 @@
 use primitive_types::U256;
 
 use ethereum_client::EthApi;
-use gear_rpc_client::GearApi;
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::message_relayer::common::{
-    ethereum::{
-        block_listener::BlockListener as EthereumBlockListener,
-        merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            block_listener::BlockListener as EthereumBlockListener,
+            merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+        },
+        GearBlockNumber, MessageInBlock,
     },
-    GearBlockNumber, MessageInBlock,
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 
 pub async fn relay(
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
     eth_api: EthApi,
     message_nonce: U256,
     gear_block: u32,
@@ -27,6 +29,8 @@ pub async fn relay(
             .await
             .expect("Failed to get finalized block number on ethereum")
     };
+
+    let gear_api = api_provider.client();
 
     let gear_block_hash = gear_api
         .block_number_to_hash(gear_block)
@@ -57,8 +61,8 @@ pub async fn relay(
     let (queued_messages_sender, queued_messages_receiver) = unbounded_channel();
 
     let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
-    let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), gear_api.clone());
-    let message_sender = MessageSender::new(eth_api, gear_api);
+    let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
+    let message_sender = MessageSender::new(eth_api, api_provider);
 
     let ethereum_blocks = ethereum_block_listener.run().await;
     let merkle_roots = merkle_root_extractor.run(ethereum_blocks).await;

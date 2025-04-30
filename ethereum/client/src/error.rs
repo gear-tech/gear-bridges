@@ -25,6 +25,8 @@ pub enum Error {
     ErrorFetchingTransactionReceipt,
     #[error("Error fetching block")]
     ErrorFetchingBlock,
+    #[error("Failed to build reqwest client")]
+    FailedToBuildClient(alloy::transports::http::reqwest::Error),
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {

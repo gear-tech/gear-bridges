@@ -12,7 +12,7 @@ concurrency:
 
 env:
   ENVIRONMENT: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'prod' || 'stg' }}
-  REGISTRY: ghcr.io/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
+  REGISTRY: ghcr.io/${{ github.repository }}
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -45,7 +45,7 @@ jobs:
       - name: Set IMAGE_NAME
         id: image
         run: |
-          image_name=${{ env.REGISTRY }}-${{ env.KUBE_DEPLOY_PREFIX }}:${{ env.branch_name }}-${{ env.sha_short }}
+          image_name=${{ env.REGISTRY }}:${{ env.branch_name }}-${{ env.sha_short }}
           echo "image_name=$image_name" >> $GITHUB_OUTPUT
 
   build-and-push-image:
@@ -70,6 +70,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           file: frontend/Dockerfile
+          tags: ${{ needs.prepair.outputs.image_name }}
           push: true
           build-args: |
             VITE_VARA_NODE_ADDRESS=${{ secrets.VITE_VARA_NODE_ADDRESS }}
@@ -91,7 +92,6 @@ jobs:
             VITE_USDC_CONTRACT_ADDRESS=${{ secrets.VITE_USDC_CONTRACT_ADDRESS }}
             VITE_USDT_CONTRACT_ADDRESS=${{ secrets.VITE_USDT_CONTRACT_ADDRESS }}
             VITE_GTM_ID=${{ secrets.VITE_GTM_ID }}
-          tags: ${{ needs.prepair.outputs.image_name }}
 
   deploy-to-k8s:
     needs: [ prepair, build-and-push-image ]

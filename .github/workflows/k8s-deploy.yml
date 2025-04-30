@@ -11,38 +11,67 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  ENVIRONMENT: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'prod' || 'stg' }}
+  REGISTRY: ghcr.io/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   AWS_REGION: ${{ secrets.AWS_REGION }}
+  KUBECTL_VERSION: ${{ secrets.KUBECTL_VERSION }}
   KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+  KUBE_NAMESPACE: zk-bridge
+  KUBE_DEPLOY_PREFIX: zk-bridge
+  KUBE_DEPLOY_TYPE: deployment # (statefulset or deployment)
 
 jobs:
-  build-frontend-image-staging:
+  prepair:
     runs-on: ubuntu-latest
-    environment: stg
+    outputs:
+      image_name: ${{ steps.image.outputs.image_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get branch
+        id: branch
+        run: |
+          branch_name=${GITHUB_REF#refs/heads/}
+          echo "branch_name=$branch_name" >> $GITHUB_ENV
+
+      - name: Get short SHA
+        id: sha
+        run: |
+          sha_short=$(git rev-parse --short HEAD)
+          echo "sha_short=$sha_short" >> $GITHUB_ENV
+
+      - name: Set IMAGE_NAME
+        id: image
+        run: |
+          image_name=${{ env.REGISTRY }}-${{ env.KUBE_DEPLOY_PREFIX }}:${{ env.branch_name }}-${{ env.sha_short }}
+          echo "image_name=$image_name" >> $GITHUB_OUTPUT
+
+  build-and-push-image:
+    needs: [prepair]
+    runs-on: ubuntu-latest
+    environment: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'prod' || 'stg' }}
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Log in to the github container registry
-        uses: docker/login-action@master
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Frontend Docker image
-        uses: docker/build-push-action@master
+      - name: Build and push image
+        uses: docker/build-push-action@v6
         with:
           file: frontend/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:qa
           build-args: |
             VITE_VARA_NODE_ADDRESS=${{ secrets.VITE_VARA_NODE_ADDRESS }}
             VITE_ETH_NODE_ADDRESS=${{ secrets.VITE_ETH_NODE_ADDRESS }}
@@ -62,24 +91,45 @@ jobs:
             VITE_ETH_WRAPPED_VARA_CONTRACT_ADDRESS=${{ secrets.VITE_ETH_WRAPPED_VARA_CONTRACT_ADDRESS }}
             VITE_USDC_CONTRACT_ADDRESS=${{ secrets.VITE_USDC_CONTRACT_ADDRESS }}
             VITE_USDT_CONTRACT_ADDRESS=${{ secrets.VITE_USDT_CONTRACT_ADDRESS }}
+            VITE_GTM_ID=${{ secrets.VITE_GTM_ID }}
+          tags: ${{ needs.prepair.outputs.image_name }}
 
-  deploy-to-k8s-staging:
-    needs: [build-frontend-image-staging]
+  deploy-to-k8s:
+    needs: [prepair, build-and-push-image]
     runs-on: ubuntu-latest
-
+    environment: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'prod' || 'stg' }}
     steps:
+      - name: Setup kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          mkdir -p $HOME/.kube/
+          echo "${{ env.KUBE_CONFIG_DATA }}" | base64 -d > $HOME/.kube/config
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to k8s
-        uses: sergeyfilyanin/kubectl-aws-eks@master
-        with:
-          args: rollout restart deployment zk-bridge-stg -n zk-bridge
-      - name: Check k8s deployments
-        uses: sergeyfilyanin/kubectl-aws-eks@master
-        with:
-          args: get deployment -o name -n zk-bridge | xargs -n1 -t kubectl rollout status -n zk-bridge --timeout=240s
+      - name: Get containes
+        id: containers
+        run: |
+          containers=$(kubectl get ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} -n ${{ env.KUBE_NAMESPACE }} -o jsonpath="{.spec.template.spec.containers[*].name}")
+          echo "CONTAINERS=$containers" >> $GITHUB_ENV
+
+      - name: Update deployment image
+        run: |
+          for container in ${{ env.CONTAINERS }}; do
+            kubectl set image ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} $container=${{ needs.prepair.outputs.image_name }} -n ${{ env.KUBE_NAMESPACE }};
+          done
+
+      - name: Restart deployment
+        run: |
+          kubectl rollout restart ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} -n ${{ env.KUBE_NAMESPACE }}
+
+      - name: Check deployment
+        run: |
+          kubectl rollout status ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} --timeout=300s -n ${{ env.KUBE_NAMESPACE }}

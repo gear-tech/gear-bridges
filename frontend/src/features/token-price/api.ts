@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { fetchWithGuard } from '@/utils';
+
 const API_URL = import.meta.env.VITE_TOKEN_PRICE_API_URL as string;
 
 const TOKEN_ID = {
@@ -9,7 +11,10 @@ const TOKEN_ID = {
   USDC: 'usd-coin',
 } as const;
 
-const TOKEN_IDS = Object.values(TOKEN_ID);
+const PARAMS = new URLSearchParams({
+  ids: Object.values(TOKEN_ID).join(','),
+  vs_currencies: 'usd',
+});
 
 type TokenId = (typeof TOKEN_ID)[keyof typeof TOKEN_ID];
 
@@ -17,20 +22,7 @@ type Response = {
   [Key in TokenId]: { usd: number };
 };
 
-const getTokenPrices = async () => {
-  const params = new URLSearchParams({
-    ids: TOKEN_IDS.join(','),
-    vs_currencies: 'usd',
-  });
-
-  const url = `${API_URL}?${params.toString()}`;
-
-  const response = await fetch(url);
-
-  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-  return (await response.json()) as Response;
-};
+const getTokenPrices = () => fetchWithGuard<Response>({ url: `${API_URL}?${PARAMS.toString()}` });
 
 function useTokenPrices() {
   return useQuery({

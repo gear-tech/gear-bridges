@@ -61,6 +61,37 @@ function definedAssert<T>(value: T, name: string): asserts value is NonNullable<
   if (isUndefined(value) || isNull(value)) throw new Error(`${name} is not defined`);
 }
 
+const fetchWithGuard = async <T>({
+  url,
+  method,
+  parameters,
+}: {
+  url: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  parameters?: object;
+}) => {
+  const headers = { 'Content-Type': 'application/json;charset=utf-8' };
+  const body = parameters ? JSON.stringify(parameters) : undefined;
+
+  const response = await fetch(url, { headers, method, body });
+
+  if (!response.ok) {
+    if (response.statusText) throw new Error(`Failed: ${response.statusText}`);
+
+    const result = (await response.json().catch(() => {})) as unknown;
+
+    if (result !== null && typeof result === 'object' && 'error' in result) {
+      const errorMessage = result.error as string;
+
+      throw new Error(`Failed: ${errorMessage}`);
+    }
+
+    throw new Error(`Failed: ${response.status}`);
+  }
+
+  return response.json() as T;
+};
+
 export {
   cx,
   isValidAddress,
@@ -73,4 +104,5 @@ export {
   getErrorMessage,
   isNativeToken,
   definedAssert,
+  fetchWithGuard,
 };

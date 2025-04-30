@@ -5,6 +5,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
 import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
+import { GetBalanceButton } from '@/features/faucet';
 import {
   useVaraAccountBalance,
   useEthAccountBalance,
@@ -65,8 +66,9 @@ function TokensCard() {
           SVG={getTokenSVG(address)}
           value={balance}
           decimals={decimals[address] ?? 0}
-          symbol={symbols[address] ?? 'Unit'}
-        />
+          symbol={symbols[address] ?? 'Unit'}>
+          <GetBalanceButton.Eth contract={address} onSuccess={refetchEthBalances} />
+        </BalanceCard>
       </li>
     ));
   };
@@ -109,8 +111,13 @@ function TokensCard() {
               SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.data}
               decimals={isVaraNetwork ? 12 : 18}
-              symbol={isVaraNetwork ? varaSymbol : 'ETH'}
-            />
+              symbol={isVaraNetwork ? varaSymbol : 'ETH'}>
+              {isVaraNetwork ? (
+                <GetBalanceButton.Vara onSuccess={refetchVaraBalances} />
+              ) : (
+                <GetBalanceButton.Eth contract={ETH_WRAPPED_ETH_CONTRACT_ADDRESS} onSuccess={refetchEthBalances} />
+              )}
+            </BalanceCard>
           </li>
         )}
 

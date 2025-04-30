@@ -35,16 +35,8 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
     mutationFn: async () => {
       if (!hCaptchaRef.current) throw new Error('HCaptcha ref is null');
 
+      const token = (await hCaptchaRef.current.execute({ async: true })).response;
       const payload = parameters as T;
-      let token: string;
-
-      try {
-        token = (await hCaptchaRef.current.execute({ async: true })).response;
-      } catch (error) {
-        if (error === 'challenge-closed') return;
-
-        throw new Error(`HCaptcha error on: ${error as string}`);
-      }
 
       return getBalance({ token, payload });
     },
@@ -56,7 +48,11 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
         onSuccess?.();
         alert.success('Tokens sent to your address');
       })
-      .catch(({ message }: Error) => alert.error(message));
+      .catch((error: string | Error) => {
+        if (error === 'challenge-closed') return;
+
+        alert.error(error instanceof Error ? error.message : error);
+      });
 
   return (
     <div>

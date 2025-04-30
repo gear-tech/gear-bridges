@@ -1,3 +1,5 @@
+import { STATUS_CODES } from 'http';
+
 import { decodeAddress, encodeAddress, ExtrinsicFailedData, HexString } from '@gear-js/api';
 import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
@@ -43,16 +45,6 @@ const isNumeric = (value: string) => /^\d+$/.test(value);
 
 const getTokenSVG = (address: HexString) => TOKEN_SVG[address] || TokenPlaceholderSVG;
 
-// string is only for cancelled sign and send popup error during useSendProgramTransaction
-// reevaluate after @gear-js/react-hooks update
-const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
-  if (typeof error === 'object' && 'docs' in error) {
-    return error.docs || error.method || error.name;
-  }
-
-  return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
-};
-
 const isNativeToken = (address: HexString) =>
   [WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS].includes(address);
 
@@ -65,31 +57,32 @@ const fetchWithGuard = async <T>({
   url,
   method,
   parameters,
+  getErrorMessage,
 }: {
   url: string;
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   parameters?: object;
+  getErrorMessage?: (response: Response) => Promise<string | undefined>;
 }) => {
   const headers = { 'Content-Type': 'application/json;charset=utf-8' };
   const body = parameters ? JSON.stringify(parameters) : undefined;
 
   const response = await fetch(url, { headers, method, body });
 
-  if (!response.ok) {
-    if (response.statusText) throw new Error(`Failed: ${response.statusText}`);
-
-    const result = (await response.json().catch(() => {})) as unknown;
-
-    if (result !== null && typeof result === 'object' && 'error' in result) {
-      const errorMessage = result.error as string;
-
-      throw new Error(`Failed: ${errorMessage}`);
-    }
-
-    throw new Error(`Failed: ${response.status}`);
-  }
+  if (!response.ok)
+    throw new Error((await getErrorMessage?.(response)) || response.statusText || STATUS_CODES[response.status]);
 
   return response.json() as T;
+};
+
+// string is only for cancelled sign and send popup error during useSendProgramTransaction
+// reevaluate after @gear-js/react-hooks update
+const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
+  if (typeof error === 'object' && 'docs' in error) {
+    return error.docs || error.method || error.name;
+  }
+
+  return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
 };
 
 export {

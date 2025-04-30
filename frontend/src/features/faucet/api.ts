@@ -19,14 +19,22 @@ type GetBalanceParameters<T> = {
   payload: T;
 };
 
+const getErrorMessage = async (response: Response) => {
+  const result = (await response.json()) as unknown;
+
+  if (result !== null && typeof result === 'object' && 'error' in result && typeof result.error === 'string')
+    return result.error;
+};
+
 const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraAccountBalance>) =>
-  fetchWithGuard({ url: `${API_URL}/balance`, method: 'POST', parameters });
+  fetchWithGuard({ url: `${API_URL}/balance`, method: 'POST', parameters, getErrorMessage });
 
 const getEthTokenBalance = (parameters: GetBalanceParameters<EthTokenBalance>) =>
   fetchWithGuard({
     url: `${API_URL}/bridge/request`,
     method: 'POST',
     parameters,
+    getErrorMessage,
   });
 
 export { getVaraAccountBalance, getEthTokenBalance };

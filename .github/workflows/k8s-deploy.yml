@@ -20,7 +20,6 @@ env:
   KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
   KUBE_NAMESPACE: zk-bridge
   KUBE_DEPLOY_PREFIX: zk-bridge
-  KUBE_DEPLOY_TYPE: deployment # (statefulset or deployment)
 
 jobs:
   prepair:
@@ -95,18 +94,10 @@ jobs:
           tags: ${{ needs.prepair.outputs.image_name }}
 
   deploy-to-k8s:
-    needs: [prepair, build-and-push-image]
+    needs: [ prepair, build-and-push-image ]
     runs-on: ubuntu-latest
-    environment: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'prod' || 'stg' }}
+    environment: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && 'prod' || (github.ref == 'refs/heads/testing') && 'testing' || 'stg' }}
     steps:
-      - name: Setup kubectl
-        run: |
-          curl -LO "https://dl.k8s.io/release/${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-          mkdir -p $HOME/.kube/
-          echo "${{ env.KUBE_CONFIG_DATA }}" | base64 -d > $HOME/.kube/config
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -114,22 +105,25 @@ jobs:
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get containes
-        id: containers
-        run: |
-          containers=$(kubectl get ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} -n ${{ env.KUBE_NAMESPACE }} -o jsonpath="{.spec.template.spec.containers[*].name}")
-          echo "CONTAINERS=$containers" >> $GITHUB_ENV
-
       - name: Update deployment image
-        run: |
-          for container in ${{ env.CONTAINERS }}; do
-            kubectl set image ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} $container=${{ needs.prepair.outputs.image_name }} -n ${{ env.KUBE_NAMESPACE }};
-          done
+        uses: kodermax/kubectl-aws-eks@main
+        with:
+          args: |
+            set image deployment/${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ env.ENVIRONMENT }} \
+            ${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ env.ENVIRONMENT }}=${{ needs.prepair.outputs.image_name }} \
+            -n ${{ env.KUBE_NAMESPACE }}
 
       - name: Restart deployment
-        run: |
-          kubectl rollout restart ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} -n ${{ env.KUBE_NAMESPACE }}
+        uses: kodermax/kubectl-aws-eks@main
+        with:
+          args: |
+            rollout restart deployment/${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ env.ENVIRONMENT }} \
+            -n ${{ env.KUBE_NAMESPACE }}
 
       - name: Check deployment
-        run: |
-          kubectl rollout status ${{ env.KUBE_DEPLOY_TYPE }}/${{ env.KUBE_DEPLOY_PREFIX }}-${{ env.ENVIRONMENT }} --timeout=300s -n ${{ env.KUBE_NAMESPACE }}
+        uses: kodermax/kubectl-aws-eks@main
+        with:
+          args: |
+            rollout status deployment/${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ env.ENVIRONMENT }} \
+            --timeout=120s \
+            -n ${{ env.KUBE_NAMESPACE }}

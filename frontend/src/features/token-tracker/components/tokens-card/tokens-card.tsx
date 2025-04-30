@@ -67,7 +67,7 @@ function TokensCard() {
           value={balance}
           decimals={decimals[address] ?? 0}
           symbol={symbols[address] ?? 'Unit'}>
-          <GetBalanceButton.Eth contract={address} onSuccess={refetchEthBalances} />
+          <GetBalanceButton.EthToken address={address} onSuccess={refetchEthBalances} />
         </BalanceCard>
       </li>
     ));
@@ -113,9 +113,9 @@ function TokensCard() {
               decimals={isVaraNetwork ? 12 : 18}
               symbol={isVaraNetwork ? varaSymbol : 'ETH'}>
               {isVaraNetwork ? (
-                <GetBalanceButton.Vara onSuccess={refetchVaraBalances} />
+                <GetBalanceButton.VaraAccount />
               ) : (
-                <GetBalanceButton.Eth contract={ETH_WRAPPED_ETH_CONTRACT_ADDRESS} onSuccess={refetchEthBalances} />
+                <GetBalanceButton.EthToken address={ETH_WRAPPED_ETH_CONTRACT_ADDRESS} onSuccess={refetchEthBalances} />
               )}
             </BalanceCard>
           </li>

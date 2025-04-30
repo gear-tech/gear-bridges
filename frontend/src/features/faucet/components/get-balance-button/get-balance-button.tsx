@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { useAccount, useAlert, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import HCaptcha from '@hcaptcha/react-hcaptcha';
@@ -8,17 +9,25 @@ import { LinkButton } from '@/components';
 import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS, USDC_CONTRACT_ADDRESS, USDT_CONTRACT_ADDRESS } from '@/consts/env';
 import { useEthAccount } from '@/hooks';
 
-import { EthTokenBalance, GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';
+import { GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';
 import GiftSVG from '../../assets/gift.svg?react';
 import { HCAPTCHA_SITEKEY } from '../../consts';
 
+import styles from './get-balance-button.module.scss';
+
 type Props<T> = {
-  isLoading?: boolean;
   getBalance: (parameters: GetBalanceParameters<T>) => Promise<unknown>;
-  onSuccess: () => void;
+  onSuccess?: () => void; // optional because vara account balance has a subscription and doesn't need to be refetched
 } & T;
 
-function GetBalanceButtonBase<T>({ isLoading, getBalance, onSuccess, ...parameters }: Props<T>) {
+const BUTTON_PROPS = {
+  icon: GiftSVG,
+  text: 'Get Balance',
+  size: 'x-small',
+  className: styles.button,
+} as const;
+
+function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) {
   const alert = useAlert();
   const hCaptchaRef = useRef<HCaptcha>(null);
 
@@ -26,6 +35,7 @@ function GetBalanceButtonBase<T>({ isLoading, getBalance, onSuccess, ...paramete
     mutationFn: async () => {
       if (!hCaptchaRef.current) throw new Error('HCaptcha ref is null');
 
+      const payload = parameters as T;
       let token: string;
 
       try {
@@ -36,66 +46,60 @@ function GetBalanceButtonBase<T>({ isLoading, getBalance, onSuccess, ...paramete
         throw new Error(`HCaptcha error on: ${error as string}`);
       }
 
-      const payload = parameters as T;
-
       return getBalance({ token, payload });
     },
   });
 
   const handleClick = () =>
     mutateAsync()
-      .then(() => onSuccess())
+      .then(() => {
+        onSuccess?.();
+        alert.success('Tokens sent to your address');
+      })
       .catch(({ message }: Error) => alert.error(message));
 
   return (
     <div>
-      <Button icon={GiftSVG} text="Get" size="x-small" onClick={handleClick} isLoading={isLoading || isPending} />
+      <Button onClick={handleClick} isLoading={isPending} {...BUTTON_PROPS} />
       <HCaptcha ref={hCaptchaRef} theme="dark" size="invisible" sitekey={HCAPTCHA_SITEKEY} />
     </div>
   );
 }
 
-function GetVaraBalanceButton({ onSuccess }: { onSuccess: () => void }) {
+function GetVaraAccountBalanceButton() {
   const { api } = useApi();
   const { account } = useAccount();
 
   if (!account || !api) return;
 
   return (
-    <GetBalanceButtonBase
-      getBalance={getVaraAccountBalance}
-      address={account.address}
-      genesis={api.genesisHash.toHex()}
-      onSuccess={onSuccess}
-    />
+    <ButtonComponent getBalance={getVaraAccountBalance} address={account.address} genesis={api.genesisHash.toHex()} />
   );
 }
 
-function GetEthBalanceButton({ contract, onSuccess }: Pick<EthTokenBalance, 'contract'> & { onSuccess: () => void }) {
+function GetEthTokenBalanceButton({ address, onSuccess }: { address: HexString; onSuccess: () => void }) {
   const ethAccount = useEthAccount();
 
   if (!ethAccount.address) return;
 
-  if (contract === ETH_WRAPPED_ETH_CONTRACT_ADDRESS)
-    return (
-      <LinkButton type="external" to="https://holesky-faucet.pk910.de/" icon={GiftSVG} text="Get" size="x-small" />
-    );
+  if (address === ETH_WRAPPED_ETH_CONTRACT_ADDRESS)
+    return <LinkButton type="external" to="https://holesky-faucet.pk910.de/" {...BUTTON_PROPS} />;
 
-  if (contract !== USDC_CONTRACT_ADDRESS && contract !== USDT_CONTRACT_ADDRESS) return;
+  if (address !== USDC_CONTRACT_ADDRESS && address !== USDT_CONTRACT_ADDRESS) return;
 
   return (
-    <GetBalanceButtonBase
+    <ButtonComponent
       getBalance={getEthTokenBalance}
       address={ethAccount.address}
-      contract={contract}
+      contract={address}
       onSuccess={onSuccess}
     />
   );
 }
 
 const GetBalanceButton = {
-  Vara: GetVaraBalanceButton,
-  Eth: GetEthBalanceButton,
+  VaraAccount: GetVaraAccountBalanceButton,
+  EthToken: GetEthTokenBalanceButton,
 };
 
 export { GetBalanceButton };

@@ -4,12 +4,12 @@ import { fetchWithGuard } from '@/utils';
 
 const API_URL = import.meta.env.VITE_FAUCET_API_URL as string;
 
-type VaraAccountBalance = {
+type VaraPayload = {
   address: string;
   genesis: HexString;
 };
 
-type EthTokenBalance = {
+type EthPayload = {
   address: HexString;
   contract: HexString;
 };
@@ -26,10 +26,10 @@ const getErrorMessage = async (response: Response) => {
     return result.error;
 };
 
-const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraAccountBalance>) =>
+const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraPayload>) =>
   fetchWithGuard({ url: `${API_URL}/balance`, method: 'POST', parameters, getErrorMessage });
 
-const getEthTokenBalance = (parameters: GetBalanceParameters<EthTokenBalance>) =>
+const getEthTokenBalance = (parameters: GetBalanceParameters<EthPayload>) =>
   fetchWithGuard({
     url: `${API_URL}/bridge/request`,
     method: 'POST',
@@ -38,4 +38,4 @@ const getEthTokenBalance = (parameters: GetBalanceParameters<EthTokenBalance>) =
   });
 
 export { getVaraAccountBalance, getEthTokenBalance };
-export type { VaraAccountBalance, EthTokenBalance, GetBalanceParameters };
+export type { GetBalanceParameters };

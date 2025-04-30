@@ -16,7 +16,9 @@ use checkpoint_light_client_io::ethereum_common::{
     utils::{self as eth_utils, MerkleProof},
     SLOTS_PER_EPOCH,
 };
-use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
+use eth_events_electra_client::{
+    traits::EthereumEventClient, BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
+};
 use ethereum_client::EthApi;
 
 pub async fn compose(
@@ -104,6 +106,7 @@ async fn build_inclusion_proof(
     let remoting = GClientRemoting::new(gear_api.clone());
 
     let historical_proxy = HistoricalProxy::new(remoting.clone());
+    let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting.clone());
     let service_checkpoint = ServiceCheckpointFor::new(remoting);
 
     let beacon_block_parent = beacon_client
@@ -118,6 +121,7 @@ async fn build_inclusion_proof(
         .await?;
 
     let slot = beacon_block.slot;
+
     let endpoint = historical_proxy
         .endpoint_for(slot)
         .recv(historical_proxy_id)
@@ -125,9 +129,15 @@ async fn build_inclusion_proof(
         .map_err(|e| anyhow::anyhow!(e))?
         .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{}: {:?}", slot, e))?;
 
+    let checkpoint_endpoint = eth_events
+        .checkpoint_light_client_address()
+        .recv(endpoint)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+
     let (slot, checkpoint) = service_checkpoint
         .get(slot)
-        .recv(endpoint)
+        .recv(checkpoint_endpoint)
         .await
         .map_err(|e| anyhow::anyhow!(e))?
         .map_err(|e| anyhow::anyhow!("Checkpoint error: {:?}", e))?;

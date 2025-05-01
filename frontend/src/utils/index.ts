@@ -1,5 +1,3 @@
-import { STATUS_CODES } from 'http';
-
 import { decodeAddress, encodeAddress, ExtrinsicFailedData, HexString } from '@gear-js/api';
 import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
@@ -7,7 +5,9 @@ import { z } from 'zod';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 
-import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from './consts';
+import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '../consts';
+
+import { fetchWithGuard } from './fetch-with-guard';
 
 const cx = (...args: unknown[]) =>
   args
@@ -52,28 +52,6 @@ const isNativeToken = (address: HexString) =>
 function definedAssert<T>(value: T, name: string): asserts value is NonNullable<T> {
   if (isUndefined(value) || isNull(value)) throw new Error(`${name} is not defined`);
 }
-
-const fetchWithGuard = async <T>({
-  url,
-  method,
-  parameters,
-  getErrorMessage,
-}: {
-  url: string;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  parameters?: object;
-  getErrorMessage?: (response: Response) => Promise<string | undefined>;
-}) => {
-  const headers = { 'Content-Type': 'application/json;charset=utf-8' };
-  const body = parameters ? JSON.stringify(parameters) : undefined;
-
-  const response = await fetch(url, { headers, method, body });
-
-  if (!response.ok)
-    throw new Error((await getErrorMessage?.(response)) || response.statusText || STATUS_CODES[response.status]);
-
-  return response.json() as T;
-};
 
 // string is only for cancelled sign and send popup error during useSendProgramTransaction
 // reevaluate after @gear-js/react-hooks update

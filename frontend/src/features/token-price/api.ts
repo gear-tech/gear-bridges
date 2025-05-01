@@ -18,11 +18,11 @@ const PARAMS = new URLSearchParams({
 
 type TokenId = (typeof TOKEN_ID)[keyof typeof TOKEN_ID];
 
-type Response = {
+type Test = {
   [Key in TokenId]: { usd: number };
 };
 
-const getTokenPrices = () => fetchWithGuard<Response>({ url: `${API_URL}?${PARAMS.toString()}` });
+const getTokenPrices = () => fetchWithGuard<Test>({ url: `${API_URL}?${PARAMS.toString()}` });
 
 function useTokenPrices() {
   return useQuery({

@@ -185,9 +185,9 @@ pub struct EthGearManualArgs {
     #[arg(long = "receiver-program")]
     pub receiver_program: String,
 
-    /// Route of the function that will be called on receiver-program
+    /// Route of the function that will be called on receiver-program. If not specified then `vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE` is used
     #[arg(long = "receiver-route")]
-    pub receiver_route: String,
+    pub receiver_route: Option<String>,
 
     #[clap(flatten)]
     pub gear_args: GearSignerArgs,

@@ -6,7 +6,10 @@ fn main() {
     let idl_file_path = out_dir_path.join("eth_events_deneb.idl");
 
     // Generate IDL file for the program
-    sails_idl_gen::generate_idl_to_file::<eth_events_deneb_app::Program>(&idl_file_path).unwrap();
+    sails_idl_gen::generate_idl_to_file::<eth_events_deneb_app::EthereumEventClientProgram>(
+        &idl_file_path,
+    )
+    .unwrap();
 
     // Generate client code from IDL file
     ClientGenerator::from_idl_path(&idl_file_path)

@@ -39,7 +39,7 @@ async fn find_slot_by_block_number(
     // TODO: It's a temporary solution of a problem that we're connecting to a different
     // nodes, so if we're observing finalized block on one node, the finalized slot might still be not
     // available on other.
-    for _ in 0..10 {
+    for _ in 0..30 {
         let beacon_block_result = beacon_client
             .find_beacon_block(block.0, beacon_block_parent.clone())
             .await;
@@ -48,13 +48,15 @@ async fn find_slot_by_block_number(
             Ok(beacon_block) => {
                 return Ok(EthereumSlotNumber(beacon_block.slot));
             }
-            Err(err) => {
+
+            Err(e) => {
+                let delay = Duration::from_secs(15);
                 log::warn!(
-                    "Failed to find beacon block for ethereum block #{}: {}. Waiting for 2 seconds before next attempt...",
+                    "Failed to find beacon block for ethereum block #{}: {e}. Waiting for {delay:?} before next attempt...",
                     block.0,
-                    err
                 );
-                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                tokio::time::sleep(delay).await;
             }
         }
     }

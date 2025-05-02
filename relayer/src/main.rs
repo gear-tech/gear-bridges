@@ -351,6 +351,8 @@ async fn main() {
             ethereum_args,
             beacon_args,
         }) => {
+            use sails_rs::calls::ActionIo;
+
             let gear_client_args = message_relayer::common::GSdkArgs {
                 vara_domain: gear_args.common.domain,
                 vara_port: gear_args.common.port,
@@ -364,8 +366,12 @@ async fn main() {
                 .expect("Failed to parse historical proxy address");
             let receiver_address = hex_utils::decode_h256(&receiver_program)
                 .expect("Failed to parse receiver program address");
-            let receiver_route = hex_utils::decode_byte_vec(&receiver_route)
-                .expect("Failed to decode receiver route");
+            let receiver_route = receiver_route
+                .map(|receiver_route| {
+                    hex_utils::decode_byte_vec(&receiver_route)
+                        .expect("Failed to decode receiver route")
+                })
+                .unwrap_or(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec());
             let tx_hash = hex_utils::decode_h256(&tx_hash)
                 .expect("Failed to decode tx hash")
                 .0

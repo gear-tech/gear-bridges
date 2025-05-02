@@ -56,15 +56,11 @@ pub async fn relay(
         historical_proxy_address,
         receiver_address,
         receiver_route,
-        false,
+        true,
     );
 
     let [gear_blocks] = gear_block_listener.run().await;
     let (deposit_events_sender, deposit_events_receiver) = unbounded_channel();
-    let checkpoints = checkpoints_extractor.run(gear_blocks).await;
-    gear_message_sender
-        .run(deposit_events_receiver, checkpoints)
-        .await;
 
     deposit_events_sender
         .send(TxHashWithSlot {
@@ -72,4 +68,9 @@ pub async fn relay(
             slot_number: EthereumSlotNumber(slot),
         })
         .expect("Failed to send message to channel");
+
+    let checkpoints = checkpoints_extractor.run(gear_blocks).await;
+    gear_message_sender
+        .run(deposit_events_receiver, checkpoints)
+        .await;
 }

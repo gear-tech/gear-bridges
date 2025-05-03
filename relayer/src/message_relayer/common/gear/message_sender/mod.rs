@@ -197,6 +197,7 @@ impl MessageSender {
             .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
 
         // TODO: Refactor this approach. #255
+        log::debug!("Received reply: {}", hex::encode(&receiver_reply));
         if self.decode_reply {
             let reply = SubmitReceipt::decode_reply(&receiver_reply)
                 .map_err(|e| anyhow::anyhow!("Failed to decode vft-manager reply: {:?}", e))?;
@@ -210,15 +211,16 @@ impl MessageSender {
                     anyhow::bail!("Internal vft-manager error: {:?}", e);
                 }
             }
-        } else {
-            log::info!("Received reply: {}", hex::encode(&receiver_reply));
         }
 
         Ok(())
     }
 
     async fn update_balance_metric(&self, gear_api: &GearApi) -> anyhow::Result<()> {
-        let balance = gear_api.total_balance(gear_api.account_id()).await?;
+        let balance = gear_api
+            .total_balance(gear_api.account_id())
+            .await
+            .map_err(|e| anyhow::anyhow!("Unable to get total balance: {e:?}"))?;
 
         let balance = balance / 1_000_000_000_000;
         let balance: i64 = balance.try_into().unwrap_or(i64::MAX);

@@ -11,7 +11,7 @@
     border-color: #00ffc433;
   }
 
-  svg {
+  .icon {
     flex-shrink: 0;
 
     transition: all 0.25s;
@@ -30,11 +30,11 @@
 
   border-color: #00ffc433;
 
-  svg {
+  .icon {
     transform: rotate(180deg);
   }
 
-  .text {
+  .body {
     opacity: 1;
 
     transition: opacity 0.5s;
@@ -60,22 +60,55 @@
   &:hover {
     color: #00ffc4;
 
-    svg path {
+    .icon path {
       stroke: #00ffc4;
       stroke-opacity: 1;
     }
   }
 }
 
-.text {
+.body {
   opacity: 0;
   overflow: hidden;
 
   padding: 0 24px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 
   color: #f6f6f6cc;
   font-size: 14px;
   line-height: 20px;
 
   transition: opacity 0.1s;
+
+  ul {
+    list-style: disc;
+
+    padding-left: 32px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  a {
+    color: #00ffc4;
+    text-decoration: underline;
+
+    &:hover {
+      opacity: 0.75;
+    }
+  }
+
+  .bold {
+    color: #f6f6f6ed;
+    font-weight: 700;
+  }
+}
+
+.inlineIcon {
+  width: 1em;
+  height: 1em;
 }

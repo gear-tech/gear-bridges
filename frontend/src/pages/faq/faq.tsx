@@ -7,7 +7,7 @@ function FAQ() {
   const renderQuestions = () =>
     QUESTIONS.map(({ question, answer }, index) => (
       <li key={index}>
-        <Accordion heading={question} text={answer} />
+        <Accordion heading={question}>{answer}</Accordion>
       </li>
     ));
 

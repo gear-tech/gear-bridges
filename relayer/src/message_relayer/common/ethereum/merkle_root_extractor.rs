@@ -1,20 +1,20 @@
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use ethereum_client::EthApi;
-use gear_rpc_client::GearApi;
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::common::{
-        AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot,
+    message_relayer::{
+        common::{AuthoritySetId, EthereumBlockNumber, GearBlockNumber, RelayedMerkleRoot},
+        eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
 
 pub struct MerkleRootExtractor {
     eth_api: EthApi,
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
 
     metrics: Metrics,
 }
@@ -35,10 +35,10 @@ impl_metered_service! {
 }
 
 impl MerkleRootExtractor {
-    pub fn new(eth_api: EthApi, gear_api: GearApi) -> Self {
+    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection) -> Self {
         Self {
             eth_api,
-            gear_api,
+            api_provider,
 
             metrics: Metrics::new(),
         }
@@ -71,6 +71,17 @@ impl MerkleRootExtractor {
 
                     tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
+                    match self.api_provider.reconnect().await {
+                        Ok(()) => {
+                            log::info!("API provider reconnected");
+                        }
+
+                        Err(err) => {
+                            log::error!("Merkle root extractor unable to reconnect: {err}");
+                            return;
+                        }
+                    }
+
                     if common::is_transport_error_recoverable(&err) {
                         self.eth_api = match self.eth_api.reconnect() {
                             Ok(eth_api) => eth_api,
@@ -95,6 +106,7 @@ impl MerkleRootExtractor {
         blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
         sender: &UnboundedSender<RelayedMerkleRoot>,
     ) -> anyhow::Result<()> {
+        let gear_api = self.api_provider.client();
         loop {
             while let Some(block) = blocks.recv().await {
                 let merkle_roots = self
@@ -115,13 +127,12 @@ impl MerkleRootExtractor {
                         .latest_merkle_root_for_block
                         .set(merkle_root.block_number as i64);
 
-                    let block_hash = self
-                        .gear_api
+                    let block_hash = gear_api
                         .block_number_to_hash(merkle_root.block_number as u32)
                         .await?;
 
                     let authority_set_id =
-                        AuthoritySetId(self.gear_api.signed_by_authority_set_id(block_hash).await?);
+                        AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await?);
 
                     log::info!(
                         "Found merkle root for gear block #{} and era #{}",

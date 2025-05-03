@@ -5,7 +5,6 @@ use clap::Parser;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
-use gear_rpc_client::GearApi;
 use kill_switch::KillSwitchRelayer;
 use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
@@ -52,7 +51,13 @@ async fn main() {
 
     match cli.command {
         CliCommands::GearEthCore(args) => {
-            let gear_api = create_gear_client(&args.gear_args).await;
+            let api_provider = ApiProvider::new(
+                args.gear_args.domain.clone(),
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await
+            .expect("Failed to connect to Gear API");
             let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let metrics = MetricsBuilder::new();
@@ -62,19 +67,31 @@ async fn main() {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
-            let relayer =
-                MerkleRootRelayer::new(gear_api, eth_api, genesis_config, proof_storage).await;
+            let relayer = MerkleRootRelayer::new(
+                api_provider.connection(),
+                eth_api,
+                genesis_config,
+                proof_storage,
+            )
+            .await;
 
             metrics
                 .register_service(&relayer)
                 .build()
                 .run(args.prometheus_args.endpoint)
                 .await;
-
+            api_provider.spawn();
             relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::KillSwitch(args) => {
-            let gear_api = create_gear_client(&args.gear_args).await;
+            let api_provider = ApiProvider::new(
+                args.gear_args.domain.clone(),
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await
+            .expect("Failed to connec to Gear API");
+
             let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let metrics = MetricsBuilder::new();
@@ -88,7 +105,7 @@ async fn main() {
                 sled::open("./block_finality_storage").expect("Db not corrupted");
 
             let mut kill_switch = KillSwitchRelayer::new(
-                gear_api,
+                api_provider.connection(),
                 eth_api,
                 genesis_config,
                 proof_storage,
@@ -102,11 +119,10 @@ async fn main() {
                 .build()
                 .run(args.prometheus_args.endpoint)
                 .await;
-
+            api_provider.spawn();
             kill_switch.run().await.expect("Kill switch relayer failed");
         }
         CliCommands::GearEthTokens(args) => {
-            let gear_api = create_gear_client(&args.gear_args).await;
             let eth_api = create_eth_signer_client(&args.ethereum_args);
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -128,7 +144,6 @@ async fn main() {
             match args.command {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
-                        gear_api,
                         eth_api,
                         args.from_block,
                         provider.connection(),
@@ -149,7 +164,6 @@ async fn main() {
                             .expect("Failed to parse address");
 
                     let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
-                        gear_api,
                         eth_api,
                         args.from_block,
                         bridging_payment_address,
@@ -304,11 +318,23 @@ async fn main() {
                 hex_utils::decode_byte_vec(&args.nonce).expect("Failed to parse message nonce");
             let nonce = U256::from_big_endian(&nonce[..]);
             let eth_api = create_eth_signer_client(&args.ethereum_args);
-            let gear_api = create_gear_client(&args.gear_args).await;
+            let api_provider = ApiProvider::new(
+                args.gear_args.domain.clone(),
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await
+            .expect("Failed to create API provider");
 
-            gear_to_eth::manual::relay(gear_api, eth_api, nonce, args.block, args.from_eth_block)
-                .await;
-
+            gear_to_eth::manual::relay(
+                api_provider.connection(),
+                eth_api,
+                nonce,
+                args.block,
+                args.from_eth_block,
+            )
+            .await;
+            api_provider.spawn();
             loop {
                 // relay() spawns thread and exits, so we need to add this loop after calling run.
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -325,6 +351,8 @@ async fn main() {
             ethereum_args,
             beacon_args,
         }) => {
+            use sails_rs::calls::ActionIo;
+
             let gear_client_args = message_relayer::common::GSdkArgs {
                 vara_domain: gear_args.common.domain,
                 vara_port: gear_args.common.port,
@@ -338,8 +366,12 @@ async fn main() {
                 .expect("Failed to parse historical proxy address");
             let receiver_address = hex_utils::decode_h256(&receiver_program)
                 .expect("Failed to parse receiver program address");
-            let receiver_route = hex_utils::decode_byte_vec(&receiver_route)
-                .expect("Failed to decode receiver route");
+            let receiver_route = receiver_route
+                .map(|receiver_route| {
+                    hex_utils::decode_byte_vec(&receiver_route)
+                        .expect("Failed to decode receiver route")
+                })
+                .unwrap_or(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec());
             let tx_hash = hex_utils::decode_h256(&tx_hash)
                 .expect("Failed to decode tx hash")
                 .0
@@ -385,12 +417,6 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
         ))
         .await
         .expect("GearApi client should be created")
-}
-
-async fn create_gear_client(args: &GearArgs) -> GearApi {
-    GearApi::new(&args.domain, args.port, args.retries)
-        .await
-        .unwrap_or_else(|err| panic!("Error while creating gear client: {}", err))
 }
 
 fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {

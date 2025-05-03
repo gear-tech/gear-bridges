@@ -1,12 +1,14 @@
-use gear_rpc_client::GearApi;
 use prometheus::IntCounter;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{GearBlockNumber, MessageInBlock};
+use crate::message_relayer::{
+    common::{GearBlockNumber, MessageInBlock},
+    eth_to_gear::api_provider::ApiProviderConnection,
+};
 
 pub struct MessageQueuedEventExtractor {
-    gear_api: GearApi,
+    api_provider: ApiProviderConnection,
 
     metrics: Metrics,
 }
@@ -27,15 +29,15 @@ impl_metered_service! {
 }
 
 impl MessageQueuedEventExtractor {
-    pub fn new(gear_api: GearApi) -> Self {
+    pub fn new(api_provider: ApiProviderConnection) -> Self {
         Self {
-            gear_api,
+            api_provider,
             metrics: Metrics::new(),
         }
     }
 
     pub async fn run(
-        self,
+        mut self,
         mut blocks: UnboundedReceiver<GearBlockNumber>,
     ) -> UnboundedReceiver<MessageInBlock> {
         let (sender, receiver) = unbounded_channel();
@@ -45,6 +47,16 @@ impl MessageQueuedEventExtractor {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
                     log::error!("Message queued extractor failed: {}", err);
+
+                    match self.api_provider.reconnect().await {
+                        Ok(()) => {
+                            log::info!("Gear block listener reconnected");
+                        }
+                        Err(err) => {
+                            log::error!("Gear block listener unable to reconnect: {err}");
+                            return;
+                        }
+                    }
                 }
             }
         });
@@ -69,9 +81,10 @@ impl MessageQueuedEventExtractor {
         block: GearBlockNumber,
         sender: &UnboundedSender<MessageInBlock>,
     ) -> anyhow::Result<()> {
-        let block_hash = self.gear_api.block_number_to_hash(block.0).await?;
+        let gear_api = self.api_provider.client();
+        let block_hash = gear_api.block_number_to_hash(block.0).await?;
 
-        let messages = self.gear_api.message_queued_events(block_hash).await?;
+        let messages = gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {
             log::info!(
                 "Found {} queued messages in block #{}",

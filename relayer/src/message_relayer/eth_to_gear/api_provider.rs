@@ -35,17 +35,19 @@ impl ApiProviderConnection {
     pub async fn reconnect(&mut self) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         let request = ApiConnectionRequest {
-            session: 0,
+            session: self.session,
             receiver: tx,
         };
         self.sender
             .send(request)
             .context("failed to send API connection request")?;
+
         let response = rx
             .await
             .context("failed to receive API connection response")?;
         self.session = response.session;
         self.api = response.api;
+
         Ok(())
     }
 

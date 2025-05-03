@@ -14,7 +14,6 @@ use sails_rs::{calls::Query, gclient::calls::GClientRemoting, prelude::*};
 use checkpoint_light_client_io::ethereum_common::{
     beacon,
     utils::{self as eth_utils, MerkleProof},
-    SLOTS_PER_EPOCH,
 };
 use eth_events_electra_client::{
     traits::EthereumEventClient, BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
@@ -135,7 +134,7 @@ async fn build_inclusion_proof(
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    let (slot, checkpoint) = service_checkpoint
+    let (checkpoint_slot, checkpoint) = service_checkpoint
         .get(slot)
         .recv(checkpoint_endpoint)
         .await
@@ -149,18 +148,15 @@ async fn build_inclusion_proof(
         state_root: beacon_block.state_root,
         body: beacon_block.body.into(),
     };
-    if slot % SLOTS_PER_EPOCH == 0 {
+    if slot == checkpoint_slot {
         return Ok(BlockInclusionProof {
             block,
             headers: vec![],
         });
     }
 
-    let epoch_next = 1 + eth_utils::calculate_epoch(slot);
-    let slot_checkpoint = epoch_next * SLOTS_PER_EPOCH;
-
     let headers = beacon_client
-        .request_headers(slot + 1, slot_checkpoint + 1)
+        .request_headers(slot + 1, checkpoint_slot + 1)
         .await?;
 
     let ControlFlow::Continue(_) =

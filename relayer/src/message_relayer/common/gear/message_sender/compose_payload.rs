@@ -155,10 +155,15 @@ async fn build_inclusion_proof(
         });
     }
 
-    let headers = beacon_client
+    let headers = {
+        let mut headers = beacon_client
         .request_headers(slot + 1, checkpoint_slot + 1)
         .await?;
 
+        headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
+
+        headers
+    };
     let ControlFlow::Continue(_) =
         headers
             .iter()

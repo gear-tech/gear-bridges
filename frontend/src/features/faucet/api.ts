@@ -29,11 +29,10 @@ type EthPayload = {
 
 type GetBalanceParameters<T> = {
   token: string; // hCaptcha token
-  payload: T;
-};
+} & T;
 
 const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraPayload>) =>
-  fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/balance`, parameters });
+  fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/vara-testnet/request`, parameters });
 
 const getEthTokenBalance = (parameters: GetBalanceParameters<EthPayload>) =>
   fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/bridge/request`, parameters });

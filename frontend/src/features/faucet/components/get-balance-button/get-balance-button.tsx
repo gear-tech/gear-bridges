@@ -38,7 +38,7 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
       const token = (await hCaptchaRef.current.execute({ async: true })).response;
       const payload = parameters as T;
 
-      return getBalance({ token, payload });
+      return getBalance({ token, ...payload });
     },
   });
 

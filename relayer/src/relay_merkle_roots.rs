@@ -444,27 +444,11 @@ impl Eras {
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
         let block = gear_api.find_era_first_block(authority_set_id + 1).await?;
-        let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
-        let proof =
-            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block)
-                .await?;
-
         let block_number = gear_api.block_hash_to_number(block).await?;
 
-        assert_eq!(
-            proof.block_number, block_number,
-            "It was expected that prover_interface::prove_final 
-            will not change the block number for the proof 
-            in the case of the first block in the era"
-        );
-
         let queue_merkle_root = gear_api.fetch_queue_merkle_root(block).await?;
-
         if queue_merkle_root.is_zero() {
-            log::info!(
-                "Message queue at block #{} is empty. Skipping sealing",
-                block_number
-            );
+            log::info!("Message queue at block #{block_number} is empty. Skipping sealing",);
             return Ok(());
         }
 
@@ -475,12 +459,25 @@ impl Eras {
             .is_some();
 
         if root_exists {
-            log::info!(
-                "Merkle root for era #{} is already submitted",
-                authority_set_id
-            );
+            log::info!("Merkle root for era #{authority_set_id} is already submitted",);
             return Ok(());
         }
+
+        let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
+
+        let instant = Instant::now();
+        let proof =
+            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block)
+                .await?;
+        let elapsed_proof = instant.elapsed();
+        log::info!("prover_interface::prove_final took {elapsed_proof:?} for block_number = #{block_number}, authority_set_id = #{authority_set_id}");
+
+        assert_eq!(
+            proof.block_number, block_number,
+            "It was expected that prover_interface::prove_final 
+            will not change the block number for the proof 
+            in the case of the first block in the era"
+        );
 
         let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
 

@@ -51,6 +51,7 @@ pub struct GearEthCoreArgs {
     pub proof_storage_args: ProofStorageArgs,
 
     /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
+    #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
 }
 

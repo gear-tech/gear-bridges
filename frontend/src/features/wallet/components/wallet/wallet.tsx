@@ -61,7 +61,7 @@ function Wallet() {
             {SVG && <SVG />}
 
             {/* icon from useWalletInfo only exists on initial wallet connection */}
-            {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : <EthSVG />}
+            {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : ethAccount.address && <EthSVG />}
 
             {account && <TruncatedText value={account.address} />}
             {ethAccount.address && <TruncatedText value={ethAccount.address} />}

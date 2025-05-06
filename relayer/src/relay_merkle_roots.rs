@@ -71,10 +71,16 @@ impl MerkleRootRelayer {
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
+        last_sealed: Option<u64>,
     ) -> MerkleRootRelayer {
-        let eras = Eras::new(None, api_provider.clone(), eth_api.clone(), genesis_config)
-            .await
-            .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
+        let eras = Eras::new(
+            last_sealed,
+            api_provider.clone(),
+            eth_api.clone(),
+            genesis_config,
+        )
+        .await
+        .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
 
         let metrics = Metrics::new();
 

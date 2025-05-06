@@ -49,6 +49,9 @@ pub struct GearEthCoreArgs {
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     pub proof_storage_args: ProofStorageArgs,
+
+    /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
+    pub start_authority_set_id: Option<u64>,
 }
 
 #[derive(Args)]

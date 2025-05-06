@@ -38,7 +38,10 @@ const TOKEN_ADDRESS_ID = {
   [USDT_CONTRACT_ADDRESS]: TOKEN_ID.USDT,
 } as const;
 
-const round = (value: number) => Number(value.toFixed(3));
+const FORMATTER = new Intl.NumberFormat('en', {
+  style: 'currency',
+  currency: 'USD',
+});
 
 function TokenPrice({ amount, className, ...props }: Props) {
   const { data, isLoading } = useTokenPrices();
@@ -57,12 +60,12 @@ function TokenPrice({ amount, className, ...props }: Props) {
 
     const value = price * Number(amount);
 
-    return isNaN(value) ? 0 : round(value);
+    return FORMATTER.format(isNaN(value) ? 0 : value);
   };
 
   return (
     <span className={cx(styles.price, className)}>
-      {isUndefined(price) || isUndefined(amount) ? <Skeleton width="2rem" disabled={!isLoading} /> : `$ ${getPrice()}`}
+      {isUndefined(price) || isUndefined(amount) ? <Skeleton width="2rem" disabled={!isLoading} /> : getPrice()}
     </span>
   );
 }

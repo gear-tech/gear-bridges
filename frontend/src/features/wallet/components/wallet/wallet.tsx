@@ -4,6 +4,7 @@ import { WalletModal } from '@gear-js/wallet-connect';
 import { isUndefined } from '@polkadot/util';
 import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
+import EthSVG from '@/assets/eth.svg?react';
 import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
 import { useEthAccount, useEthAccountBalance, useModal, useVaraAccountBalance, useVaraSymbol } from '@/hooks';
 
@@ -58,7 +59,9 @@ function Wallet() {
 
           <button type="button" className={styles.button} onClick={handleButtonClick}>
             {SVG && <SVG />}
-            {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
+
+            {/* icon from useWalletInfo only exists on initial wallet connection */}
+            {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : <EthSVG />}
 
             {account && <TruncatedText value={account.address} />}
             {ethAccount.address && <TruncatedText value={ethAccount.address} />}

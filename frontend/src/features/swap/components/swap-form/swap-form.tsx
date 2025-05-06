@@ -182,7 +182,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   </div>
                 </div>
 
-                <AmountInput.Value decimals={decimals} />
+                <AmountInput.Value />
               </div>
 
               <div className={styles.priceFooter}>{renderTokenPrice()}</div>

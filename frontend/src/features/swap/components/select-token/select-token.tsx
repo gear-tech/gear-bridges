@@ -24,7 +24,7 @@ import { useBridgeContext } from '../../context';
 import styles from './select-token.module.scss';
 
 type Props = {
-  symbol: string | undefined;
+  symbol: string;
 };
 
 type ModalProps = {
@@ -155,8 +155,6 @@ function SelectTokenModal({ close }: ModalProps) {
 
 function SelectToken({ symbol }: Props) {
   const [isModalOpen, openModal, closeModal] = useModal();
-
-  if (!symbol) return <Skeleton width="6rem" height="24px" />;
 
   return (
     <>

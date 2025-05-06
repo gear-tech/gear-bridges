@@ -1,0 +1,78 @@
+@keyframes toTop {
+  from {
+    transform: translateY(377%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes toBottom {
+  from {
+    transform: translateY(-377%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+.container {
+  display: flex;
+  gap: 16px;
+
+  z-index: 1; // for transform animation
+
+  &.select {
+    animation: toTop 0.25s ease;
+
+    .copyButton {
+      position: absolute;
+      bottom: 75%;
+      left: calc(100% - 36px);
+    }
+  }
+
+  &.text {
+    animation: toBottom 0.25s ease;
+
+    .copyButton {
+      margin-top: -24px;
+    }
+  }
+}
+
+.token {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.symbolContainer {
+  position: relative;
+
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.copyButton {
+  width: 12px;
+  height: 12px;
+
+  color: rgba(#00ffc4, 0.75);
+}
+
+.symbol {
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.network {
+  font-size: 14px;
+  line-height: 1;
+  color: #828b8e;
+  white-space: nowrap;
+}

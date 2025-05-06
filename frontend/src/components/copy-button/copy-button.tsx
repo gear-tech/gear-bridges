@@ -9,10 +9,11 @@ import CopySVG from './copy.svg?react';
 type Props = {
   value: string;
   SVG?: SVGComponent;
+  className?: string;
   onCopy?: () => void;
 };
 
-function CopyButton({ value, SVG = CopySVG, onCopy = () => {} }: Props) {
+function CopyButton({ value, SVG = CopySVG, className, onCopy = () => {} }: Props) {
   const alert = useAlert();
 
   const onSuccess = () => {
@@ -29,7 +30,7 @@ function CopyButton({ value, SVG = CopySVG, onCopy = () => {} }: Props) {
 
   const copyToClipboard = () => navigator.clipboard.writeText(value).then(onSuccess, onError);
 
-  return <Button icon={SVG} color="transparent" onClick={copyToClipboard} size="x-small" />;
+  return <Button icon={SVG} color="transparent" onClick={copyToClipboard} size="x-small" className={className} />;
 }
 
 export { CopyButton };

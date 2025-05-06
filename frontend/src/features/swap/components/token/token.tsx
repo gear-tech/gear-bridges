@@ -1,6 +1,6 @@
 import { HexString } from '@gear-js/api';
 
-import { CopyButton, Skeleton, TokenSVG } from '@/components';
+import { Address, CopyButton, Skeleton, TokenSVG } from '@/components';
 import { cx } from '@/utils';
 
 import { SelectToken } from '../select-token';
@@ -24,11 +24,19 @@ function Token({ type, address, symbol, network, networkIndex }: Props) {
         {(!address || !symbol) && <Skeleton width="6rem" />}
 
         {address && symbol && (
-          <div className={styles.symbolContainer}>
+          <>
             {type === 'text' ? <p className={styles.symbol}>{symbol}</p> : <SelectToken symbol={symbol} />}
 
-            <CopyButton value={address} className={styles.copyButton} />
-          </div>
+            <div className={styles.addressContainer}>
+              <Address value={address} tooltip={{ side: 'bottom' }} className={styles.address} />
+
+              <CopyButton
+                value={address}
+                message="Smart contract address copied to clipboard"
+                className={styles.copyButton}
+              />
+            </div>
+          </>
         )}
 
         <p className={styles.network}>{network}</p>

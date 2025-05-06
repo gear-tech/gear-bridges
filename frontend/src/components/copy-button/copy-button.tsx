@@ -8,24 +8,25 @@ import CopySVG from './copy.svg?react';
 
 type Props = {
   value: string;
+  message?: string;
   SVG?: SVGComponent;
   className?: string;
   onCopy?: () => void;
 };
 
-function CopyButton({ value, SVG = CopySVG, className, onCopy = () => {} }: Props) {
+function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCopy = () => {} }: Props) {
   const alert = useAlert();
 
   const onSuccess = () => {
-    alert.success('Copied');
+    alert.success(message);
     onCopy();
   };
 
   const onError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : 'Unexpected error copying to clipboard';
+    const errorMessage = error instanceof Error ? error.message : 'Unexpected error copying to clipboard';
 
-    alert.error(message);
-    logger.error('Copy to clipboard', error instanceof Error ? error : new Error(message));
+    alert.error(errorMessage);
+    logger.error('Copy to clipboard', error instanceof Error ? error : new Error(errorMessage));
   };
 
   const copyToClipboard = () => navigator.clipboard.writeText(value).then(onSuccess, onError);

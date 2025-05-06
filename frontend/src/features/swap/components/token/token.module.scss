@@ -20,41 +20,39 @@
 
 .container {
   display: flex;
+  align-items: center;
   gap: 16px;
 
   z-index: 1; // for transform animation
 
   &.select {
     animation: toTop 0.25s ease;
-
-    .copyButton {
-      position: absolute;
-      bottom: 75%;
-      left: calc(100% - 36px);
-    }
   }
 
   &.text {
     animation: toBottom 0.25s ease;
-
-    .copyButton {
-      margin-top: -24px;
-    }
   }
 }
 
 .token {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
 }
 
-.symbolContainer {
-  position: relative;
+.address {
+  max-width: 64px;
 
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  font-size: 11px;
+  font-weight: 300;
+  color: #828b8e;
+
+  &Container {
+    margin-bottom: 8px;
+
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
 }
 
 .copyButton {

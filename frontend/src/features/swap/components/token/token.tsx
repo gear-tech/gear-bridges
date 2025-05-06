@@ -21,23 +21,30 @@ function Token({ type, address, symbol, network, networkIndex }: Props) {
       <TokenSVG address={address} networkIndex={networkIndex} sizes={[48, 28]} />
 
       <div className={styles.token}>
-        {(!address || !symbol) && <Skeleton width="6rem" />}
+        <div className={styles.info}>
+          {(!address || !symbol) && (
+            <>
+              <Skeleton width="6rem" height="24px" />
+              <Skeleton width="4rem" height="12px" />
+            </>
+          )}
 
-        {address && symbol && (
-          <>
-            {type === 'text' ? <p className={styles.symbol}>{symbol}</p> : <SelectToken symbol={symbol} />}
+          {address && symbol && (
+            <>
+              {type === 'text' ? <p className={styles.symbol}>{symbol}</p> : <SelectToken symbol={symbol} />}
 
-            <div className={styles.addressContainer}>
-              <Address value={address} tooltip={{ side: 'bottom' }} className={styles.address} />
+              <div className={styles.addressContainer}>
+                <Address value={address} tooltip={{ side: 'bottom' }} className={styles.address} />
 
-              <CopyButton
-                value={address}
-                message="Smart contract address copied to clipboard"
-                className={styles.copyButton}
-              />
-            </div>
-          </>
-        )}
+                <CopyButton
+                  value={address}
+                  message="Smart contract address copied to clipboard"
+                  className={styles.copyButton}
+                />
+              </div>
+            </>
+          )}
+        </div>
 
         <p className={styles.network}>{network}</p>
       </div>

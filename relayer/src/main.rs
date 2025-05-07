@@ -72,6 +72,7 @@ async fn main() {
                 eth_api,
                 genesis_config,
                 proof_storage,
+                args.start_authority_set_id,
             )
             .await;
 

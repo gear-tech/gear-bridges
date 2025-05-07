@@ -1,13 +1,12 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
-import { isUndefined } from '@polkadot/util';
 import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
 import EthSVG from '@/assets/eth.svg?react';
 import { FormattedBalance, Skeleton } from '@/components';
 import { useEthAccount, useEthAccountBalance, useModal, useVaraAccountBalance, useVaraSymbol } from '@/hooks';
-import { getTruncatedText } from '@/utils';
+import { getTruncatedText, isUndefined } from '@/utils';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { WALLET_SVGS } from '../../consts';

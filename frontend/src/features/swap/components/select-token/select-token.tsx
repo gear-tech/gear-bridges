@@ -1,6 +1,5 @@
 import { HexString } from '@gear-js/api';
 import { Input, Modal } from '@gear-js/vara-ui';
-import { isUndefined } from '@polkadot/util';
 import { useState } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -15,7 +14,7 @@ import {
   useVaraAccountBalance,
   useEthAccountBalance,
 } from '@/hooks';
-import { cx, isNativeToken } from '@/utils';
+import { cx, isNativeToken, isUndefined } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { NETWORK_INDEX } from '../../consts';

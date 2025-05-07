@@ -5,8 +5,9 @@ import { isUndefined } from '@polkadot/util';
 import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
 import EthSVG from '@/assets/eth.svg?react';
-import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
+import { FormattedBalance, Skeleton } from '@/components';
 import { useEthAccount, useEthAccountBalance, useModal, useVaraAccountBalance, useVaraSymbol } from '@/hooks';
+import { getTruncatedText } from '@/utils';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { WALLET_SVGS } from '../../consts';
@@ -63,8 +64,8 @@ function Wallet() {
             {/* icon from useWalletInfo only exists on initial wallet connection */}
             {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : ethAccount.address && <EthSVG />}
 
-            {account && <TruncatedText value={account.address} />}
-            {ethAccount.address && <TruncatedText value={ethAccount.address} />}
+            {account && getTruncatedText(account.address)}
+            {ethAccount.address && getTruncatedText(ethAccount.address)}
           </button>
         </div>
       ) : (

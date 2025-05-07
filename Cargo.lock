@@ -5929,6 +5929,7 @@ dependencies = [
  "eth-events-common",
  "eth-events-deneb",
  "eth-events-deneb-client",
+ "eth-events-electra-client",
  "ethereum-common",
  "futures",
  "gclient",

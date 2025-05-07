@@ -3,10 +3,10 @@ use eth_events_common::{CheckedProofs, Error, Proofs, State};
 use ethereum_common::{beacon::BlockHeader as BeaconBlockHeader, tree_hash::TreeHash, H256};
 use sails_rs::prelude::*;
 
-pub struct EthereumEventClientProgram(RefCell<State>);
+pub struct Program(RefCell<State>);
 
 #[sails_rs::program]
-impl EthereumEventClientProgram {
+impl Program {
     pub fn new(checkpoint_light_client_address: ActorId) -> Self {
         Self(RefCell::new(State {
             checkpoint_light_client_address,

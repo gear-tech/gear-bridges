@@ -6,7 +6,7 @@ fn main() {
     let idl_file_path = out_dir_path.join("eth_events_electra.idl");
 
     // Generate IDL file for the program
-    sails_idl_gen::generate_idl_to_file::<eth_events_electra_app::EthereumEventClientProgram>(
+    sails_idl_gen::generate_idl_to_file::<eth_events_electra_app::Program>(
         &idl_file_path,
     )
     .unwrap();

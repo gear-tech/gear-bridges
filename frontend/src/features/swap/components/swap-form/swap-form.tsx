@@ -21,7 +21,6 @@ import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
 import { SubmitProgressBar } from '../submit-progress-bar';
-import { SubmitTooltip } from '../submit-tooltip';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
 
@@ -199,24 +198,22 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
           <DetailsAccordion isVaraNetwork={isVaraNetwork} />
 
           {isNetworkAccountConnected ? (
-            <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>
-              <Button
-                type="submit"
-                text={getButtonText()}
-                disabled={!isEnoughBalance()}
-                isLoading={
-                  mint?.isPending ||
-                  payFee?.isPending ||
-                  submit.isPending ||
-                  accountBalance.isLoading ||
-                  ftBalance.isLoading ||
-                  config.isLoading ||
-                  bridge.isLoading ||
-                  allowance.isLoading
-                }
-                block
-              />
-            </SubmitTooltip>
+            <Button
+              type="submit"
+              text={getButtonText()}
+              disabled={!isEnoughBalance()}
+              isLoading={
+                mint?.isPending ||
+                payFee?.isPending ||
+                submit.isPending ||
+                accountBalance.isLoading ||
+                ftBalance.isLoading ||
+                config.isLoading ||
+                bridge.isLoading ||
+                allowance.isLoading
+              }
+              block
+            />
           ) : (
             <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
           )}

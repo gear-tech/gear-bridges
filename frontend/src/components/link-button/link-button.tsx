@@ -37,14 +37,14 @@ function LinkButton({
 
   return type === 'internal' ? (
     <Link to={to} className={cn}>
-      {Icon && <Icon />}
+      {Icon && <Icon className={buttonStyles.icon} />}
       {text && <span>{text}</span>}
 
       {children}
     </Link>
   ) : (
     <a href={to} target="_blank" rel="noreferrer" className={cn}>
-      {Icon && <Icon />}
+      {Icon && <Icon className={buttonStyles.icon} />}
       {text && <span>{text}</span>}
 
       {children}

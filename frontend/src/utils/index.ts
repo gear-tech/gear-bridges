@@ -5,7 +5,9 @@ import { z } from 'zod';
 
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 
-import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from './consts';
+import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '../consts';
+
+import { fetchWithGuard } from './fetch-with-guard';
 
 const cx = (...args: unknown[]) =>
   args
@@ -43,6 +45,14 @@ const isNumeric = (value: string) => /^\d+$/.test(value);
 
 const getTokenSVG = (address: HexString) => TOKEN_SVG[address] || TokenPlaceholderSVG;
 
+const isNativeToken = (address: HexString) =>
+  [WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS].includes(address);
+
+// asserts can't use arrow functions
+function definedAssert<T>(value: T, name: string): asserts value is NonNullable<T> {
+  if (isUndefined(value) || isNull(value)) throw new Error(`${name} is not defined`);
+}
+
 // string is only for cancelled sign and send popup error during useSendProgramTransaction
 // reevaluate after @gear-js/react-hooks update
 const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailedData | string) => {
@@ -52,14 +62,6 @@ const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailed
 
   return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
 };
-
-const isNativeToken = (address: HexString) =>
-  [WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS].includes(address);
-
-// asserts can't use arrow functions
-function definedAssert<T>(value: T, name: string): asserts value is NonNullable<T> {
-  if (isUndefined(value) || isNull(value)) throw new Error(`${name} is not defined`);
-}
 
 export {
   cx,
@@ -73,4 +75,5 @@ export {
   getErrorMessage,
   isNativeToken,
   definedAssert,
+  fetchWithGuard,
 };

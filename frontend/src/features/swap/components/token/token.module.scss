@@ -1,0 +1,82 @@
+@keyframes toTop {
+  from {
+    transform: translateY(335%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes toBottom {
+  from {
+    transform: translateY(-335%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+.container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+
+  z-index: 1; // for transform animation
+
+  &.select {
+    animation: toTop 0.25s ease;
+  }
+
+  &.text {
+    animation: toBottom 0.25s ease;
+  }
+}
+
+.token {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  .address {
+    max-width: 64px;
+
+    font-size: 11px;
+    font-weight: 300;
+    line-height: 1;
+    color: #828b8e;
+
+    &Container {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+  }
+
+  .copyButton {
+    width: 12px;
+    height: 12px;
+
+    color: rgba(#00ffc4, 0.75);
+  }
+
+  .symbol {
+    font-weight: 600;
+    font-size: 18px;
+    line-height: 24px;
+  }
+}
+
+.network {
+  font-size: 14px;
+  line-height: 1;
+  color: #828b8e;
+  white-space: nowrap;
+}

@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, str::FromStr};
+use std::{marker::PhantomData, str::FromStr, time::Duration};
 
 use alloy::{
     contract::Event,
@@ -11,7 +11,10 @@ use alloy::{
         },
         Identity, Provider, ProviderBuilder, RootProvider,
     },
-    rpc::types::{BlockId, BlockNumberOrTag, Filter},
+    rpc::{
+        client::RpcClient,
+        types::{BlockId, BlockNumberOrTag, Filter},
+    },
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{
@@ -89,6 +92,7 @@ pub struct EthApi {
     public_key: Address,
     wallet: EthereumWallet,
     url: Url,
+    timeout: Duration,
 }
 
 impl EthApi {
@@ -98,6 +102,8 @@ impl EthApi {
         relayer_address: &str,
         private_key: Option<&str>,
     ) -> Result<EthApi, Error> {
+        let timeout = Duration::from_secs(180);
+
         let signer = match private_key {
             Some(private_key) => {
                 let pk: B256 =
@@ -118,10 +124,17 @@ impl EthApi {
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
 
+        let client_reqwest = Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(Error::FailedToBuildClient)?;
+        let http = Http::with_client(client_reqwest, url.clone());
+        let rpc_client = RpcClient::new(http, false);
+
         let provider: ProviderType = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(wallet.clone())
-            .on_http(url.clone());
+            .on_client(rpc_client);
 
         let contracts = Contracts::new(
             provider,
@@ -134,14 +147,22 @@ impl EthApi {
             public_key,
             url,
             wallet,
+            timeout,
         })
     }
 
     pub fn reconnect(&self) -> Result<EthApi, Error> {
+        let client_reqwest = Client::builder()
+            .timeout(self.timeout)
+            .build()
+            .map_err(Error::FailedToBuildClient)?;
+        let http = Http::with_client(client_reqwest, self.url.clone());
+        let rpc_client = RpcClient::new(http, false);
+
         let provider: ProviderType = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(self.wallet.clone())
-            .on_http(self.url.clone());
+            .on_client(rpc_client);
 
         let contracts = Contracts::new(
             provider,
@@ -154,6 +175,7 @@ impl EthApi {
             public_key: self.public_key,
             url: self.url.clone(),
             wallet: self.wallet.clone(),
+            timeout: self.timeout,
         })
     }
 

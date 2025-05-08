@@ -2,8 +2,9 @@ import { useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 
 import { SVGComponent } from '@/types';
-import { logger } from '@/utils';
+import { cx, logger } from '@/utils';
 
+import styles from './copy-button.module.scss';
 import CopySVG from './copy.svg?react';
 
 type Props = {
@@ -31,7 +32,15 @@ function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCop
 
   const copyToClipboard = () => navigator.clipboard.writeText(value).then(onSuccess, onError);
 
-  return <Button icon={SVG} color="transparent" onClick={copyToClipboard} size="x-small" className={className} />;
+  return (
+    <Button
+      icon={SVG}
+      color="transparent"
+      onClick={copyToClipboard}
+      size="x-small"
+      className={cx(styles.button, className)}
+    />
+  );
 }
 
 export { CopyButton };

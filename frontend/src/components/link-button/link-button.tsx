@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 
 import { cx } from '@/utils';
 
-type Props = Omit<ButtonProps, 'onClick' | 'type'> & {
+type Props = Pick<
+  ButtonProps,
+  'children' | 'color' | 'size' | 'disabled' | 'isLoading' | 'text' | 'icon' | 'block' | 'noWrap' | 'className'
+> & {
   to: string;
   type?: 'internal' | 'external';
 };
@@ -21,6 +24,7 @@ function LinkButton({
   noWrap,
   className,
   type = 'internal',
+  ...props // spreading props for tooltip to work
 }: Props) {
   const cn = cx(
     'linkButton',
@@ -36,14 +40,14 @@ function LinkButton({
   );
 
   return type === 'internal' ? (
-    <Link to={to} className={cn}>
+    <Link to={to} className={cn} {...props}>
       {Icon && <Icon className={buttonStyles.icon} />}
       {text && <span>{text}</span>}
 
       {children}
     </Link>
   ) : (
-    <a href={to} target="_blank" rel="noreferrer" className={cn}>
+    <a href={to} target="_blank" rel="noreferrer" className={cn} {...props}>
       {Icon && <Icon className={buttonStyles.icon} />}
       {text && <span>{text}</span>}
 

@@ -12,7 +12,7 @@ import { useTokens } from '@/hooks';
 import { cx, getErrorMessage } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import { NETWORK_SVG } from '../../consts';
+import { EXPLORER_URL, NETWORK_SVG } from '../../consts';
 import { Network, Status, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
 import { TransactionStatus } from '../transaction-status';
@@ -73,7 +73,7 @@ function TransactionModal({
   const queryClient = useQueryClient();
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.Pending;
 
-  const explorerUrl = `${isGearNetwork ? 'https://vara.subscan.io/extrinsic' : 'https://holesky.etherscan.io/tx'}/${txHash}`;
+  const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isGearNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];

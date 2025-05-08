@@ -179,7 +179,14 @@ function TransactionModal({
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>
             {txHash && (
-              <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
+              <LinkButton
+                type="external"
+                to={explorerUrl}
+                text="View in Explorer"
+                color="contrast"
+                size="small"
+                block
+              />
             )}
 
             {isPayFeeButtonVisible && (

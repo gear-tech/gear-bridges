@@ -1,5 +1,6 @@
 import ClockSVG from '@/assets/clock.svg?react';
 import { Skeleton } from '@/components';
+import { cx } from '@/utils';
 
 import { Transfer } from '../../types';
 
@@ -9,11 +10,11 @@ type Props = Pick<Transfer, 'timestamp'> & {
   className?: string;
 };
 
-function TransactionDate({ timestamp }: Props) {
+function TransactionDate({ timestamp, className }: Props) {
   const date = new Date(timestamp).toLocaleString();
 
   return (
-    <p className={styles.date}>
+    <p className={cx(styles.date, className)}>
       <ClockSVG /> {date}
     </p>
   );

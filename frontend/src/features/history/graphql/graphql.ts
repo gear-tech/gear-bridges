@@ -138,6 +138,7 @@ export type Pair = {
   ethToken: Scalars['String']['output'];
   gearToken: Scalars['String']['output'];
   id: Scalars['String']['output'];
+  tokenSupply: Network;
 };
 
 export type PairEdge = {
@@ -165,6 +166,12 @@ export enum PairOrderByInput {
   IdDesc = 'id_DESC',
   IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
   IdDescNullsLast = 'id_DESC_NULLS_LAST',
+  TokenSupplyAsc = 'tokenSupply_ASC',
+  TokenSupplyAscNullsFirst = 'tokenSupply_ASC_NULLS_FIRST',
+  TokenSupplyAscNullsLast = 'tokenSupply_ASC_NULLS_LAST',
+  TokenSupplyDesc = 'tokenSupply_DESC',
+  TokenSupplyDescNullsFirst = 'tokenSupply_DESC_NULLS_FIRST',
+  TokenSupplyDescNullsLast = 'tokenSupply_DESC_NULLS_LAST',
 }
 
 export type PairWhereInput = {
@@ -221,6 +228,11 @@ export type PairWhereInput = {
   id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   id_not_startsWith: InputMaybe<Scalars['String']['input']>;
   id_startsWith: InputMaybe<Scalars['String']['input']>;
+  tokenSupply_eq: InputMaybe<Network>;
+  tokenSupply_in: InputMaybe<Array<Network>>;
+  tokenSupply_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  tokenSupply_not_eq: InputMaybe<Network>;
+  tokenSupply_not_in: InputMaybe<Array<Network>>;
 };
 
 export type PairsConnection = {
@@ -640,6 +652,7 @@ export type TransfersQueryQuery = {
     status: Status;
     timestamp: string;
     nonce: string;
+    blockNumber: string;
   }>;
 };
 
@@ -719,6 +732,7 @@ export const TransfersQueryDocument = {
                 { kind: 'Field', name: { kind: 'Name', value: 'status' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'timestamp' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'nonce' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'blockNumber' } },
               ],
             },
           },

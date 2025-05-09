@@ -8,7 +8,7 @@ import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } f
 import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
-import { cx, getErrorMessage, getTruncatedText } from '@/utils';
+import { cx, getErrorMessage, isUndefined, getTruncatedText } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { EXPLORER_URL, NETWORK_SVG } from '../../consts';

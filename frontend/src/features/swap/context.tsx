@@ -1,7 +1,7 @@
 import { HexString } from '@gear-js/api';
-import { createContext, PropsWithChildren, useContext, useMemo, useState } from 'react';
+import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
-import { useTokens } from '@/hooks';
+import { useEthAccount, useTokens } from '@/hooks';
 import { isNativeToken } from '@/utils';
 
 import { NETWORK_INDEX } from './consts';
@@ -64,8 +64,15 @@ const useBridgeContext = () => useContext(BridgeContext);
 
 function BridgeProvider({ children }: PropsWithChildren) {
   // network
-  const [networkIndex, setNetworkIndex] = useState(NETWORK_INDEX.VARA);
+  const ethAccount = useEthAccount();
+  const defaultNetworkIndex = ethAccount.address ? NETWORK_INDEX.ETH : NETWORK_INDEX.VARA;
+
+  const [networkIndex, setNetworkIndex] = useState(defaultNetworkIndex);
   const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
+
+  useEffect(() => {
+    setNetworkIndex(defaultNetworkIndex);
+  }, [defaultNetworkIndex]);
 
   const switchNetwork = () => setNetworkIndex((prevValue) => Number(!prevValue));
 

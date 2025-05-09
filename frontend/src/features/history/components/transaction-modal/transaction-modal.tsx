@@ -1,7 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress, useAccount, useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
 import { Button, Modal } from '@gear-js/vara-ui';
-import { isUndefined } from '@polkadot/util';
 import { useQueryClient } from '@tanstack/react-query';
 import { JSX } from 'react';
 
@@ -9,7 +8,7 @@ import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } f
 import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
-import { cx, getErrorMessage } from '@/utils';
+import { cx, getErrorMessage, getTruncatedText } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { EXPLORER_URL, NETWORK_SVG } from '../../consts';
@@ -112,7 +111,7 @@ function TransactionModal({
           {txHash && (
             <p className={styles.transactionHash}>
               <a href={explorerUrl} target="_blank" rel="noreferrer">
-                <Address value={txHash} />
+                {getTruncatedText(txHash)}
               </a>
 
               <CopyButton value={txHash} />

@@ -29,6 +29,7 @@ function useVaraFTBalances(addresses: FTAddressPair[] | undefined) {
     queryKey: ['vara-ft-balances', account?.decodedAddress, addresses],
     queryFn: getBalances,
     enabled: isApiReady && Boolean(account && addresses),
+    refetchInterval: 10000,
   });
 }
 

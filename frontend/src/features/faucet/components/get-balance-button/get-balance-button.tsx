@@ -46,7 +46,9 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
     mutateAsync()
       .then(() => {
         onSuccess?.();
-        alert.success('Tokens sent to your address');
+        alert.success(
+          'Your request for test tokens has been received and is being processed. The tokens will appear in your balance shortly.',
+        );
       })
       .catch((error: string | Error) => {
         if (error === 'challenge-closed') return;

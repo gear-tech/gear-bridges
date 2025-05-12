@@ -101,9 +101,8 @@ impl EthApi {
         message_queue_address: &str,
         relayer_address: &str,
         private_key: Option<&str>,
+        timeout: Duration,
     ) -> Result<EthApi, Error> {
-        let timeout = Duration::from_secs(180);
-
         let signer = match private_key {
             Some(private_key) => {
                 let pk: B256 =

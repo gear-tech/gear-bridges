@@ -68,6 +68,15 @@ pub struct EthereumArgs {
     /// Address of the ethereum endpoint
     #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
     pub eth_endpoint: String,
+
+    /// Timeout in seconds for requests to the ethereum RPC
+    #[arg(
+        long = "ethereum-rpc-timeout",
+        env = "ETH_RPC_TIMEOUT",
+        default_value = "120"
+    )]
+    pub eth_timeout: Option<u32>,
+
     /// Ethereum address of relayer contract
     #[arg(long = "relayer-address", env = "ETH_RELAYER_ADDRESS")]
     pub relayer_address: String,

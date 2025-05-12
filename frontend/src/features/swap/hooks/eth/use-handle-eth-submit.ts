@@ -53,11 +53,12 @@ function useHandleEthSubmit(
     definedAssert(ftBalance, 'Fungible token balance');
     definedAssert(accountBalance, 'Account balance');
 
-    const valueToMint = amount - ftBalance;
-    const mintGasLimit = await mint.getGasLimit(valueToMint);
+    const valueToMint = token.isNative ? amount : 0n;
+    const isMintRequired = valueToMint > 0n;
+    const mintGasLimit = isMintRequired ? await mint.getGasLimit(valueToMint) : 0n;
 
     const isApproveRequired = amount > allowance;
-    const approveGasLimit = isApproveRequired ? await approve.getGasLimit(amount) : BigInt(0);
+    const approveGasLimit = isApproveRequired ? await approve.getGasLimit(amount) : 0n;
 
     // if approve is not made, transfer gas estimate will fail.
     // it can be avoided by using stateOverride,
@@ -75,7 +76,7 @@ function useHandleEthSubmit(
 
     if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
 
-    return { valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit };
+    return { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit };
   };
 
   const transfer = async (amount: bigint, accountAddress: HexString, gasLimit: bigint | undefined) => {
@@ -95,14 +96,16 @@ function useHandleEthSubmit(
   };
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    const { valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } = await validateBalance(
-      amount,
-      accountAddress,
-    );
+    const { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } =
+      await validateBalance(amount, accountAddress);
 
     openTransactionModal(amount.toString(), accountAddress);
 
-    await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
+    if (isMintRequired) {
+      await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
+    } else {
+      mint.reset();
+    }
 
     if (isApproveRequired) {
       await approve.mutateAsync({ amount, gas: approveGasLimit });

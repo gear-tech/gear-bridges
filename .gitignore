@@ -20,3 +20,5 @@ ethereum/broadcast
 node_modules/
 indexer/lib/
 indexer/assets/
+
+.direnv/

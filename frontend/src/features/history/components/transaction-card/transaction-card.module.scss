@@ -7,6 +7,12 @@
 
 .date {
   color: #f6f6f6e5;
+
+  &Container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 }
 
 .transactionHash {
@@ -14,9 +20,7 @@
   align-items: center;
   gap: 8px;
 
-  button {
-    max-width: 110px;
-
+  button:first-child {
     color: #f6f6f6e5;
     text-decoration: underline;
 

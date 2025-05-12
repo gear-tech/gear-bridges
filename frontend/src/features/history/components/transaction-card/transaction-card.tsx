@@ -1,9 +1,11 @@
 import { HexString } from '@gear-js/api';
 
-import { Address, Card, CopyButton, Skeleton } from '@/components';
+import { Card, CopyButton, Skeleton } from '@/components';
 import { useModal } from '@/hooks';
+import { getTruncatedText } from '@/utils';
 
 import { Transfer } from '../../types';
+import { BlockNumberLink } from '../block-number-link';
 import { TransactionDate } from '../transaction-date';
 import { TransactionModal } from '../transaction-modal';
 import { TransactionPair } from '../transaction-pair';
@@ -24,24 +26,28 @@ type Props = Pick<
   | 'sender'
   | 'receiver'
   | 'nonce'
+  | 'blockNumber'
 > & {
   decimals: Record<HexString, number>;
   symbols: Record<HexString, string>;
 };
 
 function TransactionCard(props: Props) {
-  const { timestamp, txHash, status } = props;
+  const { timestamp, blockNumber, txHash, status, sourceNetwork } = props;
 
   const [isModalOpen, openModal, closeModal] = useModal();
 
   return (
     <>
       <Card className={styles.card}>
-        <TransactionDate timestamp={timestamp} className={styles.date} />
+        <div className={styles.dateContainer}>
+          <TransactionDate timestamp={timestamp} className={styles.date} />
+          <BlockNumberLink blockNumber={blockNumber} sourceNetwork={sourceNetwork} />
+        </div>
 
         <p className={styles.transactionHash}>
           <button type="button" onClick={openModal}>
-            <Address value={txHash} />
+            {getTruncatedText(txHash)}
           </button>
 
           <CopyButton value={txHash} />

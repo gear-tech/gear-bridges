@@ -49,6 +49,10 @@ pub struct GearEthCoreArgs {
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     pub proof_storage_args: ProofStorageArgs,
+
+    /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
+    #[arg(long, env = "START_AUTHORITY_SET_ID")]
+    pub start_authority_set_id: Option<u64>,
 }
 
 #[derive(Args)]
@@ -185,9 +189,9 @@ pub struct EthGearManualArgs {
     #[arg(long = "receiver-program")]
     pub receiver_program: String,
 
-    /// Route of the function that will be called on receiver-program
+    /// Route of the function that will be called on receiver-program. If not specified then `vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE` is used
     #[arg(long = "receiver-route")]
-    pub receiver_route: String,
+    pub receiver_route: Option<String>,
 
     #[clap(flatten)]
     pub gear_args: GearSignerArgs,

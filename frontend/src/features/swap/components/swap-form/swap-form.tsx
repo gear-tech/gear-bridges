@@ -5,7 +5,7 @@ import { useAppKit } from '@reown/appkit/react';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
-import { Input, Skeleton, TokenSVG } from '@/components';
+import { Input } from '@/components';
 import { TransactionModal } from '@/features/history/components/transaction-modal';
 import { Network as TransferNetwork } from '@/features/history/types';
 import { TokenPrice } from '@/features/token-price';
@@ -20,10 +20,9 @@ import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowanc
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
-import { SelectToken } from '../select-token';
 import { SubmitProgressBar } from '../submit-progress-bar';
-import { SubmitTooltip } from '../submit-tooltip';
 import { SwapNetworkButton } from '../swap-network-button';
+import { Token } from '../token';
 
 import styles from './swap-form.module.scss';
 
@@ -149,14 +148,13 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
               </header>
 
               <div className={styles.row}>
-                <div className={styles.wallet}>
-                  <TokenSVG address={address} networkIndex={networkIndex} sizes={[48, 28]} />
-
-                  <div className={styles.token}>
-                    <SelectToken symbol={symbol} />
-                    <p className={styles.network}>{isVaraNetwork ? 'Vara Testnet' : 'Ethereum Holesky'}</p>
-                  </div>
-                </div>
+                <Token
+                  type="select"
+                  address={address}
+                  symbol={symbol}
+                  network={isVaraNetwork ? 'Vara Testnet' : 'Ethereum Holesky'}
+                  networkIndex={networkIndex}
+                />
 
                 <AmountInput />
               </div>
@@ -173,16 +171,15 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
               <h3 className={styles.heading}>To</h3>
 
               <div className={styles.row}>
-                <div className={styles.wallet}>
-                  <TokenSVG address={destinationAddress} networkIndex={Number(!networkIndex)} sizes={[48, 28]} />
+                <Token
+                  type="text"
+                  address={destinationAddress}
+                  symbol={destinationSymbol}
+                  network={isVaraNetwork ? 'Ethereum Holesky' : 'Vara Testnet'}
+                  networkIndex={Number(!networkIndex)}
+                />
 
-                  <div className={styles.token}>
-                    <p className={styles.symbol}>{destinationSymbol || <Skeleton width="6rem" />}</p>
-                    <p className={styles.network}>{isVaraNetwork ? 'Ethereum Holesky' : 'Vara Testnet'}</p>
-                  </div>
-                </div>
-
-                <AmountInput.Value decimals={decimals} />
+                <AmountInput.Value />
               </div>
 
               <div className={styles.priceFooter}>{renderTokenPrice()}</div>
@@ -201,24 +198,22 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
           <DetailsAccordion isVaraNetwork={isVaraNetwork} />
 
           {isNetworkAccountConnected ? (
-            <SubmitTooltip allowance={allowance.data} decimals={decimals} symbol={symbol} amount={amount}>
-              <Button
-                type="submit"
-                text={getButtonText()}
-                disabled={!isEnoughBalance()}
-                isLoading={
-                  mint?.isPending ||
-                  payFee?.isPending ||
-                  submit.isPending ||
-                  accountBalance.isLoading ||
-                  ftBalance.isLoading ||
-                  config.isLoading ||
-                  bridge.isLoading ||
-                  allowance.isLoading
-                }
-                block
-              />
-            </SubmitTooltip>
+            <Button
+              type="submit"
+              text={getButtonText()}
+              disabled={!isEnoughBalance()}
+              isLoading={
+                mint?.isPending ||
+                payFee?.isPending ||
+                submit.isPending ||
+                accountBalance.isLoading ||
+                ftBalance.isLoading ||
+                config.isLoading ||
+                bridge.isLoading ||
+                allowance.isLoading
+              }
+              block
+            />
           ) : (
             <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
           )}

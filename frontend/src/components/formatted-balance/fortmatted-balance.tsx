@@ -1,4 +1,3 @@
-import { formatBalance } from '@polkadot/util';
 import { formatUnits } from 'viem';
 
 import { TruncatedText } from '../layout';
@@ -11,16 +10,20 @@ type Props = {
   className?: string;
 };
 
+const FORMATTER = new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 4,
+});
+
 function FormattedBalance({ value, decimals, symbol, className }: Props) {
   const formattedValue = formatUnits(value, decimals);
-  const compactBalance = formatBalance(value, { decimals, withUnit: symbol, withZero: false });
+  const compactValue = FORMATTER.format(Number(formattedValue));
+
+  const getText = (_value: string) => `${_value} ${symbol}`;
 
   return (
-    <Tooltip value={`${formattedValue} ${symbol}`}>
-      <TruncatedText
-        value={compactBalance === '0' ? `${compactBalance} ${symbol}` : compactBalance}
-        className={className}
-      />
+    <Tooltip value={getText(formattedValue)}>
+      <TruncatedText value={getText(compactValue)} className={className} />
     </Tooltip>
   );
 }

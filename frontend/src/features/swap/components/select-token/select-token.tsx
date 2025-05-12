@@ -1,6 +1,5 @@
 import { HexString } from '@gear-js/api';
 import { Input, Modal } from '@gear-js/vara-ui';
-import { isUndefined } from '@polkadot/util';
 import { useState } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -15,7 +14,7 @@ import {
   useVaraAccountBalance,
   useEthAccountBalance,
 } from '@/hooks';
-import { cx, isNativeToken } from '@/utils';
+import { cx, isNativeToken, isUndefined } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { NETWORK_INDEX } from '../../consts';
@@ -24,7 +23,7 @@ import { useBridgeContext } from '../../context';
 import styles from './select-token.module.scss';
 
 type Props = {
-  symbol: string | undefined;
+  symbol: string;
 };
 
 type ModalProps = {
@@ -155,8 +154,6 @@ function SelectTokenModal({ close }: ModalProps) {
 
 function SelectToken({ symbol }: Props) {
   const [isModalOpen, openModal, closeModal] = useModal();
-
-  if (!symbol) return <Skeleton width="6rem" height="24px" />;
 
   return (
     <>

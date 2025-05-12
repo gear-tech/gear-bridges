@@ -1,11 +1,12 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
-import { isUndefined } from '@polkadot/util';
 import { useAppKit, useWalletInfo } from '@reown/appkit/react';
 
-import { FormattedBalance, Skeleton, TruncatedText } from '@/components';
+import EthSVG from '@/assets/eth.svg?react';
+import { FormattedBalance, Skeleton } from '@/components';
 import { useEthAccount, useEthAccountBalance, useModal, useVaraAccountBalance, useVaraSymbol } from '@/hooks';
+import { getTruncatedText, isUndefined } from '@/utils';
 
 import WalletSVG from '../../assets/wallet.svg?react';
 import { WALLET_SVGS } from '../../consts';
@@ -58,10 +59,12 @@ function Wallet() {
 
           <button type="button" className={styles.button} onClick={handleButtonClick}>
             {SVG && <SVG />}
-            {ethWallet && <img src={ethWallet.icon} alt="wallet" />}
 
-            {account && <TruncatedText value={account.address} />}
-            {ethAccount.address && <TruncatedText value={ethAccount.address} />}
+            {/* icon from useWalletInfo only exists on initial wallet connection */}
+            {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : ethAccount.address && <EthSVG />}
+
+            {account && getTruncatedText(account.address)}
+            {ethAccount.address && getTruncatedText(ethAccount.address)}
           </button>
         </div>
       ) : (

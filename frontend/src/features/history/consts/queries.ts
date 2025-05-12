@@ -17,6 +17,7 @@ const TRANSFERS_QUERY = graphql(`
       status
       timestamp
       nonce
+      blockNumber
     }
   }
 `);

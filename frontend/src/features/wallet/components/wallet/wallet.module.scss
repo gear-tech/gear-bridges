@@ -18,7 +18,6 @@
 }
 
 .button {
-  max-width: 172px;
   padding: 4px 16px;
 
   display: flex;
@@ -31,9 +30,8 @@
   background-color: #fff;
   transition: background-color 0.25s;
 
-  overflow: hidden;
-
-  img {
+  img,
+  svg {
     width: 24px;
     height: 24px;
   }

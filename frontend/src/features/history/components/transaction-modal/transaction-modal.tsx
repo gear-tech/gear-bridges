@@ -1,7 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress, useAccount, useAlert, useProgram, useSendProgramTransaction } from '@gear-js/react-hooks';
 import { Button, Modal } from '@gear-js/vara-ui';
-import { isUndefined } from '@polkadot/util';
 import { useQueryClient } from '@tanstack/react-query';
 import { JSX } from 'react';
 
@@ -9,10 +8,10 @@ import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } f
 import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { useTokens } from '@/hooks';
-import { cx, getErrorMessage } from '@/utils';
+import { cx, getErrorMessage, isUndefined, getTruncatedText } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import { NETWORK_SVG } from '../../consts';
+import { EXPLORER_URL, NETWORK_SVG } from '../../consts';
 import { Network, Status, Transfer } from '../../types';
 import { TransactionDate } from '../transaction-date';
 import { TransactionStatus } from '../transaction-status';
@@ -73,7 +72,7 @@ function TransactionModal({
   const queryClient = useQueryClient();
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.Pending;
 
-  const explorerUrl = `${isGearNetwork ? 'https://vara.subscan.io/extrinsic' : 'https://holesky.etherscan.io/tx'}/${txHash}`;
+  const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isGearNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
@@ -112,7 +111,7 @@ function TransactionModal({
           {txHash && (
             <p className={styles.transactionHash}>
               <a href={explorerUrl} target="_blank" rel="noreferrer">
-                <Address value={txHash} />
+                {getTruncatedText(txHash)}
               </a>
 
               <CopyButton value={txHash} />
@@ -179,7 +178,14 @@ function TransactionModal({
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>
             {txHash && (
-              <LinkButton type="external" to={explorerUrl} text="View in Explorer" color="grey" size="small" block />
+              <LinkButton
+                type="external"
+                to={explorerUrl}
+                text="View in Explorer"
+                color="contrast"
+                size="small"
+                block
+              />
             )}
 
             {isPayFeeButtonVisible && (

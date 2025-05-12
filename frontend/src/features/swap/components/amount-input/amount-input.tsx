@@ -1,13 +1,17 @@
 import { Controller, FieldError, get, useFormContext } from 'react-hook-form';
-import { NumericFormat } from 'react-number-format';
-import { parseUnits } from 'viem';
+import { NumericFormat, numericFormatter } from 'react-number-format';
 
-import { FormattedBalance } from '@/components';
+import { TruncatedText } from '@/components';
 import { cx } from '@/utils';
 
 import { FIELD_NAME } from '../../consts';
 
 import styles from './amount-input.module.scss';
+
+const PROPS = {
+  thousandSeparator: ' ',
+  allowNegative: false,
+} as const;
 
 function AmountInput() {
   return (
@@ -21,10 +25,9 @@ function AmountInput() {
             placeholder="0"
             value={fieldValue}
             onValueChange={({ value }) => field.onChange(value)}
-            allowNegative={false}
             aria-invalid={Boolean(error?.message)}
-            thousandSeparator
             className={cx(styles.input, Number(fieldValue) && styles.active)}
+            {...PROPS}
           />
         );
       }}
@@ -44,15 +47,13 @@ function AmountInputError() {
   return <p className={styles.error}>{error.message}</p>;
 }
 
-function AmountInputValue({ decimals = 0 }: { decimals: number | undefined }) {
+function AmountInputValue() {
   const { watch } = useFormContext();
   const amount = (watch(FIELD_NAME.VALUE) as string) || '0';
 
   return (
-    <FormattedBalance
-      value={parseUnits(amount, decimals)}
-      decimals={decimals}
-      symbol=""
+    <TruncatedText
+      value={numericFormatter(amount, PROPS)}
       className={cx(styles.amount, Number(amount) && styles.active)}
     />
   );

@@ -50,10 +50,11 @@ function useHandleVaraSubmit(
     definedAssert(ftBalance, 'Fungible token balance');
     definedAssert(accountBalance, 'Account balance');
 
-    const valueToMint = amount - ftBalance;
+    const valueToMint = token.isNative ? amount : 0n;
     const isApproveRequired = amount > allowance;
 
-    const preparedMint = await mint.prepareTransactionAsync({ args: [], value: valueToMint });
+    const preparedMint =
+      valueToMint > 0n ? await mint.prepareTransactionAsync({ args: [], value: valueToMint }) : DEFAULT_TX;
 
     const preparedApprove = isApproveRequired
       ? await approve.prepareTransactionAsync({ args: [VFT_MANAGER_CONTRACT_ADDRESS, amount] })
@@ -95,7 +96,7 @@ function useHandleVaraSubmit(
 
     const { mintTx, approveTx, transferTx } = await validateBalance(amount, accountAddress);
 
-    const extrinsics = [mintTx.extrinsic, approveTx?.extrinsic, transferTx.extrinsic].filter(
+    const extrinsics = [mintTx?.extrinsic, approveTx?.extrinsic, transferTx.extrinsic].filter(
       Boolean,
     ) as SubmittableExtrinsic<'promise', ISubmittableResult>[];
 

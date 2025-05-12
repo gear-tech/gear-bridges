@@ -109,3 +109,15 @@ async fn test_utility_functions() {
 
     assert_eq!(endpoint_for_slot_1, Ok(ActorId::from(0x800)));
 }
+
+#[test]
+fn test_routes_eq() {
+    assert_eq!(
+        eth_events_deneb_client::ethereum_event_client::io::CheckpointLightClientAddress::ROUTE,
+        eth_events_electra_client::ethereum_event_client::io::CheckpointLightClientAddress::ROUTE
+    );
+    assert_eq!(
+        eth_events_deneb_client::ethereum_event_client::io::CheckProofs::ROUTE,
+        eth_events_electra_client::ethereum_event_client::io::CheckProofs::ROUTE
+    );
+}

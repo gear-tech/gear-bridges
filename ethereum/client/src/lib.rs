@@ -228,7 +228,7 @@ impl EthApi {
         &self,
         from: u64,
         to: u64,
-    ) -> Result<Vec<MerkleRootEntry>, Error> {
+    ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         self.contracts.fetch_merkle_roots_in_range(from, to).await
     }
 
@@ -391,7 +391,7 @@ where
             .number)
     }
 
-    pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<MerkleRootEntry>, Error> {
+    pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         let current_block: u64 = self.provider.get_block_number().await?;
 
         self.fetch_merkle_roots_in_range(
@@ -405,7 +405,7 @@ where
         &self,
         from: u64,
         to: u64,
-    ) -> Result<Vec<MerkleRootEntry>, Error> {
+    ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         let filter = Filter::new()
             .address(*self.relayer_instance.address())
             .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH)
@@ -418,10 +418,10 @@ where
 
         Ok(logs
             .iter()
-            .map(|(event, _)| MerkleRootEntry {
+            .map(|(event, log)| (MerkleRootEntry {
                 block_number: event.blockNumber.to(),
                 merkle_root: event.merkleRoot.0.into(),
-            })
+            }, log.block_number))
             .collect())
     }
 

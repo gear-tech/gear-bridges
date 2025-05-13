@@ -122,7 +122,7 @@ impl MerkleRootExtractor {
                     );
                 }
 
-                for merkle_root in merkle_roots {
+                for (merkle_root, _block_number_eth) in merkle_roots {
                     self.metrics
                         .latest_merkle_root_for_block
                         .set(merkle_root.block_number as i64);

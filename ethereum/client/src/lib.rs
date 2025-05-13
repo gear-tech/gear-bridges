@@ -29,7 +29,7 @@ pub use alloy::primitives::TxHash;
 
 mod abi;
 use abi::{
-    BridgingPayment, ContentMessage, IERC20Manager, IMessageQueue,
+    BridgingPayment, IMessageQueue::VaraMessage, IERC20Manager, IMessageQueue,
     IMessageQueue::IMessageQueueInstance, IRelayer, IRelayer::IRelayerInstance,
     IRelayer::MerkleRoot,
 };
@@ -489,7 +489,7 @@ where
             block_number,
             total_leaves,
             leaf_index,
-            ContentMessage {
+            VaraMessage {
                 nonce,
                 sender,
                 receiver,
@@ -532,7 +532,7 @@ where
         // TODO: Change isProcessed to accept only nonce.
         let processed = self
             .message_queue_instance
-            .isProcessed(ContentMessage {
+            .isProcessed(VaraMessage {
                 nonce,
                 sender: Default::default(),
                 receiver: Default::default(),

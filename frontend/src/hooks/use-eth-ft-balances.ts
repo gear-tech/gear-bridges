@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { useReadContracts } from 'wagmi';
 
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
-import { useEthAccount } from '@/hooks';
+import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
 import { FTAddressPair } from '@/types';
 import { isUndefined } from '@/utils';
 
@@ -34,13 +34,17 @@ function useEthFTBalances(addresses: FTAddressPair[] | undefined) {
     return Object.fromEntries(entries) as Record<HexString, bigint>;
   };
 
-  return useReadContracts({
+  const query = useReadContracts({
     contracts,
     query: {
       enabled: ethAccount.isConnected,
       select: getBalancesMap,
     },
   });
+
+  useInvalidateOnBlock(query);
+
+  return query;
 }
 
 export { useEthFTBalances };

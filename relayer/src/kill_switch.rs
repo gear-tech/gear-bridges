@@ -228,7 +228,7 @@ impl KillSwitchRelayer {
                 .inc_by(events.len() as u64);
         }
 
-        for event in events {
+        for (event, _block_number_eth) in events {
             if !self.compare_merkle_roots(&event).await? {
                 // Okay, we have a mismatch,
                 // that means for some reason the proof with incorrect merkle root was submitted to relayer contract.

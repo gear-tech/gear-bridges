@@ -35,6 +35,9 @@ pub enum CliCommands {
 
     /// Start kill switch relayer
     KillSwitch(KillSwitchArgs),
+
+    /// Fetch relayed merkle roots to Ethereum
+    FetchMerkleRoots(FetchMerkleRootsArgs),
 }
 
 #[derive(Args)]
@@ -217,4 +220,17 @@ pub struct KillSwitchArgs {
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     pub proof_storage_args: ProofStorageArgs,
+}
+
+#[derive(Args)]
+pub struct FetchMerkleRootsArgs {
+    /// Ethereum block number to fetch merkle roots from
+    #[arg(long)]
+    pub from_eth_block: u64,
+
+    #[clap(flatten)]
+    pub ethereum_args: EthereumArgs,
+
+    #[clap(flatten)]
+    pub gear_args: GearArgs,
 }

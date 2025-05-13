@@ -29,9 +29,8 @@ pub use alloy::primitives::TxHash;
 
 mod abi;
 use abi::{
-    BridgingPayment, IMessageQueue::VaraMessage, IERC20Manager, IMessageQueue,
-    IMessageQueue::IMessageQueueInstance, IRelayer, IRelayer::IRelayerInstance,
-    IRelayer::MerkleRoot,
+    BridgingPayment, IERC20Manager, IMessageQueue, IMessageQueue::IMessageQueueInstance,
+    IMessageQueue::VaraMessage, IRelayer, IRelayer::IRelayerInstance, IRelayer::MerkleRoot,
 };
 
 pub mod error;
@@ -391,7 +390,10 @@ where
             .number)
     }
 
-    pub async fn fetch_merkle_roots(&self, depth: u64) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
+    pub async fn fetch_merkle_roots(
+        &self,
+        depth: u64,
+    ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         let current_block: u64 = self.provider.get_block_number().await?;
 
         self.fetch_merkle_roots_in_range(
@@ -418,10 +420,15 @@ where
 
         Ok(logs
             .iter()
-            .map(|(event, log)| (MerkleRootEntry {
-                block_number: event.blockNumber.to(),
-                merkle_root: event.merkleRoot.0.into(),
-            }, log.block_number))
+            .map(|(event, log)| {
+                (
+                    MerkleRootEntry {
+                        block_number: event.blockNumber.to(),
+                        merkle_root: event.merkleRoot.0.into(),
+                    },
+                    log.block_number,
+                )
+            })
             .collect())
     }
 

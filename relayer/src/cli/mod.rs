@@ -222,7 +222,6 @@ pub struct KillSwitchArgs {
     pub proof_storage_args: ProofStorageArgs,
 }
 
-
 #[derive(Args)]
 pub struct FetchMerkleRootsArgs {
     /// Ethereum block number to fetch merkle roots from

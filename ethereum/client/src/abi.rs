@@ -24,21 +24,13 @@ sol! {
 
         function isProcessed(ContentMessage calldata message) external view returns (bool);
     }
-
-    #[sol(rpc)]
-    #[derive(Debug,PartialEq, Eq)]
-    interface IRelayer {
-        event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
-
-        function submitMerkleRoot(uint256 block_number, bytes32 merkle_root, bytes calldata proof) external;
-
-        function getMerkleRoot(uint256 block_number) external view returns (bytes32);
-
-        function getBlockNumber(bytes32 merkle_root) external view returns (uint256);
-
-        function emergencyStop() external view returns (bool);
-    }
 }
+
+sol!(
+    #[sol(rpc)]
+    IRelayer,
+    "../../api/ethereum/IRelayer.json"
+);
 
 sol!(
     #[sol(rpc)]

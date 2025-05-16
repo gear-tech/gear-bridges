@@ -25,6 +25,7 @@ pub struct MessageInBlock {
     pub message: Message,
     pub block: GearBlockNumber,
     pub block_hash: H256,
+    pub authority_set_id: AuthoritySetId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -35,7 +36,9 @@ pub struct PaidMessage {
 #[derive(Clone, Copy, Debug)]
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
+    pub block_hash: H256,
     pub authority_set_id: AuthoritySetId,
+    pub merkle_root: H256,
 }
 
 #[derive(Clone, Debug)]

@@ -12,7 +12,7 @@ use ethereum_client::EthApi;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_common::beacon::electra::Block;
 
-use super::{EthereumBlockNumber, EthereumSlotNumber, RelayedMerkleRoot, MessageInBlock, AuthoritySetId, GearBlockNumber};
+use super::{EthereumBlockNumber, EthereumSlotNumber, RelayedMerkleRoot, GearBlockNumber};
 
 pub mod accumulator;
 pub mod block_listener;

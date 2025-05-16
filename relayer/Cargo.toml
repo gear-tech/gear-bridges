@@ -57,5 +57,6 @@ gsdk.workspace = true
 cgo_oligami.workspace = true
 
 [dev-dependencies]
+hex-literal.workspace = true
 ruzstd.workspace = true
 sp-core = { workspace = true, features = ["std"] }

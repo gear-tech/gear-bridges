@@ -50,7 +50,7 @@ pub struct MerkleProof {
     pub leaf_index: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Message {
     pub nonce_le: [u8; 32],
     pub source: [u8; 32],

@@ -238,7 +238,7 @@ impl Era {
     }
 }
 
-async fn submit_message(
+pub async fn submit_message(
     gear_api: &GearApi,
     eth_api: &EthApi,
     message: &Message,

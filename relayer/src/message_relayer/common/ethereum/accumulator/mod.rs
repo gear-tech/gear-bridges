@@ -1,7 +1,7 @@
 mod utils;
 
 use super::*;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, self};
 use utils::{Messages, MerkleRoots};
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -52,9 +52,8 @@ impl Accumulator {
         mut self,
         mut messages: UnboundedReceiver<MessageInBlock>,
         mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
-        mut messages_out: UnboundedSender<(MessageInBlock, RelayedMerkleRoot)>,
-
-    ) {
+    ) -> UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)> {
+        let (mut messages_out, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
             loop {
                 match run_inner(&mut self, &mut messages, &mut merkle_roots, &mut messages_out).await {
@@ -67,6 +66,8 @@ impl Accumulator {
                 }
             }
         });
+
+        receiver
     }
 }
 

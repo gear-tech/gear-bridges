@@ -1,7 +1,7 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use ethereum_client::EthApi;
+use ethereum_client::{EthApi, TxStatus};
 use prometheus::{Gauge, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -65,14 +65,13 @@ impl MessageSender {
 
     pub async fn run(
         mut self,
-        mut messages: UnboundedReceiver<MessageInBlock>,
-        mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
+        mut messages: UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)>,
     ) {
         tokio::task::spawn(async move {
             let mut attempts = 0;
 
             loop {
-                match run_inner(&mut self, &mut messages, &mut merkle_roots).await {
+                match run_inner(&mut self, &mut messages).await {
                     Ok(_) => break,
                     Err(e) => {
                         attempts += 1;
@@ -117,96 +116,54 @@ impl MessageSender {
 
 async fn run_inner(
     self_: &mut MessageSender,
-    messages: &mut UnboundedReceiver<MessageInBlock>,
-    merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
+    messages: &mut UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)>,
 ) -> anyhow::Result<()> {
-    let mut eras: BTreeMap<AuthoritySetId, Era> = BTreeMap::new();
     let gear_api = self_.api_provider.client();
-    loop {
+    while let Some((message, merkle_root)) = messages.recv().await {
+        let tx_hash = era::submit_message(&gear_api, &self_.eth_api, &message.message, merkle_root.block, merkle_root.block_hash).await?;
+        log::debug!("tx_hash = {tx_hash}");
+        self_.metrics.pending_tx_count.inc();
+
+        let eth_api = self_.eth_api.clone();
+        tokio::spawn(async move {
+            // wait for 30 minutes
+            tokio::time::sleep(tokio::time::Duration::from_secs(30 * 60)).await;
+
+            let status = eth_api.get_tx_status(tx_hash).await;
+            match status {
+                Ok(TxStatus::Pending) => {
+                    log::debug!("TxStatus::Pending");
+                }
+
+                Ok(TxStatus::Finalized) => {
+                    log::info!(
+                        "Message at block #{} with nonce {:?} finalized",
+                        message.block.0,
+                        message.message.nonce_le,
+                    );
+
+                    return;
+                }
+
+                Ok(TxStatus::Failed) => {
+                    log::error!(
+                        "Failed to finalize message at block #{} with nonce {:?}",
+                        message.block.0,
+                        message.message.nonce_le,
+                    );
+
+                    return;
+                }
+
+                Err(e) => {
+                    log::warn!("Unable to get status of the transaction {tx_hash:?}: {e:?}")
+                }
+            }
+        });
+
         let fee_payer_balance = self_.eth_api.get_approx_balance().await?;
         self_.metrics.fee_payer_balance.set(fee_payer_balance);
-
-        let recv_messages = messages.recv();
-        pin_mut!(recv_messages);
-
-        let recv_merkle_roots = merkle_roots.recv();
-        pin_mut!(recv_merkle_roots);
-
-        match future::select(recv_messages, recv_merkle_roots).await {
-            Either::Left((None, _)) => {
-                log::info!("Channel with messages closed. Exiting");
-                return Ok(());
-            }
-
-            Either::Right((None, _)) => {
-                log::info!("Channel with merkle roots closed. Exiting");
-                return Ok(());
-            }
-
-            Either::Left((Some(message), _)) => {
-                let authority_set_id = AuthoritySetId(
-                    gear_api
-                        .signed_by_authority_set_id(message.block_hash)
-                        .await?,
-                );
-
-                match eras.entry(authority_set_id) {
-                    Entry::Occupied(mut entry) => {
-                        entry.get_mut().push_message(message);
-                    }
-                    Entry::Vacant(entry) => {
-                        let mut era = Era::new(authority_set_id, self_.era_metrics.clone());
-                        era.push_message(message);
-
-                        entry.insert(era);
-                    }
-                }
-            }
-
-            Either::Right((Some(merkle_root), _)) => {
-                match eras.entry(merkle_root.authority_set_id) {
-                    Entry::Occupied(mut entry) => {
-                        entry.get_mut().push_merkle_root(merkle_root);
-                    }
-                    Entry::Vacant(entry) => {
-                        let mut era =
-                            Era::new(merkle_root.authority_set_id, self_.era_metrics.clone());
-                        era.push_merkle_root(merkle_root);
-
-                        entry.insert(era);
-                    }
-                }
-            }
-        }
-
-        let latest_era = eras.last_key_value().map(|(k, _)| *k);
-        let Some(latest_era) = latest_era else {
-            continue;
-        };
-
-        let mut finalized_eras = vec![];
-
-        for (&era_id, era) in eras.iter_mut() {
-            let res = era.process(&gear_api, &self_.eth_api).await;
-            if let Err(err) = res {
-                log::error!("Failed to process era #{era_id}: {err}");
-                continue;
-            }
-
-            let finalized = era.try_finalize(&self_.eth_api, &gear_api).await?;
-
-            // Latest era cannot be finalized.
-            if finalized && era_id != latest_era {
-                log::info!("Era #{era_id} finalized");
-                finalized_eras.push(era_id);
-            }
-        }
-
-        let pending_tx_count: usize = eras.iter().map(|era| era.1.pending_tx_count()).sum();
-        self_.metrics.pending_tx_count.set(pending_tx_count as i64);
-
-        for finalized in finalized_eras {
-            eras.remove(&finalized);
-        }
     }
+
+    Ok(())
 }

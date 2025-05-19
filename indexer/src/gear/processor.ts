@@ -16,7 +16,7 @@ export const processor = new SubstrateBatchProcessor()
     url: config.rpcUrl,
     rateLimit: 10,
   })
-  .setFinalityConfirmation(75)
+  .setFinalityConfirmation(10)
   .setFields({
     extrinsic: {
       hash: true,

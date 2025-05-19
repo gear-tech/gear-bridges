@@ -4,8 +4,8 @@ enum Network {
 }
 
 enum Status {
-  Pending
-  InProgress
+  AwaitingPayment
+  Bridging
   Completed
   Failed
 }

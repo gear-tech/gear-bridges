@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build": "rm -rf lib && tsc",
-    "migration:generate": "sqd migration generate"
+    "migration:generate": "sqd migration generate",
+    "code:generate": "sqd codegen"
   },
   "dependencies": {
     "@polkadot/util": "^13.4.4",

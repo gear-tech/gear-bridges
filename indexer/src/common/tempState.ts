@@ -164,7 +164,7 @@ export class TempState {
         this._ctx.log.error(`${nonce}: Failed to update transfer status`);
         return;
       }
-      transfer.status = Status.InProgress;
+      transfer.status = status;
       this._transfers.set(nonce, transfer);
     }
     this._ctx.log.info(`${nonce}: Transfer changed status to ${status}`);

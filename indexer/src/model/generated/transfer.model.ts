@@ -42,7 +42,7 @@ export class Transfer {
     @StringColumn_({nullable: false})
     destination!: string
 
-    @Column_("varchar", {length: 10, nullable: false})
+    @Column_("varchar", {length: 15, nullable: false})
     status!: Status
 
     @Index_()

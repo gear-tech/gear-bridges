@@ -1,6 +1,6 @@
 export enum Status {
-    Pending = "Pending",
-    InProgress = "InProgress",
+    AwaitingPayment = "AwaitingPayment",
+    Bridging = "Bridging",
     Completed = "Completed",
     Failed = "Failed",
 }

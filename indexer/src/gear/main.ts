@@ -48,7 +48,7 @@ const handler = async (ctx: ProcessorContext) => {
                   source: vara_token_id,
                   destNetwork: Network.Ethereum,
                   destination: tempState.getDestinationAddress(vara_token_id),
-                  status: Status.Pending,
+                  status: Status.AwaitingPayment,
                   sender,
                   receiver,
                   amount: BigInt(amount),
@@ -108,7 +108,7 @@ const handler = async (ctx: ProcessorContext) => {
 
             const { nonce } = bridgingPaymentDecoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
 
-            promises.push(tempState.transferStatus(gearNonce(nonce), Status.InProgress));
+            promises.push(tempState.transferStatus(gearNonce(nonce), Status.Bridging));
             break;
           }
         }

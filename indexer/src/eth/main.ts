@@ -38,7 +38,7 @@ const handler = async (ctx: Context) => {
               source: token,
               destNetwork: Network.Gear,
               destination: tempState.getDestinationAddress(token),
-              status: Status.InProgress,
+              status: Status.Bridging,
               sender: from,
               receiver: to,
               amount,

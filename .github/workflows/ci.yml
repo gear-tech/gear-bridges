@@ -34,11 +34,58 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly-f47d7e0c29a36372908b917cd74aa589d5888f8e # TODO: Change back once https://github.com/foundry-rs/foundry/issues/10102 will be resolved
-      - name: Build ethereum smart-contracts
+      - name: Build ethereum smart-contracts  # Original build job's step
         run: forge build
         working-directory: ./ethereum
-      - name: Build
+      - name: Build                         # Original build job's step
         run: cargo build --release --all-targets
+      - name: Build ethereum smart-contracts for API check # From check-api-files, for the check
+        run: forge build --force --no-cache --root ethereum
+      - name: Check that files match
+        run: |
+          stored=(
+            "./api/ethereum/IBridgingPayment.json"
+            "./api/ethereum/IERC20Manager.json"
+            "./api/ethereum/IMessageQueue.json"
+            "./api/ethereum/EthereumToken.json"
+            "./api/ethereum/ERC20Manager.json"
+            "./api/ethereum/IRelayer.json"
+            "./api/ethereum/MessageQueue.json"
+
+            "./api/gear/bridging_payment.idl"
+            "./api/gear/eth_events_deneb.idl"
+            "./api/gear/eth_events_electra.idl"
+            "./api/gear/vft_manager.idl"
+            "./api/gear/historical_proxy.idl"
+            "./api/gear/vft.idl"
+            "./api/gear/vft_vara.idl"
+          )
+
+          generated=(
+            "./ethereum/out/IBridgingPayment.sol/IBridgingPayment.json"
+            "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
+            "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
+            "./ethereum/out/EthereumToken.sol/EthereumToken.json"
+            "./ethereum/out/ERC20Manager.sol/ERC20Manager.json"
+            "./ethereum/out/IRelayer.sol/IRelayer.json"
+            "./ethereum/out/MessageQueue.sol/MessageQueue.json"
+
+            "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
+            "./target/wasm32-unknown-unknown/release/eth_events_deneb.idl"
+            "./target/wasm32-unknown-unknown/release/eth_events_electra.idl"
+            "./target/wasm32-unknown-unknown/release/vft_manager.idl"
+            "./target/wasm32-unknown-unknown/release/historical_proxy.idl"
+            "./target/wasm32-unknown-unknown/release/vft.idl"
+            "./target/wasm32-unknown-unknown/release/vft_vara.idl"
+          )
+
+          for i in "${!stored[@]}"; do
+            if ! cmp -s "${stored[$i]}" "${generated[$i]}"; then
+              echo "API files ${stored[$i]} and ${generated[$i]} don't match."
+              diff "${stored[$i]}" "${generated[$i]}"
+              exit 1
+            fi
+          done
   lints:
     runs-on: kuberunner
     steps:
@@ -140,72 +187,3 @@ jobs:
           -p plonky2_ed25519
           -p plonky2_sha512
           -p plonky2_u32
-  check-api-files:
-    runs-on: kuberunner
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: false
-
-      - name: Install golang
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.20.1'
-
-      - name: Install foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
-      - name: Build ethereum smart-contracts
-        run: forge build --force --no-cache --root ethereum
-
-      - name: Build workspace
-        run: cargo build --release --all-targets
-
-      - name: Check that files match
-        run: |
-          stored=(
-            "./api/ethereum/IBridgingPayment.json"
-            "./api/ethereum/IERC20Manager.json"
-            "./api/ethereum/IMessageQueue.json"
-            "./api/ethereum/EthereumToken.json"
-            "./api/ethereum/ERC20Manager.json"
-            "./api/ethereum/IRelayer.json"
-            "./api/ethereum/MessageQueue.json"
-
-            "./api/gear/bridging_payment.idl"
-            "./api/gear/eth_events_deneb.idl"
-            "./api/gear/eth_events_electra.idl"
-            "./api/gear/vft_manager.idl"
-            "./api/gear/historical_proxy.idl"
-            "./api/gear/vft.idl"
-            "./api/gear/vft_vara.idl"
-          )
-
-          generated=(
-            "./ethereum/out/IBridgingPayment.sol/IBridgingPayment.json"
-            "./ethereum/out/IERC20Manager.sol/IERC20Manager.json"
-            "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
-            "./ethereum/out/EthereumToken.sol/EthereumToken.json"
-            "./ethereum/out/ERC20Manager.sol/ERC20Manager.json"
-            "./ethereum/out/IRelayer.sol/IRelayer.json"
-            "./ethereum/out/MessageQueue.sol/MessageQueue.json"
-
-            "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
-            "./target/wasm32-unknown-unknown/release/eth_events_deneb.idl"
-            "./target/wasm32-unknown-unknown/release/eth_events_electra.idl"
-            "./target/wasm32-unknown-unknown/release/vft_manager.idl"
-            "./target/wasm32-unknown-unknown/release/historical_proxy.idl"
-            "./target/wasm32-unknown-unknown/release/vft.idl"
-            "./target/wasm32-unknown-unknown/release/vft_vara.idl"
-          )
-
-          for i in "${!stored[@]}"; do
-            if ! cmp -s "${stored[$i]}" "${generated[$i]}"; then
-              echo "API files ${stored[$i]} and ${generated[$i]} don't match."
-              diff "${stored[$i]}" "${generated[$i]}"
-              exit 1
-            fi
-          done

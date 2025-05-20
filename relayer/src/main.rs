@@ -28,8 +28,8 @@ mod relay_merkle_roots;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, GearArgs, GearEthTokensCommands, GearSignerArgs,
-    GenesisConfigArgs, ProofStorageArgs,
+    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
+    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
 };
 
 #[tokio::main]
@@ -405,6 +405,12 @@ async fn main() {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
+
+        CliCommands::FetchMerkleRoots(args) => {
+            if let Err(e) = fetch_merkle_roots(args).await {
+                log::error!("{e:?}");
+            }
+        }
     };
 }
 
@@ -501,4 +507,35 @@ fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConf
         authority_set_id: genesis_config_args.authority_set_id,
         authority_set_hash,
     }
+}
+
+async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> anyhow::Result<()> {
+    let eth_api = create_eth_client(&args.ethereum_args);
+    let block_finalized = eth_api.finalized_block_number().await?;
+
+    if args.from_eth_block > block_finalized {
+        return Ok(());
+    }
+
+    let merkle_roots = eth_api
+        .fetch_merkle_roots_in_range(args.from_eth_block, block_finalized)
+        .await?;
+
+    let gear_api = gear_rpc_client::GearApi::new(
+        &args.gear_args.domain,
+        args.gear_args.port,
+        args.gear_args.retries,
+    )
+    .await?;
+
+    for (root, block_number_eth) in merkle_roots {
+        let block_hash = gear_api
+            .block_number_to_hash(root.block_number as u32)
+            .await?;
+        let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+
+        log::info!("{root:?}, block_hash = {block_hash:?}, authority_set_id = {authority_set_id}, block_number_eth = {block_number_eth:?}");
+    }
+
+    Ok(())
 }

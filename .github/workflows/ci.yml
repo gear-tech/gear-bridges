@@ -34,14 +34,14 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly-f47d7e0c29a36372908b917cd74aa589d5888f8e # TODO: Change back once https://github.com/foundry-rs/foundry/issues/10102 will be resolved
-      - name: Build ethereum smart-contracts  # Original build job's step
+      - name: Build ethereum smart-contracts
         run: forge build
         working-directory: ./ethereum
-      - name: Build                         # Original build job's step
+      - name: Build
         run: cargo build --release --all-targets
-      - name: Build ethereum smart-contracts for API check # From check-api-files, for the check
+      - name: Force build ethereum smart-contracts
         run: forge build --force --no-cache --root ethereum
-      - name: Check that files match
+      - name: Check API files
         run: |
           stored=(
             "./api/ethereum/IBridgingPayment.json"

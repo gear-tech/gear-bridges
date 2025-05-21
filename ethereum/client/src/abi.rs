@@ -15,13 +15,13 @@ sol!(
 sol!(
     #[sol(rpc)]
     IERC20Manager,
-    "../out/IERC20Manager.sol/IERC20Manager.json"
+    "../../api/ethereum/IERC20Manager.json"
 );
 
 sol!(
     #[sol(rpc)]
     BridgingPayment,
-    "../out/BridgingPayment.sol/BridgingPayment.json"
+    "../../api/ethereum/BridgingPayment.json"
 );
 
 impl IMessageQueue::VaraMessage {

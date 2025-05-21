@@ -72,7 +72,11 @@ impl BlockListener {
             .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(&self, senders: &[UnboundedSender<GearBlockNumber>], current_block: &mut u32) -> anyhow::Result<()> {
+    async fn run_inner(
+        &self,
+        senders: &[UnboundedSender<GearBlockNumber>],
+        current_block: &mut u32,
+    ) -> anyhow::Result<()> {
         self.metrics.latest_block.set(*current_block as i64);
         let gear_api = self.api_provider.client();
         loop {

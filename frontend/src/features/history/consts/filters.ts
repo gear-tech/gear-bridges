@@ -22,8 +22,8 @@ const STATUS_OPTIONS = [
   { label: 'All Statuses', value: '' },
   { label: 'Completed', value: Status.Completed },
   { label: 'Failed', value: Status.Failed },
-  { label: 'Pending', value: Status.Pending },
-  { label: 'In Progress', value: Status.InProgress },
+  { label: 'Awaiting Payment', value: Status.AwaitingPayment },
+  { label: 'Bridging', value: Status.Bridging },
 ];
 
 const DEFAULT_VALUES = {

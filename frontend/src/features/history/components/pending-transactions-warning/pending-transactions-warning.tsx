@@ -13,7 +13,9 @@ function PendingTransactionsWarning() {
   const { account } = useAccount(); // fee payment is a standalone transaction only for vara network
 
   const [txsCount] = useTransactionsCount(
-    account ? ({ sender_eq: account.decodedAddress, status_eq: Status.Pending } as TransferWhereInput) : undefined,
+    account
+      ? ({ sender_eq: account.decodedAddress, status_eq: Status.AwaitingPayment } as TransferWhereInput)
+      : undefined,
   );
 
   if (!account || !txsCount) return;
@@ -24,7 +26,7 @@ function PendingTransactionsWarning() {
 
       <p>
         You have transactions awaiting fee payment.{' '}
-        <Link to={`${ROUTE.TRANSACTIONS}?owner=true&status=${Status.Pending}`}>Navigate</Link>
+        <Link to={`${ROUTE.TRANSACTIONS}?owner=true&status=${Status.AwaitingPayment}`}>Navigate</Link>
       </p>
     </div>
   );

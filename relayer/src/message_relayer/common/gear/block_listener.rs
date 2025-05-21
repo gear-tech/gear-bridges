@@ -48,8 +48,9 @@ impl BlockListener {
             (0..RECEIVER_COUNT).map(|_| unbounded_channel()).unzip();
 
         tokio::task::spawn(async move {
+            let mut current_block = self.from_block;
             loop {
-                let res = self.run_inner(&senders).await;
+                let res = self.run_inner(&senders, &mut current_block).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {}", err);
 
@@ -71,17 +72,15 @@ impl BlockListener {
             .expect("Expected Vec of correct length")
     }
 
-    async fn run_inner(&self, senders: &[UnboundedSender<GearBlockNumber>]) -> anyhow::Result<()> {
-        let mut current_block = self.from_block;
-
-        self.metrics.latest_block.set(current_block as i64);
+    async fn run_inner(&self, senders: &[UnboundedSender<GearBlockNumber>], current_block: &mut u32) -> anyhow::Result<()> {
+        self.metrics.latest_block.set(*current_block as i64);
         let gear_api = self.api_provider.client();
         loop {
             let finalized_head = gear_api.latest_finalized_block().await?;
             let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;
 
-            if finalized_head >= current_block {
-                for block in current_block..=finalized_head {
+            if finalized_head >= *current_block {
+                for block in *current_block..=finalized_head {
                     for sender in senders {
                         sender.send(GearBlockNumber(block))?;
                     }
@@ -89,7 +88,7 @@ impl BlockListener {
                     self.metrics.latest_block.inc();
                 }
 
-                current_block = finalized_head + 1;
+                *current_block = finalized_head + 1;
             } else {
                 tokio::time::sleep(GEAR_BLOCK_TIME_APPROX).await;
             }

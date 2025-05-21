@@ -1,4 +1,4 @@
-FROM debian:12-slim as builder
+FROM debian:12-slim AS builder
 
 SHELL ["/bin/bash", "-c"]
 
@@ -24,11 +24,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo install wasm-opt
 
 # Install go
-ENV GO_VERSION 1.20.1
+ENV GO_VERSION=1.20.1
 RUN wget -P /tmp "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" && \
     tar -C /usr/local -xzf "/tmp/go${GO_VERSION}.linux-amd64.tar.gz" && \
     rm "/tmp/go${GO_VERSION}.linux-amd64.tar.gz"
-ENV PATH /go/bin:/usr/local/go/bin:$PATH
+ENV PATH=/go/bin:/usr/local/go/bin:$PATH
 
 # Install foundry
 RUN curl -L https://foundry.paradigm.xyz | bash && \

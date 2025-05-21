@@ -14,7 +14,9 @@ import { Status, TransferWhereInput } from '../types';
 
 const SCHEMA = z.object({
   [FIELD_NAME.TIMESTAMP]: z.string(),
-  [FIELD_NAME.STATUS]: asOptionalField(z.enum([Status.Completed, Status.Failed, Status.Pending, Status.InProgress])),
+  [FIELD_NAME.STATUS]: asOptionalField(
+    z.enum([Status.Completed, Status.Failed, Status.AwaitingPayment, Status.Bridging]),
+  ),
   [FIELD_NAME.ASSET]: z.string(),
 
   [FIELD_NAME.SEARCH]: asOptionalField(

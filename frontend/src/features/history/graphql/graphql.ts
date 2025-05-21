@@ -323,10 +323,10 @@ export type SquidStatus = {
 };
 
 export enum Status {
+  AwaitingPayment = 'AwaitingPayment',
+  Bridging = 'Bridging',
   Completed = 'Completed',
   Failed = 'Failed',
-  InProgress = 'InProgress',
-  Pending = 'Pending',
 }
 
 export type Transfer = {

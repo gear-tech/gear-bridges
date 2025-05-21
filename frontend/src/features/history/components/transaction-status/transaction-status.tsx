@@ -10,9 +10,9 @@ import styles from './transaction-status.module.scss';
 
 const STATUS_SVG = {
   [StatusType.Completed]: CheckSVG,
-  [StatusType.InProgress]: ClockSVG,
+  [StatusType.AwaitingPayment]: ClockSVG,
   [StatusType.Failed]: ErrorSVG,
-  [StatusType.Pending]: ClockSVG,
+  [StatusType.Bridging]: ClockSVG,
 } as const;
 
 function TransactionStatus({ status }: Pick<Transfer, 'status'>) {

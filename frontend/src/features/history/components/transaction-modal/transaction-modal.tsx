@@ -70,7 +70,7 @@ function TransactionModal({
   const payFee = usePayFee();
   const alert = useAlert();
   const queryClient = useQueryClient();
-  const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.Pending;
+  const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.AwaitingPayment;
 
   const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isGearNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
 

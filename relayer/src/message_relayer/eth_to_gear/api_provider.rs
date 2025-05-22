@@ -115,6 +115,31 @@ impl ApiProvider {
         }
     }
 
+    async fn reconnect(&mut self) -> bool {
+        let mut attempts = 0;
+        loop {
+            match Api::builder().retries(self.retries).build(uri).await {
+                Ok(api) => {
+                    self.api = api;
+                    break true;
+                }
+                Err(err) => {
+                    attempts += 1;
+                    log::error!(
+                        "Failed to create API connection (attempt {}/10): {}",
+                        attempts,
+                        err
+                    );
+                    if attempts >= 10 {
+                        log::error!("All 10 attempts to connect to API failed. Giving up.");
+                        return false;
+                    }
+                    tokio::time::sleep(Duration::from_secs(90)).await;
+                }
+            }
+        }
+    }
+
     pub fn spawn(mut self) {
         tokio::spawn(async move {
             while let Some(request) = self.receiver.recv().await {
@@ -141,34 +166,6 @@ impl ApiProvider {
                 }
 
                 let uri: &str = &format!("{}:{}", self.domain, self.port);
-                let mut attempts = 0;
-                loop {
-                    match Api::builder().retries(self.retries).build(uri).await {
-                        Ok(api) => {
-                            self.api = api;
-                            break;
-                        }
-                        Err(err) => {
-                            attempts += 1;
-                            log::error!(
-                                "Failed to create API connection (attempt {}/10): {}",
-                                attempts,
-                                err
-                            );
-                            if attempts >= 10 {
-                                log::error!("All 10 attempts to connect to API failed. Giving up.");
-                                return;
-                            }
-                            tokio::time::sleep(Duration::from_secs(90)).await;
-                        }
-                    }
-                }
-                self.session += 1;
-                log::info!(
-                    "Established new API connection with session number {}",
-                    self.session
-                );
-
                 // TODO: Implement a backoff strategy for the connection
                 let rem = self.session % 10;
                 let sleep_time = if rem < 3 {
@@ -180,6 +177,14 @@ impl ApiProvider {
                 };
 
                 tokio::time::sleep(Duration::from_secs(sleep_time)).await;
+                if !self.reconnect().await {
+                    return;
+                }
+                self.session += 1;
+                log::info!(
+                    "Established new API connection with session number {}",
+                    self.session
+                );
 
                 let response = ApiConnectionResponse {
                     session: self.session,

@@ -116,6 +116,7 @@ impl ApiProvider {
     }
 
     async fn reconnect(&mut self) -> bool {
+        let uri: &str = &format!("{}:{}", self.domain, self.port);
         let mut attempts = 0;
         loop {
             match Api::builder().retries(self.retries).build(uri).await {
@@ -165,7 +166,6 @@ impl ApiProvider {
                     continue;
                 }
 
-                let uri: &str = &format!("{}:{}", self.domain, self.port);
                 // TODO: Implement a backoff strategy for the connection
                 let rem = self.session % 10;
                 let sleep_time = if rem < 3 {

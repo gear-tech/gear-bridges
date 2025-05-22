@@ -1,14 +1,14 @@
-use std::collections::{btree_map::Entry, BTreeMap};
-use tokio::sync::mpsc::UnboundedReceiver;
-
-use ethereum_client::{EthApi, TxStatus};
-use prometheus::{Gauge, IntGauge};
+use tokio::{time::{self, Duration}, sync::mpsc::{UnboundedReceiver, self, UnboundedSender}};
+use ethereum_client::{EthApi, TxStatus, TxHash, Error};
+use prometheus::{Gauge, IntGauge, IntCounter};
 use utils_prometheus::{impl_metered_service, MeteredService};
-
+use gear_rpc_client::{dto::Message, GearApi};
+use keccak_hash::keccak_256;
+use primitive_types::H256;
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
-        common::{AuthoritySetId, MessageInBlock},
+        common::{MessageInBlock, GearBlockNumber},
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
@@ -16,26 +16,21 @@ use futures::{
     future::{self, Either},
     pin_mut,
 };
-
-mod era;
-use era::{Era, Metrics as EraMetrics};
-
 use crate::message_relayer::common::RelayedMerkleRoot;
+
+type Status = (TxHash, Result<TxStatus, Error>);
 
 pub struct MessageSender {
     eth_api: EthApi,
     api_provider: ApiProviderConnection,
 
     metrics: Metrics,
-    era_metrics: EraMetrics,
 }
 
 impl MeteredService for MessageSender {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         self.metrics
             .get_sources()
-            .into_iter()
-            .chain(self.era_metrics.get_sources())
     }
 }
 
@@ -48,7 +43,11 @@ impl_metered_service! {
         fee_payer_balance: Gauge = Gauge::new(
             "ethereum_message_sender_fee_payer_balance",
             "Transaction fee payer balance",
-        )
+        ),
+        total_failed_txs: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_failed_txs",
+            "Total amount of txs sent to ethereum and failed",
+        ),
     }
 }
 
@@ -59,7 +58,6 @@ impl MessageSender {
             api_provider,
 
             metrics: Metrics::new(),
-            era_metrics: EraMetrics::new(),
         }
     }
 
@@ -70,8 +68,9 @@ impl MessageSender {
         tokio::task::spawn(async move {
             let mut attempts = 0;
 
+            let (tx_sender, mut tx_receiver) = mpsc::unbounded_channel();
             loop {
-                match run_inner(&mut self, &mut messages).await {
+                match run_inner(&mut self, &mut messages, &mut tx_receiver, &tx_sender).await {
                     Ok(_) => break,
                     Err(e) => {
                         attempts += 1;
@@ -117,53 +116,154 @@ impl MessageSender {
 async fn run_inner(
     self_: &mut MessageSender,
     messages: &mut UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)>,
+    tx_receiver: &mut UnboundedReceiver<Status>,
+    tx_sender: &UnboundedSender<Status>,
 ) -> anyhow::Result<()> {
     let gear_api = self_.api_provider.client();
-    while let Some((message, merkle_root)) = messages.recv().await {
-        let tx_hash = era::submit_message(&gear_api, &self_.eth_api, &message.message, merkle_root.block, merkle_root.block_hash).await?;
-        log::debug!("tx_hash = {tx_hash}");
-        self_.metrics.pending_tx_count.inc();
-
-        let eth_api = self_.eth_api.clone();
-        tokio::spawn(async move {
-            // wait for 30 minutes
-            tokio::time::sleep(tokio::time::Duration::from_secs(30 * 60)).await;
-
-            let status = eth_api.get_tx_status(tx_hash).await;
-            match status {
-                Ok(TxStatus::Pending) => {
-                    log::debug!("TxStatus::Pending");
-                }
-
-                Ok(TxStatus::Finalized) => {
-                    log::info!(
-                        "Message at block #{} with nonce {:?} finalized",
-                        message.block.0,
-                        message.message.nonce_le,
-                    );
-
-                    return;
-                }
-
-                Ok(TxStatus::Failed) => {
-                    log::error!(
-                        "Failed to finalize message at block #{} with nonce {:?}",
-                        message.block.0,
-                        message.message.nonce_le,
-                    );
-
-                    return;
-                }
-
-                Err(e) => {
-                    log::warn!("Unable to get status of the transaction {tx_hash:?}: {e:?}")
-                }
-            }
-        });
-
+    loop {
         let fee_payer_balance = self_.eth_api.get_approx_balance().await?;
         self_.metrics.fee_payer_balance.set(fee_payer_balance);
-    }
 
-    Ok(())
+        let recv_messages = messages.recv();
+        pin_mut!(recv_messages);
+
+        let recv_tx_statuses = tx_receiver.recv();
+        pin_mut!(recv_tx_statuses);
+
+        match future::select(recv_messages, recv_tx_statuses).await {
+            Either::Left((None, _)) => {
+                log::info!("Channel with messages closed. Exiting");
+                return Ok(());
+            }
+
+            Either::Right((None, _)) => {
+                log::info!("Channel with transactions statuses closed. Exiting");
+                return Ok(());
+            }
+
+            Either::Left((Some((message, merkle_root)), _)) => {
+                let tx_hash = submit_message(&gear_api, &self_.eth_api, &message.message, merkle_root.block, merkle_root.block_hash).await?;
+                self_.metrics.pending_tx_count.inc();
+
+                tokio::spawn(get_tx_status(self_.eth_api.clone(), tx_hash, tx_sender.clone()));
+            }
+
+            Either::Right((Some(status), _)) => {
+                check_tx_status(self_, status);
+            }
+        }
+    }
+}
+
+fn check_tx_status(
+    self_: &mut MessageSender,
+    status: Status,
+) {
+    let (tx_hash, status) = status;
+    match status {
+        Ok(TxStatus::Pending) => {
+            log::error!("Transaction {tx_hash} is still pending");
+        }
+
+        Ok(TxStatus::Finalized) => {
+            self_.metrics.pending_tx_count.dec();
+
+            log::info!(
+                "Transaction {tx_hash} has been finalized"
+            );
+        }
+
+        Ok(TxStatus::Failed) => {
+            self_.metrics.total_failed_txs.inc();
+
+            log::error!(
+                "Failed to finalize transaction {tx_hash}"
+            );
+        }
+
+        Err(e) => {
+            log::warn!("Unable to get status of the transaction {tx_hash:?}: {e:?}")
+        }
+    }
+}
+
+async fn get_tx_status(
+    eth_api: EthApi,
+    tx_hash: TxHash,
+    tx_sender: UnboundedSender<Status>,
+) {
+    // wait for 18 minutes for the first time and for 5 minutes in the next three attempts
+    let mut iter = [18, 5, 5, 5].iter().peekable();
+    while let Some(minutes) = iter.next() {
+        time::sleep(Duration::from_secs(minutes * 60)).await;
+
+        let status = eth_api.get_tx_status(tx_hash).await;
+        match status {
+            Ok(TxStatus::Pending) if iter.peek().is_some() => {}
+
+            status => {
+                let result = tx_sender.send((tx_hash, status));
+                if result.is_err() {
+                    log::error!("Failed to notify about transaction status: tx_hash = {tx_hash}, error = {result:?}");
+                }
+
+                break;
+            }
+        }
+    }
+}
+
+async fn submit_message(
+    gear_api: &GearApi,
+    eth_api: &EthApi,
+    message: &Message,
+    merkle_root_block: GearBlockNumber,
+    merkle_root_block_hash: H256,
+) -> anyhow::Result<TxHash> {
+    let message_hash = message_hash(message);
+
+    log::info!(
+        "Relaying message with hash {} and nonce {}",
+        hex::encode(message_hash),
+        hex::encode(message.nonce_le)
+    );
+
+    let proof = gear_api
+        .fetch_message_inclusion_merkle_proof(merkle_root_block_hash, message_hash.into())
+        .await?;
+
+    let tx_hash = eth_api
+        .provide_content_message(
+            merkle_root_block.0,
+            proof.num_leaves as u32,
+            proof.leaf_index as u32,
+            message.nonce_le,
+            message.source,
+            message.destination,
+            message.payload.to_vec(),
+            proof.proof,
+        )
+        .await?;
+
+    log::info!(
+        "Message with nonce {} relaying started: tx_hash = {tx_hash}",
+        hex::encode(message.nonce_le)
+    );
+
+    Ok(tx_hash)
+}
+
+fn message_hash(message: &Message) -> [u8; 32] {
+    let data = [
+        message.nonce_le.as_ref(),
+        message.source.as_ref(),
+        message.destination.as_ref(),
+        message.payload.as_ref(),
+    ]
+    .concat();
+
+    let mut hash = [0; 32];
+    keccak_256(&data, &mut hash);
+
+    hash
 }

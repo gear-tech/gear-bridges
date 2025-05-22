@@ -107,7 +107,7 @@ async fn run_inner(
             }
 
             Either::Right((Some(merkle_root), _)) => {
-                match self_.merkle_roots.add(merkle_root.clone()) {
+                match self_.merkle_roots.add(merkle_root) {
                     Ok(None) => {}
 
                     Ok(Some(merkle_root_old)) => {
@@ -126,7 +126,7 @@ async fn run_inner(
                 }
                 
                 for message in self_.messages.drain(&merkle_root) {
-                    messages_out.send((message, merkle_root.clone()))?;
+                    messages_out.send((message, merkle_root))?;
                 }
             }
         }

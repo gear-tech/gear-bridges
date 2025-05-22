@@ -137,19 +137,17 @@ impl ApiProvider {
                         MAX_RECONNECT_ATTEMPTS,
                         err
                     );
-                    if attempts >= 10 {
-                        log::error!(
-                            "All {} attempts to connect to API failed. Giving up.",
-                            MAX_RECONNECT_ATTEMPTS
-                        );
-                        return false;
-                    }
+
                     tokio::time::sleep(RECONNECT_TIMEOUT).await;
                 }
             }
         }
 
-        false
+        log::error!(
+            "All {} attempts to connect to API failed. Giving up.",
+            MAX_RECONNECT_ATTEMPTS
+        );
+        return false;
     }
 
     pub fn spawn(mut self) {

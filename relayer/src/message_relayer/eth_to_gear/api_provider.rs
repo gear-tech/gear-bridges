@@ -122,7 +122,7 @@ impl ApiProvider {
 
     async fn reconnect(&mut self) -> bool {
         let uri: &str = &format!("{}:{}", self.domain, self.port);
-        let mut attempts = 0;
+
         for attempt in 0..MAX_RECONNECT_ATTEMPTS {
             match Api::builder().retries(self.retries).build(uri).await {
                 Ok(api) => {
@@ -147,7 +147,7 @@ impl ApiProvider {
             "All {} attempts to connect to API failed. Giving up.",
             MAX_RECONNECT_ATTEMPTS
         );
-        return false;
+        false
     }
 
     pub fn spawn(mut self) {

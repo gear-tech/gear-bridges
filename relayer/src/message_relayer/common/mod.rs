@@ -20,11 +20,12 @@ pub struct EthereumBlockNumber(pub u64);
 )]
 pub struct EthereumSlotNumber(pub u64);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MessageInBlock {
     pub message: Message,
     pub block: GearBlockNumber,
     pub block_hash: H256,
+    pub authority_set_id: AuthoritySetId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -32,10 +33,12 @@ pub struct PaidMessage {
     pub nonce: [u8; 32],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
+    pub block_hash: H256,
     pub authority_set_id: AuthoritySetId,
+    pub merkle_root: H256,
 }
 
 #[derive(Clone, Debug)]

@@ -6,7 +6,7 @@ use utils_prometheus::MeteredService;
 use crate::message_relayer::{
     common::{
         ethereum::{
-            block_listener::BlockListener as EthereumBlockListener,
+            accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
         },
         gear::{
@@ -82,7 +82,9 @@ impl Relayer {
         let messages = self.message_sent_listener.run(gear_blocks).await;
 
         let merkle_roots = self.merkle_root_extractor.run(ethereum_blocks).await;
+        let accumulator = Accumulator::new();
+        let channel_messages = accumulator.run(messages, merkle_roots).await;
 
-        self.message_sender.run(messages, merkle_roots).await;
+        self.message_sender.run(channel_messages).await;
     }
 }

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration, vec::Drain};
 
 use alloy::providers::Provider;
 use alloy_eips::BlockNumberOrTag;
@@ -8,8 +8,9 @@ use ethereum_client::EthApi;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_common::beacon::electra::Block;
 
-use super::{EthereumBlockNumber, EthereumSlotNumber};
+use super::{EthereumBlockNumber, EthereumSlotNumber, GearBlockNumber, RelayedMerkleRoot};
 
+pub mod accumulator;
 pub mod block_listener;
 pub mod deposit_event_extractor;
 pub mod merkle_root_extractor;

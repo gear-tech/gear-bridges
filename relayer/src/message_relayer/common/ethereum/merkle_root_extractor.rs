@@ -142,7 +142,9 @@ impl MerkleRootExtractor {
 
                     sender.send(RelayedMerkleRoot {
                         block: GearBlockNumber(merkle_root.block_number as u32),
+                        block_hash,
                         authority_set_id,
+                        merkle_root: merkle_root.merkle_root,
                     })?;
                 }
             }

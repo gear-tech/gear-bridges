@@ -5,6 +5,11 @@ use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 
+/// Max reconnection attempts before failing. Default: 10.
+const MAX_RECONNECT_ATTEMPTS: usize = 10;
+/// Timeout between reconnects. Default: 1m30s.
+const RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
+
 struct ApiConnectionRequest {
     session: u64,
     receiver: oneshot::Sender<ApiConnectionResponse>,
@@ -118,7 +123,7 @@ impl ApiProvider {
     async fn reconnect(&mut self) -> bool {
         let uri: &str = &format!("{}:{}", self.domain, self.port);
         let mut attempts = 0;
-        loop {
+        for attempt in 0..MAX_RECONNECT_ATTEMPTS {
             match Api::builder().retries(self.retries).build(uri).await {
                 Ok(api) => {
                     self.api = api;
@@ -127,15 +132,19 @@ impl ApiProvider {
                 Err(err) => {
                     attempts += 1;
                     log::error!(
-                        "Failed to create API connection (attempt {}/10): {}",
-                        attempts,
+                        "Failed to create API connection (attempt {}/{}): {}",
+                        attempt,
+                        MAX_RECONNECT_ATTEMPTS,
                         err
                     );
                     if attempts >= 10 {
-                        log::error!("All 10 attempts to connect to API failed. Giving up.");
+                        log::error!(
+                            "All {} attempts to connect to API failed. Giving up.",
+                            MAX_RECONNECT_ATTEMPTS
+                        );
                         return false;
                     }
-                    tokio::time::sleep(Duration::from_secs(90)).await;
+                    tokio::time::sleep(RECONNECT_TIMEOUT).await;
                 }
             }
         }

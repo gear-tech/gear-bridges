@@ -76,7 +76,7 @@ impl Accumulator {
 }
 
 async fn run_inner(
-    self_: &mut Accumulator,
+    this: &mut Accumulator,
     messages: &mut UnboundedReceiver<MessageInBlock>,
     merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
     messages_out: &mut UnboundedSender<(MessageInBlock, RelayedMerkleRoot)>,
@@ -100,7 +100,7 @@ async fn run_inner(
             }
 
             Either::Left((Some(message), _)) => {
-                if let Some(merkle_root) = self_
+                if let Some(merkle_root) = this
                     .merkle_roots
                     .find(message.authority_set_id, message.block)
                 {
@@ -108,7 +108,7 @@ async fn run_inner(
                     continue;
                 }
 
-                if self_.messages.add(message.clone()).is_none() {
+                if this.messages.add(message.clone()).is_none() {
                     log::error!(
                         "Unable to add the message '{message:?}' since the capacity is full"
                     );
@@ -116,30 +116,30 @@ async fn run_inner(
             }
 
             Either::Right((Some(merkle_root), _)) => {
-                match self_.merkle_roots.add(merkle_root) {
+                match this.merkle_roots.add(merkle_root) {
                     Ok(None) => {}
 
                     Ok(Some(merkle_root_old)) => {
                         log::warn!("Removing merkle root = {merkle_root_old:?}");
-                        let messages = self_.messages.drain(&merkle_root_old);
+                        let messages = this.messages.drain(&merkle_root_old);
                         for message in messages {
                             log::error!("Remove stuck message = {message:?}");
                         }
                     }
 
                     Err(i) => {
-                        log::warn!("There is already a merkle root: root_old = {:?}, merkle_root = {merkle_root:?}", self_.merkle_roots.get(i));
+                        log::warn!("There is already a merkle root: root_old = {:?}, merkle_root = {merkle_root:?}", this.merkle_roots.get(i));
 
                         continue;
                     }
                 }
 
-                for message in self_.messages.drain(&merkle_root) {
+                for message in this.messages.drain(&merkle_root) {
                     messages_out.send((message, merkle_root))?;
                 }
             }
         }
 
-        self_.metrics.message_count.set(self_.messages.len() as _);
+        this.metrics.message_count.set(this.messages.len() as _);
     }
 }

@@ -116,15 +116,15 @@ impl MessageSender {
 }
 
 async fn run_inner(
-    self_: &mut MessageSender,
+    this: &mut MessageSender,
     messages: &mut UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)>,
     tx_receiver: &mut UnboundedReceiver<Status>,
     tx_sender: &UnboundedSender<Status>,
 ) -> anyhow::Result<()> {
-    let gear_api = self_.api_provider.client();
+    let gear_api = this.api_provider.client();
     loop {
-        let fee_payer_balance = self_.eth_api.get_approx_balance().await?;
-        self_.metrics.fee_payer_balance.set(fee_payer_balance);
+        let fee_payer_balance = this.eth_api.get_approx_balance().await?;
+        this.metrics.fee_payer_balance.set(fee_payer_balance);
 
         let recv_messages = messages.recv();
         pin_mut!(recv_messages);
@@ -146,29 +146,29 @@ async fn run_inner(
             Either::Left((Some((message, merkle_root)), _)) => {
                 let tx_hash = submit_message(
                     &gear_api,
-                    &self_.eth_api,
+                    &this.eth_api,
                     &message.message,
                     merkle_root.block,
                     merkle_root.block_hash,
                 )
                 .await?;
-                self_.metrics.pending_tx_count.inc();
+                this.metrics.pending_tx_count.inc();
 
                 tokio::spawn(get_tx_status(
-                    self_.eth_api.clone(),
+                    this.eth_api.clone(),
                     tx_hash,
                     tx_sender.clone(),
                 ));
             }
 
             Either::Right((Some(status), _)) => {
-                check_tx_status(self_, status);
+                check_tx_status(this, status);
             }
         }
     }
 }
 
-fn check_tx_status(self_: &mut MessageSender, status: Status) {
+fn check_tx_status(this: &mut MessageSender, status: Status) {
     let (tx_hash, status) = status;
     match status {
         Ok(TxStatus::Pending) => {
@@ -176,13 +176,13 @@ fn check_tx_status(self_: &mut MessageSender, status: Status) {
         }
 
         Ok(TxStatus::Finalized) => {
-            self_.metrics.pending_tx_count.dec();
+            this.metrics.pending_tx_count.dec();
 
             log::info!("Transaction {tx_hash} has been finalized");
         }
 
         Ok(TxStatus::Failed) => {
-            self_.metrics.total_failed_txs.inc();
+            this.metrics.total_failed_txs.inc();
 
             log::error!("Failed to finalize transaction {tx_hash}");
         }

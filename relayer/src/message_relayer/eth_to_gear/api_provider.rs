@@ -148,6 +148,8 @@ impl ApiProvider {
                 }
             }
         }
+
+        false
     }
 
     pub fn spawn(mut self) {

@@ -127,7 +127,7 @@ impl ApiProvider {
             match Api::builder().retries(self.retries).build(uri).await {
                 Ok(api) => {
                     self.api = api;
-                    break true;
+                    return true;
                 }
                 Err(err) => {
                     attempts += 1;

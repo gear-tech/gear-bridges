@@ -27,7 +27,7 @@ let programs: Map<string, ProgramName>;
 const handler = async (ctx: ProcessorContext) => {
   await tempState.new(ctx);
 
-  const promises = [];
+  const promises: Promise<void>[] = [];
 
   for (const block of ctx.blocks) {
     const timestamp = new Date(block.header.timestamp!);
@@ -155,11 +155,11 @@ const runProcessor = async () => {
     stateSchema: 'gear_processor',
   });
 
-  programs = await init({
+  programs = (await init({
     [ProgramName.VftManager]: config.vftManager,
     [ProgramName.HistoricalProxy]: config.hisotricalProxy,
     [ProgramName.BridgingPayment]: config.bridgingPayment,
-  });
+  })) as Map<string, ProgramName>;
 
   const processor = getProcessor(Array.from(programs.keys()));
 

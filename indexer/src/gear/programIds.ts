@@ -9,7 +9,7 @@ const createClient = () =>
     database: process.env.DB_NAME,
   });
 
-export async function init(programs: Record<string, string>) {
+export async function init(programs: Record<string, string>): Promise<Map<string, string>> {
   const client = createClient();
 
   await client.connect();

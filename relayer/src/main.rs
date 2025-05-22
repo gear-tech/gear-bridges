@@ -327,7 +327,7 @@ async fn main() {
             .await
             .expect("Failed to create API provider");
 
-            gear_to_eth::manual::relay(
+            let _sender = gear_to_eth::manual::relay(
                 api_provider.connection(),
                 eth_api,
                 nonce,

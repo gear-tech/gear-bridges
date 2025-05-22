@@ -1,7 +1,7 @@
 use primitive_types::U256;
 
 use ethereum_client::EthApi;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::message_relayer::{
     common::{
@@ -21,7 +21,7 @@ pub async fn relay(
     message_nonce: U256,
     gear_block: u32,
     from_eth_block: Option<u64>,
-) {
+) -> UnboundedSender<MessageInBlock> {
     let from_eth_block = if let Some(block) = from_eth_block {
         block
     } else {
@@ -60,7 +60,7 @@ pub async fn relay(
         authority_set_id: AuthoritySetId(gear_api.signed_by_authority_set_id(gear_block_hash).await.expect("Unable to get authority set id")),
     };
 
-    let (queued_messages_sender, queued_messages_receiver) = unbounded_channel();
+    let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
 
     let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
     let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
@@ -77,4 +77,6 @@ pub async fn relay(
     queued_messages_sender
         .send(message_in_block)
         .expect("Failed to send message to channel");
+
+    queued_messages_sender
 }

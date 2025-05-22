@@ -2,17 +2,27 @@ import { TypeormDatabase } from '@subsquid/typeorm-store';
 import { randomUUID } from 'crypto';
 import { BridgingPaidEvent, BridgingRequested, Relayed, TokenMappingAdded, TokenMappingRemoved } from './types';
 import { ethNonce, gearNonce, TempState } from '../common';
-import { ProcessorContext, processor } from './processor';
+import { ProcessorContext, getProcessor } from './processor';
 import { Network, Status, Transfer } from '../model';
-import { isUserMessageSent } from './util';
+import { isProgramChanged, isUserMessageSent } from './util';
 import { config } from './config';
 import { Decoder } from './codec';
+import { init, updateId } from './programIds';
+import { getProgramInheritor } from './rpc-queries';
 
 const tempState = new TempState(Network.Gear);
 
 let vftManagerDecoder: Decoder;
 let hisotricalProxyDecoder: Decoder;
 let bridgingPaymentDecoder: Decoder;
+
+const enum ProgramName {
+  VftManager = 'vft_manager',
+  HistoricalProxy = 'historical_proxy',
+  BridgingPayment = 'bridging_payment',
+}
+
+let programs: Map<string, ProgramName>;
 
 const handler = async (ctx: ProcessorContext) => {
   await tempState.new(ctx);
@@ -24,10 +34,24 @@ const handler = async (ctx: ProcessorContext) => {
     const blockNumber = block.header.height.toString();
 
     for (const event of block.events) {
+      if (isProgramChanged(event)) {
+        const { id, change } = event.args;
+
+        if (change.__kind == 'Inactive') {
+          if (programs.has(id)) {
+            const inheritor = await getProgramInheritor(ctx._chain.rpc, block.header._runtime, id, block.header.hash);
+            await updateId(programs.get(id)!, inheritor);
+            await tempState.save();
+            process.exit(0);
+          }
+        }
+        continue;
+      }
       if (isUserMessageSent(event)) {
         const msg = event.args.message;
-        switch (msg.source) {
-          case config.vftManager: {
+        const name = programs.get(msg.source);
+        switch (name) {
+          case ProgramName.VftManager: {
             const service = vftManagerDecoder.service(msg.payload);
             if (service !== 'VftManager') continue;
             const method = vftManagerDecoder.method(msg.payload);
@@ -84,7 +108,7 @@ const handler = async (ctx: ProcessorContext) => {
               }
             }
           }
-          case config.hisotricalProxy: {
+          case ProgramName.HistoricalProxy: {
             const service = hisotricalProxyDecoder.service(msg.payload);
             if (service !== 'HistoricalProxy') continue;
             const method = hisotricalProxyDecoder.method(msg.payload);
@@ -100,7 +124,7 @@ const handler = async (ctx: ProcessorContext) => {
             tempState.transferCompleted(nonce, timestamp);
             break;
           }
-          case config.bridgingPayment: {
+          case ProgramName.BridgingPayment: {
             const service = bridgingPaymentDecoder.service(msg.payload);
             if (service !== 'BridgingPayment') continue;
             const method = bridgingPaymentDecoder.method(msg.payload);
@@ -121,18 +145,28 @@ const handler = async (ctx: ProcessorContext) => {
   await tempState.save();
 };
 
-export const runProcessor = async () => {
+const runProcessor = async () => {
   vftManagerDecoder = await Decoder.create('./assets/vft_manager.idl');
   hisotricalProxyDecoder = await Decoder.create('./assets/historical_proxy.idl');
   bridgingPaymentDecoder = await Decoder.create('./assets/bridging_payment.idl');
 
-  processor.run(
-    new TypeormDatabase({
-      supportHotBlocks: true,
-      stateSchema: 'gear_processor',
-    }),
-    handler,
-  );
+  const db = new TypeormDatabase({
+    supportHotBlocks: true,
+    stateSchema: 'gear_processor',
+  });
+
+  programs = await init({
+    [ProgramName.VftManager]: config.vftManager,
+    [ProgramName.HistoricalProxy]: config.hisotricalProxy,
+    [ProgramName.BridgingPayment]: config.bridgingPayment,
+  });
+
+  const processor = getProcessor(Array.from(programs.keys()));
+
+  processor.run(db, handler);
 };
 
-runProcessor();
+runProcessor().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

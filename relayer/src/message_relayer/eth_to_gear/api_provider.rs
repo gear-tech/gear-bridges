@@ -141,13 +141,28 @@ impl ApiProvider {
                 }
 
                 let uri: &str = &format!("{}:{}", self.domain, self.port);
-                self.api = match Api::builder().retries(self.retries).build(uri).await {
-                    Ok(api) => api,
-                    Err(err) => {
-                        log::error!("Failed to create API connection: {err}");
-                        return;
+                let mut attempts = 0;
+                loop {
+                    match Api::builder().retries(self.retries).build(uri).await {
+                        Ok(api) => {
+                            self.api = api;
+                            break;
+                        }
+                        Err(err) => {
+                            attempts += 1;
+                            log::error!(
+                                "Failed to create API connection (attempt {}/10): {}",
+                                attempts,
+                                err
+                            );
+                            if attempts >= 10 {
+                                log::error!("All 10 attempts to connect to API failed. Giving up.");
+                                return;
+                            }
+                            tokio::time::sleep(Duration::from_secs(90)).await;
+                        }
                     }
-                };
+                }
                 self.session += 1;
                 log::info!(
                     "Established new API connection with session number {}",

@@ -124,6 +124,7 @@ impl MerkleRoots {
         Some(result)
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.0.len()
     }

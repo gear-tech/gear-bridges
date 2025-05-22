@@ -130,7 +130,6 @@ impl ApiProvider {
                     return true;
                 }
                 Err(err) => {
-                    attempts += 1;
                     log::error!(
                         "Failed to create API connection (attempt {}/{}): {}",
                         attempt,

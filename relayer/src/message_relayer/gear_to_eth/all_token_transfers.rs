@@ -6,9 +6,8 @@ use utils_prometheus::MeteredService;
 use crate::message_relayer::{
     common::{
         ethereum::{
-            block_listener::BlockListener as EthereumBlockListener,
+            accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
-            accumulator::Accumulator,
         },
         gear::{
             block_listener::BlockListener as GearBlockListener,

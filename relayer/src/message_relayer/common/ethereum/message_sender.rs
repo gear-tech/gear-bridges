@@ -1,22 +1,25 @@
-use tokio::{time::{self, Duration}, sync::mpsc::{UnboundedReceiver, self, UnboundedSender}};
-use ethereum_client::{EthApi, TxStatus, TxHash, Error};
-use prometheus::{Gauge, IntGauge, IntCounter};
-use utils_prometheus::{impl_metered_service, MeteredService};
-use gear_rpc_client::{dto::Message, GearApi};
-use keccak_hash::keccak_256;
-use primitive_types::H256;
+use crate::message_relayer::common::RelayedMerkleRoot;
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
-        common::{MessageInBlock, GearBlockNumber},
+        common::{GearBlockNumber, MessageInBlock},
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use ethereum_client::{Error, EthApi, TxHash, TxStatus};
 use futures::{
     future::{self, Either},
     pin_mut,
 };
-use crate::message_relayer::common::RelayedMerkleRoot;
+use gear_rpc_client::{dto::Message, GearApi};
+use keccak_hash::keccak_256;
+use primitive_types::H256;
+use prometheus::{Gauge, IntCounter, IntGauge};
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    time::{self, Duration},
+};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 type Status = (TxHash, Result<TxStatus, Error>);
 
@@ -29,8 +32,7 @@ pub struct MessageSender {
 
 impl MeteredService for MessageSender {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics
-            .get_sources()
+        self.metrics.get_sources()
     }
 }
 
@@ -142,10 +144,21 @@ async fn run_inner(
             }
 
             Either::Left((Some((message, merkle_root)), _)) => {
-                let tx_hash = submit_message(&gear_api, &self_.eth_api, &message.message, merkle_root.block, merkle_root.block_hash).await?;
+                let tx_hash = submit_message(
+                    &gear_api,
+                    &self_.eth_api,
+                    &message.message,
+                    merkle_root.block,
+                    merkle_root.block_hash,
+                )
+                .await?;
                 self_.metrics.pending_tx_count.inc();
 
-                tokio::spawn(get_tx_status(self_.eth_api.clone(), tx_hash, tx_sender.clone()));
+                tokio::spawn(get_tx_status(
+                    self_.eth_api.clone(),
+                    tx_hash,
+                    tx_sender.clone(),
+                ));
             }
 
             Either::Right((Some(status), _)) => {
@@ -155,10 +168,7 @@ async fn run_inner(
     }
 }
 
-fn check_tx_status(
-    self_: &mut MessageSender,
-    status: Status,
-) {
+fn check_tx_status(self_: &mut MessageSender, status: Status) {
     let (tx_hash, status) = status;
     match status {
         Ok(TxStatus::Pending) => {
@@ -168,17 +178,13 @@ fn check_tx_status(
         Ok(TxStatus::Finalized) => {
             self_.metrics.pending_tx_count.dec();
 
-            log::info!(
-                "Transaction {tx_hash} has been finalized"
-            );
+            log::info!("Transaction {tx_hash} has been finalized");
         }
 
         Ok(TxStatus::Failed) => {
             self_.metrics.total_failed_txs.inc();
 
-            log::error!(
-                "Failed to finalize transaction {tx_hash}"
-            );
+            log::error!("Failed to finalize transaction {tx_hash}");
         }
 
         Err(e) => {
@@ -187,11 +193,7 @@ fn check_tx_status(
     }
 }
 
-async fn get_tx_status(
-    eth_api: EthApi,
-    tx_hash: TxHash,
-    tx_sender: UnboundedSender<Status>,
-) {
+async fn get_tx_status(eth_api: EthApi, tx_hash: TxHash, tx_sender: UnboundedSender<Status>) {
     // wait for 18 minutes for the first time and for 5 minutes in the next three attempts
     let mut iter = [18, 5, 5, 5].iter().peekable();
     while let Some(minutes) = iter.next() {

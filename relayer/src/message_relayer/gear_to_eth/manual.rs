@@ -6,11 +6,10 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use crate::message_relayer::{
     common::{
         ethereum::{
-            block_listener::BlockListener as EthereumBlockListener,
+            accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
-            accumulator::Accumulator,
         },
-        GearBlockNumber, MessageInBlock, AuthoritySetId,
+        AuthoritySetId, GearBlockNumber, MessageInBlock,
     },
     eth_to_gear::api_provider::ApiProviderConnection,
 };
@@ -57,7 +56,12 @@ pub async fn relay(
         message,
         block: GearBlockNumber(gear_block),
         block_hash: gear_block_hash,
-        authority_set_id: AuthoritySetId(gear_api.signed_by_authority_set_id(gear_block_hash).await.expect("Unable to get authority set id")),
+        authority_set_id: AuthoritySetId(
+            gear_api
+                .signed_by_authority_set_id(gear_block_hash)
+                .await
+                .expect("Unable to get authority set id"),
+        ),
     };
 
     let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
@@ -69,10 +73,10 @@ pub async fn relay(
     let ethereum_blocks = ethereum_block_listener.run().await;
     let merkle_roots = merkle_root_extractor.run(ethereum_blocks).await;
     let accumulator = Accumulator::new();
-    let channel_messages = accumulator.run(queued_messages_receiver, merkle_roots).await;
-    message_sender
-        .run(channel_messages)
+    let channel_messages = accumulator
+        .run(queued_messages_receiver, merkle_roots)
         .await;
+    message_sender.run(channel_messages).await;
 
     queued_messages_sender
         .send(message_in_block)

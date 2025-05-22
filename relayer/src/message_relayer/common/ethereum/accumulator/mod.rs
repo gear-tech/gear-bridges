@@ -1,20 +1,18 @@
 mod utils;
 
 use super::*;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, self};
-use utils::{Messages, MerkleRoots};
-use prometheus::IntGauge;
-use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::{
     common::BASE_RETRY_DELAY,
-    message_relayer::{
-        common::{AuthoritySetId, MessageInBlock},
-    },
+    message_relayer::common::{AuthoritySetId, MessageInBlock},
 };
 use futures::{
     future::{self, Either},
     pin_mut,
 };
+use prometheus::IntGauge;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use utils::{MerkleRoots, Messages};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 /// Struct accumulates gear-eth messages and required merkle roots.
 pub struct Accumulator {
@@ -25,8 +23,7 @@ pub struct Accumulator {
 
 impl MeteredService for Accumulator {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics
-            .get_sources()
+        self.metrics.get_sources()
     }
 }
 
@@ -56,7 +53,14 @@ impl Accumulator {
         let (mut messages_out, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
             loop {
-                match run_inner(&mut self, &mut messages, &mut merkle_roots, &mut messages_out).await {
+                match run_inner(
+                    &mut self,
+                    &mut messages,
+                    &mut merkle_roots,
+                    &mut messages_out,
+                )
+                .await
+                {
                     Ok(_) => break,
                     Err(e) => {
                         log::error!("{e:?}");
@@ -96,13 +100,18 @@ async fn run_inner(
             }
 
             Either::Left((Some(message), _)) => {
-                if let Some(merkle_root) = self_.merkle_roots.find(message.authority_set_id, message.block) {
+                if let Some(merkle_root) = self_
+                    .merkle_roots
+                    .find(message.authority_set_id, message.block)
+                {
                     messages_out.send((message, *merkle_root))?;
                     continue;
                 }
-                
+
                 if self_.messages.add(message.clone()).is_none() {
-                    log::error!("Unable to add the message '{message:?}' since the capacity is full");
+                    log::error!(
+                        "Unable to add the message '{message:?}' since the capacity is full"
+                    );
                 }
             }
 
@@ -124,7 +133,7 @@ async fn run_inner(
                         continue;
                     }
                 }
-                
+
                 for message in self_.messages.drain(&merkle_root) {
                     messages_out.send((message, merkle_root))?;
                 }

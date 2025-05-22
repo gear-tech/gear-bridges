@@ -1,11 +1,11 @@
-use prometheus::IntCounter;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::message_relayer::{
-    common::{GearBlockNumber, MessageInBlock, AuthoritySetId, H256},
+    common::{AuthoritySetId, GearBlockNumber, MessageInBlock, H256},
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 use gear_rpc_client::GearApi;
+use prometheus::IntCounter;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessageQueuedEventExtractor {
     api_provider: ApiProviderConnection,
@@ -75,7 +75,8 @@ impl MessageQueuedEventExtractor {
                 let block_hash = gear_api.block_number_to_hash(block.0).await?;
                 let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
-                self.process_block_events(&gear_api, block, block_hash, authority_set_id, sender).await?;
+                self.process_block_events(&gear_api, block, block_hash, authority_set_id, sender)
+                    .await?;
             }
         }
     }
@@ -90,10 +91,7 @@ impl MessageQueuedEventExtractor {
     ) -> anyhow::Result<()> {
         let messages = gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {
-            log::info!(
-                "Found {} queued messages in block #{block}",
-                messages.len(),
-            );
+            log::info!("Found {} queued messages in block #{block}", messages.len(),);
             self.metrics
                 .total_messages_found
                 .inc_by(messages.len() as u64);

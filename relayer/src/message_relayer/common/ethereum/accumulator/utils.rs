@@ -199,7 +199,7 @@ mod tests {
                 )
                 .into(),
             },
-            the_oldest_root.clone(),
+            the_oldest_root,
             RelayedMerkleRoot {
                 block: GearBlockNumber(16_883_289),
                 block_hash: hex!(
@@ -410,7 +410,7 @@ mod tests {
         let mut messages = Messages::new(data.len());
         assert!(messages.drain(&root).collect::<Vec<_>>().is_empty());
 
-        assert!(messages.add(data.get(0).unwrap().clone()).is_some());
+        assert!(messages.add(data.first().unwrap().clone()).is_some());
         assert!(messages.add(data.get(3).unwrap().clone()).is_some());
         assert!(messages.drain(&root).collect::<Vec<_>>().is_empty());
 

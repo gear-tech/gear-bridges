@@ -14413,6 +14413,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "tests"
+version = "0.3.0"
+dependencies = [
+ "alloy",
+ "alloy-rlp",
+ "checkpoint-light-client-client",
+ "eth-events-common",
+ "eth-events-deneb",
+ "eth-events-deneb-client",
+ "eth-events-electra-client",
+ "ethereum-common",
+ "futures",
+ "gclient",
+ "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest",
+ "hex-literal",
+ "historical-proxy",
+ "historical-proxy-client",
+ "sails-rs",
+ "serde",
+ "serde_json",
+ "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
+ "tokio",
+ "vft-manager",
+ "vft-manager-client",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -32,7 +32,8 @@ members = [
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
     "tools/genesis-config",
-    "tools/governance",
+    "tools/governance", 
+    "tests",
 ]
 
 resolver = "2"

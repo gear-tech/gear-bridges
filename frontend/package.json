@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@base-ui-components/react": "1.0.0-alpha.8",
-    "@gear-js/api": "0.41.1",
-    "@gear-js/react-hooks": "0.16.2",
+    "@gear-js/api": "0.42.0",
+    "@gear-js/react-hooks": "0.16.3",
     "@gear-js/ui": "0.7.0",
     "@gear-js/vara-ui": "0.3.1",
     "@gear-js/wallet-connect": "0.4.1",
     "@hcaptcha/react-hcaptcha": "1.12.0",
     "@hookform/resolvers": "5.0.1",
-    "@polkadot/api": "15.9.1",
+    "@polkadot/api": "15.10.2",
     "@polkadot/react-identicon": "3.13.1",
     "@reown/appkit": "1.7.5",
     "@reown/appkit-adapter-wagmi": "1.7.5",
@@ -31,7 +31,7 @@
     "react-hook-form": "7.56.3",
     "react-number-format": "5.4.4",
     "react-router-dom": "6.30.0",
-    "sails-js": "0.4.1",
+    "sails-js": "0.4.2",
     "viem": "2.29.4",
     "wagmi": "2.15.3",
     "zod": "3.24.4"
@@ -41,7 +41,7 @@
     "@graphql-codegen/cli": "5.0.6",
     "@graphql-codegen/client-preset": "4.8.1",
     "@graphql-typed-document-node/core": "3.2.0",
-    "@polkadot/types": "15.9.1",
+    "@polkadot/types": "15.10.2",
     "@types/react": "19.1.4",
     "@types/react-dom": "19.1.5",
     "@types/react-gtm-module": "2.0.4",
@@ -52,9 +52,9 @@
     "vite": "6.3.5"
   },
   "overrides": {
-    "@gear-js/api": "0.41.1",
-    "@polkadot/api": "15.9.1",
-    "@polkadot/types": "15.9.1",
+    "@gear-js/api": "0.42.0",
+    "@polkadot/api": "15.10.2",
+    "@polkadot/types": "15.10.2",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   }

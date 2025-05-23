@@ -1,3 +1,3 @@
-import { Program as BridgingPaymentProgram } from './bridging-payment';
+import { SailsProgram as BridgingPaymentProgram } from './bridging-payment';
 
 export { BridgingPaymentProgram };

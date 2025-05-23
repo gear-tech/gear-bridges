@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, HexString, decodeAddress } from '@gear-js/api';
+import { GearApi, Program, HexString, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
@@ -11,22 +11,26 @@ import {
   ZERO_ADDRESS,
 } from 'sails-js';
 
-export class Program {
+export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly vft: Vft;
   public readonly vftAdmin: VftAdmin;
   public readonly vftExtension: VftExtension;
   public readonly vftMetadata: VftMetadata;
+  private _program!: Program;
 
   constructor(
     public api: GearApi,
-    private _programId?: `0x${string}`,
+    programId?: `0x${string}`,
   ) {
     const types: Record<string, any> = {};
 
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
+    if (programId) {
+      this._program = new Program(programId, api);
+    }
 
     this.vft = new Vft(this);
     this.vftAdmin = new VftAdmin(this);
@@ -35,8 +39,8 @@ export class Program {
   }
 
   public get programId(): `0x${string}` {
-    if (!this._programId) throw new Error(`Program ID is not set`);
-    return this._programId;
+    if (!this._program) throw new Error(`Program ID is not set`);
+    return this._program.id;
   }
 
   newCtorFromCode(
@@ -53,9 +57,10 @@ export class Program {
       '(String, String, String, u8)',
       'String',
       code,
+      async (programId) => {
+        this._program = await Program.new(programId, this.api);
+      },
     );
-
-    this._programId = builder.programId;
     return builder;
   }
 
@@ -68,15 +73,16 @@ export class Program {
       '(String, String, String, u8)',
       'String',
       codeId,
+      async (programId) => {
+        this._program = await Program.new(programId, this.api);
+      },
     );
-
-    this._programId = builder.programId;
     return builder;
   }
 }
 
 export class Vft {
-  constructor(private _program: Program) {}
+  constructor(private _program: SailsProgram) {}
 
   public approve(spender: ActorId, value: number | string | bigint): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
@@ -221,7 +227,7 @@ export class Vft {
 }
 
 export class VftAdmin {
-  constructor(private _program: Program) {}
+  constructor(private _program: SailsProgram) {}
 
   public appendAllowancesShard(capacity: number): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
@@ -673,7 +679,7 @@ export class VftAdmin {
 }
 
 export class VftExtension {
-  constructor(private _program: Program) {}
+  constructor(private _program: SailsProgram) {}
 
   public allocateNextAllowancesShard(): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
@@ -893,7 +899,7 @@ export class VftExtension {
 }
 
 export class VftMetadata {
-  constructor(private _program: Program) {}
+  constructor(private _program: SailsProgram) {}
 
   /**
    * Returns the number of decimals of the VFT.

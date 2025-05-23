@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, HexString, decodeAddress } from '@gear-js/api';
+import { GearApi, Program, HexString, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
@@ -11,10 +11,7 @@ import {
   ZERO_ADDRESS,
 } from 'sails-js';
 
-/**
- * Global state of the Bridging Payment service.
- */
-export interface State {
+interface State {
   /**
    * Admin of this service. Admin is in charge of:
    * - Changing fee
@@ -28,13 +25,14 @@ export interface State {
   fee: number | string | bigint;
 }
 
-export class Program {
+export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly bridgingPayment: BridgingPayment;
+  private _program!: Program;
 
   constructor(
     public api: GearApi,
-    private _programId?: `0x${string}`,
+    programId?: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       State: { admin_address: '[u8;32]', fee: 'u128' },
@@ -43,13 +41,16 @@ export class Program {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
+    if (programId) {
+      this._program = new Program(programId, api);
+    }
 
     this.bridgingPayment = new BridgingPayment(this);
   }
 
   public get programId(): `0x${string}` {
-    if (!this._programId) throw new Error(`Program ID is not set`);
-    return this._programId;
+    if (!this._program) throw new Error(`Program ID is not set`);
+    return this._program.id;
   }
 
   /**
@@ -64,9 +65,10 @@ export class Program {
       '(String, State)',
       'String',
       code,
+      async (programId) => {
+        this._program = await Program.new(programId, this.api);
+      },
     );
-
-    this._programId = builder.programId;
     return builder;
   }
 
@@ -82,15 +84,16 @@ export class Program {
       '(String, State)',
       'String',
       codeId,
+      async (programId) => {
+        this._program = await Program.new(programId, this.api);
+      },
     );
-
-    this._programId = builder.programId;
     return builder;
   }
 }
 
 export class BridgingPayment {
-  constructor(private _program: Program) {}
+  constructor(private _program: SailsProgram) {}
 
   /**
    * Pay fees for message processing to the admin.

@@ -1,4 +1,7 @@
-use std::{collections::hash_map::Entry, sync::LazyLock};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::LazyLock,
+};
 
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
@@ -8,12 +11,10 @@ use tokio::sync::Mutex;
 #[cfg(test)]
 mod historical_proxy;
 
-static LOCK: LazyLock<
-    Mutex<(
-        u32,
-        std::collections::HashMap<&'static [u8], CodeId, std::hash::RandomState>,
-    )>,
-> = LazyLock::new(|| Mutex::const_new((4_0000_2_000, std::collections::HashMap::new())));
+type State = (u32, HashMap<&'static [u8], CodeId>);
+
+static LOCK: LazyLock<Mutex<State>> =
+    LazyLock::new(|| Mutex::const_new((2_000, HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 

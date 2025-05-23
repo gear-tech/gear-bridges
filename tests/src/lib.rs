@@ -2,7 +2,7 @@ use std::{collections::hash_map::Entry, sync::LazyLock};
 
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
-use sails_rs::{calls::*, prelude::*};
+use sails_rs::prelude::*;
 use sp_core::crypto::DEV_PHRASE;
 use tokio::sync::Mutex;
 #[cfg(test)]
@@ -14,7 +14,6 @@ static LOCK: LazyLock<
         std::collections::HashMap<&'static [u8], CodeId, std::hash::RandomState>,
     )>,
 > = LazyLock::new(|| Mutex::const_new((4_0000_2_000, std::collections::HashMap::new())));
-
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 
@@ -64,10 +63,17 @@ pub async fn connect_to_node(
     let mut accounts = vec![];
     for &balance in balances.iter() {
         let suri = format!("{DEV_PHRASE}//{program}-{salt}:");
-        let api2 = GearApi::init_with(WSAddress::dev(), suri.clone()).await.unwrap();
+        let api2 = GearApi::init_with(WSAddress::dev(), suri.clone())
+            .await
+            .unwrap();
 
         let account_id: &[u8; 32] = api2.account_id().as_ref();
-        println!("account {} with SURI={} and balance={}", api2.account_id(), suri, balance);
+        println!(
+            "account {} with SURI={} and balance={}",
+            api2.account_id(),
+            suri,
+            balance
+        );
         api.transfer_keep_alive((*account_id).into(), balance)
             .await
             .unwrap();

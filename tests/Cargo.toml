@@ -18,8 +18,10 @@ sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
-vft-manager = { workspace = true, features = ["wasm-binary"] }
+vft-manager = { workspace = true, features = ["wasm-binary", "mocks"] }
 vft-manager-client.workspace = true
+vft = { workspace = true, features = ["wasm-binary"] }
+vft-client = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
 alloy = { workspace = true }
@@ -27,3 +29,6 @@ alloy-rlp = { workspace = true }
 checkpoint-light-client-client.workspace = true
 ethereum-common =  { workspace = true, features = ["std"] }
 hex-literal = { workspace = true }
+sp-runtime = { workspace = true, features = ["std"] }
+anyhow = { workspace = true }
+hex.workspace = true

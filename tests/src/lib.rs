@@ -10,6 +10,8 @@ use sp_core::crypto::DEV_PHRASE;
 use tokio::sync::Mutex;
 #[cfg(test)]
 mod historical_proxy;
+#[cfg(test)]
+mod vft_manager;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 
@@ -19,10 +21,11 @@ static LOCK: LazyLock<Mutex<State>> =
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 
 pub struct Connection {
-    pub accounts: Vec<(GearApi, ActorId)>,
+    pub api: GearApi,
+    pub accounts: Vec<(GearApi, ActorId, [u8; 4], String)>,
     pub code_ids: Vec<CodeId>,
-    pub salt: [u8; 4],
     pub gas_limit: u64,
+    pub salt: [u8; 4]
 }
 
 pub async fn connect_to_node(
@@ -59,15 +62,17 @@ pub async fn connect_to_node(
 
         res
     };
-    let salt = lock.0;
-    lock.0 += 1;
+    
     let mut accounts = vec![];
+    let salt = lock.0;
     for &balance in balances.iter() {
+        let salt = lock.0;
+        lock.0 += 1;
         let suri = format!("{DEV_PHRASE}//{program}-{salt}:");
         let api2 = GearApi::init_with(WSAddress::dev(), suri.clone())
             .await
             .unwrap();
-
+        
         let account_id: &[u8; 32] = api2.account_id().as_ref();
         println!(
             "account {} with SURI={} and balance={}",
@@ -79,13 +84,14 @@ pub async fn connect_to_node(
             .await
             .unwrap();
         let account_id = ActorId::from(*account_id);
-        accounts.push((api2, account_id));
+        accounts.push((api2, account_id, salt.to_le_bytes(), suri));
     }
 
     Connection {
+        api,
         accounts,
         code_ids,
-        salt: salt.to_le_bytes(),
         gas_limit,
+        salt: salt.to_le_bytes(),
     }
 }

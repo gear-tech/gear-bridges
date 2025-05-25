@@ -13,7 +13,7 @@ mod shared;
 #[tokio::test]
 async fn update_admin() {
     let conn @ Connection {
-        gas_limit, salt, ..
+        gas_limit, ..
     } = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical_proxy",
@@ -23,6 +23,7 @@ async fn update_admin() {
 
     let api = conn.accounts[0].0.clone();
     let admin = conn.accounts[0].1.clone();
+    let salt = conn.accounts[0].2;
     println!("admin: {:?}", admin);
     let proxy_program_id =
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
@@ -80,7 +81,7 @@ async fn proxy() {
     let message = shared::event();
 
     let conn @ Connection {
-        gas_limit, salt, ..
+        gas_limit, ..
     } = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical-proxy",
@@ -90,6 +91,7 @@ async fn proxy() {
 
     let admin = conn.accounts[0].1;
     let api = conn.accounts[0].0.clone();
+    let salt = conn.accounts[0].2;
     println!("admin: {:?}", admin);
 
     let factory =

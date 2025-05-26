@@ -18,7 +18,7 @@ async fn update_admin() {
         &[historical_proxy::WASM_BINARY],
     )
     .await;
-    
+
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let admin = conn.accounts[0].0.clone();
     let salt = conn.salt;

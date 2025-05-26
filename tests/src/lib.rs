@@ -12,14 +12,15 @@ use tokio::sync::Mutex;
 mod historical_proxy;
 #[cfg(test)]
 mod vft_manager;
+#[cfg(test)]
+mod checkpoint_light_client;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 
 static LOCK: LazyLock<Mutex<State>> =
-    LazyLock::new(|| Mutex::const_new((2_000, HashMap::new())));
+    LazyLock::new(|| Mutex::const_new((1_000, HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
-
 pub struct Connection {
     pub api: GearApi,
     pub accounts: Vec<(GearApi, ActorId, [u8; 4], String)>,
@@ -64,10 +65,12 @@ pub async fn connect_to_node(
     };
     
     let mut accounts = vec![];
-    let salt = lock.0;
+    
+    let mut osalt = lock.0 ;
+    lock.0 += 1_000;
     for &balance in balances.iter() {
-        let salt = lock.0;
-        lock.0 += 1;
+        let salt = osalt;
+        osalt += 1;
         let suri = format!("{DEV_PHRASE}//{program}-{salt}:");
         let api2 = GearApi::init_with(WSAddress::dev(), suri.clone())
             .await
@@ -92,6 +95,6 @@ pub async fn connect_to_node(
         accounts,
         code_ids,
         gas_limit,
-        salt: salt.to_le_bytes(),
+        salt: osalt.to_le_bytes(),
     }
 }

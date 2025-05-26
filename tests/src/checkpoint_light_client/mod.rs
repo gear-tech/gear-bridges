@@ -1,3 +1,4 @@
+use crate::{connect_to_node, DEFAULT_BALANCE};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_client::{
     checkpoint_light_client_factory::io as factory_io, traits::*,
@@ -15,12 +16,10 @@ use ethereum_common::{
     },
     SLOTS_PER_EPOCH,
 };
-use gclient::{GearApi, Result, WSAddress};
+use gclient::{GearApi, Result};
 use ruzstd::StreamingDecoder;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use sp_core::crypto::DEV_PHRASE;
 use std::io::Read;
-use tokio::sync::Mutex;
 
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./chain-data/sepolia-finality-update-5_263_072.json");
@@ -39,44 +38,6 @@ const HOLESKY_FINALITY_UPDATE_3_014_768: &[u8; 4_932] =
     include_bytes!("./chain-data/holesky-finality-update-3_016_768.json");
 const HOLESKY_FINALITY_UPDATE_3_014_799: &[u8; 4_980] =
     include_bytes!("./chain-data/holesky-finality-update-3_016_799.json");
-
-static LOCK: Mutex<(u32, Option<CodeId>)> = Mutex::const_new((1_000, None));
-
-async fn connect_to_node() -> (GearApi, ActorId, CodeId, GasUnit, [u8; 4]) {
-    let api = GearApi::dev().await.unwrap();
-    let gas_limit = api.block_gas_limit().unwrap();
-
-    let (api, code_id, salt) = {
-        let mut lock = LOCK.lock().await;
-        let code_id = match lock.1 {
-            Some(code_id) => code_id,
-            None => {
-                let (code_id, _) = api.upload_code(WASM_BINARY).await.unwrap();
-                lock.1 = Some(code_id);
-
-                code_id
-            }
-        };
-
-        let salt = lock.0;
-        lock.0 += 1;
-
-        let suri = format!("{DEV_PHRASE}//checkpoint-light-client-{salt}:");
-        let api2 = GearApi::init_with(WSAddress::dev(), suri).await.unwrap();
-
-        let account_id: &[u8; 32] = api2.account_id().as_ref();
-        api.transfer_keep_alive((*account_id).into(), 300_000_000_000_000)
-            .await
-            .unwrap();
-
-        (api2, code_id, salt)
-    };
-
-    let id = api.account_id();
-    let admin = <[u8; 32]>::from(id.clone());
-
-    (api, admin.into(), code_id, gas_limit, salt.to_le_bytes())
-}
 
 #[track_caller]
 fn decode_signature(sync_aggregate: &SyncAggregate) -> G2 {
@@ -163,7 +124,15 @@ async fn calculate_gas<T: ActionIo>(
 async fn init_holesky() -> Result<()> {
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (api, _admin, code_id, _gas_limit, salt) = connect_to_node().await;
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "checkpoint-light-client",
+        &[WASM_BINARY],
+    )
+    .await;
+    let api = conn.api;
+    let code_id = conn.code_ids[0];
+    let salt = conn.salt;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
@@ -207,7 +176,15 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         _ => unreachable!("Requested single update"),
     };
 
-    let (api, _admin, code_id, _gas_limit, salt) = connect_to_node().await;
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "checkpoint-light-client",
+        &[WASM_BINARY],
+    )
+    .await;
+    let api = conn.api;
+    let code_id = conn.code_ids[0];
+    let salt = conn.salt;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
@@ -275,7 +252,17 @@ async fn replay_back_and_updating() -> Result<()> {
 
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (api, _admin, code_id, _gas_limit, salt) = connect_to_node().await;
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "checkpoint-light-client",
+        &[WASM_BINARY],
+    )
+    .await;
+
+    let api = conn.api;
+    let code_id = conn.code_ids[0];
+    let salt = conn.salt;
+
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );

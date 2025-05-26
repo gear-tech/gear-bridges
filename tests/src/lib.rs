@@ -1,4 +1,4 @@
-use gclient::{GearApi, WSAddress};
+use gclient::GearApi;
 use gear_core::ids::prelude::*;
 use sails_rs::prelude::*;
 use sp_core::Pair as _;
@@ -8,7 +8,7 @@ use sp_runtime::traits::Verify;
 use sp_runtime::MultiSignature;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{atomic::AtomicU64, LazyLock},
+    sync::LazyLock,
 };
 use tokio::sync::Mutex;
 #[cfg(test)]
@@ -36,7 +36,6 @@ pub async fn connect_to_node(
     program: &str,
     binaries: &[&'static [u8]],
 ) -> Connection {
-
     let mut lock = LOCK.lock().await;
     let api = GearApi::dev().await.unwrap();
 

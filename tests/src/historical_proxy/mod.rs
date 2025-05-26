@@ -20,7 +20,7 @@ async fn update_admin() {
     .await;
 
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
-    let admin = conn.accounts[0].0.clone();
+    let admin = conn.accounts[0].0;
     let salt = conn.salt;
     println!("admin: {:?}", admin);
     let proxy_program_id =

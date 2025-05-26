@@ -82,7 +82,7 @@ pub async fn connect_to_node(
     for &balance in balances.iter() {
         let salt = osalt;
         osalt += 1;
-        let suri = format!("{DEV_PHRASE}//{program}-{salt}:");
+        let suri = format!("{DEV_PHRASE}//{program}-{salt}");
         let pair = Pair::from_string(&suri, None).expect("Failed to create keypair from SURI");
         let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();
         let account_id: &[u8; 32] = account.as_ref();

@@ -36,9 +36,9 @@ pub async fn connect_to_node(
     program: &str,
     binaries: &[&'static [u8]],
 ) -> Connection {
-    let api = GearApi::dev().await.unwrap();
 
     let mut lock = LOCK.lock().await;
+    let api = GearApi::dev().await.unwrap();
 
     println!(
         "({}-{}) nonce={}",

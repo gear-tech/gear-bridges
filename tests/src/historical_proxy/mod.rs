@@ -3,27 +3,25 @@ use checkpoint_light_client_client::service_checkpoint_for::io as checkpoint_for
 use eth_events_deneb_client::traits::EthEventsDenebFactory;
 use gclient::{DispatchStatus, Event, EventProcessor, GearEvent};
 use gstd::ActorId;
+use hex_literal::hex;
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft_manager_client::vft_manager;
-use hex_literal::hex;
 
 mod shared;
 
 #[tokio::test]
 async fn update_admin() {
-    let conn @ Connection {
-        gas_limit, ..
-    } = connect_to_node(
+    let conn @ Connection { gas_limit, .. } = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical_proxy",
         &[historical_proxy::WASM_BINARY],
     )
     .await;
-
-    let api = conn.accounts[0].0.clone();
-    let admin = conn.accounts[0].1.clone();
-    let salt = conn.accounts[0].2;
+    
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let admin = conn.accounts[0].0.clone();
+    let salt = conn.salt;
     println!("admin: {:?}", admin);
     let proxy_program_id =
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
@@ -80,18 +78,16 @@ async fn update_admin() {
 async fn proxy() {
     let message = shared::event();
 
-    let conn @ Connection {
-        gas_limit, ..
-    } = connect_to_node(
+    let conn @ Connection { gas_limit, .. } = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical-proxy",
         &[historical_proxy::WASM_BINARY, eth_events_deneb::WASM_BINARY],
     )
     .await;
 
-    let admin = conn.accounts[0].1;
-    let api = conn.accounts[0].0.clone();
-    let salt = conn.accounts[0].2;
+    let admin = conn.accounts[0].0;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let salt = conn.salt;
     println!("admin: {:?}", admin);
 
     let factory =

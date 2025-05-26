@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
-use gear_core::{gas::GasInfo};
+use gear_core::gas::GasInfo;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use std::collections::HashMap;
 use vft::WASM_BINARY as WASM_VFT;
@@ -90,8 +90,8 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     .await;
 
     let api = conn.api.clone();
-    let suri = conn.accounts[0].3.clone();
-    let suri_unauthorized = conn.accounts[1].3.clone();
+    let suri = conn.accounts[0].2.clone();
+    let suri_unauthorized = conn.accounts[1].2.clone();
     let code_id = conn.code_ids[0];
     let code_id_vft = conn.code_ids[1];
     let api = api.with(suri).unwrap();
@@ -365,7 +365,7 @@ async fn getter_transactions() -> Result<()> {
     )
     .await;
     let api = conn.api.clone();
-    let suri = conn.accounts[0].3.clone();
+    let suri = conn.accounts[0].2.clone();
     let salt = conn.salt;
     let code_id = conn.code_ids[0];
     let _code_id_vft = conn.code_ids[1];
@@ -457,7 +457,7 @@ async fn msg_tracker_state() -> Result<()> {
     )
     .await;
     let api = conn.api.clone();
-    let suri = conn.accounts[0].3.clone();
+    let suri = conn.accounts[0].2.clone();
     let code_id = conn.code_ids[0];
     let _code_id_vft = conn.code_ids[1];
     let salt = conn.salt;
@@ -542,13 +542,20 @@ async fn msg_tracker_state() -> Result<()> {
 
 #[tokio::test]
 async fn upgrade() -> Result<()> {
-    let Connection { api, accounts, code_ids, gas_limit, salt } = connect_to_node(
+    let Connection {
+        api,
+        accounts,
+        code_ids,
+        gas_limit,
+        salt,
+    } = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
-    ).await;
-    let suri = accounts[0].3.clone();
-    let suri2 = accounts[1].3.clone();
+    )
+    .await;
+    let suri = accounts[0].2.clone();
+    let suri2 = accounts[1].2.clone();
     let code_id = code_ids[0];
     let code_id_vft = code_ids[1];
     let api = api.with(suri).unwrap();
@@ -707,11 +714,18 @@ async fn upgrade() -> Result<()> {
 async fn bench_gas_for_token_map_swap() -> Result<()> {
     const COUNT: usize = 1_000;
 
-    let Connection { api, accounts: _, code_ids, gas_limit, salt } = connect_to_node(
+    let Connection {
+        api,
+        accounts: _,
+        code_ids,
+        gas_limit,
+        salt,
+    } = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
-    ).await;
+    )
+    .await;
     let code_id = code_ids[0];
     let api = api.with("//Bob").unwrap();
 
@@ -802,13 +816,20 @@ async fn bench_gas_for_token_map_swap() -> Result<()> {
 
 #[tokio::test]
 async fn update_vfts() -> Result<()> {
-    let Connection { api, accounts, code_ids, gas_limit, salt } = connect_to_node(
+    let Connection {
+        api,
+        accounts,
+        code_ids,
+        gas_limit,
+        salt,
+    } = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
-    ).await;
-    let suri = accounts[0].3.clone();
-    let suri2 = accounts[1].3.clone();
+    )
+    .await;
+    let suri = accounts[0].2.clone();
+    let suri2 = accounts[1].2.clone();
     let code_id = code_ids[0];
     let code_id_vft = code_ids[1];
     let api = api.with(suri).unwrap();

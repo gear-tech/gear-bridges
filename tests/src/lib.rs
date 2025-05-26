@@ -2,7 +2,7 @@ use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::prelude::*;
 use sp_core::Pair as _;
-use sp_core::{crypto::DEV_PHRASE, ed25519::Pair};
+use sp_core::{crypto::DEV_PHRASE, sr25519::Pair};
 use sp_runtime::traits::IdentifyAccount;
 use sp_runtime::traits::Verify;
 use sp_runtime::MultiSignature;
@@ -20,8 +20,7 @@ mod vft_manager;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 
-static LOCK: LazyLock<std::sync::Mutex<State>> =
-    LazyLock::new(|| std::sync::Mutex::new((1_000, HashMap::new())));
+static LOCK: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new((1_000, HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 pub struct Connection {
@@ -37,10 +36,16 @@ pub async fn connect_to_node(
     program: &str,
     binaries: &[&'static [u8]],
 ) -> Connection {
-    let mut lock = LOCK.lock().unwrap(); //.await;
-
     let api = GearApi::dev().await.unwrap();
-    println!("({}-{}) nonce={}", program, lock.0, api.rpc_nonce().await.unwrap());
+
+    let mut lock = LOCK.lock().await;
+
+    println!(
+        "({}-{}) nonce={}",
+        program,
+        lock.0,
+        api.rpc_nonce().await.unwrap()
+    );
     let gas_limit = api.block_gas_limit().unwrap();
     let code_ids = {
         let mut res = vec![];

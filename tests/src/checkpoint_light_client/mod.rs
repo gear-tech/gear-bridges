@@ -131,6 +131,7 @@ async fn init_holesky() -> Result<()> {
     )
     .await;
     let api = conn.api;
+    let api = api.with(&conn.accounts[0].2).unwrap();
     let code_id = conn.code_ids[0];
     let salt = conn.salt;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
@@ -182,7 +183,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         &[WASM_BINARY],
     )
     .await;
-    let api = conn.api;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let code_id = conn.code_ids[0];
     let salt = conn.salt;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
@@ -259,7 +260,7 @@ async fn replay_back_and_updating() -> Result<()> {
     )
     .await;
 
-    let api = conn.api;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let code_id = conn.code_ids[0];
     let salt = conn.salt;
 

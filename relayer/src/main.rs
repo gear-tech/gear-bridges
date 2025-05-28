@@ -327,20 +327,19 @@ async fn main() {
             .await
             .expect("Failed to create API provider");
 
-            let _sender = gear_to_eth::manual::relay(
-                api_provider.connection(),
+            let connection = api_provider.connection();
+            api_provider.spawn();
+
+            gear_to_eth::manual::relay(
+                connection,
                 eth_api,
                 nonce,
                 args.block,
                 args.from_eth_block,
             )
             .await;
-            api_provider.spawn();
-            loop {
-                // relay() spawns thread and exits, so we need to add this loop after calling run.
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
         }
+
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
             slot,

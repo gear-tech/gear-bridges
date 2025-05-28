@@ -4,11 +4,14 @@ use ethereum_client::EthApi;
 use primitive_types::H256;
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::{
+use crate::{
+    common::MAX_RETRIES,
+    message_relayer::{
     common::{
         ethereum::{
             accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+            merkle_proof_fetcher::MerkleProofFetcher, status_fetcher::StatusFetcher,
         },
         gear::{
             block_listener::BlockListener as GearBlockListener,
@@ -18,7 +21,7 @@ use crate::message_relayer::{
         paid_messages_filter::PaidMessagesFilter,
     },
     eth_to_gear::api_provider::ApiProviderConnection,
-};
+}};
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
@@ -31,6 +34,9 @@ pub struct Relayer {
 
     merkle_root_extractor: MerkleRootExtractor,
     message_sender: MessageSender,
+
+    proof_fetcher: MerkleProofFetcher,
+    status_fetcher: StatusFetcher,
 }
 
 impl MeteredService for Relayer {
@@ -82,7 +88,10 @@ impl Relayer {
 
         let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
 
-        let message_sender = MessageSender::new(eth_api, api_provider);
+        let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
+
+        let proof_fetcher = MerkleProofFetcher::new(api_provider);
+        let status_fetcher = StatusFetcher::new(eth_api);
 
         Ok(Self {
             gear_block_listener,
@@ -95,6 +104,9 @@ impl Relayer {
 
             merkle_root_extractor: merkle_root_listener,
             message_sender,
+
+            proof_fetcher,
+            status_fetcher,
         })
     }
 
@@ -112,6 +124,9 @@ impl Relayer {
         let accumulator = Accumulator::new();
         let channel_messages = accumulator.run(filtered_messages, merkle_roots).await;
 
-        self.message_sender.run(channel_messages).await;
+        let channel_message_data = self.proof_fetcher.spawn(channel_messages);
+        let channel_tx_data = self.status_fetcher.spawn();
+
+        self.message_sender.spawn(channel_message_data, channel_tx_data);
     }
 }

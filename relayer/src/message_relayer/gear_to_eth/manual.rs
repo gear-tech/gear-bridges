@@ -1,18 +1,21 @@
+use alloy::providers::{Provider, PendingTransactionBuilder};
 use primitive_types::U256;
-
 use ethereum_client::EthApi;
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc;
 
 use crate::message_relayer::{
     common::{
         ethereum::{
             accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+            merkle_proof_fetcher::MerkleProofFetcher,
         },
         AuthoritySetId, GearBlockNumber, MessageInBlock,
     },
     eth_to_gear::api_provider::ApiProviderConnection,
 };
+
+const COUNT_CONFIRMATIONS: u64 = 5;
 
 pub async fn relay(
     api_provider: ApiProviderConnection,
@@ -20,7 +23,7 @@ pub async fn relay(
     message_nonce: U256,
     gear_block: u32,
     from_eth_block: Option<u64>,
-) -> UnboundedSender<MessageInBlock> {
+) {
     let from_eth_block = if let Some(block) = from_eth_block {
         block
     } else {
@@ -68,7 +71,7 @@ pub async fn relay(
 
     let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
     let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
-    let message_sender = MessageSender::new(eth_api, api_provider);
+    let message_sender = MessageSender::new(1, eth_api.clone());
 
     let ethereum_blocks = ethereum_block_listener.run().await;
     let merkle_roots = merkle_root_extractor.run(ethereum_blocks).await;
@@ -76,11 +79,25 @@ pub async fn relay(
     let channel_messages = accumulator
         .run(queued_messages_receiver, merkle_roots)
         .await;
-    message_sender.run(channel_messages).await;
+    let channel_message_data = MerkleProofFetcher::new(api_provider).spawn(channel_messages);
+
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    message_sender.spawn(channel_message_data, sender);
 
     queued_messages_sender
         .send(message_in_block)
         .expect("Failed to send message to channel");
 
-    queued_messages_sender
+    let Some((tx_hash, _message)) = receiver.recv().await else {
+        log::info!("Unable to receive transaction data for a message {message_nonce:#x}");
+        return;
+    };
+
+    let provider = eth_api.raw_provider().root().clone();
+    let result = PendingTransactionBuilder::new(provider, tx_hash)
+        .with_required_confirmations(COUNT_CONFIRMATIONS)
+        .watch()
+        .await;
+    
+    log::info!("Result for message {message_nonce:#x} after {COUNT_CONFIRMATIONS} confirmation(s): {result:?}");
 }

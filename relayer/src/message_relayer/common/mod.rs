@@ -1,5 +1,5 @@
 use ethereum_client::TxHash;
-use gear_rpc_client::dto::Message;
+use gear_rpc_client::dto::{Message, MerkleProof};
 use primitive_types::H256;
 
 pub mod ethereum;

@@ -1,4 +1,4 @@
-use crate::{connect_to_node, Connection, DEFAULT_BALANCE};
+use crate::{connect_to_node, DEFAULT_BALANCE};
 use checkpoint_light_client_client::service_checkpoint_for::io as checkpoint_for_io;
 use eth_events_deneb_client::traits::EthEventsDenebFactory;
 use gclient::{DispatchStatus, Event, EventProcessor, GearEvent};
@@ -85,6 +85,7 @@ async fn proxy() {
     )
     .await;
 
+    let gas_limit = conn.gas_limit;
     let admin = conn.accounts[0].0;
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let salt = conn.salt;

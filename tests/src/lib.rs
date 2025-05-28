@@ -23,6 +23,7 @@ type State = (u32, HashMap<&'static [u8], CodeId>);
 static LOCK: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new((1_000, HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
+
 pub struct Connection {
     pub api: GearApi,
     pub accounts: Vec<(ActorId, [u8; 4], String)>,
@@ -39,12 +40,7 @@ pub async fn connect_to_node(
     let mut lock = LOCK.lock().await;
     let api = GearApi::dev().await.unwrap();
 
-    println!(
-        "({}-{}) nonce={}",
-        program,
-        lock.0,
-        api.rpc_nonce().await.unwrap()
-    );
+   
     let gas_limit = api.block_gas_limit().unwrap();
     let code_ids = {
         let mut res = vec![];
@@ -77,11 +73,11 @@ pub async fn connect_to_node(
 
     let mut accounts = vec![];
     let origin = lock.0;
-    let mut osalt = lock.0;
-    lock.0 += 1_000;
+    let mut salt_base = lock.0;
+    lock.0 += balances.len() as u32;
     for &balance in balances.iter() {
-        let salt = osalt;
-        osalt += 1;
+        let salt = salt_base;
+        salt_base += 1;
         let suri = format!("{DEV_PHRASE}//{program}-{salt}");
         let pair = Pair::from_string(&suri, None).expect("Failed to create keypair from SURI");
         let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();

@@ -1,14 +1,17 @@
+use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
+use gsdk::config::Header;
 use primitive_types::H256;
 use prometheus::IntCounter;
 use sails_rs::events::EventIo;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use subxt::config::Header as _;
+use tokio::sync::{
+    broadcast::{error::RecvError, Receiver},
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
-
 use crate::message_relayer::{
-    common::{GearBlockNumber, PaidMessage},
-    eth_to_gear::api_provider::ApiProviderConnection,
+    common::PaidMessage, eth_to_gear::api_provider::ApiProviderConnection,
 };
 
 pub struct MessagePaidEventExtractor {
@@ -43,10 +46,7 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub async fn run(
-        mut self,
-        mut blocks: UnboundedReceiver<GearBlockNumber>,
-    ) -> UnboundedReceiver<PaidMessage> {
+    pub async fn run(mut self, mut blocks: Receiver<Header>) -> UnboundedReceiver<PaidMessage> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
@@ -75,22 +75,33 @@ impl MessagePaidEventExtractor {
     async fn run_inner(
         &self,
         sender: &UnboundedSender<PaidMessage>,
-        blocks: &mut UnboundedReceiver<GearBlockNumber>,
+        blocks: &mut Receiver<Header>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Some(block) = blocks.recv().await {
-                self.process_block_events(block.0, sender).await?;
+            match blocks.recv().await {
+                Ok(block) => {
+                    self.process_block_events(block, sender).await?;
+                }
+                Err(RecvError::Closed) => {
+                    log::warn!("Message paid event extractor channel closed, exiting");
+                    return Ok(());
+                }
+
+                Err(RecvError::Lagged(_)) => {
+                    log::warn!("Message paid event extractor channel lagged behind, trying again");
+                    continue;
+                }
             }
         }
     }
 
     async fn process_block_events(
         &self,
-        block: u32,
+        block: Header,
         sender: &UnboundedSender<PaidMessage>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
-        let block_hash = gear_api.block_number_to_hash(block).await?;
+        let block_hash = block.hash();
 
         // As bridging-payment uses sails to send events, destnation will be zeroed.
         let destination = H256::zero();
@@ -103,7 +114,11 @@ impl MessagePaidEventExtractor {
             return Ok(());
         }
 
-        log::info!("Found {} paid messages at block #{}", messages.len(), block);
+        log::info!(
+            "Found {} paid messages at block #{}",
+            messages.len(),
+            block.number()
+        );
 
         self.metrics
             .total_messages_found

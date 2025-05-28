@@ -12,13 +12,13 @@ mod shared;
 
 #[tokio::test]
 async fn update_admin() {
-    let conn @ Connection { gas_limit, .. } = connect_to_node(
+    let conn = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical_proxy",
         &[historical_proxy::WASM_BINARY],
     )
     .await;
-
+    let gas_limit = conn.gas_limit;
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let admin = conn.accounts[0].0;
     let salt = conn.salt;
@@ -78,7 +78,7 @@ async fn update_admin() {
 async fn proxy() {
     let message = shared::event();
 
-    let conn @ Connection { gas_limit, .. } = connect_to_node(
+    let conn = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical-proxy",
         &[historical_proxy::WASM_BINARY, eth_events_deneb::WASM_BINARY],

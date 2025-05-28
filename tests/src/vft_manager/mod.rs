@@ -82,7 +82,7 @@ fn average(array: &[u64]) -> u64 {
 async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     assert!(!(amount / 2).is_zero());
 
-    let conn @ Connection { .. } = connect_to_node(
+    let conn = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
@@ -233,17 +233,18 @@ async fn unauthorized_teleport_erc20() {
 async fn bench_gas_for_reply() -> Result<()> {
     const CAPACITY: usize = 1_000;
 
-    let conn @ Connection { gas_limit, .. } = connect_to_node(
+    let conn = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
     )
     .await;
+
+    let gas_limit = conn.gas_limit;
     let api = conn.api.clone();
     let salt = conn.salt;
     let api = api.with("//Bob").unwrap();
     let code_id = conn.code_ids[0];
-    let _code_id_vft = conn.code_ids[1];
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
@@ -358,18 +359,18 @@ async fn bench_gas_for_reply() -> Result<()> {
 async fn getter_transactions() -> Result<()> {
     const CAPACITY: usize = 10;
 
-    let conn @ Connection { gas_limit, .. } = connect_to_node(
+    let conn = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
     )
     .await;
-    let api = conn.api.clone();
+
+    let gas_limit = conn.gas_limit;
     let suri = conn.accounts[0].2.clone();
     let salt = conn.salt;
     let code_id = conn.code_ids[0];
-    let _code_id_vft = conn.code_ids[1];
-    let api = api.with(suri).unwrap();
+    let api = conn.api.with(suri).unwrap();
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
@@ -450,18 +451,20 @@ async fn getter_transactions() -> Result<()> {
 
 #[tokio::test]
 async fn msg_tracker_state() -> Result<()> {
-    let conn @ Connection { gas_limit, .. } = connect_to_node(
+    let conn = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft-manager",
         &[WASM_VFT_MANAGER, WASM_VFT],
     )
     .await;
-    let api = conn.api.clone();
+
+    let gas_limit = conn.gas_limit;
+   
     let suri = conn.accounts[0].2.clone();
     let code_id = conn.code_ids[0];
     let _code_id_vft = conn.code_ids[1];
     let salt = conn.salt;
-    let api = api.with(suri).unwrap();
+    let api = conn.api.with(suri).unwrap();
 
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));

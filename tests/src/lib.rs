@@ -39,8 +39,6 @@ pub async fn connect_to_node(
 ) -> Connection {
     let mut lock = LOCK.lock().await;
     let api = GearApi::dev().await.unwrap();
-
-   
     let gas_limit = api.block_gas_limit().unwrap();
     let code_ids = {
         let mut res = vec![];

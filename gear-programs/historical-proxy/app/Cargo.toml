@@ -11,11 +11,6 @@ eth-events-common.workspace = true
 ethereum-common.workspace = true
 
 [dev-dependencies]
-futures.workspace = true
-gclient.workspace = true
-gear-core.workspace = true
-gstd.workspace = true
-sp-core = { workspace = true, features = ["std"] }
 gtest.workspace = true
 eth-events-common.workspace = true
 eth-events-deneb = { workspace = true, features = ["wasm-binary"] }
@@ -25,15 +20,6 @@ sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
-vft-manager = { workspace = true, features = ["wasm-binary"] }
-vft-manager-client.workspace = true
-serde_json = { workspace = true }
-serde = { workspace = true }
-alloy = { workspace = true }
-alloy-rlp = { workspace = true }
-checkpoint-light-client-client.workspace = true
-ethereum-common =  { workspace = true, features = ["std"] }
-hex-literal = { workspace = true }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }

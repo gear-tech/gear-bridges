@@ -19,15 +19,16 @@ use alloy::{
     transports::{
         ws::WsConnect,
         Transport,
+        RpcError, TransportErrorKind,
     },
-    pubsub::PubSubFrontend,
+    pubsub::{PubSubFrontend, Subscription},
 };
 use primitive_types::{H160, H256};
 use reqwest::Url;
 
 pub use alloy::primitives::TxHash;
 
-mod abi;
+pub mod abi;
 use abi::{
     BridgingPayment, IERC20Manager, IMessageQueue, IMessageQueue::IMessageQueueInstance,
     IMessageQueue::VaraMessage, IRelayer, IRelayer::IRelayerInstance, IRelayer::MerkleRoot,
@@ -301,6 +302,14 @@ impl EthApi {
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
         self.contracts.is_message_processed(B256::from(nonce)).await
+    }
+
+    pub async fn subscribe_logs(&self) -> Result<Subscription<alloy::rpc::types::Log>, RpcError<TransportErrorKind>> {
+        let filter = Filter::new()
+            .address(*self.contracts.relayer_instance.address())
+            .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH);
+
+        self.raw_provider().clone().subscribe_logs(&filter).await
     }
 }
 

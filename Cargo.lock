@@ -2256,24 +2256,16 @@ dependencies = [
  "ark-ec",
  "ark-scale",
  "ark-serialize 0.4.2",
- "checkpoint-light-client",
- "checkpoint-light-client-client",
  "checkpoint-light-client-io",
  "circular-buffer",
  "ethereum-common",
- "ethereum_beacon_client",
- "futures",
  "gbuiltin-bls381 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gclient",
  "getrandom 0.2.15",
  "hex",
  "hex-literal",
  "lazy_static",
- "ruzstd",
  "sails-rs",
- "serde_json",
- "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
- "tokio",
  "tree_hash_derive",
 ]
 
@@ -6091,9 +6083,6 @@ dependencies = [
 name = "historical-proxy-app"
 version = "0.3.0"
 dependencies = [
- "alloy",
- "alloy-rlp",
- "checkpoint-light-client-client",
  "eth-events-common",
  "eth-events-deneb",
  "eth-events-deneb-client",
@@ -6105,7 +6094,6 @@ dependencies = [
  "getrandom 0.2.15",
  "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest",
- "hex-literal",
  "historical-proxy",
  "historical-proxy-client",
  "lazy_static",
@@ -6113,12 +6101,7 @@ dependencies = [
  "sails-client-gen",
  "sails-rs",
  "scale-info",
- "serde",
- "serde_json",
- "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
  "tokio",
- "vft-manager",
- "vft-manager-client",
 ]
 
 [[package]]
@@ -14727,6 +14710,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "tests"
+version = "0.3.0"
+dependencies = [
+ "alloy",
+ "alloy-rlp",
+ "anyhow",
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-scale",
+ "ark-serialize 0.4.2",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
+ "eth-events-common",
+ "eth-events-deneb",
+ "eth-events-deneb-client",
+ "eth-events-electra-client",
+ "ethereum-common",
+ "ethereum_beacon_client",
+ "futures",
+ "gclient",
+ "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gtest",
+ "hex",
+ "hex-literal",
+ "historical-proxy",
+ "historical-proxy-client",
+ "ruzstd",
+ "sails-rs",
+ "serde",
+ "serde_json",
+ "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
+ "sp-runtime 39.0.1 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
+ "tokio",
+ "vft",
+ "vft-client",
+ "vft-manager",
+ "vft-manager-client",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15607,28 +15632,19 @@ version = "0.3.0"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
- "anyhow",
  "ethereum-common",
- "futures",
  "gbuiltin-eth-bridge",
  "gclient",
  "gear-core 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.15",
  "git-download",
  "gstd 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "hex",
  "lazy_static",
  "parity-scale-codec",
  "sails-client-gen",
  "sails-rs",
  "scale-info",
- "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
- "sp-runtime 39.0.1 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
- "tokio",
- "vft",
  "vft-client",
- "vft-manager",
- "vft-manager-client",
 ]
 
 [[package]]

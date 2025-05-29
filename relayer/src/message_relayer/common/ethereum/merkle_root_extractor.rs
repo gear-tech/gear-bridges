@@ -1,8 +1,3 @@
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use ethereum_client::{EthApi, abi::IRelayer::MerkleRoot};
-use prometheus::IntGauge;
-use utils_prometheus::{impl_metered_service, MeteredService};
-use alloy::{providers::{Provider, PendingTransactionBuilder}, sol_types::SolEvent};
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
@@ -10,7 +5,15 @@ use crate::{
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use alloy::{
+    providers::{PendingTransactionBuilder, Provider},
+    sol_types::SolEvent,
+};
+use ethereum_client::{abi::IRelayer::MerkleRoot, EthApi};
 use futures::StreamExt;
+use prometheus::IntGauge;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MerkleRootExtractor {
     eth_api: EthApi,
@@ -36,8 +39,7 @@ impl_metered_service! {
 }
 
 impl MerkleRootExtractor {
-    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection, 
-        confirmations: u64,) -> Self {
+    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection, confirmations: u64) -> Self {
         Self {
             eth_api,
             api_provider,
@@ -47,9 +49,7 @@ impl MerkleRootExtractor {
         }
     }
 
-    pub fn spawn(
-        self,
-    ) -> UnboundedReceiver<RelayedMerkleRoot> {
+    pub fn spawn(self) -> UnboundedReceiver<RelayedMerkleRoot> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(task(self, sender));
@@ -58,10 +58,7 @@ impl MerkleRootExtractor {
     }
 }
 
-async fn task(
-    mut this: MerkleRootExtractor,
-    sender: UnboundedSender<RelayedMerkleRoot>,
-) {
+async fn task(mut this: MerkleRootExtractor, sender: UnboundedSender<RelayedMerkleRoot>) {
     let mut attempts = 0;
 
     loop {
@@ -121,9 +118,7 @@ async fn task_inner(
 
     let mut stream = subscription.into_result_stream();
     while let Some(Ok(log)) = stream.next().await {
-        log::debug!(
-            "Get log = {log:?}"
-        );
+        log::debug!("Get log = {log:?}");
 
         let (Some(tx_hash), Some(block_number)) = (log.transaction_hash, log.block_number) else {
             log::error!("Unable to get tx_hash and block_number for log = {log:?}. Skipping");
@@ -143,7 +138,8 @@ async fn task_inner(
             }
         };
 
-        let pending = PendingTransactionBuilder::new(this.eth_api.raw_provider().root().clone(), tx_hash);
+        let pending =
+            PendingTransactionBuilder::new(this.eth_api.raw_provider().root().clone(), tx_hash);
         pending
             .with_required_confirmations(this.confirmations)
             .watch()
@@ -160,9 +156,7 @@ async fn task_inner(
             .latest_merkle_root_for_block
             .set(block_number_gear as i64);
 
-        let block_hash = gear_api
-            .block_number_to_hash(block_number_gear)
-            .await?;
+        let block_hash = gear_api.block_number_to_hash(block_number_gear).await?;
 
         let authority_set_id =
             AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await?);

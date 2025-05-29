@@ -5,10 +5,7 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::message_relayer::{
     common::{
-        ethereum::{
-            accumulator::Accumulator,
-            message_sender::MessageSender,
-        },
+        ethereum::{accumulator::Accumulator, message_sender::MessageSender},
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
     eth_to_gear::api_provider::ApiProviderConnection,
@@ -22,21 +19,19 @@ pub async fn relay(
     from_eth_block: Option<u64>,
 ) -> UnboundedSender<MessageInBlock> {
     let block_latest = eth_api
-            .block_number()
-            .await
-            .expect("Failed to get the latest block number on Ethereum");
+        .block_number()
+        .await
+        .expect("Failed to get the latest block number on Ethereum");
     let from_eth_block = from_eth_block.unwrap_or(block_latest);
 
     let merkle_roots = eth_api
-                    .fetch_merkle_roots_in_range(from_eth_block, block_latest)
-                    .await
-                    .expect("Unable to fetch merkle roots");
+        .fetch_merkle_roots_in_range(from_eth_block, block_latest)
+        .await
+        .expect("Unable to fetch merkle roots");
 
     let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
     if merkle_roots.is_empty() {
-        log::info!(
-            "Found no merkle roots"
-        );
+        log::info!("Found no merkle roots");
 
         return queued_messages_sender;
     }
@@ -49,8 +44,12 @@ pub async fn relay(
             .await
             .expect("Unable to get hash for the block number");
 
-        let authority_set_id =
-            AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await.expect("Unable to get AuthoritySetId"));
+        let authority_set_id = AuthoritySetId(
+            gear_api
+                .signed_by_authority_set_id(block_hash)
+                .await
+                .expect("Unable to get AuthoritySetId"),
+        );
 
         log::info!(
             "Found merkle root for gear block #{} and era #{}",
@@ -58,12 +57,14 @@ pub async fn relay(
             authority_set_id
         );
 
-        sender.send(RelayedMerkleRoot {
-            block: GearBlockNumber(merkle_root.block_number as u32),
-            block_hash,
-            authority_set_id,
-            merkle_root: merkle_root.merkle_root,
-        }).expect("Unable to send RelayedMerkleRoot");
+        sender
+            .send(RelayedMerkleRoot {
+                block: GearBlockNumber(merkle_root.block_number as u32),
+                block_hash,
+                authority_set_id,
+                merkle_root: merkle_root.merkle_root,
+            })
+            .expect("Unable to send RelayedMerkleRoot");
     }
 
     let gear_block_hash = gear_api
@@ -101,9 +102,7 @@ pub async fn relay(
     let message_sender = MessageSender::new(eth_api, api_provider);
 
     let accumulator = Accumulator::new();
-    let channel_messages = accumulator
-        .run(queued_messages_receiver, receiver)
-        .await;
+    let channel_messages = accumulator.run(queued_messages_receiver, receiver).await;
     message_sender.run(channel_messages).await;
 
     queued_messages_sender

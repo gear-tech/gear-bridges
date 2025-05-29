@@ -1,4 +1,3 @@
-use std::{marker::PhantomData, str::FromStr};
 use alloy::{
     contract::Event,
     network::{Ethereum, EthereumWallet},
@@ -10,20 +9,15 @@ use alloy::{
         },
         Identity, Provider, ProviderBuilder, RootProvider,
     },
-    rpc::{
-        types::{BlockId, BlockNumberOrTag, Filter},
-    },
+    pubsub::{PubSubFrontend, Subscription},
+    rpc::types::{BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
-    transports::{
-        ws::WsConnect,
-        Transport,
-        RpcError, TransportErrorKind,
-    },
-    pubsub::{PubSubFrontend, Subscription},
+    transports::{ws::WsConnect, RpcError, Transport, TransportErrorKind},
 };
 use primitive_types::{H160, H256};
 use reqwest::Url;
+use std::{marker::PhantomData, str::FromStr};
 
 pub use alloy::primitives::TxHash;
 
@@ -299,7 +293,9 @@ impl EthApi {
         self.contracts.is_message_processed(B256::from(nonce)).await
     }
 
-    pub async fn subscribe_logs(&self) -> Result<Subscription<alloy::rpc::types::Log>, RpcError<TransportErrorKind>> {
+    pub async fn subscribe_logs(
+        &self,
+    ) -> Result<Subscription<RpcLog>, RpcError<TransportErrorKind>> {
         let filter = Filter::new()
             .address(*self.contracts.relayer_instance.address())
             .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH);

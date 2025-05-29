@@ -463,7 +463,7 @@ fn create_receipt_rlp(receiver: ActorId, token: H160, amount: U256) -> Vec<u8> {
 
     let receipt = ReceiptWithBloom::from(Receipt {
         status: true.into(),
-        cumulative_gas_used: 100_000u128,
+        cumulative_gas_used: 100_000u64,
         logs: vec![alloy_primitives::Log {
             address: ERC20_MANAGER_ADDRESS.0.into(),
             data: Into::into(&event),

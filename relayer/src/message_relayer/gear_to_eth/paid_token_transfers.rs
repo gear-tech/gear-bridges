@@ -50,6 +50,7 @@ impl Relayer {
         from_block: Option<u32>,
         bridging_payment_address: H256,
         api_provider: ApiProviderConnection,
+        confirmations: u64,
     ) -> anyhow::Result<Self> {
         let from_gear_block = if let Some(block) = from_block {
             block
@@ -73,7 +74,7 @@ impl Relayer {
 
         let paid_messages_filter = PaidMessagesFilter::new();
 
-        let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
+        let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone(), confirmations);
 
         let message_sender = MessageSender::new(eth_api, api_provider);
 
@@ -85,7 +86,7 @@ impl Relayer {
 
             paid_messages_filter,
 
-            merkle_root_extractor: merkle_root_listener,
+            merkle_root_extractor,
             message_sender,
         })
     }

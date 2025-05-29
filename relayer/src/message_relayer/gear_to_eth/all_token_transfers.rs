@@ -54,7 +54,7 @@ impl Relayer {
 
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
-        let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
+        let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone(), 1);
 
         let message_sender = MessageSender::new(eth_api, api_provider);
 
@@ -63,7 +63,7 @@ impl Relayer {
 
             message_sent_listener,
 
-            merkle_root_extractor: merkle_root_listener,
+            merkle_root_extractor,
             message_sender,
         })
     }

@@ -36,11 +36,12 @@ impl_metered_service! {
 }
 
 impl MerkleRootExtractor {
-    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection,) -> Self {
+    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection, 
+        confirmations: u64,) -> Self {
         Self {
             eth_api,
             api_provider,
-            confirmations: 8,
+            confirmations,
 
             metrics: Metrics::new(),
         }

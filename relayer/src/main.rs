@@ -30,6 +30,7 @@ use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
+    DEFAULT_COUNT_CONFIRMATIONS,
 };
 
 #[tokio::main]
@@ -169,6 +170,7 @@ async fn main() {
                         args.from_block,
                         bridging_payment_address,
                         provider.connection(),
+                        args.confirmations_merkle_root.unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
                     .unwrap();

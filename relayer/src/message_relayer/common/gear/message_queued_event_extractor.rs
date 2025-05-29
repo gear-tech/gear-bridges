@@ -3,8 +3,13 @@ use crate::message_relayer::{
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 use gear_rpc_client::GearApi;
+use gsdk::config::Header;
 use prometheus::IntCounter;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use subxt::config::Header as _;
+use tokio::sync::{
+    broadcast::{error::RecvError, Receiver},
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessageQueuedEventExtractor {
@@ -36,10 +41,7 @@ impl MessageQueuedEventExtractor {
         }
     }
 
-    pub async fn run(
-        mut self,
-        mut blocks: UnboundedReceiver<GearBlockNumber>,
-    ) -> UnboundedReceiver<MessageInBlock> {
+    pub async fn run(mut self, mut blocks: Receiver<Header>) -> UnboundedReceiver<MessageInBlock> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
@@ -67,16 +69,32 @@ impl MessageQueuedEventExtractor {
     async fn run_inner(
         &self,
         sender: &UnboundedSender<MessageInBlock>,
-        blocks: &mut UnboundedReceiver<GearBlockNumber>,
+        blocks: &mut Receiver<Header>,
     ) -> anyhow::Result<()> {
+        let gear_api = self.api_provider.client();
         loop {
-            let gear_api = self.api_provider.client();
-            while let Some(block) = blocks.recv().await {
-                let block_hash = gear_api.block_number_to_hash(block.0).await?;
-                let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+            match blocks.recv().await {
+                Ok(block) => {
+                    let block_hash = block.hash();
+                    let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
-                self.process_block_events(&gear_api, block, block_hash, authority_set_id, sender)
+                    self.process_block_events(
+                        &gear_api,
+                        block,
+                        block_hash,
+                        authority_set_id,
+                        sender,
+                    )
                     .await?;
+                }
+                Err(RecvError::Closed) => {
+                    log::warn!("Message queued extractor channel closed, exiting");
+                    return Ok(());
+                }
+                Err(RecvError::Lagged(_)) => {
+                    log::warn!("Message queued extractor channel lagged behind, trying again");
+                    continue;
+                }
             }
         }
     }
@@ -84,14 +102,18 @@ impl MessageQueuedEventExtractor {
     async fn process_block_events(
         &self,
         gear_api: &GearApi,
-        block: GearBlockNumber,
+        block: Header,
         block_hash: H256,
         authority_set_id: u64,
         sender: &UnboundedSender<MessageInBlock>,
     ) -> anyhow::Result<()> {
         let messages = gear_api.message_queued_events(block_hash).await?;
         if !messages.is_empty() {
-            log::info!("Found {} queued messages in block #{block}", messages.len(),);
+            log::info!(
+                "Found {} queued messages in block #{}",
+                messages.len(),
+                block.number()
+            );
             self.metrics
                 .total_messages_found
                 .inc_by(messages.len() as u64);
@@ -99,7 +121,7 @@ impl MessageQueuedEventExtractor {
             for message in messages {
                 sender.send(MessageInBlock {
                     message,
-                    block,
+                    block: GearBlockNumber(block.number()),
                     block_hash,
                     authority_set_id: AuthoritySetId(authority_set_id),
                 })?;

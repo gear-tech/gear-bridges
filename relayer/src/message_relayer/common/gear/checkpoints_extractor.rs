@@ -1,15 +1,19 @@
 use crate::message_relayer::{
-    common::{EthereumSlotNumber, GearBlockNumber},
-    eth_to_gear::api_provider::ApiProviderConnection,
+    common::EthereumSlotNumber, eth_to_gear::api_provider::ApiProviderConnection,
 };
 use anyhow::anyhow;
 use checkpoint_light_client_client::Order;
 use gear_core::message::ReplyCode;
+use gsdk::config::Header;
 use parity_scale_codec::Decode;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::calls::*;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use subxt::config::Header as _;
+use tokio::sync::{
+    broadcast::{error::RecvError, Receiver},
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct CheckpointsExtractor {
@@ -49,7 +53,7 @@ impl CheckpointsExtractor {
 
     pub async fn run(
         mut self,
-        mut blocks: UnboundedReceiver<GearBlockNumber>,
+        mut blocks: Receiver<Header>,
     ) -> UnboundedReceiver<EthereumSlotNumber> {
         let (sender, receiver) = unbounded_channel();
 
@@ -77,11 +81,20 @@ impl CheckpointsExtractor {
     async fn run_inner(
         &mut self,
         sender: &UnboundedSender<EthereumSlotNumber>,
-        blocks: &mut UnboundedReceiver<GearBlockNumber>,
+        blocks: &mut Receiver<Header>,
     ) -> anyhow::Result<()> {
         loop {
-            while let Some(block) = blocks.recv().await {
-                self.process_block_events(block.0, sender).await?;
+            match blocks.recv().await {
+                Ok(block) => self.process_block_events(block, sender).await?,
+                Err(RecvError::Closed) => {
+                    log::warn!("Checkpoints extractor channel closed, exiting");
+                    return Ok(());
+                }
+
+                Err(RecvError::Lagged(_)) => {
+                    log::warn!("Checkpoints extractor channel lagged behind, trying again");
+                    continue;
+                }
             }
         }
     }
@@ -89,13 +102,13 @@ impl CheckpointsExtractor {
     async fn process_block_events(
         &mut self,
 
-        block: u32,
+        block: Header,
         sender: &UnboundedSender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
         use checkpoint_light_client_client::service_state::io;
 
         let gear_api = self.api_provider.client();
-        let block_hash = gear_api.block_number_to_hash(block).await?;
+        let block_hash = block.hash();
 
         let payload = io::Get::encode_call(Order::Reverse, 0, 1);
         let api = gclient::GearApi::from(gear_api.api.clone());

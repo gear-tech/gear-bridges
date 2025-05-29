@@ -12,15 +12,15 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     rpc::{
-        client::RpcClient,
         types::{BlockId, BlockNumberOrTag, Filter},
     },
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{
-        http::{Client, Http},
+        ws::WsConnect,
         Transport,
     },
+    pubsub::PubSubFrontend,
 };
 use primitive_types::{H160, H256};
 use reqwest::Url;
@@ -36,6 +36,7 @@ use abi::{
 pub mod error;
 pub use error::Error;
 
+type ClientType = PubSubFrontend;
 type ProviderType = FillProvider<
     JoinFill<
         JoinFill<
@@ -44,8 +45,8 @@ type ProviderType = FillProvider<
         >,
         WalletFiller<EthereumWallet>,
     >,
-    RootProvider<Http<Client>>,
-    Http<Client>,
+    RootProvider<ClientType>,
+    ClientType,
     Ethereum,
 >;
 
@@ -87,7 +88,7 @@ pub enum TxStatus {
 
 #[derive(Clone)]
 pub struct EthApi {
-    contracts: Contracts<ProviderType, Http<Client>, Ethereum>,
+    contracts: Contracts<ProviderType, ClientType, Ethereum>,
     public_key: Address,
     wallet: EthereumWallet,
     url: Url,
@@ -95,7 +96,7 @@ pub struct EthApi {
 }
 
 impl EthApi {
-    pub fn new(
+    pub async fn new(
         url: &str,
         message_queue_address: &str,
         relayer_address: &str,
@@ -121,18 +122,12 @@ impl EthApi {
         let relayer_address: Address = relayer_address.parse().map_err(|_| Error::WrongAddress)?;
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
-
-        let client_reqwest = Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(Error::FailedToBuildClient)?;
-        let http = Http::with_client(client_reqwest, url.clone());
-        let rpc_client = RpcClient::new(http, false);
-
+        let ws = WsConnect::new(url.clone());
         let provider: ProviderType = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(wallet.clone())
-            .on_client(rpc_client);
+            .on_ws(ws)
+            .await?;
 
         let contracts = Contracts::new(
             provider,
@@ -149,18 +144,13 @@ impl EthApi {
         })
     }
 
-    pub fn reconnect(&self) -> Result<EthApi, Error> {
-        let client_reqwest = Client::builder()
-            .timeout(self.timeout)
-            .build()
-            .map_err(Error::FailedToBuildClient)?;
-        let http = Http::with_client(client_reqwest, self.url.clone());
-        let rpc_client = RpcClient::new(http, false);
-
+    pub async fn reconnect(&self) -> Result<EthApi, Error> {
+        let ws = WsConnect::new(self.url.clone());
         let provider: ProviderType = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(self.wallet.clone())
-            .on_client(rpc_client);
+            .on_ws(ws)
+            .await?;
 
         let contracts = Contracts::new(
             provider,

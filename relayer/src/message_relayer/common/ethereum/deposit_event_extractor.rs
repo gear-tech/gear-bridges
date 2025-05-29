@@ -77,7 +77,7 @@ impl DepositEventExtractor {
                     }
                     tokio::time::sleep(delay).await;
                     if common::is_transport_error_recoverable(&err) {
-                        self.eth_api = match self.eth_api.reconnect() {
+                        self.eth_api = match self.eth_api.reconnect().await {
                             Ok(api) => api,
                             Err(err) => {
                                 log::error!("Failed to reconnect to Ethereum: {}", err);

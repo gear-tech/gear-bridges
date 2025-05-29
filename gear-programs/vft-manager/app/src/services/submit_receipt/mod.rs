@@ -69,7 +69,11 @@ pub async fn submit_receipt<T: ExecContext>(
         .iter()
         .find_map(|log| {
             let address = H160::from(log.address.0 .0);
-            let event = abi::ERC20_MANAGER::BridgingRequested::decode_log_data(log, true).ok()?;
+            let event = abi::ERC20_MANAGER::BridgingRequested::decode_raw_log_validate(
+                log.topics(),
+                &log.data.data,
+            )
+            .ok()?;
             let eth_token_id = H160::from(event.token.0 .0);
             let vara_token_id = service
                 .state()

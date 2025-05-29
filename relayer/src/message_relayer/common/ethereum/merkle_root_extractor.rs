@@ -130,7 +130,7 @@ async fn task_inner(
             continue;
         }
 
-        let root = match MerkleRoot::decode_log_data(log.data(), true) {
+        let root = match MerkleRoot::decode_log_data(log.data()) {
             Ok(root) => root,
             Err(e) => {
                 log::error!("Failed to decode log = {log:?}: {e:?}. Skipping");

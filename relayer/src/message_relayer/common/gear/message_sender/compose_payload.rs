@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
 use ethereum_beacon_client::BeaconClient;
 
-use alloy::{network::primitives::BlockTransactionsKind, primitives::TxHash, providers::Provider};
+use alloy::{primitives::TxHash, providers::Provider};
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::{anyhow, Result as AnyResult};
@@ -36,12 +36,12 @@ pub async fn compose(
 
     let block = match receipt.block_hash {
         Some(hash) => provider
-            .get_block_by_hash(hash, BlockTransactionsKind::Hashes)
+            .get_block_by_hash(hash)
             .await?
             .ok_or(anyhow!("Ethereum block (hash) is missing"))?,
         None => match receipt.block_number {
             Some(number) => provider
-                .get_block_by_number(BlockNumberOrTag::Number(number), false)
+                .get_block_by_number(BlockNumberOrTag::Number(number))
                 .await?
                 .ok_or(anyhow!("Ethereum block (number) is missing"))?,
             None => return Err(anyhow!("Unable to get Ethereum block")),

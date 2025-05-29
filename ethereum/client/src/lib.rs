@@ -39,16 +39,14 @@ type ProviderType = FillProvider<
         >,
         WalletFiller<EthereumWallet>,
     >,
-    RootProvider<ClientType>,
-    ClientType,
-    Ethereum,
+    RootProvider<Ethereum>,
 >;
 
 #[derive(Clone)]
 pub struct Contracts<P, T, N> {
     provider: P,
-    message_queue_instance: IMessageQueueInstance<T, P, N>,
-    relayer_instance: IRelayerInstance<T, P, N>,
+    message_queue_instance: IMessageQueueInstance<P, N>,
+    relayer_instance: IRelayerInstance<P, N>,
     _phantom: PhantomData<(T, N)>,
 }
 
@@ -116,9 +114,8 @@ impl EthApi {
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
         let ws = WsConnect::new(url.clone());
         let provider: ProviderType = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(wallet.clone())
-            .on_ws(ws)
+            .connect_ws(ws)
             .await?;
 
         let contracts = Contracts::new(
@@ -138,9 +135,8 @@ impl EthApi {
     pub async fn reconnect(&self) -> Result<EthApi, Error> {
         let ws = WsConnect::new(self.url.clone());
         let provider: ProviderType = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(self.wallet.clone())
-            .on_ws(ws)
+            .connect_ws(ws)
             .await?;
 
         let contracts = Contracts::new(
@@ -307,7 +303,7 @@ impl EthApi {
 impl<P, T> Contracts<P, T, Ethereum>
 where
     T: Transport + Clone,
-    P: Provider<T, Ethereum> + Send + Sync + Clone + 'static,
+    P: Provider<Ethereum> + Send + Sync + Clone + 'static,
 {
     pub fn new(
         provider: P,
@@ -372,7 +368,7 @@ where
     pub async fn finalized_block_number(&self) -> Result<u64, Error> {
         Ok(self
             .provider
-            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .get_block_by_number(BlockNumberOrTag::Finalized)
             .await
             .map_err(Error::ErrorInHTTPTransport)?
             .ok_or(Error::ErrorFetchingBlock)?
@@ -404,7 +400,7 @@ where
             .from_block(from)
             .to_block(to);
 
-        let event: Event<T, P, MerkleRoot, Ethereum> = Event::new(self.provider.clone(), filter);
+        let event: Event<P, MerkleRoot, Ethereum> = Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
 
@@ -433,7 +429,7 @@ where
             .from_block(block)
             .to_block(block);
 
-        let event: Event<T, P, IERC20Manager::BridgingRequested, Ethereum> =
+        let event: Event<P, IERC20Manager::BridgingRequested, Ethereum> =
             Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
@@ -460,7 +456,7 @@ where
             .from_block(block)
             .to_block(block);
 
-        let event: Event<T, P, BridgingPayment::FeePaid, Ethereum> =
+        let event: Event<P, BridgingPayment::FeePaid, Ethereum> =
             Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
@@ -519,7 +515,6 @@ where
             .call()
             .await
             .map_err(Error::ErrorDuringContractExecution)?
-            ._0
             .0;
 
         Ok((root != [0; 32]).then_some(root))
@@ -538,8 +533,7 @@ where
             .block(BlockId::Number(BlockNumberOrTag::Finalized))
             .call()
             .await
-            .map_err(Error::ErrorDuringContractExecution)?
-            ._0;
+            .map_err(Error::ErrorDuringContractExecution)?;
 
         Ok(processed)
     }
@@ -582,7 +576,7 @@ where
 
         let latest_finalized = self
             .provider
-            .get_block_by_number(BlockNumberOrTag::Finalized, false)
+            .get_block_by_number(BlockNumberOrTag::Finalized)
             .await
             .map_err(|_| Error::ErrorFetchingBlock)?
             .ok_or(Error::ErrorFetchingBlock)?

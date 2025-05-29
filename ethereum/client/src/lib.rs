@@ -1,5 +1,4 @@
-use std::{marker::PhantomData, str::FromStr, time::Duration};
-
+use std::{marker::PhantomData, str::FromStr};
 use alloy::{
     contract::Event,
     network::{Ethereum, EthereumWallet},
@@ -93,7 +92,6 @@ pub struct EthApi {
     public_key: Address,
     wallet: EthereumWallet,
     url: Url,
-    timeout: Duration,
 }
 
 impl EthApi {
@@ -102,7 +100,6 @@ impl EthApi {
         message_queue_address: &str,
         relayer_address: &str,
         private_key: Option<&str>,
-        timeout: Duration,
     ) -> Result<EthApi, Error> {
         let signer = match private_key {
             Some(private_key) => {
@@ -141,7 +138,6 @@ impl EthApi {
             public_key,
             url,
             wallet,
-            timeout,
         })
     }
 
@@ -164,7 +160,6 @@ impl EthApi {
             public_key: self.public_key,
             url: self.url.clone(),
             wallet: self.wallet.clone(),
-            timeout: self.timeout,
         })
     }
 

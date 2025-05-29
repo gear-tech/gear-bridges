@@ -431,17 +431,14 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         eth_endpoint,
         relayer_address,
         mq_address,
-        eth_timeout,
         ..
     } = &args.ethereum_args;
-    let timeout = Duration::from_secs(eth_timeout.unwrap_or(0).into());
 
     EthApi::new(
         eth_endpoint,
         mq_address,
         relayer_address,
         Some(&args.fee_payer),
-        timeout,
     )
     .await
     .expect("Error while creating ethereum client")
@@ -452,12 +449,10 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
         eth_endpoint,
         relayer_address,
         mq_address,
-        eth_timeout,
         ..
     } = args;
-    let timeout = Duration::from_secs(eth_timeout.unwrap_or(0).into());
 
-    EthApi::new(eth_endpoint, mq_address, relayer_address, None, timeout)
+    EthApi::new(eth_endpoint, mq_address, relayer_address, None)
         .await
         .expect("Error while creating ethereum client")
 }

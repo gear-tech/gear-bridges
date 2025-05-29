@@ -1,91 +1,102 @@
+use crate::{connect_to_node, DEFAULT_BALANCE};
 use checkpoint_light_client_client::service_checkpoint_for::io as checkpoint_for_io;
-use eth_events_deneb_client::traits::*;
-use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, WSAddress};
-use gear_core::ids::prelude::*;
+use eth_events_deneb_client::traits::EthEventsDenebFactory;
+use gclient::{DispatchStatus, Event, EventProcessor, GearEvent};
+use gstd::ActorId;
 use hex_literal::hex;
-use historical_proxy_client::traits::*;
+use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
-use sp_core::crypto::DEV_PHRASE;
-use tokio::sync::Mutex;
 use vft_manager_client::vft_manager;
 
 mod shared;
 
-static LOCK: Mutex<(u32, Option<CodeId>, Option<CodeId>)> = Mutex::const_new((2_000, None, None));
-
-async fn connect_to_node() -> (GearApi, ActorId, CodeId, CodeId, GasUnit, [u8; 4]) {
-    let api = GearApi::dev().await.unwrap();
-    let gas_limit = api.block_gas_limit().unwrap();
-
-    let (api, proxy_code_id, ethereum_event_client_code_id, salt) = {
-        let mut lock = LOCK.lock().await;
-        let proxy_code_id = match lock.1 {
-            Some(code_id) => code_id,
-            None => {
-                let code_id = api
-                    .upload_code(historical_proxy::WASM_BINARY)
-                    .await
-                    .map(|(code_id, ..)| code_id)
-                    .unwrap_or_else(|_| CodeId::generate(historical_proxy::WASM_BINARY));
-                lock.1 = Some(code_id);
-
-                code_id
-            }
-        };
-
-        let ethereum_event_client_code_id = match lock.2 {
-            Some(code_id) => code_id,
-            None => {
-                let code_id = api
-                    .upload_code(eth_events_deneb::WASM_BINARY)
-                    .await
-                    .map(|(code_id, ..)| code_id)
-                    .unwrap_or_else(|_| CodeId::generate(eth_events_deneb::WASM_BINARY));
-                lock.2 = Some(code_id);
-
-                code_id
-            }
-        };
-
-        let salt = lock.0;
-        lock.0 += 1;
-
-        let suri = format!("{DEV_PHRASE}//historical-proxy-{salt}:");
-        let api2 = GearApi::init_with(WSAddress::dev(), suri).await.unwrap();
-
-        let account_id: &[u8; 32] = api2.account_id().as_ref();
-        api.transfer_keep_alive((*account_id).into(), 500_000_000_000_000)
+#[tokio::test]
+async fn update_admin() {
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "historical_proxy",
+        &[historical_proxy::WASM_BINARY],
+    )
+    .await;
+    let gas_limit = conn.gas_limit;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let admin = conn.accounts[0].0;
+    let salt = conn.salt;
+    println!("admin: {:?}", admin);
+    let proxy_program_id =
+        historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
+            .new()
+            .with_gas_limit(gas_limit)
+            .send_recv(conn.code_ids[0], salt)
             .await
             .unwrap();
-        (api2, proxy_code_id, ethereum_event_client_code_id, salt)
-    };
 
-    let id = api.account_id();
-    let admin = <[u8; 32]>::from(id.clone());
-    let admin = ActorId::from(admin);
+    let api_unathorized = api.clone().with("//Bob").unwrap();
+    let admin_new = api_unathorized.account_id();
+    let admin_new = <[u8; 32]>::from(admin_new.clone());
+    let admin_new = ActorId::from(admin_new);
 
-    (
-        api,
-        admin,
-        proxy_code_id,
-        ethereum_event_client_code_id,
-        gas_limit,
-        salt.to_le_bytes(),
-    )
+    let mut proxy_client = historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(
+        api_unathorized.clone(),
+    ));
+
+    let result = proxy_client
+        .update_admin(admin_new)
+        .with_gas_limit(gas_limit)
+        .send_recv(proxy_program_id)
+        .await;
+    assert!(result.is_err());
+
+    let admin_current = proxy_client
+        .admin()
+        .with_gas_limit(gas_limit)
+        .recv(proxy_program_id)
+        .await
+        .unwrap();
+    assert_eq!(admin_current, admin);
+
+    // The authorized user changes the admin
+    let mut proxy_client =
+        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
+    let result = proxy_client
+        .update_admin(admin_new)
+        .with_gas_limit(gas_limit)
+        .send_recv(proxy_program_id)
+        .await;
+    assert!(result.is_ok());
+
+    let admin_current = proxy_client
+        .admin()
+        .with_gas_limit(gas_limit)
+        .recv(proxy_program_id)
+        .await
+        .unwrap();
+    assert_eq!(admin_current, admin_new);
 }
 
 #[tokio::test]
 async fn proxy() {
     let message = shared::event();
 
-    let (api, admin, proxy_code_id, relay_code_id, gas_limit, salt) = connect_to_node().await;
-    println!("node spun up, code uploaded, gas_limit={}", gas_limit);
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "historical-proxy",
+        &[historical_proxy::WASM_BINARY, eth_events_deneb::WASM_BINARY],
+    )
+    .await;
+
+    let gas_limit = conn.gas_limit;
+    let admin = conn.accounts[0].0;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let salt = conn.salt;
+    println!("admin: {:?}", admin);
+
     let factory =
         eth_events_deneb_client::EthEventsDenebFactory::new(GClientRemoting::new(api.clone()));
     let ethereum_event_client_program_id = factory
         .new(admin)
         .with_gas_limit(gas_limit)
-        .send_recv(relay_code_id, salt)
+        .send_recv(conn.code_ids[1], salt)
         .await
         .unwrap();
 
@@ -93,10 +104,10 @@ async fn proxy() {
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
             .new()
             .with_gas_limit(5_500_000_000)
-            .send_recv(proxy_code_id, salt)
+            .send_recv(conn.code_ids[0], salt)
             .await
             .unwrap();
-    println!("relay and proxy programs created");
+
     let mut proxy_client =
         historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
 
@@ -339,57 +350,4 @@ async fn proxy() {
         })
         .await
         .unwrap();
-}
-
-#[tokio::test]
-async fn update_admin() {
-    let (api, admin, proxy_code_id, _relay_code_id, gas_limit, salt) = connect_to_node().await;
-    let proxy_program_id =
-        historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
-            .new()
-            .with_gas_limit(gas_limit)
-            .send_recv(proxy_code_id, salt)
-            .await
-            .unwrap();
-
-    // Unauthorized user is not able to change the admin
-    let api_unauthorized = api.clone().with("//Bob").unwrap();
-    let admin_new = api_unauthorized.account_id();
-    let admin_new = <[u8; 32]>::from(admin_new.clone());
-    let admin_new = ActorId::from(admin_new);
-    let mut proxy_client = historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(
-        api_unauthorized.clone(),
-    ));
-    let result = proxy_client
-        .update_admin(admin_new)
-        .with_gas_limit(gas_limit)
-        .send_recv(proxy_program_id)
-        .await;
-    assert!(result.is_err());
-
-    let admin_current = proxy_client
-        .admin()
-        .with_gas_limit(gas_limit)
-        .recv(proxy_program_id)
-        .await
-        .unwrap();
-    assert_eq!(admin_current, admin);
-
-    // The authorized user changes the admin
-    let mut proxy_client =
-        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
-    let result = proxy_client
-        .update_admin(admin_new)
-        .with_gas_limit(gas_limit)
-        .send_recv(proxy_program_id)
-        .await;
-    assert!(result.is_ok());
-
-    let admin_current = proxy_client
-        .admin()
-        .with_gas_limit(gas_limit)
-        .recv(proxy_program_id)
-        .await
-        .unwrap();
-    assert_eq!(admin_current, admin_new);
 }

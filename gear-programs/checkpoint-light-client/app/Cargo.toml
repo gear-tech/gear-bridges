@@ -19,16 +19,3 @@ tree_hash_derive.workspace = true
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }
 lazy_static = { workspace = true, features = ["spin_no_std"] }
-
-[dev-dependencies]
-checkpoint-light-client = { workspace = true, features = ["wasm-binary"] }
-checkpoint-light-client-client.workspace = true
-ethereum_beacon_client.workspace = true
-futures.workspace = true
-gclient.workspace = true
-hex.workspace = true
-ruzstd.workspace = true
-sails-rs = { workspace = true, features = ["gclient"] }
-serde_json.workspace = true
-sp-core = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "macros"] }

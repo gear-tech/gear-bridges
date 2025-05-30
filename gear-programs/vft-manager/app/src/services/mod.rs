@@ -421,7 +421,7 @@ impl VftManager {
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let vft_manager = Syscall::message_source();
+        let vft_manager = Syscall::program_id();
         let mut service = vft_client::Vft::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {

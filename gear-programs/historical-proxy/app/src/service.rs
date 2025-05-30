@@ -69,7 +69,7 @@ impl<'a> HistoricalProxyService<'a> {
     ///
     /// This function can be called only by the admin.
     pub fn update_admin(&mut self, admin_new: ActorId) {
-        let source = Syscall::program_id();
+        let source = Syscall::message_source();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
@@ -89,7 +89,7 @@ impl<'a> HistoricalProxyService<'a> {
     ///
     /// This function can be called only by an admin.
     pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
-        let source = Syscall::program_id();
+        let source = Syscall::message_source();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {

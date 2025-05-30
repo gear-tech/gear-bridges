@@ -83,7 +83,7 @@ impl BridgingPayment {
     }
 
     fn ensure_admin(&self) {
-        if self.state().admin_address != Syscall::program_id() {
+        if self.state().admin_address != Syscall::message_source() {
             panic!("Not an admin")
         }
     }

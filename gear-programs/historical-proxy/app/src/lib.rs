@@ -18,7 +18,7 @@ impl HistoricalProxyProgram {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self(RefCell::new(state::ProxyState {
-            admin: Syscall::program_id(),
+            admin: Syscall::message_source(),
             endpoints: EndpointList::new(),
         }))
     }

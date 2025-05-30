@@ -50,7 +50,7 @@ pub async fn submit_receipt(
     use ethereum_common::utils::ReceiptEnvelope;
 
     let state = service.state();
-    let sender = Syscall::program_id();
+    let sender = Syscall::message_source();
 
     if sender != state.historical_proxy_address {
         return Err(Error::NotHistoricalProxy);

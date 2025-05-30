@@ -49,7 +49,7 @@ pub async fn lock(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    let receiver = Syscall::program_id();
+    let receiver = Syscall::message_source();
     let bytes: Vec<u8> = TransferFrom::encode_call(sender, receiver, amount);
 
     send_message_with_gas_for_reply(
@@ -106,7 +106,7 @@ pub async fn unlock(
 ) -> Result<(), Error> {
     let msg_tracker = msg_tracker_mut();
 
-    let sender = Syscall::program_id();
+    let sender = Syscall::message_source();
     let bytes: Vec<u8> = TransferFrom::encode_call(sender, receiver, amount);
 
     send_message_with_gas_for_reply(

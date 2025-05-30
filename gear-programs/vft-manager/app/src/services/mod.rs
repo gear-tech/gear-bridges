@@ -1,5 +1,5 @@
 use ::gstd::{static_mut, static_ref};
-use gstd::exec::{self, program_id};
+use gstd::exec::{self};
 use sails_rs::{
     calls::*,
     gstd::{self, calls::GStdRemoting, msg},
@@ -277,7 +277,7 @@ impl VftManager {
 
     /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
-        if self.state().admin != program_id() {
+        if self.state().admin != Syscall::message_source() {
             panic!("Not admin")
         }
     }
@@ -290,7 +290,7 @@ impl VftManager {
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
     pub fn pause(&mut self) {
-        let sender = Syscall::program_id();
+        let sender = Syscall::message_source();
         let state = &self.state();
 
         if sender != state.admin && sender != state.pause_admin {
@@ -313,7 +313,7 @@ impl VftManager {
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
     pub fn unpause(&mut self) {
-        let sender = Syscall::program_id();
+        let sender = Syscall::message_source();
         let state = &self.state();
 
         if sender != state.admin && sender != state.pause_admin {
@@ -377,7 +377,7 @@ impl VftManager {
             panic!("Please attach exactly {fee} value");
         }
 
-        let sender = Syscall::program_id();
+        let sender = Syscall::message_source();
 
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
     }
@@ -420,7 +420,7 @@ impl VftManager {
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let vft_manager = Syscall::program_id();
+        let vft_manager = Syscall::message_source();
         let mut service = vft_client::Vft::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {
@@ -573,7 +573,7 @@ impl VftManager {
         {
             use submit_receipt::token_operations;
 
-            let source = Syscall::program_id();
+            let source = Syscall::message_source();
             match _supply_type {
                 TokenSupply::Ethereum => {
                     token_operations::mint(
@@ -626,7 +626,7 @@ impl VftManager {
     /// Initialize VFT Manager service.
     pub fn seed(config: InitConfig) {
         unsafe {
-            let this = Syscall::program_id();
+            let this = Syscall::message_source();
             STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 admin: this,

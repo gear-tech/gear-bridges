@@ -1,10 +1,7 @@
 //! Bridging Payment service implementation.
 
 use gstd::{exec, static_mut, static_ref};
-use sails_rs::{
-    gstd::{msg,},
-    prelude::*,
-};
+use sails_rs::{gstd::msg, prelude::*};
 
 /// Bridging Payment service.
 pub struct BridgingPayment;
@@ -33,8 +30,7 @@ pub struct State {
     pub fee: u128,
 }
 
-impl BridgingPayment
-{
+impl BridgingPayment {
     /// Initialize state of the Bridging Payment service.
     pub fn seed(initial_state: State) {
         unsafe {
@@ -44,7 +40,7 @@ impl BridgingPayment
 
     /// Create Bridging Payment service.
     pub fn new() -> Self {
-        Self {  }
+        Self {}
     }
 
     fn state(&self) -> &State {
@@ -57,8 +53,7 @@ impl BridgingPayment
 }
 
 #[service(events = BridgingPaymentEvents)]
-impl BridgingPayment
-{
+impl BridgingPayment {
     /// Set fee that this program will take from incoming requests.
     ///
     /// This method can be called only by admin.

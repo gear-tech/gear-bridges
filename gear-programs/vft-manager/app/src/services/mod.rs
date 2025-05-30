@@ -1,5 +1,5 @@
-use gstd::exec::{self, program_id};
 use ::gstd::{static_mut, static_ref};
+use gstd::exec::{self, program_id};
 use sails_rs::{
     calls::*,
     gstd::{self, calls::GStdRemoting, msg},

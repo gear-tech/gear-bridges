@@ -1,10 +1,7 @@
 #![no_std]
 
 use cell::RefCell;
-use sails_rs::{
-    
-    prelude::*,
-};
+use sails_rs::prelude::*;
 use state::EndpointList;
 
 pub mod error;
@@ -20,7 +17,6 @@ pub struct HistoricalProxyProgram(RefCell<state::ProxyState>);
 impl HistoricalProxyProgram {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        
         Self(RefCell::new(state::ProxyState {
             admin: Syscall::program_id(),
             endpoints: EndpointList::new(),

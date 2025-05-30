@@ -1,6 +1,6 @@
 #![no_std]
 
-use sails_rs::{prelude::*};
+use sails_rs::prelude::*;
 pub mod services;
 use services::{InitConfig, VftManager};
 

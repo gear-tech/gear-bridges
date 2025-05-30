@@ -8,7 +8,7 @@ pub(crate) mod eth_events {
 use sails_rs::{calls::ActionIo, gstd};
 
 use cell::RefCell;
-use sails_rs::{gstd::ExecContext, prelude::*};
+use sails_rs::prelude::*;
 
 use crate::{
     error::ProxyError,
@@ -19,7 +19,7 @@ use crate::{
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
-enum Event {
+pub enum Event {
     /// Tx receipt is checked to be valid and successfully sent to the
     /// underlying program.
     Relayed {
@@ -50,21 +50,14 @@ enum Event {
 /// is responsible of processing transactions for this slot and will redirect user request to it.
 /// If `eth-events-*` returned success its reply will be redirected to the program
 /// that user have specified in his request. For more info see `redirect` implementation.
-pub struct HistoricalProxyService<'a, ExecContext> {
+pub struct HistoricalProxyService<'a> {
     state: &'a RefCell<ProxyState>,
-    exec_context: ExecContext,
 }
 
 #[sails_rs::service(events = Event)]
-impl<'a, T> HistoricalProxyService<'a, T>
-where
-    T: ExecContext,
-{
-    pub fn new(state: &'a RefCell<ProxyState>, exec_context: T) -> Self {
-        Self {
-            state,
-            exec_context,
-        }
+impl<'a> HistoricalProxyService<'a> {
+    pub fn new(state: &'a RefCell<ProxyState>) -> Self {
+        Self { state }
     }
 
     /// Get current service admin.
@@ -76,7 +69,7 @@ where
     ///
     /// This function can be called only by the admin.
     pub fn update_admin(&mut self, admin_new: ActorId) {
-        let source = self.exec_context.actor_id();
+        let source = Syscall::program_id();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
@@ -96,7 +89,7 @@ where
     ///
     /// This function can be called only by an admin.
     pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
-        let source = self.exec_context.actor_id();
+        let source = Syscall::program_id();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
@@ -178,7 +171,7 @@ where
                 ProxyError::ReplyFailure(format!("failed to receive reply from client: {:?}", e))
             })?;
 
-        let _ = self.notify_on(Event::Relayed {
+        let _ = self.emit_event(Event::Relayed {
             slot,
             block_number,
             transaction_index: transaction_index as u32,

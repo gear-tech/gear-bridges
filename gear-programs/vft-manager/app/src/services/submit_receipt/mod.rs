@@ -1,6 +1,6 @@
 use collections::btree_set::BTreeSet;
 use gstd::{static_mut, static_ref};
-use sails_rs::{gstd::ExecContext, prelude::*};
+use sails_rs::prelude::*;
 
 use super::{error::Error, TokenSupply, VftManager};
 
@@ -39,8 +39,8 @@ pub fn seed() {
 /// processed yet.
 ///
 /// This method can be called only by [State::historical_proxy_address] program.
-pub async fn submit_receipt<T: ExecContext>(
-    service: &mut VftManager<T>,
+pub async fn submit_receipt(
+    service: &mut VftManager,
     slot: u64,
     transaction_index: u64,
     receipt_rlp: Vec<u8>,
@@ -50,7 +50,7 @@ pub async fn submit_receipt<T: ExecContext>(
     use ethereum_common::utils::ReceiptEnvelope;
 
     let state = service.state();
-    let sender = service.exec_context.actor_id();
+    let sender = Syscall::program_id();
 
     if sender != state.historical_proxy_address {
         return Err(Error::NotHistoricalProxy);

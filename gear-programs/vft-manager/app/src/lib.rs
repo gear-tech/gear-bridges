@@ -1,6 +1,6 @@
 #![no_std]
 
-use sails_rs::{gstd::GStdExecContext, prelude::*};
+use sails_rs::{prelude::*};
 pub mod services;
 use services::{InitConfig, VftManager};
 
@@ -10,7 +10,7 @@ pub struct Program;
 #[program]
 impl Program {
     pub fn new(init_config: InitConfig) -> Self {
-        VftManager::<GStdExecContext>::seed(init_config, GStdExecContext::new());
+        VftManager::seed(init_config);
         Self
     }
 
@@ -40,7 +40,7 @@ impl Program {
         panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    pub fn vft_manager(&self) -> VftManager<GStdExecContext> {
-        VftManager::new(GStdExecContext::new())
+    pub fn vft_manager(&self) -> VftManager {
+        VftManager::new()
     }
 }

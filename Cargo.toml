@@ -167,22 +167,22 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 
 # Gear/Substrate deps
-gstd = { version = "=1.7.1", features = ["nightly"] }
-gtest = "=1.7.1"
-gmeta = "=1.7.1"
-gear-wasm-builder = { version = "=1.7.1", default-features = false }
-gsdk = "=1.7.1"
-gclient = "=1.7.1"
-gear-core = "=1.7.1"
-gbuiltin-bls381 = "=1.7.1"
-gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.7.1" }
-pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.7.1", default-features = false, features = [
+gstd = { version = "=1.8.1", features = ["nightly"] }
+gtest = "=1.8.1"
+gmeta = "=1.8.1"
+gear-wasm-builder = { version = "=1.8.1", default-features = false }
+gsdk = "=1.8.1"
+gclient = "=1.8.1"
+gear-core = "=1.8.1"
+gbuiltin-bls381 = "=1.8.1"
+gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.8.1" }
+pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.8.1", default-features = false, features = [
     "std",
 ] }
-sails-idl-gen = "0.7.3"
-sails-client-gen = "0.7.3"
-sails-rs = "0.7.3"
-awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", tag = "v0.1.0", default-features = false, features = [
+sails-idl-gen = "0.8.1"
+sails-client-gen = "0.8.1"
+sails-rs = "0.8.1"
+awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "3b0c53e82fa60fd9cab901fc41f566ea0a17b7ba", default-features = false, features = [
     "vft",
     "vft-admin",
     "vft-extension",
@@ -226,4 +226,4 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
 ] }
 
 [patch."https://github.com/gear-tech/gear"]
-gsys = "=1.7.1"
+gsys = "=1.8.1"

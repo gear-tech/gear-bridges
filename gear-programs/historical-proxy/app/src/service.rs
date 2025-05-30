@@ -144,13 +144,11 @@ impl<'a> HistoricalProxyService<'a> {
             slot,
         } = eth_events::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
-                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {:?}", e)))?
+                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {e:?}")))?
                 .await
-                .map_err(|e| {
-                    ProxyError::ReplyFailure(format!("failed to receive reply: {:?}", e))
-                })?,
+                .map_err(|e| ProxyError::ReplyFailure(format!("failed to receive reply: {e:?}")))?,
         )
-        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {:?}", e)))?
+        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {e:?}")))?
         .map_err(ProxyError::EthereumEventClient)?;
 
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
@@ -164,11 +162,11 @@ impl<'a> HistoricalProxyService<'a> {
 
         let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, 0)
             .map_err(|e| {
-                ProxyError::SendFailure(format!("failed to send message to client: {:?}", e))
+                ProxyError::SendFailure(format!("failed to send message to client: {e:?}"))
             })?
             .await
             .map_err(|e| {
-                ProxyError::ReplyFailure(format!("failed to receive reply from client: {:?}", e))
+                ProxyError::ReplyFailure(format!("failed to receive reply from client: {e:?}"))
             })?;
 
         let _ = self.emit_event(Event::Relayed {

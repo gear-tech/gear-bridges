@@ -28,6 +28,7 @@ pub enum Order {
 }
 
 /// VFT Manager service.
+#[derive(Default)]
 pub struct VftManager;
 
 /// Type of the token supply.
@@ -646,7 +647,7 @@ impl VftManager {
 
     /// Create VFT Manager service.
     pub fn new() -> Self {
-        Self {}
+        Self
     }
 
     /// Get a reference to the global [State].

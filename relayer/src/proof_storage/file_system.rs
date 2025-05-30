@@ -82,7 +82,7 @@ impl FileSystemProofStorage {
 
         for (validator_set_id, proof) in &self.cache.proofs {
             fs::write(
-                self.save_to.join(format!("proof_{}.bin", validator_set_id)),
+                self.save_to.join(format!("proof_{validator_set_id}.bin")),
                 proof.clone().into_bytes(),
             )
             .map_err(|_| ProofStorageError::NotInitialized)?;
@@ -119,7 +119,7 @@ impl FileSystemProofStorage {
             });
 
         for validator_set_id in found_validator_set_ids {
-            let proof = fs::read(self.save_to.join(format!("proof_{}.bin", validator_set_id)))
+            let proof = fs::read(self.save_to.join(format!("proof_{validator_set_id}.bin")))
                 .map_err(|_| ProofStorageError::NotInitialized)?;
 
             self.cache

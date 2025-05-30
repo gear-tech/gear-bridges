@@ -60,10 +60,7 @@ impl Relayer {
             gear_api.block_hash_to_number(block).await?
         };
 
-        log::info!(
-            "Starting gear event processing from block #{}",
-            from_gear_block
-        );
+        log::info!("Starting gear event processing from block #{from_gear_block}");
 
         let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
 

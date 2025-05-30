@@ -67,10 +67,9 @@ pub(crate) async fn sync_authority_set_id(
 
     panic!(
         "Invalid state of proof storage detected: \
-        latest proven authority set id = {} \
-        but latest authority set id on VARA = {}. \
-        Clean proof storage state and restart the relayer.",
-        latest_proven, latest_authority_set_id
+        latest proven authority set id = {latest_proven} \
+        but latest authority set id on VARA = {latest_authority_set_id}. \
+        Clean proof storage state and restart the relayer."
     )
 }
 

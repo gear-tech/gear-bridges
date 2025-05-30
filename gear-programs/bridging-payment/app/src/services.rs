@@ -4,6 +4,7 @@ use gstd::{exec, static_mut, static_ref};
 use sails_rs::{gstd::msg, prelude::*};
 
 /// Bridging Payment service.
+#[derive(Default)]
 pub struct BridgingPayment;
 
 /// Events emitted by Bridging Payment service.
@@ -40,7 +41,7 @@ impl BridgingPayment {
 
     /// Create Bridging Payment service.
     pub fn new() -> Self {
-        Self {}
+        Self
     }
 
     fn state(&self) -> &State {

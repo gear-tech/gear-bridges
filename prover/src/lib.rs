@@ -263,9 +263,9 @@ pub mod proving {
     ///     storage of `pallet-gear-bridge`) that we want to relay.
     /// * `genesis_config` - `GenesisConfig` that was used in the `prove_genesis` call.
     /// * `message_inclusion_proof` - Proof of inclusion of merkle trie root of queued messages into
-    ///     storage of `pallet-gear-bridge`.
+    ///    storage of `pallet-gear-bridge`.
     /// * `message_contents` - Root of merkle trie root as it's stored in `pallet-gear-bridge`
-    ///     storage.
+    ///    storage.
     pub fn prove_message_sent(
         previous_proof: ProofWithCircuitData,
         block_finality_proof: BlockFinality,

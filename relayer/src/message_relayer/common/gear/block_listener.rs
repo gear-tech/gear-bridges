@@ -52,7 +52,7 @@ impl BlockListener {
             loop {
                 let res = self.run_inner(&senders, &mut current_block).await;
                 if let Err(err) = res {
-                    log::error!("Gear block listener failed: {}", err);
+                    log::error!("Gear block listener failed: {err}");
 
                     match self.api_provider.reconnect().await {
                         Ok(()) => {

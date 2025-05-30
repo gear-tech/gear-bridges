@@ -126,13 +126,13 @@ pub async fn request_bridging(
 ///
 /// This function can return funds back to the user in the following scenarios:
 /// - Token lock/burn is complete but message to the built-in actor haven't been sent yet. It can happen if
-///     user haven't attached gas enough to process the message further after the first `wake` or if network
-///     is loaded and timeout we've set to the reply is expired.
+///   user haven't attached gas enough to process the message further after the first `wake` or if network
+///   is loaded and timeout we've set to the reply is expired.
 /// - Message to the built-in actor have returned error but token refund message haven't been sent yet. It
-///     can happen if user haven't attached gas enough to process the message further after the second `wake`
-///     or if network is loaded and timeout we've set to the reply is expired.
+///   can happen if user haven't attached gas enough to process the message further after the second `wake`
+///   or if network is loaded and timeout we've set to the reply is expired.
 /// - Token refund message have been sent but it have failed. This case should be practically impossible
-///     due to the invariants that `vft-manager` provides but left just in case.
+///   due to the invariants that `vft-manager` provides but left just in case.
 pub async fn handle_interrupted_transfer(
     service: &mut VftManager,
     msg_id: MessageId,

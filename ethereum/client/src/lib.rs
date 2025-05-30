@@ -1,5 +1,3 @@
-use std::{marker::PhantomData, str::FromStr, time::Duration};
-
 use alloy::{
     contract::Event,
     network::{Ethereum, EthereumWallet},
@@ -11,23 +9,19 @@ use alloy::{
         },
         Identity, Provider, ProviderBuilder, RootProvider,
     },
-    rpc::{
-        client::RpcClient,
-        types::{BlockId, BlockNumberOrTag, Filter},
-    },
+    pubsub::Subscription,
+    rpc::types::{BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
-    transports::{
-        http::{Client, Http},
-        Transport,
-    },
+    transports::{ws::WsConnect, RpcError, TransportErrorKind},
 };
 use primitive_types::{H160, H256};
 use reqwest::Url;
+use std::str::FromStr;
 
 pub use alloy::primitives::TxHash;
 
-mod abi;
+pub mod abi;
 use abi::{
     BridgingPayment, IERC20Manager, IMessageQueue, IMessageQueue::IMessageQueueInstance,
     IMessageQueue::VaraMessage, IRelayer, IRelayer::IRelayerInstance, IRelayer::MerkleRoot,
@@ -48,11 +42,10 @@ type ProviderType = FillProvider<
 >;
 
 #[derive(Clone)]
-pub struct Contracts<P, T, N> {
-    provider: P,
-    message_queue_instance: IMessageQueueInstance<P, N>,
-    relayer_instance: IRelayerInstance<P, N>,
-    _phantom: PhantomData<(T, N)>,
+pub struct Contracts {
+    provider: ProviderType,
+    message_queue_instance: IMessageQueueInstance<ProviderType, Ethereum>,
+    relayer_instance: IRelayerInstance<ProviderType, Ethereum>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,20 +78,18 @@ pub enum TxStatus {
 
 #[derive(Clone)]
 pub struct EthApi {
-    contracts: Contracts<ProviderType, Http<Client>, Ethereum>,
+    contracts: Contracts,
     public_key: Address,
     wallet: EthereumWallet,
     url: Url,
-    timeout: Duration,
 }
 
 impl EthApi {
-    pub fn new(
+    pub async fn new(
         url: &str,
         message_queue_address: &str,
         relayer_address: &str,
         private_key: Option<&str>,
-        timeout: Duration,
     ) -> Result<EthApi, Error> {
         let signer = match private_key {
             Some(private_key) => {
@@ -111,7 +102,7 @@ impl EthApi {
 
         let public_key = signer.address();
 
-        let wallet = alloy::network::EthereumWallet::from(signer);
+        let wallet = EthereumWallet::from(signer);
 
         let message_queue_address: Address = message_queue_address
             .parse()
@@ -119,17 +110,11 @@ impl EthApi {
         let relayer_address: Address = relayer_address.parse().map_err(|_| Error::WrongAddress)?;
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
-
-        let client_reqwest = Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(Error::FailedToBuildClient)?;
-        let http = Http::with_client(client_reqwest, url.clone());
-        let rpc_client = RpcClient::new(http, false);
-
+        let ws = WsConnect::new(url.clone());
         let provider: ProviderType = ProviderBuilder::new()
             .wallet(wallet.clone())
-            .connect_client(rpc_client);
+            .connect_ws(ws)
+            .await?;
 
         let contracts = Contracts::new(
             provider,
@@ -142,21 +127,15 @@ impl EthApi {
             public_key,
             url,
             wallet,
-            timeout,
         })
     }
 
-    pub fn reconnect(&self) -> Result<EthApi, Error> {
-        let client_reqwest = Client::builder()
-            .timeout(self.timeout)
-            .build()
-            .map_err(Error::FailedToBuildClient)?;
-        let http = Http::with_client(client_reqwest, self.url.clone());
-        let rpc_client = RpcClient::new(http, false);
-
+    pub async fn reconnect(&self) -> Result<EthApi, Error> {
+        let ws = WsConnect::new(self.url.clone());
         let provider: ProviderType = ProviderBuilder::new()
             .wallet(self.wallet.clone())
-            .connect_client(rpc_client);
+            .connect_ws(ws)
+            .await?;
 
         let contracts = Contracts::new(
             provider,
@@ -169,7 +148,6 @@ impl EthApi {
             public_key: self.public_key,
             url: self.url.clone(),
             wallet: self.wallet.clone(),
-            timeout: self.timeout,
         })
     }
 
@@ -308,15 +286,21 @@ impl EthApi {
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
         self.contracts.is_message_processed(B256::from(nonce)).await
     }
+
+    pub async fn subscribe_logs(
+        &self,
+    ) -> Result<Subscription<RpcLog>, RpcError<TransportErrorKind>> {
+        let filter = Filter::new()
+            .address(*self.contracts.relayer_instance.address())
+            .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH);
+
+        self.raw_provider().clone().subscribe_logs(&filter).await
+    }
 }
 
-impl<P, T> Contracts<P, T, Ethereum>
-where
-    T: Transport + Clone,
-    P: Provider<Ethereum> + Send + Sync + Clone + 'static,
-{
+impl Contracts {
     pub fn new(
-        provider: P,
+        provider: ProviderType,
         message_queue_address: [u8; 20],
         relayer_address: [u8; 20],
     ) -> Result<Self, Error> {
@@ -330,7 +314,6 @@ where
             provider,
             relayer_instance,
             message_queue_instance,
-            _phantom: PhantomData,
         })
     }
 
@@ -410,7 +393,8 @@ where
             .from_block(from)
             .to_block(to);
 
-        let event: Event<P, MerkleRoot, Ethereum> = Event::new(self.provider.clone(), filter);
+        let event: Event<ProviderType, MerkleRoot, Ethereum> =
+            Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
 
@@ -439,7 +423,7 @@ where
             .from_block(block)
             .to_block(block);
 
-        let event: Event<P, IERC20Manager::BridgingRequested, Ethereum> =
+        let event: Event<ProviderType, IERC20Manager::BridgingRequested, Ethereum> =
             Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
@@ -466,7 +450,7 @@ where
             .from_block(block)
             .to_block(block);
 
-        let event: Event<P, BridgingPayment::FeePaid, Ethereum> =
+        let event: Event<ProviderType, BridgingPayment::FeePaid, Ethereum> =
             Event::new(self.provider.clone(), filter);
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;

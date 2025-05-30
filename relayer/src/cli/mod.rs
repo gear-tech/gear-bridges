@@ -7,6 +7,8 @@ pub use common::{
     PrometheusArgs, ProofStorageArgs,
 };
 
+pub const DEFAULT_COUNT_CONFIRMATIONS: u64 = 8;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -92,6 +94,9 @@ pub struct GearEthTokensArgs {
     pub ethereum_args: EthereumSignerArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
+
+    #[arg(long, help = format!("How many confirmations wait for relayed merkle roots on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
+    pub confirmations_merkle_root: Option<u64>,
 }
 
 #[derive(Subcommand)]

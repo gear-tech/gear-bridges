@@ -115,7 +115,7 @@ impl TokenMap {
         let mut vara_to_eth = HashMap::with_capacity(self.vara_to_eth.len());
         let mut eth_to_vara = HashMap::with_capacity(vara_to_eth.len());
 
-        let vft_manager = Syscall::message_source();
+        let vft_manager = Syscall::program_id();
         let service = vft_client::Vft::new(GStdRemoting);
         for (vft, (erc20, supply)) in &self.vara_to_eth {
             let vft_new = match vft_map

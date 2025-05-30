@@ -106,7 +106,7 @@ pub async fn unlock(
     amount: U256,
     config: &Config,
 ) -> Result<(), Error> {
-    let sender = Syscall::message_source();
+    let sender = Syscall::program_id();
 
     send::<TransferFrom>(
         slot,

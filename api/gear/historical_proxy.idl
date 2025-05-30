@@ -64,7 +64,14 @@ service HistoricalProxy {
   events {
     /// Tx receipt is checked to be valid and successfully sent to the
     /// underlying program.
-    Relayed: struct { slot: u64, block_number: u64, transaction_index: u32 };
+    Relayed: struct {
+      /// Ethereum slot containing target transaction.
+      slot: u64,
+      /// Ethereum block number which contains target transaction.
+      block_number: u64,
+      /// Index of the target transaction in the `block_number`.
+      transaction_index: u32,
+    };
   }
 };
 

@@ -20,11 +20,11 @@ const VFT_MANAGER_ID: u64 = 1_003;
 async fn setup_for_test() -> Fixture {
     let system = System::new();
     system.init_logger();
-    system.mint_to(ADMIN_ID, 100_000_000_000_000);
-    system.mint_to(PROXY_ID, 100_000_000_000_000);
-    system.mint_to(ETHEREUM_EVENT_CLIENT_ID, 100_000_000_000_000);
-    system.mint_to(VFT_MANAGER_ID, 100_000_000_000_000);
-    system.mint_to(USER_ID, 100_000_000_000_000);
+    system.mint_to(ADMIN_ID, 100_000_000_000_000_000);
+    system.mint_to(PROXY_ID, 100_000_000_000_000_000);
+    system.mint_to(ETHEREUM_EVENT_CLIENT_ID, 100_000_000_000_000_000);
+    system.mint_to(VFT_MANAGER_ID, 100_000_000_000_000_000);
+    system.mint_to(USER_ID, 100_000_000_000_000_000);
 
     let remoting = GTestRemoting::new(system, ADMIN_ID.into());
 

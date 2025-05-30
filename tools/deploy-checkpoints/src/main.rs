@@ -96,10 +96,7 @@ async fn main() -> AnyResult<()> {
     let current_period = eth_utils::calculate_period(slot);
     let mut updates = beacon_client.get_updates(current_period, 1).await?;
 
-    println!(
-        "finality_update slot = {}, period = {}",
-        slot, current_period
-    );
+    println!("finality_update slot = {slot}, period = {current_period}");
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,

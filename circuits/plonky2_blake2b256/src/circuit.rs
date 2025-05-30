@@ -62,8 +62,7 @@ pub fn blake2_circuit<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     msg_len: usize,
 ) -> Blake2Targets {
-    let message = std::iter::repeat(())
-        .take(msg_len * 8)
+    let message = std::iter::repeat_n((), msg_len * 8)
         .map(|_| builder.add_virtual_bool_target_safe())
         .collect::<Vec<_>>();
 
@@ -256,7 +255,7 @@ mod tests {
             let digest_1 = compute_digest_using_library(&data);
             let digest_2 = compute_digest_using_circuit(&data);
 
-            assert_eq!(digest_1, digest_2, "test input: {:?}", data);
+            assert_eq!(digest_1, digest_2, "test input: {data:?}");
         }
     }
 

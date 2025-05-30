@@ -67,10 +67,7 @@ impl MessagePaidEventExtractor {
                 if let Err(err) = res {
                     attempts += 1;
                     log::error!(
-                        "Deposit event extractor failed (attempt {}/{}): {}",
-                        attempts,
-                        MAX_RETRIES,
-                        err
+                        "Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}"
                     );
 
                     if attempts >= MAX_RETRIES {
@@ -84,7 +81,7 @@ impl MessagePaidEventExtractor {
                         self.eth_api = match self.eth_api.reconnect().await {
                             Ok(eth_api) => eth_api,
                             Err(err) => {
-                                log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                log::error!("Failed to reconnect to Ethereum API: {err}");
                                 break;
                             }
                         };

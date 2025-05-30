@@ -1,10 +1,7 @@
 #![no_std]
 
 use cell::RefCell;
-use sails_rs::{
-    gstd::{ExecContext, GStdExecContext},
-    prelude::*,
-};
+use sails_rs::prelude::*;
 use state::EndpointList;
 
 pub mod error;
@@ -20,14 +17,13 @@ pub struct HistoricalProxyProgram(RefCell<state::ProxyState>);
 impl HistoricalProxyProgram {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let exec_context = GStdExecContext::new();
         Self(RefCell::new(state::ProxyState {
-            admin: exec_context.actor_id(),
+            admin: Syscall::message_source(),
             endpoints: EndpointList::new(),
         }))
     }
 
-    pub fn historical_proxy(&self) -> service::HistoricalProxyService<GStdExecContext> {
-        service::HistoricalProxyService::new(&self.0, GStdExecContext::new())
+    pub fn historical_proxy(&self) -> service::HistoricalProxyService {
+        service::HistoricalProxyService::new(&self.0)
     }
 }

@@ -65,23 +65,13 @@ impl<const N: usize> Default for Vector<N> {
 pub enum Error {
     #[display(fmt = "invalid byte {_0:x} when decoding data of the expected type")]
     InvalidByte(u8),
-    #[display(
-        fmt = "{} byte(s) given but only expected (up to) {} byte(s)",
-        provided,
-        expected
-    )]
+    #[display(fmt = "{provided} byte(s) given but only expected (up to) {expected} byte(s)")]
     AdditionalInput { provided: usize, expected: usize },
     #[display(
-        fmt = "expected at least {} byte(s) when decoding but provided only {} byte(s)",
-        expected,
-        provided
+        fmt = "expected at least {expected} byte(s) when decoding but provided only {provided} byte(s)"
     )]
     ExpectedFurtherInput { provided: usize, expected: usize },
-    #[display(
-        fmt = "{} elements given for a type with (inclusive) upper bound {}",
-        provided,
-        bound
-    )]
+    #[display(fmt = "{provided} elements given for a type with (inclusive) upper bound {bound}")]
     Bounded { bound: usize, provided: usize },
 }
 

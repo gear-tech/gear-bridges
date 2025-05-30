@@ -495,7 +495,7 @@ impl GearApi {
             _,
             _,
         >(&storage_proof, state_root, storage_keys.iter())
-        .unwrap_or_else(|err| panic!("Failed to generate trie proof for {:?}: {}", address, err));
+        .unwrap_or_else(|err| panic!("Failed to generate trie proof for {address:?}: {err}"));
 
         let leaf = proof.pop().expect("At least one node in trie proof");
         let leaf = TrieCodec::decode(&leaf).expect("Failed to decode last node in trie proof");

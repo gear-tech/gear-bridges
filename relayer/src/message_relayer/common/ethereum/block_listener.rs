@@ -71,7 +71,7 @@ impl BlockListener {
                         self.eth_api = match self.eth_api.reconnect().await {
                             Ok(api) => api,
                             Err(err) => {
-                                log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                log::error!("Failed to reconnect to Ethereum API: {err}");
                                 return;
                             }
                         }

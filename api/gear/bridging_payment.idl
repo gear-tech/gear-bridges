@@ -39,7 +39,10 @@ service BridgingPayment {
 
   events {
     /// Fee for the message processing by relayer was paid.
-    BridgingPaid: struct { nonce: u256 };
+    BridgingPaid: struct {
+      /// Nonce of the message that was paid for.
+      nonce: u256
+    };
   }
 };
 

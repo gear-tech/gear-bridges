@@ -232,7 +232,7 @@ where
 pub fn bitfield_bytes_tree_hash_root<const N: usize>(bytes: &[u8]) -> Hash256 {
     use tree_hash::{MerkleHasher, BYTES_PER_CHUNK};
 
-    let byte_size = (N + 7) / 8;
+    let byte_size = N.div_ceil(8);
     let leaf_count = byte_size.div_ceil(BYTES_PER_CHUNK);
 
     let mut hasher = MerkleHasher::with_leaves(leaf_count);

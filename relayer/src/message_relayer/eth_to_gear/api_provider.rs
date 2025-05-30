@@ -131,10 +131,7 @@ impl ApiProvider {
                 }
                 Err(err) => {
                     log::error!(
-                        "Failed to create API connection (attempt {}/{}): {}",
-                        attempt,
-                        MAX_RECONNECT_ATTEMPTS,
-                        err
+                        "Failed to create API connection (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS}): {err}"
                     );
 
                     tokio::time::sleep(RECONNECT_TIMEOUT).await;
@@ -142,10 +139,7 @@ impl ApiProvider {
             }
         }
 
-        log::error!(
-            "All {} attempts to connect to API failed. Giving up.",
-            MAX_RECONNECT_ATTEMPTS
-        );
+        log::error!("All {MAX_RECONNECT_ATTEMPTS} attempts to connect to API failed. Giving up.");
         false
     }
 

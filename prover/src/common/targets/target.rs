@@ -109,7 +109,7 @@ fn test_single_target_from_u64_bits_le_lossy() {
 
         let result = proof.public_inputs[0];
 
-        println!("{}", num);
+        println!("{num}");
 
         assert_eq!(result, F::from_noncanonical_u64(num));
         assert!(circuit.verify(proof).is_ok());

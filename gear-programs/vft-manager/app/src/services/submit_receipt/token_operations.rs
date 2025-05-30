@@ -106,7 +106,7 @@ pub async fn unlock(
     amount: U256,
     config: &Config,
 ) -> Result<(), Error> {
-    let sender = gstd::exec::program_id();
+    let sender = Syscall::program_id();
 
     send::<TransferFrom>(
         slot,

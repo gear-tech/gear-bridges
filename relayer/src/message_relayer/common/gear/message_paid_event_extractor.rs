@@ -53,7 +53,7 @@ impl MessagePaidEventExtractor {
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
-                    log::error!("Message paid event extractor failed: {}", err);
+                    log::error!("Message paid event extractor failed: {err}");
 
                     match self.api_provider.reconnect().await {
                         Ok(()) => {
@@ -61,7 +61,7 @@ impl MessagePaidEventExtractor {
                         }
 
                         Err(err) => {
-                            log::error!("Failed to reconnect: {}", err);
+                            log::error!("Failed to reconnect: {err}");
                             return;
                         }
                     }

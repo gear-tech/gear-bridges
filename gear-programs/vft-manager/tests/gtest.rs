@@ -66,8 +66,8 @@ struct Fixture {
 async fn setup_for_test() -> Fixture {
     let system = System::new();
     system.init_logger();
-    system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000);
-    system.mint_to(HISTORICAL_PROXY_ID, 100_000_000_000_000);
+    system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000_000);
+    system.mint_to(HISTORICAL_PROXY_ID, 100_000_000_000_000_000);
 
     let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
 
@@ -191,7 +191,7 @@ async fn test_gear_supply_token() {
     let account_id: ActorId = 100_000.into();
     remoting.system().mint_to(account_id, 100_000_000_000_000);
 
-    let amount = U256::from(10_000_000_000_u64);
+    let amount = U256::from(1_000_000_000_000_u64);
 
     let mut vft = VftAdminC::new(remoting.clone());
 
@@ -248,7 +248,9 @@ async fn test_eth_supply_token() {
     } = setup_for_test().await;
 
     let account_id: ActorId = 100_000.into();
-    remoting.system().mint_to(account_id, 100_000_000_000_000);
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
     let amount = U256::from(10_000_000_000_u64);
 
     let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);

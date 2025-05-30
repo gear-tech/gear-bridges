@@ -72,13 +72,13 @@ jobs:
             "./ethereum/out/MessageQueue.sol/MessageQueue.json"
             "./ethereum/out/BridgingPayment.sol/BridgingPayment.json"
 
-            "./target/wasm32-unknown-unknown/release/bridging_payment.idl"
-            "./target/wasm32-unknown-unknown/release/eth_events_deneb.idl"
-            "./target/wasm32-unknown-unknown/release/eth_events_electra.idl"
-            "./target/wasm32-unknown-unknown/release/vft_manager.idl"
-            "./target/wasm32-unknown-unknown/release/historical_proxy.idl"
-            "./target/wasm32-unknown-unknown/release/vft.idl"
-            "./target/wasm32-unknown-unknown/release/vft_vara.idl"
+            "./target/wasm32-gear/release/bridging_payment.idl"
+            "./target/wasm32-gear/release/eth_events_deneb.idl"
+            "./target/wasm32-gear/release/eth_events_electra.idl"
+            "./target/wasm32-gear/release/vft_manager.idl"
+            "./target/wasm32-gear/release/historical_proxy.idl"
+            "./target/wasm32-gear/release/vft.idl"
+            "./target/wasm32-gear/release/vft_vara.idl"
           )
 
           for i in "${!stored[@]}"; do

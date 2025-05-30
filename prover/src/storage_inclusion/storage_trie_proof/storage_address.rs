@@ -36,7 +36,7 @@ impl StorageAddressTarget {
     /// Create `StorageAddressTarget` with length = 0.
     pub fn empty(builder: &mut CircuitBuilder<F, D>) -> Self {
         let zero = builder.zero();
-        let mut nibbles = iter::repeat(zero).take(MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
+        let mut nibbles = std::iter::repeat_n(zero, MAX_STORAGE_ADDRESS_LENGTH_IN_NIBBLES);
 
         Self {
             padded_address: ArrayTarget::parse_exact(&mut nibbles),

@@ -46,7 +46,7 @@ impl MessageQueuedEventExtractor {
             loop {
                 let res = self.run_inner(&sender, &mut blocks).await;
                 if let Err(err) = res {
-                    log::error!("Message queued extractor failed: {}", err);
+                    log::error!("Message queued extractor failed: {err}");
 
                     match self.api_provider.reconnect().await {
                         Ok(()) => {

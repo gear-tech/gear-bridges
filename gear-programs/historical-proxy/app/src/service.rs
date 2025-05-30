@@ -8,7 +8,7 @@ pub(crate) mod eth_events {
 use sails_rs::{calls::ActionIo, gstd};
 
 use cell::RefCell;
-use sails_rs::{gstd::ExecContext, prelude::*};
+use sails_rs::prelude::*;
 
 use crate::{
     error::ProxyError,
@@ -19,7 +19,7 @@ use crate::{
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
-enum Event {
+pub enum Event {
     /// Tx receipt is checked to be valid and successfully sent to the
     /// underlying program.
     Relayed {
@@ -50,21 +50,14 @@ enum Event {
 /// is responsible of processing transactions for this slot and will redirect user request to it.
 /// If `eth-events-*` returned success its reply will be redirected to the program
 /// that user have specified in his request. For more info see `redirect` implementation.
-pub struct HistoricalProxyService<'a, ExecContext> {
+pub struct HistoricalProxyService<'a> {
     state: &'a RefCell<ProxyState>,
-    exec_context: ExecContext,
 }
 
 #[sails_rs::service(events = Event)]
-impl<'a, T> HistoricalProxyService<'a, T>
-where
-    T: ExecContext,
-{
-    pub fn new(state: &'a RefCell<ProxyState>, exec_context: T) -> Self {
-        Self {
-            state,
-            exec_context,
-        }
+impl<'a> HistoricalProxyService<'a> {
+    pub fn new(state: &'a RefCell<ProxyState>) -> Self {
+        Self { state }
     }
 
     /// Get current service admin.
@@ -76,7 +69,7 @@ where
     ///
     /// This function can be called only by the admin.
     pub fn update_admin(&mut self, admin_new: ActorId) {
-        let source = self.exec_context.actor_id();
+        let source = Syscall::message_source();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
@@ -96,7 +89,7 @@ where
     ///
     /// This function can be called only by an admin.
     pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
-        let source = self.exec_context.actor_id();
+        let source = Syscall::message_source();
 
         let mut state = self.state.borrow_mut();
         if source != state.admin {
@@ -151,13 +144,11 @@ where
             slot,
         } = eth_events::ethereum_event_client::io::CheckProofs::decode_reply(
             gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
-                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {:?}", e)))?
+                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {e:?}")))?
                 .await
-                .map_err(|e| {
-                    ProxyError::ReplyFailure(format!("failed to receive reply: {:?}", e))
-                })?,
+                .map_err(|e| ProxyError::ReplyFailure(format!("failed to receive reply: {e:?}")))?,
         )
-        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {:?}", e)))?
+        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {e:?}")))?
         .map_err(ProxyError::EthereumEventClient)?;
 
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
@@ -171,14 +162,14 @@ where
 
         let reply = gstd::msg::send_bytes_for_reply(client, submit_receipt, 0, 0)
             .map_err(|e| {
-                ProxyError::SendFailure(format!("failed to send message to client: {:?}", e))
+                ProxyError::SendFailure(format!("failed to send message to client: {e:?}"))
             })?
             .await
             .map_err(|e| {
-                ProxyError::ReplyFailure(format!("failed to receive reply from client: {:?}", e))
+                ProxyError::ReplyFailure(format!("failed to receive reply from client: {e:?}"))
             })?;
 
-        let _ = self.notify_on(Event::Relayed {
+        let _ = self.emit_event(Event::Relayed {
             slot,
             block_number,
             transaction_index: transaction_index as u32,

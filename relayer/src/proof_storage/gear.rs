@@ -168,7 +168,7 @@ impl GearProofStorage {
             let res = self.try_upload_program(&payload).await;
             match res {
                 Err(err) => {
-                    log::error!("Failed to upload proof storage program: {}", err);
+                    log::error!("Failed to upload proof storage program: {err}");
                 }
                 Ok(Some(program)) => {
                     let config = UploadedProgramInfo {
@@ -437,7 +437,7 @@ async fn message_sender_inner(
                     }
                 }
                 MessageState::Failed { message, error } => {
-                    log::error!("Error sending proof to gear: {}", error);
+                    log::error!("Error sending proof to gear: {error}");
                     MessageState::Pending { message }
                 }
                 MessageState::Submitted { .. } => state,
@@ -479,15 +479,13 @@ async fn message_sender_inner(
                     Some(DispatchStatus::Success) => None,
                     Some(DispatchStatus::Failed) => Some(MessageState::Pending { message }),
                     Some(DispatchStatus::NotExecuted) => {
-                        log::error!("Message {} at block #{} not executed", msg_id, at_block);
+                        log::error!("Message {msg_id} at block #{at_block} not executed");
                         None
                     }
                     None => {
                         if at_block + MESSAGE_RESEND_TIMEOUT > latest_finalized {
                             log::warn!(
-                                "Timeout for message {} at block #{} exceeded",
-                                msg_id,
-                                at_block
+                                "Timeout for message {msg_id} at block #{at_block} exceeded"
                             );
 
                             Some(MessageState::Pending { message })

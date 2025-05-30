@@ -80,7 +80,7 @@ impl MerkleRootRelayer {
             genesis_config,
         )
         .await
-        .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
+        .unwrap_or_else(|err| panic!("Error while creating era storage: {err}"));
 
         let metrics = Metrics::new();
 
@@ -108,11 +108,7 @@ impl MerkleRootRelayer {
             if let Err(err) = res {
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                 log::error!(
-                    "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
-                    attempts,
-                    MAX_RETRIES,
-                    err,
-                    delay
+                    "Main loop error (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}..."
                 );
                 if attempts >= MAX_RETRIES {
                     log::error!("Max attempts reached. Exiting...");
@@ -126,7 +122,7 @@ impl MerkleRootRelayer {
                     }
 
                     Err(err) => {
-                        log::error!("Failed to reconnect to Gear API: {}", err);
+                        log::error!("Failed to reconnect to Gear API: {err}");
                         return Err(err.context("Failed to reconnect to Gear API"));
                     }
                 }
@@ -137,7 +133,7 @@ impl MerkleRootRelayer {
                         .reconnect()
                         .await
                         .inspect_err(|err| {
-                            log::error!("Failed to reconnect to Ethereum: {}", err);
+                            log::error!("Failed to reconnect to Ethereum: {err}");
                         })
                         .map_err(|err| anyhow::anyhow!(err))?;
                     self.eras.update_eth_api(self.eth_api.clone());
@@ -172,7 +168,7 @@ impl MerkleRootRelayer {
             if sync_steps == 0 {
                 break;
             } else {
-                log::info!("Synced {} authority sets", sync_steps);
+                log::info!("Synced {sync_steps} authority sets");
             }
         }
 
@@ -223,18 +219,14 @@ impl MerkleRootRelayer {
         let merkle_root = gear_api.fetch_queue_merkle_root(finalized_head).await?;
 
         if merkle_root.is_zero() {
-            log::info!(
-                "Message queue at block #{} is empty. Skipping",
-                finalized_block_number
-            );
+            log::info!("Message queue at block #{finalized_block_number} is empty. Skipping");
             return Ok(());
         }
 
         if let Some(submitted_merkle_root) = &self.latest_submitted_merkle_root {
             if submitted_merkle_root.proof.merkle_root == merkle_root.0 {
                 log::info!(
-                    "Message queue at block #{} don't contain new messages. Skipping",
-                    finalized_block_number
+                    "Message queue at block #{finalized_block_number} don't contain new messages. Skipping"
                 );
                 return Ok(());
             }

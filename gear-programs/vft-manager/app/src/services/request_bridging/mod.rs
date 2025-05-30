@@ -1,6 +1,6 @@
 //! Gear -> ethereum bridging request entrypoint of `VFTManager` service.
 
-use sails_rs::{gstd::ExecContext, prelude::*};
+use sails_rs::prelude::*;
 
 use super::{error::Error, Event, TokenSupply, VftManager};
 
@@ -23,8 +23,8 @@ pub fn seed() {
 /// Lock/burn `vft` tokens (specific operation depends on the token supply type) and send
 /// request to the bridge built-in actor. If request is failed then tokens will be refunded back
 /// to the sender.
-pub async fn request_bridging<T: ExecContext>(
-    service: &mut VftManager<T>,
+pub async fn request_bridging(
+    service: &mut VftManager,
     sender: ActorId,
     vara_token_id: ActorId,
     amount: U256,
@@ -108,7 +108,7 @@ pub async fn request_bridging<T: ExecContext>(
     };
 
     service
-        .notify_on(Event::BridgingRequested {
+        .emit_event(Event::BridgingRequested {
             nonce,
             vara_token_id,
             amount,
@@ -126,15 +126,15 @@ pub async fn request_bridging<T: ExecContext>(
 ///
 /// This function can return funds back to the user in the following scenarios:
 /// - Token lock/burn is complete but message to the built-in actor haven't been sent yet. It can happen if
-///     user haven't attached gas enough to process the message further after the first `wake` or if network
-///     is loaded and timeout we've set to the reply is expired.
+///   user haven't attached gas enough to process the message further after the first `wake` or if network
+///   is loaded and timeout we've set to the reply is expired.
 /// - Message to the built-in actor have returned error but token refund message haven't been sent yet. It
-///     can happen if user haven't attached gas enough to process the message further after the second `wake`
-///     or if network is loaded and timeout we've set to the reply is expired.
+///   can happen if user haven't attached gas enough to process the message further after the second `wake`
+///   or if network is loaded and timeout we've set to the reply is expired.
 /// - Token refund message have been sent but it have failed. This case should be practically impossible
-///     due to the invariants that `vft-manager` provides but left just in case.
-pub async fn handle_interrupted_transfer<T: ExecContext>(
-    service: &mut VftManager<T>,
+///   due to the invariants that `vft-manager` provides but left just in case.
+pub async fn handle_interrupted_transfer(
+    service: &mut VftManager,
     msg_id: MessageId,
 ) -> Result<(), Error> {
     let config = service.config();

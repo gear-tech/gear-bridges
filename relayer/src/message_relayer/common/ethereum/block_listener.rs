@@ -68,7 +68,7 @@ impl BlockListener {
                     if common::is_transport_error_recoverable(&err) {
                         tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
-                        self.eth_api = match self.eth_api.reconnect() {
+                        self.eth_api = match self.eth_api.reconnect().await {
                             Ok(api) => api,
                             Err(err) => {
                                 log::error!("Failed to reconnect to Ethereum API: {}", err);

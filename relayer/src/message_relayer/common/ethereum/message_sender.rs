@@ -5,7 +5,7 @@ use crate::{
     },
 };
 use ethereum_client::{EthApi, TxHash};
-use prometheus::{Gauge, IntCounter, IntGauge};
+use prometheus::Gauge;
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
@@ -26,17 +26,9 @@ impl MeteredService for MessageSender {
 
 impl_metered_service! {
     struct Metrics {
-        pending_tx_count: IntGauge = IntGauge::new(
-            "ethereum_message_sender_pending_tx_count",
-            "Amount of txs pending finalization on ethereum",
-        ),
         fee_payer_balance: Gauge = Gauge::new(
             "ethereum_message_sender_fee_payer_balance",
             "Transaction fee payer balance",
-        ),
-        total_failed_txs: IntCounter = IntCounter::new(
-            "ethereum_message_sender_total_failed_txs",
-            "Total amount of txs sent to ethereum and failed",
         ),
     }
 }
@@ -141,51 +133,3 @@ async fn task_inner(
 
     Ok(())
 }
-/*
-fn check_tx_status(this: &mut MessageSender, status: Status) {
-    let (tx_hash, status) = status;
-    match status {
-        Ok(TxStatus::Pending) => {
-            log::error!("Transaction {tx_hash} is still pending");
-        }
-
-        Ok(TxStatus::Finalized) => {
-            this.metrics.pending_tx_count.dec();
-
-            log::info!("Transaction {tx_hash} has been finalized");
-        }
-
-        Ok(TxStatus::Failed) => {
-            this.metrics.total_failed_txs.inc();
-
-            log::error!("Failed to finalize transaction {tx_hash}");
-        }
-
-        Err(e) => {
-            log::warn!("Unable to get status of the transaction {tx_hash:?}: {e:?}")
-        }
-    }
-}
-
-async fn get_tx_status(eth_api: EthApi, tx_hash: TxHash, tx_sender: UnboundedSender<Status>) {
-    // wait for 18 minutes for the first time and for 5 minutes in the next three attempts
-    let mut iter = [18, 5, 5, 5].iter().peekable();
-    while let Some(minutes) = iter.next() {
-        time::sleep(Duration::from_secs(minutes * 60)).await;
-
-        let status = eth_api.get_tx_status(tx_hash).await;
-        match status {
-            Ok(TxStatus::Pending) if iter.peek().is_some() => {}
-
-            status => {
-                let result = tx_sender.send((tx_hash, status));
-                if result.is_err() {
-                    log::error!("Failed to notify about transaction status: tx_hash = {tx_hash}, error = {result:?}");
-                }
-
-                break;
-            }
-        }
-    }
-}
-*/

@@ -1,11 +1,11 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_client::service_replay_back::events::ServiceReplayBackEvents;
-use checkpoint_light_client_client::service_sync_update::events::{self, ServiceSyncUpdateEvents};
+use checkpoint_light_client_client::service_sync_update;
+use checkpoint_light_client_client::service_sync_update::events::ServiceSyncUpdateEvents;
 use checkpoint_light_client_client::{
     checkpoint_light_client_factory::io as factory_io, traits::*,
 };
-use checkpoint_light_client_client::{service_replay_back, service_sync_update};
 use checkpoint_light_client_io::{Error, Init, ReplayBackError, ReplayBackStatus, G2};
 use ethereum_beacon_client::utils;
 use ethereum_common::{
@@ -398,7 +398,7 @@ async fn replay_back_and_updating() -> Result<()> {
             |event| match event {
                 gclient::Event::Gear(gclient::GearEvent::UserMessageSent {
                     message,
-                    expiration,
+                    expiration: _,
                 }) => {
                     if message.source.0 == program_id.into_bytes()
                         && message.destination.0 == [0; 32]
@@ -483,21 +483,20 @@ async fn replay_back_and_updating() -> Result<()> {
 
             let (actor_id, event) = stream.next().await.expect("no events received");
             assert_eq!(actor_id, program_id);
-            if let ServiceSyncUpdateEvents::NewCheckpoint {
+            let ServiceSyncUpdateEvents::NewCheckpoint {
                 slot,
                 tree_hash_root,
-            } = event
-            {
-                assert!(
-                    slot == update.finalized_header.slot,
-                    "Expected slot to match finalized header slot"
-                );
-                assert_eq!(
-                    tree_hash_root,
-                    update.finalized_header.tree_hash_root(),
-                    "Expected tree hash root to match finalized header"
-                );
-            }
+            } = event;
+
+            assert!(
+                slot == update.finalized_header.slot,
+                "Expected slot to match finalized header slot"
+            );
+            assert_eq!(
+                tree_hash_root,
+                update.finalized_header.tree_hash_root(),
+                "Expected tree hash root to match finalized header"
+            );
         } else {
             println!("update failed...");
         }

@@ -1,5 +1,6 @@
 mod committee;
 
+use crate::services::Event;
 use crate::State;
 use crate::{crypto, utils};
 use cell::RefCell;
@@ -114,7 +115,7 @@ pub struct SyncUpdate<'a> {
     state: &'a RefCell<State>,
 }
 
-#[sails_rs::service]
+#[sails_rs::service(events = Event)]
 impl<'a> SyncUpdate<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
@@ -170,6 +171,12 @@ impl<'a> SyncUpdate<'a> {
             state
                 .checkpoints
                 .push(finalized_header.slot, finalized_header.tree_hash_root());
+
+            self.notify_on(Event::NewCheckpoint {
+                slot: finalized_header.slot,
+                tree_hash_root: finalized_header.tree_hash_root(),
+            })
+            .expect("failed to send event");
             state.finalized_header = finalized_header;
         }
 

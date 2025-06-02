@@ -8,8 +8,8 @@ use crate::message_relayer::{
         ethereum::{
             accumulator::Accumulator,
             message_sender::MessageSender,
-            merkle_proof_fetcher::MerkleProofFetcher,
         },
+        gear::merkle_proof_fetcher::MerkleProofFetcher,
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
     eth_to_gear::api_provider::ApiProviderConnection,

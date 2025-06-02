@@ -1,7 +1,7 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY},
     message_relayer::{
-        common::MessageInBlock,
+        common::{Data, MessageInBlock},
     },
 };
 use ethereum_client::{EthApi, TxHash};
@@ -10,8 +10,6 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
-
-use super::Data;
 
 pub struct MessageSender {
     max_retries: u32,

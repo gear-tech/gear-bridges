@@ -8,22 +8,15 @@ use ethereum_client::EthApi;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_common::beacon::electra::Block;
 
-use super::{EthereumBlockNumber, EthereumSlotNumber, GearBlockNumber, RelayedMerkleRoot, MessageInBlock, MerkleProof};
+use super::{EthereumBlockNumber, EthereumSlotNumber, GearBlockNumber, RelayedMerkleRoot};
 
 pub mod accumulator;
 pub mod block_listener;
 pub mod deposit_event_extractor;
-pub mod merkle_proof_fetcher;
 pub mod merkle_root_extractor;
 pub mod message_paid_event_extractor;
 pub mod message_sender;
 pub mod status_fetcher;
-
-pub struct Data {
-    pub message: MessageInBlock,
-    pub relayed_root: RelayedMerkleRoot,
-    pub proof: MerkleProof,
-}
 
 async fn find_slot_by_block_number(
     eth_api: &EthApi,

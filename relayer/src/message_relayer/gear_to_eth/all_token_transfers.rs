@@ -10,11 +10,12 @@ use crate::{
         ethereum::{
             accumulator::Accumulator,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
-            status_fetcher::StatusFetcher, merkle_proof_fetcher::MerkleProofFetcher,
+            status_fetcher::StatusFetcher,
         },
         gear::{
             block_listener::BlockListener as GearBlockListener,
             message_queued_event_extractor::MessageQueuedEventExtractor,
+            merkle_proof_fetcher::MerkleProofFetcher,
         },
     },
     eth_to_gear::api_provider::ApiProviderConnection,

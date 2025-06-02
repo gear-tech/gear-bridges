@@ -1,7 +1,6 @@
-use crate::message_relayer::common::RelayedMerkleRoot;
 use crate::{
     message_relayer::{
-        common::MessageInBlock,
+        common::{RelayedMerkleRoot, Data, MessageInBlock},
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
@@ -10,7 +9,6 @@ use keccak_hash::keccak_256;
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
-use super::Data;
 
 pub struct MerkleProofFetcher {
     api_provider: ApiProviderConnection,

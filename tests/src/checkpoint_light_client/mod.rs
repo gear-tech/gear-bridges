@@ -1,8 +1,11 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
 use checkpoint_light_client::WASM_BINARY;
+use checkpoint_light_client_client::service_replay_back::events::ServiceReplayBackEvents;
+use checkpoint_light_client_client::service_sync_update::events::{self, ServiceSyncUpdateEvents};
 use checkpoint_light_client_client::{
     checkpoint_light_client_factory::io as factory_io, traits::*,
 };
+use checkpoint_light_client_client::{service_replay_back, service_sync_update};
 use checkpoint_light_client_io::{Error, Init, ReplayBackError, ReplayBackStatus, G2};
 use ethereum_beacon_client::utils;
 use ethereum_common::{
@@ -16,9 +19,11 @@ use ethereum_common::{
     },
     SLOTS_PER_EPOCH,
 };
-use gclient::{GearApi, Result};
+use futures::StreamExt;
+use gclient::{EventProcessor, GearApi, Result};
 use ruzstd::StreamingDecoder;
-use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sails_rs::events::EventIo;
+use sails_rs::{calls::*, events::Listener, gclient::calls::*, prelude::*};
 use std::io::Read;
 
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
@@ -352,9 +357,10 @@ async fn replay_back_and_updating() -> Result<()> {
     );
 
     // second attempt to start backreplay should fail
+    let sync_update = utils::sync_update_from_finality(signature, finality_update);
     let result = service
         .start(
-            utils::sync_update_from_finality(signature, finality_update),
+            sync_update.clone(),
             sync_aggregate_encoded,
             headers_all
                 .iter()
@@ -371,7 +377,7 @@ async fn replay_back_and_updating() -> Result<()> {
         matches!(result, Err(ReplayBackError::AlreadyStarted)),
         "result = {result:?}"
     );
-
+    let mut listener = api.subscribe().await.unwrap();
     // replaying the blocks back
     let headers = headers_all
         .iter()
@@ -382,8 +388,43 @@ async fn replay_back_and_updating() -> Result<()> {
     let gas_limit = calculate_gas::<replay_back_io::Process>(&api, program_id, &headers).await?;
     println!("replay_back_io::Process gas_limit = {gas_limit}");
     let result = service
-        .process(headers)
+        .process(headers.clone())
         .send_recv(program_id)
+        .await
+        .unwrap();
+
+    listener
+        .proc_many(
+            |event| match event {
+                gclient::Event::Gear(gclient::GearEvent::UserMessageSent {
+                    message,
+                    expiration,
+                }) => {
+                    if message.source.0 == program_id.into_bytes()
+                        && message.destination.0 == [0; 32]
+                    {
+                        let event =
+                            ServiceReplayBackEvents::decode_event(&message.payload.0).unwrap();
+                        match event {
+                            ServiceReplayBackEvents::NewCheckpoint {
+                                slot,
+                                tree_hash_root,
+                            } => {
+                                println!("event = {event:?}");
+                                assert!(headers.iter().any(|header| {
+                                    header.slot == slot && header.tree_hash_root() == tree_hash_root
+                                }));
+                            }
+                        }
+                        Some(())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            |res| (res, true),
+        )
         .await
         .unwrap();
 
@@ -427,13 +468,39 @@ async fn replay_back_and_updating() -> Result<()> {
                 params,
             )
         };
-
+        let remoting = GClientRemoting::new(api.clone());
+        let mut listener = service_sync_update::events::listener(remoting);
+        let mut stream = listener.listen().await.expect("failed to listen to events");
         println!("process gas_limit = {gas_limit}");
         let result = service
-            .process(update, sync_aggregate_encoded)
+            .process(update.clone(), sync_aggregate_encoded)
             .send_recv(program_id)
             .await
             .unwrap();
+
+        if let Ok(()) = result {
+            println!("waiting for events");
+
+            let (actor_id, event) = stream.next().await.expect("no events received");
+            assert_eq!(actor_id, program_id);
+            if let ServiceSyncUpdateEvents::NewCheckpoint {
+                slot,
+                tree_hash_root,
+            } = event
+            {
+                assert!(
+                    slot == update.finalized_header.slot,
+                    "Expected slot to match finalized header slot"
+                );
+                assert_eq!(
+                    tree_hash_root,
+                    update.finalized_header.tree_hash_root(),
+                    "Expected tree hash root to match finalized header"
+                );
+            }
+        } else {
+            println!("update failed...");
+        }
 
         assert!(
             matches!(result, Ok(_) | Err(Error::LowVoteCount)),

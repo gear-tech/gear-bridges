@@ -148,6 +148,10 @@ async fn main() {
                         eth_api,
                         args.from_block,
                         provider.connection(),
+                        args.confirmations_merkle_root
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.confirmations_status
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
                     .unwrap();
@@ -170,6 +174,8 @@ async fn main() {
                         bridging_payment_address,
                         provider.connection(),
                         args.confirmations_merkle_root
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
@@ -338,6 +344,7 @@ async fn main() {
                 nonce,
                 args.block,
                 args.from_eth_block,
+                args.confirmations_status.unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
             )
             .await;
         }

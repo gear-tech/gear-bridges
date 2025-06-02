@@ -15,14 +15,13 @@ use crate::message_relayer::{
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 
-const COUNT_CONFIRMATIONS: u64 = 5;
-
 pub async fn relay(
     api_provider: ApiProviderConnection,
     eth_api: EthApi,
     message_nonce: U256,
     gear_block: u32,
     from_eth_block: Option<u64>,
+    confirmations: u64,
 ) {
     let block_latest = eth_api
         .block_number()
@@ -127,9 +126,9 @@ pub async fn relay(
 
     let provider = eth_api.raw_provider().root().clone();
     let result = PendingTransactionBuilder::new(provider, tx_hash)
-        .with_required_confirmations(COUNT_CONFIRMATIONS)
+        .with_required_confirmations(confirmations)
         .watch()
         .await;
     
-    log::info!("Result for message {message_nonce:#x} after {COUNT_CONFIRMATIONS} confirmation(s): {result:?}");
+    log::info!("Result for message {message_nonce:#x} after {confirmations} confirmation(s): {result:?}");
 }

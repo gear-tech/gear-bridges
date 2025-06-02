@@ -4,16 +4,17 @@ use crate::{
         common::MessageInBlock,
     },
 };
-use ethereum_client::{EthApi, TxHash, TxStatus};
-use prometheus::{Gauge, IntCounter, IntGauge};
+use ethereum_client::{EthApi, TxHash};
+use prometheus::{IntCounter, IntGauge};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    time::{self, Duration},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
+use alloy::providers::{Provider, PendingTransactionBuilder};
 
 pub struct StatusFetcher {
     eth_api: EthApi,
+    confirmations: u64,
 
     metrics: Metrics,
 }
@@ -30,10 +31,6 @@ impl_metered_service! {
             "ethereum_message_sender_pending_tx_count",
             "Amount of txs pending finalization on ethereum",
         ),
-        fee_payer_balance: Gauge = Gauge::new(
-            "ethereum_message_sender_fee_payer_balance",
-            "Transaction fee payer balance",
-        ),
         total_failed_txs: IntCounter = IntCounter::new(
             "ethereum_message_sender_total_failed_txs",
             "Total amount of txs sent to ethereum and failed",
@@ -42,9 +39,11 @@ impl_metered_service! {
 }
 
 impl StatusFetcher {
-    pub fn new(eth_api: EthApi,) -> Self {
+    pub fn new(eth_api: EthApi,
+    confirmations: u64,) -> Self {
         Self {
             eth_api,
+            confirmations,
 
             metrics: Metrics::new(),
         }
@@ -110,43 +109,27 @@ async fn task_inner(
             this.eth_api.clone(),
             metrics,
             tx_hash,
+            this.confirmations,
         ));
     }
 
     Ok(())
 }
 
-async fn get_tx_status(eth_api: EthApi, metrics: Metrics, tx_hash: TxHash) {
-    // wait for 18 minutes for the first time and for 5 minutes in the next three attempts
-    let mut iter = [18, 5, 5, 5].iter().peekable();
-    while let Some(minutes) = iter.next() {
-        time::sleep(Duration::from_secs(minutes * 60)).await;
-
-        let status = eth_api.get_tx_status(tx_hash).await;
-        match status {
-            Err(e) => {
-                log::warn!("Unable to get status of the transaction {tx_hash:?}: {e:?}");
-                break;
-            }
-
-            Ok(TxStatus::Pending) if iter.peek().is_some() => {}
-
-            Ok(TxStatus::Pending) => {
-                log::error!("Transaction {tx_hash} is still pending");
-            }
-
-            Ok(TxStatus::Finalized) => {
-                metrics.pending_tx_count.dec();
-                log::info!("Transaction {tx_hash} has been finalized");
-                break;
-            }
-
-            Ok(TxStatus::Failed) => {
-                metrics.total_failed_txs.inc();
-                log::error!("Failed to finalize transaction {tx_hash}");
-
-                break;
-            }
-        }
+async fn get_tx_status(eth_api: EthApi, metrics: Metrics, tx_hash: TxHash, 
+    confirmations: u64,) {
+    let pending =
+        PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash);
+    
+    if let Err(e) = pending
+        .with_required_confirmations(confirmations)
+        .watch()
+        .await
+    {
+        metrics.total_failed_txs.inc();
+        log::error!("Failed to finalize transaction {tx_hash}: {e:?}");
+    } else {
+        metrics.pending_tx_count.dec();
+        log::info!("Transaction {tx_hash} has {confirmations} confirmation(s)");
     }
 }

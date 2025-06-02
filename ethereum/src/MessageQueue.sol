@@ -1,4 +1,5 @@
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+pragma solidity ^0.8.30;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
@@ -51,8 +52,9 @@ contract MessageQueue is IMessageQueue {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) public {
-        if (_processed_messages[message.nonce])
+        if (_processed_messages[message.nonce]) {
             revert MessageAlreadyProcessed(message.nonce);
+        }
 
         bytes32 msg_hash = hash_vara_msg(message);
 
@@ -60,12 +62,16 @@ contract MessageQueue is IMessageQueue {
             block_number
         );
 
-        if (merkle_root == bytes32(0)) revert MerkleRootNotSet(block_number);
+        if (merkle_root == bytes32(0)) {
+            revert MerkleRootNotSet(block_number);
+        }
 
         if (
             _calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) !=
             merkle_root
-        ) revert BadProof();
+        ) {
+            revert BadProof();
+        }
 
         _processed_messages[message.nonce] = true;
 
@@ -124,13 +130,13 @@ contract MessageQueue is IMessageQueue {
             bytes32 proofElement = proof[i];
 
             if ((index % 2 == 1) || (index + 1 == width)) {
-                assembly {
+                assembly ("memory-safe") {
                     mstore(0x00, proofElement)
                     mstore(0x20, hash)
                     hash := keccak256(0x00, 0x40)
                 }
             } else {
-                assembly {
+                assembly ("memory-safe") {
                     mstore(0x00, hash)
                     mstore(0x20, proofElement)
                     hash := keccak256(0x00, 0x40)

@@ -13,6 +13,7 @@ out/
 tmp/
 
 ethereum/broadcast
+ethereum/remappings.txt
 
 .env
 .DS_Store

@@ -32,7 +32,7 @@ async fn find_slot_by_block_number(
 ) -> anyhow::Result<EthereumSlotNumber> {
     let block_body = eth_api
         .raw_provider()
-        .get_block_by_number(BlockNumberOrTag::Number(block.0), false)
+        .get_block_by_number(BlockNumberOrTag::Number(block.0))
         .await?
         .ok_or(anyhow!("Ethereum block #{} is missing", block.0))?;
 

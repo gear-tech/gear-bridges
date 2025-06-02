@@ -83,7 +83,7 @@ async fn task(
                 tokio::time::sleep(delay).await;
 
                 if common::is_transport_error_recoverable(&e) {
-                    match this.eth_api.reconnect().inspect_err(|e| {
+                    match this.eth_api.reconnect().await.inspect_err(|e| {
                         log::error!("Failed to reconnect to Ethereum: {e}");
                     }) {
                         Ok(eth_api) => this.eth_api = eth_api,

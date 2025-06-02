@@ -135,6 +135,7 @@ impl MerkleRootRelayer {
                     self.eth_api = self
                         .eth_api
                         .reconnect()
+                        .await
                         .inspect_err(|err| {
                             log::error!("Failed to reconnect to Ethereum: {}", err);
                         })

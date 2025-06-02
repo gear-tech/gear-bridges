@@ -1,0 +1,42 @@
+[package]
+name = "tests"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures.workspace = true
+gclient.workspace = true
+gear-core.workspace = true
+gstd.workspace = true
+sp-core = { workspace = true, features = ["std"] }
+gtest.workspace = true
+eth-events-common.workspace = true
+eth-events-deneb = { workspace = true, features = ["wasm-binary"] }
+eth-events-deneb-client.workspace = true
+eth-events-electra-client.workspace = true
+sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+historical-proxy = { workspace = true, features = ["wasm-binary"] }
+historical-proxy-client.workspace = true
+vft-manager = { workspace = true, features = ["wasm-binary", "mocks"] }
+vft-manager-client.workspace = true
+vft = { workspace = true, features = ["wasm-binary"] }
+vft-client = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+alloy = { workspace = true }
+alloy-rlp = { workspace = true }
+checkpoint-light-client-client.workspace = true
+ethereum-common =  { workspace = true, features = ["std"] }
+hex-literal = { workspace = true }
+sp-runtime = { workspace = true, features = ["std"] }
+anyhow = { workspace = true }
+hex.workspace = true
+checkpoint-light-client = { workspace = true, features = ["wasm-binary"] }
+checkpoint-light-client-io.workspace = true
+ethereum_beacon_client.workspace = true
+ark-bls12-381 = { workspace = true, features = ["curve"] }
+ark-ec.workspace = true
+ark-scale.workspace = true
+ark-serialize.workspace = true
+ruzstd.workspace = true

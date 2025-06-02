@@ -32,7 +32,8 @@ members = [
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
     "tools/genesis-config",
-    "tools/governance",
+    "tools/governance", 
+    "tests",
 ]
 
 resolver = "2"
@@ -202,20 +203,21 @@ primitive-types = { version = "0.12.2", default-features = false }
 binary-merkle-tree = { version = "15.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
 
 # Alloy deps
-alloy-consensus = { version = "=0.5.2", default-features = false }
-alloy-eips = { version = "=0.5.2", default-features = false }
-alloy-rlp = { version = "=0.3.8", default-features = false }
-alloy-primitives = { version = "=0.8.9", default-features = false }
-alloy-sol-types = { version = "=0.8.9", default-features = false }
-alloy = { version = "=0.5.2", package = "alloy", features = [
+alloy-consensus = { version = "=1.0.9", default-features = false }
+alloy-eips = { version = "=1.0.9", default-features = false }
+alloy-rlp = { version = "=0.3.12", default-features = false }
+alloy-primitives = { version = "=1.1.2", default-features = false }
+alloy-sol-types = { version = "=1.1.2", default-features = false }
+alloy = { version = "=1.0.9", package = "alloy", features = [
     "sol-types",
     "contract",
     "pubsub",
     "providers",
+    "provider-ws",
     "signers",
     "signer-local",
     "transports",
-    "transport-http",
+    "transport-ws",
     "network",
     "node-bindings",
     "rpc",

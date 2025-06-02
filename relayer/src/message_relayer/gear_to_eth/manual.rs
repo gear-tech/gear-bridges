@@ -6,11 +6,11 @@ use tokio::sync::mpsc;
 use crate::message_relayer::{
     common::{
         ethereum::{
-            accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
-            merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
+            accumulator::Accumulator,
+            message_sender::MessageSender,
             merkle_proof_fetcher::MerkleProofFetcher,
         },
-        AuthoritySetId, GearBlockNumber, MessageInBlock,
+        AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
     eth_to_gear::api_provider::ApiProviderConnection,
 };
@@ -24,16 +24,53 @@ pub async fn relay(
     gear_block: u32,
     from_eth_block: Option<u64>,
 ) {
-    let from_eth_block = if let Some(block) = from_eth_block {
-        block
-    } else {
-        eth_api
-            .finalized_block_number()
-            .await
-            .expect("Failed to get finalized block number on ethereum")
-    };
+    let block_latest = eth_api
+        .block_number()
+        .await
+        .expect("Failed to get the latest block number on Ethereum");
+    let from_eth_block = from_eth_block.unwrap_or(block_latest);
+
+    let merkle_roots = eth_api
+        .fetch_merkle_roots_in_range(from_eth_block, block_latest)
+        .await
+        .expect("Unable to fetch merkle roots");
+
+    if merkle_roots.is_empty() {
+        log::info!("Found no merkle roots");
+
+        return;
+    }
 
     let gear_api = api_provider.client();
+    let (merkle_roots_sender, merkle_roots_receiver) = mpsc::unbounded_channel();
+    for (merkle_root, _block_number_eth) in merkle_roots {
+        let block_hash = gear_api
+            .block_number_to_hash(merkle_root.block_number as u32)
+            .await
+            .expect("Unable to get hash for the block number");
+
+        let authority_set_id = AuthoritySetId(
+            gear_api
+                .signed_by_authority_set_id(block_hash)
+                .await
+                .expect("Unable to get AuthoritySetId"),
+        );
+
+        log::info!(
+            "Found merkle root for gear block #{} and era #{}",
+            merkle_root.block_number,
+            authority_set_id
+        );
+
+        merkle_roots_sender
+            .send(RelayedMerkleRoot {
+                block: GearBlockNumber(merkle_root.block_number as u32),
+                block_hash,
+                authority_set_id,
+                merkle_root: merkle_root.merkle_root,
+            })
+            .expect("Unable to send RelayedMerkleRoot");
+    }
 
     let gear_block_hash = gear_api
         .block_number_to_hash(gear_block)
@@ -67,17 +104,12 @@ pub async fn relay(
         ),
     };
 
-    let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
-
-    let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
-    let merkle_root_extractor = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
     let message_sender = MessageSender::new(1, eth_api.clone());
 
-    let ethereum_blocks = ethereum_block_listener.run().await;
-    let merkle_roots = merkle_root_extractor.run(ethereum_blocks).await;
     let accumulator = Accumulator::new();
+    let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
     let channel_messages = accumulator
-        .run(queued_messages_receiver, merkle_roots)
+        .run(queued_messages_receiver, merkle_roots_receiver)
         .await;
     let channel_message_data = MerkleProofFetcher::new(api_provider).spawn(channel_messages);
 

@@ -9,7 +9,7 @@ use crate::{
     message_relayer::{
     common::{
         ethereum::{
-            accumulator::Accumulator, block_listener::BlockListener as EthereumBlockListener,
+            accumulator::Accumulator,
             merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
             merkle_proof_fetcher::MerkleProofFetcher, status_fetcher::StatusFetcher,
         },
@@ -25,7 +25,6 @@ use crate::{
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
-    ethereum_block_listener: EthereumBlockListener,
 
     message_sent_listener: MessageQueuedEventExtractor,
     message_paid_listener: MessagePaidEventExtractor,
@@ -43,7 +42,6 @@ impl MeteredService for Relayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
         iter::empty()
             .chain(self.gear_block_listener.get_sources())
-            .chain(self.ethereum_block_listener.get_sources())
             .chain(self.message_sent_listener.get_sources())
             .chain(self.message_paid_listener.get_sources())
             .chain(self.paid_messages_filter.get_sources())
@@ -58,6 +56,7 @@ impl Relayer {
         from_block: Option<u32>,
         bridging_payment_address: H256,
         api_provider: ApiProviderConnection,
+        confirmations: u64,
     ) -> anyhow::Result<Self> {
         let from_gear_block = if let Some(block) = from_block {
             block
@@ -67,17 +66,12 @@ impl Relayer {
             gear_api.block_hash_to_number(block).await?
         };
 
-        let from_eth_block = eth_api.finalized_block_number().await?;
-
         log::info!(
             "Starting gear event processing from block #{}",
             from_gear_block
         );
-        log::info!("Starting ethereum listener from block #{}", from_eth_block);
 
         let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
-
-        let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
@@ -86,7 +80,8 @@ impl Relayer {
 
         let paid_messages_filter = PaidMessagesFilter::new();
 
-        let merkle_root_listener = MerkleRootExtractor::new(eth_api.clone(), api_provider.clone());
+        let merkle_root_extractor =
+            MerkleRootExtractor::new(eth_api.clone(), api_provider.clone(), confirmations);
 
         let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
 
@@ -95,14 +90,13 @@ impl Relayer {
 
         Ok(Self {
             gear_block_listener,
-            ethereum_block_listener,
 
             message_sent_listener,
             message_paid_listener,
 
             paid_messages_filter,
 
-            merkle_root_extractor: merkle_root_listener,
+            merkle_root_extractor,
             message_sender,
 
             proof_fetcher,
@@ -112,14 +106,13 @@ impl Relayer {
 
     pub async fn run(self) {
         let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run().await;
-        let ethereum_blocks = self.ethereum_block_listener.run().await;
 
         let messages = self.message_sent_listener.run(gear_blocks_0).await;
         let paid_messages = self.message_paid_listener.run(gear_blocks_1).await;
 
         let filtered_messages = self.paid_messages_filter.run(messages, paid_messages).await;
 
-        let merkle_roots = self.merkle_root_extractor.run(ethereum_blocks).await;
+        let merkle_roots = self.merkle_root_extractor.spawn();
 
         let accumulator = Accumulator::new();
         let channel_messages = accumulator.run(filtered_messages, merkle_roots).await;

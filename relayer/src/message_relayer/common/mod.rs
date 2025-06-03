@@ -1,5 +1,5 @@
 use ethereum_client::TxHash;
-use gear_rpc_client::dto::Message;
+use gear_rpc_client::dto::{MerkleProof, Message};
 use primitive_types::H256;
 
 pub mod ethereum;
@@ -52,4 +52,10 @@ pub struct GSdkArgs {
     pub vara_domain: String,
     pub vara_port: u16,
     pub vara_rpc_retries: u8,
+}
+
+pub struct Data {
+    pub message: MessageInBlock,
+    pub relayed_root: RelayedMerkleRoot,
+    pub proof: MerkleProof,
 }

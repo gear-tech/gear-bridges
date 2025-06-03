@@ -16,6 +16,7 @@ pub mod deposit_event_extractor;
 pub mod merkle_root_extractor;
 pub mod message_paid_event_extractor;
 pub mod message_sender;
+pub mod status_fetcher;
 
 async fn find_slot_by_block_number(
     eth_api: &EthApi,

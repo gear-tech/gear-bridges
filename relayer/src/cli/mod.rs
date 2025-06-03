@@ -97,6 +97,9 @@ pub struct GearEthTokensArgs {
 
     #[arg(long, help = format!("How many confirmations wait for relayed merkle roots on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
     pub confirmations_merkle_root: Option<u64>,
+
+    #[arg(long, help = format!("How many confirmations wait for message transaction on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
+    pub confirmations_status: Option<u64>,
 }
 
 #[derive(Subcommand)]
@@ -173,6 +176,9 @@ pub struct GearEthManualArgs {
     pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
+
+    #[arg(long, help = format!("How many confirmations wait for message transaction on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
+    pub confirmations_status: Option<u64>,
 }
 
 #[derive(Args)]

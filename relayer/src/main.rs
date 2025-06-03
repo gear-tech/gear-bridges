@@ -29,7 +29,7 @@ mod relay_merkle_roots;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
+    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 
 #[tokio::main]
@@ -58,7 +58,7 @@ async fn main() {
             )
             .await
             .expect("Failed to connect to Gear API");
-            let eth_api = create_eth_signer_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
             let metrics = MetricsBuilder::new();
 
@@ -93,7 +93,7 @@ async fn main() {
             .await
             .expect("Failed to connec to Gear API");
 
-            let eth_api = create_eth_signer_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
             let metrics = MetricsBuilder::new();
 
@@ -124,7 +124,7 @@ async fn main() {
             kill_switch.run().await.expect("Kill switch relayer failed");
         }
         CliCommands::GearEthTokens(args) => {
-            let eth_api = create_eth_signer_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
                 vara_domain: args.gear_args.domain,
@@ -148,6 +148,10 @@ async fn main() {
                         eth_api,
                         args.from_block,
                         provider.connection(),
+                        args.confirmations_merkle_root
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.confirmations_status
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
                     .unwrap();
@@ -169,6 +173,10 @@ async fn main() {
                         args.from_block,
                         bridging_payment_address,
                         provider.connection(),
+                        args.confirmations_merkle_root
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.confirmations_status
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
                     .unwrap();
@@ -226,7 +234,7 @@ async fn main() {
             beacon_rpc,
             prometheus_args,
         }) => {
-            let eth_api = create_eth_client(&ethereum_args);
+            let eth_api = create_eth_client(&ethereum_args).await;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -318,7 +326,7 @@ async fn main() {
             let nonce =
                 hex_utils::decode_byte_vec(&args.nonce).expect("Failed to parse message nonce");
             let nonce = U256::from_big_endian(&nonce[..]);
-            let eth_api = create_eth_signer_client(&args.ethereum_args);
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -327,20 +335,21 @@ async fn main() {
             .await
             .expect("Failed to create API provider");
 
-            let _sender = gear_to_eth::manual::relay(
-                api_provider.connection(),
+            let connection = api_provider.connection();
+            api_provider.spawn();
+
+            gear_to_eth::manual::relay(
+                connection,
                 eth_api,
                 nonce,
                 args.block,
                 args.from_eth_block,
+                args.confirmations_status
+                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
             )
             .await;
-            api_provider.spawn();
-            loop {
-                // relay() spawns thread and exits, so we need to add this loop after calling run.
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
         }
+
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
             slot,
@@ -359,7 +368,7 @@ async fn main() {
                 vara_port: gear_args.common.port,
                 vara_rpc_retries: gear_args.common.retries,
             };
-            let eth_api = create_eth_client(&ethereum_args);
+            let eth_api = create_eth_client(&ethereum_args).await;
             let beacon_client = create_beacon_client(&beacon_args).await;
             let checkpoint_light_client_address = hex_utils::decode_h256(&checkpoint_light_client)
                 .expect("Failed to parse checkpoint light client address");
@@ -426,37 +435,34 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
         .expect("GearApi client should be created")
 }
 
-fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
+async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
         relayer_address,
         mq_address,
-        eth_timeout,
         ..
     } = &args.ethereum_args;
-    let timeout = Duration::from_secs(eth_timeout.unwrap_or(0).into());
 
     EthApi::new(
         eth_endpoint,
         mq_address,
         relayer_address,
         Some(&args.fee_payer),
-        timeout,
     )
+    .await
     .expect("Error while creating ethereum client")
 }
 
-fn create_eth_client(args: &EthereumArgs) -> EthApi {
+async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
         relayer_address,
         mq_address,
-        eth_timeout,
         ..
     } = args;
-    let timeout = Duration::from_secs(eth_timeout.unwrap_or(0).into());
 
-    EthApi::new(eth_endpoint, mq_address, relayer_address, None, timeout)
+    EthApi::new(eth_endpoint, mq_address, relayer_address, None)
+        .await
         .expect("Error while creating ethereum client")
 }
 
@@ -510,15 +516,16 @@ fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConf
 }
 
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> anyhow::Result<()> {
-    let eth_api = create_eth_client(&args.ethereum_args);
+    let eth_api = create_eth_client(&args.ethereum_args).await;
     let block_finalized = eth_api.finalized_block_number().await?;
 
     if args.from_eth_block > block_finalized {
         return Ok(());
     }
 
+    let block_range = common::create_range(args.from_eth_block.into(), block_finalized);
     let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(args.from_eth_block, block_finalized)
+        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
         .await?;
 
     let gear_api = gear_rpc_client::GearApi::new(

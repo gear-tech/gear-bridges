@@ -157,6 +157,7 @@ impl KillSwitchRelayer {
                     self.eth_api = self
                         .eth_api
                         .reconnect()
+                        .await
                         .map_err(|e| anyhow::anyhow!("Failed to reconnect: {}", e))?;
                 }
             }

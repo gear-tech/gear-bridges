@@ -81,7 +81,7 @@ impl MessagePaidEventExtractor {
                     tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
                     if common::is_transport_error_recoverable(&err) {
-                        self.eth_api = match self.eth_api.reconnect() {
+                        self.eth_api = match self.eth_api.reconnect().await {
                             Ok(eth_api) => eth_api,
                             Err(err) => {
                                 log::error!("Failed to reconnect to Ethereum API: {}", err);

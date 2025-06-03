@@ -134,7 +134,7 @@ impl MessageSender {
                             }
 
                             if common::is_transport_error_recoverable(&err) {
-                                self.eth_api = match self.eth_api.reconnect() {
+                                self.eth_api = match self.eth_api.reconnect().await {
                                     Ok(eth_api) => eth_api,
                                     Err(err) => {
                                         log::error!("Failed to reconnect to Ethereum API: {}", err);

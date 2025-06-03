@@ -16,6 +16,7 @@ pub mod deposit_event_extractor;
 pub mod merkle_root_extractor;
 pub mod message_paid_event_extractor;
 pub mod message_sender;
+pub mod status_fetcher;
 
 async fn find_slot_by_block_number(
     eth_api: &EthApi,
@@ -24,7 +25,7 @@ async fn find_slot_by_block_number(
 ) -> anyhow::Result<EthereumSlotNumber> {
     let block_body = eth_api
         .raw_provider()
-        .get_block_by_number(BlockNumberOrTag::Number(block.0), false)
+        .get_block_by_number(BlockNumberOrTag::Number(block.0))
         .await?
         .ok_or(anyhow!("Ethereum block #{} is missing", block.0))?;
 

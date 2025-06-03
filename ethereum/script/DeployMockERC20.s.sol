@@ -1,17 +1,15 @@
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-
 import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
-contract Deploy is Script {
-    using Address for address;
-
+contract DeployMockERC20Script is Script {
     function setUp() public {}
 
     function run() public {
-        vm.startBroadcast(vm.envUint("ETHEREUM_DEPLOYMENT_PRIVATE_KEY"));
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(privateKey);
 
         ERC20Mock token_1 = new ERC20Mock("USDC");
         ERC20Mock token_2 = new ERC20Mock("USDT");

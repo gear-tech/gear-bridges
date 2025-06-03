@@ -1,4 +1,5 @@
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+pragma solidity ^0.8.30;
 
 import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
 import {ProxyContract} from "./ProxyContract.sol";
@@ -11,6 +12,7 @@ contract ProxyUpdater is IMessageQueueReceiver {
 
     ProxyContract proxy;
     bytes32 governance;
+
     address immutable MESSAGE_QUEUE_ADDRESS;
 
     constructor(

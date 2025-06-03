@@ -35,7 +35,7 @@ This repository contains the implementation of a token bridging protocol built o
 
 #### Protocol part
 
-- **Pallet-Gear-Eth-Bridge Built-in Actor**: a [Built-in Actor](https://wiki.gear-tech.io/docs/gear/features/builtin-actors) - the entry point into the generic bridging protocol. Receives messages from any actor on the Gear network and relays them to `pallet-gear-eth-bridge`.
+- **Pallet-Gear-Eth-Bridge Built-in Actor**: a [Built-in Actor](https://wiki.vara.network/docs/welcome) - the entry point into the generic bridging protocol. Receives messages from any actor on the Gear network and relays them to `pallet-gear-eth-bridge`.
 - **Pallet-Gear-Eth-Bridge**: Receives messages from the `pallet-gear-eth-bridge` built-in actor and stores them in the binary Merkle trie. This Merkle trie gets slashed at the end of each `ERA`. Also stores and updates hashed `GRANDPA` authority set.
 - **Relayer(proxy)[^1]**: Accepts proofs of Merkle trie root inclusion and, if they're valid, stores Merkle trie roots in memory. Deployed behind [ERC-1967 Proxy](https://eips.ethereum.org/EIPS/eip-1967).
 - **Verifier**: A contract capable of verifying `plonk` proofs created by [gnark](https://github.com/Consensys/gnark). The submitted proofs are [plonky2](https://github.com/0xPolygonZero/plonky2) proofs wrapped by `gnark`.

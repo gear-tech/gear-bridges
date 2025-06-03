@@ -522,8 +522,9 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let block_range = common::create_range(args.from_eth_block.into(), block_finalized);
     let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(args.from_eth_block, block_finalized)
+        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
         .await?;
 
     let gear_api = gear_rpc_client::GearApi::new(

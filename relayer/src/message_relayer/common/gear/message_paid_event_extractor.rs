@@ -1,9 +1,8 @@
 use bridging_payment_client::bridging_payment::events::BridgingPaymentEvents;
-use gsdk::config::Header;
+
 use primitive_types::H256;
 use prometheus::IntCounter;
 use sails_rs::events::EventIo;
-use subxt::config::Header as _;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -11,7 +10,8 @@ use tokio::sync::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::message_relayer::{
-    common::PaidMessage, eth_to_gear::api_provider::ApiProviderConnection,
+    common::{gear::block_listener::GearBlock, PaidMessage},
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 
 pub struct MessagePaidEventExtractor {
@@ -46,7 +46,7 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub async fn run(mut self, mut blocks: Receiver<Header>) -> UnboundedReceiver<PaidMessage> {
+    pub async fn run(mut self, mut blocks: Receiver<GearBlock>) -> UnboundedReceiver<PaidMessage> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
@@ -75,7 +75,7 @@ impl MessagePaidEventExtractor {
     async fn run_inner(
         &self,
         sender: &UnboundedSender<PaidMessage>,
-        blocks: &mut Receiver<Header>,
+        blocks: &mut Receiver<GearBlock>,
     ) -> anyhow::Result<()> {
         loop {
             match blocks.recv().await {
@@ -97,32 +97,22 @@ impl MessagePaidEventExtractor {
 
     async fn process_block_events(
         &self,
-        block: Header,
+        block: GearBlock,
         sender: &UnboundedSender<PaidMessage>,
     ) -> anyhow::Result<()> {
-        let gear_api = self.api_provider.client();
         let block_hash = block.hash();
 
         // As bridging-payment uses sails to send events, destnation will be zeroed.
         let destination = H256::zero();
 
-        let messages = gear_api
-            .user_message_sent_events(self.bridging_payment_address, destination, block_hash)
-            .await?;
-
-        if messages.is_empty() {
-            return Ok(());
-        }
+        let messages = block.user_message_sent_events(self.bridging_payment_address, destination);
 
         log::info!(
-            "Found {} paid messages at block #{}",
-            messages.len(),
-            block.number()
+            "Processing block #{} with hash {}",
+            block.number(),
+            block_hash
         );
-
-        self.metrics
-            .total_messages_found
-            .inc_by(messages.len() as u64);
+        let mut total = 0;
 
         for message in messages {
             let user_reply = BridgingPaymentEvents::decode_event(message.payload)
@@ -134,7 +124,10 @@ impl MessagePaidEventExtractor {
             nonce.to_little_endian(&mut nonce_le);
 
             sender.send(PaidMessage { nonce: nonce_le })?;
+            total += 1;
         }
+        log::info!("Found {} paid messages in block #{}", total, block.number());
+        self.metrics.total_messages_found.inc_by(total as u64);
 
         Ok(())
     }

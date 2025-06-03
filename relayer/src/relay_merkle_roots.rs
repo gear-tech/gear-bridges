@@ -1,8 +1,5 @@
 use std::{
-    fs::{self, File},
-    io::{Read, Write},
-    path::Path,
-    time::{Duration, Instant},
+    fs::{self, File}, io::{Read, Write}, path::Path, str::FromStr, time::{Duration, Instant}
 };
 
 use alloy_primitives::TxHash;
@@ -32,7 +29,7 @@ pub struct MerkleRootRelayerState {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SubmittedMerkleRootState {
-    pub tx_hash: String, // Hex-encoded TxHash
+    pub tx_hash: String,
     pub proof: FinalProofState,
     pub finalized: bool,
 }
@@ -54,12 +51,12 @@ pub struct ErasState {
 pub struct SealedNotFinalizedEraState {
     pub era: u64,
     pub merkle_root_block: u32,
-    pub tx_hash: String, // Hex-encoded TxHash
+    pub tx_hash: String,
     pub proof: FinalProofState,
 }
 
 // Need to make GenesisConfig serializable as well
-#[derive(Serialize, Deserialize, Clone, Debug, Copy)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GenesisConfigState {
     pub authority_set_id: u64,
     pub authority_set_hash: String, // Hex-encoded [u8; 32]
@@ -257,7 +254,7 @@ impl MerkleRootRelayer {
         self.latest_submitted_merkle_root = state
             .latest_submitted_merkle_root
             .map(|smrs| {
-                Ok(SubmittedMerkleRoot {
+                Ok::<SubmittedMerkleRoot, anyhow::Error>(SubmittedMerkleRoot {
                     tx_hash: TxHash::from_str(&smrs.tx_hash).map_err(|e| {
                         anyhow::anyhow!("Failed to parse TxHash from hex {}: {}", smrs.tx_hash, e)
                     })?,
@@ -265,7 +262,7 @@ impl MerkleRootRelayer {
                     finalized: smrs.finalized,
                 })
             })
-            .transpose()?; // Converts Option<Result<T, E>> to Result<Option<T>, E>
+            .transpose()?; 
 
         self.eras.last_sealed = state.eras_state.last_sealed;
         self.eras.sealed_not_finalized = state
@@ -288,7 +285,7 @@ impl MerkleRootRelayer {
         self.metrics.latest_proven_era.set(
             self.proof_storage
                 .get_latest_authority_set_id()
-                .map_or(0, |&id| id as i64)
+                .map_or(0, |id| id as i64)
         );
         self.eras.metrics.last_sealed_era.set(self.eras.last_sealed as i64);
         self.eras.metrics.sealed_not_finalized_count.set(self.eras.sealed_not_finalized.len() as i64);
@@ -303,6 +300,7 @@ impl MerkleRootRelayer {
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
+        last_sealed: Option<u64>,
     ) -> MerkleRootRelayer {
         let loaded_state = Self::load_state().unwrap_or_else(|e| {
             log::warn!("Failed to load relayer state: {}. Starting fresh.", e);
@@ -310,7 +308,7 @@ impl MerkleRootRelayer {
         });
 
         let (eras, initial_genesis_config) = if let Some(ref state) = loaded_state {
-            let loaded_genesis_config = GenesisConfig::from(state.genesis_config);
+            let loaded_genesis_config = GenesisConfig::from(state.genesis_config.clone());
             if loaded_genesis_config.authority_set_id != genesis_config.authority_set_id ||
                loaded_genesis_config.authority_set_hash != genesis_config.authority_set_hash {
                 log::warn!("Provided genesis_config differs from loaded state's genesis_config. Using provided genesis_config and starting fresh for Eras.");
@@ -336,7 +334,7 @@ impl MerkleRootRelayer {
             }
         } else {
             (Eras::new(
-                None, // No state, start fresh
+                last_sealed,
                 api_provider.clone(),
                 eth_api.clone(),
                 genesis_config,
@@ -360,9 +358,10 @@ impl MerkleRootRelayer {
         };
 
         if let Some(state) = loaded_state {
+            let config = GenesisConfig::from(state.genesis_config.clone());
             // Only apply state if genesis config matches or if we decided to use loaded genesis
-            if relayer.genesis_config.authority_set_id == GenesisConfig::from(state.genesis_config).authority_set_id &&
-               relayer.genesis_config.authority_set_hash == GenesisConfig::from(state.genesis_config).authority_set_hash {
+            if relayer.genesis_config.authority_set_id == config.authority_set_id &&
+               relayer.genesis_config.authority_set_hash == config.authority_set_hash {
                 if let Err(e) = relayer.apply_state(state) {
                     log::warn!("Failed to apply loaded state: {}. Continuing with potentially partial state.", e);
                 }

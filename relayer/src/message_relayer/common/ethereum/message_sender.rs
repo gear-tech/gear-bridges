@@ -1,14 +1,10 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY},
-    message_relayer::{
-        common::{Data, MessageInBlock},
-    },
+    message_relayer::common::{Data, MessageInBlock},
 };
 use ethereum_client::{EthApi, TxHash};
 use prometheus::Gauge;
-use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
-};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessageSender {
@@ -34,7 +30,7 @@ impl_metered_service! {
 }
 
 impl MessageSender {
-    pub fn new(max_retries: u32, eth_api: EthApi,) -> Self {
+    pub fn new(max_retries: u32, eth_api: EthApi) -> Self {
         Self {
             max_retries,
             eth_api,
@@ -107,7 +103,8 @@ async fn task_inner(
             proof,
         } = data;
 
-        let tx_hash = this.eth_api
+        let tx_hash = this
+            .eth_api
             .provide_content_message(
                 relayed_root.block.0,
                 proof.num_leaves as u32,

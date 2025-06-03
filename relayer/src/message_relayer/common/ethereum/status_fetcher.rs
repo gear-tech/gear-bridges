@@ -1,16 +1,12 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::{
-        common::MessageInBlock,
-    },
+    message_relayer::common::MessageInBlock,
 };
+use alloy::providers::{PendingTransactionBuilder, Provider};
 use ethereum_client::{EthApi, TxHash};
 use prometheus::{IntCounter, IntGauge};
-use tokio::{
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
-use alloy::providers::{Provider, PendingTransactionBuilder};
 
 pub struct StatusFetcher {
     eth_api: EthApi,
@@ -39,8 +35,7 @@ impl_metered_service! {
 }
 
 impl StatusFetcher {
-    pub fn new(eth_api: EthApi,
-    confirmations: u64,) -> Self {
+    pub fn new(eth_api: EthApi, confirmations: u64) -> Self {
         Self {
             eth_api,
             confirmations,
@@ -49,9 +44,7 @@ impl StatusFetcher {
         }
     }
 
-    pub fn spawn(
-        self,
-    ) -> UnboundedSender<(TxHash, MessageInBlock)> {
+    pub fn spawn(self) -> UnboundedSender<(TxHash, MessageInBlock)> {
         let (sender, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(task(self, receiver));
 
@@ -59,10 +52,7 @@ impl StatusFetcher {
     }
 }
 
-async fn task(
-    mut this: StatusFetcher,
-    mut channel: UnboundedReceiver<(TxHash, MessageInBlock)>,
-) {
+async fn task(mut this: StatusFetcher, mut channel: UnboundedReceiver<(TxHash, MessageInBlock)>) {
     let mut attempts = 0;
 
     loop {
@@ -116,11 +106,9 @@ async fn task_inner(
     Ok(())
 }
 
-async fn get_tx_status(eth_api: EthApi, metrics: Metrics, tx_hash: TxHash, 
-    confirmations: u64,) {
-    let pending =
-        PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash);
-    
+async fn get_tx_status(eth_api: EthApi, metrics: Metrics, tx_hash: TxHash, confirmations: u64) {
+    let pending = PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash);
+
     if let Err(e) = pending
         .with_required_confirmations(confirmations)
         .watch()

@@ -344,7 +344,8 @@ async fn main() {
                 nonce,
                 args.block,
                 args.from_eth_block,
-                args.confirmations_status.unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                args.confirmations_status
+                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
             )
             .await;
         }

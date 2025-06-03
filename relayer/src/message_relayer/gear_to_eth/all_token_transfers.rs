@@ -6,20 +6,20 @@ use utils_prometheus::MeteredService;
 use crate::{
     common::MAX_RETRIES,
     message_relayer::{
-    common::{
-        ethereum::{
-            accumulator::Accumulator,
-            merkle_root_extractor::MerkleRootExtractor, message_sender::MessageSender,
-            status_fetcher::StatusFetcher,
+        common::{
+            ethereum::{
+                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+                message_sender::MessageSender, status_fetcher::StatusFetcher,
+            },
+            gear::{
+                block_listener::BlockListener as GearBlockListener,
+                merkle_proof_fetcher::MerkleProofFetcher,
+                message_queued_event_extractor::MessageQueuedEventExtractor,
+            },
         },
-        gear::{
-            block_listener::BlockListener as GearBlockListener,
-            message_queued_event_extractor::MessageQueuedEventExtractor,
-            merkle_proof_fetcher::MerkleProofFetcher,
-        },
+        eth_to_gear::api_provider::ApiProviderConnection,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
-}};
+};
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
@@ -49,8 +49,8 @@ impl Relayer {
         from_block: Option<u32>,
         api_provider: ApiProviderConnection,
         confirmations_merkle_root: u64,
-        
-    confirmations_status: u64,
+
+        confirmations_status: u64,
     ) -> anyhow::Result<Self> {
         let from_gear_block = if let Some(block) = from_block {
             block
@@ -64,8 +64,11 @@ impl Relayer {
 
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
-        let merkle_root_extractor =
-            MerkleRootExtractor::new(eth_api.clone(), api_provider.clone(), confirmations_merkle_root);
+        let merkle_root_extractor = MerkleRootExtractor::new(
+            eth_api.clone(),
+            api_provider.clone(),
+            confirmations_merkle_root,
+        );
 
         let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
 
@@ -97,6 +100,7 @@ impl Relayer {
         let channel_message_data = self.proof_fetcher.spawn(channel_messages);
         let channel_tx_data = self.status_fetcher.spawn();
 
-        self.message_sender.spawn(channel_message_data, channel_tx_data);
+        self.message_sender
+            .spawn(channel_message_data, channel_tx_data);
     }
 }

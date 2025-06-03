@@ -1,14 +1,10 @@
-use crate::{
-    message_relayer::{
-        common::{RelayedMerkleRoot, Data, MessageInBlock},
-        eth_to_gear::api_provider::ApiProviderConnection,
-    },
+use crate::message_relayer::{
+    common::{Data, MessageInBlock, RelayedMerkleRoot},
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 use gear_rpc_client::dto::Message;
 use keccak_hash::keccak_256;
-use tokio::{
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 pub struct MerkleProofFetcher {
     api_provider: ApiProviderConnection,
@@ -16,9 +12,7 @@ pub struct MerkleProofFetcher {
 
 impl MerkleProofFetcher {
     pub fn new(api_provider: ApiProviderConnection) -> Self {
-        Self {
-            api_provider,
-        }
+        Self { api_provider }
     }
 
     pub fn spawn(

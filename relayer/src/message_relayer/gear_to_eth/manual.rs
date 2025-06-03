@@ -1,14 +1,11 @@
-use alloy::providers::{Provider, PendingTransactionBuilder};
-use primitive_types::U256;
+use alloy::providers::{PendingTransactionBuilder, Provider};
 use ethereum_client::EthApi;
+use primitive_types::U256;
 use tokio::sync::mpsc;
 
 use crate::message_relayer::{
     common::{
-        ethereum::{
-            accumulator::Accumulator,
-            message_sender::MessageSender,
-        },
+        ethereum::{accumulator::Accumulator, message_sender::MessageSender},
         gear::merkle_proof_fetcher::MerkleProofFetcher,
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
@@ -45,11 +42,11 @@ pub async fn relay(
         });
 
     let authority_set_id = AuthoritySetId(
-            gear_api
-                .signed_by_authority_set_id(gear_block_hash)
-                .await
-                .expect("Unable to get authority set id"),
-        );
+        gear_api
+            .signed_by_authority_set_id(gear_block_hash)
+            .await
+            .expect("Unable to get authority set id"),
+    );
     log::debug!("AuthoritySetId for the message is {authority_set_id}");
     let message_in_block = MessageInBlock {
         message,
@@ -105,9 +102,9 @@ pub async fn relay(
 
         if authority_set_id == message_in_block.authority_set_id
             && merkle_root.block_number >= gear_block.into()
-            {
-                break;
-            }
+        {
+            break;
+        }
     }
 
     let message_sender = MessageSender::new(1, eth_api.clone());
@@ -136,6 +133,8 @@ pub async fn relay(
         .with_required_confirmations(confirmations)
         .watch()
         .await;
-    
-    log::info!("Result for message {message_nonce:#x} after {confirmations} confirmation(s): {result:?}");
+
+    log::info!(
+        "Result for message {message_nonce:#x} after {confirmations} confirmation(s): {result:?}"
+    );
 }

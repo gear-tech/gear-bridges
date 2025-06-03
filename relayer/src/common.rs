@@ -145,7 +145,7 @@ pub fn create_range(from: Option<u64>, latest: u64) -> BlockRange {
     let Some(from) = from else {
         return BlockRange {
             from: latest,
-            to: latest
+            to: latest,
         };
     };
 
@@ -156,10 +156,7 @@ pub fn create_range(from: Option<u64>, latest: u64) -> BlockRange {
         block_to_max
     };
 
-    BlockRange {
-        from,
-        to: block_to,
-    }
+    BlockRange { from, to: block_to }
 }
 
 pub const MAX_RETRIES: u32 = 5;

@@ -2,7 +2,24 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-evm_version = "cancun"
+evm_version = "prague"
 optimizer = true
-no_match_test = "skip"
-solc-version = "0.8.28"
+extra_output_files = ["irOptimized"]
+via_ir = true
+bytecode_hash = "none"
+cbor_metadata = false
+revert_strings = "strip"
+
+[rpc_endpoints]
+mainnet = "${MAINNET_RPC_URL}"
+sepolia = "${SEPOLIA_RPC_URL}"
+holesky = "${HOLESKY_RPC_URL}"
+hoodi = "${HOODI_RPC_URL}"
+
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}" }
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
+holesky = { key = "${ETHERSCAN_API_KEY}" }
+hoodi = { key = "${ETHERSCAN_API_KEY}" }
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

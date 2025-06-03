@@ -1,9 +1,13 @@
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+pragma solidity ^0.8.30;
 
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract BridgingPayment is IBridgingPayment, Ownable {
+    error OnlyErc20Manager();
+    error IncorrectFeeAmount();
+
     address public immutable erc20Manager;
     uint256 public fee;
 
@@ -13,9 +17,13 @@ contract BridgingPayment is IBridgingPayment, Ownable {
     }
 
     function payFee() external payable {
-        require(msg.sender == erc20Manager, "only erc20 manager may call fee payment");
+        if (msg.sender != erc20Manager) {
+            revert OnlyErc20Manager();
+        }
 
-        require(msg.value == fee, "incorrect fee amount");
+        if (msg.value != fee) {
+            revert IncorrectFeeAmount();
+        }
 
         payable(owner()).transfer(msg.value);
 

@@ -1,10 +1,10 @@
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
 import {Verifier} from "../src/mocks/VerifierMock.sol";
 
 contract VerifierTest is Test {
-
     Verifier public verifier;
 
     function setUp() public {
@@ -21,5 +21,3 @@ contract VerifierTest is Test {
         assertEq(verifier.verifyProof(proof, public_inputs), true);       
     }
 }
-
-

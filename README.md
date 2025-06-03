@@ -99,7 +99,7 @@ Install golang: [golang installation](https://go.dev/doc/install)
 
 Install forge:
 ```sh
-curl -L https://foundry.paradigm.xyz | bash
+curl -L https://raw.githubusercontent.com/foundry-rs/foundry/master/foundryup/install | bash
 foundryup
 ```
 

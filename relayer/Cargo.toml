@@ -20,6 +20,7 @@ ark-serialize = { workspace = true, features = ["std"] }
 axum.workspace = true
 checkpoint-light-client-client.workspace = true
 checkpoint-light-client-io.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
 clap.workspace = true
 derive_more.workspace = true
 dotenv.workspace = true

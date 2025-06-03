@@ -1,8 +1,15 @@
-use std::time::{Duration, Instant};
+use std::{
+    fs::{self, File},
+    io::{Read, Write},
+    path::Path,
+    time::{Duration, Instant},
+};
 
+use alloy_primitives::TxHash;
 use prometheus::{Gauge, IntGauge};
+use serde::{Deserialize, Serialize};
 
-use ethereum_client::{EthApi, TxHash, TxStatus};
+use ethereum_client::{EthApi, TxStatus};
 use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -15,8 +22,102 @@ use crate::{
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MerkleRootRelayerState {
+    pub latest_submitted_merkle_root: Option<SubmittedMerkleRootState>,
+    pub eras_state: ErasState,
+    // We need to store genesis_config to be able to reconstruct Eras
+    pub genesis_config: GenesisConfigState,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SubmittedMerkleRootState {
+    pub tx_hash: String, // Hex-encoded TxHash
+    pub proof: FinalProofState,
+    pub finalized: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FinalProofState {
+    pub proof: String,       // Hex-encoded Vec<u8>
+    pub block_number: u32,
+    pub merkle_root: String, // Hex-encoded [u8; 32]
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ErasState {
+    pub last_sealed: u64,
+    pub sealed_not_finalized: Vec<SealedNotFinalizedEraState>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SealedNotFinalizedEraState {
+    pub era: u64,
+    pub merkle_root_block: u32,
+    pub tx_hash: String, // Hex-encoded TxHash
+    pub proof: FinalProofState,
+}
+
+// Need to make GenesisConfig serializable as well
+#[derive(Serialize, Deserialize, Clone, Debug, Copy)]
+pub struct GenesisConfigState {
+    pub authority_set_id: u64,
+    pub authority_set_hash: String, // Hex-encoded [u8; 32]
+}
+
+impl From<GenesisConfig> for GenesisConfigState {
+    fn from(config: GenesisConfig) -> Self {
+        Self {
+            authority_set_id: config.authority_set_id,
+            authority_set_hash: hex::encode(config.authority_set_hash),
+        }
+    }
+}
+
+impl From<GenesisConfigState> for GenesisConfig {
+    fn from(state: GenesisConfigState) -> Self {
+        let mut authority_set_hash = [0u8; 32];
+        hex::decode_to_slice(&state.authority_set_hash, &mut authority_set_hash)
+            .expect("Failed to decode authority_set_hash from hex");
+        Self {
+            authority_set_id: state.authority_set_id,
+            authority_set_hash,
+        }
+    }
+}
+
+impl From<&FinalProof> for FinalProofState {
+    fn from(proof: &FinalProof) -> Self {
+        Self {
+            proof: hex::encode(&proof.proof),
+            block_number: proof.block_number,
+            merkle_root: hex::encode(proof.merkle_root),
+        }
+    }
+}
+
+impl TryFrom<FinalProofState> for FinalProof {
+    type Error = anyhow::Error;
+
+    fn try_from(state: FinalProofState) -> Result<Self, Self::Error> {
+        let proof_bytes = hex::decode(&state.proof)
+            .map_err(|e| anyhow::anyhow!("Failed to decode proof from hex: {}", e))?;
+        let merkle_root_bytes = hex::decode(&state.merkle_root)
+            .map_err(|e| anyhow::anyhow!("Failed to decode merkle_root from hex: {}", e))?;
+        let merkle_root: [u8; 32] = merkle_root_bytes.try_into().map_err(|_| {
+            anyhow::anyhow!("Decoded merkle_root has incorrect length")
+        })?;
+
+        Ok(Self {
+            proof: proof_bytes,
+            block_number: state.block_number,
+            merkle_root,
+        })
+    }
+}
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
+const STATE_FILE_PATH: &str = "data/relayer_state.json";
 
 impl_metered_service! {
     struct Metrics {
@@ -66,33 +167,211 @@ impl MeteredService for MerkleRootRelayer {
 }
 
 impl MerkleRootRelayer {
+    fn to_state(&self) -> MerkleRootRelayerState {
+        let latest_submitted_merkle_root_state =
+            self.latest_submitted_merkle_root
+                .as_ref()
+                .map(|smr| SubmittedMerkleRootState {
+                    tx_hash: smr.tx_hash.to_string(),
+                    proof: FinalProofState::from(&smr.proof),
+                    finalized: smr.finalized,
+                });
+
+        let eras_state = ErasState {
+            last_sealed: self.eras.last_sealed,
+            sealed_not_finalized: self
+                .eras
+                .sealed_not_finalized
+                .iter()
+                .map(|snfe| SealedNotFinalizedEraState {
+                    era: snfe.era,
+                    merkle_root_block: snfe.merkle_root_block,
+                    tx_hash: snfe.tx_hash.to_string(),
+                    proof: FinalProofState::from(&snfe.proof),
+                })
+                .collect(),
+        };
+
+        MerkleRootRelayerState {
+            latest_submitted_merkle_root: latest_submitted_merkle_root_state,
+            eras_state,
+            genesis_config: GenesisConfigState::from(self.genesis_config),
+        }
+    }
+
+    fn save_state(&self) -> anyhow::Result<()> {
+        let state = self.to_state();
+        let serialized_state = serde_json::to_string_pretty(&state)?;
+
+        let path = Path::new(STATE_FILE_PATH);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // Atomic write: write to temp file then rename
+        let temp_file_path = format!("{}.tmp", STATE_FILE_PATH);
+        let mut temp_file = File::create(&temp_file_path)?;
+        temp_file.write_all(serialized_state.as_bytes())?;
+        temp_file.sync_all()?; // Ensure all data is written to disk
+        fs::rename(&temp_file_path, STATE_FILE_PATH)?;
+
+        log::info!("MerkleRootRelayer state saved to {}", STATE_FILE_PATH);
+        Ok(())
+    }
+
+    fn load_state() -> anyhow::Result<Option<MerkleRootRelayerState>> {
+        if !Path::new(STATE_FILE_PATH).exists() {
+            log::info!(
+                "No state file found at {}, starting with fresh state.",
+                STATE_FILE_PATH
+            );
+            return Ok(None);
+        }
+
+        let mut file = File::open(STATE_FILE_PATH)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+
+        match serde_json::from_str(&contents) {
+            Ok(state) => {
+                log::info!("MerkleRootRelayer state loaded from {}", STATE_FILE_PATH);
+                Ok(Some(state))
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to deserialize state from {}: {}. Starting with fresh state.",
+                    STATE_FILE_PATH,
+                    e
+                );
+                // Optionally, back up the corrupted file
+                let backup_path = format!("{}.corrupted_{}", STATE_FILE_PATH, chrono::Utc::now().timestamp());
+                if fs::rename(STATE_FILE_PATH, &backup_path).is_ok() {
+                    log::info!("Corrupted state file backed up to {}", backup_path);
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    fn apply_state(&mut self, state: MerkleRootRelayerState) -> anyhow::Result<()> {
+        self.latest_submitted_merkle_root = state
+            .latest_submitted_merkle_root
+            .map(|smrs| {
+                Ok(SubmittedMerkleRoot {
+                    tx_hash: TxHash::from_str(&smrs.tx_hash).map_err(|e| {
+                        anyhow::anyhow!("Failed to parse TxHash from hex {}: {}", smrs.tx_hash, e)
+                    })?,
+                    proof: FinalProof::try_from(smrs.proof)?,
+                    finalized: smrs.finalized,
+                })
+            })
+            .transpose()?; // Converts Option<Result<T, E>> to Result<Option<T>, E>
+
+        self.eras.last_sealed = state.eras_state.last_sealed;
+        self.eras.sealed_not_finalized = state
+            .eras_state
+            .sealed_not_finalized
+            .into_iter()
+            .map(|snfes| {
+                Ok(SealedNotFinalizedEra {
+                    era: snfes.era,
+                    merkle_root_block: snfes.merkle_root_block,
+                    tx_hash: TxHash::from_str(&snfes.tx_hash).map_err(|e| {
+                        anyhow::anyhow!("Failed to parse TxHash from hex {}: {}", snfes.tx_hash, e)
+                    })?,
+                    proof: FinalProof::try_from(snfes.proof)?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        
+        // Update metrics based on loaded state
+        self.metrics.latest_proven_era.set(
+            self.proof_storage
+                .get_latest_authority_set_id()
+                .map_or(0, |&id| id as i64)
+        );
+        self.eras.metrics.last_sealed_era.set(self.eras.last_sealed as i64);
+        self.eras.metrics.sealed_not_finalized_count.set(self.eras.sealed_not_finalized.len() as i64);
+
+
+        log::info!("Applied loaded state to MerkleRootRelayer.");
+        Ok(())
+    }
+
     pub async fn new(
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
         proof_storage: Box<dyn ProofStorage>,
-        last_sealed: Option<u64>,
     ) -> MerkleRootRelayer {
-        let eras = Eras::new(
-            last_sealed,
-            api_provider.clone(),
-            eth_api.clone(),
-            genesis_config,
-        )
-        .await
-        .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err));
+        let loaded_state = Self::load_state().unwrap_or_else(|e| {
+            log::warn!("Failed to load relayer state: {}. Starting fresh.", e);
+            None
+        });
+
+        let (eras, initial_genesis_config) = if let Some(ref state) = loaded_state {
+            let loaded_genesis_config = GenesisConfig::from(state.genesis_config);
+            if loaded_genesis_config.authority_set_id != genesis_config.authority_set_id ||
+               loaded_genesis_config.authority_set_hash != genesis_config.authority_set_hash {
+                log::warn!("Provided genesis_config differs from loaded state's genesis_config. Using provided genesis_config and starting fresh for Eras.");
+                 (Eras::new(
+                    None, // Start fresh for eras if genesis config changed
+                    api_provider.clone(),
+                    eth_api.clone(),
+                    genesis_config, // Use provided genesis_config
+                )
+                .await
+                .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err)),
+                genesis_config) // Store the provided genesis config
+            } else {
+                (Eras::new(
+                    Some(state.eras_state.last_sealed), // Use last_sealed from state
+                    api_provider.clone(),
+                    eth_api.clone(),
+                    loaded_genesis_config, // Use loaded genesis_config
+                )
+                .await
+                .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err)),
+                loaded_genesis_config) // Store the loaded genesis config
+            }
+        } else {
+            (Eras::new(
+                None, // No state, start fresh
+                api_provider.clone(),
+                eth_api.clone(),
+                genesis_config,
+            )
+            .await
+            .unwrap_or_else(|err| panic!("Error while creating era storage: {}", err)),
+            genesis_config) // Store the provided genesis config
+        };
+
 
         let metrics = Metrics::new();
 
-        MerkleRootRelayer {
+        let mut relayer = MerkleRootRelayer {
             api_provider,
             eth_api,
-            genesis_config,
+            genesis_config: initial_genesis_config,
             proof_storage,
             latest_submitted_merkle_root: None,
             eras,
             metrics,
+        };
+
+        if let Some(state) = loaded_state {
+            // Only apply state if genesis config matches or if we decided to use loaded genesis
+            if relayer.genesis_config.authority_set_id == GenesisConfig::from(state.genesis_config).authority_set_id &&
+               relayer.genesis_config.authority_set_hash == GenesisConfig::from(state.genesis_config).authority_set_hash {
+                if let Err(e) = relayer.apply_state(state) {
+                    log::warn!("Failed to apply loaded state: {}. Continuing with potentially partial state.", e);
+                }
+            } else {
+                 log::info!("Skipping apply_state due to genesis_config mismatch. Relayer started with provided config.");
+            }
         }
+        
+        relayer
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
@@ -156,12 +435,22 @@ impl MerkleRootRelayer {
         self.metrics.fee_payer_balance.set(balance);
 
         self.sync_authority_set_completely().await?;
+        if let Err(e) = self.save_state() {
+            log::warn!("Failed to save state after sync_authority_set_completely: {}", e);
+        }
 
         self.eras.process(self.proof_storage.as_mut()).await?;
 
         self.submit_merkle_root().await?;
+        if let Err(e) = self.save_state() {
+            log::warn!("Failed to save state after submit_merkle_root: {}", e);
+        }
 
-        self.try_finalize_submitted_merkle_root().await
+        let result = self.try_finalize_submitted_merkle_root().await;
+        if let Err(e) = self.save_state() {
+            log::warn!("Failed to save state after try_finalize_submitted_merkle_root: {}", e);
+        }
+        result
     }
 
     async fn sync_authority_set_completely(&mut self) -> anyhow::Result<()> {

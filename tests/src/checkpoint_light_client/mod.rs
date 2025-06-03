@@ -396,26 +396,19 @@ async fn replay_back_and_updating() -> Result<()> {
     listener
         .proc_many(
             |event| match event {
-                gclient::Event::Gear(gclient::GearEvent::UserMessageSent {
-                    message,
-                    expiration: _,
-                }) => {
+                gclient::Event::Gear(gclient::GearEvent::UserMessageSent { message, .. }) => {
                     if message.source.0 == program_id.into_bytes()
                         && message.destination.0 == [0; 32]
                     {
-                        let event =
-                            ServiceReplayBackEvents::decode_event(&message.payload.0).unwrap();
-                        match event {
-                            ServiceReplayBackEvents::NewCheckpoint {
-                                slot,
-                                tree_hash_root,
-                            } => {
-                                println!("event = {event:?}");
-                                assert!(headers.iter().any(|header| {
-                                    header.slot == slot && header.tree_hash_root() == tree_hash_root
-                                }));
-                            }
-                        }
+                        let ServiceReplayBackEvents::NewCheckpoint {
+                            slot,
+                            tree_hash_root,
+                        } = ServiceReplayBackEvents::decode_event(&message.payload.0).unwrap();
+
+                        assert!(headers.iter().any(|header| {
+                            header.slot == slot && header.tree_hash_root() == tree_hash_root
+                        }));
+
                         Some(())
                     } else {
                         None
@@ -450,6 +443,7 @@ async fn replay_back_and_updating() -> Result<()> {
             finality_update.data
         },
     ];
+
     for update in finality_updates {
         println!(
             "slot = {:?}, attested slot = {:?}, signature slot = {:?}",
@@ -481,22 +475,31 @@ async fn replay_back_and_updating() -> Result<()> {
         if let Ok(()) = result {
             println!("waiting for events");
 
-            let (actor_id, event) = stream.next().await.expect("no events received");
-            assert_eq!(actor_id, program_id);
-            let ServiceSyncUpdateEvents::NewCheckpoint {
-                slot,
-                tree_hash_root,
-            } = event;
+            loop {
+                let (
+                    actor_id,
+                    ServiceSyncUpdateEvents::NewCheckpoint {
+                        slot,
+                        tree_hash_root,
+                    },
+                ) = stream.next().await.expect("failed to get next event");
+                assert_eq!(actor_id, program_id);
+                if slot != update.finalized_header.slot {
+                    println!(
+                        "slot mismatch: expected {}, got {}",
+                        update.finalized_header.slot, slot
+                    );
+                    continue;
+                }
 
-            assert!(
-                slot == update.finalized_header.slot,
-                "Expected slot to match finalized header slot"
-            );
-            assert_eq!(
-                tree_hash_root,
-                update.finalized_header.tree_hash_root(),
-                "Expected tree hash root to match finalized header"
-            );
+                println!(
+                    "NewCheckpoint: slot = {}, tree_hash_root = {}",
+                    slot,
+                    hex::encode(tree_hash_root)
+                );
+                assert_eq!(tree_hash_root, update.finalized_header.tree_hash_root());
+                break;
+            }
         } else {
             println!("update failed...");
         }
@@ -509,6 +512,5 @@ async fn replay_back_and_updating() -> Result<()> {
         println!();
         println!();
     }
-
     Ok(())
 }

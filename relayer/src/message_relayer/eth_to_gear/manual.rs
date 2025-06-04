@@ -41,6 +41,7 @@ pub async fn relay(
         eth_api,
         beacon_client,
         historical_proxy_address,
+        checkpoint_light_client_address,
         receiver_address,
         receiver_route,
         true,

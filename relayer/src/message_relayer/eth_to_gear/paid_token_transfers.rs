@@ -74,6 +74,7 @@ impl Relayer {
             eth_api,
             beacon_client,
             historical_proxy_address,
+            checkpoint_light_client_address,
             vft_manager_address,
             route,
             true,

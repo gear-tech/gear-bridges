@@ -3,6 +3,7 @@ use crate::{
     eth_to_gear::api_provider::ApiProviderConnection,
     message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
 };
+use checkpoint_light_client_client::{traits::ServiceState as _, Order, ServiceState};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use futures::{
@@ -15,7 +16,7 @@ use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
-    calls::{Action, ActionIo, Call},
+    calls::{Action, ActionIo, Call, Query},
     gclient::calls::GClientRemoting,
     Encode,
 };
@@ -32,6 +33,7 @@ pub struct MessageSender {
     eth_api: EthApi,
     beacon_client: BeaconClient,
     historical_proxy_address: H256,
+    checkpoint_light_client_address: H256,
     receiver_address: H256,
     receiver_route: Vec<u8>,
     decode_reply: bool,
@@ -72,6 +74,7 @@ impl MessageSender {
         eth_api: EthApi,
         beacon_client: BeaconClient,
         historical_proxy_address: H256,
+        checkpoint_light_client_address: H256,
         receiver_address: H256,
         receiver_route: Vec<u8>,
         decode_reply: bool,
@@ -82,6 +85,7 @@ impl MessageSender {
             eth_api,
             beacon_client,
             historical_proxy_address,
+            checkpoint_light_client_address,
             receiver_address,
             receiver_route,
             decode_reply,
@@ -102,7 +106,8 @@ impl MessageSender {
                 let mut attempts = 0;
 
                 loop {
-                    match run_inner(&mut self, &mut messages, &mut checkpoints).await {
+                    let address = self.checkpoint_light_client_address;
+                    match run_inner(&mut self, &mut messages, &mut checkpoints, address).await {
                         Ok(_) => break,
                         Err(err) => {
                             log::error!("Gear message sender failed with: {err}");
@@ -235,11 +240,27 @@ async fn run_inner(
     self_: &mut MessageSender,
     messages: &mut UnboundedReceiver<TxHashWithSlot>,
     checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
+    checkpoint_light_client: H256,
 ) -> anyhow::Result<()> {
-    let mut latest_checkpoint_slot = None;
+    let gear_api = self_.api_provider.gclient_client(&self_.suri)?;
+
+    let remoting = GClientRemoting::new(gear_api.clone());
+    let svc = ServiceState::new(remoting);
+    let state = svc
+        .get(Order::Reverse, 0, 1)
+        .recv(checkpoint_light_client.into())
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to get service state from checkpoint light client: {:?}",
+                e
+            )
+        })?;
+    assert!(state.checkpoints.len() <= 1);
+
+    let mut latest_checkpoint_slot = state.checkpoints.first().map(|c| EthereumSlotNumber(c.0));
 
     loop {
-        let gear_api = self_.api_provider.gclient_client(&self_.suri)?;
         self_.update_balance_metric(&gear_api).await?;
 
         let recv_messages = messages.recv();

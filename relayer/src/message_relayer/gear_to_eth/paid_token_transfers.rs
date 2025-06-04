@@ -64,7 +64,7 @@ impl Relayer {
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
         let message_paid_listener =
-            MessagePaidEventExtractor::new(api_provider.clone(), bridging_payment_address);
+            MessagePaidEventExtractor::new(bridging_payment_address);
 
         let paid_messages_filter = PaidMessagesFilter::new();
 

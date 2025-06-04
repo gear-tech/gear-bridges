@@ -9,15 +9,10 @@ use tokio::sync::{
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::{
-    common::{gear::block_listener::GearBlock, PaidMessage},
-    eth_to_gear::api_provider::ApiProviderConnection,
-};
+use crate::message_relayer::common::{gear::block_listener::GearBlock, PaidMessage};
 
 pub struct MessagePaidEventExtractor {
     bridging_payment_address: H256,
-
-    api_provider: ApiProviderConnection,
 
     metrics: Metrics,
 }
@@ -38,10 +33,9 @@ impl_metered_service! {
 }
 
 impl MessagePaidEventExtractor {
-    pub fn new(api_provider: ApiProviderConnection, bridging_payment_address: H256) -> Self {
+    pub fn new(bridging_payment_address: H256) -> Self {
         Self {
             bridging_payment_address,
-            api_provider,
             metrics: Metrics::new(),
         }
     }
@@ -50,22 +44,9 @@ impl MessagePaidEventExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            loop {
-                let res = self.run_inner(&sender, &mut blocks).await;
-                if let Err(err) = res {
-                    log::error!("Message paid event extractor failed: {}", err);
-
-                    match self.api_provider.reconnect().await {
-                        Ok(()) => {
-                            log::info!("Message paid event extractor reconnected");
-                        }
-
-                        Err(err) => {
-                            log::error!("Failed to reconnect: {}", err);
-                            return;
-                        }
-                    }
-                }
+            let res = self.run_inner(&sender, &mut blocks).await;
+            if let Err(err) = res {
+                log::error!("Message paid event extractor failed: {}", err);
             }
         });
 

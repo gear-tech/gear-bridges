@@ -3,8 +3,8 @@ use crate::message_relayer::{
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 
+use gsdk::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use prometheus::IntCounter;
-
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -32,6 +32,25 @@ impl_metered_service! {
     }
 }
 
+fn message_queued_events_of(
+    block: &GearBlock,
+) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
+    block.events().iter().filter_map(|event| match event {
+        gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
+            let mut nonce_le = [0; 32];
+            primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
+
+            Some(gear_rpc_client::dto::Message {
+                nonce_le,
+                source: message.source.0,
+                destination: message.destination.0,
+                payload: message.payload.clone(),
+            })
+        }
+        _ => None,
+    })
+}
+
 impl MessageQueuedEventExtractor {
     pub fn new(api_provider: ApiProviderConnection) -> Self {
         Self {
@@ -54,10 +73,10 @@ impl MessageQueuedEventExtractor {
 
                     match self.api_provider.reconnect().await {
                         Ok(()) => {
-                            log::info!("Gear block listener reconnected");
+                            log::info!("Message queued extractor reconnected");
                         }
                         Err(err) => {
-                            log::error!("Gear block listener unable to reconnect: {err}");
+                            log::error!("Message queued extractor unable to reconnect: {err}");
                             return;
                         }
                     }
@@ -101,7 +120,7 @@ impl MessageQueuedEventExtractor {
         authority_set_id: u64,
         sender: &UnboundedSender<MessageInBlock>,
     ) -> anyhow::Result<()> {
-        let messages = block.message_queued_events();
+        let messages = message_queued_events_of(&block);
         let block_hash = block.hash();
         let mut total = 0;
         for message in messages {
@@ -115,11 +134,7 @@ impl MessageQueuedEventExtractor {
             })?;
         }
 
-        log::info!(
-            "Found {} queued messages in block #{}",
-            total,
-            block.number()
-        );
+        log::info!("Found {total} queued messages in block #{}", block.number());
         self.metrics.total_messages_found.inc_by(total);
 
         Ok(())

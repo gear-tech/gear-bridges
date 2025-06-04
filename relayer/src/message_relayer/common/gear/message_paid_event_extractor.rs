@@ -40,7 +40,7 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub async fn run(mut self, mut blocks: Receiver<GearBlock>) -> UnboundedReceiver<PaidMessage> {
+    pub async fn run(self, mut blocks: Receiver<GearBlock>) -> UnboundedReceiver<PaidMessage> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {

@@ -52,13 +52,7 @@ impl Relayer {
         vft_manager_address: H256,
         api_provider: ApiProviderConnection,
     ) -> anyhow::Result<Self> {
-        let from_gear_block = {
-            let gear_api = api_provider.client();
-            let from_gear_block = gear_api.latest_finalized_block().await?;
-
-            gear_api.block_hash_to_number(from_gear_block).await?
-        };
-        let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
+        let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
@@ -69,8 +63,7 @@ impl Relayer {
             erc20_manager_address,
         );
 
-        let checkpoints_extractor =
-            CheckpointsExtractor::new(api_provider.clone(), checkpoint_light_client_address);
+        let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
         let route =
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();

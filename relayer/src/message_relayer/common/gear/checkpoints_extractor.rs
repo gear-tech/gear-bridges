@@ -1,10 +1,12 @@
-use crate::message_relayer::{
-    common::{gear::block_listener::GearBlock, EthereumSlotNumber},
-    eth_to_gear::api_provider::ApiProviderConnection,
+use crate::message_relayer::common::{gear::block_listener::GearBlock, EthereumSlotNumber};
+use checkpoint_light_client_client::{
+    service_replay_back::events::ServiceReplayBackEvents,
+    service_sync_update::events::ServiceSyncUpdateEvents,
 };
 use primitive_types::H256;
 use prometheus::IntGauge;
 
+use sails_rs::events::EventIo;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -13,10 +15,6 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct CheckpointsExtractor {
     checkpoint_light_client_address: H256,
-
-    api_provider: ApiProviderConnection,
-
-    latest_checkpoint: Option<EthereumSlotNumber>,
 
     metrics: Metrics,
 }
@@ -36,12 +34,37 @@ impl_metered_service! {
     }
 }
 
+fn checkpoints_for_block(block: &GearBlock, program_address: H256) -> Vec<(u64, H256)> {
+    let mut checkpoints = block
+        .user_message_sent_events(program_address, H256::zero())
+        .filter_map(|payload| {
+            ServiceReplayBackEvents::decode_event(payload)
+                .ok()
+                .map(
+                    |ServiceReplayBackEvents::NewCheckpoint {
+                         slot,
+                         tree_hash_root,
+                     }| (slot, tree_hash_root),
+                )
+                .or_else(|| {
+                    ServiceSyncUpdateEvents::decode_event(payload).ok().map(
+                        |ServiceSyncUpdateEvents::NewCheckpoint {
+                             slot,
+                             tree_hash_root,
+                         }| (slot, tree_hash_root),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    checkpoints.sort_by(|a, b| a.0.cmp(&b.0));
+    checkpoints
+}
+
 impl CheckpointsExtractor {
-    pub fn new(api_provider: ApiProviderConnection, checkpoint_light_client_address: H256) -> Self {
+    pub fn new(checkpoint_light_client_address: H256) -> Self {
         Self {
             checkpoint_light_client_address,
-            api_provider,
-            latest_checkpoint: None,
+
             metrics: Metrics::new(),
         }
     }
@@ -53,20 +76,9 @@ impl CheckpointsExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            loop {
-                let res = self.run_inner(&sender, &mut blocks).await;
-                if let Err(err) = res {
-                    log::error!("Checkpoints extractor failed: {}", err);
-                    match self.api_provider.reconnect().await {
-                        Ok(()) => {
-                            log::info!("Checkpoints extractor reconnected");
-                        }
-                        Err(err) => {
-                            log::error!("Checkpoints extractor unable to reconnect: {err}");
-                            return;
-                        }
-                    };
-                }
+            let res = self.run_inner(&sender, &mut blocks).await;
+            if let Err(err) = res {
+                log::error!("Checkpoints extractor failed: {}", err);
             }
         });
 
@@ -99,29 +111,11 @@ impl CheckpointsExtractor {
         block: GearBlock,
         sender: &UnboundedSender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
-        for checkpoint in block.new_checkpoints(self.checkpoint_light_client_address) {
-            match self.latest_checkpoint {
-                Some(stored) if checkpoint.0 > stored.0 => {
-                    self.metrics.latest_checkpoint_slot.set(checkpoint.0 as i64);
-                    self.latest_checkpoint = Some(EthereumSlotNumber(checkpoint.0));
-
-                    log::info!("New checkpoint discovered: {}", checkpoint.0);
-
-                    sender.send(EthereumSlotNumber(checkpoint.0))?;
-                }
-
-                // checkpoint is older than the stored one
-                Some(_) => continue,
-
-                None => {
-                    self.latest_checkpoint = Some(EthereumSlotNumber(checkpoint.0));
-                    self.metrics.latest_checkpoint_slot.set(checkpoint.0 as i64);
-
-                    log::info!("First checkpoint discovered: {}", checkpoint.0);
-
-                    sender.send(EthereumSlotNumber(checkpoint.0))?;
-                }
-            }
+        let checkpoints = checkpoints_for_block(&block, self.checkpoint_light_client_address);
+        if let Some(latest) = checkpoints.last() {
+            self.metrics.latest_checkpoint_slot.set(latest.0 as i64);
+            log::info!("New checkpoint discovered: {}", latest.0);
+            sender.send(EthereumSlotNumber(latest.0))?;
         }
 
         Ok(())

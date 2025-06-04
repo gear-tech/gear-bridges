@@ -97,7 +97,7 @@ impl BlockListener {
             loop {
                 let res = self.run_inner(&tx2).await;
                 if let Err(err) = res {
-                    log::error!("Gear block listener failed: {}", err);
+                    log::error!("Gear block listener failed: {err}");
 
                     match self.api_provider.reconnect().await {
                         Ok(()) => {
@@ -116,7 +116,7 @@ impl BlockListener {
             .map(|_| tx.subscribe())
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap()
+            .expect("expected Vec of correct length")
     }
 
     async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<()> {
@@ -126,7 +126,7 @@ impl BlockListener {
         loop {
             match finalized_blocks.next().await {
                 Some(Err(err)) => {
-                    log::error!("Error receiving finalized block: {}", err);
+                    log::error!("Error receiving finalized block: {err}");
                     break Err(err);
                 }
 

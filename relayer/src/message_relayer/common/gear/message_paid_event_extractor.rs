@@ -102,10 +102,13 @@ impl MessagePaidEventExtractor {
     ) -> anyhow::Result<()> {
         let block_hash = block.hash();
 
-        // As bridging-payment uses sails to send events, destnation will be zeroed.
-        let destination = H256::zero();
-
-        let messages = block.user_message_sent_events(self.bridging_payment_address, destination);
+        let messages = block
+            .user_message_sent_events(self.bridging_payment_address, H256::zero())
+            .filter_map(|event| {
+                BridgingPaymentEvents::decode_event(event)
+                    .ok()
+                    .map(|BridgingPaymentEvents::BridgingPaid { nonce }| nonce)
+            });
 
         log::info!(
             "Processing block #{} with hash {}",
@@ -114,12 +117,7 @@ impl MessagePaidEventExtractor {
         );
         let mut total = 0;
 
-        for message in messages {
-            let user_reply = BridgingPaymentEvents::decode_event(message.payload)
-                .map_err(|_| anyhow::anyhow!("Failed to decode bridging payment event"))?;
-
-            let BridgingPaymentEvents::BridgingPaid { nonce } = user_reply;
-
+        for nonce in messages {
             let mut nonce_le = [0; 32];
             nonce.to_little_endian(&mut nonce_le);
 

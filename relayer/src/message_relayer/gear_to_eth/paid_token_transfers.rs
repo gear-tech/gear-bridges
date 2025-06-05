@@ -54,31 +54,16 @@ impl MeteredService for Relayer {
 impl Relayer {
     pub async fn new(
         eth_api: EthApi,
-        from_block: Option<u32>,
         bridging_payment_address: H256,
         api_provider: ApiProviderConnection,
         confirmations_merkle_root: u64,
         confirmations_status: u64,
     ) -> anyhow::Result<Self> {
-        let from_gear_block = if let Some(block) = from_block {
-            block
-        } else {
-            let gear_api = api_provider.client();
-            let block = gear_api.latest_finalized_block().await?;
-            gear_api.block_hash_to_number(block).await?
-        };
-
-        log::info!(
-            "Starting gear event processing from block #{}",
-            from_gear_block
-        );
-
-        let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
+        let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
-        let message_paid_listener =
-            MessagePaidEventExtractor::new(api_provider.clone(), bridging_payment_address);
+        let message_paid_listener = MessagePaidEventExtractor::new(bridging_payment_address);
 
         let paid_messages_filter = PaidMessagesFilter::new();
 

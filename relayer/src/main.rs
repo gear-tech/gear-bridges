@@ -146,7 +146,6 @@ async fn main() {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         eth_api,
-                        args.from_block,
                         provider.connection(),
                         args.confirmations_merkle_root
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
@@ -170,7 +169,6 @@ async fn main() {
 
                     let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
                         eth_api,
-                        args.from_block,
                         bridging_payment_address,
                         provider.connection(),
                         args.confirmations_merkle_root

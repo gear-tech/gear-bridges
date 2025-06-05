@@ -1,5 +1,10 @@
 #![no_std]
 
+use awesome_sails::{
+    error::Error,
+    pause::Pausable,
+    storage::{InfallibleStorage, Storage},
+};
 use awesome_sails_services::{
     vft::{
         self,
@@ -8,10 +13,14 @@ use awesome_sails_services::{
     vft_metadata::{self, Metadata},
 };
 use core::cell::RefCell;
-use awesome_sails::{error::Error, storage::{InfallibleStorage, Storage}, pause::Pausable};
 use sails_rs::prelude::*;
 
-pub struct Service<'a, A = Pausable<RefCell<Allowances>>, B = Pausable<RefCell<Balances>>, M = RefCell<Metadata>> {
+pub struct Service<
+    'a,
+    A = Pausable<RefCell<Allowances>>,
+    B = Pausable<RefCell<Balances>>,
+    M = RefCell<Metadata>,
+> {
     // Allowances storage.
     allowances: &'a A,
     // Balances storage.
@@ -39,7 +48,12 @@ impl<'a, A, B, M> Service<'a, A, B, M> {
 }
 
 #[service(events = vft::Event)]
-impl<A: Storage<Item = Allowances>, B: Storage<Item = Balances>, M: InfallibleStorage<Item = Metadata>> Service<'_, A, B, M> {
+impl<
+        A: Storage<Item = Allowances>,
+        B: Storage<Item = Balances>,
+        M: InfallibleStorage<Item = Metadata>,
+    > Service<'_, A, B, M>
+{
     pub fn name(&self) -> String {
         self.metadata().name()
     }

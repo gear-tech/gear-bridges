@@ -106,8 +106,7 @@ impl MessageSender {
                 let mut attempts = 0;
 
                 loop {
-                    let address = self.checkpoint_light_client_address;
-                    match run_inner(&mut self, &mut messages, &mut checkpoints, address).await {
+                    match run_inner(&mut self, &mut messages, &mut checkpoints).await {
                         Ok(_) => break,
                         Err(err) => {
                             log::error!("Gear message sender failed with: {err}");
@@ -240,15 +239,14 @@ async fn run_inner(
     self_: &mut MessageSender,
     messages: &mut UnboundedReceiver<TxHashWithSlot>,
     checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
-    checkpoint_light_client: H256,
 ) -> anyhow::Result<()> {
     let gear_api = self_.api_provider.gclient_client(&self_.suri)?;
 
     let remoting = GClientRemoting::new(gear_api.clone());
-    let svc = ServiceState::new(remoting);
-    let state = svc
+    let service = ServiceState::new(remoting);
+    let state = service
         .get(Order::Reverse, 0, 1)
-        .recv(checkpoint_light_client.into())
+        .recv(self_.checkpoint_light_client_address.into())
         .await
         .map_err(|e| {
             anyhow::anyhow!(

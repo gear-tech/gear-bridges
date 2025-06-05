@@ -112,10 +112,10 @@ impl CheckpointsExtractor {
         sender: &UnboundedSender<EthereumSlotNumber>,
     ) -> anyhow::Result<()> {
         let checkpoints = checkpoints_for_block(&block, self.checkpoint_light_client_address);
-        if let Some(latest) = checkpoints.last() {
-            self.metrics.latest_checkpoint_slot.set(latest.0 as i64);
-            log::info!("New checkpoint discovered: {}", latest.0);
-            sender.send(EthereumSlotNumber(latest.0))?;
+        for checkpoint in checkpoints {
+            self.metrics.latest_checkpoint_slot.set(checkpoint.0 as i64);
+            log::info!("New checkpoint discovered: {}", checkpoint.0);
+            sender.send(EthereumSlotNumber(checkpoint.0))?;
         }
 
         Ok(())

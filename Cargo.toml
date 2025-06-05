@@ -79,6 +79,7 @@ historical-proxy = { path = "gear-programs/historical-proxy" }
 vft = { path = "gear-programs/vft" }
 vft-app = { path = "gear-programs/vft/app" }
 vft-client = { path = "gear-programs/vft/client" }
+vft-common = { path = "gear-programs/vft-common" }
 vft-vara = { path = "gear-programs/vft-vara" }
 vft-vara-app = { path = "gear-programs/vft-vara/app" }
 vft-vara-client = { path = "gear-programs/vft-vara/client" }
@@ -182,6 +183,7 @@ pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/g
 sails-idl-gen = "0.7.3"
 sails-client-gen = "0.7.3"
 sails-rs = "0.7.3"
+awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", tag = "v0.1.0", default-features = false }
 awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", tag = "v0.1.0", default-features = false, features = [
     "vft",
     "vft-admin",

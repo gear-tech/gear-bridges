@@ -59,7 +59,11 @@ impl Program {
         }
     }
 
-    pub fn vft(&self) -> vft::Service<'_> {
+    pub fn vft(&self) -> vft_common::Service<'_> {
+        vft_common::Service::new(&self.allowances, &self.balances, &self.metadata)
+    }
+
+    pub fn vft2(&self) -> vft::Service<'_> {
         vft::Service::new(&self.allowances, &self.balances)
     }
 
@@ -69,12 +73,12 @@ impl Program {
             &self.allowances,
             &self.balances,
             &self.pause,
-            self.vft(),
+            self.vft2(),
         )
     }
 
     pub fn vft_extension(&self) -> vft_extension::Service<'_> {
-        vft_extension::Service::new(&self.allowances, &self.balances, self.vft())
+        vft_extension::Service::new(&self.allowances, &self.balances, self.vft2())
     }
 
     pub fn vft_metadata(&self) -> vft_metadata::Service<'_> {
@@ -82,7 +86,7 @@ impl Program {
     }
 
     pub fn vft_native_exchange(&self) -> vft_native_exchange::Service<'_> {
-        vft_native_exchange::Service::new(&self.balances, self.vft())
+        vft_native_exchange::Service::new(&self.balances, self.vft2())
     }
 }
 

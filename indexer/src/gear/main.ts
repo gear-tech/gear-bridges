@@ -8,7 +8,7 @@ import { isProgramChanged, isUserMessageSent } from './util';
 import { config } from './config';
 import { Decoder } from './codec';
 import { init, updateId } from './programIds';
-import { getProgramInheritor } from './rpc-queries';
+import { getProgramInheritor, initDecoders } from './rpc-queries';
 
 const tempState = new TempState(Network.Gear);
 
@@ -71,13 +71,12 @@ const handler = async (ctx: ProcessorContext) => {
                   sourceNetwork: Network.Gear,
                   source: vara_token_id,
                   destNetwork: Network.Ethereum,
-                  destination: tempState.getDestinationAddress(vara_token_id),
                   status: Status.AwaitingPayment,
                   sender,
                   receiver,
                   amount: BigInt(amount),
                 });
-                tempState.transferRequested(transfer);
+                promises.push(tempState.transferRequested(transfer));
                 break;
               }
               case 'TokenMappingAdded': {
@@ -87,10 +86,13 @@ const handler = async (ctx: ProcessorContext) => {
                   msg.payload,
                 );
 
-                tempState.addPair(
-                  vara_token_id.toLowerCase(),
-                  eth_token_id.toLowerCase(),
-                  supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
+                promises.push(
+                  tempState.addPair(
+                    vara_token_id.toLowerCase(),
+                    eth_token_id.toLowerCase(),
+                    supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
+                    block.header,
+                  ),
                 );
                 break;
               }
@@ -100,7 +102,7 @@ const handler = async (ctx: ProcessorContext) => {
                   method,
                   msg.payload,
                 );
-                promises.push(tempState.removePair(vara_token_id.toLowerCase(), eth_token_id.toLowerCase()));
+                tempState.removePair(vara_token_id.toLowerCase(), eth_token_id.toLowerCase());
                 break;
               }
               default: {
@@ -132,7 +134,7 @@ const handler = async (ctx: ProcessorContext) => {
 
             const { nonce } = bridgingPaymentDecoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
 
-            promises.push(tempState.transferStatus(gearNonce(nonce), Status.Bridging));
+            tempState.transferStatus(gearNonce(nonce), Status.Bridging);
             break;
           }
         }
@@ -149,6 +151,8 @@ const runProcessor = async () => {
   vftManagerDecoder = await Decoder.create('./assets/vft_manager.idl');
   hisotricalProxyDecoder = await Decoder.create('./assets/historical_proxy.idl');
   bridgingPaymentDecoder = await Decoder.create('./assets/bridging_payment.idl');
+
+  await initDecoders();
 
   const db = new TypeormDatabase({
     supportHotBlocks: true,

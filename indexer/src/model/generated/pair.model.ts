@@ -1,4 +1,4 @@
-import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_} from "@subsquid/typeorm-store"
+import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_, Index as Index_, IntColumn as IntColumn_, BooleanColumn as BooleanColumn_} from "@subsquid/typeorm-store"
 import {Network} from "./_network"
 
 @Entity_()
@@ -10,12 +10,35 @@ export class Pair {
     @PrimaryColumn_()
     id!: string
 
+    @Index_()
     @StringColumn_({nullable: false})
-    gearToken!: string
+    varaToken!: string
 
+    @StringColumn_({nullable: false})
+    varaTokenSymbol!: string
+
+    @IntColumn_({nullable: false})
+    varaTokenDecimals!: number
+
+    @StringColumn_({nullable: false})
+    varaTokenName!: string
+
+    @Index_()
     @StringColumn_({nullable: false})
     ethToken!: string
 
+    @StringColumn_({nullable: false})
+    ethTokenSymbol!: string
+
+    @IntColumn_({nullable: false})
+    ethTokenDecimals!: number
+
+    @StringColumn_({nullable: false})
+    ethTokenName!: string
+
     @Column_("varchar", {length: 8, nullable: false})
     tokenSupply!: Network
+
+    @BooleanColumn_({nullable: false})
+    isRemoved!: boolean
 }

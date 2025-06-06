@@ -63,8 +63,6 @@ jobs:
             "./api/gear/eth_events_electra.idl"
             "./api/gear/vft_manager.idl"
             "./api/gear/historical_proxy.idl"
-            "./api/gear/vft.idl"
-            "./api/gear/vft_vara.idl"
           )
 
           generated=(
@@ -82,8 +80,6 @@ jobs:
             "./target/wasm32-unknown-unknown/release/eth_events_electra.idl"
             "./target/wasm32-unknown-unknown/release/vft_manager.idl"
             "./target/wasm32-unknown-unknown/release/historical_proxy.idl"
-            "./target/wasm32-unknown-unknown/release/vft.idl"
-            "./target/wasm32-unknown-unknown/release/vft_vara.idl"
           )
 
           for i in "${!stored[@]}"; do

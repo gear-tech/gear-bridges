@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 awesome-sails-services.workspace = true
 sails-rs.workspace = true
+vft-common.workspace = true

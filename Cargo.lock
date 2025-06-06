@@ -15661,6 +15661,7 @@ version = "0.3.0"
 dependencies = [
  "awesome-sails-services",
  "sails-rs",
+ "vft-common",
 ]
 
 [[package]]
@@ -15672,6 +15673,15 @@ dependencies = [
  "sails-idl-gen",
  "sails-rs",
  "vft-app",
+]
+
+[[package]]
+name = "vft-common"
+version = "0.3.0"
+dependencies = [
+ "awesome-sails",
+ "awesome-sails-services",
+ "sails-rs",
 ]
 
 [[package]]
@@ -15742,6 +15752,7 @@ version = "0.3.0"
 dependencies = [
  "awesome-sails-services",
  "sails-rs",
+ "vft-common",
 ]
 
 [[package]]

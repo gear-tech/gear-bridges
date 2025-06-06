@@ -36,59 +36,96 @@ export class TempState {
   }
 
   public async save() {
-    if (this._transfers.size > 0) {
-      await this._ctx.store.save(Array.from(this._transfers.values()));
-    }
+    try {
+      const saveOperations: Promise<any>[] = [];
 
-    if (this._addedPairs.size > 0) {
-      await this._ctx.store.save(Array.from(this._addedPairs.values()));
+      if (this._transfers.size > 0) {
+        saveOperations.push(this._ctx.store.save(Array.from(this._transfers.values())));
+      }
+
+      await this._savePairs(saveOperations);
+
+      if (saveOperations.length > 0) {
+        await Promise.all(saveOperations);
+      }
+
+      await this._processCompletedTransfers();
+
+      this._logSaveOperations();
+    } catch (error) {
+      this._ctx.log.error({ error: error instanceof Error ? error.message : String(error) }, 'Error saving state');
+      throw error;
     }
+  }
+
+  private async _savePairs(saveOperations: Promise<any>[]) {
+    const pairs: Pair[] = [];
 
     if (this._removedPairs.size > 0) {
       const pairsToRemove = Array.from(this._pairs.values()).filter(({ id }) => this._removedPairs.has(id));
       for (const pair of pairsToRemove) {
         pair.isRemoved = true;
       }
-      await this._ctx.store.save(pairsToRemove);
+      pairs.push(...pairsToRemove);
+    }
+
+    if (this._addedPairs.size > 0) {
+      pairs.push(...Array.from(this._addedPairs.values()).filter(({ id }) => !this._removedPairs.has(id)));
+    }
+
+    if (pairs.length > 0) {
+      saveOperations.push(this._ctx.store.save(pairs));
+    }
+  }
+
+  private async _processCompletedTransfers() {
+    if (this._completed.size === 0) return;
+
+    const transfers = await this._getTransfers(Array.from(this._completed.keys()));
+    const completedToDelete: CompletedTransfer[] = [];
+    const transfersToUpdate: Transfer[] = [];
+
+    if (transfers.length > 0) {
+      for (const transfer of transfers) {
+        const completed = this._completed.get(transfer.nonce)!;
+        transfer.status = Status.Completed;
+        transfer.completedAt = completed.timestamp;
+        transfersToUpdate.push(transfer);
+        completedToDelete.push(completed);
+        this._completed.delete(transfer.nonce);
+      }
+
+      const operations: Promise<any>[] = [];
+      if (transfersToUpdate.length > 0) {
+        operations.push(this._ctx.store.save(transfersToUpdate));
+      }
+      if (completedToDelete.length > 0) {
+        operations.push(this._ctx.store.remove(completedToDelete));
+      }
+
+      await Promise.all(operations);
     }
 
     if (this._completed.size > 0) {
-      const transfers = await this._getTransfers(Array.from(this._completed.keys()));
-      const completedToDelete: CompletedTransfer[] = [];
-
-      if (transfers.length > 0) {
-        for (const t of transfers) {
-          const completed = this._completed.get(t.nonce)!;
-          t.status = Status.Completed;
-          t.completedAt = completed.timestamp;
-          completedToDelete.push(completed);
-          this._completed.delete(t.nonce);
-        }
-        if (completedToDelete.length > 0) {
-          await this._ctx.store.save(transfers);
-          await this._ctx.store.remove(completedToDelete);
-        }
-      }
-      if (this._completed.size > 0) {
-        await this._ctx.store.save(Array.from(this._completed.values()));
-      }
+      await this._ctx.store.save(Array.from(this._completed.values()));
     }
+  }
 
+  private _logSaveOperations() {
     if (
       this._transfers.size > 0 ||
       this._addedPairs.size > 0 ||
       this._completed.size > 0 ||
       this._removedPairs.size > 0
     ) {
-      this._ctx.log.info(
-        {
-          transfers: this._transfers.size > 0 ? this._transfers.size : undefined,
-          completed: this._completed.size > 0 ? this._completed.size : undefined,
-          addedPairs: this._addedPairs.size > 0 ? this._addedPairs.size : undefined,
-          removedPairs: this._removedPairs.size > 0 ? this._removedPairs.size : undefined,
-        },
-        'Saved',
-      );
+      const logInfo: Record<string, number> = {};
+
+      if (this._transfers.size > 0) logInfo.transfers = this._transfers.size;
+      if (this._completed.size > 0) logInfo.completed = this._completed.size;
+      if (this._addedPairs.size > 0) logInfo.addedPairs = this._addedPairs.size;
+      if (this._removedPairs.size > 0) logInfo.removedPairs = this._removedPairs.size;
+
+      this._ctx.log.info(logInfo, 'Saved');
     }
   }
 

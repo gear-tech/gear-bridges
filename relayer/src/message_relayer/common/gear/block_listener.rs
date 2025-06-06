@@ -1,17 +1,65 @@
+use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
+
+use ethereum_common::Hash256;
+use futures::StreamExt;
+use gsdk::metadata::gear::Event as GearEvent;
+use gsdk::metadata::runtime_types::gear_core::message::user::UserMessage;
+use gsdk::metadata::runtime_types::gprimitives::ActorId;
+use gsdk::{config::Header, subscription::BlockEvents};
+use primitive_types::H256;
 use prometheus::IntGauge;
-use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use subxt::config::Header as _;
+use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::{
-    common::GearBlockNumber, eth_to_gear::api_provider::ApiProviderConnection,
-};
+#[derive(Clone)]
+pub struct GearBlock {
+    pub header: Header,
+    pub events: Vec<gsdk::Event>,
+}
 
-const GEAR_BLOCK_TIME_APPROX: Duration = Duration::from_secs(3);
+impl GearBlock {
+    pub fn new(header: Header, events: Vec<gsdk::Event>) -> Self {
+        Self { header, events }
+    }
+
+    pub fn number(&self) -> u32 {
+        self.header.number()
+    }
+
+    pub fn hash(&self) -> Hash256 {
+        self.header.hash()
+    }
+
+    pub fn events(&self) -> &[gsdk::Event] {
+        &self.events
+    }
+
+    pub fn user_message_sent_events(
+        &self,
+        from_program: H256,
+        to_user: H256,
+    ) -> impl Iterator<Item = &[u8]> + use<'_> {
+        self.events.iter().filter_map(move |event| match event {
+            gclient::Event::Gear(GearEvent::UserMessageSent {
+                message:
+                    UserMessage {
+                        source,
+                        destination,
+                        payload,
+                        ..
+                    },
+                ..
+            }) if source == &ActorId(from_program.0) && destination == &ActorId(to_user.0) => {
+                Some(payload.0.as_ref())
+            }
+            _ => None,
+        })
+    }
+}
 
 pub struct BlockListener {
     api_provider: ApiProviderConnection,
-    from_block: u32,
 
     metrics: Metrics,
 }
@@ -32,10 +80,9 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(api_provider: ApiProviderConnection, from_block: u32) -> Self {
+    pub fn new(api_provider: ApiProviderConnection) -> Self {
         Self {
             api_provider,
-            from_block,
 
             metrics: Metrics::new(),
         }
@@ -43,14 +90,12 @@ impl BlockListener {
 
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
-    ) -> [UnboundedReceiver<GearBlockNumber>; RECEIVER_COUNT] {
-        let (senders, receivers): (Vec<_>, Vec<_>) =
-            (0..RECEIVER_COUNT).map(|_| unbounded_channel()).unzip();
-
+    ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
+        let (tx, _) = broadcast::channel(RECEIVER_COUNT);
+        let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            let mut current_block = self.from_block;
             loop {
-                let res = self.run_inner(&senders, &mut current_block).await;
+                let res = self.run_inner(&tx2).await;
                 if let Err(err) = res {
                     log::error!("Gear block listener failed: {err}");
 
@@ -67,34 +112,41 @@ impl BlockListener {
             }
         });
 
-        receivers
+        (0..RECEIVER_COUNT)
+            .map(|_| tx.subscribe())
+            .collect::<Vec<_>>()
             .try_into()
-            .expect("Expected Vec of correct length")
+            .expect("expected Vec of correct length")
     }
 
-    async fn run_inner(
-        &self,
-        senders: &[UnboundedSender<GearBlockNumber>],
-        current_block: &mut u32,
-    ) -> anyhow::Result<()> {
-        self.metrics.latest_block.set(*current_block as i64);
+    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
+
+        let mut finalized_blocks = gear_api.api.subscribe_finalized_blocks().await?;
         loop {
-            let finalized_head = gear_api.latest_finalized_block().await?;
-            let finalized_head = gear_api.block_hash_to_number(finalized_head).await?;
+            match finalized_blocks.next().await {
+                Some(Err(err)) => {
+                    log::error!("Error receiving finalized block: {err}");
+                    break Err(err);
+                }
 
-            if finalized_head >= *current_block {
-                for block in *current_block..=finalized_head {
-                    for sender in senders {
-                        sender.send(GearBlockNumber(block))?;
+                Some(Ok(block)) => {
+                    self.metrics.latest_block.set(block.number() as i64);
+                    let header = block.header().clone();
+                    let block_events = BlockEvents::new(block).await?;
+                    let events = block_events.events()?;
+
+                    match tx.send(GearBlock::new(header, events)) {
+                        Ok(_) => (),
+                        Err(broadcast::error::SendError(_)) => {
+                            log::error!("No active receivers for Gear block listener, stopping");
+                            return Ok(());
+                        }
                     }
-
                     self.metrics.latest_block.inc();
                 }
 
-                *current_block = finalized_head + 1;
-            } else {
-                tokio::time::sleep(GEAR_BLOCK_TIME_APPROX).await;
+                None => break Ok(()),
             }
         }
     }

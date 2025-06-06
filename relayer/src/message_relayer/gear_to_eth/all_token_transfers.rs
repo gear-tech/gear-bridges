@@ -3,18 +3,22 @@ use std::iter;
 use ethereum_client::EthApi;
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::{
-    common::{
-        ethereum::{
-            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
-            message_sender::MessageSender,
+use crate::{
+    common::MAX_RETRIES,
+    message_relayer::{
+        common::{
+            ethereum::{
+                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+                message_sender::MessageSender, status_fetcher::StatusFetcher,
+            },
+            gear::{
+                block_listener::BlockListener as GearBlockListener,
+                merkle_proof_fetcher::MerkleProofFetcher,
+                message_queued_event_extractor::MessageQueuedEventExtractor,
+            },
         },
-        gear::{
-            block_listener::BlockListener as GearBlockListener,
-            message_queued_event_extractor::MessageQueuedEventExtractor,
-        },
+        eth_to_gear::api_provider::ApiProviderConnection,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
 };
 
 pub struct Relayer {
@@ -24,6 +28,9 @@ pub struct Relayer {
 
     merkle_root_extractor: MerkleRootExtractor,
     message_sender: MessageSender,
+
+    proof_fetcher: MerkleProofFetcher,
+    status_fetcher: StatusFetcher,
 }
 
 impl MeteredService for Relayer {
@@ -39,25 +46,26 @@ impl MeteredService for Relayer {
 impl Relayer {
     pub async fn new(
         eth_api: EthApi,
-        from_block: Option<u32>,
-        api_provider: ApiProviderConnection,
-    ) -> anyhow::Result<Self> {
-        let from_gear_block = if let Some(block) = from_block {
-            block
-        } else {
-            let gear_api = api_provider.client();
-            let block = gear_api.latest_finalized_block().await?;
-            gear_api.block_hash_to_number(block).await?
-        };
 
-        let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
+        api_provider: ApiProviderConnection,
+        confirmations_merkle_root: u64,
+
+        confirmations_status: u64,
+    ) -> anyhow::Result<Self> {
+        let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 
-        let merkle_root_extractor =
-            MerkleRootExtractor::new(eth_api.clone(), api_provider.clone(), 1);
+        let merkle_root_extractor = MerkleRootExtractor::new(
+            eth_api.clone(),
+            api_provider.clone(),
+            confirmations_merkle_root,
+        );
 
-        let message_sender = MessageSender::new(eth_api, api_provider);
+        let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
+
+        let proof_fetcher = MerkleProofFetcher::new(api_provider);
+        let status_fetcher = StatusFetcher::new(eth_api, confirmations_status);
 
         Ok(Self {
             gear_block_listener,
@@ -66,6 +74,9 @@ impl Relayer {
 
             merkle_root_extractor,
             message_sender,
+
+            proof_fetcher,
+            status_fetcher,
         })
     }
 
@@ -78,6 +89,10 @@ impl Relayer {
         let accumulator = Accumulator::new();
         let channel_messages = accumulator.run(messages, merkle_roots).await;
 
-        self.message_sender.run(channel_messages).await;
+        let channel_message_data = self.proof_fetcher.spawn(channel_messages);
+        let channel_tx_data = self.status_fetcher.spawn();
+
+        self.message_sender
+            .spawn(channel_message_data, channel_tx_data);
     }
 }

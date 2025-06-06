@@ -31,22 +31,9 @@ pub async fn relay(
     tx_hash: TxHash,
     slot: u64,
 ) {
-    let gear_api = api_provider.client();
+    let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
-    let from_gear_block = gear_api
-        .latest_finalized_block()
-        .await
-        .expect("Failed to fetch latest finalized block");
-
-    let from_gear_block = gear_api
-        .block_hash_to_number(from_gear_block)
-        .await
-        .expect("Failed to fetch block number by hash");
-
-    let gear_block_listener = GearBlockListener::new(api_provider.clone(), from_gear_block);
-
-    let checkpoints_extractor =
-        CheckpointsExtractor::new(api_provider.clone(), checkpoint_light_client_address);
+    let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
     let gear_message_sender = MessageSender::new(
         api_provider,
@@ -54,6 +41,7 @@ pub async fn relay(
         eth_api,
         beacon_client,
         historical_proxy_address,
+        checkpoint_light_client_address,
         receiver_address,
         receiver_route,
         true,

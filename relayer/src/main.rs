@@ -146,8 +146,11 @@ async fn main() {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         eth_api,
-                        args.from_block,
                         provider.connection(),
+                        args.confirmations_merkle_root
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.confirmations_status
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
                     .unwrap();
@@ -166,10 +169,11 @@ async fn main() {
 
                     let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
                         eth_api,
-                        args.from_block,
                         bridging_payment_address,
                         provider.connection(),
                         args.confirmations_merkle_root
+                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                     )
                     .await
@@ -329,20 +333,21 @@ async fn main() {
             .await
             .expect("Failed to create API provider");
 
-            let _sender = gear_to_eth::manual::relay(
-                api_provider.connection(),
+            let connection = api_provider.connection();
+            api_provider.spawn();
+
+            gear_to_eth::manual::relay(
+                connection,
                 eth_api,
                 nonce,
                 args.block,
                 args.from_eth_block,
+                args.confirmations_status
+                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
             )
             .await;
-            api_provider.spawn();
-            loop {
-                // relay() spawns thread and exits, so we need to add this loop after calling run.
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
         }
+
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
             slot,
@@ -516,8 +521,9 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let block_range = common::create_range(args.from_eth_block.into(), block_finalized);
     let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(args.from_eth_block, block_finalized)
+        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
         .await?;
 
     let gear_api = gear_rpc_client::GearApi::new(

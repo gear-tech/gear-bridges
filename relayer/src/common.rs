@@ -133,5 +133,30 @@ pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
     false
 }
 
+pub struct BlockRange {
+    pub from: u64,
+    pub to: u64,
+}
+
+/// Creates BlockRange that does not exceed the maximum allowed range (i.e. to avoid
+/// an error 'server returned an error response: error code -32602: query exceeds max block range 100000').
+pub fn create_range(from: Option<u64>, latest: u64) -> BlockRange {
+    let Some(from) = from else {
+        return BlockRange {
+            from: latest,
+            to: latest,
+        };
+    };
+
+    let block_to_max = from + 99_999;
+    let block_to = if block_to_max > latest {
+        latest
+    } else {
+        block_to_max
+    };
+
+    BlockRange { from, to: block_to }
+}
+
 pub const MAX_RETRIES: u32 = 5;
 pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(1);

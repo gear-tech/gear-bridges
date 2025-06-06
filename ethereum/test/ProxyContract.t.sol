@@ -1,4 +1,5 @@
-pragma solidity ^0.8.13;
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";

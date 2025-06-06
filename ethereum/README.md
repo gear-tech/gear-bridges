@@ -10,8 +10,7 @@ struct VaraMessage {
     bytes data;
 }
 
-
-    function process_message(VaraMessage calldata message) external;
+function process_message(VaraMessage calldata message) external;
 ```
 
 - Bytes[0..=0x1F] VaraAddress
@@ -50,41 +49,16 @@ library Hasher {
 fallback(bytes calldata data) onlyRole(Constants.MESSAGE_QUEUE_ROLE) external returns (bytes memory){
     (address token, address to, uint256 amount) = abi.decode(data, (address, address, uint256));
     withdraw(token, to, amount);
-    return (bytes(""));
+    return new bytes(0);
 }
 ```
 
-## Setup 
-```bash
-cd solidity_bridge
-forge install foundry-rs/forge-std --no-commit
-forge install OpenZeppelin/openzeppelin-contracts --no-commit
-```
-
-## Test
-```bash
-forge test
-```
-
-## Deploy
-
-### Anvil
+## Setup
 
 ```bash
-forge script DeployScript --fork-url http://localhost:8545 --broadcast --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-```
-
-```
-Verifier: 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
-Relayer: 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
-Treasury: 0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9
-MessageQueue: 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9
-
-Relayer Proxy: 0x5FC8d32690cc91D4c39d9d3abcBD16989F875707
-Treasury Proxy: 0xa513E6E4b8f2a923D98304ec87F64353C4D5C853
-MessageQueue Proxy: 0x0165878A594ca255338adfa4d48449f69242Eb8F
-
-wVARA ERC20 :  @0x5FbDB2315678afecb367f032d93F642f64180aa3
+git clone --recurse-submodules https://github.com/gear-tech/gear-bridges.git
+cd gear-bridges/ethereum
+cp .env.example .env # don't forget to modify `.env`
 ```
 
 ## Foundry
@@ -137,7 +111,12 @@ $ anvil
 ### Deploy
 
 ```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+$ source .env
+$ forge script script/DeployMockERC20.s.sol:DeployMockERC20Script --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/DeployEthereumToken.s.sol:DeployEthereumTokenScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/DeployCore.s.sol:DeployCoreScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/DeployTokenBridge.s.sol:DeployTokenBridgeScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/DeployWrappedVara.s.sol:DeployWrappedVaraScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
 ```
 
 ### Cast

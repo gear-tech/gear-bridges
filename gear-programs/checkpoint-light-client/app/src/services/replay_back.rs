@@ -1,3 +1,4 @@
+use super::Event;
 use crate::{state::ReplayBackState, State};
 use cell::RefCell;
 use checkpoint_light_client_io::{
@@ -10,7 +11,7 @@ pub struct ReplayBack<'a> {
     state: &'a RefCell<State>,
 }
 
-#[sails_rs::service]
+#[sails_rs::service(events = Event)]
 impl<'a> ReplayBack<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
@@ -56,13 +57,17 @@ impl<'a> ReplayBack<'a> {
             checkpoints: {
                 let mut checkpoints = Vec::with_capacity(EPOCHS_PER_SYNC_COMMITTEE as usize);
                 checkpoints.push((finalized_header.slot, finalized_header.tree_hash_root()));
-
+                self.notify_on(Event::NewCheckpoint {
+                    slot: finalized_header.slot,
+                    tree_hash_root: finalized_header.tree_hash_root(),
+                })
+                .expect("Failed to deposit event");
                 checkpoints
             },
             last_header: finalized_header,
         });
 
-        Ok(match process_headers(&mut state, headers) {
+        Ok(match process_headers(self, &mut state, headers) {
             true => ReplayBackStatus::Finished,
             false => ReplayBackStatus::InProcess,
         })
@@ -77,14 +82,18 @@ impl<'a> ReplayBack<'a> {
             return Err(ReplayBackError::NotStarted);
         }
 
-        Ok(match process_headers(&mut state, headers) {
+        Ok(match process_headers(self, &mut state, headers) {
             true => ReplayBackStatus::Finished,
             false => ReplayBackStatus::InProcess,
         })
     }
 }
 
-fn process_headers(state: &mut State, mut headers: Vec<BeaconBlockHeader>) -> bool {
+fn process_headers(
+    service: &mut ReplayBack,
+    state: &mut State,
+    mut headers: Vec<BeaconBlockHeader>,
+) -> bool {
     headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
 
     let replay_back = state.replay_back.as_mut().expect("Checked by the caller");
@@ -113,6 +122,12 @@ fn process_headers(state: &mut State, mut headers: Vec<BeaconBlockHeader>) -> bo
             .expect("At least contains finalized header; qed");
         if slot % SLOTS_PER_EPOCH == 0 || slot + SLOTS_PER_EPOCH < *slot_next {
             replay_back.checkpoints.push((slot, hash));
+            service
+                .notify_on(Event::NewCheckpoint {
+                    slot,
+                    tree_hash_root: hash,
+                })
+                .expect("Failed to deposit event");
         }
     }
 
@@ -123,6 +138,12 @@ fn process_headers(state: &mut State, mut headers: Vec<BeaconBlockHeader>) -> bo
     // move checkpoints
     while let Some((slot, checkpoint)) = replay_back.checkpoints.pop() {
         state.checkpoints.push(slot, checkpoint);
+        service
+            .notify_on(Event::NewCheckpoint {
+                slot,
+                tree_hash_root: checkpoint,
+            })
+            .expect("Failed to deposit event");
     }
 
     if let Some(sync_committee_next) = replay_back.sync_committee_next.take() {

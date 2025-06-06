@@ -627,11 +627,11 @@ impl VftManager {
     /// Initialize VFT Manager service.
     pub fn seed(config: InitConfig) {
         unsafe {
-            let this = Syscall::message_source();
+            let source = Syscall::message_source();
             STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                admin: this,
-                pause_admin: this,
+                admin: source,
+                pause_admin: source,
                 erc20_manager_address: config.erc20_manager_address,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,

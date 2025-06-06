@@ -363,7 +363,7 @@ mod tests {
         use MockChildType::*;
 
         test_case(
-            std::iter::repeat_n(NotClaimed(32), 15)
+            iter::repeat_n(NotClaimed(32), 15)
                 .chain(iter::once(Claimed([0xAA; BLAKE2_DIGEST_SIZE])))
                 .collect(),
         );

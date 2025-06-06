@@ -110,7 +110,14 @@ impl MessageSender {
                         Ok(_) => break,
                         Err(err) => {
                             log::error!("Gear message sender failed with: {err}");
+                            match err {
+                                err if err.is::<historical_proxy_client::ProxyError>() => {
+                                    log::error!("Gear message sender failed due to a prox error. Exiting...");
+                                    return;
+                                }
 
+                                _ => ()
+                            }
                             attempts += 1;
                             let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                             log::error!(
@@ -192,13 +199,8 @@ impl MessageSender {
             .with_gas_limit(gas_limit)
             .send_recv(self.historical_proxy_address.into())
             .await
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to send message to historical proxy address: {:?}",
-                    e
-                )
-            })?
-            .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
+            .context("failed to send message to historical proxy address")?
+            .context("internal historical proxy error")?;
 
         // TODO: Refactor this approach. #255
         log::debug!("Received reply: {}", hex::encode(&receiver_reply));

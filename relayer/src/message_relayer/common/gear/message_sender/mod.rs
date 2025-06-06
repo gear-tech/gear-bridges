@@ -198,7 +198,12 @@ impl MessageSender {
                     e
                 )
             })?
-            .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to receive reply from historical proxy address: {:?}",
+                    e
+                )
+            })?;
 
         // TODO: Refactor this approach. #255
         log::debug!("Received reply: {}", hex::encode(&receiver_reply));

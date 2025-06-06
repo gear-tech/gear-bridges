@@ -5,6 +5,7 @@ WORKDIR /assets
 COPY api/gear/vft_manager.idl .
 COPY api/gear/historical_proxy.idl .
 COPY api/gear/bridging_payment.idl .
+COPY api/gear/vft.idl .
 COPY api/ethereum/IERC20Manager.json .
 COPY api/ethereum/IMessageQueue.json .
 COPY api/ethereum/IBridgingPayment.json .

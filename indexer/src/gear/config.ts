@@ -7,4 +7,5 @@ export const config = {
   hisotricalProxy: getEnv('GEAR_HISTORICAL_PROXY'),
   bridgingPayment: getEnv('GEAR_BRIDGING_PAYMENT'),
   fromBlock: Number(getEnv('GEAR_FROM_BLOCK', '11000000')),
+  ethRpcUrl: getEnv('GEAR_ETH_RPC_URL'),
 };

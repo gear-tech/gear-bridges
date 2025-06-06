@@ -8,7 +8,7 @@ import { isProgramChanged, isUserMessageSent } from './util';
 import { config } from './config';
 import { Decoder } from './codec';
 import { init, updateId } from './programIds';
-import { getProgramInheritor } from './rpc-queries';
+import { getEthTokenSymbol, getProgramInheritor, getVaraTokenSymbol, initDecoders } from './rpc-queries';
 
 const tempState = new TempState(Network.Gear);
 
@@ -87,10 +87,15 @@ const handler = async (ctx: ProcessorContext) => {
                   msg.payload,
                 );
 
+                const varaTokenSymbol = await getVaraTokenSymbol(ctx._chain.rpc, vara_token_id, block.header.hash);
+                const ethTokenSymbol = await getEthTokenSymbol(eth_token_id);
+
                 tempState.addPair(
                   vara_token_id.toLowerCase(),
                   eth_token_id.toLowerCase(),
                   supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
+                  varaTokenSymbol,
+                  ethTokenSymbol,
                 );
                 break;
               }
@@ -100,7 +105,7 @@ const handler = async (ctx: ProcessorContext) => {
                   method,
                   msg.payload,
                 );
-                promises.push(tempState.removePair(vara_token_id.toLowerCase(), eth_token_id.toLowerCase()));
+                tempState.removePair(vara_token_id.toLowerCase(), eth_token_id.toLowerCase());
                 break;
               }
               default: {
@@ -149,6 +154,8 @@ const runProcessor = async () => {
   vftManagerDecoder = await Decoder.create('./assets/vft_manager.idl');
   hisotricalProxyDecoder = await Decoder.create('./assets/historical_proxy.idl');
   bridgingPaymentDecoder = await Decoder.create('./assets/bridging_payment.idl');
+
+  await initDecoders();
 
   const db = new TypeormDatabase({
     supportHotBlocks: true,

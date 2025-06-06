@@ -14,29 +14,28 @@ contract DeployTokenBridgeScript is Script {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
 
-        bytes32 vft_manager = vm.envBytes32("VFT_MANAGER");
-        bytes32 governance_address = vm.envBytes32("GOVERNANCE_ADDRESS");
+        bytes32 vftManager = vm.envBytes32("VFT_MANAGER");
+        bytes32 governance = vm.envBytes32("GOVERNANCE_ADDRESS");
 
-        address message_queue_proxy_address = vm.envAddress("MQ_PROXY");
-        address bridging_payment_admin = vm.envAddress("BRIDGING_PAYMENT_ADMIN");
+        address messageQueueProxyAddress = vm.envAddress("MQ_PROXY");
+        address bridgingPaymentAdmin = vm.envAddress("BRIDGING_PAYMENT_ADMIN");
 
         uint256 fee = vm.envUint("BRIDGING_PAYMENT_FEE");
 
-        ERC20Manager erc20_manager = new ERC20Manager(message_queue_proxy_address, vft_manager);
-        ProxyContract erc20_manager_proxy = new ProxyContract();
-        erc20_manager_proxy.upgradeToAndCall(address(erc20_manager), "");
+        ERC20Manager erc20Manager = new ERC20Manager(messageQueueProxyAddress, vftManager);
+        ProxyContract erc20ManagerProxy = new ProxyContract();
+        erc20ManagerProxy.upgradeToAndCall(address(erc20Manager), "");
 
-        ProxyUpdater erc20_manager_proxy_updater =
-            new ProxyUpdater(payable(address(erc20_manager_proxy)), governance_address, message_queue_proxy_address);
-        erc20_manager_proxy.changeProxyAdmin(address(erc20_manager_proxy_updater));
+        ProxyUpdater erc20ManagerProxyUpdater =
+            new ProxyUpdater(payable(address(erc20ManagerProxy)), governance, messageQueueProxyAddress);
+        erc20ManagerProxy.changeProxyAdmin(address(erc20ManagerProxyUpdater));
 
-        BridgingPayment bridging_payment =
-            new BridgingPayment(address(erc20_manager_proxy), fee, bridging_payment_admin);
+        BridgingPayment bridgingPayment = new BridgingPayment(address(erc20ManagerProxy), fee, bridgingPaymentAdmin);
 
-        console.log("ERC20Manager:", address(erc20_manager));
-        console.log("ERC20Manager Proxy:", address(erc20_manager_proxy));
-        console.log("ERC20Manager Proxy Updater:", address(erc20_manager_proxy_updater));
-        console.log("Bridging Payment:", address(bridging_payment));
+        console.log("ERC20Manager:", address(erc20Manager));
+        console.log("ERC20Manager Proxy:", address(erc20ManagerProxy));
+        console.log("ERC20Manager Proxy Updater:", address(erc20ManagerProxyUpdater));
+        console.log("Bridging Payment:", address(bridgingPayment));
 
         vm.stopBroadcast();
     }

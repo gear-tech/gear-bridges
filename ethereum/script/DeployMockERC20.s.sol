@@ -11,11 +11,11 @@ contract DeployMockERC20Script is Script {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
 
-        ERC20Mock token_1 = new ERC20Mock("USDC");
-        ERC20Mock token_2 = new ERC20Mock("USDT");
+        ERC20Mock usdt = new ERC20Mock("USDT");
+        ERC20Mock usdc = new ERC20Mock("USDC");
 
-        console.log("USDC:", address(token_1));
-        console.log("USDT:", address(token_2));
+        console.log("USDT:", address(usdt));
+        console.log("USDC:", address(usdc));
 
         vm.stopBroadcast();
     }

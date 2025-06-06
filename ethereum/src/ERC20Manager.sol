@@ -7,7 +7,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
-import {ERC20GearSupply} from "../src/erc20/ERC20GearSupply.sol";
+import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
+import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 
 contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
@@ -35,7 +36,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         SupplyType supply_type = tokenSupplyType[token];
 
         if (supply_type == SupplyType.Gear) {
-            ERC20GearSupply(token).burnFrom(msg.sender, amount);
+            IERC20Burnable(token).burnFrom(msg.sender, amount);
         } else {
             if (supply_type == SupplyType.Unknown) {
                 tokenSupplyType[token] = SupplyType.Ethereum;
@@ -93,7 +94,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
                 tokenSupplyType[token] = SupplyType.Gear;
             }
 
-            ERC20GearSupply(token).mint(receiver, amount);
+            IERC20Mintable(token).mint(receiver, amount);
         }
 
         emit BridgingAccepted(receiver, token, amount);
@@ -101,9 +102,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         return true;
     }
 
-    function getTokenSupplyType(
-        address token
-    ) public view returns (SupplyType) {
+    function getTokenSupplyType(address token) public view returns (SupplyType) {
         return tokenSupplyType[token];
     }
 }

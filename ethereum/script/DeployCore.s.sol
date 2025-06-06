@@ -15,37 +15,35 @@ contract DeployCoreScript is Script {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
 
-        bytes32 governance_address = vm.envBytes32("GOVERNANCE_ADDRESS");
+        bytes32 governance = vm.envBytes32("GOVERNANCE_ADDRESS");
 
         Verifier verifier = new Verifier();
 
-        ProxyContract message_queue_proxy = new ProxyContract();
-        ProxyUpdater message_queue_proxy_updater =
-            new ProxyUpdater(payable(address(message_queue_proxy)), governance_address, address(message_queue_proxy));
+        ProxyContract messageQueueProxy = new ProxyContract();
+        ProxyUpdater messageQueueProxyUpdater =
+            new ProxyUpdater(payable(address(messageQueueProxy)), governance, address(messageQueueProxy));
 
-        ProxyContract relayer_proxy = new ProxyContract();
-        ProxyUpdater relayer_proxy_updater =
-            new ProxyUpdater(payable(address(relayer_proxy)), governance_address, address(message_queue_proxy));
+        ProxyContract relayerProxy = new ProxyContract();
+        ProxyUpdater relayerProxyUpdater =
+            new ProxyUpdater(payable(address(relayerProxy)), governance, address(messageQueueProxy));
 
-        MessageQueue message_queue = new MessageQueue(address(relayer_proxy));
+        MessageQueue messageQueue = new MessageQueue(address(relayerProxy));
         Relayer relayer = new Relayer(address(verifier));
 
-        message_queue_proxy.upgradeToAndCall(address(message_queue), "");
-        relayer_proxy.upgradeToAndCall(address(relayer), "");
+        messageQueueProxy.upgradeToAndCall(address(messageQueue), "");
+        relayerProxy.upgradeToAndCall(address(relayer), "");
 
-        message_queue_proxy.changeProxyAdmin(address(message_queue_proxy_updater));
-        relayer_proxy.changeProxyAdmin(address(relayer_proxy_updater));
+        messageQueueProxy.changeProxyAdmin(address(messageQueueProxyUpdater));
+        relayerProxy.changeProxyAdmin(address(relayerProxyUpdater));
 
         console.log("Verifier:", address(verifier));
         console.log("Relayer:", address(relayer));
-        console.log("MessageQueue:", address(message_queue));
+        console.log("MessageQueue:", address(messageQueue));
 
-        console.log("Relayer Proxy:", address(relayer_proxy));
-        console.log("MessageQueue Proxy:", address(message_queue_proxy));
+        console.log("Relayer Proxy:", address(relayerProxy));
+        console.log("MessageQueue Proxy:", address(messageQueueProxy));
 
-        console.log("Relayer Proxy Updater:", address(relayer_proxy_updater));
-        console.log("MessageQueue Proxy Updater:", address(message_queue_proxy_updater));
-
-        vm.stopBroadcast();
+        console.log("Relayer Proxy Updater:", address(relayerProxyUpdater));
+        console.log("MessageQueue Proxy Updater:", address(messageQueueProxyUpdater));
     }
 }

@@ -6,6 +6,33 @@ import { Decoder } from './codec';
 import { ethers } from 'ethers';
 import { config } from './config';
 
+let vftDecoder: Decoder;
+
+export async function initDecoders() {
+  vftDecoder = await Decoder.create('./assets/vft.idl');
+}
+
+// Helper function for querying VFT metadata
+async function queryVFTMetadata<T>(rpc: RpcClient, programId: string, blockhash: string, fn: string): Promise<T> {
+  const method = 'gear_calculateReplyForHandle';
+  const origin = ZERO_ADDRESS;
+  const gasLimit = 1e10;
+  const value = 0;
+
+  const service = 'VftMetadata';
+
+  const payload = vftDecoder.encodeQueryInput(service, fn, []);
+
+  const response = await rpc.call(method, [origin, programId, payload, gasLimit, value, blockhash]);
+
+  if (response.code.Success) {
+    const result = vftDecoder.decodeQueryOutput<T>(service, fn, response.payload);
+    return result;
+  } else {
+    throw new Error(`Failed to get token ${fn}. ${response.code}`);
+  }
+}
+
 export async function getProgramInheritor(
   rpc: RpcClient,
   runtime: Runtime,
@@ -28,44 +55,42 @@ export async function getProgramInheritor(
   }
 }
 
-let vftDecoder: Decoder;
-
-export async function getVaraTokenSymbol(rpc: RpcClient, programId: string, blockhash: string): Promise<string> {
-  const method = 'gear_calculateReplyForHandle';
-  const origin = ZERO_ADDRESS;
-  const gasLimit = 1e10;
-  const value = 0;
-
-  const service = 'VftMetadata';
-  const fn = 'Symbol';
-
-  const payload = vftDecoder.encodeQueryInput(service, fn, []);
-
-  const response = await rpc.call(method, [origin, programId, payload, gasLimit, value, blockhash]);
-
-  if (response.code.Success) {
-    const symbol = vftDecoder.decodeQueryOutput<string>(service, fn, response.payload);
-    return symbol;
-  } else {
-    throw new Error(`Failed to get token symbol. ${response.code}`);
-  }
+export async function getVaraTokenDecimals(rpc: RpcClient, programId: string, blockhash: string): Promise<number> {
+  return queryVFTMetadata(rpc, programId, blockhash, 'Decimals');
 }
 
-export async function initDecoders() {
-  vftDecoder = await Decoder.create('./assets/vft.idl');
+export async function getVaraTokenName(rpc: RpcClient, programId: string, blockhash: string): Promise<string> {
+  return queryVFTMetadata<string>(rpc, programId, blockhash, 'Name');
+}
+
+export async function getVaraTokenSymbol(rpc: RpcClient, programId: string, blockhash: string): Promise<string> {
+  return queryVFTMetadata<string>(rpc, programId, blockhash, 'Symbol');
+}
+
+// Helper function for querying Ethereum ERC20 token properties
+async function queryEthTokenProperty<T>(contractAddress: string, method: string, abi: string[]): Promise<T> {
+  const provider = new ethers.JsonRpcProvider(config.ethRpcUrl);
+
+  try {
+    const tokenContract = new ethers.Contract(contractAddress, abi, provider);
+    const result: T = await tokenContract[method]();
+    return result;
+  } catch (error) {
+    throw new Error(`Failed to get ERC20 token ${method}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function getEthTokenSymbol(contractAddress: string): Promise<string> {
   const erc20ABI = ['function symbol() view returns (string)'];
+  return queryEthTokenProperty<string>(contractAddress, 'symbol', erc20ABI);
+}
 
-  const provider = new ethers.JsonRpcProvider(config.ethRpcUrl);
+export async function getEthTokenDecimals(contractAddress: string): Promise<number> {
+  const erc20ABI = ['function decimals() view returns (uint8)'];
+  return queryEthTokenProperty<number>(contractAddress, 'decimals', erc20ABI);
+}
 
-  try {
-    const tokenContract = new ethers.Contract(contractAddress, erc20ABI, provider);
-
-    const symbol = await tokenContract.symbol();
-    return symbol;
-  } catch (error) {
-    throw new Error(`Failed to get ERC20 token symbol: ${error instanceof Error ? error.message : String(error)}`);
-  }
+export async function getEthTokenName(contractAddress: string): Promise<string> {
+  const erc20ABI = ['function name() view returns (string)'];
+  return queryEthTokenProperty<string>(contractAddress, 'name', erc20ABI);
 }

@@ -31,8 +31,12 @@ type Pair @entity {
   id: ID!
   varaToken: String! @index
   varaTokenSymbol: String!
+  varaTokenDecimals: Int!
+  varaTokenName: String!
   ethToken: String! @index
   ethTokenSymbol: String!
+  ethTokenDecimals: Int!
+  ethTokenName: String!
   tokenSupply: Network!
   isRemoved: Boolean!
 }

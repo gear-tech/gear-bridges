@@ -8,7 +8,7 @@ import { isProgramChanged, isUserMessageSent } from './util';
 import { config } from './config';
 import { Decoder } from './codec';
 import { init, updateId } from './programIds';
-import { getEthTokenSymbol, getProgramInheritor, getVaraTokenSymbol, initDecoders } from './rpc-queries';
+import { getProgramInheritor, initDecoders } from './rpc-queries';
 
 const tempState = new TempState(Network.Gear);
 
@@ -71,13 +71,12 @@ const handler = async (ctx: ProcessorContext) => {
                   sourceNetwork: Network.Gear,
                   source: vara_token_id,
                   destNetwork: Network.Ethereum,
-                  destination: tempState.getDestinationAddress(vara_token_id),
                   status: Status.AwaitingPayment,
                   sender,
                   receiver,
                   amount: BigInt(amount),
                 });
-                tempState.transferRequested(transfer);
+                promises.push(tempState.transferRequested(transfer));
                 break;
               }
               case 'TokenMappingAdded': {
@@ -87,15 +86,13 @@ const handler = async (ctx: ProcessorContext) => {
                   msg.payload,
                 );
 
-                const varaTokenSymbol = await getVaraTokenSymbol(ctx._chain.rpc, vara_token_id, block.header.hash);
-                const ethTokenSymbol = await getEthTokenSymbol(eth_token_id);
-
-                tempState.addPair(
-                  vara_token_id.toLowerCase(),
-                  eth_token_id.toLowerCase(),
-                  supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
-                  varaTokenSymbol,
-                  ethTokenSymbol,
+                promises.push(
+                  tempState.addPair(
+                    vara_token_id.toLowerCase(),
+                    eth_token_id.toLowerCase(),
+                    supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
+                    block.header,
+                  ),
                 );
                 break;
               }
@@ -137,7 +134,7 @@ const handler = async (ctx: ProcessorContext) => {
 
             const { nonce } = bridgingPaymentDecoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
 
-            promises.push(tempState.transferStatus(gearNonce(nonce), Status.Bridging));
+            tempState.transferStatus(gearNonce(nonce), Status.Bridging);
             break;
           }
         }

@@ -27,7 +27,7 @@ const handler = async (ctx: Context) => {
         case ERC20_MANAGER: {
           if (topic !== ERC20_MANAGER_BRIDGING_REQUESTED) continue;
           const [from, to, token, amount] = erc20TreasuryAbi.events.BridgingRequested.decode(log);
-          tempState.transferRequested(
+          await tempState.transferRequested(
             new Transfer({
               id: randomUUID(),
               txHash: log.transactionHash,

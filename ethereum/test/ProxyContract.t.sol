@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IERC20Manager} from "../src/interfaces/IERC20Manager.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
@@ -50,10 +51,7 @@ contract ProxyTest is Test {
             address(new_erc20_manager),
             bytes("")
         );
-        assertEq(
-            erc20_manager_proxy.implementation(),
-            address(new_erc20_manager)
-        );
+        assertEq(address(uint160(uint256(vm.load(address(erc20_manager_proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(new_erc20_manager));
     }
 
     function test_changeProxyAdmin() public {

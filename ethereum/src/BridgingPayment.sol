@@ -4,33 +4,58 @@ pragma solidity ^0.8.30;
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * @dev BridgingPayment smart contract is responsible for collecting bridging fees
+ *      for transferring tokens from Ethereum to Vara. This smart contract enables
+ *      setting fee amount, updating owner address that will collect the fee, and
+ *      setting `ERC20Manager` smart contract that will handle bridging requests.
+ */
 contract BridgingPayment is IBridgingPayment, Ownable {
-    error OnlyErc20Manager();
-    error IncorrectFeeAmount();
-
     address public immutable erc20Manager;
     uint256 public fee;
 
+    /**
+     * @dev Initializes the BridgingPayment contract with the ERC20Manager address, fee amount, and initial owner.
+     * @param _erc20Manager The address of the ERC20Manager contract that will handle bridging requests.
+     * @param _fee The initial fee amount required for bridging.
+     * @param initialOwner The address that will receive the bridging fees.
+     */
     constructor(address _erc20Manager, uint256 _fee, address initialOwner) Ownable(initialOwner) {
         erc20Manager = _erc20Manager;
         fee = _fee;
     }
 
-    function payFee() external payable {
+    /**
+     * @dev Modifier to check if the caller is the ERC20Manager.
+     */
+    modifier onlyErc20Manager() {
         if (msg.sender != erc20Manager) {
             revert OnlyErc20Manager();
         }
+        _;
+    }
 
+    /**
+     * @dev Sets the fee amount.
+     * @param _fee The new fee amount.
+     */
+    function setFee(uint256 _fee) external onlyOwner {
+        fee = _fee;
+    }
+
+    /**
+     * @dev Pays the fee to the contract owner.
+     */
+    function payFee() external payable onlyErc20Manager {
         if (msg.value != fee) {
             revert IncorrectFeeAmount();
         }
 
-        payable(owner()).transfer(msg.value);
+        (bool success,) = owner().call{value: msg.value}("");
+        if (!success) {
+            revert PayFeeFailed();
+        }
 
         emit FeePaid();
-    }
-
-    function setFee(uint256 _fee) external onlyOwner {
-        fee = _fee;
     }
 }

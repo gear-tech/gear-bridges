@@ -46,7 +46,7 @@ impl MessagePaidEventExtractor {
         tokio::task::spawn(async move {
             let res = self.run_inner(&sender, &mut blocks).await;
             if let Err(err) = res {
-                log::error!("Message paid event extractor failed: {}", err);
+                log::error!("Message paid event extractor failed: {err}");
             }
         });
 

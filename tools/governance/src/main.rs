@@ -143,7 +143,7 @@ fn decode_h160(hex: &str) -> H160 {
 
 fn decode_hex(hex: &str) -> Vec<u8> {
     let formatted_hex = if &hex[..2] == "0x" { &hex[2..] } else { hex };
-    hex::decode(formatted_hex).unwrap_or_else(|_| panic!("Failed to decode hex string {}", hex))
+    hex::decode(formatted_hex).unwrap_or_else(|_| panic!("Failed to decode hex string {hex}"))
 }
 
 async fn submit_builtin_request(
@@ -175,7 +175,7 @@ async fn submit_builtin_request(
     let (_, reply, _value) = listener
         .reply_bytes_on(message_id)
         .await
-        .unwrap_or_else(|_| panic!("Failed to get reply for message {}", message_id));
+        .unwrap_or_else(|_| panic!("Failed to get reply for message {message_id}"));
     let reply = reply.expect("Bridge builtin sent error reply");
     let reply = gbuiltin_eth_bridge::Response::decode(&mut &reply[..])
         .expect("Failed to decode bridge bultin reply");

@@ -78,7 +78,7 @@ impl CheckpointsExtractor {
         tokio::task::spawn(async move {
             let res = self.run_inner(&sender, &mut blocks).await;
             if let Err(err) = res {
-                log::error!("Checkpoints extractor failed: {}", err);
+                log::error!("Checkpoints extractor failed: {err}");
             }
         });
 

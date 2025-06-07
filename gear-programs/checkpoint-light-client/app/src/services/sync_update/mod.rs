@@ -172,7 +172,7 @@ impl<'a> SyncUpdate<'a> {
                 .checkpoints
                 .push(finalized_header.slot, finalized_header.tree_hash_root());
 
-            self.notify_on(Event::NewCheckpoint {
+            self.emit_event(Event::NewCheckpoint {
                 slot: finalized_header.slot,
                 tree_hash_root: finalized_header.tree_hash_root(),
             })

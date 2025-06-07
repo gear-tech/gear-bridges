@@ -7,9 +7,9 @@
 //! This circuit computes 2 things:
 //! - Overall amount of children nodes. It's used to assert that amount is correct.
 //! - Converts nibble to index in the array of children nodes. They differ because empty nodes aren't
-//!     stored in this array. For example, if we have bitmap `0b00_11_10_00_11_00_01_10` and provide
-//!     `nibble = 4` as input, we should get `index = 2` as first 2 nodes are empty. It's used later
-//!     to assert that this node have correct hash.
+//!   stored in this array. For example, if we have bitmap `0b00_11_10_00_11_00_01_10` and provide
+//!   `nibble = 4` as input, we should get `index = 2` as first 2 nodes are empty. It's used later
+//!   to assert that this node have correct hash.
 
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;

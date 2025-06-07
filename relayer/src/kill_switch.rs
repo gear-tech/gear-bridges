@@ -130,11 +130,7 @@ impl KillSwitchRelayer {
             if let Err(err) = res {
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                 log::error!(
-                    "Main loop error (attempt {}/{}): {}. Retrying in {:?}...",
-                    attempts,
-                    MAX_RETRIES,
-                    err,
-                    delay
+                    "Main loop error (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}..."
                 );
                 if attempts >= MAX_RETRIES {
                     log::error!("Max attempts reached, exiting ..");
@@ -193,7 +189,7 @@ impl KillSwitchRelayer {
             if sync_steps == 0 {
                 break;
             } else {
-                log::info!("Synced {} authority set ids", sync_steps);
+                log::info!("Synced {sync_steps} authority set ids");
             }
         }
 
@@ -319,7 +315,7 @@ impl KillSwitchRelayer {
             }
             TxStatus::Pending => (),
             TxStatus::Failed => {
-                log::warn!("Re-trying kill switch tx #{} finalization", tx_hash);
+                log::warn!("Re-trying kill switch tx #{tx_hash} finalization");
 
                 let State::WaitingForKillSwitchTxFin { tx_hash, proof } = &mut self.state else {
                     unreachable!("Invalid state");
@@ -390,11 +386,7 @@ impl KillSwitchRelayer {
             proof: block_finality,
         }: BlockFinalityProofWithHash,
     ) -> anyhow::Result<FinalProof> {
-        log::info!(
-            "Proving merkle root presence in block #{} with hash {}",
-            block_number,
-            block_hash,
-        );
+        log::info!("Proving merkle root presence in block #{block_number} with hash {block_hash}",);
 
         let gear_api = self.api_provider.client();
 

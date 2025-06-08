@@ -19,8 +19,6 @@ import {ProxyContract} from "../src/ProxyContract.sol";
 
 import {TestHelper, OWNER, USER, VARA_ADDRESS_3, VARA_ADDRESS_7, ETH_ADDRESS_3, ETH_ADDRESS_5, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
 
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
-
 contract MessageQueueTest is TestHelper {
     using Address for address;
     using Hasher for VaraMessage;

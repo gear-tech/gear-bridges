@@ -64,6 +64,6 @@ contract ProxyTest is Test {
 
         // from proxyAdmin
         erc20_manager_proxy.changeProxyAdmin(not_admin);
-        assertEq(erc20_manager_proxy.proxyAdmin(), not_admin);
+        assertEq(address(uint160(uint256(vm.load(address(erc20_manager_proxy), ERC1967Utils.ADMIN_SLOT)))), not_admin);
     }
 }

@@ -10,7 +10,6 @@ import {Relayer} from "../src/Relayer.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 import {TestHelper} from "./TestHelper.t.sol";
 
 contract RelayerTest is TestHelper {

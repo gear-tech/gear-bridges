@@ -54,14 +54,14 @@ contract ProxyUpdaterTest is Test {
     function test_updateAdmin() public {
         vm.startPrank(MESSAGE_QUEUE);
 
-        assertEq(proxy.proxyAdmin(), address(updater));
+        assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.ADMIN_SLOT)))), address(updater));
 
         updater.processVaraMessage(
             GOVERNANCE,
             abi.encodePacked(uint8(1), NEW_ADMIN)
         );
 
-        assertEq(proxy.proxyAdmin(), NEW_ADMIN);
+        assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.ADMIN_SLOT)))), NEW_ADMIN);
     }
 
     function test_updateGovernance() public {

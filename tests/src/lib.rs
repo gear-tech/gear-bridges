@@ -46,18 +46,18 @@ pub async fn connect_to_node(
         for &binary in binaries {
             match lock.1.entry(binary) {
                 Entry::Occupied(entry) => {
-                    println!("code {:p} already uploaded", binary);
+                    println!("code {binary:p} already uploaded");
                     res.push(*entry.get());
                 }
 
                 Entry::Vacant(entry) => {
-                    println!("uploading code {:p}", binary);
+                    println!("uploading code {binary:p}");
                     let code_id = api
                         .upload_code(binary)
                         .await
                         .map(|(code_id, ..)| code_id)
                         .unwrap_or_else(|err| {
-                            println!("Failed to upload code: {}", err);
+                            println!("Failed to upload code: {err}");
                             CodeId::generate(binary)
                         });
                     entry.insert(code_id);
@@ -81,10 +81,7 @@ pub async fn connect_to_node(
         let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();
         let account_id: &[u8; 32] = account.as_ref();
         let account_id = ActorId::from(*account_id);
-        println!(
-            "account {} with SURI={} and balance={}",
-            account_id, suri, balance
-        );
+        println!("account {account_id} with SURI={suri} and balance={balance}");
         api.transfer_keep_alive(account_id, balance).await.unwrap();
 
         accounts.push((account_id, salt.to_le_bytes(), suri));

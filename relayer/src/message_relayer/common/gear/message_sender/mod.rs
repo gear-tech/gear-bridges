@@ -114,11 +114,7 @@ impl MessageSender {
                             attempts += 1;
                             let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                             log::error!(
-                                "Gear message sender failed (attempt {}/{}): {}. Retrying in {:?}",
-                                attempts,
-                                MAX_RETRIES,
-                                err,
-                                delay
+                                "Gear message sender failed (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}"
                             );
                             if attempts >= MAX_RETRIES {
                                 log::error!("Max attempts reached, exiting...");
@@ -141,7 +137,7 @@ impl MessageSender {
                                 self.eth_api = match self.eth_api.reconnect().await {
                                     Ok(eth_api) => eth_api,
                                     Err(err) => {
-                                        log::error!("Failed to reconnect to Ethereum API: {}", err);
+                                        log::error!("Failed to reconnect to Ethereum API: {err}");
                                         break;
                                     }
                                 };
@@ -198,7 +194,12 @@ impl MessageSender {
                     e
                 )
             })?
-            .map_err(|e| anyhow::anyhow!("Internal historical proxy error: {:?}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to receive reply from historical proxy address: {:?}",
+                    e
+                )
+            })?;
 
         // TODO: Refactor this approach. #255
         log::debug!("Received reply: {}", hex::encode(&receiver_reply));
@@ -286,9 +287,7 @@ async fn run_inner(
                 } else {
                     log::error!(
                         "Received checkpoints not in sequential order. \
-                    Previously found checkpoint: {:?} and new checkpoint is {}",
-                        latest_checkpoint_slot,
-                        checkpoint
+                    Previously found checkpoint: {latest_checkpoint_slot:?} and new checkpoint is {checkpoint}"
                     );
                 }
             }

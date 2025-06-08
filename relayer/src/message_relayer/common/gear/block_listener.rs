@@ -96,18 +96,30 @@ impl BlockListener {
         tokio::task::spawn(async move {
             loop {
                 let res = self.run_inner(&tx2).await;
-                if let Err(err) = res {
-                    log::error!("Gear block listener failed: {err}");
+                match res {
+                    Ok(false) => {
+                        log::info!("Gear block listener stopped due to no active receivers");
+                        return;
+                    }
 
-                    match self.api_provider.reconnect().await {
-                        Ok(()) => {
-                            log::info!("Gear block listener reconnected");
-                        }
-                        Err(err) => {
-                            log::error!("Gear block listener unable to reconnect: {err}");
-                            return;
-                        }
-                    };
+                    Ok(true) => {
+                        log::info!("Gear block listener: subscription expired, restarting");
+                        continue;
+                    }
+
+                    Err(err) => {
+                        log::error!("Gear block listener failed: {err}");
+
+                        match self.api_provider.reconnect().await {
+                            Ok(()) => {
+                                log::info!("Gear block listener reconnected");
+                            }
+                            Err(err) => {
+                                log::error!("Gear block listener unable to reconnect: {err}");
+                                return;
+                            }
+                        };
+                    }
                 }
             }
         });
@@ -119,7 +131,7 @@ impl BlockListener {
             .expect("expected Vec of correct length")
     }
 
-    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<()> {
+    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
 
         let mut finalized_blocks = gear_api.api.subscribe_finalized_blocks().await?;
@@ -140,13 +152,13 @@ impl BlockListener {
                         Ok(_) => (),
                         Err(broadcast::error::SendError(_)) => {
                             log::error!("No active receivers for Gear block listener, stopping");
-                            return Ok(());
+                            return Ok(false);
                         }
                     }
                     self.metrics.latest_block.inc();
                 }
 
-                None => break Ok(()),
+                None => break Ok(true),
             }
         }
     }

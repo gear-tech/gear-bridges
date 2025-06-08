@@ -190,12 +190,12 @@ pub mod proving {
     /// # Arguments
     ///
     /// * `current_epoch_block_finality` - Finality proof of some block present in the last epoch of
-    ///     the first bridge era. The first bridge era is defined in `genesis_config`
+    ///   the first bridge era. The first bridge era is defined in `genesis_config`
     /// * `genesis_config` - Defines starting point for all the bridge operation.
     /// * `next_validator_set_inclusion_proof` - Proof of inclusion of next authority set into
-    ///     storage of the block that proven final by `current_epoch_block_finality`.
+    ///   storage of the block that proven final by `current_epoch_block_finality`.
     /// * `next_validator_set_data` - Hash of next validator set(as it's stored in the
-    ///     `pallet_gear_bridge` storage).
+    ///   `pallet_gear_bridge` storage).
     pub fn prove_genesis(
         current_epoch_block_finality: BlockFinality,
         genesis_config: GenesisConfig,
@@ -221,13 +221,13 @@ pub mod proving {
     /// # Arguments
     ///
     /// * `previous_proof` - Proof that we previously composed. Proves transition of authority set
-    ///     from genesis to current.
+    ///   from genesis to current.
     /// * `current_epoch_block_finality` - Finality proof of some block present in the last epoch of
-    ///     the current era.
+    ///   the current era.
     /// * `next_validator_set_inclusion_proof` - Proof of inclusion of next authority set into
-    ///     storage of block that's proven final by `current_epoch_block_finality`.
+    ///   storage of block that's proven final by `current_epoch_block_finality`.
     /// * `next_validator_set_data` - Hash of next validator set(as it's stored in the
-    ///     `pallet_gear_bridge` storage).
+    ///   `pallet_gear_bridge` storage).
     pub fn prove_validator_set_change(
         previous_proof: ProofWithCircuitData,
         current_epoch_block_finality: BlockFinality,
@@ -257,15 +257,15 @@ pub mod proving {
     /// # Arguments
     ///
     /// * `previous_proof` - Proof that proves transition of authority set from genesis to current.
-    ///     It can be obtained by calling `prove_genesis` once and then `prove_validator_set_change`
-    ///     `N` times where `N` means number of eras passes from bridge genesis to the current era.
+    ///   It can be obtained by calling `prove_genesis` once and then `prove_validator_set_change`
+    ///   `N` times where `N` means number of eras passes from bridge genesis to the current era.
     /// * `block_finality_proof` - Finality proof of block that contain merkle trie root(in the
-    ///     storage of `pallet-gear-bridge`) that we want to relay.
+    ///   storage of `pallet-gear-bridge`) that we want to relay.
     /// * `genesis_config` - `GenesisConfig` that was used in the `prove_genesis` call.
     /// * `message_inclusion_proof` - Proof of inclusion of merkle trie root of queued messages into
-    ///     storage of `pallet-gear-bridge`.
+    ///   storage of `pallet-gear-bridge`.
     /// * `message_contents` - Root of merkle trie root as it's stored in `pallet-gear-bridge`
-    ///     storage.
+    ///   storage.
     pub fn prove_message_sent(
         previous_proof: ProofWithCircuitData,
         block_finality_proof: BlockFinality,

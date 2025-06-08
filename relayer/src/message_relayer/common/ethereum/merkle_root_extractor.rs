@@ -73,7 +73,7 @@ async fn task(mut this: MerkleRootExtractor, sender: UnboundedSender<RelayedMerk
                 BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
             );
             if attempts >= MAX_RETRIES {
-                log::error!("Merkle root extractor failed {} times: {}", attempts, err);
+                log::error!("Merkle root extractor failed {attempts} times: {err}");
                 break;
             }
 
@@ -94,12 +94,12 @@ async fn task(mut this: MerkleRootExtractor, sender: UnboundedSender<RelayedMerk
                 this.eth_api = match this.eth_api.reconnect().await {
                     Ok(eth_api) => eth_api,
                     Err(err) => {
-                        log::error!("Failed to reconnect to Ethereum: {}", err);
+                        log::error!("Failed to reconnect to Ethereum: {err}");
                         break;
                     }
                 };
             } else {
-                log::error!("Merkle root extractor failed: {}", err);
+                log::error!("Merkle root extractor failed: {err}");
                 break;
             }
         } else {

@@ -1,15 +1,11 @@
 //! Bridging Payment service implementation.
 
 use gstd::{exec, static_mut, static_ref};
-use sails_rs::{
-    gstd::{msg, ExecContext},
-    prelude::*,
-};
+use sails_rs::{gstd::msg, prelude::*};
 
 /// Bridging Payment service.
-pub struct BridgingPayment<ExecContext> {
-    exec_context: ExecContext,
-}
+#[derive(Default)]
+pub struct BridgingPayment;
 
 /// Events emitted by Bridging Payment service.
 #[derive(Encode, Decode, TypeInfo)]
@@ -35,10 +31,7 @@ pub struct State {
     pub fee: u128,
 }
 
-impl<T> BridgingPayment<T>
-where
-    T: ExecContext,
-{
+impl BridgingPayment {
     /// Initialize state of the Bridging Payment service.
     pub fn seed(initial_state: State) {
         unsafe {
@@ -47,8 +40,8 @@ where
     }
 
     /// Create Bridging Payment service.
-    pub fn new(exec_context: T) -> Self {
-        Self { exec_context }
+    pub fn new() -> Self {
+        Self
     }
 
     fn state(&self) -> &State {
@@ -61,10 +54,7 @@ where
 }
 
 #[service(events = BridgingPaymentEvents)]
-impl<T> BridgingPayment<T>
-where
-    T: ExecContext,
-{
+impl BridgingPayment {
     /// Set fee that this program will take from incoming requests.
     ///
     /// This method can be called only by admin.
@@ -94,7 +84,7 @@ where
     }
 
     fn ensure_admin(&self) {
-        if self.state().admin_address != self.exec_context.actor_id() {
+        if self.state().admin_address != Syscall::message_source() {
             panic!("Not an admin")
         }
     }
@@ -113,7 +103,7 @@ where
             panic!("Please attach exactly {} value", fee);
         }
 
-        self.notify_on(BridgingPaymentEvents::BridgingPaid { nonce })
+        self.emit_event(BridgingPaymentEvents::BridgingPaid { nonce })
             .expect("Error depositing event");
     }
 

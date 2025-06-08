@@ -123,7 +123,7 @@ pub fn affine_multisummation_batch_inversion<C: Curve>(
     let mut inverse_index = 0;
     for summation in summations {
         let n = summation.len();
-        let mut reduced_points = Vec::with_capacity((n + 1) / 2);
+        let mut reduced_points = Vec::with_capacity(n.div_ceil(2));
 
         // The special case for n=0 is to avoid underflow.
         let range_end = if n == 0 { 0 } else { n - 1 };

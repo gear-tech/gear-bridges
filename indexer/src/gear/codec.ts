@@ -8,10 +8,10 @@ export class Decoder {
   static async create(idlPath: string) {
     const parser = new SailsIdlParser();
     await parser.init();
-    const vft = new Sails(parser);
-    vft.parseIdl(fs.readFileSync(idlPath, 'utf-8'));
+    const sails = new Sails(parser);
+    sails.parseIdl(fs.readFileSync(idlPath, 'utf-8'));
 
-    return new Decoder(vft);
+    return new Decoder(sails);
   }
 
   decodeInput<T>(data: `0x${string}`): T {
@@ -25,6 +25,10 @@ export class Decoder {
     return this.sails.services[service].functions[fn].decodeResult<T>(data);
   }
 
+  decodeQueryOutput<T>(service: string, fn: string, data: `0x${string}`): T {
+    return this.sails.services[service].queries[fn].decodeResult<T>(data);
+  }
+
   decodeEvent<T>(service: string, method: string, data: `0x${string}`): T {
     return this.sails.services[service].events[method].decode(data);
   }
@@ -35,5 +39,9 @@ export class Decoder {
 
   method(data: `0x${string}`): string {
     return getFnNamePrefix(data);
+  }
+
+  encodeQueryInput(service: string, fn: string, data: any[]): string {
+    return this.sails.services[service].queries[fn].encodePayload(...data);
   }
 }

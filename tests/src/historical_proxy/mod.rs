@@ -22,7 +22,7 @@ async fn update_admin() {
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let admin = conn.accounts[0].0;
     let salt = conn.salt;
-    println!("admin: {:?}", admin);
+    println!("admin: {admin:?}");
     let proxy_program_id =
         historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
             .new()
@@ -89,7 +89,7 @@ async fn proxy() {
     let admin = conn.accounts[0].0;
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
     let salt = conn.salt;
-    println!("admin: {:?}", admin);
+    println!("admin: {admin:?}");
 
     let factory =
         eth_events_deneb_client::EthEventsDenebFactory::new(GClientRemoting::new(api.clone()));
@@ -127,10 +127,7 @@ async fn proxy() {
         .unwrap()
         .unwrap();
     assert_eq!(endpoint, ethereum_event_client_program_id);
-    println!(
-        "endpoint {:?}\nproxy: {:?}\nadmin: {:?}",
-        endpoint, proxy_program_id, admin
-    );
+    println!("endpoint {endpoint:?}\nproxy: {proxy_program_id:?}\nadmin: {admin:?}");
 
     let gas_limit = api.block_gas_limit().unwrap();
     let mut listener = api.subscribe().await.unwrap();
@@ -189,17 +186,14 @@ async fn proxy() {
         Ok(reply) => reply,
         Err(err) => {
             let block = api.last_block_number().await.unwrap();
-            println!(
-                "failed to send reply to {:?}: {:?}, block={}",
-                message_id, err, block
-            );
+            println!("failed to send reply to {message_id:?}: {err:?}, block={block}");
             let result = result.recv().await.unwrap().unwrap();
-            println!("{:?}", result);
+            println!("{result:?}");
             crate::panic!("{:?}", err);
         }
     };
 
-    println!("Checkpoint reply with ID {:?}", message_id);
+    println!("Checkpoint reply with ID {message_id:?}");
 
     println!("Processed...");
     // wait for SubmitReceipt request and reply to it
@@ -313,17 +307,14 @@ async fn proxy() {
         Ok(reply) => reply,
         Err(err) => {
             let block = api.last_block_number().await.unwrap();
-            println!(
-                "failed to send reply to {:?}: {:?}, block={}",
-                message_id, err, block
-            );
+            println!("failed to send reply to {message_id:?}: {err:?}, block={block}");
             let result = result.recv().await.unwrap().unwrap();
-            println!("{:?}", result);
+            println!("{result:?}");
             crate::panic!("{:?}", err);
         }
     };
 
-    println!("Checkpoint reply with ID {:?}", message_id);
+    println!("Checkpoint reply with ID {message_id:?}");
 
     listener
         .proc(|e| match e {

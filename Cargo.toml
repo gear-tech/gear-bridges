@@ -183,8 +183,8 @@ pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/g
 sails-idl-gen = "0.8.1"
 sails-client-gen = "0.8.1"
 sails-rs = "0.8.1"
-awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", rev = "3b0c53e82fa60fd9cab901fc41f566ea0a17b7ba", default-features = false }
-awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "3b0c53e82fa60fd9cab901fc41f566ea0a17b7ba", default-features = false, features = [
+awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", rev = "c1aaad471e3483c65a73d54bdf58147025e9a5c2", default-features = false }
+awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "c1aaad471e3483c65a73d54bdf58147025e9a5c2", default-features = false, features = [
     "vft",
     "vft-admin",
     "vft-extension",

@@ -41,7 +41,7 @@ pub struct RelayedMerkleRoot {
     pub merkle_root: H256,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TxHashWithSlot {
     pub slot_number: EthereumSlotNumber,
     pub tx_hash: TxHash,

@@ -1544,6 +1544,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d818003e740b63afc82337e3160717f4f63078720a810b7b903e70a5d1d2994"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "atomic-take"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10622,6 +10631,7 @@ dependencies = [
  "cgo_oligami",
  "checkpoint-light-client-client",
  "checkpoint-light-client-io",
+ "chrono",
  "clap",
  "derive_more 0.99.20",
  "dotenv",
@@ -10660,6 +10670,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "utils-prometheus",
+ "uuid",
  "vft-manager-client",
 ]
 
@@ -12289,6 +12300,12 @@ checksum = "286acebaf8b67c1130aedffad26f594eff0c1292389158135327d2e23aed582b"
 dependencies = [
  "cc",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "sha2"
@@ -15186,7 +15203,10 @@ version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
+ "atomic",
+ "getrandom 0.3.3",
  "js-sys",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

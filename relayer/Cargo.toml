@@ -52,6 +52,8 @@ tokio.workspace = true
 utils-prometheus.workspace = true
 subxt.workspace = true
 gsdk.workspace = true
+uuid.workspace = true
+chrono.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true

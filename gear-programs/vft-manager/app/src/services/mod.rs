@@ -1,7 +1,8 @@
-use gstd::{exec, static_mut, static_ref};
+use ::gstd::{static_mut, static_ref};
+use gstd::exec::{self};
 use sails_rs::{
     calls::*,
-    gstd::{calls::GStdRemoting, msg, ExecContext},
+    gstd::{self, calls::GStdRemoting, msg},
     prelude::*,
 };
 use vft_client::traits::*;
@@ -27,9 +28,8 @@ pub enum Order {
 }
 
 /// VFT Manager service.
-pub struct VftManager<ExecContext> {
-    exec_context: ExecContext,
-}
+#[derive(Default)]
+pub struct VftManager;
 
 /// Type of the token supply.
 #[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy)]
@@ -63,7 +63,7 @@ pub enum TokenSupply {
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
-enum Event {
+pub enum Event {
     /// Token mapping was added.
     ///
     /// This means that VFT Manager service now supports specified
@@ -201,10 +201,7 @@ pub struct Config {
 
 /// VFT Manager service implementation.
 #[service(events = Event)]
-impl<T> VftManager<T>
-where
-    T: ExecContext,
-{
+impl VftManager {
     /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
     pub fn update_erc20_manager_address(&mut self, new_erc20_manager_address: H160) {
         self.ensure_admin();
@@ -232,7 +229,7 @@ where
             .token_map
             .insert(vara_token_id, eth_token_id, supply_type);
 
-        self.notify_on(Event::TokenMappingAdded {
+        self.emit_event(Event::TokenMappingAdded {
             vara_token_id,
             eth_token_id,
             supply_type,
@@ -246,7 +243,7 @@ where
 
         let (eth_token_id, supply_type) = self.state_mut().token_map.remove(vara_token_id);
 
-        self.notify_on(Event::TokenMappingRemoved {
+        self.emit_event(Event::TokenMappingRemoved {
             vara_token_id,
             eth_token_id,
             supply_type,
@@ -281,7 +278,7 @@ where
 
     /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
-        if self.state().admin != self.exec_context.actor_id() {
+        if self.state().admin != Syscall::message_source() {
             panic!("Not admin")
         }
     }
@@ -294,7 +291,7 @@ where
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
     pub fn pause(&mut self) {
-        let sender = self.exec_context.actor_id();
+        let sender = Syscall::message_source();
         let state = &self.state();
 
         if sender != state.admin && sender != state.pause_admin {
@@ -307,7 +304,7 @@ where
 
         self.state_mut().is_paused = true;
 
-        self.notify_on(Event::Paused)
+        self.emit_event(Event::Paused)
             .expect("Failed to deposit event");
     }
 
@@ -317,7 +314,7 @@ where
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
     pub fn unpause(&mut self) {
-        let sender = self.exec_context.actor_id();
+        let sender = Syscall::message_source();
         let state = &self.state();
 
         if sender != state.admin && sender != state.pause_admin {
@@ -334,7 +331,7 @@ where
 
         self.state_mut().is_paused = false;
 
-        self.notify_on(Event::Unpaused)
+        self.emit_event(Event::Unpaused)
             .expect("Failed to deposit event");
     }
 
@@ -381,7 +378,7 @@ where
             panic!("Please attach exactly {fee} value");
         }
 
-        let sender = self.exec_context.actor_id();
+        let sender = Syscall::message_source();
 
         request_bridging::request_bridging(self, sender, vara_token_id, amount, receiver).await
     }
@@ -424,7 +421,7 @@ where
 
         self.state_mut().vft_manager_new = Some(vft_manager_new);
 
-        let vft_manager = exec::program_id();
+        let vft_manager = Syscall::program_id();
         let mut service = vft_client::Vft::new(GStdRemoting);
         let mappings = self.state().token_map.read_state();
         for (vft, _erc20, _supply) in mappings {
@@ -577,7 +574,7 @@ where
         {
             use submit_receipt::token_operations;
 
-            let source = self.exec_context.actor_id();
+            let source = Syscall::message_source();
             match _supply_type {
                 TokenSupply::Ethereum => {
                     token_operations::mint(
@@ -626,17 +623,15 @@ where
     }
 }
 
-impl<T> VftManager<T>
-where
-    T: ExecContext,
-{
+impl VftManager {
     /// Initialize VFT Manager service.
-    pub fn seed(config: InitConfig, exec_context: T) {
+    pub fn seed(config: InitConfig) {
         unsafe {
+            let source = Syscall::message_source();
             STATE = Some(State {
                 gear_bridge_builtin: config.gear_bridge_builtin,
-                admin: exec_context.actor_id(),
-                pause_admin: exec_context.actor_id(),
+                admin: source,
+                pause_admin: source,
                 erc20_manager_address: config.erc20_manager_address,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
@@ -651,8 +646,8 @@ where
     }
 
     /// Create VFT Manager service.
-    pub fn new(exec_context: T) -> Self {
-        Self { exec_context }
+    pub fn new() -> Self {
+        Self
     }
 
     /// Get a reference to the global [State].

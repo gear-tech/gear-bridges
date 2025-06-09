@@ -57,7 +57,7 @@ impl<'a> ReplayBack<'a> {
             checkpoints: {
                 let mut checkpoints = Vec::with_capacity(EPOCHS_PER_SYNC_COMMITTEE as usize);
                 checkpoints.push((finalized_header.slot, finalized_header.tree_hash_root()));
-                self.notify_on(Event::NewCheckpoint {
+                self.emit_event(Event::NewCheckpoint {
                     slot: finalized_header.slot,
                     tree_hash_root: finalized_header.tree_hash_root(),
                 })
@@ -123,7 +123,7 @@ fn process_headers(
         if slot % SLOTS_PER_EPOCH == 0 || slot + SLOTS_PER_EPOCH < *slot_next {
             replay_back.checkpoints.push((slot, hash));
             service
-                .notify_on(Event::NewCheckpoint {
+                .emit_event(Event::NewCheckpoint {
                     slot,
                     tree_hash_root: hash,
                 })
@@ -139,7 +139,7 @@ fn process_headers(
     while let Some((slot, checkpoint)) = replay_back.checkpoints.pop() {
         state.checkpoints.push(slot, checkpoint);
         service
-            .notify_on(Event::NewCheckpoint {
+            .emit_event(Event::NewCheckpoint {
                 slot,
                 tree_hash_root: checkpoint,
             })

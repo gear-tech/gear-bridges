@@ -34,6 +34,7 @@ members = [
     "tools/genesis-config",
     "tools/governance", 
     "tests",
+    "gear-common",
 ]
 
 resolver = "2"
@@ -53,6 +54,7 @@ plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum_beacon_client = { path = "ethereum_beacon_client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
+gear-common = { path = "gear-common" }
 
 bridging-payment = { path = "gear-programs/bridging-payment" }
 bridging-payment-app = { path = "gear-programs/bridging-payment/app" }

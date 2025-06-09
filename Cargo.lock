@@ -4801,6 +4801,16 @@ dependencies = [
 
 [[package]]
 name = "gear-common"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "gclient",
+ "sails-rs",
+ "vft-client",
+]
+
+[[package]]
+name = "gear-common"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc72b0e1d9d310bfb7d2164deb1059571a2965713f79faec1c1522c13ee3e53"
@@ -14307,6 +14317,7 @@ dependencies = [
  "ethereum_beacon_client",
  "futures",
  "gclient",
+ "gear-common 0.3.0",
  "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest",

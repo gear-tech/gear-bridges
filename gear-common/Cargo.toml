@@ -1,0 +1,10 @@
+[package]
+name = "gear-common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+gclient.workspace = true
+sails-rs = { workspace = true, features = ["gclient"] }
+vft-client = { workspace = true }

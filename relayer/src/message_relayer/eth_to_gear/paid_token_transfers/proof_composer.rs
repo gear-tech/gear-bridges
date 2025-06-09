@@ -43,7 +43,9 @@ impl<'a> ProofComposerTask<'a> {
             payload.proof_block.block.slot
         );
 
-        self.ctx.task_manager.enqueue(Task::submit_message(payload, self.message));
+        self.ctx
+            .task_manager
+            .enqueue(Task::submit_message(payload, self.message));
         Ok(())
     }
 }

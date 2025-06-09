@@ -1,5 +1,8 @@
 use crate::message_relayer::{
-    common::{gear::{block_listener::GearBlock, checkpoints_extractor::checkpoints_for_block}, EthereumSlotNumber},
+    common::{
+        gear::{block_listener::GearBlock, checkpoints_extractor::checkpoints_for_block},
+        EthereumSlotNumber,
+    },
     eth_to_gear::paid_token_transfers::task_manager::TaskContext,
 };
 use primitive_types::H256;
@@ -30,7 +33,9 @@ impl<'a> ExtractCheckpoints<'a> {
                 slot,
                 tree_hash_root
             );
-            self.ctx.task_manager.add_checkpoint(EthereumSlotNumber(slot));
+            self.ctx
+                .task_manager
+                .add_checkpoint(EthereumSlotNumber(slot));
         }
         Ok(())
     }

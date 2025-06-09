@@ -152,28 +152,22 @@ impl TaskManager {
     }
 
     pub async fn run(
-        self: &Arc<Self>,
-        mut ethereum_blocks: UnboundedReceiver<EthereumBlockNumber>,
-        mut gear_blocks: Receiver<GearBlock>,
+        self: Arc<Self>,
+        mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
+        mut message_paid_events: UnboundedReceiver<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
         loop {
             tokio::select! {
-                Some(block) = ethereum_blocks.recv() => {
-                    let slot_number = find_slot_by_block_number(
-                        &self.eth_api,
-                        &self.beacon_client,
-                        block,
-                    ).await?;
-                    self.enqueue(Task::new(TaskKind::ExtractMessagePaidEvents { block, slot_number }));
+                Some(slot_number) = checkpoints.recv() => {
+                    self.add_checkpoint(slot_number);
                 }
 
-                Ok(block) = gear_blocks.recv() => {
-                    self.enqueue(Task::new(TaskKind::ExtractCheckpoints {
-                        block
-                    }));
+                Some(tx_hash) = message_paid_events.recv() => {
+                    self.enqueue(Task::paid_event(tx_hash.tx_hash, tx_hash.slot_number));
                 }
+
                 else => {
-                    let mut to_process = Vec::new();
+                     let mut to_process = Vec::new();
 
                     let mut task_queue = self.task_queue.write().unwrap();
                     let mut failed = self.failed_tasks.write().unwrap();
@@ -199,24 +193,18 @@ impl TaskManager {
                     for uuid in to_process {
                         if let Some(task) = task_queue.remove(&uuid)
                             .or_else(|| failed.remove(&uuid).map(|(t, _)| t)) {
+                            let ctx = self.context_for(&task);
+                            let task_uuid = task.uuid;
+                            self.running_tasks
+                                .write()
+                                .unwrap()
+                                .insert(task.uuid, task.clone());
                             match task.task_kind {
-                                TaskKind::Shutdown => {
-                                    log::info!("Shutting down task manager");
-                                    return Ok(());
-                                }
                                 TaskKind::PaidEvent { ref tx } => {
-                                    let ctx = self.context_for(&task);
-                                    self.running_tasks
-                                        .write()
-                                        .unwrap()
-                                        .insert(task.uuid, task.clone());
-
-
-                                    let task_uuid = task.uuid;
                                     let historical_proxy_address =
                                         self.historical_proxy_client_address;
-                                    let tx = tx.clone();
                                     let suri = self.suri.clone();
+                                    let tx = tx.clone();
                                     tokio::task::spawn_blocking(move || block_on(async move {
                                         let proof_composer = super::proof_composer::ProofComposerTask::new(
                                             &ctx,
@@ -237,86 +225,14 @@ impl TaskManager {
                                     }));
                                 }
 
-                                TaskKind::ExtractMessagePaidEvents {
-                                    block,
-                                    slot_number
-                                } => {
-
-                                    let ctx = self.context_for(&task);
-
-                                    self.running_tasks
-                                        .write()
-                                        .unwrap()
-                                        .insert(task.uuid, task.clone());
-                                    let bridging_payment_address = self.bridging_payment_address;
-                                    let task_uuid = task.uuid;
-                                    tokio::spawn(async move {
-                                        let mut task = super::message_paid_event_extractor::ExtractMessagePaidEvents::new(
-                                            &ctx,
-                                            block,
-                                            slot_number,
-                                            bridging_payment_address
-                                        );
-
-                                        match task.run().await {
-                                            Ok(()) => {
-                                                ctx.task_manager.complete(task_uuid);
-                                            }
-
-                                            Err(err) => {
-                                                ctx.task_manager.fail(task_uuid, err);
-                                            }
-                                        }
-                                    });
-                                }
-
-                                TaskKind::ExtractCheckpoints { ref block } => {
-                                    let ctx = self.context_for(&task);
-
-                                    self.running_tasks
-                                        .write()
-                                        .unwrap()
-                                        .insert(task.uuid, task.clone());
-
-                                    let task_uuid = task.uuid;
-                                    let checkpoint_light_client_address =
-                                        self.checkpoint_light_client_address;
-                                    let block = block.clone();
-                                    tokio::spawn(async move {
-                                        let mut task = super::checkpoint_extractor::ExtractCheckpoints::new(
-                                            &ctx,
-                                            checkpoint_light_client_address,
-                                        );
-
-                                        match task.run(&block).await {
-                                            Ok(()) => {
-                                                ctx.task_manager.complete(task_uuid);
-                                            }
-
-                                            Err(err) => {
-                                                ctx.task_manager.fail(task_uuid, err);
-                                            }
-                                        }
-                                    });
-                                }
-
                                 TaskKind::SubmitMessage { ref payload, ref tx } => {
-                                    let ctx = self.context_for(&task);
-                                    self.running_tasks
-                                        .write()
-                                        .unwrap()
-                                        .insert(task.uuid, task.clone());
-
-                                    let task_uuid = task.uuid;
-
                                     let vft_manager_client_address =
                                         self.vft_manager_client_address;
                                     let suri = self.suri.clone();
-                                    let tx = tx.clone();
-                                    let payload = payload.clone();
                                     let historical_proxy_address =
                                         self.historical_proxy_client_address;
-
+                                    let tx = tx.clone();
+                                    let payload = payload.clone();
                                     tokio::task::spawn_blocking(move || block_on(async move {
                                         let task = super::submit_message::SubmitMessageTask::new(
                                             &ctx,
@@ -337,12 +253,10 @@ impl TaskManager {
                                             }
                                         }
                                     }));
-
                                 }
-                            }
 
-                            let mut completed_tasks = self.completed_tasks.write().unwrap();
-                            completed_tasks.push(task);
+                                _ => unimplemented!()
+                            }
                         }
                     }
                 }
@@ -372,8 +286,6 @@ pub struct Task {
     pub retries: usize,
     pub task_kind: TaskKind,
 }
-
-
 
 impl Task {
     pub fn new(task_kind: TaskKind) -> Self {
@@ -405,7 +317,10 @@ impl Task {
     }
 
     pub fn needs_eth_api(&self) -> bool {
-        matches!(self.task_kind, TaskKind::PaidEvent { .. } | TaskKind::ExtractMessagePaidEvents { .. })
+        matches!(
+            self.task_kind,
+            TaskKind::PaidEvent { .. } | TaskKind::ExtractMessagePaidEvents { .. }
+        )
     }
 }
 #[derive(Clone, Debug)]

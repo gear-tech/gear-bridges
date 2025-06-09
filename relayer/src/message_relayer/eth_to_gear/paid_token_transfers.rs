@@ -7,8 +7,14 @@ use ethereum_client::EthApi;
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
-    ethereum::block_listener::BlockListener as EthereumBlockListener,
-    gear::block_listener::BlockListener as GearBlockListener,
+    ethereum::{
+        block_listener::BlockListener as EthereumBlockListener,
+        message_paid_event_extractor::MessagePaidEventExtractor,
+    },
+    gear::{
+        block_listener::BlockListener as GearBlockListener,
+        checkpoints_extractor::CheckpointsExtractor,
+    },
 };
 
 use super::api_provider::ApiProviderConnection;
@@ -86,8 +92,21 @@ impl Relayer {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
+        let message_paid_events = MessagePaidEventExtractor::new(
+            self.task_manager.eth_api.clone(),
+            self.task_manager.beacon_client.clone(),
+            self.task_manager.bridging_payment_address,
+        )
+        .run(ethereum_blocks)
+        .await;
+
+        let checkpoints =
+            CheckpointsExtractor::new(self.task_manager.checkpoint_light_client_address)
+                .run(gear_blocks)
+                .await;
+
         self.task_manager
-            .run(ethereum_blocks, gear_blocks)
+            .run(checkpoints, message_paid_events)
             .await
             .unwrap_or_else(|err| {
                 log::error!("Relayer task manager failed: {err}");

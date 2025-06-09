@@ -1,9 +1,7 @@
-use primitive_types::{H160, H256};
-
-use std::{iter, sync::Arc};
-
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
+use primitive_types::{H160, H256};
+use std::{iter, sync::Arc};
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
@@ -53,21 +51,6 @@ impl Relayer {
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
-        /*
-        let route =
-            <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
-
-        let gear_message_sender = MessageSender::new(
-            api_provider,
-            suri,
-            eth_api,
-            beacon_client,
-            historical_proxy_address,
-            checkpoint_light_client_address,
-            vft_manager_address,
-            route,
-            true,
-        );*/
 
         let task_manager = task_manager::TaskManager::new(
             api_provider.clone(),
@@ -78,6 +61,7 @@ impl Relayer {
             historical_proxy_address,
             vft_manager_address,
             suri,
+            storage::Storage::None,
         );
 
         Ok(Self {
@@ -104,9 +88,18 @@ impl Relayer {
             CheckpointsExtractor::new(self.task_manager.checkpoint_light_client_address)
                 .run(gear_blocks)
                 .await;
+        let proof_composer = proof_composer::ProofComposerTask::new(
+            self.task_manager.api_provider.clone(),
+            self.task_manager.beacon_client.clone(),
+            self.task_manager.eth_api.clone(),
+            self.task_manager.historical_proxy_client_address,
+            self.task_manager.suri.clone(),
+        );
+
+        let proof_composer_io = proof_composer.run(checkpoints);
 
         self.task_manager
-            .run(checkpoints, message_paid_events)
+            .run(proof_composer_io, message_paid_events)
             .await
             .unwrap_or_else(|err| {
                 log::error!("Relayer task manager failed: {err}");
@@ -114,9 +107,7 @@ impl Relayer {
     }
 }
 
-pub mod checkpoint_extractor;
-pub mod message_paid_event_extractor;
 pub mod proof_composer;
 pub mod storage;
-pub mod submit_message;
+//pub mod submit_message;
 pub mod task_manager;

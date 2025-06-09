@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 
 contract Relayer is IRelayer {
-    IVerifier private _verifier;
     mapping(uint256 => bytes32) private _block_numbers;
     mapping(bytes32 => uint256) private _merkle_roots;
     bool _emergencyStop;

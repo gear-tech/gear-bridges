@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {Test, console} from "forge-std/Test.sol";
-import {Verifier} from "../src/mocks/VerifierMock.sol";
+import {VerifierMock} from "../src/mocks/VerifierMock.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 
 import {Relayer} from "../src/Relayer.sol";

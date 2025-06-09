@@ -112,10 +112,7 @@ $ anvil
 
 ```shell
 $ source .env
-$ forge script script/DeployMockERC20.s.sol:DeployMockERC20Script --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
-
-$ source .env
-$ forge script script/DeployWrappedEther.s.sol:DeployWrappedEtherScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/DeployERC20Tokens.s.sol:DeployERC20TokensScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
 
 $ source .env
 $ forge script script/DeployCore.s.sol:DeployCoreScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv

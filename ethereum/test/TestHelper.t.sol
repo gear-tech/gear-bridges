@@ -3,13 +3,11 @@ pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
-
+import {WrappedVara} from "../src/erc20/WrappedVara.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
-import {Verifier} from "../src/mocks/VerifierMock.sol";
+import {VerifierMock} from "../src/mocks/VerifierMock.sol";
 import {Relayer} from "../src/Relayer.sol";
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
-
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 
 address constant OWNER = address(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266);
@@ -40,7 +38,7 @@ contract TestHelper is Test {
     IVerifier public verifier;
     ERC20Manager public erc20_manager;
     MessageQueue public message_queue;
-    ERC20Mock public erc20_token;
+    WrappedVara public erc20_token;
 
     function setUp() public virtual {
         vm.startPrank(OWNER, OWNER);
@@ -48,9 +46,10 @@ contract TestHelper is Test {
         ProxyContract _message_queue_proxy = new ProxyContract();
         ProxyContract _treasury_proxy = new ProxyContract();
 
-        erc20_token = new ERC20Mock("wVARA");
+        erc20_token = new WrappedVara(OWNER);
+        erc20_token.mint(OWNER, type(uint256).max);
 
-        Verifier _verifier = new Verifier();
+        VerifierMock _verifier = new VerifierMock();
 
         Relayer _relayer = new Relayer(address(_verifier));
         ERC20Manager _erc20_manager = new ERC20Manager(

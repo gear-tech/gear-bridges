@@ -2,13 +2,13 @@
 pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Verifier} from "../src/mocks/VerifierMock.sol";
+import {VerifierMock} from "../src/mocks/VerifierMock.sol";
 
 contract VerifierTest is Test {
-    Verifier public verifier;
+    VerifierMock public verifier;
 
     function setUp() public {
-        verifier = new Verifier();        
+        verifier = new VerifierMock();
     }
 
     function test_block_proof() view public {

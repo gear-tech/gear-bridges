@@ -7,7 +7,7 @@
     "start": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "codegen": "graphql-codegen"
+    "codegen": "graphql-codegen --require dotenv/config"
   },
   "dependencies": {
     "@base-ui-components/react": "1.0.0-beta.0",

@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::message_relayer::eth_to_gear::paid_token_transfers::task_manager::Task;
 
 pub enum Storage {
+    #[allow(dead_code)]
     None,
     #[allow(dead_code)]
     Json(PathBuf),

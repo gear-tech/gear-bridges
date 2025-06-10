@@ -1,7 +1,8 @@
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use primitive_types::{H160, H256};
-use std::{iter, sync::Arc};
+use sails_rs::calls::ActionIo;
+use std::{iter, path::PathBuf, sync::Arc};
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
@@ -63,8 +64,12 @@ impl Relayer {
             beacon_client.clone(),
             bridging_payment_address,
         );
+
+        let route =
+            <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
         let message_sender = message_sender::MessageSender::new(
             vft_manager_address,
+            route,
             historical_proxy_address,
             api_provider.clone(),
             suri.clone(),
@@ -78,7 +83,8 @@ impl Relayer {
             suri.clone(),
         );
 
-        let task_manager = task_manager::TaskManager::new(storage::Storage::None);
+        let task_manager =
+            task_manager::TaskManager::new(storage::Storage::Json(PathBuf::from("./tasks")));
 
         Ok(Self {
             gear_block_listener,

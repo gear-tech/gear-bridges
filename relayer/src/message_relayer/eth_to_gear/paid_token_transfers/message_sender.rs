@@ -17,7 +17,8 @@ use crate::common::MAX_RETRIES;
 use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 
 pub struct MessageSender {
-    pub vft_mananager_address: H256,
+    pub receiver_address: H256,
+    pub receiver_route: Vec<u8>,
     pub historical_proxy_address: H256,
     pub api: ApiProviderConnection,
     pub suri: String,
@@ -25,13 +26,15 @@ pub struct MessageSender {
 
 impl MessageSender {
     pub fn new(
-        vft_mananager_address: H256,
+        receiver_address: H256,
+        receiver_route: Vec<u8>,
         historical_proxy_address: H256,
         api: ApiProviderConnection,
         suri: String,
     ) -> Self {
         Self {
-            vft_mananager_address,
+            receiver_address,
+            receiver_route,
             historical_proxy_address,
             api,
             suri,
@@ -95,8 +98,6 @@ impl MessageSender {
         msg_receiver: &mut UnboundedReceiver<Message>,
         response_sender: &mut UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
-        let route =
-            <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
         let gear_api = self.api.gclient_client(&self.suri)?;
         while let Some(Message {
             task_uuid,
@@ -115,8 +116,8 @@ impl MessageSender {
                 .redirect(
                     payload.proof_block.block.slot,
                     payload.encode(),
-                    self.vft_mananager_address.into(),
-                    route.clone(),
+                    self.receiver_address.into(),
+                    self.receiver_route.clone(),
                 )
                 .with_gas_limit(gas_limit)
                 .send_recv(self.historical_proxy_address.into())

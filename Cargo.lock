@@ -3177,6 +3177,7 @@ dependencies = [
  "clap",
  "dotenv",
  "gclient",
+ "gear-common 0.3.0",
  "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "sails-rs",

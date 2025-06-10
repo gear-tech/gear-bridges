@@ -11,6 +11,7 @@ vft-vara-client.workspace = true
 
 clap.workspace = true
 dotenv.workspace = true
+gear-common.workspace = true
 gear-core.workspace = true
 gclient.workspace = true
 hex.workspace = true

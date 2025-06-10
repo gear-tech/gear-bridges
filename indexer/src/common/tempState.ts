@@ -172,13 +172,16 @@ export class TempState {
   }
 
   private async _getPairs(withRemoved = false) {
-    const condition = withRemoved ? {} : { isRemoved: withRemoved };
-    const tokens = await this._ctx.store.find(Pair, { where: condition });
+    const tokens = withRemoved
+      ? await this._ctx.store.find(Pair)
+      : await this._ctx.store.find(Pair, { where: { isRemoved: false } });
 
     for (const token of tokens) {
       if (this._network === Network.Ethereum) {
+        this._ctx.log.info(`Setting pair for ${token.ethToken}`);
         this._pairs.set(token.ethToken, token);
       } else {
+        this._ctx.log.info(`Setting pair for ${token.varaToken}`);
         this._pairs.set(token.varaToken, token);
       }
     }
@@ -195,13 +198,13 @@ export class TempState {
   }
 
   private async _getDestinationAddress(source: string): Promise<string> {
-    source = source.toLowerCase();
-    let pair = this._pairs.get(source);
+    const _source = source.toLowerCase();
+    let pair = this._pairs.get(_source);
     while (!pair) {
-      this._ctx.log.warn(`Pair not found for ${source}, retrying...`);
+      this._ctx.log.warn(`Pair not found for ${_source}, retrying...`);
       await new Promise((resolve) => setTimeout(resolve, 1000));
       await this._getPairs(true);
-      pair = this._pairs.get(source);
+      pair = this._pairs.get(_source);
     }
 
     if (this._network === Network.Ethereum) {
@@ -328,7 +331,7 @@ export class TempState {
       return;
     }
     this._statuses.set(nonce, status);
-    this._ctx.log.info(`${nonce}: Status update recorded for ${status}`);
+    this._ctx.log.info(`${nonce}: Status changed to ${status}`);
   }
 
   private async _saveStatusUpdates(): Promise<void> {
@@ -340,8 +343,10 @@ export class TempState {
     const noncesNotInCache = noncesToUpdate.filter((nonce) => !this._transfers.has(nonce));
 
     if (noncesNotInCache.length > 0) {
-      const transfersToFetch = await this._getTransfers(noncesNotInCache);
-      for (const transfer of transfersToFetch) {
+      const transfers = await this._ctx.store.find(Transfer, {
+        where: { nonce: In(noncesNotInCache), sourceNetwork: this._network },
+      });
+      for (const transfer of transfers) {
         this._transfers.set(transfer.nonce, transfer);
       }
     }
@@ -351,7 +356,7 @@ export class TempState {
       if (transfer) {
         transfer.status = status;
       } else {
-        this._ctx.log.error({ nonce }, 'Transfer not found in cache or DB for status update');
+        this._ctx.log.error(`${nonce}: Transfer not found in cache or DB for status update`);
       }
     }
   }

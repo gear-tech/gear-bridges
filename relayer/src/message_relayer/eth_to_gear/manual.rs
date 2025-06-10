@@ -43,7 +43,7 @@ pub async fn relay(
         api_provider.clone(),
         beacon_client.clone(),
         eth_api.clone(),
-        historical_proxy_address.clone(),
+        historical_proxy_address,
         gear_suri.clone(),
     );
 
@@ -73,15 +73,19 @@ pub async fn relay(
 
     match task_manager
         .run(
+            false,
             proof_composer_io,
             deposit_events_receiver,
             message_sender_io,
+            
         )
         .await
     {
-        Ok(()) => (),
+        Ok(()) => {
+            drop(deposit_events_sender);
+        },
         Err(err) => {
-            log::error!("Error running task manager: {}", err);
+            log::error!("Error running task manager: {err}");
         }
     }
 

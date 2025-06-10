@@ -109,7 +109,7 @@ impl Relayer {
         let msg_sender_io = self.message_sender.run();
 
         self.task_manager
-            .run(proof_composer_io, message_paid_events, msg_sender_io)
+            .run(true, proof_composer_io, message_paid_events, msg_sender_io)
             .await
             .unwrap_or_else(|err| {
                 log::error!("Relayer task manager failed: {err}");

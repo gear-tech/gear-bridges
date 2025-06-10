@@ -100,6 +100,7 @@ impl ProofComposerTask {
         loop {
             tokio::select! {
                 Some(checkpoint) = checkpoints.recv() => {
+                    log::info!("Received checkpoint: {checkpoint}");
                     self.last_checkpoint = Some(checkpoint);
                     let mut to_process = Vec::new();
 
@@ -113,6 +114,7 @@ impl ProofComposerTask {
                     });
 
                     for (task_uuid, tx) in to_process {
+                        log::info!("Processing waiting transaction for task {task_uuid}: {tx:?}");
                         match self.compose_payload(tx).await {
                             Ok(payload) => {
                                 responses_tx.send(ProofComposerResponse { payload, task_uuid }).unwrap();
@@ -128,6 +130,7 @@ impl ProofComposerTask {
                 Some(req) = requests_rx.recv() => {
                     let ProofComposerRequest { tx, task_uuid } = req;
                     if let Some(last_checkpoint) = self.last_checkpoint {
+                        log::info!("Received request for task {task_uuid}: {tx:?}");
                         if tx.slot_number <= last_checkpoint {
                             match self.compose_payload(tx).await {
                                 Ok(payload) => {
@@ -139,6 +142,7 @@ impl ProofComposerTask {
                                 }
                             }
                         } else {
+                            log::info!("Task {task_uuid} is waiting for checkpoint, adding to queue.");
                             self.waiting_checkpoint.push((task_uuid, tx));
                         }
                     } else {

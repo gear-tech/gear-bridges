@@ -22,6 +22,7 @@ impl Storage {
                 for (task_uuid, task) in tasks {
                     let mut filename = path.join(task_uuid.to_string());
                     filename.set_extension("json");
+
                     let mut file = tokio::fs::OpenOptions::new()
                         .write(true)
                         .create(true)

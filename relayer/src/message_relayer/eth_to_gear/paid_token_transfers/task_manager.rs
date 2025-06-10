@@ -118,17 +118,7 @@ impl TaskManager {
 
 
                     else => {
-                        // if any of the channels are closed, this indicates an error in one of the actors
-                        // so we just exit the task manager.
-                        if proof_rx.is_closed() {
-                            log::info!("Proof composer channel is closed, exiting task manager.");
-                            return Ok(());
-                        }
-
-                        if message_paid_events.is_closed() {
-                            log::info!("No more message paid events to process, waiting for new events.");
-                            break;
-                        }
+                        
 
                         for (task_uuid, task) in tasks.iter_mut() {
                             if let TaskState::PaidEvent { tx } = &task.task_state {
@@ -153,6 +143,18 @@ impl TaskManager {
                         // now that we have processed all tasks, update the storage
                         // to reflect the current state of the task queue.
                         self.update_storage().await;
+
+                        // if any of the channels are closed, this indicates an error in one of the actors
+                        // so we just exit the task manager.
+                        if proof_rx.is_closed() {
+                            log::info!("Proof composer channel is closed, exiting task manager.");
+                            return Ok(());
+                        }
+
+                        if message_paid_events.is_closed() {
+                            log::info!("No more message paid events to process, waiting for new events.");
+                            break;
+                        }
                     }
                 }
             }

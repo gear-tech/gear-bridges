@@ -17,7 +17,7 @@ use vft_client::traits::*;
 /// - `size_batch`: Number of balances to process per batch
 /// - `vft`: ActorId of the source VFT contract (old)
 /// - `vft_new`: ActorId of the destination VFT contract (new). Provided `remoting` should
-///     have account with mint-permission.
+///   have account with mint-permission.
 ///
 /// # Returns
 /// - `Ok(())` if migration completes successfully
@@ -44,7 +44,13 @@ use vft_client::traits::*;
 ///     ).await
 /// }
 /// ```
-pub async fn migrate_balances(remoting: GClientRemoting, gas_limit: u64, size_batch: u32, vft: ActorId, vft_new: ActorId) -> Result<()> {
+pub async fn migrate_balances(
+    remoting: GClientRemoting,
+    gas_limit: u64,
+    size_batch: u32,
+    vft: ActorId,
+    vft_new: ActorId,
+) -> Result<()> {
     let service_vft = vft_client::Vft::new(remoting.clone());
     let supply = service_vft
         .total_supply()
@@ -53,7 +59,9 @@ pub async fn migrate_balances(remoting: GClientRemoting, gas_limit: u64, size_ba
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
     if !supply.is_zero() {
-        Err(anyhow!("New VFT program should have zero supply but it is {supply}"))?;
+        Err(anyhow!(
+            "New VFT program should have zero supply but it is {supply}"
+        ))?;
     }
 
     let service_extension = vft_client::VftExtension::new(remoting.clone());
@@ -76,7 +84,7 @@ pub async fn migrate_balances(remoting: GClientRemoting, gas_limit: u64, size_ba
                 .with_gas_limit(gas_limit)
                 .send_recv(vft_new)
                 .await
-        .map_err(|e| anyhow!("{e:?}"))?;
+                .map_err(|e| anyhow!("{e:?}"))?;
         }
 
         if (len as u32) < size_batch {

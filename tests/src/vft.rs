@@ -1,9 +1,9 @@
+use super::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
 use gclient::Result;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
-use super::{connect_to_node, DEFAULT_BALANCE};
 
 #[tokio::test]
 async fn upgrade() -> Result<()> {
@@ -136,8 +136,20 @@ async fn upgrade() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
     assert_eq!(balances.len(), 2);
-    assert_eq!(balances.iter().find_map(|(id, balance)| (id == &id_user_1).then_some(*balance)).unwrap(), vft_balance_1);
-    assert_eq!(balances.iter().find_map(|(id, balance)| (id == &id_user_2).then_some(*balance)).unwrap(), vft_balance_2);
+    assert_eq!(
+        balances
+            .iter()
+            .find_map(|(id, balance)| (id == &id_user_1).then_some(*balance))
+            .unwrap(),
+        vft_balance_1
+    );
+    assert_eq!(
+        balances
+            .iter()
+            .find_map(|(id, balance)| (id == &id_user_2).then_some(*balance))
+            .unwrap(),
+        vft_balance_2
+    );
 
     let service_vft = vft_client::Vft::new(remoting.clone());
     let balance = service_vft
@@ -171,10 +183,7 @@ async fn upgrade() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    let result = service
-        .is_paused()
-        .recv(vft_id_1)
-        .await;
+    let result = service.is_paused().recv(vft_id_1).await;
     assert!(result.is_err(), "result = {result:?}");
     let error = format!("{result:?}");
     assert!(error.contains("InactiveProgram"));

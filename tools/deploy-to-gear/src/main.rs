@@ -306,11 +306,19 @@ impl Uploader {
 
 async fn migrate_balances(gear_api: GearApi, args: MigrateBalances) {
     let gas_limit = gear_api
-                .block_gas_limit()
-                .expect("Unable to get block gas limit");
+        .block_gas_limit()
+        .expect("Unable to get block gas limit");
     let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
 
-    if let Err(e) = gear_common::migrate_balances(GClientRemoting::new(gear_api), gas_limit, size_batch, str_to_actorid(args.vft), str_to_actorid(args.vft_new)).await {
+    if let Err(e) = gear_common::migrate_balances(
+        GClientRemoting::new(gear_api),
+        gas_limit,
+        size_batch,
+        str_to_actorid(args.vft),
+        str_to_actorid(args.vft_new),
+    )
+    .await
+    {
         println!("Failed to migrate balances: {e:?}");
     }
 }

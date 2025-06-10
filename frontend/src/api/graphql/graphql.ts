@@ -768,6 +768,26 @@ export type TransfersConnection = {
   totalCount: Scalars['Int']['output'];
 };
 
+export type PairsQueryQueryVariables = Exact<{ [key: string]: never }>;
+
+export type PairsQueryQuery = {
+  __typename?: 'Query';
+  pairs: Array<{
+    __typename?: 'Pair';
+    ethToken: string;
+    ethTokenDecimals: number;
+    ethTokenName: string;
+    ethTokenSymbol: string;
+    id: string;
+    isRemoved: boolean;
+    tokenSupply: Network;
+    varaToken: string;
+    varaTokenDecimals: number;
+    varaTokenName: string;
+    varaTokenSymbol: string;
+  }>;
+};
+
 export type TransfersQueryQueryVariables = Exact<{
   limit: Scalars['Int']['input'];
   offset: Scalars['Int']['input'];
@@ -803,6 +823,41 @@ export type TransfersConnectionQueryQuery = {
   transfersConnection: { __typename?: 'TransfersConnection'; totalCount: number };
 };
 
+export const PairsQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'PairsQuery' },
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'pairs' },
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [
+                { kind: 'Field', name: { kind: 'Name', value: 'ethToken' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'ethTokenDecimals' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'ethTokenName' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'ethTokenSymbol' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'id' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'isRemoved' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'tokenSupply' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaToken' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaTokenDecimals' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaTokenName' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaTokenSymbol' } },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<PairsQueryQuery, PairsQueryQueryVariables>;
 export const TransfersQueryDocument = {
   kind: 'Document',
   definitions: [

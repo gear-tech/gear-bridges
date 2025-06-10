@@ -21,6 +21,11 @@ pub struct Relayer {
     gear_block_listener: GearBlockListener,
     ethereum_block_listener: EthereumBlockListener,
 
+    message_sender: message_sender::MessageSender,
+    message_paid_event_extractor: MessagePaidEventExtractor,
+    checkpoints_extractor: CheckpointsExtractor,
+    proof_composer: proof_composer::ProofComposerTask,
+
     task_manager: Arc<task_manager::TaskManager>,
 }
 
@@ -52,23 +57,38 @@ impl Relayer {
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
-        let task_manager = task_manager::TaskManager::new(
-            api_provider.clone(),
+        let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+        let message_paid_event_extractor = MessagePaidEventExtractor::new(
             eth_api.clone(),
             beacon_client.clone(),
             bridging_payment_address,
-            checkpoint_light_client_address,
-            historical_proxy_address,
-            vft_manager_address,
-            suri,
-            storage::Storage::None,
         );
+        let message_sender = message_sender::MessageSender::new(
+            vft_manager_address,
+            historical_proxy_address,
+            api_provider.clone(),
+            suri.clone(),
+        );
+
+        let proof_composer = proof_composer::ProofComposerTask::new(
+            api_provider.clone(),
+            beacon_client.clone(),
+            eth_api.clone(),
+            historical_proxy_address,
+            suri.clone(),
+        );
+
+        let task_manager = task_manager::TaskManager::new(storage::Storage::None);
 
         Ok(Self {
             gear_block_listener,
             ethereum_block_listener,
 
             task_manager,
+            checkpoints_extractor,
+            message_paid_event_extractor,
+            message_sender,
+            proof_composer,
         })
     }
 
@@ -76,30 +96,14 @@ impl Relayer {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
-        let message_paid_events = MessagePaidEventExtractor::new(
-            self.task_manager.eth_api.clone(),
-            self.task_manager.beacon_client.clone(),
-            self.task_manager.bridging_payment_address,
-        )
-        .run(ethereum_blocks)
-        .await;
+        let message_paid_events = self.message_paid_event_extractor.run(ethereum_blocks).await;
 
-        let checkpoints =
-            CheckpointsExtractor::new(self.task_manager.checkpoint_light_client_address)
-                .run(gear_blocks)
-                .await;
-        let proof_composer = proof_composer::ProofComposerTask::new(
-            self.task_manager.api_provider.clone(),
-            self.task_manager.beacon_client.clone(),
-            self.task_manager.eth_api.clone(),
-            self.task_manager.historical_proxy_client_address,
-            self.task_manager.suri.clone(),
-        );
-
-        let proof_composer_io = proof_composer.run(checkpoints);
+        let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
+        let proof_composer_io = self.proof_composer.run(checkpoints);
+        let msg_sender_io = self.message_sender.run();
 
         self.task_manager
-            .run(proof_composer_io, message_paid_events)
+            .run(proof_composer_io, message_paid_events, msg_sender_io)
             .await
             .unwrap_or_else(|err| {
                 log::error!("Relayer task manager failed: {err}");
@@ -110,4 +114,5 @@ impl Relayer {
 pub mod proof_composer;
 pub mod storage;
 //pub mod submit_message;
+pub mod message_sender;
 pub mod task_manager;

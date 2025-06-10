@@ -62,7 +62,7 @@ impl ProofComposerTask {
                         .run_inner(&mut checkpoints, &mut requests_rx, &mut responses_tx)
                         .await
                     {
-                        log::error!("ProofComposerTask encountered an error: {}", e);
+                        log::error!("ProofComposerTask encountered an error: {e}");
 
                         if common::is_transport_error_recoverable(&e) {
                             match self.api_provider.reconnect().await {
@@ -81,7 +81,7 @@ impl ProofComposerTask {
                                 }
                             }
                         } else {
-                            log::error!("Non-recoverable error encountered, stopping task: {}", e);
+                            log::error!("Non-recoverable error encountered, stopping task: {e}");
                             return;
                         }
                     }
@@ -105,7 +105,7 @@ impl ProofComposerTask {
 
                     self.waiting_checkpoint.retain(|(task_uuid, tx)| {
                         if tx.slot_number <= checkpoint {
-                            to_process.push((task_uuid.clone(), tx.clone()));
+                            to_process.push((*task_uuid, tx.clone()));
                             false
                         } else {
                             true
@@ -118,8 +118,8 @@ impl ProofComposerTask {
                                 responses_tx.send(ProofComposerResponse { payload, task_uuid }).unwrap();
                             }
                             Err(e) => {
-                                log::error!("Failed to compose payload: {}", e);
-                                return Err(e.into());
+                                log::error!("Failed to compose payload: {e}");
+                                return Err(e);
                             }
                         }
                     }
@@ -134,8 +134,8 @@ impl ProofComposerTask {
                                     responses_tx.send(ProofComposerResponse { payload, task_uuid }).unwrap();
                                 }
                                 Err(e) => {
-                                    log::error!("Failed to compose payload: {}", e);
-                                    return Err(e.into());
+                                    log::error!("Failed to compose payload: {e}");
+                                    return Err(e);
                                 }
                             }
                         } else {

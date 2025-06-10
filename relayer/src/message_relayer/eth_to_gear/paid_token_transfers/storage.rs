@@ -7,14 +7,14 @@ use crate::message_relayer::eth_to_gear::paid_token_transfers::task_manager::Tas
 pub enum Storage {
     None,
     #[allow(dead_code)]
-    JSON(PathBuf),
+    Json(PathBuf),
 }
 
 impl Storage {
     pub async fn save_tasks(&self, tasks: &BTreeMap<Uuid, Task>) -> anyhow::Result<()> {
         match self {
             Storage::None => Ok(()),
-            Storage::JSON(path) => {
+            Storage::Json(path) => {
                 if !path.exists() {
                     tokio::fs::create_dir_all(path).await?;
                 }
@@ -39,7 +39,7 @@ impl Storage {
     pub async fn load_tasks(&self) -> anyhow::Result<BTreeMap<Uuid, Task>> {
         match self {
             Storage::None => Ok(BTreeMap::new()),
-            Storage::JSON(path) => {
+            Storage::Json(path) => {
                 let mut tasks = BTreeMap::new();
                 if !path.exists() {
                     return Ok(tasks);

@@ -165,6 +165,17 @@ impl MessageSender {
                         })
                         .unwrap_or_default();
                 }
+
+                Err(vft_manager_client::Error::AlreadyProcessed) => {                    
+                    log::warn!("Message for {tx_hash} is already processed, skipping.");
+                    response_sender
+                        .send(Response {
+                            task_uuid,
+                            status: SendStatus::Success,
+                        })
+                        .unwrap_or_default();
+                }
+
                 Err(vft_manager_client::Error::NotSupportedEvent) => {
                     let message = format!("Dropping message for {tx_hash} as it's considered invalid by vft-manager (probably unsupported ERC20 token)");
                     log::warn!("{message}");

@@ -20,8 +20,7 @@ impl Storage {
                     tokio::fs::create_dir_all(path).await?;
                 }
                 for (task_uuid, task) in tasks {
-                    let mut filename = path.join(task_uuid.to_string());
-                    filename.set_extension("json");
+                    let filename = path.join(task_uuid.to_string());
 
                     let mut file = tokio::fs::OpenOptions::new()
                         .write(true)
@@ -50,6 +49,7 @@ impl Storage {
                 while let Some(entry) = dir.next_entry().await? {
                     if entry.file_type().await?.is_file() {
                         let mut file = tokio::fs::File::open(entry.path()).await?;
+
                         let uuid = entry
                             .file_name()
                             .to_str()

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 
 mod common;
@@ -155,6 +157,9 @@ pub enum EthGearTokensCommands {
         /// Address of the BridgingPayment contract on ethereum
         #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
         bridging_payment_address: String,
+        /// Path to the storage where task state will be saved.
+        #[arg(long = "storage-path", env = "STORAGE_PATH")]
+        storage_path: PathBuf,
     },
 }
 

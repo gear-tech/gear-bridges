@@ -32,6 +32,8 @@ use cli::{
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 
+use crate::message_relayer::eth_to_gear::paid_token_transfers::storage::Storage;
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
@@ -286,6 +288,7 @@ async fn main() {
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
+                    storage_path,
                 } => {
                     let bridging_payment_address =
                         hex_utils::decode_h160(&bridging_payment_address)
@@ -300,6 +303,7 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        Storage::Json(storage_path),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -310,14 +314,8 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
                     provider.spawn();
-                    relayer.run().await;
+                    relayer.run(true).await;
                 }
-            }
-
-            loop {
-                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                // TODO(playx): is this necessary now? We switched to full async
-                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
         CliCommands::GearEthManual(args) => {

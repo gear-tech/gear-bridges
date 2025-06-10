@@ -2,18 +2,21 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
-use std::{iter, path::PathBuf, sync::Arc};
+use std::{iter, sync::Arc};
 use utils_prometheus::MeteredService;
 
-use crate::message_relayer::common::{
-    ethereum::{
-        block_listener::BlockListener as EthereumBlockListener,
-        message_paid_event_extractor::MessagePaidEventExtractor,
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            block_listener::BlockListener as EthereumBlockListener,
+            message_paid_event_extractor::MessagePaidEventExtractor,
+        },
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            checkpoints_extractor::CheckpointsExtractor,
+        },
     },
-    gear::{
-        block_listener::BlockListener as GearBlockListener,
-        checkpoints_extractor::CheckpointsExtractor,
-    },
+    eth_to_gear::paid_token_transfers::storage::Storage,
 };
 
 use super::api_provider::ApiProviderConnection;
@@ -52,6 +55,7 @@ impl Relayer {
         historical_proxy_address: H256,
         vft_manager_address: H256,
         api_provider: ApiProviderConnection,
+        storage: Storage,
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
@@ -83,8 +87,7 @@ impl Relayer {
             suri.clone(),
         );
 
-        let task_manager =
-            task_manager::TaskManager::new(storage::Storage::Json(PathBuf::from("./tasks")));
+        let task_manager = task_manager::TaskManager::new(storage);
 
         Ok(Self {
             gear_block_listener,
@@ -98,7 +101,7 @@ impl Relayer {
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, resume_from_storage: bool) {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
@@ -109,7 +112,12 @@ impl Relayer {
         let msg_sender_io = self.message_sender.run();
 
         self.task_manager
-            .run(true, proof_composer_io, message_paid_events, msg_sender_io)
+            .run(
+                resume_from_storage,
+                proof_composer_io,
+                message_paid_events,
+                msg_sender_io,
+            )
             .await
             .unwrap_or_else(|err| {
                 log::error!("Relayer task manager failed: {err}");

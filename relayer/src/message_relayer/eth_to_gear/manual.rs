@@ -77,13 +77,12 @@ pub async fn relay(
             proof_composer_io,
             deposit_events_receiver,
             message_sender_io,
-            
         )
         .await
     {
         Ok(()) => {
             drop(deposit_events_sender);
-        },
+        }
         Err(err) => {
             log::error!("Error running task manager: {err}");
         }

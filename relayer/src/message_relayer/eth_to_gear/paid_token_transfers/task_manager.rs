@@ -160,17 +160,23 @@ impl TaskManager {
                         match tasks.get_mut(&task_uuid) {
                             Some(task) => {
                                 if let TaskState::ComposeProof = &task.state {
+                                    task.state = TaskState::SubmitMessage {
+                                        payload: payload.encode(),
+                                    };
+                                    let tx_hash = task.tx.tx_hash;
+
+                                    drop(tasks);
+
+                                    self.update_storage().await;
                                     if let Err(err) = message_sender.send(Message {
                                         task_uuid,
-                                        payload: payload.clone(),
-                                        tx_hash: task.tx.tx_hash,
+                                        payload,
+                                        tx_hash,
                                     }) {
                                         log::error!("Failed to send message for task {task_uuid:?}: {err}");
                                         continue;
                                     }
-                                    task.state = TaskState::SubmitMessage {
-                                        payload: payload.encode(),
-                                    };
+
                                     log::info!("Task {task_uuid:?} state updated to SubmitMessage.");
                                 } else {
                                     log::warn!("Received proof for task {task_uuid:?} that is not in ComposeProof state.");
@@ -185,16 +191,16 @@ impl TaskManager {
                     Some(Response { task_uuid, status }) = response_receiver.recv() => {
                         log::info!("Received response for task {task_uuid:?}: {status:?}");
                         let mut tasks = self.task_queue.write().await;
-                        if let Some(mut task) = tasks.remove(&task_uuid) {
+                        if let Some(task) = tasks.get_mut(&task_uuid) {
                             match status {
                                 SendStatus::Success => {
                                     task.state = TaskState::Completed;
-                                    self.completed.write().await.insert(task_uuid, task);
+                                    self.completed.write().await.insert(task_uuid, task.clone());
                                     log::info!("Task {task_uuid:?} completed successfully.");
                                 }
                                 SendStatus::Failure(err) => {
                                     task.state = TaskState::Failed(err.clone());
-                                    self.failed.write().await.insert(task_uuid, task);
+                                    self.failed.write().await.insert(task_uuid, task.clone());
                                     log::error!("Task {task_uuid:?} failed: {err}");
                                 }
                             }

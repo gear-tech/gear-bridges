@@ -34,7 +34,7 @@ impl_metered_service! {
     }
 }
 
-fn checkpoints_for_block(block: &GearBlock, program_address: H256) -> Vec<(u64, H256)> {
+pub fn checkpoints_for_block(block: &GearBlock, program_address: H256) -> Vec<(u64, H256)> {
     let mut checkpoints = block
         .user_message_sent_events(program_address, H256::zero())
         .filter_map(|payload| {

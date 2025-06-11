@@ -18,7 +18,7 @@ pub mod message_paid_event_extractor;
 pub mod message_sender;
 pub mod status_fetcher;
 
-async fn find_slot_by_block_number(
+pub async fn find_slot_by_block_number(
     eth_api: &EthApi,
     beacon_client: &BeaconClient,
     block: EthereumBlockNumber,

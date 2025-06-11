@@ -12,7 +12,7 @@ use subxt::config::Header as _;
 use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GearBlock {
     pub header: Header,
     pub events: Vec<gsdk::Event>,

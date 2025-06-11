@@ -1,11 +1,9 @@
-import { decodeAddress, encodeAddress, ExtrinsicFailedData, HexString } from '@gear-js/api';
+import { decodeAddress, encodeAddress, ExtrinsicFailedData } from '@gear-js/api';
 import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
-
-import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '../consts';
+import { NETWORK_INDEX } from '@/features/swap/consts';
 
 import { fetchWithGuard } from './fetch-with-guard';
 
@@ -43,10 +41,8 @@ const isUndefined = (value: unknown): value is undefined => value === undefined;
 const isNull = (value: unknown): value is null => value === null;
 const isNumeric = (value: string) => /^\d+$/.test(value);
 
-const getTokenSVG = (address: HexString) => TOKEN_SVG[address] || TokenPlaceholderSVG;
-
-const isNativeToken = (address: HexString) =>
-  [WRAPPED_VARA_CONTRACT_ADDRESS, ETH_WRAPPED_ETH_CONTRACT_ADDRESS].includes(address);
+const isNativeToken = (symbol: string, networkIndex: number) =>
+  symbol.toLowerCase().includes(networkIndex === NETWORK_INDEX.VARA ? 'vara' : 'eth');
 
 // asserts can't use arrow functions
 function definedAssert<T>(value: T, name: string): asserts value is NonNullable<T> {
@@ -74,7 +70,6 @@ export {
   isUndefined,
   isNull,
   isNumeric,
-  getTokenSVG,
   getErrorMessage,
   isNativeToken,
   definedAssert,

@@ -18,9 +18,9 @@
 }
 
 .networkSvg {
-  width: var(--small-size);
-  height: var(--small-size);
-  margin-left: calc(var(--small-size) / -2);
+  width: var(--network-size);
+  height: var(--network-size);
+  margin-left: calc(var(--network-size) / -2);
 
   box-shadow: -1px 0 0px 0px #000;
 }

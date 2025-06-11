@@ -38,7 +38,7 @@ function TransactionPair(props: Props) {
   return (
     <div className={styles.pair}>
       <div className={styles.tx}>
-        <TokenSVG address={sourceHex} networkIndex={NETWORK_INDEX[sourceNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={sourceSymbol} networkIndex={NETWORK_INDEX[sourceNetwork]} sizes={[32, 20]} />
 
         <div>
           <FormattedBalance
@@ -55,12 +55,12 @@ function TransactionPair(props: Props) {
       <ArrowSVG />
 
       <div className={styles.tx}>
-        <TokenSVG address={destinationHex} networkIndex={NETWORK_INDEX[destNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={destinationSymbol} networkIndex={NETWORK_INDEX[destNetwork]} sizes={[32, 20]} />
 
         <div>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals[sourceHex] ?? 0}
+            decimals={decimals[destinationHex] ?? 0}
             symbol={destinationSymbol}
             className={styles.amount}
           />

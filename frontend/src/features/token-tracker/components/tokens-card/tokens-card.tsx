@@ -3,8 +3,6 @@ import { Button } from '@gear-js/vara-ui';
 
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { TOKEN_SVG, WRAPPED_VARA_CONTRACT_ADDRESS } from '@/consts';
-import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
 import { GetBalanceButton } from '@/features/faucet';
 import {
   useVaraAccountBalance,
@@ -16,7 +14,7 @@ import {
   useEthFTBalance,
   useVaraSymbol,
 } from '@/hooks';
-import { getErrorMessage, getTokenSVG, isUndefined } from '@/utils';
+import { getErrorMessage, isUndefined } from '@/utils';
 
 import { useBurnEthTokens, useBurnVaraTokens } from '../../hooks';
 import { BalanceCard } from '../balance-card';
@@ -26,7 +24,7 @@ import styles from './tokens-card.module.scss';
 function TokensCard() {
   const { account } = useAccount();
   const varaSymbol = useVaraSymbol();
-  const { addresses, decimals, symbols } = useTokens();
+  const { addresses, decimals, symbols, wrappedVaraAddress, wrappedEthAddress } = useTokens();
   const alert = useAlert();
 
   const burnVara = useBurnVaraTokens();
@@ -34,16 +32,15 @@ function TokensCard() {
   const burn = account ? burnVara : burnEth;
 
   // TODO: is there any reason not to fetch it from useFTBalances hook?
-  const { data: varaLockedBalance, refetch: refetchLockedVara } = useVaraFTBalance(WRAPPED_VARA_CONTRACT_ADDRESS);
-  const { data: ethLockedBalance, refetch: refetchLockedEth } = useEthFTBalance(ETH_WRAPPED_ETH_CONTRACT_ADDRESS);
+  const { data: varaLockedBalance, refetch: refetchLockedVara } = useVaraFTBalance(wrappedVaraAddress);
+  const { data: ethLockedBalance, refetch: refetchLockedEth } = useEthFTBalance(wrappedEthAddress);
   const lockedBalance = account ? varaLockedBalance : ethLockedBalance;
 
   const isVaraNetwork = Boolean(account);
   const networkIndex = isVaraNetwork ? 0 : 1;
 
   const nonNativeAddresses = addresses?.filter(
-    (pair) =>
-      pair[networkIndex] !== WRAPPED_VARA_CONTRACT_ADDRESS && pair[networkIndex] !== ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
+    (pair) => pair[networkIndex] !== wrappedVaraAddress && pair[networkIndex] !== wrappedEthAddress,
   );
 
   const { data: varaFtBalances, refetch: refetchVaraBalances } = useVaraFTBalances(nonNativeAddresses);
@@ -56,18 +53,20 @@ function TokensCard() {
 
   const renderBalances = () => {
     if (!ftBalances || !decimals || !symbols)
-      return new Array(Object.keys(TOKEN_SVG).length)
-        .fill(null)
-        .map((_item, index) => <BalanceCard.Skeleton key={index} />);
+      return new Array(8).fill(null).map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
     return getTypedEntries(ftBalances).map(([address, balance]) => (
       <li key={address}>
         <BalanceCard
-          SVG={getTokenSVG(address)}
           value={balance}
           decimals={decimals[address] ?? 0}
-          symbol={symbols[address] ?? 'Unit'}>
-          <GetBalanceButton.EthToken address={address} onSuccess={refetchEthBalances} />
+          symbol={symbols[address] ?? 'Unit'}
+          networkIndex={networkIndex}>
+          <GetBalanceButton.EthToken
+            address={address}
+            symbol={symbols[address] ?? 'Unit'}
+            onSuccess={refetchEthBalances}
+          />
         </BalanceCard>
       </li>
     ));
@@ -105,17 +104,17 @@ function TokensCard() {
       </header>
 
       <ul className={styles.list}>
-        {!isUndefined(accountBalance.data) && varaSymbol && (
+        {!isUndefined(accountBalance.data) && varaSymbol && wrappedEthAddress && (
           <li>
             <BalanceCard
-              SVG={isVaraNetwork ? VaraSVG : EthSVG}
               value={accountBalance.data}
               decimals={isVaraNetwork ? 12 : 18}
-              symbol={isVaraNetwork ? varaSymbol : 'ETH'}>
+              symbol={isVaraNetwork ? varaSymbol : 'ETH'}
+              networkIndex={networkIndex}>
               {isVaraNetwork ? (
                 <GetBalanceButton.VaraAccount />
               ) : (
-                <GetBalanceButton.EthToken address={ETH_WRAPPED_ETH_CONTRACT_ADDRESS} onSuccess={refetchEthBalances} />
+                <GetBalanceButton.EthToken address={wrappedEthAddress} symbol="ETH" onSuccess={refetchEthBalances} />
               )}
             </BalanceCard>
           </li>
@@ -124,15 +123,15 @@ function TokensCard() {
         {renderBalances()}
       </ul>
 
-      {!isUndefined(lockedBalance) && symbols && decimals && (
+      {!isUndefined(lockedBalance) && symbols && decimals && wrappedVaraAddress && wrappedEthAddress && (
         <>
           <h4 className={styles.lockedHeading}>Locked Tokens</h4>
 
           <BalanceCard
             value={lockedBalance}
-            SVG={getTokenSVG(account ? WRAPPED_VARA_CONTRACT_ADDRESS : ETH_WRAPPED_ETH_CONTRACT_ADDRESS)}
-            decimals={decimals[account ? WRAPPED_VARA_CONTRACT_ADDRESS : ETH_WRAPPED_ETH_CONTRACT_ADDRESS] ?? 0}
-            symbol={symbols[account ? WRAPPED_VARA_CONTRACT_ADDRESS : ETH_WRAPPED_ETH_CONTRACT_ADDRESS] ?? 'Unit'}
+            decimals={decimals[account ? wrappedVaraAddress : wrappedEthAddress] ?? 0}
+            symbol={symbols[account ? wrappedVaraAddress : wrappedEthAddress] ?? 'Unit'}
+            networkIndex={networkIndex}
             locked>
             {Boolean(lockedBalance) && (
               <Button text="Unlock" size="small" onClick={handleUnlockBalanceClick} isLoading={burn.isPending} />

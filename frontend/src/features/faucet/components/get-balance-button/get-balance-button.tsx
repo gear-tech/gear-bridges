@@ -6,7 +6,6 @@ import { useMutation } from '@tanstack/react-query';
 import { useRef } from 'react';
 
 import { LinkButton } from '@/components';
-import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS, USDC_CONTRACT_ADDRESS, USDT_CONTRACT_ADDRESS } from '@/consts/env';
 import { useEthAccount } from '@/hooks';
 
 import { GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';
@@ -75,15 +74,25 @@ function GetVaraAccountBalanceButton() {
   );
 }
 
-function GetEthTokenBalanceButton({ address, onSuccess }: { address: HexString; onSuccess: () => void }) {
+function GetEthTokenBalanceButton({
+  address,
+  symbol,
+  onSuccess,
+}: {
+  address: HexString;
+  symbol: string;
+  onSuccess: () => void;
+}) {
   const ethAccount = useEthAccount();
 
   if (!ethAccount.address) return;
 
-  if (address === ETH_WRAPPED_ETH_CONTRACT_ADDRESS)
+  const lowerCaseSymbol = symbol.toLowerCase();
+
+  if (lowerCaseSymbol.includes('eth'))
     return <LinkButton type="external" to="https://holesky-faucet.pk910.de/" {...BUTTON_PROPS} />;
 
-  if (address !== USDC_CONTRACT_ADDRESS && address !== USDT_CONTRACT_ADDRESS) return;
+  if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt')) return;
 
   return (
     <ButtonComponent

@@ -3,14 +3,18 @@ import { useConfig } from 'wagmi';
 import { waitForTransactionReceipt, writeContract } from 'wagmi/actions';
 
 import { ETH_TOKEN_ABI } from '@/consts';
-import { ETH_WRAPPED_ETH_CONTRACT_ADDRESS } from '@/consts/env';
+import { useTokens } from '@/hooks';
+import { definedAssert } from '@/utils';
 
 function useBurnEthTokens() {
+  const { wrappedEthAddress } = useTokens();
   const config = useConfig();
 
   const burn = async (value: bigint) => {
+    definedAssert(wrappedEthAddress, 'ETH token address');
+
     const hash = await writeContract(config, {
-      address: ETH_WRAPPED_ETH_CONTRACT_ADDRESS,
+      address: wrappedEthAddress,
       abi: ETH_TOKEN_ABI,
       functionName: 'release',
       args: [value],

@@ -1,6 +1,7 @@
 import { HexString } from '@gear-js/api';
 
 import { usePairs } from '@/api';
+import { Network } from '@/api/graphql/graphql';
 
 function useTokens() {
   const { data: pairs, isLoading } = usePairs();
@@ -27,11 +28,22 @@ function useTokens() {
     },
   ) || {
     addresses: undefined,
-    symbols: {} as Record<HexString, string>,
-    decimals: {} as Record<HexString, number>,
+    symbols: undefined,
+    decimals: undefined,
   };
 
-  return { addresses, symbols, decimals, isLoading };
+  const varaPair = activePairs?.find(
+    (pair) => pair.varaTokenSymbol.toLowerCase().includes('vara') && pair.tokenSupply === Network.Gear,
+  );
+
+  const ethPair = activePairs?.find(
+    (pair) => pair.ethTokenSymbol.toLowerCase().includes('eth') && pair.tokenSupply === Network.Ethereum,
+  );
+
+  const wrappedVaraAddress = varaPair?.varaToken;
+  const wrappedEthAddress = ethPair?.ethToken;
+
+  return { addresses, symbols, decimals, isLoading, wrappedVaraAddress, wrappedEthAddress };
 }
 
 export { useTokens };

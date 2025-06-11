@@ -18,7 +18,7 @@ type Props = {
 function Token({ type, address, symbol, network, networkIndex }: Props) {
   return (
     <div className={cx(styles.container, styles[type])}>
-      <TokenSVG address={address} networkIndex={networkIndex} sizes={[48, 28]} />
+      <TokenSVG symbol={symbol} networkIndex={networkIndex} sizes={[48, 28]} />
 
       <div className={styles.token}>
         <div className={styles.info}>

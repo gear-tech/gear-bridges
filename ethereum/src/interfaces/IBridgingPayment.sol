@@ -16,7 +16,7 @@ interface IBridgingPayment {
     error IncorrectFeeAmount();
 
     /**
-     * @dev The fee payment failed (transfer failed)
+     * @dev The fee payment failed (transfer failed).
      */
     error PayFeeFailed();
 

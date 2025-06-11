@@ -5,6 +5,8 @@ use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
 use vft_client::traits::*;
 use vft_vara_client::traits::*;
 
+const SIZE_MIGRATE_BATCH: u32 = 25;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -46,6 +48,7 @@ enum CliCommands {
         /// Program ID of the VFT contract
         program_id: String,
     },
+    MigrateBalances(MigrateBalances),
 }
 
 #[derive(Args)]
@@ -74,6 +77,26 @@ struct RolesArgs {
     burner: Option<String>,
 }
 
+#[derive(Args)]
+struct MigrateBalances {
+    #[arg(long, help = format!("Size of migration batch. Default: {SIZE_MIGRATE_BATCH}"))]
+    size_batch: Option<u32>,
+    /// ActorId of the source VFT contract (old)
+    #[arg(long)]
+    vft: String,
+    /// ActorId of the destination VFT contract (new). Provided `remoting` should have account
+    /// with mint-permission
+    #[arg(long)]
+    vft_new: String,
+}
+
+fn str_to_actorid(s: String) -> ActorId {
+    let s = if &s[..2] == "0x" { &s[2..] } else { &s };
+    let data = hex::decode(s).expect("Failed to decode ActorId");
+
+    ActorId::new(data.try_into().expect("Got input of wrong length"))
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
@@ -86,13 +109,6 @@ async fn main() {
         .build(address)
         .await
         .expect("Failed to initialize GearApi");
-
-    let str_to_actorid = |s: String| {
-        let s = if &s[..2] == "0x" { &s[2..] } else { &s };
-        let data = hex::decode(s).expect("Failed to decode ActorId");
-
-        ActorId::new(data.try_into().expect("Got input of wrong length"))
-    };
 
     let salt = match cli.salt {
         Some(salt) => {
@@ -130,11 +146,14 @@ async fn main() {
             let uploader = Uploader::new(gear_api, minter, burner, salt);
             uploader.upload_vft_vara().await;
         }
+
         CliCommands::AllocateShards { program_id } => {
             let program_id = str_to_actorid(program_id);
             let uploader = Uploader::new(gear_api, None, None, salt);
             uploader.allocate_shards(program_id).await;
         }
+
+        CliCommands::MigrateBalances(args) => migrate_balances(gear_api, args).await,
     }
 }
 
@@ -282,5 +301,24 @@ impl Uploader {
             .expect("Failed to upload program");
 
         self.upload_common(program_id).await
+    }
+}
+
+async fn migrate_balances(gear_api: GearApi, args: MigrateBalances) {
+    let gas_limit = gear_api
+        .block_gas_limit()
+        .expect("Unable to get block gas limit");
+    let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
+
+    if let Err(e) = gear_common::migrate_balances(
+        GClientRemoting::new(gear_api),
+        gas_limit,
+        size_batch,
+        str_to_actorid(args.vft),
+        str_to_actorid(args.vft_new),
+    )
+    .await
+    {
+        println!("Failed to migrate balances: {e:?}");
     }
 }

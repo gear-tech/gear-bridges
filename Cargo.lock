@@ -3177,6 +3177,7 @@ dependencies = [
  "clap",
  "dotenv",
  "gclient",
+ "gear-common 0.3.0",
  "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
  "sails-rs",
@@ -4797,6 +4798,16 @@ dependencies = [
  "gear-stack-buffer 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
  "gprimitives 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
  "gsys",
+]
+
+[[package]]
+name = "gear-common"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "gclient",
+ "sails-rs",
+ "vft-client",
 ]
 
 [[package]]
@@ -14307,6 +14318,7 @@ dependencies = [
  "ethereum_beacon_client",
  "futures",
  "gclient",
+ "gear-common 0.3.0",
  "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gstd 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtest",

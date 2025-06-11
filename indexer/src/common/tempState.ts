@@ -178,10 +178,8 @@ export class TempState {
 
     for (const token of tokens) {
       if (this._network === Network.Ethereum) {
-        this._ctx.log.info(`Setting pair for ${token.ethToken}`);
         this._pairs.set(token.ethToken, token);
       } else {
-        this._ctx.log.info(`Setting pair for ${token.varaToken}`);
         this._pairs.set(token.varaToken, token);
       }
     }

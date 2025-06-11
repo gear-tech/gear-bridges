@@ -7,12 +7,12 @@ pragma solidity ^0.8.30;
 interface IVerifier {
     /**
      * @dev Verifies zk-SNARK Plonk proof, which lets us know that
-     *      `merkleRoot` and `blockBumber` are on Vara Network.
+     *      `blockNumber` and `merkleRoot` are on Vara Network.
      * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
      * @param publicInputs Reduced public inputs in the following format:
      *        ```solidity
-     *        bytes32 merkleRoot = 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb;
      *        uint256 blockNumber = 0xcccccccc; // actually `uint32` (because Vara Network uses 32-bit block numbers)
+     *        bytes32 merkleRoot = 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb;
      *
      *        uint256[] memory publicInputs = new uint256[](2);
      *        publicInputs[0] = uint256(merkleRoot) >> 64;

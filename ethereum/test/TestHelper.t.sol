@@ -51,7 +51,7 @@ contract TestHelper is Test {
 
         VerifierMock _verifier = new VerifierMock();
 
-        Relayer _relayer = new Relayer(address(_verifier));
+        Relayer _relayer = new Relayer(_verifier);
         ERC20Manager _erc20_manager = new ERC20Manager(
             address(_message_queue_proxy),
             bytes32(0)

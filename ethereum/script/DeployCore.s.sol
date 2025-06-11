@@ -28,7 +28,7 @@ contract DeployCoreScript is Script {
             new ProxyUpdater(payable(address(relayerProxy)), governance, address(messageQueueProxy));
 
         MessageQueue messageQueue = new MessageQueue(address(relayerProxy));
-        Relayer relayer = new Relayer(address(verifier));
+        Relayer relayer = new Relayer(verifier);
 
         messageQueueProxy.upgradeToAndCall(address(messageQueue), "");
         relayerProxy.upgradeToAndCall(address(relayer), "");

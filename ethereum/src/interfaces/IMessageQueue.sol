@@ -9,14 +9,10 @@ struct VaraMessage {
 }
 
 interface IMessageQueue {
-    error AlreadyInitialized();
     error MessageAlreadyProcessed(bytes32 messageNonce);
     error MessageNotProcessed();
     error MerkleRootNotSet(uint256 blockNumber);
     error BadProof();
-
-    event RelayerAddressUpdated(address relayer);
-    event ProoverAddressUpdated(address proover);
 
     event MessageProcessed(
         uint256 indexed blockNumber,

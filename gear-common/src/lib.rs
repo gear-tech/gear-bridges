@@ -22,28 +22,6 @@ use vft_client::traits::*;
 /// # Returns
 /// - `Ok(())` if migration completes successfully
 /// - `Err(anyhow::Error)` on failure
-///
-/// # Example
-/// ```no_run
-/// use anyhow::Result;
-/// use gear_core::ActorId;
-///
-/// async fn example() -> Result<()> {
-///     // Assume configured client
-///     let remoting = get_gear_remoting();
-///     migrate_balances(
-///         remoting,
-///         // gas limit
-///         50_000_000_000,
-///         // batch size
-///         100,
-///         // Old VFT
-///         ActorId::from([1; 32]),
-///         // New VFT
-///         ActorId::from([2; 32]),
-///     ).await
-/// }
-/// ```
 pub async fn migrate_balances(
     remoting: GClientRemoting,
     gas_limit: u64,

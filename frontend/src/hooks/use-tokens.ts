@@ -1,7 +1,7 @@
 import { HexString } from '@gear-js/api';
 
-import { usePairs } from '@/api';
-import { Network } from '@/api/graphql/graphql';
+import { usePairs } from '@/features/history';
+import { Network } from '@/features/history/graphql/graphql';
 
 function useTokens() {
   const { data: pairs, isLoading } = usePairs();

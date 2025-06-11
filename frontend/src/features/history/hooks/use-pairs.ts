@@ -2,9 +2,9 @@ import { HexString } from '@gear-js/api';
 import { useQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { INDEXER_ADDRESS } from './consts';
-import { graphql } from './graphql';
-import { Pair } from './graphql/graphql';
+import { INDEXER_ADDRESS } from '../consts';
+import { graphql } from '../graphql';
+import { Pair } from '../graphql/graphql';
 
 const PAIRS_QUERY = graphql(`
   query PairsQuery {

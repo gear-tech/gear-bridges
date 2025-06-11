@@ -2,11 +2,11 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Verifier} from "../src/Verifier.sol";
-import {Relayer} from "../src/Relayer.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {ProxyUpdater} from "../src/ProxyUpdater.sol";
+import {Relayer} from "../src/Relayer.sol";
+import {Verifier} from "../src/Verifier.sol";
 
 contract DeployCoreScript is Script {
     function setUp() public {}

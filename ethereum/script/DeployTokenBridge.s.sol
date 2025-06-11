@@ -2,8 +2,8 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
-import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {BridgingPayment} from "../src/BridgingPayment.sol";
+import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {ProxyUpdater} from "../src/ProxyUpdater.sol";
 

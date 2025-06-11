@@ -9,10 +9,6 @@ contract Relayer is IRelayer {
     mapping(bytes32 => uint256) private _merkle_roots;
     bool _emergencyStop;
 
-    uint256 private constant MASK_32BITS = (2 ** 32) - 1;
-    uint256 private constant MASK_64BITS = (2 ** 64) - 1;
-    uint256 private constant MASK_192BITS = (2 ** 192) - 1;
-
     address immutable VERIFIER_ADDRESS;
 
     constructor(address verifier) {
@@ -56,7 +52,7 @@ contract Relayer is IRelayer {
         _block_numbers[block_number] = merkle_root;
         _merkle_roots[merkle_root] = block_number;
 
-        emit MerkleRoot(block_number, bytes32(merkle_root));
+        emit MerkleRoot(block_number, merkle_root);
     }
 
     /**
@@ -122,11 +118,9 @@ contract Relayer is IRelayer {
         bytes32 merkle_root
     ) public pure returns (uint256[] memory public_inputs) {
         uint256[] memory ret = new uint256[](2);
-        ret[0] = (uint256(merkle_root) >> 64) & MASK_192BITS;
-        ret[1] =
-            ((uint256(block_number) & MASK_32BITS) << 96) |
-            ((uint256(merkle_root) & MASK_64BITS) << 128);
-
+        ret[0] = uint256(merkle_root) >> 64;
+        ret[1] = ((uint256(merkle_root) & uint256(type(uint64).max)) << 128)
+            | ((block_number & uint256(type(uint32).max)) << 96);
         return ret;
     }
 }

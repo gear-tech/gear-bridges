@@ -14,8 +14,6 @@ import {IMessageQueue, VaraMessage, IMessageQueueReceiver} from "../src/interfac
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
-
 import {TestHelper, VARA_ADDRESS_3, VARA_ADDRESS_7, USER, OWNER, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
 
 contract TreasuryTest is TestHelper {

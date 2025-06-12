@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {ProxyUpdater} from "../src/ProxyUpdater.sol";
 
@@ -40,27 +41,27 @@ contract ProxyUpdaterTest is Test {
     function test_updateImpl() public {
         vm.startPrank(MESSAGE_QUEUE);
 
-        assertEq(proxy.implementation(), initialImpl);
+        assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(initialImpl));
 
         updater.processVaraMessage(
             GOVERNANCE,
             abi.encodePacked(uint8(0), changedImpl, "")
         );
 
-        assertEq(proxy.implementation(), changedImpl);
+        assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(changedImpl));
     }
 
     function test_updateAdmin() public {
         vm.startPrank(MESSAGE_QUEUE);
 
-        assertEq(proxy.proxyAdmin(), address(updater));
+        assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.ADMIN_SLOT)))), address(updater));
 
         updater.processVaraMessage(
             GOVERNANCE,
             abi.encodePacked(uint8(1), NEW_ADMIN)
         );
 
-        assertEq(proxy.proxyAdmin(), NEW_ADMIN);
+        assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.ADMIN_SLOT)))), NEW_ADMIN);
     }
 
     function test_updateGovernance() public {

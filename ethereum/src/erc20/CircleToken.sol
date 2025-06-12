@@ -7,27 +7,29 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @dev Wrapped Vara (WVARA) is represents VARA on Ethereum as ERC20 token.
- *      VARA is also used for paying fees, staking and governance on Vara Network,
- *      while WVARA does all of the same things but on Ethereum.
+ * @dev USD Coin (USDC) is represents USDC on Ethereum as ERC20 token.
+ *      USDC is stablecoin that is pegged to US dollar.
+ *
+ *      Based on USDC:
+ *      - https://etherscan.io/address/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48#code
+ *
+ *      This smart contract tries to be as similar as possible to Ethereum mainnet USDC.
  */
-contract WrappedVara is ERC20, ERC20Burnable, Ownable, ERC20Permit {
-    string private constant TOKEN_NAME = "Wrapped Vara";
-    string private constant TOKEN_SYMBOL = "WVARA";
+contract CircleToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
+    string private constant TOKEN_NAME = "USD Coin";
+    string private constant TOKEN_SYMBOL = "USDC";
 
     /**
-     * @dev Initializes the WrappedVara contract with the token name and symbol.
+     * @dev Initializes the CircleToken contract with the token name and symbol.
      * @param initialOwner The address of the initial owner of the contract.
      */
     constructor(address initialOwner) ERC20(TOKEN_NAME, TOKEN_SYMBOL) Ownable(initialOwner) ERC20Permit(TOKEN_NAME) {}
 
     /**
      * @dev Returns the number of decimals used to get its user representation.
-     *      Also see documentation about decimals:
-     *      - https://wiki.vara.network/docs/staking/validator-faqs#what-is-the-precision-of-the-vara-token
      */
     function decimals() public view virtual override returns (uint8) {
-        return 12;
+        return 6;
     }
 
     /**

@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-
 import {IRelayer} from "./interfaces/IRelayer.sol";
-
-import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
-import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
+import {VaraMessage, IMessageQueue, IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
 
 contract MessageQueue is IMessageQueue {
-    using Address for address;
-    using Hasher for VaraMessage;
-
     address immutable RELAYER_ADDRESS;
 
     constructor(address relayer_address) {

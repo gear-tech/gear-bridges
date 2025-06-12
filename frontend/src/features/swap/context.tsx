@@ -1,61 +1,33 @@
 import { HexString } from '@gear-js/api';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
-import { useEthAccount, useTokens } from '@/hooks';
-import { isNativeToken } from '@/utils';
+import { Token, useTokens } from '@/context';
+import { useEthAccount } from '@/hooks';
 
-import { NETWORK_INDEX } from './consts';
+import { usePairs } from '../history';
+
+import { NETWORK } from './consts';
 
 type Context = {
   network: {
-    index: number;
+    name: 'vara' | 'eth';
     isVara: boolean;
-    setIndex: (index: number) => void;
     switch: () => void;
   };
 
-  pair: {
-    index: number;
-    setIndex: (index: number) => void;
-  };
-
-  token: {
-    address: HexString | undefined;
-    symbol: string | undefined;
-    decimals: number | undefined;
-    isNative: boolean;
-
-    destination: {
-      address: HexString | undefined;
-      symbol: string | undefined;
-    };
-  };
+  token: (Token & { set: (address: HexString) => void }) | undefined;
+  destinationToken: Token | undefined;
 };
 
 const DEFAULT_VALUE = {
   network: {
-    index: NETWORK_INDEX.VARA,
+    name: NETWORK.VARA,
     isVara: true,
-    setIndex: () => {},
     switch: () => {},
   },
 
-  pair: {
-    index: 0,
-    setIndex: () => {},
-  },
-
-  token: {
-    address: undefined,
-    symbol: undefined,
-    decimals: undefined,
-    isNative: false,
-
-    destination: {
-      address: undefined,
-      symbol: undefined,
-    },
-  },
+  token: undefined,
+  destinationToken: undefined,
 } as const;
 
 const BridgeContext = createContext<Context>(DEFAULT_VALUE);
@@ -65,64 +37,46 @@ const useBridgeContext = () => useContext(BridgeContext);
 function BridgeProvider({ children }: PropsWithChildren) {
   // network
   const ethAccount = useEthAccount();
-  const defaultNetworkIndex = ethAccount.address ? NETWORK_INDEX.ETH : NETWORK_INDEX.VARA;
-
-  const [networkIndex, setNetworkIndex] = useState(defaultNetworkIndex);
-  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
-
-  useEffect(() => {
-    setNetworkIndex(defaultNetworkIndex);
-  }, [defaultNetworkIndex]);
-
-  const switchNetwork = () => setNetworkIndex((prevValue) => Number(!prevValue));
-
-  // pair
-  const [pairIndex, setPairIndex] = useState(0);
 
   // token
-  const { addresses, symbols, decimals } = useTokens();
-  const tokenAddress = addresses?.[pairIndex][networkIndex];
-  const tokenSymbol = tokenAddress ? symbols?.[tokenAddress] : undefined;
-  const tokenDecimals = tokenAddress ? decimals?.[tokenAddress] : undefined;
-  const tokenDestinationAddress = addresses?.[pairIndex][Number(!networkIndex)];
-  const tokenDestinationSymbol = tokenDestinationAddress ? symbols?.[tokenDestinationAddress] : undefined;
+  const { data: pairs } = usePairs();
+  const { tokens, addressToToken } = useTokens();
+
+  const [tokenAddress, setTokenAddress] = useState<HexString>();
+
+  useEffect(() => {
+    if (!tokens) return;
+
+    const defaultNetwork = ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
+
+    // TODO: active filter
+    const defaultToken = tokens.find(
+      ({ isActive, isNative, network }) => isActive && isNative && network === defaultNetwork,
+    );
+
+    setTokenAddress(defaultToken?.address);
+  }, [ethAccount.address, tokens]);
+
+  const token = tokenAddress ? addressToToken?.[tokenAddress] : undefined;
+  const isVaraNetwork = token ? token.network === NETWORK.VARA : true;
+
+  const pair = pairs?.find(({ varaToken, ethToken }) => varaToken === tokenAddress || ethToken === tokenAddress);
+  const destinationTokenAddress = isVaraNetwork ? pair?.ethToken : pair?.varaToken;
+
+  const destinationToken = destinationTokenAddress ? addressToToken?.[destinationTokenAddress] : undefined;
 
   const value = useMemo(
     () => ({
       network: {
-        index: networkIndex,
+        name: token?.network || NETWORK.VARA,
         isVara: isVaraNetwork,
-        setIndex: setNetworkIndex,
-        switch: switchNetwork,
+        switch: () => setTokenAddress(destinationToken?.address),
       },
 
-      pair: {
-        index: pairIndex,
-        setIndex: setPairIndex,
-      },
-
-      token: {
-        address: tokenAddress,
-        symbol: tokenSymbol,
-        decimals: tokenDecimals,
-        isNative: tokenSymbol ? isNativeToken(tokenSymbol, networkIndex) : false,
-
-        destination: {
-          address: tokenDestinationAddress,
-          symbol: tokenDestinationSymbol,
-        },
-      },
+      token: token ? { ...token, set: setTokenAddress } : undefined,
+      destinationToken,
     }),
-    [
-      networkIndex,
-      isVaraNetwork,
-      pairIndex,
-      tokenAddress,
-      tokenSymbol,
-      tokenDecimals,
-      tokenDestinationAddress,
-      tokenDestinationSymbol,
-    ],
+    [destinationToken, isVaraNetwork, token],
   );
 
   return <Provider value={value}>{children}</Provider>;

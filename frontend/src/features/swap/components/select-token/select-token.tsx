@@ -11,7 +11,7 @@ import { useEthFTBalances, useVaraFTBalances, useModal, useVaraAccountBalance, u
 import { cx, isUndefined } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import { NETWORK_INDEX } from '../../consts';
+import { NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 
 import styles from './select-token.module.scss';
@@ -26,7 +26,7 @@ type ModalProps = {
 
 function SelectTokenModal({ close }: ModalProps) {
   const { tokens, addressToToken } = useTokens();
-  const { network, pair } = useBridgeContext();
+  const { token } = useBridgeContext();
 
   const varaFtBalances = useVaraFTBalances();
   const ethFtBalances = useEthFTBalances();
@@ -34,12 +34,12 @@ function SelectTokenModal({ close }: ModalProps) {
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
 
-  const [networkIndex, setNetworkIndex] = useState(network.index);
-  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
+  const [networkName, setNetworkName] = useState(token?.network);
+  const isVaraNetwork = networkName === NETWORK.VARA;
 
   // TODO: active filter
   const activeTokens = tokens?.filter(
-    ({ isActive, ...token }) => isActive && token.network === (isVaraNetwork ? 'vara' : 'eth'),
+    ({ isActive, ..._token }) => isActive && _token.network === (isVaraNetwork ? 'vara' : 'eth'),
   );
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,21 +74,12 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!filteredTokens) return;
 
-    // TODO: bridge context
-    // const selectedTokenAddress = addresses[pair.index][network.index];
-    const selectedTokenAddress = '0x00';
-
     return filteredTokens.map(({ address, symbol, isNative }, index) => {
-      const isActive = address === selectedTokenAddress;
+      const isActive = address === token?.address;
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
-        // TODO: bridge context
-        // const indexWithinNonFilteredAddresses = addresses.findIndex((_pair) => _pair[networkIndex] === address);
-        const indexWithinNonFilteredAddresses = 0;
-
-        network.setIndex(networkIndex);
-        pair.setIndex(indexWithinNonFilteredAddresses);
+        token?.set(address);
         close();
       };
 
@@ -100,7 +91,7 @@ function SelectTokenModal({ close }: ModalProps) {
             onClick={handleClick}
             disabled={isActive}>
             <span className={styles.wallet}>
-              <TokenSVG symbol={symbol} networkIndex={networkIndex} sizes={[32, 20]} />
+              <TokenSVG symbol={symbol} networkIndex={isVaraNetwork ? 0 : 1} sizes={[32, 20]} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{symbol}</span>
@@ -123,18 +114,18 @@ function SelectTokenModal({ close }: ModalProps) {
         <div className={styles.list}>
           <button
             type="button"
-            className={cx(styles.network, networkIndex === NETWORK_INDEX.VARA && styles.active)}
-            disabled={networkIndex === NETWORK_INDEX.VARA}
-            onClick={() => setNetworkIndex(NETWORK_INDEX.VARA)}>
+            className={cx(styles.network, networkName === NETWORK.VARA && styles.active)}
+            disabled={networkName === NETWORK.VARA}
+            onClick={() => setNetworkName(NETWORK.VARA)}>
             <VaraSVG />
             <p>Vara</p>
           </button>
 
           <button
             type="button"
-            className={cx(styles.network, networkIndex === NETWORK_INDEX.ETH && styles.active)}
-            disabled={networkIndex === NETWORK_INDEX.ETH}
-            onClick={() => setNetworkIndex(NETWORK_INDEX.ETH)}>
+            className={cx(styles.network, networkName === NETWORK.ETH && styles.active)}
+            disabled={networkName === NETWORK.ETH}
+            onClick={() => setNetworkName(NETWORK.ETH)}>
             <EthSVG />
             <p>Ethereum</p>
           </button>

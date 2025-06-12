@@ -14,6 +14,11 @@ const NETWORK_INDEX = {
   ETH: 1,
 };
 
+const NETWORK = {
+  VARA: 'vara',
+  ETH: 'eth',
+} as const;
+
 export {
   BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
@@ -26,6 +31,7 @@ export {
   EVENT_NAME,
   ERROR_MESSAGE,
   NETWORK_INDEX,
+  NETWORK,
   SERVICE_NAME,
   QUERY_NAME,
   BridgingPaymentProgram,

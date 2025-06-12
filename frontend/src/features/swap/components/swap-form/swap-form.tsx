@@ -15,7 +15,7 @@ import { isUndefined } from '@/utils';
 import PlusSVG from '../../assets/plus.svg?react';
 import { FIELD_NAME } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { useSwapForm, useToken } from '../../hooks';
+import { useSwapForm } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
@@ -35,21 +35,14 @@ type Props = {
 };
 
 function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
-  const { network, pair, token } = useBridgeContext();
-  const { index: networkIndex, isVara: isVaraNetwork } = network;
-  const { index: pairIndex } = pair;
-  const { isNative: isNativeToken } = token;
+  const { network, token, destinationToken } = useBridgeContext();
 
   const { api } = useApi();
-  const { address, destinationAddress, destinationSymbol, symbol, decimals, ...bridge } = useToken(
-    networkIndex,
-    pairIndex,
-  );
 
   const { fee, ...config } = useFee();
   const accountBalance = useAccountBalance();
-  const ftBalance = useFTBalance(address);
-  const allowance = useFTAllowance(address);
+  const ftBalance = useFTBalance(token?.address);
+  const allowance = useFTAllowance(token?.address);
 
   const { account } = useAccount();
   const ethAccount = useEthAccount();
@@ -62,13 +55,13 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const varaSymbol = useVaraSymbol();
 
   const openTransacionModal = (amount: string, receiver: string) => {
-    if (!address || !destinationAddress) throw new Error('Address is not defined');
+    if (!token || !destinationToken) throw new Error('Address is not defined');
 
-    const source = address;
-    const destination = destinationAddress;
-    const sourceNetwork = isVaraNetwork ? TransferNetwork.Gear : TransferNetwork.Ethereum;
-    const destNetwork = isVaraNetwork ? TransferNetwork.Ethereum : TransferNetwork.Gear;
-    const sender = isVaraNetwork ? account!.decodedAddress : ethAccount.address!;
+    const source = token.address;
+    const destination = destinationToken.address;
+    const sourceNetwork = network.isVara ? TransferNetwork.Gear : TransferNetwork.Ethereum;
+    const destNetwork = network.isVara ? TransferNetwork.Ethereum : TransferNetwork.Gear;
+    const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
     const close = () => setTransactionModal(undefined);
 
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
@@ -83,22 +76,22 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   );
 
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
-    isVaraNetwork,
+    network.isVara,
     accountBalance,
     ftBalance,
-    decimals,
+    token?.decimals,
     submit.mutateAsync,
   );
 
   const renderFromBalance = () => {
-    const balance = isNativeToken ? accountBalance : ftBalance;
+    const balance = token?.isNative ? accountBalance : ftBalance;
 
     return (
       <Balance
         value={balance.data}
-        decimals={decimals}
-        symbol={symbol}
-        isLoading={balance.isLoading || bridge.isLoading}
+        decimals={token?.decimals}
+        symbol={token?.symbol}
+        isLoading={balance.isLoading}
         onMaxButtonClick={setMaxBalance}
       />
     );
@@ -107,13 +100,13 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const isEnoughBalance = () => {
     if (!api || isUndefined(fee.value) || !accountBalance.data) return false;
 
-    const requiredBalance = isVaraNetwork ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
+    const requiredBalance = network.isVara ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
 
     return accountBalance.data > requiredBalance;
   };
 
   const getButtonText = () => {
-    if (!isEnoughBalance()) return `Not Enough ${isVaraNetwork ? varaSymbol : 'ETH'}`;
+    if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
     if (approve.isPending) return 'Approving...';
     if (submit.isPending) return 'Transferring...';
@@ -122,12 +115,12 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const handleConnectWalletButtonClick = () => {
-    const openWalletModal = isVaraNetwork ? openSubstrateWalletModal : openEthWalletModal;
+    const openWalletModal = network.isVara ? openSubstrateWalletModal : openEthWalletModal;
 
     void openWalletModal();
   };
 
-  const renderTokenPrice = () => <TokenPrice symbol={symbol} amount={amount} />;
+  const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} />;
   const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} payFee={payFee} />;
 
   return (
@@ -144,10 +137,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
               <div className={styles.row}>
                 <Token
                   type="select"
-                  address={address}
-                  symbol={symbol}
-                  network={isVaraNetwork ? 'Vara Testnet' : 'Ethereum Holesky'}
-                  networkIndex={networkIndex}
+                  address={token?.address}
+                  symbol={token?.symbol}
+                  network={network.isVara ? 'Vara Testnet' : 'Ethereum Holesky'}
+                  networkIndex={network.isVara ? 0 : 1}
                 />
 
                 <AmountInput />
@@ -167,10 +160,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
               <div className={styles.row}>
                 <Token
                   type="text"
-                  address={destinationAddress}
-                  symbol={destinationSymbol}
-                  network={isVaraNetwork ? 'Ethereum Holesky' : 'Vara Testnet'}
-                  networkIndex={Number(!networkIndex)}
+                  address={destinationToken?.address}
+                  symbol={destinationToken?.symbol}
+                  network={network.isVara ? 'Ethereum Holesky' : 'Vara Testnet'}
+                  networkIndex={network.isVara ? 1 : 0}
                 />
 
                 <AmountInput.Value />
@@ -189,7 +182,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <DetailsAccordion isVaraNetwork={isVaraNetwork} />
+          <DetailsAccordion isVaraNetwork={network.isVara} />
 
           {isNetworkAccountConnected ? (
             <Button
@@ -203,7 +196,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 accountBalance.isLoading ||
                 ftBalance.isLoading ||
                 config.isLoading ||
-                bridge.isLoading ||
                 allowance.isLoading
               }
               block

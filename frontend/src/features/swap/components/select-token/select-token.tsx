@@ -44,12 +44,12 @@ function SelectTokenModal({ close }: ModalProps) {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const renderTokenBalance = (address: HexString) => {
+  const renderTokenBalance = (address: HexString, symbol: string) => {
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
-    const balance = isNativeToken(address) ? accountBalance : ftBalance;
+    const balance = isNativeToken(symbol, networkIndex) ? accountBalance : ftBalance;
 
     if (!decimals || balance.isLoading) return <Skeleton width="5rem" />;
     if (isUndefined(balance.data)) return;
@@ -95,7 +95,7 @@ function SelectTokenModal({ close }: ModalProps) {
             onClick={handleClick}
             disabled={isActive}>
             <span className={styles.wallet}>
-              <TokenSVG address={address} networkIndex={networkIndex} sizes={[32, 20]} />
+              <TokenSVG symbol={symbol} networkIndex={networkIndex} sizes={[32, 20]} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{symbol}</span>
@@ -103,7 +103,7 @@ function SelectTokenModal({ close }: ModalProps) {
               </span>
             </span>
 
-            {renderTokenBalance(address)}
+            {renderTokenBalance(address, symbol)}
           </button>
         </li>
       );

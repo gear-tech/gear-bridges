@@ -127,13 +127,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     void openWalletModal();
   };
 
-  const renderTokenPrice = () => {
-    // to map through token ids without storing eth addresses
-    const varaAddress = network.isVara ? address : destinationAddress;
-
-    return <TokenPrice address={varaAddress} amount={amount} />;
-  };
-
+  const renderTokenPrice = () => <TokenPrice symbol={symbol} amount={amount} />;
   const renderProgressBar = () => <SubmitProgressBar mint={mint} approve={approve} submit={submit} payFee={payFee} />;
 
   return (

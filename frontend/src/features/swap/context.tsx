@@ -105,7 +105,7 @@ function BridgeProvider({ children }: PropsWithChildren) {
         address: tokenAddress,
         symbol: tokenSymbol,
         decimals: tokenDecimals,
-        isNative: tokenAddress ? isNativeToken(tokenAddress) : false,
+        isNative: tokenSymbol ? isNativeToken(tokenSymbol, networkIndex) : false,
 
         destination: {
           address: tokenDestinationAddress,

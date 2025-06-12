@@ -3,16 +3,23 @@ import { useMemo } from 'react';
 import { useReadContracts } from 'wagmi';
 
 import { FUNGIBLE_TOKEN_ABI } from '@/consts';
+import { useTokens } from '@/context';
 import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
-import { FTAddressPair } from '@/types';
 import { isUndefined } from '@/utils';
 
-function useEthFTBalances(addresses: FTAddressPair[] | undefined) {
+function useEthFTBalances() {
   const ethAccount = useEthAccount();
+
+  const { tokens } = useTokens();
+
+  // TODO: active filter
+  const addresses = tokens
+    ?.filter(({ isActive, network }) => isActive && network === 'eth')
+    .map(({ address }) => address);
 
   const contracts = useMemo(
     () =>
-      addresses?.map(([, address]) => ({
+      addresses?.map((address) => ({
         address,
         abi: FUNGIBLE_TOKEN_ABI,
         functionName: 'balanceOf',
@@ -25,7 +32,7 @@ function useEthFTBalances(addresses: FTAddressPair[] | undefined) {
     if (!addresses) return;
 
     const entries = data.map(({ result }, pairIndex) => {
-      const address = addresses[pairIndex][1];
+      const address = addresses[pairIndex];
       const balance = isUndefined(result) ? 0n : BigInt(result);
 
       return [address, balance] as const;

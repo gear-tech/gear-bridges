@@ -2,6 +2,7 @@ import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
+import { Token } from '@/context';
 import { NETWORK_INDEX as DEFAULT_NETWORK_INDEX } from '@/features/swap/consts';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -18,18 +19,19 @@ type Props = Pick<
   Transfer,
   'sourceNetwork' | 'destNetwork' | 'source' | 'destination' | 'amount' | 'sender' | 'receiver'
 > & {
-  symbols: Record<HexString, string>;
-  decimals: Record<HexString, number>;
+  addressToToken: Record<HexString, Token>;
 };
 
 function TransactionPair(props: Props) {
-  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, symbols, decimals } = props;
+  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, addressToToken } = props;
 
   const sourceHex = source as HexString;
-  const sourceSymbol = symbols[sourceHex] ?? 'Unit';
+  const sourceToken = addressToToken[sourceHex];
+  const sourceSymbol = sourceToken?.symbol ?? 'Unit';
 
   const destinationHex = destination as HexString;
-  const destinationSymbol = symbols[destinationHex] ?? 'Unit';
+  const destinationToken = addressToToken[destinationHex];
+  const destinationSymbol = destinationToken?.symbol ?? 'Unit';
 
   const isGearNetwork = sourceNetwork === Network.Gear;
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
@@ -43,7 +45,7 @@ function TransactionPair(props: Props) {
         <div>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals[sourceHex] ?? 0}
+            decimals={sourceToken?.decimals ?? 0}
             symbol={sourceSymbol}
             className={styles.amount}
           />
@@ -60,7 +62,7 @@ function TransactionPair(props: Props) {
         <div>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals[destinationHex] ?? 0}
+            decimals={destinationToken?.decimals ?? 0}
             symbol={destinationSymbol}
             className={styles.amount}
           />

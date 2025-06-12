@@ -3,11 +3,18 @@ import { useAccount, useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
 
 import { VftProgram } from '@/consts';
-import { FTAddressPair } from '@/types';
+import { useTokens } from '@/context';
 
-function useVaraFTBalances(addresses: FTAddressPair[] | undefined) {
+function useVaraFTBalances() {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
+
+  const { tokens } = useTokens();
+
+  // TODO: active filter
+  const addresses = tokens
+    ?.filter(({ isActive, network }) => isActive && network === 'vara')
+    .map(({ address }) => address);
 
   const getBalances = async () => {
     if (!api) throw new Error('API not initialized');
@@ -16,7 +23,7 @@ function useVaraFTBalances(addresses: FTAddressPair[] | undefined) {
 
     const result: Record<HexString, bigint> = {};
 
-    for (const [address] of addresses) {
+    for (const address of addresses) {
       const balance = await new VftProgram(api, address).vft.balanceOf(account.decodedAddress);
 
       result[address] = balance;

@@ -3,11 +3,17 @@ import { useConfig } from 'wagmi';
 import { waitForTransactionReceipt, writeContract } from 'wagmi/actions';
 
 import { ETH_TOKEN_ABI } from '@/consts';
-import { useTokens } from '@/hooks';
+import { useTokens } from '@/context';
 import { definedAssert } from '@/utils';
 
 function useBurnEthTokens() {
-  const { wrappedEthAddress } = useTokens();
+  const { tokens } = useTokens();
+
+  // TODO: active filter
+  const wrappedEthAddress = tokens?.find(
+    ({ network, isActive, isNative }) => isActive && isNative && network === 'eth',
+  )?.address;
+
   const config = useConfig();
 
   const burn = async (value: bigint) => {

@@ -4,7 +4,7 @@ import { request } from 'graphql-request';
 
 import { INDEXER_ADDRESS } from '../consts';
 import { graphql } from '../graphql';
-import { Pair } from '../graphql/graphql';
+import { Pair, PairsQueryQuery } from '../graphql/graphql';
 
 const PAIRS_QUERY = graphql(`
   query PairsQuery {
@@ -24,11 +24,13 @@ const PAIRS_QUERY = graphql(`
   }
 `);
 
+const derivePairs = ({ pairs }: PairsQueryQuery) => pairs as (Pair & { varaToken: HexString; ethToken: HexString })[];
+
 function usePairs() {
   return useQuery({
     queryKey: ['pairs'],
     queryFn: () => request(INDEXER_ADDRESS, PAIRS_QUERY),
-    select: ({ pairs }) => pairs as (Pair & { varaToken: HexString; ethToken: HexString })[],
+    select: derivePairs,
   });
 }
 

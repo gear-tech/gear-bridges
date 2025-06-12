@@ -1,12 +1,20 @@
 import WarningSVG from '@/assets/warning.svg?react';
 import { Tooltip } from '@/components';
-import { useEthFTBalance, useTokens, useVaraFTBalance } from '@/hooks';
+import { useTokens } from '@/context';
+import { useEthFTBalance, useVaraFTBalance } from '@/hooks';
 
 function LockedBalanceTooltip() {
-  const { wrappedVaraAddress, wrappedEthAddress } = useTokens();
+  const { tokens } = useTokens();
 
-  const { data: lockedVaraBalance } = useVaraFTBalance(wrappedVaraAddress);
-  const { data: lockedEthBalance } = useEthFTBalance(wrappedEthAddress);
+  // TODO: active filter
+  const { data: lockedVaraBalance } = useVaraFTBalance(
+    tokens?.find(({ network, isActive, isNative }) => isActive && isNative && network === 'vara')?.address,
+  );
+
+  const { data: lockedEthBalance } = useEthFTBalance(
+    tokens?.find(({ network, isActive, isNative }) => isActive && isNative && network === 'eth')?.address,
+  );
+
   const lockedBalance = lockedVaraBalance || lockedEthBalance;
 
   if (!lockedBalance) return;

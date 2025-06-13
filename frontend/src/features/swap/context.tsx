@@ -42,14 +42,13 @@ function BridgeProvider({ children }: PropsWithChildren) {
   const { data: pairs } = usePairs();
   const { addressToToken, nativeToken } = useTokens();
 
-  const [tokenAddress, setTokenAddress] = useState<HexString>();
+  const defaultNetwork = ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
+  const defaultTokenAddress = nativeToken[defaultNetwork]?.address;
+  const [tokenAddress, setTokenAddress] = useState(defaultTokenAddress);
 
   useEffect(() => {
-    const defaultNetwork = ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
-    const defaultToken = nativeToken[defaultNetwork];
-
-    setTokenAddress(defaultToken?.address);
-  }, [ethAccount.address, nativeToken]);
+    setTokenAddress(defaultTokenAddress);
+  }, [defaultTokenAddress]);
 
   const token = tokenAddress ? addressToToken?.[tokenAddress] : undefined;
   const isVaraNetwork = token ? token.network === NETWORK.VARA : true;

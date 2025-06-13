@@ -4,17 +4,10 @@ import { useTokens } from '@/context';
 import { useEthFTBalance, useVaraFTBalance } from '@/hooks';
 
 function LockedBalanceTooltip() {
-  const { tokens } = useTokens();
+  const { nativeToken } = useTokens();
 
-  // TODO: active filter
-  const { data: lockedVaraBalance } = useVaraFTBalance(
-    tokens?.find(({ network, isActive, isNative }) => isActive && isNative && network === 'vara')?.address,
-  );
-
-  const { data: lockedEthBalance } = useEthFTBalance(
-    tokens?.find(({ network, isActive, isNative }) => isActive && isNative && network === 'eth')?.address,
-  );
-
+  const { data: lockedVaraBalance } = useVaraFTBalance(nativeToken.vara?.address);
+  const { data: lockedEthBalance } = useEthFTBalance(nativeToken.eth?.address);
   const lockedBalance = lockedVaraBalance || lockedEthBalance;
 
   if (!lockedBalance) return;

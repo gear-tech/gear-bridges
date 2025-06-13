@@ -3,15 +3,36 @@ import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
 import { Network, Pair } from '@/features/history/graphql/graphql';
+import { NETWORK } from '@/features/swap/consts';
 
 type Value = {
   addressToToken: Record<HexString, Token> | undefined;
-  tokens: Token[] | undefined;
+
+  tokens: {
+    active: Token[] | undefined;
+    vara: Token[] | undefined;
+    eth: Token[] | undefined;
+  };
+
+  nativeToken: {
+    vara: Token | undefined;
+    eth: Token | undefined;
+  };
 };
 
 const DEFAULT_VALUE = {
   addressToToken: undefined,
-  tokens: undefined,
+
+  tokens: {
+    active: undefined,
+    vara: undefined,
+    eth: undefined,
+  },
+
+  nativeToken: {
+    vara: undefined,
+    eth: undefined,
+  },
 };
 
 const TokensContext = createContext<Value>(DEFAULT_VALUE);
@@ -64,7 +85,31 @@ function TokensProvider({ children }: PropsWithChildren) {
 
   const addressToToken = useMemo(() => (pairs ? deriveTokens(pairs) : undefined), [pairs]);
   const tokens = useMemo(() => (addressToToken ? Object.values(addressToToken) : undefined), [addressToToken]);
-  const value = useMemo(() => ({ addressToToken, tokens }), [addressToToken, tokens]);
+
+  const activeTokens = useMemo(() => tokens?.filter(({ isActive }) => isActive), [tokens]);
+  const varaTokens = useMemo(() => activeTokens?.filter(({ network }) => network === NETWORK.VARA), [activeTokens]);
+  const ethTokens = useMemo(() => activeTokens?.filter(({ network }) => network === NETWORK.ETH), [activeTokens]);
+
+  const nativeVaraToken = useMemo(() => varaTokens?.find(({ isNative }) => isNative), [varaTokens]);
+  const nativeEthToken = useMemo(() => ethTokens?.find(({ isNative }) => isNative), [ethTokens]);
+
+  const value = useMemo(
+    () => ({
+      addressToToken,
+
+      tokens: {
+        active: activeTokens,
+        vara: varaTokens,
+        eth: ethTokens,
+      },
+
+      nativeToken: {
+        vara: nativeVaraToken,
+        eth: nativeEthToken,
+      },
+    }),
+    [addressToToken, activeTokens, varaTokens, ethTokens, nativeVaraToken, nativeEthToken],
+  );
 
   return <Provider value={value}>{children}</Provider>;
 }

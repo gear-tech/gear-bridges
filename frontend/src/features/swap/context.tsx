@@ -40,22 +40,16 @@ function BridgeProvider({ children }: PropsWithChildren) {
 
   // token
   const { data: pairs } = usePairs();
-  const { tokens, addressToToken } = useTokens();
+  const { addressToToken, nativeToken } = useTokens();
 
   const [tokenAddress, setTokenAddress] = useState<HexString>();
 
   useEffect(() => {
-    if (!tokens) return;
-
     const defaultNetwork = ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
-
-    // TODO: active filter
-    const defaultToken = tokens.find(
-      ({ isActive, isNative, network }) => isActive && isNative && network === defaultNetwork,
-    );
+    const defaultToken = nativeToken[defaultNetwork];
 
     setTokenAddress(defaultToken?.address);
-  }, [ethAccount.address, tokens]);
+  }, [ethAccount.address, nativeToken]);
 
   const token = tokenAddress ? addressToToken?.[tokenAddress] : undefined;
   const isVaraNetwork = token ? token.network === NETWORK.VARA : true;

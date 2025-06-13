@@ -4,16 +4,11 @@ import { WrappedVaraProgram } from '@/consts';
 import { useTokens } from '@/context';
 
 function useWrappedVaraProgram() {
-  const { tokens } = useTokens();
-
-  // TODO: active filter
-  const wrappedVaraAddress = tokens?.find(
-    ({ network, isActive, isNative }) => isActive && isNative && network === 'vara',
-  )?.address;
+  const { nativeToken } = useTokens();
 
   return useProgram({
     library: WrappedVaraProgram,
-    id: wrappedVaraAddress,
+    id: nativeToken.vara?.address,
   });
 }
 

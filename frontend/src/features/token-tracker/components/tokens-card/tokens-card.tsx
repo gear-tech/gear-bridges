@@ -28,13 +28,9 @@ function TokensCard() {
   const varaSymbol = useVaraSymbol();
   const alert = useAlert();
 
-  const { tokens } = useTokens();
-  const activeTokens = tokens?.filter(({ isActive }) => isActive);
-  const activeVaraTokens = activeTokens?.filter((token) => token.network === 'vara');
-  const activeEthTokens = activeTokens?.filter((token) => token.network === 'eth');
-  const activeNetworkTokens = isVaraNetwork ? activeVaraTokens : activeEthTokens;
-  const nativeToken = activeNetworkTokens?.find(({ isNative }) => isNative);
-  const nonNativeTokens = activeNetworkTokens?.filter(({ isNative }) => !isNative);
+  const { tokens, nativeToken: _nativeToken } = useTokens();
+  const nativeToken = _nativeToken?.[network];
+  const nonNativeTokens = tokens[network]?.filter(({ isNative }) => !isNative);
 
   const burnVara = useBurnVaraTokens();
   const burnEth = useBurnEthTokens();

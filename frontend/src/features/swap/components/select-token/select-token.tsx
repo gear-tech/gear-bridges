@@ -37,11 +37,6 @@ function SelectTokenModal({ close }: ModalProps) {
   const [networkName, setNetworkName] = useState(network.name);
   const isVaraNetwork = networkName === NETWORK.VARA;
 
-  // TODO: active filter
-  const activeTokens = tokens?.filter(
-    ({ isActive, ..._token }) => isActive && _token.network === (isVaraNetwork ? 'vara' : 'eth'),
-  );
-
   const [searchQuery, setSearchQuery] = useState('');
 
   const renderTokenBalance = (address: HexString, isNative: boolean) => {
@@ -64,7 +59,7 @@ function SelectTokenModal({ close }: ModalProps) {
     );
   };
 
-  const filteredTokens = activeTokens?.filter(({ symbol }) => {
+  const filteredTokens = tokens[networkName]?.filter(({ symbol }) => {
     const lowerCaseSymbol = symbol.toLocaleLowerCase();
     const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
 

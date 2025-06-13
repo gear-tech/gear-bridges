@@ -7,20 +7,15 @@ import { useTokens } from '@/context';
 import { definedAssert } from '@/utils';
 
 function useBurnEthTokens() {
-  const { tokens } = useTokens();
-
-  // TODO: active filter
-  const wrappedEthAddress = tokens?.find(
-    ({ network, isActive, isNative }) => isActive && isNative && network === 'eth',
-  )?.address;
+  const { nativeToken } = useTokens();
 
   const config = useConfig();
 
   const burn = async (value: bigint) => {
-    definedAssert(wrappedEthAddress, 'ETH token address');
+    definedAssert(nativeToken.eth, 'ETH token address');
 
     const hash = await writeContract(config, {
-      address: wrappedEthAddress,
+      address: nativeToken.eth.address,
       abi: ETH_TOKEN_ABI,
       functionName: 'release',
       args: [value],

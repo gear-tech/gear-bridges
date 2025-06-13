@@ -12,27 +12,22 @@ function useEthFTBalances() {
 
   const { tokens } = useTokens();
 
-  // TODO: active filter
-  const addresses = tokens
-    ?.filter(({ isActive, network }) => isActive && network === 'eth')
-    .map(({ address }) => address);
-
   const contracts = useMemo(
     () =>
-      addresses?.map((address) => ({
+      tokens.eth?.map(({ address }) => ({
         address,
         abi: FUNGIBLE_TOKEN_ABI,
         functionName: 'balanceOf',
         args: [ethAccount.address],
       })),
-    [addresses, ethAccount.address],
+    [ethAccount.address, tokens.eth],
   );
 
-  const getBalancesMap = (data: { result?: string | number | bigint }[]) => {
-    if (!addresses) return;
+  const getAddressToBalance = (data: { result?: string | number | bigint }[]) => {
+    if (!tokens.eth) return;
 
-    const entries = data.map(({ result }, pairIndex) => {
-      const address = addresses[pairIndex];
+    const entries = data.map(({ result }, index) => {
+      const { address } = tokens.eth![index];
       const balance = isUndefined(result) ? 0n : BigInt(result);
 
       return [address, balance] as const;
@@ -45,7 +40,7 @@ function useEthFTBalances() {
     contracts,
     query: {
       enabled: ethAccount.isConnected,
-      select: getBalancesMap,
+      select: getAddressToBalance,
     },
   });
 

@@ -4,7 +4,6 @@ const getLastDaysISOTimestamp = (daysCount: number) =>
   new Date(Date.now() - daysCount * 24 * 60 * 60 * 1000).toISOString();
 
 const getAssetOptions = (pairs: Pair[]) => {
-  // TODO: active filter
   const options = pairs
     .filter(({ isRemoved }) => !isRemoved)
     .flatMap(({ varaToken, varaTokenSymbol, ethToken, ethTokenSymbol }) => [

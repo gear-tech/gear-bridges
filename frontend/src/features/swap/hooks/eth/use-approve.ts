@@ -14,7 +14,7 @@ const abi = FUNGIBLE_TOKEN_ABI;
 
 function useApprove() {
   const { token } = useBridgeContext();
-  const { address } = token;
+  const { address } = token || {};
 
   const config = useConfig();
   const { writeContractAsync } = useWriteContract();

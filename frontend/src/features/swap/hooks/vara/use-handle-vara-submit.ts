@@ -44,7 +44,7 @@ function useHandleVaraSubmit(
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
     definedAssert(api, 'API');
     definedAssert(varaSymbol, 'Vara symbol');
-    definedAssert(token.address, 'Fungible token address');
+    definedAssert(token?.address, 'Fungible token address');
     definedAssert(feeValue, 'Fee value');
     definedAssert(allowance, 'Allowance');
     definedAssert(ftBalance, 'Fungible token balance');

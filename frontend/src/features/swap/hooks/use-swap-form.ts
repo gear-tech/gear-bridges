@@ -33,7 +33,7 @@ function useSwapForm(
   const { token } = useBridgeContext();
 
   const valueSchema = getAmountSchema(
-    token.isNative,
+    token?.isNative,
     accountBalance.data,
     ftBalance.data,
     decimals,
@@ -70,7 +70,7 @@ function useSwapForm(
   });
 
   const setMaxBalance = () => {
-    const balance = token.isNative ? accountBalance : ftBalance;
+    const balance = token?.isNative ? accountBalance : ftBalance;
     if (isUndefined(decimals)) throw new Error('Decimals are not defined');
     if (isUndefined(balance.data)) throw new Error('Balance is not defined');
 

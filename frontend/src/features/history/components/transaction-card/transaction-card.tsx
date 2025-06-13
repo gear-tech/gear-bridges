@@ -1,6 +1,7 @@
 import { HexString } from '@gear-js/api';
 
 import { Card, CopyButton, Skeleton } from '@/components';
+import { Token } from '@/context';
 import { useModal } from '@/hooks';
 import { getTruncatedText } from '@/utils';
 
@@ -28,8 +29,7 @@ type Props = Pick<
   | 'nonce'
   | 'blockNumber'
 > & {
-  decimals: Record<HexString, number>;
-  symbols: Record<HexString, string>;
+  addressToToken: Record<HexString, Token>;
 };
 
 function TransactionCard(props: Props) {

@@ -9,10 +9,10 @@ import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE } from './for
 import { BridgingPaymentProgram } from './sails';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
 
-const NETWORK_INDEX = {
-  VARA: 0,
-  ETH: 1,
-};
+const NETWORK = {
+  VARA: 'vara',
+  ETH: 'eth',
+} as const;
 
 export {
   BRIDGING_PAYMENT_CONTRACT_ADDRESS,
@@ -25,7 +25,7 @@ export {
   ADDRESS_SCHEMA,
   EVENT_NAME,
   ERROR_MESSAGE,
-  NETWORK_INDEX,
+  NETWORK,
   SERVICE_NAME,
   QUERY_NAME,
   BridgingPaymentProgram,

@@ -3,7 +3,6 @@ import { useEthAccount } from './use-eth-account';
 import { useEthAccountBalance } from './use-eth-account-balance';
 import { useEthFTBalance } from './use-eth-ft-balance';
 import { useEthFTBalances } from './use-eth-ft-balances';
-import { useTokens } from './use-tokens';
 import { useVaraAccountBalance } from './use-vara-account-balance';
 import { useVaraFTBalance } from './use-vara-ft-balance';
 import { useVaraFTBalances } from './use-vara-ft-balances';
@@ -18,7 +17,6 @@ export {
   useLoading,
   useChangeEffect,
   useDebounce,
-  useTokens,
   useInvalidateOnBlock,
   useVaraAccountBalance,
   useVaraFTBalance,

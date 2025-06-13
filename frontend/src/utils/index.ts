@@ -3,8 +3,6 @@ import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import { NETWORK_INDEX } from '@/features/swap/consts';
-
 import { fetchWithGuard } from './fetch-with-guard';
 
 const cx = (...args: unknown[]) =>
@@ -41,9 +39,6 @@ const isUndefined = (value: unknown): value is undefined => value === undefined;
 const isNull = (value: unknown): value is null => value === null;
 const isNumeric = (value: string) => /^\d+$/.test(value);
 
-const isNativeToken = (symbol: string, networkIndex: number) =>
-  symbol.toLowerCase().includes(networkIndex === NETWORK_INDEX.VARA ? 'vara' : 'eth');
-
 // asserts can't use arrow functions
 function definedAssert<T>(value: T, name: string): asserts value is NonNullable<T> {
   if (isUndefined(value) || isNull(value)) throw new Error(`${name} is not defined`);
@@ -71,7 +66,6 @@ export {
   isNull,
   isNumeric,
   getErrorMessage,
-  isNativeToken,
   definedAssert,
   fetchWithGuard,
   getTruncatedText,

@@ -6,7 +6,7 @@ import { useBridgeContext } from '../../context';
 
 function usePrepareApprove() {
   const { token } = useBridgeContext();
-  const { data: program } = useVFTProgram(token.address);
+  const { data: program } = useVFTProgram(token?.address);
 
   return {
     program,

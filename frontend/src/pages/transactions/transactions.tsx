@@ -1,10 +1,10 @@
-import { HexString } from '@gear-js/api';
 import { useAccount } from '@gear-js/react-hooks';
 import { useMemo } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import SearchSVG from '@/assets/search.svg?react';
 import { Container, Input, Select, Skeleton, Checkbox } from '@/components';
+import { useTokens } from '@/context';
 import {
   useTransactions,
   useTransactionsCount,
@@ -18,36 +18,9 @@ import {
   TRANSACTIONS_LIMIT,
   usePairs,
 } from '@/features/history';
-import { useEthAccount, useTokens } from '@/hooks';
+import { useEthAccount } from '@/hooks';
 
 import styles from './transactions.module.scss';
-
-function useHistoryTokens() {
-  const { data: pairs, isLoading } = usePairs();
-
-  const { symbols, decimals } = pairs?.reduce(
-    (result, pair) => {
-      const { varaToken, varaTokenSymbol, varaTokenDecimals, ethToken, ethTokenSymbol, ethTokenDecimals } = pair;
-
-      result.symbols[varaToken] = varaTokenSymbol;
-      result.decimals[varaToken] = varaTokenDecimals;
-
-      result.symbols[ethToken] = ethTokenSymbol;
-      result.decimals[ethToken] = ethTokenDecimals;
-
-      return result;
-    },
-    {
-      symbols: {} as Record<HexString, string>,
-      decimals: {} as Record<HexString, number>,
-    },
-  ) || {
-    symbols: undefined,
-    decimals: undefined,
-  };
-
-  return { symbols, decimals, isLoading };
-}
 
 function Transactions() {
   const { account } = useAccount();
@@ -58,10 +31,10 @@ function Transactions() {
   const [transactionsCount, isTransactionsCountLoading] = useTransactionsCount(filters);
   const [transactions, isFetching, hasNextPage, fetchNextPage] = useTransactions(transactionsCount, filters);
 
-  const { addresses, symbols, isLoading } = useTokens();
-  const assetOptions = useMemo(() => getAssetOptions(addresses ?? [], symbols ?? {}), [addresses, symbols]);
+  const { data: pairs, isLoading } = usePairs();
+  const assetOptions = useMemo(() => getAssetOptions(pairs || []), [pairs]);
 
-  const historyTokens = useHistoryTokens();
+  const { addressToToken } = useTokens();
 
   return (
     <Container>
@@ -87,11 +60,9 @@ function Transactions() {
       </header>
 
       <List
-        items={historyTokens.symbols && historyTokens.decimals ? transactions : undefined}
+        items={addressToToken ? transactions : undefined}
         hasMore={hasNextPage}
-        renderItem={(transaction) => (
-          <TransactionCard {...transaction} symbols={historyTokens.symbols!} decimals={historyTokens.decimals!} />
-        )}
+        renderItem={(transaction) => <TransactionCard {...transaction} addressToToken={addressToToken!} />}
         fetchMore={fetchNextPage}
         skeleton={{
           rowsCount: TRANSACTIONS_LIMIT,

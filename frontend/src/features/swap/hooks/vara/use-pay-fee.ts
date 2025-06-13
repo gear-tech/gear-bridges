@@ -28,7 +28,7 @@ function usePayFee(feeValue: bigint | undefined) {
   });
 
   const payFees = ({ amount, accountAddress }: FormattedValues) => {
-    if (!token.address) throw new Error('Fungible token address is not found');
+    if (!token?.address) throw new Error('Fungible token address is not found');
     if (isUndefined(feeValue)) throw new Error('Fee is not found');
     if (!account) throw new Error('Account is not found');
     if (!isApiReady) throw new Error('API is not initialized');

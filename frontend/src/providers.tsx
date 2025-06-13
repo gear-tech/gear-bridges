@@ -14,6 +14,7 @@ import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
 import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, VARA_NODE_ADDRESS } from './consts';
+import { TokensProvider } from './context';
 
 function ApiProvider({ children }: ProviderProps) {
   return <GearApiProvider initialArgs={{ endpoint: VARA_NODE_ADDRESS }}>{children}</GearApiProvider>;
@@ -95,7 +96,7 @@ function QueryProvider({ children }: ProviderProps) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider];
+const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider, TokensProvider];
 
 const WithProviders = (Component: ComponentType) => () =>
   providers.reduceRight((children, Provider) => <Provider>{children}</Provider>, <Component />);

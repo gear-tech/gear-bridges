@@ -6,13 +6,14 @@ import { isUndefined } from '@/utils';
 import { ERROR_MESSAGE } from './consts';
 
 const getAmountSchema = (
-  isNativeToken: boolean,
+  isNativeToken: boolean | undefined,
   accountBalanceValue: bigint | undefined,
   ftBalanceValue: bigint | undefined,
   decimals: number | undefined,
   existentialDeposit: bigint | undefined,
 ) => {
   if (
+    isUndefined(isNativeToken) ||
     isUndefined(accountBalanceValue) ||
     isUndefined(ftBalanceValue) ||
     isUndefined(decimals) ||

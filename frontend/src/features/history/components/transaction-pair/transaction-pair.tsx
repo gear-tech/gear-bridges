@@ -3,16 +3,16 @@ import { getVaraAddress } from '@gear-js/react-hooks';
 
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { Token } from '@/context';
-import { NETWORK_INDEX as DEFAULT_NETWORK_INDEX } from '@/features/swap/consts';
+import { NETWORK } from '@/features/swap/consts';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { Network, Transfer } from '../../types';
 
 import styles from './transaction-pair.module.scss';
 
-const NETWORK_INDEX = {
-  [Network.Gear]: DEFAULT_NETWORK_INDEX.VARA,
-  [Network.Ethereum]: DEFAULT_NETWORK_INDEX.ETH,
+const INDEXED_NETWORK_TO_NETWORK = {
+  [Network.Gear]: NETWORK.VARA,
+  [Network.Ethereum]: NETWORK.ETH,
 } as const;
 
 type Props = Pick<
@@ -40,7 +40,7 @@ function TransactionPair(props: Props) {
   return (
     <div className={styles.pair}>
       <div className={styles.tx}>
-        <TokenSVG symbol={sourceSymbol} networkIndex={NETWORK_INDEX[sourceNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={sourceSymbol} network={INDEXED_NETWORK_TO_NETWORK[sourceNetwork]} sizes={[32, 20]} />
 
         <div>
           <FormattedBalance
@@ -57,7 +57,7 @@ function TransactionPair(props: Props) {
       <ArrowSVG />
 
       <div className={styles.tx}>
-        <TokenSVG symbol={destinationSymbol} networkIndex={NETWORK_INDEX[destNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={destinationSymbol} network={INDEXED_NETWORK_TO_NETWORK[destNetwork]} sizes={[32, 20]} />
 
         <div>
           <FormattedBalance

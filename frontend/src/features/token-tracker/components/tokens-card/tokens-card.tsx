@@ -5,6 +5,7 @@ import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { useTokens } from '@/context';
 import { GetBalanceButton } from '@/features/faucet';
+import { NETWORK } from '@/features/swap/consts';
 import {
   useVaraAccountBalance,
   useEthAccountBalance,
@@ -22,7 +23,7 @@ import styles from './tokens-card.module.scss';
 function TokensCard() {
   const { account } = useAccount();
   const isVaraNetwork = Boolean(account);
-  const networkIndex = isVaraNetwork ? 0 : 1;
+  const network = isVaraNetwork ? NETWORK.VARA : NETWORK.ETH;
 
   const varaSymbol = useVaraSymbol();
   const alert = useAlert();
@@ -58,7 +59,7 @@ function TokensCard() {
 
       return (
         <li key={address}>
-          <BalanceCard value={balance} decimals={decimals ?? 0} symbol={symbol ?? 'Unit'} networkIndex={networkIndex}>
+          <BalanceCard value={balance} decimals={decimals ?? 0} symbol={symbol ?? 'Unit'} network={network}>
             <GetBalanceButton.EthToken address={address} symbol={symbol ?? 'Unit'} onSuccess={refetchEthBalances} />
           </BalanceCard>
         </li>
@@ -102,7 +103,7 @@ function TokensCard() {
               value={accountBalance.data}
               decimals={isVaraNetwork ? 12 : 18}
               symbol={isVaraNetwork ? varaSymbol : 'ETH'}
-              networkIndex={networkIndex}>
+              network={network}>
               {isVaraNetwork ? (
                 <GetBalanceButton.VaraAccount />
               ) : (
@@ -123,7 +124,7 @@ function TokensCard() {
             value={lockedBalance}
             decimals={nativeToken.decimals ?? 0}
             symbol={nativeToken.symbol ?? 'Unit'}
-            networkIndex={networkIndex}
+            network={network}
             locked>
             {Boolean(lockedBalance) && (
               <Button text="Unlock" size="small" onClick={handleUnlockBalanceClick} isLoading={burn.isPending} />

@@ -10,15 +10,15 @@ type Props = PropsWithChildren & {
   value: bigint;
   decimals: number;
   symbol: string;
-  networkIndex: number;
+  network: 'vara' | 'eth';
   locked?: boolean;
 };
 
-function BalanceCard({ locked, value, decimals, symbol, networkIndex, children }: Props) {
+function BalanceCard({ locked, value, decimals, symbol, network, children }: Props) {
   return (
     <div className={cx(styles.card, locked && styles.locked)}>
       <span className={styles.balance}>
-        <TokenSVG symbol={symbol} networkIndex={networkIndex} sizes={[24]} />
+        <TokenSVG symbol={symbol} network={network} sizes={[24]} />
         <FormattedBalance value={value} decimals={decimals} symbol={symbol} />
       </span>
 

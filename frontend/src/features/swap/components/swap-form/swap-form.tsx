@@ -13,7 +13,7 @@ import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
-import { FIELD_NAME } from '../../consts';
+import { FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
@@ -139,8 +139,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   type="select"
                   address={token?.address}
                   symbol={token?.symbol}
-                  network={network.isVara ? 'Vara Testnet' : 'Ethereum Holesky'}
-                  networkIndex={network.isVara ? 0 : 1}
+                  networkText={network.isVara ? 'Vara Testnet' : 'Ethereum Holesky'}
+                  network={network.name}
                 />
 
                 <AmountInput />
@@ -162,8 +162,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   type="text"
                   address={destinationToken?.address}
                   symbol={destinationToken?.symbol}
-                  network={network.isVara ? 'Ethereum Holesky' : 'Vara Testnet'}
-                  networkIndex={network.isVara ? 1 : 0}
+                  networkText={network.isVara ? 'Ethereum Holesky' : 'Vara Testnet'}
+                  network={network.name === NETWORK.VARA ? NETWORK.ETH : NETWORK.VARA}
                 />
 
                 <AmountInput.Value />

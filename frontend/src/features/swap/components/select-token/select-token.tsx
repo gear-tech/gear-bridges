@@ -26,7 +26,7 @@ type ModalProps = {
 
 function SelectTokenModal({ close }: ModalProps) {
   const { tokens, addressToToken } = useTokens();
-  const { token } = useBridgeContext();
+  const { token, network } = useBridgeContext();
 
   const varaFtBalances = useVaraFTBalances();
   const ethFtBalances = useEthFTBalances();
@@ -34,7 +34,7 @@ function SelectTokenModal({ close }: ModalProps) {
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
 
-  const [networkName, setNetworkName] = useState(token?.network);
+  const [networkName, setNetworkName] = useState(network.name);
   const isVaraNetwork = networkName === NETWORK.VARA;
 
   // TODO: active filter
@@ -91,7 +91,7 @@ function SelectTokenModal({ close }: ModalProps) {
             onClick={handleClick}
             disabled={isActive}>
             <span className={styles.wallet}>
-              <TokenSVG symbol={symbol} networkIndex={isVaraNetwork ? 0 : 1} sizes={[32, 20]} />
+              <TokenSVG symbol={symbol} network={networkName} sizes={[32, 20]} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{symbol}</span>

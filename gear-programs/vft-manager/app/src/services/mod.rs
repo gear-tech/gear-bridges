@@ -544,6 +544,16 @@ impl VftManager {
         }
     }
 
+    pub async fn insert_transactions(&mut self, transactions: Vec<(u64, u64)>) {
+        self.ensure_admin();
+
+        if !self.state().is_paused {
+            panic!("Not paused");
+        }
+
+        todo!()
+    }
+
     /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Populates the collection with processed transactions.
     ///

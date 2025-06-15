@@ -6,18 +6,12 @@ import EthSVG from '@/assets/eth.svg?react';
 import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
-import {
-  useEthFTBalances,
-  useVaraFTBalances,
-  useTokens,
-  useModal,
-  useVaraAccountBalance,
-  useEthAccountBalance,
-} from '@/hooks';
-import { cx, isNativeToken, isUndefined } from '@/utils';
+import { useTokens } from '@/context';
+import { useEthFTBalances, useVaraFTBalances, useModal, useVaraAccountBalance, useEthAccountBalance } from '@/hooks';
+import { cx, isUndefined } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import { NETWORK_INDEX } from '../../consts';
+import { NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 
 import styles from './select-token.module.scss';
@@ -31,59 +25,56 @@ type ModalProps = {
 };
 
 function SelectTokenModal({ close }: ModalProps) {
-  const { network, pair } = useBridgeContext();
+  const { tokens, addressToToken } = useTokens();
+  const { token, network } = useBridgeContext();
 
-  const { addresses, symbols, decimals } = useTokens();
-  const varaFtBalances = useVaraFTBalances(addresses);
-  const ethFtBalances = useEthFTBalances(addresses);
+  const varaFtBalances = useVaraFTBalances();
+  const ethFtBalances = useEthFTBalances();
+
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
 
-  const [networkIndex, setNetworkIndex] = useState(network.index);
-  const isVaraNetwork = networkIndex === NETWORK_INDEX.VARA;
+  const [networkName, setNetworkName] = useState(network.name);
+  const isVaraNetwork = networkName === NETWORK.VARA;
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const renderTokenBalance = (address: HexString, symbol: string) => {
+  const renderTokenBalance = (address: HexString, isNative: boolean) => {
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
-    const balance = isNativeToken(symbol, networkIndex) ? accountBalance : ftBalance;
+    const balance = isNative ? accountBalance : ftBalance;
 
-    if (!decimals || balance.isLoading) return <Skeleton width="5rem" />;
+    if (!addressToToken || balance.isLoading) return <Skeleton width="5rem" />;
     if (isUndefined(balance.data)) return;
 
-    return <FormattedBalance value={balance.data} symbol="" decimals={decimals[address]} className={styles.balance} />;
+    return (
+      <FormattedBalance
+        value={balance.data}
+        symbol=""
+        decimals={addressToToken[address]?.decimals ?? 0}
+        className={styles.balance}
+      />
+    );
   };
 
-  const filteredAddresses =
-    addresses && symbols
-      ? addresses.filter((addressPair) => {
-          const address = addressPair[networkIndex];
-          const lowerCaseSymbol = symbols[address].toLocaleLowerCase();
-          const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
+  const filteredTokens = tokens[networkName]?.filter(({ symbol }) => {
+    const lowerCaseSymbol = symbol.toLocaleLowerCase();
+    const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
 
-          return lowerCaseSymbol.includes(lowerCaseSearchQuery);
-        })
-      : undefined;
+    return lowerCaseSymbol.includes(lowerCaseSearchQuery);
+  });
 
   const renderTokens = () => {
-    if (!addresses || !filteredAddresses || !symbols) return;
+    if (!filteredTokens) return;
 
-    const selectedTokenAddress = addresses[pair.index][network.index];
-
-    return filteredAddresses.map((addressPair, index) => {
-      const address = addressPair[networkIndex];
-      const isActive = address === selectedTokenAddress;
-      const symbol = symbols[address];
+    return filteredTokens.map(({ address, symbol, isNative }, index) => {
+      const isActive = address === token?.address;
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
-        const indexWithinNonFilteredAddresses = addresses.findIndex((_pair) => _pair[networkIndex] === address);
-
-        network.setIndex(networkIndex);
-        pair.setIndex(indexWithinNonFilteredAddresses);
+        token?.set(address);
         close();
       };
 
@@ -95,7 +86,7 @@ function SelectTokenModal({ close }: ModalProps) {
             onClick={handleClick}
             disabled={isActive}>
             <span className={styles.wallet}>
-              <TokenSVG symbol={symbol} networkIndex={networkIndex} sizes={[32, 20]} />
+              <TokenSVG symbol={symbol} network={networkName} sizes={[32, 20]} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{symbol}</span>
@@ -103,7 +94,7 @@ function SelectTokenModal({ close }: ModalProps) {
               </span>
             </span>
 
-            {renderTokenBalance(address, symbol)}
+            {renderTokenBalance(address, isNative)}
           </button>
         </li>
       );
@@ -118,18 +109,18 @@ function SelectTokenModal({ close }: ModalProps) {
         <div className={styles.list}>
           <button
             type="button"
-            className={cx(styles.network, networkIndex === NETWORK_INDEX.VARA && styles.active)}
-            disabled={networkIndex === NETWORK_INDEX.VARA}
-            onClick={() => setNetworkIndex(NETWORK_INDEX.VARA)}>
+            className={cx(styles.network, networkName === NETWORK.VARA && styles.active)}
+            disabled={networkName === NETWORK.VARA}
+            onClick={() => setNetworkName(NETWORK.VARA)}>
             <VaraSVG />
             <p>Vara</p>
           </button>
 
           <button
             type="button"
-            className={cx(styles.network, networkIndex === NETWORK_INDEX.ETH && styles.active)}
-            disabled={networkIndex === NETWORK_INDEX.ETH}
-            onClick={() => setNetworkIndex(NETWORK_INDEX.ETH)}>
+            className={cx(styles.network, networkName === NETWORK.ETH && styles.active)}
+            disabled={networkName === NETWORK.ETH}
+            onClick={() => setNetworkName(NETWORK.ETH)}>
             <EthSVG />
             <p>Ethereum</p>
           </button>
@@ -143,7 +134,7 @@ function SelectTokenModal({ close }: ModalProps) {
         className={styles.input}
       />
 
-      {filteredAddresses?.length ? (
+      {filteredTokens?.length ? (
         <ul className={styles.tokens}>{renderTokens()}</ul>
       ) : (
         <p className={styles.notFound}>Tokens with provided name are not found.</p>

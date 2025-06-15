@@ -2,34 +2,36 @@ import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
-import { NETWORK_INDEX as DEFAULT_NETWORK_INDEX } from '@/features/swap/consts';
+import { Token } from '@/context';
+import { NETWORK } from '@/features/swap/consts';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { Network, Transfer } from '../../types';
 
 import styles from './transaction-pair.module.scss';
 
-const NETWORK_INDEX = {
-  [Network.Gear]: DEFAULT_NETWORK_INDEX.VARA,
-  [Network.Ethereum]: DEFAULT_NETWORK_INDEX.ETH,
+const INDEXED_NETWORK_TO_NETWORK = {
+  [Network.Gear]: NETWORK.VARA,
+  [Network.Ethereum]: NETWORK.ETH,
 } as const;
 
 type Props = Pick<
   Transfer,
   'sourceNetwork' | 'destNetwork' | 'source' | 'destination' | 'amount' | 'sender' | 'receiver'
 > & {
-  symbols: Record<HexString, string>;
-  decimals: Record<HexString, number>;
+  addressToToken: Record<HexString, Token>;
 };
 
 function TransactionPair(props: Props) {
-  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, symbols, decimals } = props;
+  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, addressToToken } = props;
 
   const sourceHex = source as HexString;
-  const sourceSymbol = symbols[sourceHex] ?? 'Unit';
+  const sourceToken = addressToToken[sourceHex];
+  const sourceSymbol = sourceToken?.symbol ?? 'Unit';
 
   const destinationHex = destination as HexString;
-  const destinationSymbol = symbols[destinationHex] ?? 'Unit';
+  const destinationToken = addressToToken[destinationHex];
+  const destinationSymbol = destinationToken?.symbol ?? 'Unit';
 
   const isGearNetwork = sourceNetwork === Network.Gear;
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
@@ -38,12 +40,12 @@ function TransactionPair(props: Props) {
   return (
     <div className={styles.pair}>
       <div className={styles.tx}>
-        <TokenSVG symbol={sourceSymbol} networkIndex={NETWORK_INDEX[sourceNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={sourceSymbol} network={INDEXED_NETWORK_TO_NETWORK[sourceNetwork]} sizes={[32, 20]} />
 
         <div>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals[sourceHex] ?? 0}
+            decimals={sourceToken?.decimals ?? 0}
             symbol={sourceSymbol}
             className={styles.amount}
           />
@@ -55,12 +57,12 @@ function TransactionPair(props: Props) {
       <ArrowSVG />
 
       <div className={styles.tx}>
-        <TokenSVG symbol={destinationSymbol} networkIndex={NETWORK_INDEX[destNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={destinationSymbol} network={INDEXED_NETWORK_TO_NETWORK[destNetwork]} sizes={[32, 20]} />
 
         <div>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals[destinationHex] ?? 0}
+            decimals={destinationToken?.decimals ?? 0}
             symbol={destinationSymbol}
             className={styles.amount}
           />

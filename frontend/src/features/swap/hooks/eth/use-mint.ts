@@ -14,7 +14,7 @@ function useMint() {
   const config = useConfig();
 
   const mint = async ({ value, gas }: { value: bigint; gas: bigint }) => {
-    definedAssert(token.address, 'Fungible token address');
+    definedAssert(token?.address, 'Fungible token address');
 
     const hash = await writeContractAsync({
       abi: ETH_TOKEN_ABI,
@@ -28,7 +28,7 @@ function useMint() {
   };
 
   const getGasLimit = (value: bigint) => {
-    definedAssert(token.address, 'Fungible token address');
+    definedAssert(token?.address, 'Fungible token address');
 
     const data = encodeFunctionData({
       abi: ETH_TOKEN_ABI,

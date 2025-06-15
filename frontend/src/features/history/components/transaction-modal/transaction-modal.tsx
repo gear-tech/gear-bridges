@@ -5,9 +5,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { JSX } from 'react';
 
 import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } from '@/components';
+import { useTokens } from '@/context';
 import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
-import { useTokens } from '@/hooks';
 import { cx, getErrorMessage, isUndefined, getTruncatedText } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -59,7 +59,7 @@ function TransactionModal({
   renderProgressBar,
   close,
 }: Props) {
-  const { decimals, symbols } = useTokens();
+  const { addressToToken } = useTokens();
   const isGearNetwork = sourceNetwork === Network.Gear;
 
   const { fee: varaFee } = useVaraFee();
@@ -77,8 +77,8 @@ function TransactionModal({
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
 
-  const sourceSymbol = symbols?.[source as HexString] || 'Unit';
-  const destinationSymbol = symbols?.[destination as HexString] || 'Unit';
+  const sourceToken = addressToToken?.[source as HexString];
+  const destinationToken = addressToToken?.[destination as HexString];
 
   const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
@@ -126,8 +126,8 @@ function TransactionModal({
         <span className={styles.tx}>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals?.[source as HexString] ?? 0}
-            symbol={sourceSymbol}
+            decimals={sourceToken?.decimals ?? 0}
+            symbol={sourceToken?.symbol || 'Unit'}
             className={styles.amount}
           />
 
@@ -144,8 +144,8 @@ function TransactionModal({
         <span className={styles.tx}>
           <FormattedBalance
             value={BigInt(amount)}
-            decimals={decimals?.[source as HexString] ?? 0}
-            symbol={destinationSymbol}
+            decimals={destinationToken?.decimals ?? 0}
+            symbol={destinationToken?.symbol || 'Unit'}
             className={styles.amount}
           />
 

@@ -68,22 +68,8 @@ const ERC20_MANAGER_ABI = [
     ],
     anonymous: false,
   },
-  {
-    type: 'error',
-    name: 'AddressEmptyCode',
-    inputs: [{ name: 'target', type: 'address', internalType: 'address' }],
-  },
   { type: 'error', name: 'BadArguments', inputs: [] },
   { type: 'error', name: 'BadVftManagerAddress', inputs: [] },
-  { type: 'error', name: 'FailedCall', inputs: [] },
-  {
-    type: 'error',
-    name: 'InsufficientBalance',
-    inputs: [
-      { name: 'balance', type: 'uint256', internalType: 'uint256' },
-      { name: 'needed', type: 'uint256', internalType: 'uint256' },
-    ],
-  },
   { type: 'error', name: 'NotAuthorized', inputs: [] },
   {
     type: 'error',

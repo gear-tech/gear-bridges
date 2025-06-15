@@ -35,6 +35,7 @@ members = [
     "tools/governance", 
     "tests",
     "gear-common",
+    "tools/vft-manager-tool",
 ]
 
 resolver = "2"

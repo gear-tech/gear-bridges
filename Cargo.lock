@@ -15325,6 +15325,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vft-manager-tool"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dotenv",
+ "gclient",
+ "gear-common 0.3.0",
+ "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
+ "log",
+ "pretty_env_logger",
+ "sails-rs",
+ "tokio",
+ "vft-manager-client",
+]
+
+[[package]]
 name = "vft-vara"
 version = "0.3.0"
 dependencies = [

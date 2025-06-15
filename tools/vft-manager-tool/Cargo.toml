@@ -1,0 +1,18 @@
+[package]
+name = "vft-manager-tool"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dotenv.workspace = true
+gear-common.workspace = true
+gear-core.workspace = true
+gclient.workspace = true
+hex.workspace = true
+log.workspace = true
+pretty_env_logger.workspace = true
+sails-rs = { workspace = true, features = ["gclient"] }
+tokio.workspace = true
+vft-manager-client.workspace = true

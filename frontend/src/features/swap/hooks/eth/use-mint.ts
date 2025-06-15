@@ -3,7 +3,7 @@ import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
-import { ETH_TOKEN_ABI } from '@/consts';
+import { WRAPPED_ETH_ABI } from '@/consts';
 import { definedAssert } from '@/utils';
 
 import { useBridgeContext } from '../../context';
@@ -17,9 +17,9 @@ function useMint() {
     definedAssert(token?.address, 'Fungible token address');
 
     const hash = await writeContractAsync({
-      abi: ETH_TOKEN_ABI,
+      abi: WRAPPED_ETH_ABI,
       address: token.address, // only for wrapped eth
-      functionName: 'tokenize',
+      functionName: 'deposit',
       value,
       gas,
     });
@@ -31,8 +31,8 @@ function useMint() {
     definedAssert(token?.address, 'Fungible token address');
 
     const data = encodeFunctionData({
-      abi: ETH_TOKEN_ABI,
-      functionName: 'tokenize',
+      abi: WRAPPED_ETH_ABI,
+      functionName: 'deposit',
     });
 
     return estimateGas(config, { to: token.address, data, value });

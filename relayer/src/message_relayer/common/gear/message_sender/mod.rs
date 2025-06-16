@@ -25,7 +25,7 @@ use tokio::{sync::mpsc::UnboundedReceiver, time::Duration};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
-mod compose_payload;
+pub mod compose_payload;
 
 pub struct MessageSender {
     api_provider: ApiProviderConnection,

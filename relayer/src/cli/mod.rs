@@ -155,6 +155,18 @@ pub enum EthGearTokensCommands {
         /// Address of the BridgingPayment contract on ethereum
         #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
         bridging_payment_address: String,
+        /// Storage path for transactions. Relayer will save transaction
+        /// status in that directory.
+        #[arg(long = "storage-path", env = "ETH_GEAR_TX_STORAGE_PATH")]
+        storage_path: String,
+        /// Restart failed transactions or no. At the moment only
+        /// restarts transactions loaded from storage.
+        #[arg(long = "restart-failed", default_value_t = false)]
+        restart_failed: bool,
+        /// Resume transaction execution from storage. If not specified
+        /// transactions are loaded, but not processed.
+        #[arg(long = "resume-from-storage", default_value_t = false)]
+        resume_from_storage: bool,
     },
 }
 

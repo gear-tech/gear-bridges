@@ -286,6 +286,9 @@ async fn main() {
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
+                    storage_path,
+                    restart_failed,
+                    resume_from_storage,
                 } => {
                     let bridging_payment_address =
                         hex_utils::decode_h160(&bridging_payment_address)
@@ -310,7 +313,9 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
                     provider.spawn();
-                    relayer.run().await;
+                    relayer
+                        .run(restart_failed, resume_from_storage, &storage_path)
+                        .await;
                 }
             }
 

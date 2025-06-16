@@ -441,8 +441,6 @@ contract MessageQueueTest is TestHelper {
             bytes(hex"baad")
         );
 
-        // Same for getMerkleRoot
-        vm.expectRevert(IRelayer.EmergencyStop.selector);
-        relayer.getMerkleRoot(BLOCK_ID);
+        assertTrue(relayer.emergencyStop());
     }
 }

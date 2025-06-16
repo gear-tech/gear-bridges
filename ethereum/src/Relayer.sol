@@ -4,28 +4,43 @@ pragma solidity ^0.8.30;
 import {IRelayer} from "./interfaces/IRelayer.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 
+/**
+ * @dev Relayer smart contract is responsible for storing Merkle roots for blocks
+ *      that were observed on Vara Network. Before storing Merkle roots, Relayer
+ *      verifies received Merkle roots with help of Verifier smart contract.
+ */
 contract Relayer is IRelayer {
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 blockNumber) private _merkleRoots;
-    bool _emergencyStop;
+    bool private _emergencyStop;
 
-    IVerifier immutable VERIFIER_ADDRESS;
+    IVerifier immutable VERIFIER;
 
+    /**
+     * @dev Initializes the Relayer contract with the Verifier address.
+     * @param verifier The address of the Verifier contract that will be used to verify Merkle roots.
+     */
     constructor(IVerifier verifier) {
-        VERIFIER_ADDRESS = verifier;
+        VERIFIER = verifier;
     }
 
     /**
-     * @dev Verifies and stores a `merkleRoot` for specified `blockNumber`. Calls `verifyProof`
-     *      in `PlonkVerifier` and reverts if the proof or the public inputs are malformed.
+     * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
-     * @param blockNumber Block number where merkle root was relayed.
-     * @param merkleRoot Merkle root containing messages queued to relay on VARA.
-     * @param proof serialised plonk proof (using gnark's MarshalSolidity).
+     *      Upon successfully storing data about block number and corresponding Merkle root,
+     *      Relayer smart contract will emit a MerkleRoot event.
+     *
+     *      It is important to note that anyone can submit a Merkle root because only
+     *      validated Merkle roots will be stored in the Relayer smart contract.
+     *
+     * @param blockNumber Block number on Vara Network
+     * @param merkleRoot Merkle root of transactions included in block with corresponding block number
+     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
+     * @dev Reverts if emergency stop status is set.
+     * @dev Reverts if `proof` or `publicInputs` are malformed (depends on implementation of `IVerifier`).
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
         if (_emergencyStop) {
-            // Emergency stop is active, stop processing.
             revert EmergencyStop();
         }
 
@@ -34,7 +49,7 @@ contract Relayer is IRelayer {
         publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)
             | ((blockNumber & uint256(type(uint32).max)) << 96);
 
-        if (!VERIFIER_ADDRESS.verifyProof(proof, publicInputs)) {
+        if (!VERIFIER.verifyProof(proof, publicInputs)) {
             revert InvalidProof();
         }
 
@@ -53,35 +68,30 @@ contract Relayer is IRelayer {
     }
 
     /**
-     * @dev Returns emergency stop status.
-     */
-    function emergencyStop() external view override returns (bool) {
-        return _emergencyStop;
-    }
-
-    /**
-     * @dev Returns merkle root for specified block number. Returns bytes32(0) if merkle root was
-     *      not provided for specified blockNumber.
-     *
+     * @dev Returns merkle root for specified block number.
+     *      Returns `bytes32(0)` if merkle root was not provided for specified block number.
      * @param blockNumber Target block number.
-     * @return merkleRoot, bytes32(0) if no merkle root was found.
+     * @return merkleRoot Merkle root for specified block number.
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32) {
-        if (_emergencyStop) {
-            // Emergency stop is active, stop processing.
-            revert EmergencyStop();
-        }
         return _blockNumbers[blockNumber];
     }
 
     /**
-     * @dev Returns block number for provided merkleRoot. Returns uint256(0) if merkle root was not
-     *      provided for specified blockNumber.
-     *
-     * @param merkleRoot merkle root
-     * @return blockNumber, uint256(0) if no block number was found.
+     * @dev Returns block number for provided merkle root.
+     *      Returns `uint256(0)` if block number was not provided for specified merkle root.
+     * @param merkleRoot Target merkle root.
+     * @return blockNumber Block number for provided merkle root.
      */
     function getBlockNumber(bytes32 merkleRoot) external view returns (uint256) {
         return _merkleRoots[merkleRoot];
+    }
+
+    /**
+     * @dev Returns emergency stop status.
+     * @return emergencyStop emergency stop status.
+     */
+    function emergencyStop() external view returns (bool) {
+        return _emergencyStop;
     }
 }

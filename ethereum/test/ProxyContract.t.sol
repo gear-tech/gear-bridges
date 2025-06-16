@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IRelayer} from "../src/interfaces/IRelayer.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IERC20Manager} from "../src/interfaces/IERC20Manager.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
@@ -22,7 +23,7 @@ contract ProxyTest is Test {
             VFT_MANAGER_ADDRESS
         );
         MessageQueue message_queue = new MessageQueue(
-            address(erc20_manager_proxy)
+            IRelayer(address(erc20_manager_proxy))
         );
 
         message_queue_proxy.upgradeToAndCall(address(message_queue), "");

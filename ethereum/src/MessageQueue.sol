@@ -5,10 +5,10 @@ import {IRelayer} from "./interfaces/IRelayer.sol";
 import {VaraMessage, IMessageQueue, IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
 
 contract MessageQueue is IMessageQueue {
-    address immutable RELAYER_ADDRESS;
+    IRelayer immutable RELAYER;
 
-    constructor(address relayer_address) {
-        RELAYER_ADDRESS = relayer_address;
+    constructor(IRelayer relayer) {
+        RELAYER = relayer;
     }
 
     function hash_vara_msg(
@@ -43,15 +43,17 @@ contract MessageQueue is IMessageQueue {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) public {
+        if (RELAYER.emergencyStop()) {
+            revert RelayerEmergencyStop();
+        }
+
         if (_processed_messages[message.nonce]) {
             revert MessageAlreadyProcessed(message.nonce);
         }
 
         bytes32 msg_hash = hash_vara_msg(message);
 
-        bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
-            block_number
-        );
+        bytes32 merkle_root = RELAYER.getMerkleRoot(block_number);
 
         if (merkle_root == bytes32(0)) {
             revert MerkleRootNotSet(block_number);

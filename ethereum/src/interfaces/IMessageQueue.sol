@@ -9,6 +9,7 @@ struct VaraMessage {
 }
 
 interface IMessageQueue {
+    error RelayerEmergencyStop();
     error MessageAlreadyProcessed(bytes32 messageNonce);
     error MessageNotProcessed();
     error MerkleRootNotSet(uint256 blockNumber);

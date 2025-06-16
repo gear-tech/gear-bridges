@@ -2,13 +2,14 @@
 pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
+import {IRelayer} from "../src/interfaces/IRelayer.sol";
+import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {WrappedVara} from "../src/erc20/WrappedVara.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {VerifierMock} from "../src/mocks/VerifierMock.sol";
 import {Relayer} from "../src/Relayer.sol";
-import {IVerifier} from "../src/interfaces/IVerifier.sol";
 
 address constant OWNER = address(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266);
 address constant USER = address(0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496);
@@ -56,7 +57,7 @@ contract TestHelper is Test {
             address(_message_queue_proxy),
             bytes32(0)
         );
-        MessageQueue _message_queue = new MessageQueue(address(_relayer_proxy));
+        MessageQueue _message_queue = new MessageQueue(IRelayer(address(_relayer_proxy)));
 
         _relayer_proxy.upgradeToAndCall(address(_relayer), "");
         _treasury_proxy.upgradeToAndCall(address(_erc20_manager), "");

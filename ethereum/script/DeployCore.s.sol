@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
+import {IRelayer} from "../src/interfaces/IRelayer.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {ProxyUpdater} from "../src/ProxyUpdater.sol";
@@ -27,7 +28,7 @@ contract DeployCoreScript is Script {
         ProxyUpdater relayerProxyUpdater =
             new ProxyUpdater(payable(address(relayerProxy)), governance, address(messageQueueProxy));
 
-        MessageQueue messageQueue = new MessageQueue(address(relayerProxy));
+        MessageQueue messageQueue = new MessageQueue(IRelayer(address(relayerProxy)));
         Relayer relayer = new Relayer(verifier);
 
         messageQueueProxy.upgradeToAndCall(address(messageQueue), "");

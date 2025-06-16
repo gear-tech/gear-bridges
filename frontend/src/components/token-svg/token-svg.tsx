@@ -1,49 +1,78 @@
-import { HexString } from '@gear-js/api';
 import { CSSProperties } from 'react';
 
-import { NETWORK_INDEX } from '@/features/swap/consts';
-import { getTokenSVG } from '@/utils';
+import EthSVG from '@/assets/eth.svg?react';
+import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
+import UsdcSVG from '@/assets/usdc.svg?react';
+import UsdtSVG from '@/assets/usdt.svg?react';
+import VaraUsdcSVG from '@/assets/vara-usdc.svg?react';
+import VaraUsdtSVG from '@/assets/vara-usdt.svg?react';
+import VaraSVG from '@/assets/vara.svg?react';
+import WrappedEthSVG from '@/assets/wrapped-eth.svg?react';
+import WrappedVaraSVG from '@/assets/wrapped-vara.svg?react';
+import { NETWORK } from '@/features/swap/consts';
 
-import EthSVG from '../../assets/eth.svg?react';
-import VaraSVG from '../../assets/vara.svg?react';
 import { Skeleton } from '../layout';
 
 import styles from './token-svg.module.scss';
 
 const NETWORK_SVG = {
-  [NETWORK_INDEX.VARA]: VaraSVG,
-  [NETWORK_INDEX.ETH]: EthSVG,
+  [NETWORK.VARA]: VaraSVG,
+  [NETWORK.ETH]: EthSVG,
 } as const;
 
 type Props = {
-  address: HexString | undefined;
-  networkIndex: number;
-  sizes: [number, number];
+  symbol: string | undefined;
+  network: 'vara' | 'eth';
+  sizes: [number, number?];
 };
 
-function TokenSVG({ address, networkIndex, sizes }: Props) {
-  const [size, smallSize] = sizes;
-  const style = { '--size': `${size}px`, '--small-size': `${smallSize}px` } as CSSProperties;
+function TokenSVG({ symbol, network, sizes }: Props) {
+  const [size, networkSize = 0] = sizes;
+  const style = { '--size': `${size}px`, '--network-size': `${networkSize}px` } as CSSProperties;
 
-  const SVG = address ? getTokenSVG(address) : Skeleton;
-  const NetworkSVG = NETWORK_SVG[networkIndex];
+  const getSVG = () => {
+    if (!symbol) return Skeleton;
+
+    const lowerCaseSymbol = symbol.toLowerCase();
+
+    if (network === NETWORK.VARA) {
+      if (lowerCaseSymbol.includes('vara')) return VaraSVG;
+      if (lowerCaseSymbol.includes('eth')) return WrappedEthSVG;
+      if (lowerCaseSymbol.includes('usdc')) return VaraUsdcSVG;
+      if (lowerCaseSymbol.includes('usdt')) return VaraUsdtSVG;
+    }
+
+    if (network === NETWORK.ETH) {
+      if (lowerCaseSymbol.includes('vara')) return WrappedVaraSVG;
+      if (lowerCaseSymbol.includes('eth')) return EthSVG;
+      if (lowerCaseSymbol.includes('usdc')) return UsdcSVG;
+      if (lowerCaseSymbol.includes('usdt')) return UsdtSVG;
+    }
+
+    return TokenPlaceholderSVG;
+  };
+
+  const SVG = getSVG();
+  const NetworkSVG = NETWORK_SVG[network];
 
   return (
     <div className={styles.container} style={style}>
       <SVG className={styles.tokenSvg} />
-      <NetworkSVG className={styles.networkSvg} />
+
+      {Boolean(networkSize) && <NetworkSVG className={styles.networkSvg} />}
     </div>
   );
 }
 
 function TokenSVGSkeleton({ sizes }: Pick<Props, 'sizes'>) {
-  const [size, smallSize] = sizes;
-  const style = { '--size': `${size}px`, '--small-size': `${smallSize}px` } as CSSProperties;
+  const [size, networkSize = 0] = sizes;
+  const style = { '--size': `${size}px`, '--network-size': `${networkSize}px` } as CSSProperties;
 
   return (
     <div className={styles.container} style={style}>
       <Skeleton className={styles.tokenSvg} />
-      <Skeleton className={styles.networkSvg} />
+
+      {Boolean(networkSize) && <Skeleton className={styles.networkSvg} />}
     </div>
   );
 }

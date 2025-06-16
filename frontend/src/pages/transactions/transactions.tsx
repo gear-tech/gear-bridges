@@ -4,6 +4,7 @@ import { FormProvider } from 'react-hook-form';
 
 import SearchSVG from '@/assets/search.svg?react';
 import { Container, Input, Select, Skeleton, Checkbox } from '@/components';
+import { useTokens } from '@/context';
 import {
   useTransactions,
   useTransactionsCount,
@@ -15,8 +16,9 @@ import {
   useTransactionFilters,
   TransactionCard,
   TRANSACTIONS_LIMIT,
+  usePairs,
 } from '@/features/history';
-import { useEthAccount, useTokens } from '@/hooks';
+import { useEthAccount } from '@/hooks';
 
 import styles from './transactions.module.scss';
 
@@ -29,8 +31,10 @@ function Transactions() {
   const [transactionsCount, isTransactionsCountLoading] = useTransactionsCount(filters);
   const [transactions, isFetching, hasNextPage, fetchNextPage] = useTransactions(transactionsCount, filters);
 
-  const { addresses, symbols, decimals, isLoading } = useTokens();
-  const assetOptions = useMemo(() => getAssetOptions(addresses ?? [], symbols ?? {}), [addresses, symbols]);
+  const { data: pairs, isLoading } = usePairs();
+  const assetOptions = useMemo(() => getAssetOptions(pairs || []), [pairs]);
+
+  const { addressToToken } = useTokens();
 
   return (
     <Container>
@@ -56,9 +60,9 @@ function Transactions() {
       </header>
 
       <List
-        items={symbols && decimals ? transactions : undefined}
+        items={addressToToken ? transactions : undefined}
         hasMore={hasNextPage}
-        renderItem={(transaction) => <TransactionCard {...transaction} symbols={symbols!} decimals={decimals!} />}
+        renderItem={(transaction) => <TransactionCard {...transaction} addressToToken={addressToToken!} />}
         fetchMore={fetchNextPage}
         skeleton={{
           rowsCount: TRANSACTIONS_LIMIT,

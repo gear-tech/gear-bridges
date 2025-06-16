@@ -1,8 +1,7 @@
 import { CodegenConfig } from '@graphql-codegen/cli';
-import { loadEnv } from 'vite';
 
 const config: CodegenConfig = {
-  schema: loadEnv('', process.cwd(), '').VITE_INDEXER_ADDRESS,
+  schema: process.env.VITE_INDEXER_ADDRESS, // needs --require dotenv/config
   documents: ['src/**/*.{ts,tsx}'],
   ignoreNoDocuments: true, // for better experience with the watcher
   generates: {

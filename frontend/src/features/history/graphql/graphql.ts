@@ -136,9 +136,16 @@ export type PageInfo = {
 export type Pair = {
   __typename?: 'Pair';
   ethToken: Scalars['String']['output'];
-  gearToken: Scalars['String']['output'];
+  ethTokenDecimals: Scalars['Int']['output'];
+  ethTokenName: Scalars['String']['output'];
+  ethTokenSymbol: Scalars['String']['output'];
   id: Scalars['String']['output'];
+  isRemoved: Scalars['Boolean']['output'];
   tokenSupply: Network;
+  varaToken: Scalars['String']['output'];
+  varaTokenDecimals: Scalars['Int']['output'];
+  varaTokenName: Scalars['String']['output'];
+  varaTokenSymbol: Scalars['String']['output'];
 };
 
 export type PairEdge = {
@@ -148,35 +155,120 @@ export type PairEdge = {
 };
 
 export enum PairOrderByInput {
+  EthTokenDecimalsAsc = 'ethTokenDecimals_ASC',
+  EthTokenDecimalsAscNullsFirst = 'ethTokenDecimals_ASC_NULLS_FIRST',
+  EthTokenDecimalsAscNullsLast = 'ethTokenDecimals_ASC_NULLS_LAST',
+  EthTokenDecimalsDesc = 'ethTokenDecimals_DESC',
+  EthTokenDecimalsDescNullsFirst = 'ethTokenDecimals_DESC_NULLS_FIRST',
+  EthTokenDecimalsDescNullsLast = 'ethTokenDecimals_DESC_NULLS_LAST',
+  EthTokenNameAsc = 'ethTokenName_ASC',
+  EthTokenNameAscNullsFirst = 'ethTokenName_ASC_NULLS_FIRST',
+  EthTokenNameAscNullsLast = 'ethTokenName_ASC_NULLS_LAST',
+  EthTokenNameDesc = 'ethTokenName_DESC',
+  EthTokenNameDescNullsFirst = 'ethTokenName_DESC_NULLS_FIRST',
+  EthTokenNameDescNullsLast = 'ethTokenName_DESC_NULLS_LAST',
+  EthTokenSymbolAsc = 'ethTokenSymbol_ASC',
+  EthTokenSymbolAscNullsFirst = 'ethTokenSymbol_ASC_NULLS_FIRST',
+  EthTokenSymbolAscNullsLast = 'ethTokenSymbol_ASC_NULLS_LAST',
+  EthTokenSymbolDesc = 'ethTokenSymbol_DESC',
+  EthTokenSymbolDescNullsFirst = 'ethTokenSymbol_DESC_NULLS_FIRST',
+  EthTokenSymbolDescNullsLast = 'ethTokenSymbol_DESC_NULLS_LAST',
   EthTokenAsc = 'ethToken_ASC',
   EthTokenAscNullsFirst = 'ethToken_ASC_NULLS_FIRST',
   EthTokenAscNullsLast = 'ethToken_ASC_NULLS_LAST',
   EthTokenDesc = 'ethToken_DESC',
   EthTokenDescNullsFirst = 'ethToken_DESC_NULLS_FIRST',
   EthTokenDescNullsLast = 'ethToken_DESC_NULLS_LAST',
-  GearTokenAsc = 'gearToken_ASC',
-  GearTokenAscNullsFirst = 'gearToken_ASC_NULLS_FIRST',
-  GearTokenAscNullsLast = 'gearToken_ASC_NULLS_LAST',
-  GearTokenDesc = 'gearToken_DESC',
-  GearTokenDescNullsFirst = 'gearToken_DESC_NULLS_FIRST',
-  GearTokenDescNullsLast = 'gearToken_DESC_NULLS_LAST',
   IdAsc = 'id_ASC',
   IdAscNullsFirst = 'id_ASC_NULLS_FIRST',
   IdAscNullsLast = 'id_ASC_NULLS_LAST',
   IdDesc = 'id_DESC',
   IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
   IdDescNullsLast = 'id_DESC_NULLS_LAST',
+  IsRemovedAsc = 'isRemoved_ASC',
+  IsRemovedAscNullsFirst = 'isRemoved_ASC_NULLS_FIRST',
+  IsRemovedAscNullsLast = 'isRemoved_ASC_NULLS_LAST',
+  IsRemovedDesc = 'isRemoved_DESC',
+  IsRemovedDescNullsFirst = 'isRemoved_DESC_NULLS_FIRST',
+  IsRemovedDescNullsLast = 'isRemoved_DESC_NULLS_LAST',
   TokenSupplyAsc = 'tokenSupply_ASC',
   TokenSupplyAscNullsFirst = 'tokenSupply_ASC_NULLS_FIRST',
   TokenSupplyAscNullsLast = 'tokenSupply_ASC_NULLS_LAST',
   TokenSupplyDesc = 'tokenSupply_DESC',
   TokenSupplyDescNullsFirst = 'tokenSupply_DESC_NULLS_FIRST',
   TokenSupplyDescNullsLast = 'tokenSupply_DESC_NULLS_LAST',
+  VaraTokenDecimalsAsc = 'varaTokenDecimals_ASC',
+  VaraTokenDecimalsAscNullsFirst = 'varaTokenDecimals_ASC_NULLS_FIRST',
+  VaraTokenDecimalsAscNullsLast = 'varaTokenDecimals_ASC_NULLS_LAST',
+  VaraTokenDecimalsDesc = 'varaTokenDecimals_DESC',
+  VaraTokenDecimalsDescNullsFirst = 'varaTokenDecimals_DESC_NULLS_FIRST',
+  VaraTokenDecimalsDescNullsLast = 'varaTokenDecimals_DESC_NULLS_LAST',
+  VaraTokenNameAsc = 'varaTokenName_ASC',
+  VaraTokenNameAscNullsFirst = 'varaTokenName_ASC_NULLS_FIRST',
+  VaraTokenNameAscNullsLast = 'varaTokenName_ASC_NULLS_LAST',
+  VaraTokenNameDesc = 'varaTokenName_DESC',
+  VaraTokenNameDescNullsFirst = 'varaTokenName_DESC_NULLS_FIRST',
+  VaraTokenNameDescNullsLast = 'varaTokenName_DESC_NULLS_LAST',
+  VaraTokenSymbolAsc = 'varaTokenSymbol_ASC',
+  VaraTokenSymbolAscNullsFirst = 'varaTokenSymbol_ASC_NULLS_FIRST',
+  VaraTokenSymbolAscNullsLast = 'varaTokenSymbol_ASC_NULLS_LAST',
+  VaraTokenSymbolDesc = 'varaTokenSymbol_DESC',
+  VaraTokenSymbolDescNullsFirst = 'varaTokenSymbol_DESC_NULLS_FIRST',
+  VaraTokenSymbolDescNullsLast = 'varaTokenSymbol_DESC_NULLS_LAST',
+  VaraTokenAsc = 'varaToken_ASC',
+  VaraTokenAscNullsFirst = 'varaToken_ASC_NULLS_FIRST',
+  VaraTokenAscNullsLast = 'varaToken_ASC_NULLS_LAST',
+  VaraTokenDesc = 'varaToken_DESC',
+  VaraTokenDescNullsFirst = 'varaToken_DESC_NULLS_FIRST',
+  VaraTokenDescNullsLast = 'varaToken_DESC_NULLS_LAST',
 }
 
 export type PairWhereInput = {
   AND: InputMaybe<Array<PairWhereInput>>;
   OR: InputMaybe<Array<PairWhereInput>>;
+  ethTokenDecimals_eq: InputMaybe<Scalars['Int']['input']>;
+  ethTokenDecimals_gt: InputMaybe<Scalars['Int']['input']>;
+  ethTokenDecimals_gte: InputMaybe<Scalars['Int']['input']>;
+  ethTokenDecimals_in: InputMaybe<Array<Scalars['Int']['input']>>;
+  ethTokenDecimals_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  ethTokenDecimals_lt: InputMaybe<Scalars['Int']['input']>;
+  ethTokenDecimals_lte: InputMaybe<Scalars['Int']['input']>;
+  ethTokenDecimals_not_eq: InputMaybe<Scalars['Int']['input']>;
+  ethTokenDecimals_not_in: InputMaybe<Array<Scalars['Int']['input']>>;
+  ethTokenName_contains: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_endsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_eq: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_gt: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_gte: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_in: InputMaybe<Array<Scalars['String']['input']>>;
+  ethTokenName_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  ethTokenName_lt: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_lte: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_not_contains: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_not_eq: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  ethTokenName_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenName_startsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_contains: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_endsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_eq: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_gt: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_gte: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_in: InputMaybe<Array<Scalars['String']['input']>>;
+  ethTokenSymbol_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  ethTokenSymbol_lt: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_lte: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_not_contains: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_not_eq: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  ethTokenSymbol_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  ethTokenSymbol_startsWith: InputMaybe<Scalars['String']['input']>;
   ethToken_contains: InputMaybe<Scalars['String']['input']>;
   ethToken_containsInsensitive: InputMaybe<Scalars['String']['input']>;
   ethToken_endsWith: InputMaybe<Scalars['String']['input']>;
@@ -194,23 +286,6 @@ export type PairWhereInput = {
   ethToken_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   ethToken_not_startsWith: InputMaybe<Scalars['String']['input']>;
   ethToken_startsWith: InputMaybe<Scalars['String']['input']>;
-  gearToken_contains: InputMaybe<Scalars['String']['input']>;
-  gearToken_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  gearToken_endsWith: InputMaybe<Scalars['String']['input']>;
-  gearToken_eq: InputMaybe<Scalars['String']['input']>;
-  gearToken_gt: InputMaybe<Scalars['String']['input']>;
-  gearToken_gte: InputMaybe<Scalars['String']['input']>;
-  gearToken_in: InputMaybe<Array<Scalars['String']['input']>>;
-  gearToken_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  gearToken_lt: InputMaybe<Scalars['String']['input']>;
-  gearToken_lte: InputMaybe<Scalars['String']['input']>;
-  gearToken_not_contains: InputMaybe<Scalars['String']['input']>;
-  gearToken_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  gearToken_not_endsWith: InputMaybe<Scalars['String']['input']>;
-  gearToken_not_eq: InputMaybe<Scalars['String']['input']>;
-  gearToken_not_in: InputMaybe<Array<Scalars['String']['input']>>;
-  gearToken_not_startsWith: InputMaybe<Scalars['String']['input']>;
-  gearToken_startsWith: InputMaybe<Scalars['String']['input']>;
   id_contains: InputMaybe<Scalars['String']['input']>;
   id_containsInsensitive: InputMaybe<Scalars['String']['input']>;
   id_endsWith: InputMaybe<Scalars['String']['input']>;
@@ -228,11 +303,74 @@ export type PairWhereInput = {
   id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   id_not_startsWith: InputMaybe<Scalars['String']['input']>;
   id_startsWith: InputMaybe<Scalars['String']['input']>;
+  isRemoved_eq: InputMaybe<Scalars['Boolean']['input']>;
+  isRemoved_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  isRemoved_not_eq: InputMaybe<Scalars['Boolean']['input']>;
   tokenSupply_eq: InputMaybe<Network>;
   tokenSupply_in: InputMaybe<Array<Network>>;
   tokenSupply_isNull: InputMaybe<Scalars['Boolean']['input']>;
   tokenSupply_not_eq: InputMaybe<Network>;
   tokenSupply_not_in: InputMaybe<Array<Network>>;
+  varaTokenDecimals_eq: InputMaybe<Scalars['Int']['input']>;
+  varaTokenDecimals_gt: InputMaybe<Scalars['Int']['input']>;
+  varaTokenDecimals_gte: InputMaybe<Scalars['Int']['input']>;
+  varaTokenDecimals_in: InputMaybe<Array<Scalars['Int']['input']>>;
+  varaTokenDecimals_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  varaTokenDecimals_lt: InputMaybe<Scalars['Int']['input']>;
+  varaTokenDecimals_lte: InputMaybe<Scalars['Int']['input']>;
+  varaTokenDecimals_not_eq: InputMaybe<Scalars['Int']['input']>;
+  varaTokenDecimals_not_in: InputMaybe<Array<Scalars['Int']['input']>>;
+  varaTokenName_contains: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_endsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_eq: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_gt: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_gte: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_in: InputMaybe<Array<Scalars['String']['input']>>;
+  varaTokenName_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  varaTokenName_lt: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_lte: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_not_contains: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_not_eq: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  varaTokenName_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenName_startsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_contains: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_endsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_eq: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_gt: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_gte: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_in: InputMaybe<Array<Scalars['String']['input']>>;
+  varaTokenSymbol_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  varaTokenSymbol_lt: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_lte: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_not_contains: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_not_eq: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  varaTokenSymbol_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  varaTokenSymbol_startsWith: InputMaybe<Scalars['String']['input']>;
+  varaToken_contains: InputMaybe<Scalars['String']['input']>;
+  varaToken_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  varaToken_endsWith: InputMaybe<Scalars['String']['input']>;
+  varaToken_eq: InputMaybe<Scalars['String']['input']>;
+  varaToken_gt: InputMaybe<Scalars['String']['input']>;
+  varaToken_gte: InputMaybe<Scalars['String']['input']>;
+  varaToken_in: InputMaybe<Array<Scalars['String']['input']>>;
+  varaToken_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  varaToken_lt: InputMaybe<Scalars['String']['input']>;
+  varaToken_lte: InputMaybe<Scalars['String']['input']>;
+  varaToken_not_contains: InputMaybe<Scalars['String']['input']>;
+  varaToken_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  varaToken_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  varaToken_not_eq: InputMaybe<Scalars['String']['input']>;
+  varaToken_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  varaToken_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  varaToken_startsWith: InputMaybe<Scalars['String']['input']>;
 };
 
 export type PairsConnection = {
@@ -665,6 +803,26 @@ export type TransfersConnectionQueryQuery = {
   transfersConnection: { __typename?: 'TransfersConnection'; totalCount: number };
 };
 
+export type PairsQueryQueryVariables = Exact<{ [key: string]: never }>;
+
+export type PairsQueryQuery = {
+  __typename?: 'Query';
+  pairs: Array<{
+    __typename?: 'Pair';
+    ethToken: string;
+    ethTokenDecimals: number;
+    ethTokenName: string;
+    ethTokenSymbol: string;
+    id: string;
+    isRemoved: boolean;
+    tokenSupply: Network;
+    varaToken: string;
+    varaTokenDecimals: number;
+    varaTokenName: string;
+    varaTokenSymbol: string;
+  }>;
+};
+
 export const TransfersQueryDocument = {
   kind: 'Document',
   definitions: [
@@ -783,3 +941,38 @@ export const TransfersConnectionQueryDocument = {
     },
   ],
 } as unknown as DocumentNode<TransfersConnectionQueryQuery, TransfersConnectionQueryQueryVariables>;
+export const PairsQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'PairsQuery' },
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'pairs' },
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [
+                { kind: 'Field', name: { kind: 'Name', value: 'ethToken' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'ethTokenDecimals' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'ethTokenName' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'ethTokenSymbol' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'id' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'isRemoved' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'tokenSupply' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaToken' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaTokenDecimals' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaTokenName' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'varaTokenSymbol' } },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<PairsQueryQuery, PairsQueryQueryVariables>;

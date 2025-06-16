@@ -1,5 +1,4 @@
 import { useChangeEffect, useLoading, useModal, useDebounce, useInvalidateOnBlock } from './common';
-import { useTokens } from './tokens';
 import { useEthAccount } from './use-eth-account';
 import { useEthAccountBalance } from './use-eth-account-balance';
 import { useEthFTBalance } from './use-eth-ft-balance';
@@ -18,7 +17,6 @@ export {
   useLoading,
   useChangeEffect,
   useDebounce,
-  useTokens,
   useInvalidateOnBlock,
   useVaraAccountBalance,
   useVaraFTBalance,

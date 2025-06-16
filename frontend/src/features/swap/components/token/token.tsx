@@ -11,14 +11,14 @@ type Props = {
   type: 'select' | 'text';
   address: HexString | undefined;
   symbol: string | undefined;
-  network: string;
-  networkIndex: number;
+  network: 'vara' | 'eth';
+  networkText: string;
 };
 
-function Token({ type, address, symbol, network, networkIndex }: Props) {
+function Token({ type, address, symbol, network, networkText }: Props) {
   return (
     <div className={cx(styles.container, styles[type])}>
-      <TokenSVG address={address} networkIndex={networkIndex} sizes={[48, 28]} />
+      <TokenSVG symbol={symbol} network={network} sizes={[48, 28]} />
 
       <div className={styles.token}>
         <div className={styles.info}>
@@ -46,7 +46,7 @@ function Token({ type, address, symbol, network, networkIndex }: Props) {
           )}
         </div>
 
-        <p className={styles.network}>{network}</p>
+        <p className={styles.network}>{networkText}</p>
       </div>
     </div>
   );

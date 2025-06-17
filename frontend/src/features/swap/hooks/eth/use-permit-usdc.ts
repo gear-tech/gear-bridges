@@ -1,10 +1,11 @@
+import { useMutation } from '@tanstack/react-query';
 import { hexToNumber, slice } from 'viem';
 import { useReadContract, useSignTypedData } from 'wagmi';
 
 import { ETH_CHAIN_ID } from '@/consts';
 import { useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
-import { definedAssert } from '@/utils';
+import { definedAssert, isUndefined } from '@/utils';
 
 import { ERC20_MANAGER_CONTRACT_ADDRESS, USDC_ABI } from '../../consts';
 
@@ -85,7 +86,9 @@ function usePermitUSDC() {
     return { deadline, r, s, v };
   };
 
-  return permit;
+  const isLoading = !version || !name || isUndefined(nonce);
+
+  return { ...useMutation({ mutationFn: permit }), isLoading };
 }
 
 export { usePermitUSDC };

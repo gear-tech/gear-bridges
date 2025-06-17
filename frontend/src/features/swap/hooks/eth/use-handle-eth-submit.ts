@@ -70,24 +70,24 @@ function useHandleEthSubmit(
     const { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } =
       await validateBalance(amount, accountAddress);
 
+    mint.reset();
+    approve.reset();
+    permitUSDC.reset();
+
     openTransactionModal(amount.toString(), accountAddress);
 
     if (isMintRequired) {
       await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
-    } else {
-      mint.reset();
+    }
+
+    if (isApproveRequired && isUSDC) {
+      const permit = await permitUSDC.mutateAsync(amount);
+
+      return transfer.mutateWithPermitAsync({ amount, accountAddress, permit });
     }
 
     if (isApproveRequired) {
-      if (isUSDC) {
-        const permit = await permitUSDC(amount);
-
-        return transfer.mutateWithPermitAsync({ amount, accountAddress, permit });
-      }
-
       await approve.mutateAsync({ amount, gas: approveGasLimit });
-    } else {
-      approve.reset();
     }
 
     return transfer.mutateAsync({ amount, accountAddress, gasLimit: transferGasLimit });
@@ -95,7 +95,7 @@ function useHandleEthSubmit(
 
   const submit = useMutation({ mutationFn: onSubmit });
 
-  return [submit, approve, undefined, mint] as const;
+  return { submit, approve, mint, permitUSDC };
 }
 
 export { useHandleEthSubmit };

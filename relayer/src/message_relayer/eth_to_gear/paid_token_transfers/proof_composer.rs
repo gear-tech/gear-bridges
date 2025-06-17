@@ -1,3 +1,4 @@
+use anyhow::Context;
 use eth_events_electra_client::EthToVaraEvent;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
@@ -16,6 +17,39 @@ use crate::{
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+
+#[derive(Clone)]
+pub struct Request {
+    pub tx: TxHashWithSlot,
+    pub tx_uuid: Uuid,
+}
+
+#[derive(Clone)]
+pub struct Response {
+    pub payload: EthToVaraEvent,
+    pub tx_uuid: Uuid,
+}
+
+pub struct ProofComposerIo {
+    requests_channel: UnboundedSender<Request>,
+    response_channel: UnboundedReceiver<Response>,
+}
+
+impl ProofComposerIo {
+    /// Receive composed proof for some transaction.
+    ///
+    /// In case of `None` indicates closed channel.
+    pub async fn recv(&mut self) -> Option<Response> {
+        self.response_channel.recv().await
+    }
+
+    /// Send request to compose proof for `tx` with uuid `tx_uuid`.
+    ///
+    /// Returns `false` if send failed which indicates that channel was closed.
+    pub fn compose_proof_for(&mut self, tx_uuid: Uuid, tx: TxHashWithSlot) -> bool {
+        self.requests_channel.send(Request { tx, tx_uuid }).is_ok()
+    }
+}
 
 pub struct ProofComposer {
     pub api_provider: ApiProviderConnection,
@@ -46,44 +80,12 @@ impl ProofComposer {
         }
     }
 
-    pub fn run(
-        mut self,
-        mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
-    ) -> ProofComposerIo {
-        let (requests_tx, mut requests_rx) = unbounded_channel();
-        let (mut response_tx, response_rx) = unbounded_channel();
+    pub fn run(self, checkpoints: UnboundedReceiver<EthereumSlotNumber>) -> ProofComposerIo {
+        let (requests_tx, requests_rx) = unbounded_channel();
+        let (response_tx, response_rx) = unbounded_channel();
 
         spawn_blocking(move || {
-            block_on(async move {
-                loop {
-                    if let Err(err) = self
-                        .run_inner(&mut checkpoints, &mut requests_rx, &mut response_tx)
-                        .await
-                    {
-                        log::error!("Proof composer failed with error: {err:?}");
-                        if common::is_transport_error_recoverable(&err) {
-                            match self.api_provider.reconnect().await {
-                                Ok(_) => log::info!("Successfully reconnected to Gear API"),
-                                Err(err) => {
-                                    log::error!("Failed to reconnect to Gear API: {err:?}");
-                                    return;
-                                }
-                            }
-
-                            match self.eth_api.reconnect().await {
-                                Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
-                                Err(err) => {
-                                    log::error!("Failed to reconnect to Ethereum API: {err:?}");
-                                    return;
-                                }
-                            }
-                        } else {
-                            log::error!("Non recoverable error, exiting: {err:?}");
-                            return;
-                        }
-                    }
-                }
-            })
+            block_on(task(self, checkpoints, requests_rx, response_tx));
         });
 
         ProofComposerIo {
@@ -95,8 +97,8 @@ impl ProofComposer {
     async fn run_inner(
         &mut self,
         checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
-        requests_rx: &mut UnboundedReceiver<ComposeProof>,
-        response_tx: &mut UnboundedSender<ComposedProof>,
+        requests_rx: &mut UnboundedReceiver<Request>,
+        response_tx: &mut UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
         loop {
             tokio::select! {
@@ -117,38 +119,15 @@ impl ProofComposer {
 
                     for (tx_uuid, tx) in to_process {
                         log::info!("Processing waiting transaction {tx_uuid}: {tx:?}");
-
-                        match self.compose_payload(tx).await {
-                            Ok(payload) => {
-                                response_tx.send(ComposedProof {
-                                    payload,
-                                    tx_uuid
-                                })?;
-                            }
-
-                            Err(e) => {
-                                log::error!("Failed to compose payload {e:?}");
-                                return Err(e);
-                            }
-                        }
+                        self.process(response_tx, tx, tx_uuid).await?;
                     }
                 }
 
-                Some(ComposeProof { tx_uuid, tx }) = requests_rx.recv() => {
+                Some(Request { tx_uuid, tx }) = requests_rx.recv() => {
                     if self.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
-                        .is_some() {
-                        match self.compose_payload(tx).await {
-                            Ok(payload) => {
-                                response_tx.send(ComposedProof {
-                                    payload,
-                                    tx_uuid
-                                })?;
-                            }
-                            Err(e) => {
-                                log::error!("Failed to compose payload for {tx_uuid}: {e}");
-                                return Err(e);
-                            }
-                        }
+                        .is_some()
+                    {
+                        self.process(response_tx, tx, tx_uuid).await?;
                     } else {
                         log::info!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
                         self.waiting_for_checkpoints.push((tx_uuid, tx));
@@ -163,10 +142,15 @@ impl ProofComposer {
         }
     }
 
-    async fn compose_payload(&mut self, tx: TxHashWithSlot) -> anyhow::Result<EthToVaraEvent> {
+    async fn process(
+        &mut self,
+        response_tx: &mut UnboundedSender<Response>,
+        tx: TxHashWithSlot,
+        tx_uuid: Uuid,
+    ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.gclient_client(&self.suri)?;
 
-        compose_payload::compose(
+        match compose_payload::compose(
             &self.beacon_client,
             &gear_api,
             &self.eth_api,
@@ -174,40 +158,54 @@ impl ProofComposer {
             self.historical_proxy_address.into(),
         )
         .await
+        {
+            Ok(payload) => response_tx
+                .send(Response { payload, tx_uuid })
+                .context("failed to send response"),
+            Err(err) => {
+                log::error!(
+                    "Failed to compose proof for transaction {}: {:?}",
+                    tx.tx_hash,
+                    err
+                );
+                return Err(err);
+            }
+        }
     }
 }
 
-pub struct ProofComposerIo {
-    requests_channel: UnboundedSender<ComposeProof>,
-    response_channel: UnboundedReceiver<ComposedProof>,
-}
+async fn task(
+    mut this: ProofComposer,
+    mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
+    mut requests: UnboundedReceiver<Request>,
+    mut responses: UnboundedSender<Response>,
+) {
+    loop {
+        if let Err(err) = this
+            .run_inner(&mut checkpoints, &mut requests, &mut responses)
+            .await
+        {
+            log::error!("Proof composer failed with error: {err:?}");
+            if common::is_transport_error_recoverable(&err) {
+                match this.api_provider.reconnect().await {
+                    Ok(_) => log::info!("Successfully reconnected to Gear API"),
+                    Err(err) => {
+                        log::error!("Failed to reconnect to Gear API: {err:?}");
+                        return;
+                    }
+                }
 
-impl ProofComposerIo {
-    /// Receive composed proof for some transaction.
-    ///
-    /// In case of `None` indicates closed channel.
-    pub async fn recv(&mut self) -> Option<ComposedProof> {
-        self.response_channel.recv().await
+                match this.eth_api.reconnect().await {
+                    Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
+                    Err(err) => {
+                        log::error!("Failed to reconnect to Ethereum API: {err:?}");
+                        return;
+                    }
+                }
+            } else {
+                log::error!("Non recoverable error, exiting: {err:?}");
+                return;
+            }
+        }
     }
-
-    /// Send request to compose proof for `tx` with uuid `tx_uuid`.
-    ///
-    /// Returns `false` if send failed which indicates that channel was closed.
-    pub fn compose_proof_for(&mut self, tx_uuid: Uuid, tx: TxHashWithSlot) -> bool {
-        self.requests_channel
-            .send(ComposeProof { tx, tx_uuid })
-            .is_ok()
-    }
-}
-
-#[derive(Clone)]
-pub struct ComposeProof {
-    pub tx: TxHashWithSlot,
-    pub tx_uuid: Uuid,
-}
-
-#[derive(Clone)]
-pub struct ComposedProof {
-    pub payload: EthToVaraEvent,
-    pub tx_uuid: Uuid,
 }

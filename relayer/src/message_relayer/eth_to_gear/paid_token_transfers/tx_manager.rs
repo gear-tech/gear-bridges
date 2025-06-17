@@ -9,8 +9,8 @@ use crate::message_relayer::{
 };
 
 use super::{
-    message_sender::{MessageSenderIo, Response},
-    proof_composer::{ComposedProof, ProofComposerIo},
+    message_sender::{self, MessageSenderIo},
+    proof_composer::{self, ProofComposerIo},
     storage::{NoStorage, Storage},
 };
 
@@ -152,7 +152,7 @@ impl TransactionManager {
 
                     }
 
-                    Some(ComposedProof { payload, tx_uuid }) = proof_composer.recv() => {
+                    Some(proof_composer::Response { payload, tx_uuid }) = proof_composer.recv() => {
                         log::info!("Received proof for transaction {tx_uuid}");
 
                         let mut transactions = self.transactions.write().await;
@@ -184,7 +184,7 @@ impl TransactionManager {
                         }
                     }
 
-                    Some(Response { tx_uuid, status }) = message_sender.receive_response() => {
+                    Some(message_sender::Response { tx_uuid, status }) = message_sender.receive_response() => {
                         log::info!("Received response for transaction {tx_uuid}: {status:?}");
 
                         let mut transactions = self.transactions.write().await;

@@ -8,7 +8,7 @@ import { definedAssert } from '@/utils';
 
 import { ERC20_MANAGER_CONTRACT_ADDRESS, USDC_ABI } from '../../consts';
 
-const PERMIT_DURATION_SECONDS = 5 * 60;
+const PERMIT_DURATION_SECONDS = 60 * 60;
 
 function usePermitUSDC() {
   const ethAccount = useEthAccount();
@@ -61,13 +61,14 @@ function usePermitUSDC() {
     };
 
     const timestampSeconds = Math.floor(Date.now() / 1000);
+    const deadline = BigInt(timestampSeconds + PERMIT_DURATION_SECONDS);
 
     const message = {
       owner: ethAccount.address,
       spender: ERC20_MANAGER_CONTRACT_ADDRESS,
       value,
       nonce,
-      deadline: timestampSeconds + PERMIT_DURATION_SECONDS,
+      deadline,
     };
 
     const signature = await signTypedDataAsync({
@@ -77,9 +78,11 @@ function usePermitUSDC() {
       message,
     });
 
-    const [r, s, v] = [slice(signature, 0, 32), slice(signature, 32, 64), slice(signature, 64, 65)];
+    const r = slice(signature, 0, 32);
+    const s = slice(signature, 32, 64);
+    const v = hexToNumber(slice(signature, 64, 65));
 
-    return { r, s, v: hexToNumber(v) };
+    return { deadline, r, s, v };
   };
 
   return permit;

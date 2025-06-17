@@ -48,6 +48,22 @@ const ERC20_MANAGER_ABI = [
     stateMutability: 'payable',
   },
   {
+    type: 'function',
+    name: 'requestBridgingPayingFeeWithPermit',
+    inputs: [
+      { name: 'token', type: 'address', internalType: 'address' },
+      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+      { name: 'to', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'deadline', type: 'uint256', internalType: 'uint256' },
+      { name: 'v', type: 'uint8', internalType: 'uint8' },
+      { name: 'r', type: 'bytes32', internalType: 'bytes32' },
+      { name: 's', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'bridgingPayment', type: 'address', internalType: 'address' },
+    ],
+    outputs: [],
+    stateMutability: 'payable',
+  },
+  {
     type: 'event',
     name: 'BridgingAccepted',
     inputs: [

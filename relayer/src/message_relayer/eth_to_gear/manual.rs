@@ -13,11 +13,8 @@ use crate::message_relayer::common::{
 };
 
 use super::{
-    api_provider::ApiProviderConnection,
-    paid_token_transfers::{
-        message_sender::MessageSender, proof_composer::ProofComposer,
-        tx_manager::TransactionManager,
-    },
+    api_provider::ApiProviderConnection, message_sender::MessageSender,
+    proof_composer::ProofComposer, tx_manager::TransactionManager,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -67,7 +64,7 @@ pub async fn relay(
 
     let checkpoints = checkpoints_extractor.run(gear_blocks).await;
 
-    let tx_manager = TransactionManager::new(false, false, None);
+    let tx_manager = TransactionManager::new(None);
 
     let message_sender = message_sender.run();
     let proof_composer = proof_composer.run(checkpoints);

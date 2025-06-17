@@ -1,10 +1,10 @@
+use super::{message_sender, proof_composer, storage, tx_manager};
+use ethereum_beacon_client::BeaconClient;
+use ethereum_client::EthApi;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::iter;
 use tx_manager::TransactionManager;
-
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
 use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
@@ -97,7 +97,7 @@ impl Relayer {
         })
     }
 
-    pub async fn run(self, restart_failed: bool, resume_from_storage: bool, storage_path: &str) {
+    pub async fn run(self, storage_path: &str) {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
@@ -108,14 +108,8 @@ impl Relayer {
 
         let storage = storage::JSONStorage::new(storage_path);
 
-        let _ =
-            TransactionManager::new(restart_failed, resume_from_storage, Some(Box::new(storage)))
-                .run(message_paid_events, proof_composer, message_sender)
-                .await;
+        let _ = TransactionManager::new(Some(Box::new(storage)))
+            .run(message_paid_events, proof_composer, message_sender)
+            .await;
     }
 }
-
-pub mod message_sender;
-pub mod proof_composer;
-pub mod storage;
-pub mod tx_manager;

@@ -6,6 +6,11 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use utils_prometheus::MeteredService;
 
+use super::{
+    message_sender::MessageSender, proof_composer::ProofComposer, storage,
+    tx_manager::TransactionManager,
+};
+
 use crate::message_relayer::common::{
     ethereum::{
         block_listener::BlockListener as EthereumBlockListener,
@@ -13,7 +18,7 @@ use crate::message_relayer::common::{
     },
     gear::{
         block_listener::BlockListener as GearBlockListener,
-        checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
+        checkpoints_extractor::CheckpointsExtractor,
     },
 };
 
@@ -26,6 +31,7 @@ pub struct Relayer {
     deposit_event_extractor: DepositEventExtractor,
     checkpoints_extractor: CheckpointsExtractor,
 
+    proof_composer: ProofComposer,
     gear_message_sender: MessageSender,
 }
 
@@ -36,7 +42,6 @@ impl MeteredService for Relayer {
             .chain(self.ethereum_block_listener.get_sources())
             .chain(self.deposit_event_extractor.get_sources())
             .chain(self.checkpoints_extractor.get_sources())
-            .chain(self.gear_message_sender.get_sources())
     }
 }
 
@@ -69,15 +74,19 @@ impl Relayer {
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
 
         let gear_message_sender = MessageSender::new(
-            api_provider.clone(),
-            suri,
-            eth_api,
-            beacon_client,
-            historical_proxy_address,
-            checkpoint_light_client_address,
             vft_manager_address,
             route,
-            true,
+            historical_proxy_address,
+            api_provider.clone(),
+            suri.clone(),
+        );
+
+        let proof_composer = ProofComposer::new(
+            api_provider,
+            beacon_client,
+            eth_api,
+            historical_proxy_address,
+            suri,
         );
 
         Ok(Self {
@@ -87,19 +96,24 @@ impl Relayer {
             deposit_event_extractor,
             checkpoints_extractor,
 
+            proof_composer,
             gear_message_sender,
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, storage_path: &str) {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
         let deposit_events = self.deposit_event_extractor.run(ethereum_blocks).await;
         let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
+        let proof_composer = self.proof_composer.run(checkpoints);
+        let message_sender = self.gear_message_sender.run();
 
-        self.gear_message_sender
-            .run(deposit_events, checkpoints)
+        let storage = storage::JSONStorage::new(storage_path);
+
+        let _ = TransactionManager::new(Some(Box::new(storage)))
+            .run(deposit_events, proof_composer, message_sender)
             .await;
     }
 }

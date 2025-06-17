@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import {
   BridgingPaidEvent,
   BridgingRequested,
-  HistoricalProxyChanged,
+  HistoricalProxyAddressChanged,
   Relayed,
   TokenMappingAdded,
   TokenMappingRemoved,
@@ -125,11 +125,10 @@ const handler = async (ctx: ProcessorContext) => {
                 state.removePair(vara_token_id, eth_token_id, blockNumber);
                 break;
               }
-              case VftManagerMethods.HistoricalProxyChanged: {
-                // TODO: check
-                const { newAddress } = decoder.decodeEvent<HistoricalProxyChanged>(service, method, msg.payload);
-                ctx.log.info(`Historical proxy program changed to ${newAddress}`);
-                await updateId(ProgramName.HistoricalProxy, newAddress);
+              case VftManagerMethods.HistoricalProxyAddressChanged: {
+                const data = decoder.decodeEvent<HistoricalProxyAddressChanged>(service, method, msg.payload);
+                ctx.log.info(`Historical proxy program changed to ${data.new}`);
+                await updateId(ProgramName.HistoricalProxy, data.new);
                 await state.save();
                 process.exit(0);
               }

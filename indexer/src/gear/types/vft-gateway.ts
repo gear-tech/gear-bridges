@@ -14,7 +14,7 @@ export interface TokenMappingAdded {
 
 export type TokenMappingRemoved = TokenMappingAdded;
 
-// TODO: check
-export interface HistoricalProxyChanged {
-  readonly newAddress: string;
+export interface HistoricalProxyAddressChanged {
+  readonly new: string;
+  readonly old: string;
 }

@@ -61,6 +61,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       for (const pair of removed) {
         pair.isRemoved = true;
         pair.activeToBlock = this._removedPairs.get(pair.id);
+        pair.isActive = false;
       }
       pairs.push(...removed);
       this._ctx.log.info(`Saved ${removed.length} removed pairs`);
@@ -74,6 +75,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
         const { newId, activeToBlock } = this._upgradedPairs.get(pair.id)!;
         pair.upgradedTo = newId;
         pair.activeToBlock = activeToBlock;
+        pair.isActive = false;
       }
       pairs.push(...upgraded);
       this._ctx.log.info(`Saved ${upgraded.length} upgraded pairs`);
@@ -137,6 +139,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       tokenSupply: supply,
       isRemoved: false,
       activeSinceBlock: BigInt(blockHeader.height),
+      isActive: true,
     });
 
     this._pairs.set(vara, pair);

@@ -27,7 +27,7 @@ export const enum VftManagerMethods {
   BridgingRequested = 'BridgingRequested',
   TokenMappingAdded = 'TokenMappingAdded',
   TokenMappingRemoved = 'TokenMappingRemoved',
-  HistoricalProxyChanged = 'HistoricalProxyChanged', // TODO: check when pr is ready
+  HistoricalProxyAddressChanged = 'HistoricalProxyAddressChanged',
 }
 
 export const enum HistoricalProxyServices {

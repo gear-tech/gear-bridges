@@ -42,6 +42,7 @@ type Pair @entity {
   activeSinceBlock: BigInt!
   upgradedTo: String
   activeToBlock: BigInt
+  isActive: Boolean!
 }
 
 type CompletedTransfer @entity {

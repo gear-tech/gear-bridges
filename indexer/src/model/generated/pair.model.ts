@@ -50,4 +50,7 @@ export class Pair {
 
     @BigIntColumn_({nullable: true})
     activeToBlock!: bigint | undefined | null
+
+    @BooleanColumn_({nullable: false})
+    isActive!: boolean
 }

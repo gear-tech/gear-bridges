@@ -13,3 +13,8 @@ export interface TokenMappingAdded {
 }
 
 export type TokenMappingRemoved = TokenMappingAdded;
+
+// TODO: check
+export interface HistoricalProxyChanged {
+  readonly newAddress: string;
+}

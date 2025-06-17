@@ -1,74 +1,96 @@
 import { TypeormDatabase } from '@subsquid/typeorm-store';
 import { randomUUID } from 'crypto';
-import { BridgingPaidEvent, BridgingRequested, Relayed, TokenMappingAdded, TokenMappingRemoved } from './types';
-import { ethNonce, gearNonce, TempState } from '../common';
+import {
+  BridgingPaidEvent,
+  BridgingRequested,
+  HistoricalProxyChanged,
+  Relayed,
+  TokenMappingAdded,
+  TokenMappingRemoved,
+} from './types';
+import { ethNonce, gearNonce } from '../common';
 import { ProcessorContext, getProcessor } from './processor';
 import { Network, Status, Transfer } from '../model';
-import { isProgramChanged, isUserMessageSent } from './util';
+import {
+  BridgingPaymentMethods,
+  BridgingPaymentServices,
+  HistoricalProxyMethods,
+  HistoricalProxyServices,
+  isProgramChanged,
+  isUserMessageSent,
+  ProgramName,
+  VftManagerMethods,
+  VftManagerServices,
+} from './util';
 import { config } from './config';
-import { Decoder } from './codec';
 import { init, updateId } from './programIds';
-import { getProgramInheritor, initDecoders } from './rpc-queries';
+import { getProgramInheritor } from './rpc-queries';
+import { BatchState } from './batch-state';
+import { getDecoder, initDecoders } from './decoders';
 
-const tempState = new TempState(Network.Gear);
-
-let vftManagerDecoder: Decoder;
-let hisotricalProxyDecoder: Decoder;
-let bridgingPaymentDecoder: Decoder;
-
-const enum ProgramName {
-  VftManager = 'vft_manager',
-  HistoricalProxy = 'historical_proxy',
-  BridgingPayment = 'bridging_payment',
-}
+const state = new BatchState();
 
 let programs: Map<string, ProgramName>;
 
 const handler = async (ctx: ProcessorContext) => {
-  await tempState.new(ctx);
-
-  const promises: Promise<void>[] = [];
+  await state.new(ctx);
 
   for (const block of ctx.blocks) {
     const timestamp = new Date(block.header.timestamp!);
-    const blockNumber = block.header.height.toString();
+    const blockNumber = BigInt(block.header.height);
 
     for (const event of block.events) {
       if (isProgramChanged(event)) {
         const { id, change } = event.args;
 
         if (change.__kind == 'Inactive') {
+          const vftTokens = state.getActiveVaraTokens();
+
           if (programs.has(id)) {
             const inheritor = await getProgramInheritor(ctx._chain.rpc, block.header._runtime, id, block.header.hash);
             await updateId(programs.get(id)!, inheritor);
-            await tempState.save();
+            await state.save();
             process.exit(0);
+          }
+
+          if (vftTokens.includes(id.toLowerCase())) {
+            await state.upgradePair(id, block.header);
           }
         }
         continue;
       }
       if (isUserMessageSent(event)) {
         const msg = event.args.message;
-        const name = programs.get(msg.source);
+        const name = programs.get(msg.source)!;
+        if (!name) {
+          ctx.log.error(`Failed to get program name and decoder for ${msg.source}`);
+          continue;
+        }
+
+        const decoder = getDecoder(name);
+        const service = decoder.service(msg.payload);
+        const method = decoder.method(msg.payload);
+
         switch (name) {
           case ProgramName.VftManager: {
-            const service = vftManagerDecoder.service(msg.payload);
-            if (service !== 'VftManager') continue;
-            const method = vftManagerDecoder.method(msg.payload);
+            if (service !== VftManagerServices.VftManager) continue;
 
             switch (method) {
-              case 'BridgingRequested': {
-                const { nonce, vara_token_id, sender, receiver, amount } =
-                  vftManagerDecoder.decodeEvent<BridgingRequested>(service, method, msg.payload);
+              case VftManagerMethods.BridgingRequested: {
+                const { nonce, vara_token_id, sender, receiver, amount } = decoder.decodeEvent<BridgingRequested>(
+                  service,
+                  method,
+                  msg.payload,
+                );
                 const id = randomUUID();
 
                 const transfer = new Transfer({
                   id,
                   txHash: event.extrinsic!.hash,
-                  blockNumber,
+                  blockNumber: blockNumber,
                   timestamp,
                   nonce: gearNonce(nonce),
-                  sourceNetwork: Network.Gear,
+                  sourceNetwork: Network.Vara,
                   source: vara_token_id,
                   destNetwork: Network.Ethereum,
                   status: Status.AwaitingPayment,
@@ -76,34 +98,40 @@ const handler = async (ctx: ProcessorContext) => {
                   receiver,
                   amount: BigInt(amount),
                 });
-                promises.push(tempState.transferRequested(transfer));
+                await state.addTransfer(transfer);
                 break;
               }
-              case 'TokenMappingAdded': {
-                const { vara_token_id, eth_token_id, supply_type } = vftManagerDecoder.decodeEvent<TokenMappingAdded>(
+              case VftManagerMethods.TokenMappingAdded: {
+                const { vara_token_id, eth_token_id, supply_type } = decoder.decodeEvent<TokenMappingAdded>(
                   service,
                   method,
                   msg.payload,
                 );
 
-                promises.push(
-                  tempState.addPair(
-                    vara_token_id.toLowerCase(),
-                    eth_token_id.toLowerCase(),
-                    supply_type === 'Ethereum' ? Network.Ethereum : Network.Gear,
-                    block.header,
-                  ),
+                await state.addPair(
+                  vara_token_id.toLowerCase(),
+                  eth_token_id.toLowerCase(),
+                  supply_type === 'Ethereum' ? Network.Ethereum : Network.Vara,
+                  block.header,
                 );
                 break;
               }
-              case 'TokenMappingRemoved': {
-                const { vara_token_id, eth_token_id } = vftManagerDecoder.decodeEvent<TokenMappingRemoved>(
+              case VftManagerMethods.TokenMappingRemoved: {
+                const { vara_token_id, eth_token_id } = decoder.decodeEvent<TokenMappingRemoved>(
                   service,
                   method,
                   msg.payload,
                 );
-                tempState.removePair(vara_token_id.toLowerCase(), eth_token_id.toLowerCase());
+                state.removePair(vara_token_id, eth_token_id, blockNumber);
                 break;
+              }
+              case VftManagerMethods.HistoricalProxyChanged: {
+                // TODO: check
+                const { newAddress } = decoder.decodeEvent<HistoricalProxyChanged>(service, method, msg.payload);
+                ctx.log.info(`Historical proxy program changed to ${newAddress}`);
+                await updateId(ProgramName.HistoricalProxy, newAddress);
+                await state.save();
+                process.exit(0);
               }
               default: {
                 continue;
@@ -111,30 +139,22 @@ const handler = async (ctx: ProcessorContext) => {
             }
           }
           case ProgramName.HistoricalProxy: {
-            const service = hisotricalProxyDecoder.service(msg.payload);
-            if (service !== 'HistoricalProxy') continue;
-            const method = hisotricalProxyDecoder.method(msg.payload);
-            if (method !== 'Relayed') continue;
+            if (service !== HistoricalProxyServices.HistoricalProxy) continue;
+            if (method !== HistoricalProxyMethods.Relayed) continue;
 
-            const { block_number, transaction_index } = hisotricalProxyDecoder.decodeEvent<Relayed>(
-              service,
-              method,
-              msg.payload,
-            );
+            const { block_number, transaction_index } = decoder.decodeEvent<Relayed>(service, method, msg.payload);
 
             const nonce = ethNonce(`${block_number}${transaction_index}`);
-            tempState.transferCompleted(nonce, timestamp);
+            state.setCompletedTransfer(nonce, timestamp);
             break;
           }
           case ProgramName.BridgingPayment: {
-            const service = bridgingPaymentDecoder.service(msg.payload);
-            if (service !== 'BridgingPayment') continue;
-            const method = bridgingPaymentDecoder.method(msg.payload);
-            if (method !== 'BridgingPaid') continue;
+            if (service !== BridgingPaymentServices.BridgingPayment) continue;
+            if (method !== BridgingPaymentMethods.BridgingPaid) continue;
 
-            const { nonce } = bridgingPaymentDecoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
+            const { nonce } = decoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
 
-            tempState.transferStatus(gearNonce(nonce), Status.Bridging);
+            state.updateTransferStatus(gearNonce(nonce), Status.Bridging);
             break;
           }
         }
@@ -142,16 +162,10 @@ const handler = async (ctx: ProcessorContext) => {
     }
   }
 
-  await Promise.all(promises);
-
-  await tempState.save();
+  await state.save();
 };
 
 const runProcessor = async () => {
-  vftManagerDecoder = await Decoder.create('./assets/vft_manager.idl');
-  hisotricalProxyDecoder = await Decoder.create('./assets/historical_proxy.idl');
-  bridgingPaymentDecoder = await Decoder.create('./assets/bridging_payment.idl');
-
   await initDecoders();
 
   const db = new TypeormDatabase({

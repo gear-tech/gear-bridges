@@ -1,4 +1,4 @@
-import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_, Index as Index_, IntColumn as IntColumn_, BooleanColumn as BooleanColumn_} from "@subsquid/typeorm-store"
+import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_, Index as Index_, IntColumn as IntColumn_, BooleanColumn as BooleanColumn_, BigIntColumn as BigIntColumn_} from "@subsquid/typeorm-store"
 import {Network} from "./_network"
 
 @Entity_()
@@ -41,4 +41,13 @@ export class Pair {
 
     @BooleanColumn_({nullable: false})
     isRemoved!: boolean
+
+    @BigIntColumn_({nullable: false})
+    activeSinceBlock!: bigint
+
+    @StringColumn_({nullable: true})
+    upgradedTo!: string | undefined | null
+
+    @BigIntColumn_({nullable: true})
+    activeToBlock!: bigint | undefined | null
 }

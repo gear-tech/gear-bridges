@@ -1,6 +1,6 @@
 enum Network {
   Ethereum
-  Gear
+  Vara
 }
 
 enum Status {
@@ -13,7 +13,7 @@ enum Status {
 type Transfer @entity {
   id: ID!
   txHash: String!
-  blockNumber: String!
+  blockNumber: BigInt!
   timestamp: DateTime! @index
   completedAt: DateTime
   nonce: String! @index
@@ -39,6 +39,9 @@ type Pair @entity {
   ethTokenName: String!
   tokenSupply: Network!
   isRemoved: Boolean!
+  activeSinceBlock: BigInt!
+  upgradedTo: String
+  activeToBlock: BigInt
 }
 
 type CompletedTransfer @entity {
@@ -46,4 +49,14 @@ type CompletedTransfer @entity {
   nonce: String! @index @unique
   destNetwork: Network!
   timestamp: DateTime
+}
+
+type VaraBridgeProgram @entity {
+  id: ID!
+  name: String! @unique
+}
+
+type EthBridgeProgram @entity {
+  id: ID!
+  name: String! @unique
 }

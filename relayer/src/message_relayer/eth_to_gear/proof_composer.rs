@@ -45,15 +45,25 @@ pub struct Response {
 
 pub struct ProofComposerIo {
     requests_channel: UnboundedSender<Request>,
-    response_channel: UnboundedReceiver<Response>,
+    responses_channel: UnboundedReceiver<Response>,
 }
 
 impl ProofComposerIo {
+    pub fn new(
+        requests_channel: UnboundedSender<Request>,
+        responses_channel: UnboundedReceiver<Response>,
+    ) -> Self {
+        Self {
+            requests_channel,
+            responses_channel,
+        }
+    }
+
     /// Receive composed proof for some transaction.
     ///
     /// In case of `None` indicates closed channel.
     pub async fn recv(&mut self) -> Option<Response> {
-        self.response_channel.recv().await
+        self.responses_channel.recv().await
     }
 
     /// Send request to compose proof for `tx` with uuid `tx_uuid`.
@@ -101,10 +111,7 @@ impl ProofComposer {
             block_on(task(self, checkpoints, requests_rx, response_tx));
         });
 
-        ProofComposerIo {
-            requests_channel: requests_tx,
-            response_channel: response_rx,
-        }
+        ProofComposerIo::new(requests_tx, response_rx)
     }
 
     async fn run_inner(

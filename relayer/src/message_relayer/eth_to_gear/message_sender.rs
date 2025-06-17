@@ -23,18 +23,28 @@ use crate::{
 };
 
 pub struct MessageSenderIo {
-    requests: UnboundedSender<Request>,
-    responses: UnboundedReceiver<Response>,
+    requests_channel: UnboundedSender<Request>,
+    responses_channel: UnboundedReceiver<Response>,
 }
 
 impl MessageSenderIo {
+    pub fn new(
+        requests_channel: UnboundedSender<Request>,
+        responses_channel: UnboundedReceiver<Response>,
+    ) -> Self {
+        Self {
+            requests_channel,
+            responses_channel,
+        }
+    }
+
     pub fn send_message(
         &mut self,
         tx_uuid: Uuid,
         tx_hash: FixedBytes<32>,
         payload: EthToVaraEvent,
     ) -> bool {
-        self.requests
+        self.requests_channel
             .send(Request {
                 tx_uuid,
                 tx_hash,
@@ -44,7 +54,7 @@ impl MessageSenderIo {
     }
 
     pub async fn recv(&mut self) -> Option<Response> {
-        self.responses.recv().await
+        self.responses_channel.recv().await
     }
 }
 
@@ -98,10 +108,7 @@ impl MessageSender {
 
         spawn_blocking(move || block_on(task(self, requests_rx, responses_tx)));
 
-        MessageSenderIo {
-            requests: requests_tx,
-            responses: responses_rx,
-        }
+        MessageSenderIo::new(requests_tx, responses_rx)
     }
 
     async fn run_inner(

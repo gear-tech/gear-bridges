@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
@@ -50,6 +51,12 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
 
     function requestBridgingPayingFee(address token, uint256 amount, bytes32 to, address bridgingPayment) public payable {
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
+        requestBridging(token, amount, to);
+    }
+
+    function requestBridgingPayingFeeWithPermit(address token, uint256 amount, bytes32 to, uint256 deadline, uint8 v, bytes32 r, bytes32 s, address bridgingPayment) public payable {
+        IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
+        try IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
         requestBridging(token, amount, to);
     }
 

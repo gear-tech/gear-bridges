@@ -25,7 +25,6 @@ type UseFee = () => {
 type UseHandleSubmit = (
   feeValue: bigint | undefined,
   allowance: bigint | undefined,
-  ftBalance: bigint | undefined,
   accountBalance: bigint | undefined,
   openTxModal: (amount: string, receiver: string) => void,
 ) => {

@@ -19,7 +19,6 @@ const TRANSFER_GAS_LIMIT_FALLBACK = 21000n * 10n;
 function useHandleEthSubmit(
   fee: bigint | undefined,
   allowance: bigint | undefined,
-  ftBalance: bigint | undefined,
   accountBalance: bigint | undefined,
   openTransactionModal: (amount: string, receiver: string) => void,
 ) {
@@ -34,10 +33,9 @@ function useHandleEthSubmit(
   const config = useConfig();
 
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
-    definedAssert(token?.address, 'Fungible token address');
+    definedAssert(token, 'Fungible token');
     definedAssert(fee, 'Fee');
     definedAssert(allowance, 'Allowance');
-    definedAssert(ftBalance, 'Fungible token balance');
     definedAssert(accountBalance, 'Account balance');
 
     const valueToMint = token.isNative ? amount : 0n;

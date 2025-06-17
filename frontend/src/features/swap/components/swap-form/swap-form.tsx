@@ -70,7 +70,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const { submit, approve, payFee, mint, permitUSDC } = useHandleSubmit(
     fee.value,
     allowance.data,
-    ftBalance.data,
     accountBalance.data,
     openTransacionModal,
   );

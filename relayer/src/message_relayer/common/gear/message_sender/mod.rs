@@ -1,7 +1,7 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    eth_to_gear::api_provider::ApiProviderConnection,
     message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
+    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
 };
 use checkpoint_light_client_client::{traits::ServiceState as _, Order, ServiceState};
 use ethereum_beacon_client::BeaconClient;

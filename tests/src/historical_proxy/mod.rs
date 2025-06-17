@@ -8,7 +8,7 @@ use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft_manager_client::vft_manager;
 
-mod shared;
+pub mod shared;
 
 #[tokio::test]
 async fn update_admin() {

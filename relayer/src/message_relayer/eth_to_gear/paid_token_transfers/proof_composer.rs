@@ -183,6 +183,16 @@ pub struct ProofComposerIo {
 }
 
 impl ProofComposerIo {
+    pub fn new(
+        requests_channel: UnboundedSender<ComposeProof>,
+        response_channel: UnboundedReceiver<ComposedProof>,
+    ) -> Self {
+        Self {
+            requests_channel,
+            response_channel,
+        }
+    }
+
     /// Receive composed proof for some transaction.
     ///
     /// In case of `None` indicates closed channel.

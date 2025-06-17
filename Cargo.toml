@@ -96,6 +96,8 @@ plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = 
 # Coordinates of `EdwardsPoint` made public in fork.
 curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek", rev = "f63777fbeeb181944097bdcaeb9384ac158ec931" }
 
+relayer = { path = "relayer" }
+
 ahash = "0.7.8"
 anyhow = "1.0.86"
 ark-bls12-381 = { version = "0.4.0", default-features = false }

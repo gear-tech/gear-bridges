@@ -5,32 +5,25 @@ use clap::Parser;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
-use kill_switch::KillSwitchRelayer;
-use message_relayer::{
-    eth_to_gear::{self, api_provider::ApiProvider},
-    gear_to_eth,
-};
 use primitive_types::U256;
-use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
-use relay_merkle_roots::MerkleRootRelayer;
-use utils_prometheus::MetricsBuilder;
-
-mod cli;
-mod common;
-mod ethereum_checkpoints;
-mod hex_utils;
-mod kill_switch;
-mod message_relayer;
-mod proof_storage;
-mod prover_interface;
-mod relay_merkle_roots;
-
-use cli::{
+use relayer::cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
+use relayer::common;
+use relayer::ethereum_checkpoints;
+use relayer::hex_utils;
+use relayer::kill_switch::KillSwitchRelayer;
+use relayer::message_relayer;
+use relayer::message_relayer::{
+    eth_to_gear::{self, api_provider::ApiProvider},
+    gear_to_eth,
+};
+use relayer::proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
+use relayer::relay_merkle_roots::MerkleRootRelayer;
+use utils_prometheus::MetricsBuilder;
 
 #[tokio::main]
 async fn main() {

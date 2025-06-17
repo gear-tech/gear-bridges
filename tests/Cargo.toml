@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 alloy = { workspace = true }
 alloy-rlp = { workspace = true }
+alloy-primitives = { workspace = true }
 checkpoint-light-client-client.workspace = true
 ethereum-common =  { workspace = true, features = ["std"] }
 hex-literal = { workspace = true }
@@ -41,3 +42,4 @@ ark-ec.workspace = true
 ark-scale.workspace = true
 ark-serialize.workspace = true
 ruzstd.workspace = true
+relayer.workspace = true

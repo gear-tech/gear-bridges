@@ -230,6 +230,13 @@ pub struct MessageSenderIo {
 }
 
 impl MessageSenderIo {
+    pub fn new(requests: UnboundedSender<Message>, responses: UnboundedReceiver<Response>) -> Self {
+        Self {
+            requests,
+            responses,
+        }
+    }
+
     pub fn send_message(
         &mut self,
         tx_uuid: Uuid,

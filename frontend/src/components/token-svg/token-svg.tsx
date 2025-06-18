@@ -9,24 +9,24 @@ import VaraUsdtSVG from '@/assets/vara-usdt.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import WrappedEthSVG from '@/assets/wrapped-eth.svg?react';
 import WrappedVaraSVG from '@/assets/wrapped-vara.svg?react';
-import { NETWORK_INDEX } from '@/features/swap/consts';
+import { NETWORK } from '@/features/swap/consts';
 
 import { Skeleton } from '../layout';
 
 import styles from './token-svg.module.scss';
 
 const NETWORK_SVG = {
-  [NETWORK_INDEX.VARA]: VaraSVG,
-  [NETWORK_INDEX.ETH]: EthSVG,
+  [NETWORK.VARA]: VaraSVG,
+  [NETWORK.ETH]: EthSVG,
 } as const;
 
 type Props = {
   symbol: string | undefined;
-  networkIndex: number;
+  network: 'vara' | 'eth';
   sizes: [number, number?];
 };
 
-function TokenSVG({ symbol, networkIndex, sizes }: Props) {
+function TokenSVG({ symbol, network, sizes }: Props) {
   const [size, networkSize = 0] = sizes;
   const style = { '--size': `${size}px`, '--network-size': `${networkSize}px` } as CSSProperties;
 
@@ -35,14 +35,14 @@ function TokenSVG({ symbol, networkIndex, sizes }: Props) {
 
     const lowerCaseSymbol = symbol.toLowerCase();
 
-    if (networkIndex === NETWORK_INDEX.VARA) {
+    if (network === NETWORK.VARA) {
       if (lowerCaseSymbol.includes('vara')) return VaraSVG;
       if (lowerCaseSymbol.includes('eth')) return WrappedEthSVG;
       if (lowerCaseSymbol.includes('usdc')) return VaraUsdcSVG;
       if (lowerCaseSymbol.includes('usdt')) return VaraUsdtSVG;
     }
 
-    if (networkIndex === NETWORK_INDEX.ETH) {
+    if (network === NETWORK.ETH) {
       if (lowerCaseSymbol.includes('vara')) return WrappedVaraSVG;
       if (lowerCaseSymbol.includes('eth')) return EthSVG;
       if (lowerCaseSymbol.includes('usdc')) return UsdcSVG;
@@ -53,7 +53,7 @@ function TokenSVG({ symbol, networkIndex, sizes }: Props) {
   };
 
   const SVG = getSVG();
-  const NetworkSVG = NETWORK_SVG[networkIndex];
+  const NetworkSVG = NETWORK_SVG[network];
 
   return (
     <div className={styles.container} style={style}>

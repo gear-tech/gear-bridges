@@ -1,15 +1,14 @@
 import { useProgram } from '@gear-js/react-hooks';
 
 import { WrappedVaraProgram } from '@/consts';
-
-import { useTokens } from './use-tokens';
+import { useTokens } from '@/context';
 
 function useWrappedVaraProgram() {
-  const { wrappedVaraAddress } = useTokens();
+  const { nativeToken } = useTokens();
 
   return useProgram({
     library: WrappedVaraProgram,
-    id: wrappedVaraAddress,
+    id: nativeToken.vara?.address,
   });
 }
 

@@ -31,7 +31,7 @@ function useHandleEthSubmit(
 
   const getTransferGasLimit = (amount: bigint, accountAddress: HexString) => {
     definedAssert(fee, 'Fee');
-    definedAssert(token.address, 'Fungible token address');
+    definedAssert(token?.address, 'Fungible token address');
 
     const encodedData = encodeFunctionData({
       abi: ERC20_MANAGER_ABI,
@@ -47,7 +47,7 @@ function useHandleEthSubmit(
   };
 
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
-    definedAssert(token.address, 'Fungible token address');
+    definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
     definedAssert(allowance, 'Allowance');
     definedAssert(ftBalance, 'Fungible token balance');
@@ -80,7 +80,7 @@ function useHandleEthSubmit(
   };
 
   const transfer = async (amount: bigint, accountAddress: HexString, gasLimit: bigint | undefined) => {
-    definedAssert(token.address, 'Fungible token address');
+    definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
 
     const hash = await writeContractAsync({

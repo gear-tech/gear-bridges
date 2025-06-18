@@ -6,7 +6,7 @@ import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { definedAssert } from '@/utils';
 
-import { ERC20_MANAGER_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS, ERC20_MANAGER_CONTRACT_ADDRESS } from '../../consts';
+import { ERC20_MANAGER_ABI, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 
 type Parameters = { amount: bigint; accountAddress: HexString };
@@ -25,11 +25,11 @@ function useTransfer(fee: bigint | undefined) {
     const encodedData = encodeFunctionData({
       abi: ERC20_MANAGER_ABI,
       functionName: 'requestBridgingPayingFee',
-      args: [token.address, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+      args: [token.address, amount, accountAddress, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
     });
 
     return estimateGas(config, {
-      to: ERC20_MANAGER_CONTRACT_ADDRESS,
+      to: CONTRACT_ADDRESS.ERC20_MANAGER,
       data: encodedData,
       value: fee,
     });
@@ -44,7 +44,7 @@ function useTransfer(fee: bigint | undefined) {
     const hash = withPermit
       ? await writeContractAsync({
           abi: ERC20_MANAGER_ABI,
-          address: ERC20_MANAGER_CONTRACT_ADDRESS,
+          address: CONTRACT_ADDRESS.ERC20_MANAGER,
           functionName: 'requestBridgingPayingFeeWithPermit',
           args: [
             token.address,
@@ -54,15 +54,15 @@ function useTransfer(fee: bigint | undefined) {
             params.permit.v,
             params.permit.r,
             params.permit.s,
-            ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+            CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT,
           ],
           value: fee,
         })
       : await writeContractAsync({
           abi: ERC20_MANAGER_ABI,
-          address: ERC20_MANAGER_CONTRACT_ADDRESS,
+          address: CONTRACT_ADDRESS.ERC20_MANAGER,
           functionName: 'requestBridgingPayingFee',
-          args: [token.address, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+          args: [token.address, amount, accountAddress, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
           value: fee,
         });
 

@@ -3,11 +3,10 @@ import { useApi } from '@gear-js/react-hooks';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraSymbol } from '@/hooks';
 import { definedAssert } from '@/utils';
 
-import { SUBMIT_STATUS } from '../../consts';
+import { SUBMIT_STATUS, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
@@ -46,7 +45,7 @@ function useHandleVaraSubmit({ fee, allowance, accountBalance, onTransactionStar
       valueToMint > 0n ? await mint.prepareTransactionAsync({ args: [], value: valueToMint }) : DEFAULT_TX;
 
     const preparedApprove = isApproveRequired
-      ? await approve.prepareTransactionAsync({ args: [VFT_MANAGER_CONTRACT_ADDRESS, amount] })
+      ? await approve.prepareTransactionAsync({ args: [CONTRACT_ADDRESS.VFT_MANAGER, amount] })
       : DEFAULT_TX;
 
     const preparedRequestBridging = await requestBridging.prepareTransactionAsync({

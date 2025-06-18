@@ -1,9 +1,8 @@
 import { useApi, useProgram, useAccount, useSendProgramTransaction } from '@gear-js/react-hooks';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS, VftManagerProgram } from '@/consts';
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { BridgingPaymentProgram, VftManagerProgram, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 
@@ -18,7 +17,7 @@ function usePayFee(feeValue: bigint | undefined) {
 
   const { data: program } = useProgram({
     library: BridgingPaymentProgram,
-    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+    id: CONTRACT_ADDRESS.BRIDGING_PAYMENT,
   });
 
   const { sendTransactionAsync, reset, error, isPending } = useSendProgramTransaction({
@@ -33,7 +32,7 @@ function usePayFee(feeValue: bigint | undefined) {
     if (!account) throw new Error('Account is not found');
     if (!isApiReady) throw new Error('API is not initialized');
 
-    const vftManagerProgram = new VftManagerProgram(api, VFT_MANAGER_CONTRACT_ADDRESS);
+    const vftManagerProgram = new VftManagerProgram(api, CONTRACT_ADDRESS.VFT_MANAGER);
     let unsubscribe: () => void | undefined;
 
     const result = new Promise((resolve, reject) => {

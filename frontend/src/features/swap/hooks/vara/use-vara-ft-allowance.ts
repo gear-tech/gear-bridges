@@ -1,8 +1,9 @@
 import { HexString } from '@gear-js/api';
 import { useAccount, useProgramQuery } from '@gear-js/react-hooks';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
 import { useVFTProgram } from '@/hooks';
+
+import { CONTRACT_ADDRESS } from '../../consts';
 
 function useVaraFTAllowance(address: HexString | undefined) {
   const { account } = useAccount();
@@ -14,7 +15,7 @@ function useVaraFTAllowance(address: HexString | undefined) {
     serviceName: 'vft',
     functionName: 'allowance',
     // TODO: get rid of assertions after @gear-js/react-hooks update to support empty args
-    args: [account?.decodedAddress as HexString, VFT_MANAGER_CONTRACT_ADDRESS],
+    args: [account?.decodedAddress as HexString, CONTRACT_ADDRESS.VFT_MANAGER],
     query: { enabled: Boolean(account) },
     watch: true,
   });

@@ -38,7 +38,17 @@ interface IMessageQueueReceiver {
 }
 
 library Hasher {
-    function hash(VaraMessage calldata message) internal pure returns (bytes32) {
+    function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
+        bytes memory data = abi.encodePacked(
+            message.nonce,
+            message.sender,
+            message.receiver,
+            message.data
+        );
+        return keccak256(abi.encodePacked(keccak256(data)));
+    }
+
+    function hash(VaraMessage memory message) internal pure returns (bytes32) {
         bytes memory data = abi.encodePacked(
             message.nonce,
             message.sender,

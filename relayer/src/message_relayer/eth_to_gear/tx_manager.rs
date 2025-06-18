@@ -35,7 +35,6 @@ pub enum TxStatus {
     SubmitMessage { payload: Vec<u8> },
 
     Completed,
-    Failed(String),
 }
 
 pub struct TransactionManager {
@@ -44,7 +43,7 @@ pub struct TransactionManager {
     pub transactions: RwLock<BTreeMap<Uuid, Transaction>>,
 
     pub completed: RwLock<BTreeMap<Uuid, Transaction>>,
-    pub failed: RwLock<BTreeMap<Uuid, Transaction>>,
+    pub failed: RwLock<BTreeMap<Uuid, String>>,
     pub storage: Box<dyn Storage>,
 }
 
@@ -58,14 +57,14 @@ impl TransactionManager {
         }
     }
 
+    pub async fn fail_transaction(&self, tx_uuid: Uuid, reason: String) {
+        self.failed.write().await.insert(tx_uuid, reason);
+    }
+
     pub async fn add_transaction(&self, tx: Transaction) {
         match tx.status {
             TxStatus::Completed => {
                 self.completed.write().await.insert(tx.uuid, tx);
-            }
-
-            TxStatus::Failed(_) => {
-                self.failed.write().await.insert(tx.uuid, tx);
             }
 
             _ => {
@@ -155,7 +154,7 @@ impl TransactionManager {
         message_sender: &mut MessageSenderIo,
         proof_composer: &mut ProofComposerIo,
     ) -> anyhow::Result<bool> {
-        let mut transactions = self.transactions.write().await;
+        let transactions = self.transactions.write().await;
         for (_, tx) in transactions.iter() {
             match tx.status {
                 TxStatus::ComposeProof => {
@@ -173,17 +172,8 @@ impl TransactionManager {
                         return Ok(false);
                     }
                 }
-
-                TxStatus::Completed | TxStatus::Failed(_) => unreachable!(),
+                TxStatus::Completed => unreachable!(),
             }
-        }
-
-        let mut failed = self.failed.write().await;
-
-        while let Some((tx_uuid, tx)) = failed.pop_last() {
-            debug_assert!(matches!(tx.status, TxStatus::Failed(_)));
-            log::info!("Restarting failed transaction {tx_uuid}: {:?}", tx.tx);
-            transactions.insert(tx_uuid, tx);
         }
 
         Ok(true)
@@ -262,12 +252,14 @@ impl TransactionManager {
             match status {
                 MessageStatus::Success => {
                     tx.status = TxStatus::Completed;
+                    // transaction may have been failed and restarted. Remove
+                    // it from failed set if it succeeded.
+                    self.failed.write().await.remove(&tx.uuid);
                     self.completed.write().await.insert(tx.uuid, tx);
                 }
 
                 MessageStatus::Failure(message) => {
-                    tx.status = TxStatus::Failed(message);
-                    self.failed.write().await.insert(tx.uuid, tx);
+                    self.fail_transaction(tx_uuid, message).await;
                 }
             }
         } else {

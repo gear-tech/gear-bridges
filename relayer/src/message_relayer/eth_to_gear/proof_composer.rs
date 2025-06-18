@@ -113,58 +113,9 @@ impl ProofComposer {
 
         ProofComposerIo::new(requests_tx, response_rx)
     }
-
-    async fn run_inner(
-        &mut self,
-        checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
-        requests_rx: &mut UnboundedReceiver<Request>,
-        response_tx: &mut UnboundedSender<Response>,
-    ) -> anyhow::Result<()> {
-        loop {
-            tokio::select! {
-                Some(checkpoint) = checkpoints.recv() => {
-                    log::info!("Received checkpoint: {checkpoint}");
-                    self.last_checkpoint = Some(checkpoint);
-
-                    let mut to_process = Vec::new();
-
-                    self.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
-                        if tx.slot_number <= checkpoint {
-                            to_process.push((*tx_uuid, tx.clone()));
-                            false
-                        } else {
-                            true
-                        }
-                    });
-
-                    for (tx_uuid, tx) in to_process {
-                        log::info!("Processing waiting transaction {tx_uuid}: {tx:?}");
-                        self.process(response_tx, tx, tx_uuid).await?;
-                    }
-                }
-
-                Some(Request { tx_uuid, tx }) = requests_rx.recv() => {
-                    if self.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
-                        .is_some()
-                    {
-                        self.process(response_tx, tx, tx_uuid).await?;
-                    } else {
-                        log::info!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
-                        self.waiting_for_checkpoints.push((tx_uuid, tx));
-                    }
-                }
-
-                else => {
-                    log::info!("Channels closed, exiting...");
-                    return Ok(());
-                }
-            }
-        }
-    }
-
     async fn process(
         &mut self,
-        response_tx: &mut UnboundedSender<Response>,
+        response_tx: &UnboundedSender<Response>,
         tx: TxHashWithSlot,
         tx_uuid: Uuid,
     ) -> anyhow::Result<()> {
@@ -198,12 +149,11 @@ async fn task(
     mut this: ProofComposer,
     mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
     mut requests: UnboundedReceiver<Request>,
-    mut responses: UnboundedSender<Response>,
+    responses: UnboundedSender<Response>,
 ) {
     loop {
-        if let Err(err) = this
-            .run_inner(&mut checkpoints, &mut requests, &mut responses)
-            .await
+        if let Err(err) =
+            handle_requests(&mut this, &mut checkpoints, &mut requests, &responses).await
         {
             log::error!("Proof composer failed with error: {err:?}");
             if common::is_transport_error_recoverable(&err) {
@@ -229,6 +179,55 @@ async fn task(
         }
     }
 }
+
+async fn handle_requests(
+    this: &mut ProofComposer,
+    checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
+    requests: &mut UnboundedReceiver<Request>,
+    responses: &UnboundedSender<Response>,
+) -> anyhow::Result<()> {
+    loop {
+        tokio::select! {
+            Some(checkpoint) = checkpoints.recv() => {
+                log::info!("Received checkpoint: {checkpoint}");
+                this.last_checkpoint = Some(checkpoint);
+
+                let mut to_process = Vec::new();
+
+                this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
+                    if tx.slot_number <= checkpoint {
+                        to_process.push((*tx_uuid, tx.clone()));
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                for (tx_uuid, tx) in to_process {
+                    log::debug!("Processing waiting transaction {tx_uuid}: {tx:?}");
+                    this.process(responses, tx, tx_uuid).await?;
+                }
+            }
+
+            Some(Request { tx_uuid, tx }) = requests.recv() => {
+                if this.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
+                    .is_some()
+                {
+                    this.process(responses, tx, tx_uuid).await?;
+                } else {
+                    log::debug!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
+                    this.waiting_for_checkpoints.push((tx_uuid, tx));
+                }
+            }
+
+            else => {
+                log::info!("Channels closed, exiting...");
+                return Ok(());
+            }
+        }
+    }
+}
+
 pub async fn compose(
     beacon_client: &BeaconClient,
     gear_api: &gclient::GearApi,

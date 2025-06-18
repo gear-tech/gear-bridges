@@ -14310,6 +14310,7 @@ dependencies = [
  "ark-ec",
  "ark-scale",
  "ark-serialize 0.4.2",
+ "async-trait",
  "checkpoint-light-client",
  "checkpoint-light-client-client",
  "checkpoint-light-client-io",

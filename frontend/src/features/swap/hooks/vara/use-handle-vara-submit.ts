@@ -2,7 +2,6 @@ import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
-import { useMutation } from '@tanstack/react-query';
 
 import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraSymbol } from '@/hooks';
@@ -127,9 +126,21 @@ function useHandleVaraSubmit(
     return result;
   };
 
-  const submit = useMutation({ mutationFn: onSubmit });
+  const getState = () => {
+    const getStatus = () => {
+      if (signAndSend.isPending || signAndSend.error) return 'bridge';
+      if (payFee.isPending || payFee.error) return 'fee';
 
-  return { submit, payFee };
+      return 'success';
+    };
+
+    const isPending = signAndSend.isPending || payFee.isPending;
+    const error = signAndSend.error || payFee.error;
+
+    return { status: getStatus, isPending, error };
+  };
+
+  return { onSubmit, ...getState() };
 }
 
 export { useHandleVaraSubmit };

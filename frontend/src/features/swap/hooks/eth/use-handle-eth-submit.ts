@@ -1,5 +1,4 @@
 import { HexString } from '@gear-js/api';
-import { useMutation } from '@tanstack/react-query';
 import { useConfig } from 'wagmi';
 import { estimateFeesPerGas } from 'wagmi/actions';
 
@@ -61,12 +60,11 @@ function useHandleEthSubmit(
 
     if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
 
-    return { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit };
+    return { isMintRequired, valueToMint, isApproveRequired, mintGasLimit };
   };
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    const { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } =
-      await validateBalance(amount, accountAddress);
+    const { isMintRequired, valueToMint, isApproveRequired } = await validateBalance(amount, accountAddress);
 
     mint.reset();
     approve.reset();
@@ -75,25 +73,39 @@ function useHandleEthSubmit(
     openTransactionModal(amount.toString(), accountAddress);
 
     if (isMintRequired) {
-      await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
+      await mint.mutateAsync({ value: valueToMint });
     }
 
     if (isApproveRequired && isUSDC) {
       const permit = await permitUSDC.mutateAsync(amount);
 
-      return transfer.mutateWithPermitAsync({ amount, accountAddress, permit });
+      return transfer.mutateAsync({ amount, accountAddress, permit });
     }
 
     if (isApproveRequired) {
-      await approve.mutateAsync({ amount, gas: approveGasLimit });
+      await approve.mutateAsync({ amount });
     }
 
-    return transfer.mutateAsync({ amount, accountAddress, gasLimit: transferGasLimit });
+    return transfer.mutateAsync({ amount, accountAddress });
   };
 
-  const submit = useMutation({ mutationFn: onSubmit });
+  const getState = () => {
+    const getStatus = () => {
+      if (mint.isPending || mint.error) return 'mint';
+      if (approve.isPending || approve.error) return 'approve';
+      if (permitUSDC.isPending || permitUSDC.error) return 'permit';
+      if (transfer.isPending || transfer.error) return 'bridge';
 
-  return { submit, approve, mint, permitUSDC };
+      return 'success';
+    };
+
+    const isPending = mint.isPending || approve.isPending || permitUSDC.isPending || transfer.isPending;
+    const error = mint.error || approve.error || permitUSDC.error || transfer.error;
+
+    return { status: getStatus(), isPending, error };
+  };
+
+  return { onSubmit, ...getState() };
 }
 
 export { useHandleEthSubmit };

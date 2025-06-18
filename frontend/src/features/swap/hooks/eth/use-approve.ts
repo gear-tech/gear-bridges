@@ -30,13 +30,13 @@ function useApprove() {
     return estimateGas(config, { to, data });
   };
 
-  const approve = async ({ amount, gas }: { amount: bigint; gas: bigint }) => {
+  const approve = async ({ amount }: { amount: bigint }) => {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
     const args = [ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
 
-    const hash = await writeContractAsync({ address, abi, functionName, args, gas });
+    const hash = await writeContractAsync({ address, abi, functionName, args });
 
     return waitForTransactionReceipt(config, { hash });
   };

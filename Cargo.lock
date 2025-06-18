@@ -10628,11 +10628,13 @@ dependencies = [
  "alloy-rlp",
  "anyhow",
  "ark-serialize 0.4.2",
+ "async-trait",
  "axum",
  "bridging-payment-client",
  "cgo_oligami",
  "checkpoint-light-client-client",
  "checkpoint-light-client-io",
+ "chrono",
  "clap",
  "derive_more 0.99.20",
  "dotenv",
@@ -10671,6 +10673,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "utils-prometheus",
+ "uuid",
  "vft-manager-client",
 ]
 
@@ -15198,7 +15201,9 @@ version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
+ "getrandom 0.3.3",
  "js-sys",
+ "serde",
  "wasm-bindgen",
 ]
 

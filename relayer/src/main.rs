@@ -231,6 +231,7 @@ async fn main() {
             ethereum_args,
             beacon_rpc,
             prometheus_args,
+            storage_path,
         }) => {
             let eth_api = create_eth_client(&ethereum_args).await;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
@@ -282,7 +283,7 @@ async fn main() {
                         .await;
 
                     provider.spawn();
-                    relayer.run().await;
+                    relayer.run(&storage_path).await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -310,7 +311,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
                     provider.spawn();
-                    relayer.run().await;
+                    relayer.run(&storage_path).await;
                 }
             }
 

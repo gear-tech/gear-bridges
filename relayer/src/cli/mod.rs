@@ -140,6 +140,11 @@ pub struct EthGearTokensArgs {
     pub beacon_rpc: BeaconRpcArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
+
+    /// Storage path for transactions. Relayer will save transaction
+    /// status in that directory.
+    #[arg(long = "storage-path", env = "ETH_GEAR_TX_STORAGE_PATH")]
+    pub storage_path: String,
 }
 
 #[derive(Subcommand)]

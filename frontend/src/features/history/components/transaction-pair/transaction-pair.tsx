@@ -33,9 +33,9 @@ function TransactionPair(props: Props) {
   const destinationToken = addressToToken[destinationHex];
   const destinationSymbol = destinationToken?.symbol ?? 'Unit';
 
-  const isGearNetwork = sourceNetwork === Network.Vara;
-  const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
-  const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
+  const isVaraNetwork = sourceNetwork === Network.Vara;
+  const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
+  const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   return (
     <div className={styles.pair}>

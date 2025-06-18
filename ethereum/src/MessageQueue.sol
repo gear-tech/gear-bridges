@@ -2,26 +2,16 @@
 pragma solidity ^0.8.30;
 
 import {IRelayer} from "./interfaces/IRelayer.sol";
-import {VaraMessage, IMessageQueue, IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
+import {VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
 contract MessageQueue is IMessageQueue {
+    using Hasher for VaraMessage;
+
     IRelayer immutable RELAYER;
 
     constructor(IRelayer relayer) {
         RELAYER = relayer;
-    }
-
-    function hash_vara_msg(
-        VaraMessage calldata message
-    ) internal pure returns (bytes32) {
-        bytes memory data = abi.encodePacked(
-            message.nonce,
-            message.sender,
-            message.receiver,
-            message.data
-        );
-        return keccak256(abi.encodePacked(keccak256(data)));
     }
 
     mapping(bytes32 => bool) private _processed_messages;
@@ -52,7 +42,7 @@ contract MessageQueue is IMessageQueue {
             revert MessageAlreadyProcessed(message.nonce);
         }
 
-        bytes32 msg_hash = hash_vara_msg(message);
+        bytes32 msg_hash = message.hash();
 
         bytes32 merkle_root = RELAYER.getMerkleRoot(block_number);
 

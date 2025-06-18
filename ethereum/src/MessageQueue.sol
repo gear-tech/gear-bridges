@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {IRelayer} from "./interfaces/IRelayer.sol";
 import {VaraMessage, IMessageQueue, IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
+import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
 contract MessageQueue is IMessageQueue {
     IRelayer immutable RELAYER;
@@ -59,10 +60,7 @@ contract MessageQueue is IMessageQueue {
             revert MerkleRootNotSet(block_number);
         }
 
-        if (
-            _calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) !=
-            merkle_root
-        ) {
+        if (!BinaryMerkleTree.verifyProofCalldata(merkle_root, proof, total_leaves, leaf_index, msg_hash)) {
             revert BadProof();
         }
 
@@ -81,65 +79,11 @@ contract MessageQueue is IMessageQueue {
     }
 
     /**
-     * @dev Calculated merkle tree root for a provided merkle proof.
-     *
-     * @param proof - Merkle proof.
-     * @param leaf_hash - Hash of data stored in target leaf.
-     * @param total_leaves - Number of leaves in merkle tree.
-     * @param leaf_index - Index of target leaf.
-     */
-    function calculateMerkleRoot(
-        bytes32[] calldata proof,
-        bytes32 leaf_hash,
-        uint256 total_leaves,
-        uint256 leaf_index
-    ) public pure returns (bytes32) {
-        return _calculateMerkleRoot(proof, leaf_hash, total_leaves, leaf_index);
-    }
-
-    /**
      * @dev Checks if `VaraMessage` already was processed.
      *
      * @param message - Message it checks agaiunst.
      */
-
-    function isProcessed(
-        VaraMessage calldata message
-    ) external view returns (bool) {
+    function isProcessed(VaraMessage calldata message) external view returns (bool) {
         return _processed_messages[message.nonce];
-    }
-
-    function _calculateMerkleRoot(
-        bytes32[] calldata proof,
-        bytes32 leaf,
-        uint256 width,
-        uint256 index
-    ) internal pure returns (bytes32) {
-        bytes32 hash = leaf;
-
-        assert(index < width);
-
-        for (uint256 i = 0; i < proof.length; i++) {
-            bytes32 proofElement = proof[i];
-
-            if ((index % 2 == 1) || (index + 1 == width)) {
-                assembly ("memory-safe") {
-                    mstore(0x00, proofElement)
-                    mstore(0x20, hash)
-                    hash := keccak256(0x00, 0x40)
-                }
-            } else {
-                assembly ("memory-safe") {
-                    mstore(0x00, hash)
-                    mstore(0x20, proofElement)
-                    hash := keccak256(0x00, 0x40)
-                }
-            }
-
-            index = index / 2;
-            width = ((width - 1) / 2) + 1;
-        }
-
-        return hash;
     }
 }

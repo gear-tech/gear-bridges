@@ -9,6 +9,8 @@ import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {Relayer} from "../src/Relayer.sol";
 import {IRelayer} from "../src/interfaces/IRelayer.sol";
 
+import {BinaryMerkleTree} from "../src/libraries/BinaryMerkleTree.sol";
+
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IERC20Manager, Packer, WithdrawMessage} from "../src/interfaces/IERC20Manager.sol";
 
@@ -59,11 +61,11 @@ contract MessageQueueTest is TestHelper {
             0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             3,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -91,11 +93,11 @@ contract MessageQueueTest is TestHelper {
         );
         console.logBytes32(proof[0]);
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             3,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -123,11 +125,11 @@ contract MessageQueueTest is TestHelper {
         );
         console.logBytes32(proof[0]);
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             3,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -180,11 +182,11 @@ contract MessageQueueTest is TestHelper {
             0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            expectedMessageHash,
             3,
-            2
+            2,
+            expectedMessageHash
         );
 
         assertEq(
@@ -230,11 +232,11 @@ contract MessageQueueTest is TestHelper {
             0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             101,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -287,11 +289,11 @@ contract MessageQueueTest is TestHelper {
             0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             101,
-            3
+            3,
+            messageHash
         );
 
         assertEq(
@@ -345,11 +347,11 @@ contract MessageQueueTest is TestHelper {
             0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            expectedMessageHash,
             101,
-            100
+            100,
+            expectedMessageHash
         );
 
         assertEq(
@@ -395,11 +397,11 @@ contract MessageQueueTest is TestHelper {
             0xf0ac28723c4a3e05cb2489c4ff0abe4a236486375c4337c81b80199a9c01892d
         );
 
-        bytes32 calculatedRoot = message_queue.calculateMerkleRoot(
+        bytes32 calculatedRoot = BinaryMerkleTree.processProof(
             proof,
-            msg_hash,
             101,
-            100
+            100,
+            msg_hash
         );
 
         assertEq(

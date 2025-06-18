@@ -21,13 +21,6 @@ interface IMessageQueue {
         bytes32 indexed messageNonce
     );
 
-    function calculateMerkleRoot(
-        bytes32[] calldata proof,
-        bytes32 hash,
-        uint256 width,
-        uint256 leaf_index
-    ) external view returns (bytes32);
-
     function processMessage(
         uint256 block_number,
         uint256 total_leaves,

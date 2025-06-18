@@ -45,7 +45,7 @@ contract MessageQueueTest is TestHelper {
         relayer.submitMerkleRoot(BLOCK_ID, BLOCK_MERKLE_ROOT, proof);
     }
 
-    function test_calculate_root_buffer() public view {
+    function test_calculate_root_buffer() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -76,7 +76,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_2() public view {
+    function test_calculate_root_buffer_2() public pure {
         // prettier-ignore
         uint8[86] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -108,7 +108,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_3() public view {
+    function test_calculate_root_buffer_3() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -140,7 +140,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root() public view {
+    function test_calculate_root() public pure {
         uint8[2] memory msgt = [3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i++) {
@@ -197,7 +197,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_leaf_2() public view {
+    function test_calculate_root_buffer_leaf_2() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2];
 
@@ -247,7 +247,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_leaf_3() public view {
+    function test_calculate_root_buffer_leaf_3() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
 
@@ -304,7 +304,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_leaf_100() public view {
+    function test_calculate_root_buffer_leaf_100() public pure {
         uint8[3] memory msgt = [3, 3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i++) {

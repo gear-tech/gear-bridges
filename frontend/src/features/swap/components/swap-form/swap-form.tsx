@@ -54,9 +54,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransacionModal = (amount: string, receiver: string) => {
+  const openTransacionModal = (_amount: bigint, receiver: string) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
+    const amount = _amount.toString();
     const source = token.address;
     const destination = destinationToken.address;
     const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;
@@ -67,7 +68,12 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const { onSubmit, ...submit } = useHandleSubmit(fee.value, allowance.data, accountBalance.data, openTransacionModal);
+  const { onSubmit, ...submit } = useHandleSubmit({
+    fee: fee.value,
+    allowance: allowance.data,
+    accountBalance: accountBalance.data,
+    onTransactionStart: openTransacionModal,
+  });
 
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     network.isVara,

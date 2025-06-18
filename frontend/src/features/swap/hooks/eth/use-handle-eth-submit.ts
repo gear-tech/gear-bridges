@@ -6,7 +6,7 @@ import { definedAssert } from '@/utils';
 
 import { useBridgeContext } from '../../context';
 import { InsufficientAccountBalanceError } from '../../errors';
-import { FormattedValues } from '../../types';
+import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { useApprove } from './use-approve';
 import { useMint } from './use-mint';
@@ -15,12 +15,7 @@ import { useTransfer } from './use-transfer';
 
 const TRANSFER_GAS_LIMIT_FALLBACK = 21000n * 10n;
 
-function useHandleEthSubmit(
-  fee: bigint | undefined,
-  allowance: bigint | undefined,
-  accountBalance: bigint | undefined,
-  openTransactionModal: (amount: string, receiver: string) => void,
-) {
+function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
   const { token } = useBridgeContext();
   const isUSDC = token?.symbol.toLowerCase().includes('usdc');
 
@@ -69,12 +64,11 @@ function useHandleEthSubmit(
     mint.reset();
     approve.reset();
     permitUSDC.reset();
+    transfer.reset();
 
-    openTransactionModal(amount.toString(), accountAddress);
+    onTransactionStart(amount, accountAddress);
 
-    if (isMintRequired) {
-      await mint.mutateAsync({ value: valueToMint });
-    }
+    if (isMintRequired) await mint.mutateAsync({ value: valueToMint });
 
     if (isApproveRequired && isUSDC) {
       const permit = await permitUSDC.mutateAsync(amount);
@@ -82,9 +76,7 @@ function useHandleEthSubmit(
       return transfer.mutateAsync({ amount, accountAddress, permit });
     }
 
-    if (isApproveRequired) {
-      await approve.mutateAsync({ amount });
-    }
+    if (isApproveRequired) await approve.mutateAsync({ amount });
 
     return transfer.mutateAsync({ amount, accountAddress });
   };

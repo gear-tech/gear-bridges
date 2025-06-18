@@ -9,7 +9,7 @@ import { definedAssert } from '@/utils';
 
 import { useBridgeContext } from '../../context';
 import { InsufficientAccountBalanceError } from '../../errors';
-import { FormattedValues } from '../../types';
+import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { usePayFee } from './use-pay-fee';
 import { usePrepareApprove } from './use-prepare-approve';
@@ -23,12 +23,7 @@ const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
 const BRIDGING_REQUEST_GAS_LIMIT = 150_000_000_000n;
 const APPROXIMATE_PAY_FEE_GAS_LIMIT = 10_000_000_000n;
 
-function useHandleVaraSubmit(
-  feeValue: bigint | undefined,
-  allowance: bigint | undefined,
-  accountBalance: bigint | undefined,
-  openTransactionModal: (amount: string, receiver: string) => void,
-) {
+function useHandleVaraSubmit({ fee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
   const { api } = useApi();
   const { token } = useBridgeContext();
   const varaSymbol = useVaraSymbol();
@@ -36,7 +31,7 @@ function useHandleVaraSubmit(
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
-  const payFee = usePayFee(feeValue);
+  const payFee = usePayFee(fee);
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const getTransactions = async (amount: bigint, accountAddress: HexString) => {
@@ -68,7 +63,7 @@ function useHandleVaraSubmit(
     preparedRequestBridging,
   }: Awaited<ReturnType<typeof getTransactions>>) => {
     definedAssert(api, 'API');
-    definedAssert(feeValue, 'Fee value');
+    definedAssert(fee, 'Fee value');
 
     const mintGasLimit = preparedMint.transaction?.gasInfo.min_limit.toBigInt() ?? 0n;
     const approveGasLimit = preparedApprove.transaction?.gasInfo.min_limit.toBigInt() ?? 0n;
@@ -80,7 +75,7 @@ function useHandleVaraSubmit(
 
     const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + estimatedBridgingFee;
 
-    return valueToMint + totalGasLimit + totalEstimatedFee + feeValue + api.existentialDeposit.toBigInt();
+    return valueToMint + totalGasLimit + totalEstimatedFee + fee + api.existentialDeposit.toBigInt();
   };
 
   const validateBalance = async (amount: bigint, accountAddress: HexString) => {
@@ -111,7 +106,10 @@ function useHandleVaraSubmit(
     // would be nice to have the ability to decode it's payload there. perhaps some api in sails-js can be implemented?
     const { result, unsubscribe } = payFee.awaitBridgingRequest({ amount, accountAddress });
 
-    openTransactionModal(amount.toString(), accountAddress);
+    signAndSend.reset();
+    payFee.reset();
+
+    onTransactionStart(amount, accountAddress);
 
     const extrinsics = [mintTx?.extrinsic, approveTx?.extrinsic, transferTx.extrinsic].filter(Boolean) as Extrinsic[];
     const extrinsic = api.tx.utility.batchAll(extrinsics);

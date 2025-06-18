@@ -33,8 +33,6 @@ function usePayFee(feeValue: bigint | undefined) {
     if (!account) throw new Error('Account is not found');
     if (!isApiReady) throw new Error('API is not initialized');
 
-    reset();
-
     const vftManagerProgram = new VftManagerProgram(api, VFT_MANAGER_CONTRACT_ADDRESS);
     let unsubscribe: () => void | undefined;
 
@@ -63,7 +61,7 @@ function usePayFee(feeValue: bigint | undefined) {
     return { result, unsubscribe: () => unsubscribe() };
   };
 
-  return { awaitBridgingRequest: payFees, error, isPending };
+  return { awaitBridgingRequest: payFees, error, isPending, reset };
 }
 
 export { usePayFee };

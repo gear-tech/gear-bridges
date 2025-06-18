@@ -22,12 +22,14 @@ type UseFee = () => {
   isLoading: boolean;
 };
 
-type UseHandleSubmit = (
-  feeValue: bigint | undefined,
-  allowance: bigint | undefined,
-  accountBalance: bigint | undefined,
-  openTxModal: (amount: string, receiver: string) => void,
-) => {
+type UseHandleSubmitParameters = {
+  fee: bigint | undefined;
+  allowance: bigint | undefined;
+  accountBalance: bigint | undefined;
+  onTransactionStart: (amount: bigint, receiver: string) => void;
+};
+
+type UseHandleSubmit = (params: UseHandleSubmitParameters) => {
   onSubmit: (values: FormattedValues) => Promise<unknown>;
   status: 'success' | 'bridge' | 'fee' | 'mint' | 'approve' | 'permit';
   isPending: boolean;
@@ -41,4 +43,4 @@ type UseFTAllowance = (address: HexString | undefined) => {
   refetch: () => Promise<unknown>;
 };
 
-export type { UseAccountBalance, UseFTBalance, UseHandleSubmit, UseFee, UseFTAllowance };
+export type { UseAccountBalance, UseFTBalance, UseHandleSubmitParameters, UseHandleSubmit, UseFee, UseFTAllowance };

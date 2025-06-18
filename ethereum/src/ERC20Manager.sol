@@ -2,12 +2,14 @@
 pragma solidity ^0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IMessageQueueReceiver} from "./interfaces/IMessageQueue.sol";
-import {ERC20GearSupply} from "../src/erc20/ERC20GearSupply.sol";
+import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
+import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 
 contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
@@ -35,7 +37,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         SupplyType supply_type = tokenSupplyType[token];
 
         if (supply_type == SupplyType.Gear) {
-            ERC20GearSupply(token).burnFrom(msg.sender, amount);
+            IERC20Burnable(token).burnFrom(msg.sender, amount);
         } else {
             if (supply_type == SupplyType.Unknown) {
                 tokenSupplyType[token] = SupplyType.Ethereum;
@@ -49,6 +51,12 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
 
     function requestBridgingPayingFee(address token, uint256 amount, bytes32 to, address bridgingPayment) public payable {
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
+        requestBridging(token, amount, to);
+    }
+
+    function requestBridgingPayingFeeWithPermit(address token, uint256 amount, bytes32 to, uint256 deadline, uint8 v, bytes32 r, bytes32 s, address bridgingPayment) public payable {
+        IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
+        try IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
         requestBridging(token, amount, to);
     }
 
@@ -93,7 +101,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
                 tokenSupplyType[token] = SupplyType.Gear;
             }
 
-            ERC20GearSupply(token).mint(receiver, amount);
+            IERC20Mintable(token).mint(receiver, amount);
         }
 
         emit BridgingAccepted(receiver, token, amount);
@@ -101,9 +109,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         return true;
     }
 
-    function getTokenSupplyType(
-        address token
-    ) public view returns (SupplyType) {
+    function getTokenSupplyType(address token) public view returns (SupplyType) {
         return tokenSupplyType[token];
     }
 }

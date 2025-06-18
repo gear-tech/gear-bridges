@@ -2,6 +2,8 @@
 pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IRelayer} from "../src/interfaces/IRelayer.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IERC20Manager} from "../src/interfaces/IERC20Manager.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
@@ -21,7 +23,7 @@ contract ProxyTest is Test {
             VFT_MANAGER_ADDRESS
         );
         MessageQueue message_queue = new MessageQueue(
-            address(erc20_manager_proxy)
+            IRelayer(address(erc20_manager_proxy))
         );
 
         message_queue_proxy.upgradeToAndCall(address(message_queue), "");
@@ -50,10 +52,7 @@ contract ProxyTest is Test {
             address(new_erc20_manager),
             bytes("")
         );
-        assertEq(
-            erc20_manager_proxy.implementation(),
-            address(new_erc20_manager)
-        );
+        assertEq(address(uint160(uint256(vm.load(address(erc20_manager_proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(new_erc20_manager));
     }
 
     function test_changeProxyAdmin() public {
@@ -66,6 +65,6 @@ contract ProxyTest is Test {
 
         // from proxyAdmin
         erc20_manager_proxy.changeProxyAdmin(not_admin);
-        assertEq(erc20_manager_proxy.proxyAdmin(), not_admin);
+        assertEq(address(uint160(uint256(vm.load(address(erc20_manager_proxy), ERC1967Utils.ADMIN_SLOT)))), not_admin);
     }
 }

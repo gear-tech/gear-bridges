@@ -11,12 +11,11 @@ contract Deploy is Script {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
 
-        bytes32 vft_manager = vm.envBytes32("VFT_MANAGER");
-        address message_queue_proxy_address = vm.envAddress("MQ_PROXY");
+        bytes32 vftManager = vm.envBytes32("VFT_MANAGER");
+        address messageQueueProxyAddress = vm.envAddress("MQ_PROXY");
 
-        ERC20Manager erc20_manager = new ERC20Manager(message_queue_proxy_address, vft_manager);
-
-        console.log("ERC20Manager:", address(erc20_manager));
+        ERC20Manager erc20Manager = new ERC20Manager(messageQueueProxyAddress, vftManager);
+        console.log("ERC20Manager:", address(erc20Manager));
 
         vm.stopBroadcast();
     }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
+import {DeployCommonScript} from "./DeployCommon.s.sol";
 import {IRelayer} from "../src/interfaces/IRelayer.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
@@ -9,7 +10,7 @@ import {ProxyUpdater} from "../src/ProxyUpdater.sol";
 import {Relayer} from "../src/Relayer.sol";
 import {Verifier} from "../src/Verifier.sol";
 
-contract DeployCoreScript is Script {
+contract DeployCoreScript is DeployCommonScript {
     function setUp() public {}
 
     function run() public {
@@ -22,17 +23,19 @@ contract DeployCoreScript is Script {
 
         ProxyContract messageQueueProxy = new ProxyContract();
         ProxyUpdater messageQueueProxyUpdater =
-            new ProxyUpdater(payable(address(messageQueueProxy)), governance, address(messageQueueProxy));
+            new ProxyUpdater(messageQueueProxy, governance, address(messageQueueProxy));
 
         ProxyContract relayerProxy = new ProxyContract();
-        ProxyUpdater relayerProxyUpdater =
-            new ProxyUpdater(payable(address(relayerProxy)), governance, address(messageQueueProxy));
+        ProxyUpdater relayerProxyUpdater = new ProxyUpdater(relayerProxy, governance, address(messageQueueProxy));
 
         MessageQueue messageQueue = new MessageQueue(IRelayer(address(relayerProxy)));
         Relayer relayer = new Relayer(verifier);
 
         messageQueueProxy.upgradeToAndCall(address(messageQueue), "");
         relayerProxy.upgradeToAndCall(address(relayer), "");
+
+        printContractInfo("MessageQueue", address(messageQueueProxy), address(messageQueue));
+        printContractInfo("Relayer", address(relayerProxy), address(relayer));
 
         messageQueueProxy.changeProxyAdmin(address(messageQueueProxyUpdater));
         relayerProxy.changeProxyAdmin(address(relayerProxyUpdater));

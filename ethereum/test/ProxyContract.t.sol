@@ -18,41 +18,29 @@ contract ProxyTest is Test {
         message_queue_proxy = new ProxyContract();
         erc20_manager_proxy = new ProxyContract();
 
-        ERC20Manager erc20_manager = new ERC20Manager(
-            address(message_queue_proxy),
-            VFT_MANAGER_ADDRESS
-        );
-        MessageQueue message_queue = new MessageQueue(
-            IRelayer(address(erc20_manager_proxy))
-        );
+        ERC20Manager erc20_manager = new ERC20Manager(address(message_queue_proxy), VFT_MANAGER_ADDRESS);
+        MessageQueue message_queue = new MessageQueue(IRelayer(address(erc20_manager_proxy)));
 
         message_queue_proxy.upgradeToAndCall(address(message_queue), "");
         erc20_manager_proxy.upgradeToAndCall(address(erc20_manager), "");
     }
 
     function test_renewImplementation() public {
-        ERC20Manager new_erc20_manager = new ERC20Manager(
-            address(message_queue_proxy),
-            VFT_MANAGER_ADDRESS
-        );
+        ERC20Manager new_erc20_manager = new ERC20Manager(address(message_queue_proxy), VFT_MANAGER_ADDRESS);
 
         // from pranker
         vm.prank(
-            address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34),
-            address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34)
+            address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34), address(0x5124fcC2B3F99F571AD67D075643C743F38f1C34)
         );
         vm.expectRevert(ProxyContract.ProxyDeniedAdminAccess.selector);
-        erc20_manager_proxy.upgradeToAndCall(
-            address(new_erc20_manager),
-            bytes("")
-        );
+        erc20_manager_proxy.upgradeToAndCall(address(new_erc20_manager), bytes(""));
 
         // from proxyAdmin no init
-        erc20_manager_proxy.upgradeToAndCall(
-            address(new_erc20_manager),
-            bytes("")
+        erc20_manager_proxy.upgradeToAndCall(address(new_erc20_manager), bytes(""));
+        assertEq(
+            address(uint160(uint256(vm.load(address(erc20_manager_proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            address(new_erc20_manager)
         );
-        assertEq(address(uint160(uint256(vm.load(address(erc20_manager_proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(new_erc20_manager));
     }
 
     function test_changeProxyAdmin() public {

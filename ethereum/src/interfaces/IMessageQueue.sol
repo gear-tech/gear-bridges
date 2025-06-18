@@ -39,22 +39,36 @@ interface IMessageQueueReceiver {
 
 library Hasher {
     function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
-        bytes memory data = abi.encodePacked(
+        bytes32 hash1 = keccak256(abi.encodePacked(
             message.nonce,
             message.sender,
             message.receiver,
             message.data
-        );
-        return keccak256(abi.encodePacked(keccak256(data)));
+        ));
+
+        bytes32 hash2;
+        assembly ("memory-safe") {
+            mstore(0x00, hash1)
+            hash2 := keccak256(0x00, 0x20)
+        }
+
+        return hash2;
     }
 
     function hash(VaraMessage memory message) internal pure returns (bytes32) {
-        bytes memory data = abi.encodePacked(
+        bytes32 hash1 = keccak256(abi.encodePacked(
             message.nonce,
             message.sender,
             message.receiver,
             message.data
-        );
-        return keccak256(abi.encodePacked(keccak256(data)));
+        ));
+
+        bytes32 hash2;
+        assembly ("memory-safe") {
+            mstore(0x00, hash1)
+            hash2 := keccak256(0x00, 0x20)
+        }
+
+        return hash2;
     }
 }

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
+/**
+ * @dev Message struct, same as in Vara Network:
+ *      - https://github.com/gear-tech/gear/blob/v1.8.1/pallets/gear-eth-bridge/src/internal.rs#L58
+ *
+ * TODO: rename fields
+ */
 struct VaraMessage {
     bytes32 nonce;
     bytes32 sender;
@@ -8,6 +14,9 @@ struct VaraMessage {
     bytes data;
 }
 
+/**
+ * @dev Interface for the MessageQueue contract.
+ */
 interface IMessageQueue {
     error RelayerEmergencyStop();
     error MessageAlreadyProcessed(bytes32 messageNonce);
@@ -15,36 +24,31 @@ interface IMessageQueue {
     error MerkleRootNotSet(uint256 blockNumber);
     error BadProof();
 
-    event MessageProcessed(
-        uint256 indexed blockNumber,
-        bytes32 indexed messageHash,
-        bytes32 indexed messageNonce
-    );
+    event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash, bytes32 indexed messageNonce);
 
     function processMessage(
-        uint256 block_number,
-        uint256 total_leaves,
-        uint256 leaf_index,
+        uint256 blockNumber,
+        uint256 totalLeaves,
+        uint256 leafIndex,
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external;
+
+    /**
+     * @dev Checks if message was already processed.
+     * @param message Message to check.
+     * @return isProcessed `true` if message was already processed, `false` otherwise.
+     */
+    function isProcessed(VaraMessage calldata message) external view returns (bool);
 }
 
 interface IMessageQueueReceiver {
-    function processVaraMessage(
-        bytes32 sender,
-        bytes calldata payload
-    ) external returns (bool);
+    function processVaraMessage(bytes32 sender, bytes calldata payload) external returns (bool);
 }
 
 library Hasher {
     function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
-        bytes32 hash1 = keccak256(abi.encodePacked(
-            message.nonce,
-            message.sender,
-            message.receiver,
-            message.data
-        ));
+        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.sender, message.receiver, message.data));
 
         bytes32 hash2;
         assembly ("memory-safe") {
@@ -56,12 +60,7 @@ library Hasher {
     }
 
     function hash(VaraMessage memory message) internal pure returns (bytes32) {
-        bytes32 hash1 = keccak256(abi.encodePacked(
-            message.nonce,
-            message.sender,
-            message.receiver,
-            message.data
-        ));
+        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.sender, message.receiver, message.data));
 
         bytes32 hash2;
         assembly ("memory-safe") {

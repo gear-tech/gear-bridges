@@ -5,6 +5,10 @@ import {IRelayer} from "./interfaces/IRelayer.sol";
 import {VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
+/**
+ * @dev MessageQueue smart contract is responsible for verifying and processing
+ *      received messages originated from Vara Network.
+ */
 contract MessageQueue is IMessageQueue {
     using Hasher for VaraMessage;
 
@@ -14,23 +18,23 @@ contract MessageQueue is IMessageQueue {
         RELAYER = relayer;
     }
 
-    mapping(bytes32 => bool) private _processed_messages;
+    mapping(bytes32 => bool) private _processedMessages;
 
     /**
      * @dev Unpack message from merkle tree and relay it to the receiver.
      *
-     * @param block_number - Block number of block containing target merkle tree.
-     * @param total_leaves - Number of leaves in target merkle tree.
-     * @param leaf_index - Index of leaf containing target message. See `binary_merkle_tree` for
+     * @param blockNumber - Block number of block containing target merkle tree.
+     * @param totalLeaves - Number of leaves in target merkle tree.
+     * @param leafIndex - Index of leaf containing target message. See `binary_merkle_tree` for
      *  reference.
      * @param message - Target message.
-     * @param proof - Merkle proof of inclusion of leaf #`leaf_index` into target merkle tree that
-     *  was included into `block_number`.
+     * @param proof - Merkle proof of inclusion of leaf #`leafIndex` into target merkle tree that
+     *  was included into `blockNumber`.
      */
     function processMessage(
-        uint256 block_number,
-        uint256 total_leaves,
-        uint256 leaf_index,
+        uint256 blockNumber,
+        uint256 totalLeaves,
+        uint256 leafIndex,
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) public {
@@ -38,23 +42,21 @@ contract MessageQueue is IMessageQueue {
             revert RelayerEmergencyStop();
         }
 
-        if (_processed_messages[message.nonce]) {
+        if (_processedMessages[message.nonce]) {
             revert MessageAlreadyProcessed(message.nonce);
         }
 
-        bytes32 msg_hash = message.hashCalldata();
-
-        bytes32 merkle_root = RELAYER.getMerkleRoot(block_number);
-
-        if (merkle_root == bytes32(0)) {
-            revert MerkleRootNotSet(block_number);
+        bytes32 merkleRoot = RELAYER.getMerkleRoot(blockNumber);
+        if (merkleRoot == bytes32(0)) {
+            revert MerkleRootNotSet(blockNumber);
         }
 
-        if (!BinaryMerkleTree.verifyProofCalldata(merkle_root, proof, total_leaves, leaf_index, msg_hash)) {
+        bytes32 messageHash = message.hashCalldata();
+        if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {
             revert BadProof();
         }
 
-        _processed_messages[message.nonce] = true;
+        _processedMessages[message.nonce] = true;
 
         if (
             !IMessageQueueReceiver(message.receiver).processVaraMessage(
@@ -63,17 +65,17 @@ contract MessageQueue is IMessageQueue {
             )
         ) {
             revert MessageNotProcessed();
-        } else {
-            emit MessageProcessed(block_number, msg_hash, message.nonce);
         }
+
+        emit MessageProcessed(blockNumber, messageHash, message.nonce);
     }
 
     /**
-     * @dev Checks if `VaraMessage` already was processed.
-     *
-     * @param message - Message it checks agaiunst.
+     * @dev Checks if message was already processed.
+     * @param message Message to check.
+     * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
     function isProcessed(VaraMessage calldata message) external view returns (bool) {
-        return _processed_messages[message.nonce];
+        return _processedMessages[message.nonce];
     }
 }

@@ -16,7 +16,7 @@ function usePermitUSDC() {
   const { signTypedDataAsync } = useSignTypedData();
 
   const { tokens } = useTokens();
-  const { address } = tokens.active?.find(({ symbol }) => symbol.toLowerCase().includes('usdc')) || {};
+  const { address } = tokens.eth?.find(({ symbol }) => symbol.toLowerCase().includes('usdc')) || {};
 
   const { data: version } = useReadContract({
     abi: USDC_ABI,

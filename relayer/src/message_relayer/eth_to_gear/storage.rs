@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     ffi::OsString,
     path::{Path, PathBuf},
     str::FromStr,
@@ -88,10 +89,26 @@ impl Storage for JSONStorage {
         if !self.path.exists() {
             tokio::fs::create_dir_all(&self.path).await?;
         }
+        let mut failed = BTreeMap::new();
 
+        let failed_map = tx_manager.failed.read().await;
         for (tx_uuid, tx) in tx_manager.transactions.read().await.iter() {
             self.write_tx(tx_uuid, tx).await?;
+            if let Some(reason) = failed_map.get(tx_uuid) {
+                failed.insert(*tx_uuid, reason);
+            }
         }
+
+        let mut failed_file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(self.path.join("failed"))
+            .await?;
+
+        let str = serde_json::to_string(&failed)?;
+        failed_file.write_all(str.as_bytes()).await?;
+        failed_file.flush().await?;
 
         Ok(())
     }
@@ -105,9 +122,15 @@ impl Storage for JSONStorage {
 
         while let Some(entry) = dir.next_entry().await? {
             if entry.file_type().await?.is_file() {
-                let tx = self.read_tx(entry.path(), entry.file_name()).await?;
+                if entry.file_name().to_str() == Some("failed") {
+                    let contents = tokio::fs::read_to_string(entry.path()).await?;
+                    let map: BTreeMap<Uuid, String> = serde_json::from_str(&contents)?;
+                    *tx_manager.failed.write().await = map;
+                } else {
+                    let tx = self.read_tx(entry.path(), entry.file_name()).await?;
 
-                tx_manager.add_transaction(tx).await;
+                    tx_manager.add_transaction(tx).await;
+                }
             }
         }
 

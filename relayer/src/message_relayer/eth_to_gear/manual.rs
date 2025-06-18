@@ -69,15 +69,11 @@ pub async fn relay(
     let message_sender = message_sender.run();
     let proof_composer = proof_composer.run(checkpoints);
 
-    match tx_manager
+    if let Err(err) = tx_manager
         .run(deposit_events_receiver, proof_composer, message_sender)
         .await
     {
-        Ok(_) => {}
-
-        Err(err) => {
-            log::error!("Transasction manager failed with error: {err:?}");
-        }
+        log::error!("Transasction manager failed with error: {err:?}");
     }
 
     drop(deposit_events_sender);

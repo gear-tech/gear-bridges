@@ -17,10 +17,7 @@ use tokio::{
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
-use crate::{
-    common::{BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
-};
+use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,
@@ -253,7 +250,6 @@ async fn task(
     mut requests: UnboundedReceiver<Request>,
     mut responses: UnboundedSender<Response>,
 ) {
-    let mut attempts = 0;
     loop {
         if requests.is_closed() || responses.is_closed() {
             log::warn!("Transaction manager connection terminated, exiting...");
@@ -267,19 +263,7 @@ async fn task(
             }
 
             Err(err) => {
-                log::error!(
-                    "Gear message sender got an error (attempt {attempts}/{MAX_RETRIES}): {err:?}"
-                );
-                attempts += 1;
-
-                if attempts >= MAX_RETRIES {
-                    log::error!("Max retries reached, terminating Gear message sender");
-                    break;
-                }
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-
-                tokio::time::sleep(delay).await;
-
+                log::error!("Gear message sender got an error: {err:?}");
                 match this.api_provider.reconnect().await {
                     Ok(()) => {
                         log::info!("Reconnected to Gear API");

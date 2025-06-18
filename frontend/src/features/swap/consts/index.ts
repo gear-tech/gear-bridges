@@ -5,7 +5,7 @@ import {
   ERC20_MANAGER_CONTRACT_ADDRESS,
 } from './env';
 import { EVENT_NAME } from './eth';
-import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE } from './form';
+import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE, SUBMIT_STATUS } from './form';
 import { BridgingPaymentProgram } from './sails';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
 
@@ -29,5 +29,6 @@ export {
   NETWORK,
   SERVICE_NAME,
   QUERY_NAME,
+  SUBMIT_STATUS,
   BridgingPaymentProgram,
 };

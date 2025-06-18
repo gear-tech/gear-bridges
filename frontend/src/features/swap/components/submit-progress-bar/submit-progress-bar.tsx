@@ -3,6 +3,7 @@ import { CSSProperties } from 'react';
 import { Card } from '@/components';
 import { cx, getErrorMessage } from '@/utils';
 
+import { SUBMIT_STATUS } from '../../consts';
 import { UseHandleSubmit } from '../../types';
 
 import styles from './submit-progress-bar.module.scss';
@@ -12,39 +13,39 @@ type Props = Pick<ReturnType<UseHandleSubmit>, 'status' | 'isPending' | 'error'>
 };
 
 const VARA_PERCENTAGE = {
-  mint: 0,
-  approve: 0,
-  permit: 0,
-  bridge: 50,
-  fee: 75,
-  success: 100,
+  [SUBMIT_STATUS.MINT]: 0,
+  [SUBMIT_STATUS.APPROVE]: 0,
+  [SUBMIT_STATUS.PERMIT]: 0,
+  [SUBMIT_STATUS.BRIDGE]: 50,
+  [SUBMIT_STATUS.FEE]: 75,
+  [SUBMIT_STATUS.SUCCESS]: 100,
 } as const;
 
 const ETH_PERCENTAGE = {
-  fee: 0,
-  mint: 25,
-  approve: 50,
-  permit: 50,
-  bridge: 75,
-  success: 100,
+  [SUBMIT_STATUS.FEE]: 0,
+  [SUBMIT_STATUS.MINT]: 25,
+  [SUBMIT_STATUS.APPROVE]: 50,
+  [SUBMIT_STATUS.PERMIT]: 50,
+  [SUBMIT_STATUS.BRIDGE]: 75,
+  [SUBMIT_STATUS.SUCCESS]: 100,
 } as const;
 
 const TEXT = {
-  mint: 'Locking tokens',
-  approve: 'Approving tokens',
-  permit: 'Requesting signature to permit token spending',
-  bridge: 'Requesting transfer',
-  fee: 'Paying fee',
-  success: 'Your transfer request and fee payment have been successful',
+  [SUBMIT_STATUS.MINT]: 'Locking tokens',
+  [SUBMIT_STATUS.APPROVE]: 'Approving tokens',
+  [SUBMIT_STATUS.PERMIT]: 'Requesting signature to permit token spending',
+  [SUBMIT_STATUS.BRIDGE]: 'Requesting transfer',
+  [SUBMIT_STATUS.FEE]: 'Paying fee',
+  [SUBMIT_STATUS.SUCCESS]: 'Your transfer request and fee payment have been successful',
 } as const;
 
 const ERROR_TEXT = {
-  mint: 'Tokens lock',
-  approve: 'Tokens approval',
-  permit: 'Permit signature',
-  bridge: 'Transfer request',
-  fee: 'Fee payment',
-  success: '',
+  [SUBMIT_STATUS.MINT]: 'Tokens lock',
+  [SUBMIT_STATUS.APPROVE]: 'Tokens approval',
+  [SUBMIT_STATUS.PERMIT]: 'Permit signature',
+  [SUBMIT_STATUS.BRIDGE]: 'Transfer request',
+  [SUBMIT_STATUS.FEE]: 'Fee payment',
+  [SUBMIT_STATUS.SUCCESS]: '',
 } as const;
 
 function SubmitProgressBar({ isVaraNetwork, status, isPending, error }: Props) {

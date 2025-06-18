@@ -7,6 +7,7 @@ import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
 import { useVaraSymbol } from '@/hooks';
 import { definedAssert } from '@/utils';
 
+import { SUBMIT_STATUS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
@@ -126,10 +127,10 @@ function useHandleVaraSubmit({ fee, allowance, accountBalance, onTransactionStar
 
   const getState = () => {
     const getStatus = () => {
-      if (signAndSend.isPending || signAndSend.error) return 'bridge';
-      if (payFee.isPending || payFee.error) return 'fee';
+      if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;
+      if (payFee.isPending || payFee.error) return SUBMIT_STATUS.FEE;
 
-      return 'success';
+      return SUBMIT_STATUS.SUCCESS;
     };
 
     const isPending = signAndSend.isPending || payFee.isPending;

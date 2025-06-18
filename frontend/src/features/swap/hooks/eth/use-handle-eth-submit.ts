@@ -4,6 +4,7 @@ import { estimateFeesPerGas } from 'wagmi/actions';
 
 import { definedAssert } from '@/utils';
 
+import { SUBMIT_STATUS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
@@ -83,12 +84,12 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
   const getState = () => {
     const getStatus = () => {
-      if (mint.isPending || mint.error) return 'mint';
-      if (approve.isPending || approve.error) return 'approve';
-      if (permitUSDC.isPending || permitUSDC.error) return 'permit';
-      if (transfer.isPending || transfer.error) return 'bridge';
+      if (mint.isPending || mint.error) return SUBMIT_STATUS.MINT;
+      if (approve.isPending || approve.error) return SUBMIT_STATUS.APPROVE;
+      if (permitUSDC.isPending || permitUSDC.error) return SUBMIT_STATUS.PERMIT;
+      if (transfer.isPending || transfer.error) return SUBMIT_STATUS.BRIDGE;
 
-      return 'success';
+      return SUBMIT_STATUS.SUCCESS;
     };
 
     const { isLoading } = permitUSDC;

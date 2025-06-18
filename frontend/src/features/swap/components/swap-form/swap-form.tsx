@@ -59,8 +59,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
     const source = token.address;
     const destination = destinationToken.address;
-    const sourceNetwork = network.isVara ? TransferNetwork.Gear : TransferNetwork.Ethereum;
-    const destNetwork = network.isVara ? TransferNetwork.Ethereum : TransferNetwork.Gear;
+    const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;
+    const destNetwork = network.isVara ? TransferNetwork.Ethereum : TransferNetwork.Vara;
     const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
     const close = () => setTransactionModal(undefined);
 

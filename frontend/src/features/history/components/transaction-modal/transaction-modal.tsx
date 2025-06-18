@@ -60,7 +60,7 @@ function TransactionModal({
   close,
 }: Props) {
   const { addressToToken } = useTokens();
-  const isGearNetwork = sourceNetwork === Network.Gear;
+  const isGearNetwork = sourceNetwork === Network.Vara;
 
   const { fee: varaFee } = useVaraFee();
   const { fee: ethFee } = useEthFee();

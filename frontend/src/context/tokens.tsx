@@ -59,9 +59,9 @@ const deriveTokens = (pairs: Pair[]) => {
       address: varaAddress,
       symbol: pair.varaTokenSymbol,
       decimals: pair.varaTokenDecimals,
-      isNative: pair.tokenSupply === Network.Gear && pair.varaTokenSymbol.toLowerCase().includes('vara'),
+      isNative: pair.tokenSupply === Network.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara'),
       network: 'vara',
-      isActive: !pair.isRemoved,
+      isActive: pair.isActive,
     };
 
     const ethToken: Token = {
@@ -70,7 +70,7 @@ const deriveTokens = (pairs: Pair[]) => {
       decimals: pair.ethTokenDecimals,
       isNative: pair.tokenSupply === Network.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth'),
       network: 'eth',
-      isActive: !pair.isRemoved,
+      isActive: pair.isActive,
     };
 
     addressToToken[varaAddress] = varaToken;

@@ -39,31 +39,20 @@ function useTransfer(fee: bigint | undefined) {
     definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
 
-    const withPermit = 'permit' in params;
+    const tx = { abi: ERC20_MANAGER_ABI, address: CONTRACT_ADDRESS.ERC20_MANAGER, value: fee };
+    const permit = 'permit' in params ? params.permit : undefined;
+    const permitArgs = permit ? ([permit.deadline, permit.v, permit.r, permit.s] as const) : undefined;
 
-    const hash = withPermit
+    const hash = permitArgs
       ? await writeContractAsync({
-          abi: ERC20_MANAGER_ABI,
-          address: CONTRACT_ADDRESS.ERC20_MANAGER,
+          ...tx,
           functionName: 'requestBridgingPayingFeeWithPermit',
-          args: [
-            token.address,
-            amount,
-            accountAddress,
-            params.permit.deadline,
-            params.permit.v,
-            params.permit.r,
-            params.permit.s,
-            CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT,
-          ],
-          value: fee,
+          args: [token.address, amount, accountAddress, ...permitArgs, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
         })
       : await writeContractAsync({
-          abi: ERC20_MANAGER_ABI,
-          address: CONTRACT_ADDRESS.ERC20_MANAGER,
+          ...tx,
           functionName: 'requestBridgingPayingFee',
           args: [token.address, amount, accountAddress, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
-          value: fee,
         });
 
     return waitForTransactionReceipt(config, { hash });

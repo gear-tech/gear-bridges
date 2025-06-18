@@ -14,6 +14,7 @@ gtest.workspace = true
 eth-events-common.workspace = true
 eth-events-deneb = { workspace = true, features = ["wasm-binary"] }
 eth-events-deneb-client.workspace = true
+eth-events-electra = { workspace = true, features = ["wasm-binary"] }
 eth-events-electra-client.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
@@ -41,3 +42,4 @@ ark-ec.workspace = true
 ark-scale.workspace = true
 ark-serialize.workspace = true
 ruzstd.workspace = true
+relayer.workspace = true

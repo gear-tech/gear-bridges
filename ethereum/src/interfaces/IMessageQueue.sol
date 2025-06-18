@@ -24,7 +24,7 @@ interface IMessageQueue {
     error MerkleRootNotSet(uint256 blockNumber);
     error BadProof();
 
-    event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash, bytes32 indexed messageNonce);
+    event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash, bytes32 indexed messageNonce, address messageReceiver);
 
     function processMessage(
         uint256 blockNumber,

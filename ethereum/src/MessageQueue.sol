@@ -67,7 +67,7 @@ contract MessageQueue is IMessageQueue {
             revert MessageNotProcessed();
         }
 
-        emit MessageProcessed(blockNumber, messageHash, message.nonce);
+        emit MessageProcessed(blockNumber, messageHash, message.nonce, message.receiver);
     }
 
     /**

@@ -67,19 +67,14 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const { submit, approve, payFee, mint, permitUSDC } = useHandleSubmit(
-    fee.value,
-    allowance.data,
-    accountBalance.data,
-    openTransacionModal,
-  );
+  const { onSubmit, ...submit } = useHandleSubmit(fee.value, allowance.data, accountBalance.data, openTransacionModal);
 
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     network.isVara,
     accountBalance,
     ftBalance,
     token?.decimals,
-    submit.mutateAsync,
+    onSubmit,
   );
 
   const renderFromBalance = () => {
@@ -107,9 +102,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const getButtonText = () => {
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
-    if (approve?.isPending) return 'Approving...';
-    if (submit.isPending) return 'Transferring...';
-
     return 'Transfer';
   };
 
@@ -120,10 +112,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} />;
-
-  const renderProgressBar = () => (
-    <SubmitProgressBar mint={mint} approve={approve} submit={submit} payFee={payFee} permitUSDC={permitUSDC} />
-  );
+  const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
 
   return (
     <>

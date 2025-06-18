@@ -137,7 +137,7 @@ function useHandleVaraSubmit(
     const isPending = signAndSend.isPending || payFee.isPending;
     const error = signAndSend.error || payFee.error;
 
-    return { status: getStatus, isPending, error };
+    return { status: getStatus(), isPending, error };
   };
 
   return { onSubmit, ...getState() };

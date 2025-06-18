@@ -28,17 +28,11 @@ type UseHandleSubmit = (
   accountBalance: bigint | undefined,
   openTxModal: (amount: string, receiver: string) => void,
 ) => {
-  submit: {
-    mutateAsync: (values: FormattedValues) => Promise<unknown>;
-    reset: () => void;
-    isPending: boolean;
-    isSuccess: boolean;
-    error: Error | null;
-  };
-  approve?: { isPending: boolean; error: Error | null };
-  mint?: { isPending: boolean; error: Error | null };
-  payFee?: { isPending: boolean; error: Error | null } | undefined;
-  permitUSDC?: { isPending: boolean; error: Error | null };
+  onSubmit: (values: FormattedValues) => Promise<unknown>;
+  status: 'success' | 'bridge' | 'fee' | 'mint' | 'approve' | 'permit';
+  isPending: boolean;
+  error: Error | null;
+  isLoading?: boolean;
 };
 
 type UseFTAllowance = (address: HexString | undefined) => {

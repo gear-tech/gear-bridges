@@ -99,10 +99,11 @@ function useHandleEthSubmit(
       return 'success';
     };
 
+    const { isLoading } = permitUSDC;
     const isPending = mint.isPending || approve.isPending || permitUSDC.isPending || transfer.isPending;
     const error = mint.error || approve.error || permitUSDC.error || transfer.error;
 
-    return { status: getStatus(), isPending, error };
+    return { status: getStatus(), isLoading, isPending, error };
   };
 
   return { onSubmit, ...getState() };

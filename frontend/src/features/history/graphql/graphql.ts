@@ -1060,7 +1060,7 @@ export type PairsQueryQuery = {
     ethTokenName: string;
     ethTokenSymbol: string;
     id: string;
-    isRemoved: boolean;
+    isActive: boolean;
     tokenSupply: Network;
     varaToken: string;
     varaTokenDecimals: number;
@@ -1208,7 +1208,7 @@ export const PairsQueryDocument = {
                 { kind: 'Field', name: { kind: 'Name', value: 'ethTokenName' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'ethTokenSymbol' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'id' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'isRemoved' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'isActive' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'tokenSupply' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'varaToken' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'varaTokenDecimals' } },

@@ -72,10 +72,10 @@ contract MessageQueue is IMessageQueue {
 
     /**
      * @dev Checks if message was already processed.
-     * @param message Message to check.
+     * @param messageNonce Message nonce to check.
      * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
-    function isProcessed(VaraMessage calldata message) external view returns (bool) {
-        return _processedMessages[message.nonce];
+    function isProcessed(bytes32 messageNonce) external view returns (bool) {
+        return _processedMessages[messageNonce];
     }
 }

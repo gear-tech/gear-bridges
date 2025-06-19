@@ -22,9 +22,11 @@ interface IMessageQueue {
     error MessageAlreadyProcessed(bytes32 messageNonce);
     error MessageNotProcessed();
     error MerkleRootNotSet(uint256 blockNumber);
-    error BadProof();
+    error InvalidMerkleProof();
 
-    event MessageProcessed(uint256 indexed blockNumber, bytes32 indexed messageHash, bytes32 indexed messageNonce, address messageReceiver);
+    event MessageProcessed(
+        uint256 indexed blockNumber, bytes32 indexed messageHash, bytes32 indexed messageNonce, address messageReceiver
+    );
 
     function processMessage(
         uint256 blockNumber,
@@ -40,10 +42,6 @@ interface IMessageQueue {
      * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
     function isProcessed(bytes32 messageNonce) external view returns (bool);
-}
-
-interface IMessageQueueReceiver {
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external returns (bool);
 }
 
 library Hasher {

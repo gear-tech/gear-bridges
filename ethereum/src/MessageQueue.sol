@@ -2,7 +2,8 @@
 pragma solidity ^0.8.30;
 
 import {IRelayer} from "./interfaces/IRelayer.sol";
-import {VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
+import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
+import {IMessageQueueReceiver} from "./interfaces/IMessageQueueReceiver.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
 /**
@@ -53,17 +54,15 @@ contract MessageQueue is IMessageQueue {
 
         bytes32 messageHash = message.hashCalldata();
         if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {
-            revert BadProof();
+            revert InvalidMerkleProof();
         }
 
         _processedMessages[message.nonce] = true;
 
-        if (
-            !IMessageQueueReceiver(message.receiver).processVaraMessage(
-                message.sender,
-                message.data
-            )
-        ) {
+        (bool success,) = message.receiver.call(
+            abi.encodeWithSelector(IMessageQueueReceiver.processVaraMessage.selector, message.sender, message.data)
+        );
+        if (!success) {
             revert MessageNotProcessed();
         }
 

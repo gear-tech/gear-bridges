@@ -2,12 +2,13 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
+import {DeployCommonScript} from "./DeployCommon.s.sol";
 import {BridgingPayment} from "../src/BridgingPayment.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 import {ProxyUpdater} from "../src/ProxyUpdater.sol";
 
-contract DeployTokenBridgeScript is Script {
+contract DeployTokenBridgeScript is DeployCommonScript {
     function setUp() public {}
 
     function run() public {
@@ -27,8 +28,10 @@ contract DeployTokenBridgeScript is Script {
         erc20ManagerProxy.upgradeToAndCall(address(erc20Manager), "");
 
         ProxyUpdater erc20ManagerProxyUpdater =
-            new ProxyUpdater(payable(address(erc20ManagerProxy)), governance, messageQueueProxyAddress);
+            new ProxyUpdater(erc20ManagerProxy, governance, messageQueueProxyAddress);
         erc20ManagerProxy.changeProxyAdmin(address(erc20ManagerProxyUpdater));
+
+        printContractInfo("ERC20Manager", address(erc20ManagerProxy), address(erc20Manager));
 
         BridgingPayment bridgingPayment = new BridgingPayment(address(erc20ManagerProxy), fee, bridgingPaymentAdmin);
 

@@ -15,6 +15,9 @@ const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequest
 const MSGQ = config.msgQ;
 const MSGQ_MESSAGE_PROCESSED = messageQueueAbi.events.MessageProcessed.topic;
 
+console.log(`Erc20Manager address: ${ERC20_MANAGER}`);
+console.log(`MessageQueue address: ${MSGQ}`);
+
 const handler = async (ctx: Context) => {
   await state.new(ctx);
 
@@ -47,7 +50,8 @@ const handler = async (ctx: Context) => {
         }
         case MSGQ: {
           if (topic !== MSGQ_MESSAGE_PROCESSED) continue;
-          const [_, __, nonce] = messageQueueAbi.events.MessageProcessed.decode(log);
+          const [_, __, nonce, receiver] = messageQueueAbi.events.MessageProcessed.decode(log);
+          if (receiver !== ERC20_MANAGER) continue;
           state.setCompletedTransfer(gearNonce(nonce, false), timestamp);
           break;
         }

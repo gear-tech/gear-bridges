@@ -21,7 +21,7 @@ interface IERC20Manager {
 struct WithdrawMessage {
     address receiver;
     address token;
-    uint128 amount;
+    uint256 amount;
 }
 
 library Packer {

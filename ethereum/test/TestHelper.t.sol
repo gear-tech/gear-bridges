@@ -37,13 +37,10 @@ contract TestHelper is Test {
         ProxyContract _message_queue_proxy = new ProxyContract();
         ProxyContract _treasury_proxy = new ProxyContract();
 
-        erc20_token = new WrappedVara(OWNER);
-        erc20_token.mint(OWNER, type(uint256).max);
-
         VerifierMock _verifier = new VerifierMock();
 
         Relayer _relayer = new Relayer(_verifier);
-        ERC20Manager _erc20_manager = new ERC20Manager(address(_message_queue_proxy), bytes32(0));
+        ERC20Manager _erc20_manager = new ERC20Manager(address(_message_queue_proxy), VFT_MANAGER_ADDRESS);
         MessageQueue _message_queue = new MessageQueue(IRelayer(address(_relayer_proxy)));
 
         _relayer_proxy.upgradeToAndCall(address(_relayer), "");
@@ -53,6 +50,15 @@ contract TestHelper is Test {
         relayer = Relayer(address(_relayer_proxy));
         erc20_manager = ERC20Manager(address(_treasury_proxy));
         message_queue = MessageQueue(address(_message_queue_proxy));
+
+        erc20_token = new WrappedVara(address(erc20_manager));
+
+        vm.startPrank(address(erc20_manager));
+
+        erc20_token.mint(address(erc20_manager), type(uint128).max);
+        erc20_token.mint(OWNER, type(uint128).max);
+
+        vm.stopPrank();
 
         verifier = IVerifier(address(_verifier));
         vm.stopPrank();

@@ -36,9 +36,8 @@ contract TreasuryTest is TestHelper {
         vm.stopPrank();
     }
 
-    // TODO: Test skipped, to enable it remove the skip_ prefix
-    function skip_test_withdraw() public {
-        uint128 amount = 100 * (10 ** 18);
+    function test_withdraw() public {
+        uint256 amount = 100 * (10 ** 18);
         erc20_token.approve(address(erc20_manager), amount);
         erc20_manager.requestBridging(address(erc20_token), amount, VARA_ADDRESS_3);
 

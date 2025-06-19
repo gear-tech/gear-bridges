@@ -362,8 +362,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    // TODO: Test skipped, to enable it remove the skip_ prefix
-    function skip_test_submit_transaction() public {
+    function test_submit_transaction() public {
         WithdrawMessage memory withdraw_msg = WithdrawMessage({
             receiver: ETH_ADDRESS_3,
             token: address(erc20_token),
@@ -381,33 +380,24 @@ contract MessageQueueTest is TestHelper {
         assertEq(
             msg_hash,
             bytes32(
-                0x08cd8737899a4429f30e776378f014ed3fa619d6db473458fc8d024ea06e6ade
+                0x06b36f6b3c72a30689ee21a949ddb99c071bb2e344e20350732b756d06d9f1ef
             )
         );
 
-        bytes32[] memory proof = new bytes32[](3);
-
-        proof[0] = bytes32(
-            0x88ccaf73d4bd4c768ad9cba30c457d0e2b6e8a425902130885796282b2251338
-        );
-        proof[1] = bytes32(
-            0x799a4f8d4ebba9468c54944bcf41156bad48de11ae6aa62eeb581a17678c532b
-        );
-        proof[2] = bytes32(
-            0xf0ac28723c4a3e05cb2489c4ff0abe4a236486375c4337c81b80199a9c01892d
-        );
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = bytes32(0xc805cc536d1a1916393a7213425df9d88b1a3bd81802c18d5e11c7486b3258c6);
 
         bytes32 calculatedRoot = BinaryMerkleTree.processProof(
             proof,
-            101,
-            100,
+            3,
+            2,
             msg_hash
         );
 
         assertEq(
             calculatedRoot,
             bytes32(
-                0xaecb4397edb628f9ac7408336b4090bba1ad40c4b0a9e8934c7e94b9c967e5ea
+                0xf77542860e4ed694c115701d29d9caa2d0b4c0e11a236ad067880f46a2d68d6c
             )
         );
 

@@ -1,4 +1,4 @@
-import { ETH_TOKEN_ABI } from './eth-token-abi';
 import { FUNGIBLE_TOKEN_ABI } from './fungible-token-abi';
+import { WRAPPED_ETH_ABI } from './wrapped-eth';
 
-export { FUNGIBLE_TOKEN_ABI, ETH_TOKEN_ABI };
+export { FUNGIBLE_TOKEN_ABI, WRAPPED_ETH_ABI };

@@ -7,17 +7,13 @@ import { UseHandleSubmit } from '../../types';
 
 import styles from './submit-progress-bar.module.scss';
 
-type Props = {
-  submit: Omit<ReturnType<UseHandleSubmit>[0], 'mutateAsync'>;
-  approve: ReturnType<UseHandleSubmit>[1];
-  payFee: ReturnType<UseHandleSubmit>[2];
-  mint: ReturnType<UseHandleSubmit>[3];
-};
+type Props = ReturnType<UseHandleSubmit>;
 
 const VARA_PERCENTAGE = {
   default: 0,
   mint: 0,
-  approve: 25,
+  approve: 0,
+  permitUSDC: 0,
   transfer: 50,
   fee: 75,
   success: 100,
@@ -28,6 +24,7 @@ const ETH_PERCENTAGE = {
   fee: 0,
   mint: 25,
   approve: 50,
+  permitUSDC: 50,
   transfer: 75,
   success: 100,
 } as const;
@@ -36,6 +33,7 @@ const TEXT = {
   default: '',
   mint: 'Locking tokens',
   approve: 'Approving tokens',
+  permitUSDC: 'Requesting signature to permit token spending',
   transfer: 'Requesting transfer',
   fee: 'Paying fee',
   success: 'Your transfer request and fee payment have been successful',
@@ -45,19 +43,21 @@ const ERROR_TEXT = {
   default: '',
   mint: 'Tokens lock',
   approve: 'Tokens approval',
+  permitUSDC: 'Permit signature',
   transfer: 'Transfer request',
   fee: 'Fee payment',
   success: '',
 } as const;
 
-function SubmitProgressBar({ approve, submit, payFee, mint }: Props) {
+function SubmitProgressBar({ approve, submit, payFee, mint, permitUSDC }: Props) {
   const { isSuccess, isPending, error } = submit;
   const errorMessage = error ? getErrorMessage(error) : '';
 
   const getStatus = () => {
     if (mint?.isPending || mint?.error) return 'mint';
     if (payFee?.isPending || payFee?.error) return 'fee';
-    if (approve.isPending || approve.error) return 'approve';
+    if (permitUSDC?.isPending || permitUSDC?.error) return 'permitUSDC';
+    if (approve?.isPending || approve?.error) return 'approve';
     if (submit.isPending || submit.error) return 'transfer';
     if (isSuccess) return 'success';
     return 'default';

@@ -10,9 +10,9 @@ import { config } from './config';
 
 const state = new BaseBatchState(Network.Ethereum);
 
-const ERC20_MANAGER = config.erc20Manager;
+const ERC20_MANAGER = config.erc20Manager.toLowerCase();
 const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequested.topic;
-const MSGQ = config.msgQ;
+const MSGQ = config.msgQ.toLowerCase();
 const MSGQ_MESSAGE_PROCESSED = messageQueueAbi.events.MessageProcessed.topic;
 
 console.log(`Erc20Manager address: ${ERC20_MANAGER}`);
@@ -51,7 +51,7 @@ const handler = async (ctx: Context) => {
         case MSGQ: {
           if (topic !== MSGQ_MESSAGE_PROCESSED) continue;
           const [_, __, nonce, receiver] = messageQueueAbi.events.MessageProcessed.decode(log);
-          if (receiver !== ERC20_MANAGER) continue;
+          if (receiver.toLowerCase() !== ERC20_MANAGER) continue;
           state.setCompletedTransfer(gearNonce(nonce, false), timestamp);
           break;
         }

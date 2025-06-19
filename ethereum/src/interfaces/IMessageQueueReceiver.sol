@@ -2,5 +2,5 @@
 pragma solidity ^0.8.30;
 
 interface IMessageQueueReceiver {
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external returns (bool);
+    function processVaraMessage(bytes32 sender, bytes calldata payload) external;
 }

@@ -88,7 +88,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
      * @param sender sender of message on the gear side.
      * @param payload payload of the message.
      */
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external returns (bool) {
+    function processVaraMessage(bytes32 sender, bytes calldata payload) external {
         if (msg.sender != MESSAGE_QUEUE_ADDRESS) {
             revert NotAuthorized();
         }
@@ -116,8 +116,6 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         }
 
         emit BridgingAccepted(receiver, token, amount);
-
-        return true;
     }
 
     function getTokenSupplyType(address token) public view returns (SupplyType) {

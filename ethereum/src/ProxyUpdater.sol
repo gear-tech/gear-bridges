@@ -32,7 +32,7 @@ contract ProxyUpdater is IMessageQueueReceiver {
      * @param sender sender of message on the gear side.
      * @param payload payload of the message.
      */
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external returns (bool) {
+    function processVaraMessage(bytes32 sender, bytes calldata payload) external {
         if (msg.sender != MESSAGE_QUEUE) {
             revert NotAuthorized();
         }
@@ -68,8 +68,6 @@ contract ProxyUpdater is IMessageQueueReceiver {
         } else {
             revert InvalidDiscriminant();
         }
-
-        return true;
     }
 
     function getGovernance() external view returns (bytes32) {

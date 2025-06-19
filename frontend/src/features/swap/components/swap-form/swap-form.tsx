@@ -54,7 +54,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransacionModal = (_amount: bigint, receiver: string) => {
+  const openTransactionModal = (_amount: bigint, receiver: string) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
     const amount = _amount.toString();
@@ -72,7 +72,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     fee: fee.value,
     allowance: allowance.data,
     accountBalance: accountBalance.data,
-    onTransactionStart: openTransacionModal,
+    onTransactionStart: openTransactionModal,
   });
 
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(

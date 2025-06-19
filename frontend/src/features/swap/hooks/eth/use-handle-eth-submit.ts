@@ -57,7 +57,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
     if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
 
-    return { isMintRequired, valueToMint, isApproveRequired, mintGasLimit };
+    return { isMintRequired, valueToMint, isApproveRequired };
   };
 
   const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {

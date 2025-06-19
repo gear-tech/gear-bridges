@@ -111,7 +111,10 @@ impl TransactionManager {
                 .await;
             self.update_storage().await;
             match result {
-                Ok(false) => break,
+                Ok(false) => {
+                    log::error!("One of channels are closed, terminating transaction manager");
+                    break;
+                }
                 Ok(true) => continue,
                 Err(err) => {
                     log::error!("Transaction manager got error: {err:?}");
@@ -130,23 +133,27 @@ impl TransactionManager {
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
         tokio::select! {
-            Some(tx) = message_paid_events.recv() =>
-                if !self.compose_proof(tx, proof_composer).await? {
-                    return Ok(false);
-                },
-            Some(proof_composer::Response { payload, tx_uuid }) = proof_composer.recv() =>
-                if !self.submit_message(tx_uuid, payload, message_sender).await? {
-                    return Ok(false);
-                },
+           v = message_paid_events.recv() =>
+               if let Some(tx) = v {
+                   return self.compose_proof(tx, proof_composer).await;
+               } else {
+                   return Ok(false);
+               },
+           v = proof_composer.recv() =>
+               if let Some(proof_composer::Response { tx_uuid, payload }) = v {
+                   return self.submit_message(tx_uuid, payload, message_sender).await;
+              } else {
+                   return Ok(false);
+               },
 
-            Some(response) = message_sender.recv() => self.finalize_transaction(response).await?,
-            else => {
-                log::info!("One of connections terminated, exiting...");
-                return Ok(false);
-            }
+           v = message_sender.recv() =>
+               if let Some(response) = v {
+                   self.finalize_transaction(response).await?;
+                   return Ok(true);
+               } else {
+                   return Ok(false);
+               }
         }
-
-        Ok(true)
     }
 
     async fn resume(

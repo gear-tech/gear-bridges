@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { useMutation } from '@tanstack/react-query';
 import { useConfig } from 'wagmi';
 import { estimateFeesPerGas } from 'wagmi/actions';
 
@@ -82,23 +83,19 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
     return transfer.mutateAsync({ amount, accountAddress });
   };
 
-  const getState = () => {
-    const getStatus = () => {
-      if (mint.isPending || mint.error) return SUBMIT_STATUS.MINT;
-      if (approve.isPending || approve.error) return SUBMIT_STATUS.APPROVE;
-      if (permitUSDC.isPending || permitUSDC.error) return SUBMIT_STATUS.PERMIT;
-      if (transfer.isPending || transfer.error) return SUBMIT_STATUS.BRIDGE;
+  const getStatus = () => {
+    if (mint.isPending || mint.error) return SUBMIT_STATUS.MINT;
+    if (approve.isPending || approve.error) return SUBMIT_STATUS.APPROVE;
+    if (permitUSDC.isPending || permitUSDC.error) return SUBMIT_STATUS.PERMIT;
+    if (transfer.isPending || transfer.error) return SUBMIT_STATUS.BRIDGE;
 
-      return SUBMIT_STATUS.SUCCESS;
-    };
-
-    const isPending = mint.isPending || approve.isPending || permitUSDC.isPending || transfer.isPending;
-    const error = mint.error || approve.error || permitUSDC.error || transfer.error;
-
-    return { status: getStatus(), isPending, error };
+    return SUBMIT_STATUS.SUCCESS;
   };
 
-  return { onSubmit, ...getState() };
+  const { mutateAsync, isPending, error } = useMutation({ mutationFn: onSubmit });
+  const status = getStatus();
+
+  return { onSubmit: mutateAsync, isPending, error, status };
 }
 
 export { useHandleEthSubmit };

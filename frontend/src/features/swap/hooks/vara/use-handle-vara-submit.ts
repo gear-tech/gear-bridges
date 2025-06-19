@@ -2,6 +2,7 @@ import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
+import { useMutation } from '@tanstack/react-query';
 
 import { useVaraSymbol } from '@/hooks';
 import { definedAssert } from '@/utils';
@@ -124,21 +125,17 @@ function useHandleVaraSubmit({ fee, allowance, accountBalance, onTransactionStar
     return result;
   };
 
-  const getState = () => {
-    const getStatus = () => {
-      if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;
-      if (payFee.isPending || payFee.error) return SUBMIT_STATUS.FEE;
+  const getStatus = () => {
+    if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;
+    if (payFee.isPending || payFee.error) return SUBMIT_STATUS.FEE;
 
-      return SUBMIT_STATUS.SUCCESS;
-    };
-
-    const isPending = signAndSend.isPending || payFee.isPending;
-    const error = signAndSend.error || payFee.error;
-
-    return { status: getStatus(), isPending, error };
+    return SUBMIT_STATUS.SUCCESS;
   };
 
-  return { onSubmit, ...getState() };
+  const { mutateAsync, isPending, error } = useMutation({ mutationFn: onSubmit });
+  const status = getStatus();
+
+  return { onSubmit: mutateAsync, isPending, error, status };
 }
 
 export { useHandleVaraSubmit };

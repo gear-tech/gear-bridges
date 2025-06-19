@@ -49,7 +49,6 @@ const ERROR_TEXT = {
 } as const;
 
 function SubmitProgressBar({ isVaraNetwork, status, isPending, error }: Props) {
-  console.log('status: ', status);
   const errorMessage = error ? getErrorMessage(error) : '';
 
   return (

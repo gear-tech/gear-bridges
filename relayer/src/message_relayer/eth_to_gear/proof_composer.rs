@@ -70,7 +70,12 @@ impl ProofComposerIo {
     ///
     /// Returns `false` if send failed which indicates that channel was closed.
     pub fn compose_proof_for(&mut self, tx_uuid: Uuid, tx: TxHashWithSlot) -> bool {
-        self.requests_channel.send(Request { tx, tx_uuid }).is_ok()
+        self.requests_channel
+            .send(Request { tx, tx_uuid })
+            .inspect_err(|err| {
+                log::error!("proof composer send failure: {err:?}");
+            })
+            .is_ok()
     }
 }
 

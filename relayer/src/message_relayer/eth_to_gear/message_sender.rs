@@ -47,6 +47,7 @@ impl MessageSenderIo {
                 tx_hash,
                 payload,
             })
+            .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
     }
 

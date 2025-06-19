@@ -16,7 +16,7 @@ import PlusSVG from '../../assets/plus.svg?react';
 import { FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
-import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
+import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance, FormattedValues } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
@@ -54,10 +54,11 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransactionModal = (_amount: bigint, receiver: string) => {
+  const openTransactionModal = (values: FormattedValues) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
-    const amount = _amount.toString();
+    const amount = values.amount.toString();
+    const receiver = values.accountAddress;
     const source = token.address;
     const destination = destinationToken.address;
     const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;

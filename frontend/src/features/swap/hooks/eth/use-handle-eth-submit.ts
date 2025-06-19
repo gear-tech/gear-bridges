@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
 import { useConfig } from 'wagmi';
 import { estimateFeesPerGas } from 'wagmi/actions';
@@ -17,6 +16,12 @@ import { useTransfer } from './use-transfer';
 
 const TRANSFER_GAS_LIMIT_FALLBACK = 21000n * 10n;
 
+type Transaction = {
+  call: () => Promise<unknown>;
+  gasLimit: bigint;
+  value?: bigint;
+};
+
 function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
   const { token } = useBridgeContext();
   const isUSDC = token?.symbol.toLowerCase().includes('usdc');
@@ -28,59 +33,86 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
   const config = useConfig();
 
-  const validateBalance = async (amount: bigint, accountAddress: HexString) => {
-    definedAssert(token, 'Fungible token');
-    definedAssert(fee, 'Fee');
+  const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
-    definedAssert(accountBalance, 'Account balance');
+    definedAssert(fee, 'Fee');
+    definedAssert(token, 'Fungible token');
 
-    const valueToMint = token.isNative ? amount : 0n;
-    const isMintRequired = valueToMint > 0n;
-    const mintGasLimit = isMintRequired ? await mint.getGasLimit(valueToMint) : 0n;
+    const txs: Transaction[] = [];
+    const shouldMint = token.isNative;
+    const shouldApprove = amount > allowance;
 
-    const isApproveRequired = amount > allowance;
-    const approveGasLimit = isApproveRequired && !isUSDC ? await approve.getGasLimit(amount) : 0n;
+    if (shouldMint) {
+      const value = amount;
+      const gasLimit = await mint.getGasLimit(value);
+
+      txs.push({
+        call: () => mint.mutateAsync({ value }),
+        gasLimit,
+        value,
+      });
+    }
 
     // if approve is not made, transfer gas estimate will fail.
     // it can be avoided by using stateOverride,
     // but it requires the knowledge of the storage slot or state diff of the allowance for each token,
     // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
-    const transferGasLimit = isApproveRequired ? undefined : await transfer.getGasLimit({ amount, accountAddress });
 
-    // TRANSFER_GAS_LIMIT_FALLBACK is just for balance check, during the actual transfer it will be recalculated
-    const gasLimit = mintGasLimit + approveGasLimit + (transferGasLimit || TRANSFER_GAS_LIMIT_FALLBACK);
+    const bridgeTx = {
+      gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
+      value: fee,
+    };
 
-    const { maxFeePerGas } = await estimateFeesPerGas(config);
-    const weiGasLimit = gasLimit * maxFeePerGas;
+    if (shouldApprove && isUSDC) {
+      const call = () =>
+        permitUSDC.mutateAsync(amount).then((permit) => transfer.mutateAsync({ amount, accountAddress, permit }));
 
-    const balanceToWithdraw = valueToMint + weiGasLimit + fee;
+      txs.push({ call, ...bridgeTx });
 
-    if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
+      return txs;
+    }
 
-    return { isMintRequired, valueToMint, isApproveRequired };
+    if (shouldApprove) {
+      const call = () => approve.mutateAsync({ amount });
+      const gasLimit = await approve.getGasLimit(amount);
+
+      txs.push({ call, gasLimit });
+    }
+
+    const call = () => transfer.mutateAsync({ amount, accountAddress });
+    txs.push({ call, ...bridgeTx });
+
+    return txs;
   };
 
-  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    const { isMintRequired, valueToMint, isApproveRequired } = await validateBalance(amount, accountAddress);
+  const validateBalance = async (txs: Transaction[]) => {
+    definedAssert(accountBalance, 'Account balance');
 
+    const { maxFeePerGas } = await estimateFeesPerGas(config);
+
+    const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * maxFeePerGas;
+    const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
+
+    const requiredBalance = totalValue + totalGasLimit;
+
+    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError('ETH', requiredBalance);
+  };
+
+  const resetState = () => {
     mint.reset();
     approve.reset();
     permitUSDC.reset();
     transfer.reset();
+  };
 
-    onTransactionStart(amount, accountAddress);
+  const onSubmit = async (values: FormattedValues) => {
+    const txs = await getTransactions(values);
+    await validateBalance(txs);
 
-    if (isMintRequired) await mint.mutateAsync({ value: valueToMint });
+    resetState();
+    onTransactionStart(values);
 
-    if (isApproveRequired && isUSDC) {
-      const permit = await permitUSDC.mutateAsync(amount);
-
-      return transfer.mutateAsync({ amount, accountAddress, permit });
-    }
-
-    if (isApproveRequired) await approve.mutateAsync({ amount });
-
-    return transfer.mutateAsync({ amount, accountAddress });
+    return Promise.all(txs.map(({ call }) => call()));
   };
 
   const getStatus = () => {

@@ -15,7 +15,7 @@ type UseHandleSubmitParameters = {
   fee: bigint | undefined;
   allowance: bigint | undefined;
   accountBalance: bigint | undefined;
-  onTransactionStart: (amount: bigint, receiver: string) => void;
+  onTransactionStart: (values: FormattedValues) => void;
 };
 
 type UseHandleSubmit = (params: UseHandleSubmitParameters) => {

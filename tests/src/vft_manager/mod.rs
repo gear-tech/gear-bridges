@@ -104,7 +104,6 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
         .new(InitConfig {
-            erc20_manager_address: Default::default(),
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
             config: Config {
@@ -252,7 +251,6 @@ async fn bench_gas_for_reply() -> Result<()> {
     let vft_manager_id = factory
         .gas_calculation(
             InitConfig {
-                erc20_manager_address: Default::default(),
                 gear_bridge_builtin: Default::default(),
                 historical_proxy_address: Default::default(),
                 config: Config {
@@ -378,7 +376,6 @@ async fn getter_transactions() -> Result<()> {
     let vft_manager_id = factory
         .gas_calculation(
             InitConfig {
-                erc20_manager_address: Default::default(),
                 gear_bridge_builtin: Default::default(),
                 historical_proxy_address: Default::default(),
                 config: Config {
@@ -470,7 +467,6 @@ async fn msg_tracker_state() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let vft_manager_id = factory
         .new(InitConfig {
-            erc20_manager_address: Default::default(),
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
             config: Config {
@@ -567,7 +563,6 @@ async fn upgrade() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
         .new(InitConfig {
-            erc20_manager_address: Default::default(),
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
             config: Config {
@@ -731,7 +726,6 @@ async fn bench_gas_for_token_map_swap() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let vft_manager_id = factory
         .new(InitConfig {
-            erc20_manager_address: Default::default(),
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
             config: Config {
@@ -833,7 +827,6 @@ async fn update_vfts() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
         .new(InitConfig {
-            erc20_manager_address: Default::default(),
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
             config: Config {
@@ -877,7 +870,6 @@ async fn update_vfts() -> Result<()> {
     };
     let vft = factory
         .new(InitConfig {
-            erc20_manager_address: Default::default(),
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
             config: Config {
@@ -999,6 +991,106 @@ async fn update_vfts() -> Result<()> {
     }
 
     assert!(expected.is_empty());
+
+    Ok(())
+}
+
+
+#[tokio::test]
+async fn init() -> Result<()> {
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "vft-manager",
+        &[WASM_VFT_MANAGER],
+    )
+    .await;
+    let suri = conn.accounts[0].2.clone();
+    let code_id = conn.code_ids[0];
+    let gas_limit = conn.gas_limit;
+    let salt = conn.salt;
+    let api = conn.api.with(suri).unwrap();
+
+    // deploy VFT-manager
+    let remoting = GClientRemoting::new(api.clone());
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
+    let vft_manager_id = factory
+        .new(InitConfig {
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    let result = service
+        .is_paused()
+        .with_gas_limit(gas_limit)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result);
+    let result = service
+        .erc_20_manager_address()
+        .with_gas_limit(gas_limit)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_none());
+
+    // teleport requests should fail since the VftManager is paused
+    let result = service
+        .submit_receipt(0, 0, vec![])
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_err(), "result = {result:?}");
+    let result = service
+        .request_bridging(Default::default(), 0.into(), Default::default())
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_err(), "result = {result:?}");
+
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    // teleport requests should fail since the ERC20Manager address is not set
+    let result = service
+        .submit_receipt(0, 0, vec![])
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"));
+    assert!(result.is_err(), "result = {result:?}");
+    let result = service
+        .request_bridging(Default::default(), 0.into(), Default::default())
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"));
+    assert!(result.is_err(), "result = {result:?}");
 
     Ok(())
 }

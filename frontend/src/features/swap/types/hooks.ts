@@ -39,7 +39,7 @@ type UseHandleSubmit = (
   approve?: { isPending: boolean; error: Error | null };
   mint?: { isPending: boolean; error: Error | null };
   payFee?: { isPending: boolean; error: Error | null } | undefined;
-  permitUSDC?: { isPending: boolean; isLoading: boolean; error: Error | null };
+  permitUSDC?: { isPending: boolean; error: Error | null };
 };
 
 type UseFTAllowance = (address: HexString | undefined) => {

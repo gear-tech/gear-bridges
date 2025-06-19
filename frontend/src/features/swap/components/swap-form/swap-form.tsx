@@ -197,8 +197,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                 accountBalance.isLoading ||
                 ftBalance.isLoading ||
                 config.isLoading ||
-                allowance.isLoading ||
-                permitUSDC?.isLoading
+                allowance.isLoading
               }
               block
             />

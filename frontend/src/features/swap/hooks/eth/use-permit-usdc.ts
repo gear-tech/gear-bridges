@@ -1,11 +1,13 @@
 import { useMutation } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { hexToNumber, slice } from 'viem';
-import { useReadContract, useSignTypedData } from 'wagmi';
+import { useConfig, useSignTypedData } from 'wagmi';
+import { readContract } from 'wagmi/actions';
 
 import { ETH_CHAIN_ID } from '@/consts';
 import { useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
-import { definedAssert, isUndefined } from '@/utils';
+import { definedAssert } from '@/utils';
 
 import { ERC20_MANAGER_CONTRACT_ADDRESS, USDC_ABI } from '../../consts';
 
@@ -14,35 +16,29 @@ const PERMIT_DURATION_SECONDS = 60 * 60;
 function usePermitUSDC() {
   const ethAccount = useEthAccount();
   const { signTypedDataAsync } = useSignTypedData();
+  const config = useConfig();
 
   const { tokens } = useTokens();
-  const { address } = tokens.eth?.find(({ symbol }) => symbol.toLowerCase().includes('usdc')) || {};
+  const usdcToken = useMemo(
+    () => tokens.eth?.find(({ symbol }) => symbol.toLowerCase().includes('usdc')),
+    [tokens.eth],
+  );
 
-  const { data: version } = useReadContract({
-    abi: USDC_ABI,
-    address,
-    functionName: 'version',
-  });
+  const getNonce = () => {
+    definedAssert(usdcToken, 'USDC token');
+    definedAssert(ethAccount.address, 'Account address');
 
-  const { data: name } = useReadContract({
-    abi: USDC_ABI,
-    address,
-    functionName: 'name',
-  });
-
-  const { data: nonce } = useReadContract({
-    abi: USDC_ABI,
-    address,
-    functionName: 'nonces',
-    args: ethAccount.address ? [ethAccount.address] : undefined,
-  });
+    return readContract(config, {
+      abi: USDC_ABI,
+      address: usdcToken.address,
+      functionName: 'nonces',
+      args: [ethAccount.address],
+    });
+  };
 
   const permit = async (value: bigint) => {
+    definedAssert(usdcToken, 'USDC token');
     definedAssert(ethAccount.address, 'Account address');
-    definedAssert(address, 'USDC address');
-    definedAssert(version, 'USDC version');
-    definedAssert(name, 'USDC name');
-    definedAssert(nonce, 'USDC nonce');
 
     const types = {
       Permit: [
@@ -55,10 +51,10 @@ function usePermitUSDC() {
     };
 
     const domain = {
-      name,
-      version,
+      name: usdcToken.name,
+      version: '1', // hardcoded for now, should be fetched from the contract but for now there's no such query
       chainId: ETH_CHAIN_ID,
-      verifyingContract: address,
+      verifyingContract: usdcToken.address,
     };
 
     const timestampSeconds = Math.floor(Date.now() / 1000);
@@ -68,7 +64,7 @@ function usePermitUSDC() {
       owner: ethAccount.address,
       spender: ERC20_MANAGER_CONTRACT_ADDRESS,
       value,
-      nonce,
+      nonce: await getNonce(),
       deadline,
     };
 
@@ -86,9 +82,7 @@ function usePermitUSDC() {
     return { deadline, r, s, v };
   };
 
-  const isLoading = !version || !name || isUndefined(nonce);
-
-  return { ...useMutation({ mutationFn: permit }), isLoading };
+  return { ...useMutation({ mutationFn: permit }) };
 }
 
 export { usePermitUSDC };

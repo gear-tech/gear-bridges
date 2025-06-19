@@ -59,6 +59,10 @@ contract MessageQueue is IMessageQueue {
 
         _processedMessages[message.nonce] = true;
 
+        if (message.receiver.code.length == 0) {
+            revert MessageNotProcessed();
+        }
+
         (bool success,) = message.receiver.call(
             abi.encodeWithSelector(IMessageQueueReceiver.processVaraMessage.selector, message.sender, message.data)
         );

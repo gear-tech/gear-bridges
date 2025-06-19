@@ -194,7 +194,7 @@ impl TransactionManager {
 
         self.transactions.write().await.insert(tx_uuid, tx);
 
-        if proof_composer.compose_proof_for(tx_uuid, tx_hash) {
+        if !proof_composer.compose_proof_for(tx_uuid, tx_hash) {
             log::error!("Proof composer connection closed, exiting...");
             Ok(false)
         } else {

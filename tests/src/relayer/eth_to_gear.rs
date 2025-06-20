@@ -1,5 +1,6 @@
 use alloy::primitives::{fixed_bytes, FixedBytes};
 use alloy::rpc::types::TransactionReceipt;
+use alloy::transports::http::reqwest::ResponseBuilderExt;
 use alloy_rlp::Encodable;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::utils::{BeaconBlockHeaderResponse, MerkleProof};
@@ -266,24 +267,22 @@ pub struct Tx {
 
 impl Tx {
     pub fn event(&self) -> EthToVaraEvent {
-        let receipts = self.receipts
+        let receipts = self
+            .receipts
             .result
             .iter()
             .map(|tx_receipt| {
+                let receipt = tx_receipt.as_ref();
                 tx_receipt
                     .transaction_index
-                    .map(|i| (i, eth_utils::map_receipt_envelope(tx_receipt)))
-            }).collect::<Option<Vec<_>>>()
+                    .map(|i| (i, eth_utils::map_receipt_envelope(receipt)))
+            })
+            .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         let headers = self.headers.clone();
 
-        let MerkleProof {
-            proof, receipt
-        } = eth_utils::generate_merkle_proof(self.tx_index,
-            &receipts
-        ).unwrap();
-        i
-        println!("Proof for tx #{}:\n{:#?}", self.tx_index, proof);
+        let MerkleProof { proof, receipt } =
+            eth_utils::generate_merkle_proof(self.tx_index, &receipts).unwrap();
 
         let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
         Encodable::encode(&receipt, &mut receipt_rlp);
@@ -293,16 +292,20 @@ impl Tx {
             proposer_index: self.block.data.message.proposer_index,
             parent_root: self.block.data.message.parent_root,
             state_root: self.block.data.message.state_root,
-            body: self.block.data.message.body  
+            body: self.block.data.message.body.clone().into(),
         };
 
         EthToVaraEvent {
             proof_block: BlockInclusionProof {
-                block: self.block.data.message.clone(),
-                headers,
-                proof: proof.clone(),
-                transaction
-            }
+                block,
+                headers: headers
+                    .into_iter()
+                    .map(|header| header.data.header.message)
+                    .collect(),
+            },
+            proof: proof.clone(),
+            transaction_index: self.tx_index,
+            receipt_rlp,
         }
     }
 }
@@ -321,7 +324,96 @@ static TRANSACTIONS: LazyLock<HashMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
 
 struct MockProofComposer;
 
+impl MockProofComposer {
+    async fn run(
+        mut requests: UnboundedReceiver<proof_composer::Request>,
+        response: UnboundedSender<proof_composer::Response>,
+    ) {
+        tokio::task::spawn(async move {
+            loop {
+                if requests.is_closed() || response.is_closed() {
+                    return;
+                }
+
+                let req = requests.recv().await.unwrap();
+
+                let tx = TRANSACTIONS.get(&req.tx.tx_hash).unwrap();
+
+                let event = tx.event();
+                println!("compose proof #{}: {:?}", req.tx_uuid, tx.tx_hash);
+                response
+                    .send(proof_composer::Response {
+                        payload: event,
+                        tx_uuid: req.tx_uuid,
+                    })
+                    .unwrap();
+            }
+        });
+    }
+}
+
+struct MockMessageSender;
+
+impl MockMessageSender {
+    async fn run(
+        mut requests: UnboundedReceiver<message_sender::Request>,
+        responses: UnboundedSender<message_sender::Response>,
+    ) {
+        tokio::task::spawn(async move {
+            loop {
+                if requests.is_closed() || responses.is_closed() {
+                    return;
+                }
+                let req = requests.recv().await.unwrap();
+
+                let tx = TRANSACTIONS.get(&req.tx_hash).unwrap();
+                assert_eq!(tx.event(), req.payload);
+                println!("send message for #{}: {:?}", req.tx_uuid, req.tx_hash);
+                responses
+                    .send(message_sender::Response {
+                        tx_uuid: req.tx_uuid,
+                        status: message_sender::MessageStatus::Success,
+                    })
+                    .unwrap();
+            }
+        });
+    }
+}
+
 #[tokio::test]
 async fn test_relayer() {
     let txs = &*TRANSACTIONS;
+
+    let (events_tx, mut events_rx) = unbounded_channel();
+
+    for (_, tx) in txs.iter() {
+        let tx_event = TxHashWithSlot {
+            tx_hash: tx.tx_hash,
+            slot_number: EthereumSlotNumber(tx.slot_number),
+        };
+
+        events_tx.send(tx_event).unwrap();
+    }
+
+    let (proof_req_tx, proof_req_rx) = unbounded_channel();
+    let (proof_res_tx, proof_res_rx) = unbounded_channel();
+
+    let mut proof_composer = ProofComposerIo::new(proof_req_tx, proof_res_rx);
+
+    let (message_req_tx, message_req_rx) = unbounded_channel();
+    let (message_res_tx, message_res_rx) = unbounded_channel();
+
+    let mut message_sender = MessageSenderIo::new(message_req_tx, message_res_rx);
+
+    let mut tx_manager = TransactionManager::new(None);
+    MockProofComposer::run(proof_req_rx, proof_res_tx).await;
+    MockMessageSender::run(message_req_rx, message_res_tx).await;
+    loop {
+        let res = tx_manager
+            .process(&mut events_rx, &mut proof_composer, &mut message_sender)
+            .await;
+        println!("{res:?}");
+    }
+
+    drop(events_tx);
 }

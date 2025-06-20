@@ -112,7 +112,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
     resetState();
     onTransactionStart(values);
 
-    return Promise.all(txs.map(({ call }) => call()));
+    for (const { call } of txs) await call();
   };
 
   const getStatus = () => {

@@ -50,8 +50,11 @@ pub async fn submit_receipt(
     use ethereum_common::utils::ReceiptEnvelope;
 
     let state = service.state();
-    let sender = Syscall::message_source();
+    let Some(erc20_manager_address) = state.erc20_manager_address else {
+        panic!("Address of the ERC20Manger is not set");
+    };
 
+    let sender = Syscall::message_source();
     if sender != state.historical_proxy_address {
         return Err(Error::NotHistoricalProxy);
     }
@@ -81,7 +84,7 @@ pub async fn submit_receipt(
                 .get_vara_token_id(&eth_token_id)
                 .ok()?;
 
-            (service.erc20_manager_address() == address).then_some((vara_token_id, event))
+            (erc20_manager_address == address).then_some((vara_token_id, event))
         })
         .ok_or(Error::NotSupportedEvent)?;
 

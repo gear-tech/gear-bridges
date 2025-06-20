@@ -10,11 +10,10 @@ import {Relayer} from "../src/Relayer.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IERC20Manager} from "../src/interfaces/IERC20Manager.sol";
 
-import {IMessageQueue, VaraMessage, IMessageQueueReceiver} from "../src/interfaces/IMessageQueue.sol";
+import {VaraMessage, IMessageQueue} from "../src/interfaces/IMessageQueue.sol";
+import {IMessageQueueReceiver} from "../src/interfaces/IMessageQueueReceiver.sol";
 import {MessageQueue} from "../src/MessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
-
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 import {TestHelper, VARA_ADDRESS_3, VARA_ADDRESS_7, USER, OWNER, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
 
@@ -32,44 +31,25 @@ contract TreasuryTest is TestHelper {
 
         uint256 amount = 100 * (10 ** 18);
         erc20_token.approve(address(erc20_manager), amount);
-        erc20_manager.requestBridging(
-            address(erc20_token),
-            amount,
-            VARA_ADDRESS_3
-        );
+        erc20_manager.requestBridging(address(erc20_token), amount, VARA_ADDRESS_3);
 
         vm.stopPrank();
     }
 
-    // TODO: Test skipped, to enable it remove the skip_ prefix
-    function skip_test_withdraw() public {
-        uint128 amount = 100 * (10 ** 18);
+    function test_withdraw() public {
+        uint256 amount = 100 * (10 ** 18);
         erc20_token.approve(address(erc20_manager), amount);
-        erc20_manager.requestBridging(
-            address(erc20_token),
-            amount,
-            VARA_ADDRESS_3
-        );
+        erc20_manager.requestBridging(address(erc20_token), amount, VARA_ADDRESS_3);
 
-        bytes memory call_data = abi.encodePacked(
-            address(this),
-            address(erc20_token),
-            amount
-        );
+        bytes memory call_data = abi.encodePacked(address(this), address(erc20_token), amount);
         console.log(amount);
         console.logBytes(call_data);
 
         vm.expectRevert();
 
-        IMessageQueueReceiver(erc20_manager).processVaraMessage(
-            VFT_MANAGER_ADDRESS,
-            call_data
-        );
+        IMessageQueueReceiver(erc20_manager).processVaraMessage(VFT_MANAGER_ADDRESS, call_data);
 
         vm.prank(address(message_queue));
-        IMessageQueueReceiver(erc20_manager).processVaraMessage(
-            VFT_MANAGER_ADDRESS,
-            call_data
-        );
+        IMessageQueueReceiver(erc20_manager).processVaraMessage(VFT_MANAGER_ADDRESS, call_data);
     }
 }

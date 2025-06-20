@@ -515,15 +515,9 @@ impl Contracts {
     }
 
     pub async fn is_message_processed(&self, nonce: B256) -> Result<bool, Error> {
-        // TODO: Change isProcessed to accept only nonce.
         let processed = self
             .message_queue_instance
-            .isProcessed(VaraMessage {
-                nonce,
-                sender: Default::default(),
-                receiver: Default::default(),
-                data: Default::default(),
-            })
+            .isProcessed(nonce)
             .block(BlockId::Number(BlockNumberOrTag::Finalized))
             .call()
             .await

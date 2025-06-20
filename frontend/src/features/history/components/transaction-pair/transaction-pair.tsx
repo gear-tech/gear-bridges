@@ -11,7 +11,7 @@ import { Network, Transfer } from '../../types';
 import styles from './transaction-pair.module.scss';
 
 const INDEXED_NETWORK_TO_NETWORK = {
-  [Network.Gear]: NETWORK.VARA,
+  [Network.Vara]: NETWORK.VARA,
   [Network.Ethereum]: NETWORK.ETH,
 } as const;
 
@@ -33,9 +33,9 @@ function TransactionPair(props: Props) {
   const destinationToken = addressToToken[destinationHex];
   const destinationSymbol = destinationToken?.symbol ?? 'Unit';
 
-  const isGearNetwork = sourceNetwork === Network.Gear;
-  const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
-  const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
+  const isVaraNetwork = sourceNetwork === Network.Vara;
+  const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
+  const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   return (
     <div className={styles.pair}>

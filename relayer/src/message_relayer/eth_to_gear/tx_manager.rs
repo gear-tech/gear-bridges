@@ -179,7 +179,6 @@ impl TransactionManager {
                         return Ok(false);
                     }
                 }
-
                 TxStatus::Completed => unreachable!(),
             }
         }

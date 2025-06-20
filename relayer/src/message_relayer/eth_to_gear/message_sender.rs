@@ -1,3 +1,4 @@
+use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
@@ -16,8 +17,6 @@ use tokio::{
 };
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
-
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,

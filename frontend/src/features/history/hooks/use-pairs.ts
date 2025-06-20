@@ -14,7 +14,7 @@ const PAIRS_QUERY = graphql(`
       ethTokenName
       ethTokenSymbol
       id
-      isRemoved
+      isActive
       tokenSupply
       varaToken
       varaTokenDecimals

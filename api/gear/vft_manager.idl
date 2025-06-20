@@ -222,7 +222,7 @@ service VftManager {
   /// For more info see [Config] docs.
   UpdateConfig : (config: Config) -> null;
   /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
-  UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
+  UpdateErc20ManagerAddress : (erc20_manager_address_new: h160) -> null;
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
   UpdateVfts : (vft_map: vec struct { actor_id, actor_id }) -> null;
@@ -297,6 +297,16 @@ service VftManager {
     /// 
     /// It means that normal operation is continued after the pause.
     Unpaused;
+    /// Address of the `historical-proxy` program was changed.
+    HistoricalProxyAddressChanged: struct {
+      old: actor_id,
+      new: actor_id,
+    };
+    /// Address of the `ERC20Manager` contract address on Ethereum was changed.
+    Erc20ManagerAddressChanged: struct {
+      old: h160,
+      new: h160,
+    };
   }
 };
 

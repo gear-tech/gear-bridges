@@ -36,6 +36,12 @@ impl_metered_service! {
     }
 }
 
+impl Default for Accumulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Accumulator {
     pub fn new() -> Self {
         Self {

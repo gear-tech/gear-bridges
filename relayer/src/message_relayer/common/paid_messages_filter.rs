@@ -32,6 +32,12 @@ impl_metered_service! {
     }
 }
 
+impl Default for PaidMessagesFilter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaidMessagesFilter {
     pub fn new() -> Self {
         Self {

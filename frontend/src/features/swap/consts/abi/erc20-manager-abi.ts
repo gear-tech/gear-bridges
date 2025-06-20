@@ -48,6 +48,22 @@ const ERC20_MANAGER_ABI = [
     stateMutability: 'payable',
   },
   {
+    type: 'function',
+    name: 'requestBridgingPayingFeeWithPermit',
+    inputs: [
+      { name: 'token', type: 'address', internalType: 'address' },
+      { name: 'amount', type: 'uint256', internalType: 'uint256' },
+      { name: 'to', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'deadline', type: 'uint256', internalType: 'uint256' },
+      { name: 'v', type: 'uint8', internalType: 'uint8' },
+      { name: 'r', type: 'bytes32', internalType: 'bytes32' },
+      { name: 's', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'bridgingPayment', type: 'address', internalType: 'address' },
+    ],
+    outputs: [],
+    stateMutability: 'payable',
+  },
+  {
     type: 'event',
     name: 'BridgingAccepted',
     inputs: [
@@ -68,22 +84,8 @@ const ERC20_MANAGER_ABI = [
     ],
     anonymous: false,
   },
-  {
-    type: 'error',
-    name: 'AddressEmptyCode',
-    inputs: [{ name: 'target', type: 'address', internalType: 'address' }],
-  },
   { type: 'error', name: 'BadArguments', inputs: [] },
   { type: 'error', name: 'BadVftManagerAddress', inputs: [] },
-  { type: 'error', name: 'FailedCall', inputs: [] },
-  {
-    type: 'error',
-    name: 'InsufficientBalance',
-    inputs: [
-      { name: 'balance', type: 'uint256', internalType: 'uint256' },
-      { name: 'needed', type: 'uint256', internalType: 'uint256' },
-    ],
-  },
   { type: 'error', name: 'NotAuthorized', inputs: [] },
   {
     type: 'error',

@@ -28,20 +28,19 @@ type UseHandleSubmit = (
   ftBalance: bigint | undefined,
   accountBalance: bigint | undefined,
   openTxModal: (amount: string, receiver: string) => void,
-) => Readonly<
-  [
-    {
-      mutateAsync: (values: FormattedValues) => Promise<unknown>;
-      reset: () => void;
-      isPending: boolean;
-      isSuccess: boolean;
-      error: Error | null;
-    },
-    { isPending: boolean; error: Error | null },
-    { isPending: boolean; error: Error | null } | undefined,
-    { isPending: boolean; error: Error | null }?,
-  ]
->;
+) => {
+  submit: {
+    mutateAsync: (values: FormattedValues) => Promise<unknown>;
+    reset: () => void;
+    isPending: boolean;
+    isSuccess: boolean;
+    error: Error | null;
+  };
+  approve?: { isPending: boolean; error: Error | null };
+  mint?: { isPending: boolean; error: Error | null };
+  payFee?: { isPending: boolean; error: Error | null } | undefined;
+  permitUSDC?: { isPending: boolean; error: Error | null };
+};
 
 type UseFTAllowance = (address: HexString | undefined) => {
   data: bigint | undefined;

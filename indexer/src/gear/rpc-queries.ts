@@ -2,15 +2,9 @@ import { RpcClient } from '@subsquid/rpc-client';
 import { Runtime } from '@subsquid/substrate-runtime';
 import { encodeName } from '@subsquid/substrate-runtime/lib/runtime/storage';
 import { ZERO_ADDRESS } from 'sails-js';
-import { Decoder } from './codec';
 import { ethers } from 'ethers';
 import { config } from './config';
-
-let vftDecoder: Decoder;
-
-export async function initDecoders() {
-  vftDecoder = await Decoder.create('./assets/vft.idl');
-}
+import { getDecoder } from './decoders';
 
 // Helper function for querying VFT metadata
 async function queryVFTMetadata<T>(rpc: RpcClient, programId: string, blockhash: string, fn: string): Promise<T> {
@@ -21,12 +15,14 @@ async function queryVFTMetadata<T>(rpc: RpcClient, programId: string, blockhash:
 
   const service = 'VftMetadata';
 
-  const payload = vftDecoder.encodeQueryInput(service, fn, []);
+  const decoder = getDecoder('vft');
+
+  const payload = decoder.encodeQueryInput(service, fn, []);
 
   const response = await rpc.call(method, [origin, programId, payload, gasLimit, value, blockhash]);
 
   if (response.code.Success) {
-    const result = vftDecoder.decodeQueryOutput<T>(service, fn, response.payload);
+    const result = decoder.decodeQueryOutput<T>(service, fn, response.payload);
     return result;
   } else {
     throw new Error(`Failed to get token ${fn}. ${response.code}`);

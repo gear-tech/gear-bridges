@@ -34,6 +34,8 @@ service BridgingPayment {
   /// 
   /// This method can be called only by admin.
   SetFee : (fee: u128) -> null;
+  /// Upgrades the program to the provided new address.
+  Upgrade : (new: actor_id) -> null;
   /// Get current service [State].
   query GetState : () -> State;
 

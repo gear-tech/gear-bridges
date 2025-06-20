@@ -1,152 +1,84 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-
-import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-
 import {IRelayer} from "./interfaces/IRelayer.sol";
+import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
+import {IMessageQueueReceiver} from "./interfaces/IMessageQueueReceiver.sol";
+import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
-import {VaraMessage, VaraMessage, IMessageQueue, IMessageQueueReceiver, Hasher} from "./interfaces/IMessageQueue.sol";
-import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
-
+/**
+ * @dev MessageQueue smart contract is responsible for verifying and processing
+ *      received messages originated from Vara Network.
+ */
 contract MessageQueue is IMessageQueue {
-    using Address for address;
     using Hasher for VaraMessage;
 
-    address immutable RELAYER_ADDRESS;
+    IRelayer immutable RELAYER;
 
-    constructor(address relayer_address) {
-        RELAYER_ADDRESS = relayer_address;
+    constructor(IRelayer relayer) {
+        RELAYER = relayer;
     }
 
-    function hash_vara_msg(
-        VaraMessage calldata message
-    ) internal pure returns (bytes32) {
-        bytes memory data = abi.encodePacked(
-            message.nonce,
-            message.sender,
-            message.receiver,
-            message.data
-        );
-        return keccak256(abi.encodePacked(keccak256(data)));
-    }
-
-    mapping(bytes32 => bool) private _processed_messages;
+    mapping(bytes32 => bool) private _processedMessages;
 
     /**
      * @dev Unpack message from merkle tree and relay it to the receiver.
      *
-     * @param block_number - Block number of block containing target merkle tree.
-     * @param total_leaves - Number of leaves in target merkle tree.
-     * @param leaf_index - Index of leaf containing target message. See `binary_merkle_tree` for
+     * @param blockNumber - Block number of block containing target merkle tree.
+     * @param totalLeaves - Number of leaves in target merkle tree.
+     * @param leafIndex - Index of leaf containing target message. See `binary_merkle_tree` for
      *  reference.
      * @param message - Target message.
-     * @param proof - Merkle proof of inclusion of leaf #`leaf_index` into target merkle tree that
-     *  was included into `block_number`.
+     * @param proof - Merkle proof of inclusion of leaf #`leafIndex` into target merkle tree that
+     *  was included into `blockNumber`.
      */
     function processMessage(
-        uint256 block_number,
-        uint256 total_leaves,
-        uint256 leaf_index,
+        uint256 blockNumber,
+        uint256 totalLeaves,
+        uint256 leafIndex,
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) public {
-        if (_processed_messages[message.nonce]) {
+        if (RELAYER.emergencyStop()) {
+            revert RelayerEmergencyStop();
+        }
+
+        if (_processedMessages[message.nonce]) {
             revert MessageAlreadyProcessed(message.nonce);
         }
 
-        bytes32 msg_hash = hash_vara_msg(message);
-
-        bytes32 merkle_root = IRelayer(RELAYER_ADDRESS).getMerkleRoot(
-            block_number
-        );
-
-        if (merkle_root == bytes32(0)) {
-            revert MerkleRootNotSet(block_number);
+        bytes32 merkleRoot = RELAYER.getMerkleRoot(blockNumber);
+        if (merkleRoot == bytes32(0)) {
+            revert MerkleRootNotSet(blockNumber);
         }
 
-        if (
-            _calculateMerkleRoot(proof, msg_hash, total_leaves, leaf_index) !=
-            merkle_root
-        ) {
-            revert BadProof();
+        bytes32 messageHash = message.hashCalldata();
+        if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {
+            revert InvalidMerkleProof();
         }
 
-        _processed_messages[message.nonce] = true;
+        _processedMessages[message.nonce] = true;
 
-        if (
-            !IMessageQueueReceiver(message.receiver).processVaraMessage(
-                message.sender,
-                message.data
-            )
-        ) {
+        if (message.receiver.code.length == 0) {
             revert MessageNotProcessed();
-        } else {
-            emit MessageProcessed(block_number, msg_hash, message.nonce);
         }
+
+        (bool success,) = message.receiver.call(
+            abi.encodeWithSelector(IMessageQueueReceiver.processVaraMessage.selector, message.sender, message.data)
+        );
+        if (!success) {
+            revert MessageNotProcessed();
+        }
+
+        emit MessageProcessed(blockNumber, messageHash, message.nonce, message.receiver);
     }
 
     /**
-     * @dev Calculated merkle tree root for a provided merkle proof.
-     *
-     * @param proof - Merkle proof.
-     * @param leaf_hash - Hash of data stored in target leaf.
-     * @param total_leaves - Number of leaves in merkle tree.
-     * @param leaf_index - Index of target leaf.
+     * @dev Checks if message was already processed.
+     * @param messageNonce Message nonce to check.
+     * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
-    function calculateMerkleRoot(
-        bytes32[] calldata proof,
-        bytes32 leaf_hash,
-        uint256 total_leaves,
-        uint256 leaf_index
-    ) public pure returns (bytes32) {
-        return _calculateMerkleRoot(proof, leaf_hash, total_leaves, leaf_index);
-    }
-
-    /**
-     * @dev Checks if `VaraMessage` already was processed.
-     *
-     * @param message - Message it checks agaiunst.
-     */
-
-    function isProcessed(
-        VaraMessage calldata message
-    ) external view returns (bool) {
-        return _processed_messages[message.nonce];
-    }
-
-    function _calculateMerkleRoot(
-        bytes32[] calldata proof,
-        bytes32 leaf,
-        uint256 width,
-        uint256 index
-    ) internal pure returns (bytes32) {
-        bytes32 hash = leaf;
-
-        assert(index < width);
-
-        for (uint256 i = 0; i < proof.length; i++) {
-            bytes32 proofElement = proof[i];
-
-            if ((index % 2 == 1) || (index + 1 == width)) {
-                assembly ("memory-safe") {
-                    mstore(0x00, proofElement)
-                    mstore(0x20, hash)
-                    hash := keccak256(0x00, 0x40)
-                }
-            } else {
-                assembly ("memory-safe") {
-                    mstore(0x00, hash)
-                    mstore(0x20, proofElement)
-                    hash := keccak256(0x00, 0x40)
-                }
-            }
-
-            index = index / 2;
-            width = ((width - 1) / 2) + 1;
-        }
-
-        return hash;
+    function isProcessed(bytes32 messageNonce) external view returns (bool) {
+        return _processedMessages[messageNonce];
     }
 }

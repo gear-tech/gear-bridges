@@ -59,13 +59,13 @@ pub struct Beacon {
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BeaconBlockHeaderResponse {
     pub data: BeaconBlockHeaderData,
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BeaconBlockHeaderData {
     pub header: SignedBeaconBlockHeader,
 }

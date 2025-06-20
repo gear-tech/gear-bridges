@@ -3,11 +3,15 @@ pragma solidity ^0.8.30;
 
 import {IVerifier} from "../interfaces/IVerifier.sol";
 
-contract Verifier is IVerifier {
-    function verifyProof(
-        bytes calldata,
-        uint256[] calldata
-    ) external pure returns (bool) {
+/**
+ * @dev Mock Verifier smart contract is responsible for verifying zk-SNARK Plonk proofs.
+ *      It is used for testing purposes.
+ */
+contract VerifierMock is IVerifier {
+    /**
+     * @dev See {IVerifier-verifyProof}.
+     */
+    function verifyProof(bytes calldata, uint256[] calldata) external pure returns (bool) {
         return true;
     }
 }

@@ -41,6 +41,7 @@ const useTokens = () => useContext(TokensContext);
 
 type Token = {
   address: HexString;
+  name: string;
   symbol: string;
   decimals: number;
   isNative: boolean;
@@ -57,20 +58,22 @@ const deriveTokens = (pairs: Pair[]) => {
 
     const varaToken: Token = {
       address: varaAddress,
+      name: pair.varaTokenName,
       symbol: pair.varaTokenSymbol,
       decimals: pair.varaTokenDecimals,
-      isNative: pair.tokenSupply === Network.Gear && pair.varaTokenSymbol.toLowerCase().includes('vara'),
+      isNative: pair.tokenSupply === Network.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara'),
       network: 'vara',
-      isActive: !pair.isRemoved,
+      isActive: pair.isActive,
     };
 
     const ethToken: Token = {
       address: ethAddress,
+      name: pair.ethTokenName,
       symbol: pair.ethTokenSymbol,
       decimals: pair.ethTokenDecimals,
       isNative: pair.tokenSupply === Network.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth'),
       network: 'eth',
-      isActive: !pair.isRemoved,
+      isActive: pair.isActive,
     };
 
     addressToToken[varaAddress] = varaToken;

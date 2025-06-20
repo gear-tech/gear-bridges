@@ -121,7 +121,7 @@ function useHandleVaraSubmit(
 
   const submit = useMutation({ mutationFn: onSubmit });
 
-  return [submit, approve, payFee] as const;
+  return { submit, payFee };
 }
 
 export { useHandleVaraSubmit };

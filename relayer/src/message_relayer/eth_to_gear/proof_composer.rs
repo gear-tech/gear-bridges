@@ -118,7 +118,6 @@ impl ProofComposer {
 
         ProofComposerIo::new(requests_tx, response_rx)
     }
-
     async fn process(
         &mut self,
         response_tx: &UnboundedSender<Response>,

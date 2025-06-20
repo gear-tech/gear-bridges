@@ -97,6 +97,14 @@ async fn setup_for_test() -> Fixture {
         .await
         .unwrap();
 
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
     // VFT
     let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
     let gear_supply_vft = VftFactoryC::new(remoting.clone())

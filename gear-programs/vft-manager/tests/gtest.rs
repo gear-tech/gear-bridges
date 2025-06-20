@@ -79,7 +79,6 @@ async fn setup_for_test() -> Fixture {
     // Vft Manager
     let vft_manager_code_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
     let init_config = InitConfig {
-        erc20_manager_address: ERC20_MANAGER_ADDRESS,
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         historical_proxy_address: HISTORICAL_PROXY_ID.into(),
         config: Config {

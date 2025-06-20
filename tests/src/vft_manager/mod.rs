@@ -995,15 +995,9 @@ async fn update_vfts() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn init() -> Result<()> {
-    let conn = connect_to_node(
-        &[DEFAULT_BALANCE],
-        "vft-manager",
-        &[WASM_VFT_MANAGER],
-    )
-    .await;
+    let conn = connect_to_node(&[DEFAULT_BALANCE], "vft-manager", &[WASM_VFT_MANAGER]).await;
     let suri = conn.accounts[0].2.clone();
     let code_id = conn.code_ids[0];
     let gas_limit = conn.gas_limit;

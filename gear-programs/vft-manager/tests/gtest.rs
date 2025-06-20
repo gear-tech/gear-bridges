@@ -100,7 +100,11 @@ async fn setup_for_test() -> Fixture {
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
         .unpause()
-        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    service
+        .update_erc_20_manager_address(ERC20_MANAGER_ADDRESS)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();

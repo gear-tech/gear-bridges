@@ -99,6 +99,10 @@ impl Storage for JSONStorage {
             }
         }
 
+        for (tx_uuid, tx) in tx_manager.completed.read().await.iter() {
+            self.write_tx(tx_uuid, tx).await?;
+        }
+
         let mut failed_file = tokio::fs::OpenOptions::new()
             .create(true)
             .truncate(true)

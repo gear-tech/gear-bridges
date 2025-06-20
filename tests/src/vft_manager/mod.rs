@@ -1120,7 +1120,6 @@ async fn init() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn migrate_transactions() -> Result<()> {
     let conn = connect_to_node(
@@ -1201,18 +1200,7 @@ async fn migrate_transactions() -> Result<()> {
         .unwrap();
 
     // insert some transactions
-    let transactions = vec![
-        (  4_178_375,
-          22
-        ),
-        (
-          4_182_830,
-          22
-        ),
-        (
-          4_182_948,
-          26
-      ),];
+    let transactions = vec![(4_178_375, 22), (4_182_830, 22), (4_182_948, 26)];
     let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
     service
         .insert_transactions(transactions.clone())
@@ -1220,7 +1208,7 @@ async fn migrate_transactions() -> Result<()> {
         .send(vft_manager_id)
         .await
         .unwrap();
-    
+
     let result = service
         .transactions(Order::Direct, 0, transactions.len() as _)
         .recv(vft_manager_id)

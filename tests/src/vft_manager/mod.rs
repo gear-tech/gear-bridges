@@ -622,7 +622,10 @@ async fn upgrade() -> Result<()> {
         .unwrap();
     assert!(result.is_err(), "result = {result:?}");
 
-    let result = service.erc_20_manager_address().recv(vft_manager_id).await
+    let result = service
+        .erc_20_manager_address()
+        .recv(vft_manager_id)
+        .await
         .map_err(|e| anyhow!("{e:?}"))?;
     assert!(result.is_none(), "result = {result:?}");
 
@@ -880,7 +883,8 @@ async fn update_vfts() -> Result<()> {
 
     // non-authorized user cannot update VFT-addresses
     let api_unauthorized = api.clone().with(suri2).unwrap();
-    let mut service_unauthorized = vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized));
+    let mut service_unauthorized =
+        vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized));
     let result = service_unauthorized
         .update_vfts([].to_vec())
         .with_gas_limit(gas_limit)

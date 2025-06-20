@@ -67,6 +67,7 @@ pub async fn request_bridging(
         receiver,
         token_id: eth_token_id,
         amount,
+        sender,
     };
 
     msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);

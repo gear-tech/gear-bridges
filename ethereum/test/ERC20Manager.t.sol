@@ -16,6 +16,7 @@ contract ERC20ManagerTest is Test {
     address constant ETH_TOKEN_HOLDER = address(6969);
     bytes32 constant GEAR_TOKEN_RECEIVER = bytes32("token_receiver_token_receiver_to");
     address constant ETH_TOKEN_RECEIVER = address(1234);
+    bytes32 constant VARA_ADDRESS = bytes32(uint256(7856));
     uint256 constant TRANSFER_AMOUNT = 1000;
 
     ERC20Manager public erc20Manager;
@@ -55,7 +56,7 @@ contract ERC20ManagerTest is Test {
 
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
         erc20Manager.processVaraMessage(
-            VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedEther), TRANSFER_AMOUNT)
+            VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedEther), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
 
@@ -70,7 +71,7 @@ contract ERC20ManagerTest is Test {
 
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
         erc20Manager.processVaraMessage(
-            VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT)
+            VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
 
@@ -94,14 +95,14 @@ contract ERC20ManagerTest is Test {
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
         vm.expectRevert(IERC20Manager.BadVftManagerAddress.selector);
         erc20Manager.processVaraMessage(
-            FAKE_VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT)
+            FAKE_VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
 
         vm.startPrank(FAKE_MESSAGE_QUEUE, FAKE_MESSAGE_QUEUE);
         vm.expectRevert(IERC20Manager.NotAuthorized.selector);
         erc20Manager.processVaraMessage(
-            VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT)
+            VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
     }

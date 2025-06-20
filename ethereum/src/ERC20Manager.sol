@@ -15,14 +15,16 @@ import {BridgingPayment} from "./BridgingPayment.sol";
 contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
     using SafeERC20 for IERC20;
 
-    address immutable MESSAGE_QUEUE_ADDRESS;
-    bytes32 immutable VFT_MANAGER_ADDRESS;
+    address immutable MESSAGE_QUEUE;
+    bytes32 immutable VFT_MANAGER;
 
-    mapping(address => SupplyType) tokenSupplyType;
+    uint256 private constant WITHDRAW_MESSAGE_SIZE = 104; //20 + 20 + 32 + 32
 
-    constructor(address message_queue, bytes32 vft_manager) {
-        MESSAGE_QUEUE_ADDRESS = message_queue;
-        VFT_MANAGER_ADDRESS = vft_manager;
+    mapping(address token => SupplyType supplyType) private tokenSupplyType;
+
+    constructor(address messageQueue, bytes32 vftManager) {
+        MESSAGE_QUEUE = messageQueue;
+        VFT_MANAGER = vftManager;
     }
 
     /**
@@ -35,12 +37,12 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
      * @param to destination of transfer on gear
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public {
-        SupplyType supply_type = tokenSupplyType[token];
+        SupplyType supplyType = tokenSupplyType[token];
 
-        if (supply_type == SupplyType.Gear) {
+        if (supplyType == SupplyType.Gear) {
             IERC20Burnable(token).burnFrom(msg.sender, amount);
         } else {
-            if (supply_type == SupplyType.Unknown) {
+            if (supplyType == SupplyType.Unknown) {
                 tokenSupplyType[token] = SupplyType.Ethereum;
             }
 
@@ -89,33 +91,34 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
      * @param payload payload of the message.
      */
     function processVaraMessage(bytes32 sender, bytes calldata payload) external {
-        if (msg.sender != MESSAGE_QUEUE_ADDRESS) {
+        if (msg.sender != MESSAGE_QUEUE) {
             revert NotAuthorized();
         }
-        if (payload.length != 20 + 20 + 32) {
+        if (payload.length != WITHDRAW_MESSAGE_SIZE) {
             revert BadArguments();
         }
-        if (sender != VFT_MANAGER_ADDRESS) {
+        if (sender != VFT_MANAGER) {
             revert BadVftManagerAddress();
         }
 
         address receiver = address(bytes20(payload[0:20]));
         address token = address(bytes20(payload[20:40]));
-        uint256 amount = uint256(bytes32(payload[40:]));
+        uint256 amount = uint256(bytes32(payload[40:72]));
+        bytes32 sender1 = bytes32(payload[72:104]);
 
-        SupplyType supply_type = tokenSupplyType[token];
+        SupplyType supplyType = tokenSupplyType[token];
 
-        if (supply_type == SupplyType.Ethereum) {
+        if (supplyType == SupplyType.Ethereum) {
             IERC20(token).safeTransfer(receiver, amount);
         } else {
-            if (supply_type == SupplyType.Unknown) {
+            if (supplyType == SupplyType.Unknown) {
                 tokenSupplyType[token] = SupplyType.Gear;
             }
 
             IERC20Mintable(token).mint(receiver, amount);
         }
 
-        emit BridgingAccepted(receiver, token, amount);
+        emit BridgingAccepted(receiver, token, amount, sender1);
     }
 
     function getTokenSupplyType(address token) public view returns (SupplyType) {

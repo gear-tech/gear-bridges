@@ -366,7 +366,8 @@ contract MessageQueueTest is TestHelper {
         WithdrawMessage memory withdraw_msg = WithdrawMessage({
             receiver: ETH_ADDRESS_3,
             token: address(erc20_token),
-            amount: 10 * (10 ** 18)
+            amount: 10 * (10 ** 18),
+            sender: VARA_ADDRESS_3
         });
 
         VaraMessage memory vara_message = VaraMessage({
@@ -377,15 +378,18 @@ contract MessageQueueTest is TestHelper {
         });
 
         bytes32 msg_hash = vara_message.hash();
+        bytes32 hash1 = keccak256(abi.encodePacked(vara_message.nonce, vara_message.sender, vara_message.receiver, vara_message.data));
+        console.logBytes32(hash1);
+        console.log("*******");
         assertEq(
             msg_hash,
             bytes32(
-                0x06b36f6b3c72a30689ee21a949ddb99c071bb2e344e20350732b756d06d9f1ef
+                0xb4d0caba814ed52512784ca8bbee50bf4dfb85a9a86c88146cf45ad2bedeba92
             )
         );
 
         bytes32[] memory proof = new bytes32[](1);
-        proof[0] = bytes32(0xc805cc536d1a1916393a7213425df9d88b1a3bd81802c18d5e11c7486b3258c6);
+        proof[0] = bytes32(0x1f163ac825edf91f97faf688eb5ee88449b3ae1ff315141e8b9785707181fcea);
 
         bytes32 calculatedRoot = BinaryMerkleTree.processProof(
             proof,
@@ -397,7 +401,7 @@ contract MessageQueueTest is TestHelper {
         assertEq(
             calculatedRoot,
             bytes32(
-                0xf77542860e4ed694c115701d29d9caa2d0b4c0e11a236ad067880f46a2d68d6c
+                0xd4530dc2881e9a1a34d2bd07b3fa20984981c29beccc18a99421a7bc366654e4
             )
         );
 

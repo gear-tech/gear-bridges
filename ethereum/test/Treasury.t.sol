@@ -41,12 +41,8 @@ contract TreasuryTest is TestHelper {
         erc20_token.approve(address(erc20_manager), amount);
         erc20_manager.requestBridging(address(erc20_token), amount, VARA_ADDRESS_3);
 
-        bytes memory call_data = abi.encodePacked(address(this), address(erc20_token), amount);
-        console.log(amount);
-        console.logBytes(call_data);
-
+        bytes memory call_data = abi.encodePacked(address(this), address(erc20_token), amount, VARA_ADDRESS_3);
         vm.expectRevert();
-
         IMessageQueueReceiver(erc20_manager).processVaraMessage(VFT_MANAGER_ADDRESS, call_data);
 
         vm.prank(address(message_queue));

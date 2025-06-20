@@ -142,7 +142,7 @@ pub struct State {
     /// Address of the `ERC20Manager` contract address on Ethereum.
     ///
     /// Can be adjusted by the [State::admin].
-    erc20_manager_address: H160,
+    erc20_manager_address: Option<H160>,
     /// Mapping between `VFT` and `ERC20` tokens.
     ///
     /// Can be adjusted by the [State::admin].
@@ -164,10 +164,6 @@ pub struct State {
 /// Config that should be provided to this service on initialization.
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
-    /// Address of the `ERC20Manager` contract on ethereum.
-    ///
-    /// For more info see [State::erc20_manager_address].
-    pub erc20_manager_address: H160,
     /// Address of the gear-eth-bridge built-in actor.
     pub gear_bridge_builtin: ActorId,
     /// Address of the `historical-proxy` program.
@@ -210,8 +206,12 @@ impl VftManager {
     pub fn update_erc20_manager_address(&mut self, erc20_manager_address_new: H160) {
         self.ensure_admin();
 
-        let old = self.state_mut().erc20_manager_address;
-        self.state_mut().erc20_manager_address = erc20_manager_address_new;
+        if erc20_manager_address_new == Default::default() {
+            panic!("Invalid address of ERC20Manger");
+        }
+
+        let old = self.state_mut().erc20_manager_address.unwrap_or_default();
+        self.state_mut().erc20_manager_address = Some(erc20_manager_address_new);
 
         let _ = self.emit_event(Event::Erc20ManagerAddressChanged {
             old,
@@ -492,7 +492,7 @@ impl VftManager {
     }
 
     /// Get current [State::erc20_manager_address] address.
-    pub fn erc20_manager_address(&self) -> H160 {
+    pub fn erc20_manager_address(&self) -> Option<H160> {
         self.state().erc20_manager_address
     }
 
@@ -648,10 +648,10 @@ impl VftManager {
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 admin: source,
                 pause_admin: source,
-                erc20_manager_address: config.erc20_manager_address,
+                erc20_manager_address: None,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                is_paused: false,
+                is_paused: true,
                 vft_manager_new: None,
             });
             CONFIG = Some(config.config);

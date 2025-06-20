@@ -1,9 +1,5 @@
 /// Config that should be provided to this service on initialization.
 type InitConfig = struct {
-  /// Address of the `ERC20Manager` contract on ethereum.
-  /// 
-  /// For more info see [State::erc20_manager_address].
-  erc20_manager_address: h160,
   /// Address of the gear-eth-bridge built-in actor.
   gear_bridge_builtin: actor_id,
   /// Address of the `historical-proxy` program.
@@ -230,7 +226,7 @@ service VftManager {
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
   /// Get current [State::erc20_manager_address] address.
-  query Erc20ManagerAddress : () -> h160;
+  query Erc20ManagerAddress : () -> opt h160;
   /// Get current [State::gear_bridge_builtin] address.
   query GearBridgeBuiltin : () -> actor_id;
   /// Get current [Config].

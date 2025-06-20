@@ -125,6 +125,14 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
         hex::encode(vft_manager_id)
     );
 
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(conn.gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
     // deploy Vara Fungible Token
     let factory = vft_client::VftFactory::new(remoting.clone());
     let vft_id = factory
@@ -585,11 +593,20 @@ async fn upgrade() -> Result<()> {
         hex::encode(vft_manager_id)
     );
 
+    // unpause the VftManager
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
     // upgrade request from a non-authorized source should fail
     let api_unauthorized = api.clone().with(suri2).unwrap();
-    let mut service =
+    let mut service_unauthorized =
         vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
-    let result = service
+    let result = service_unauthorized
         .upgrade(Default::default())
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
@@ -597,13 +614,17 @@ async fn upgrade() -> Result<()> {
     assert!(result.is_err(), "result = {result:?}");
 
     // upgrade request to the running VftManager should fail
-    let mut service = vft_manager_client::VftManager::new(remoting.clone());
-    let result = service
+    service
         .upgrade(Default::default())
         .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_id)
-        .await;
+        .send(vft_manager_id)
+        .await
+        .unwrap();
     assert!(result.is_err(), "result = {result:?}");
+
+    let result = service.erc_20_manager_address().recv(vft_manager_id).await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_none(), "result = {result:?}");
 
     // deploy Vara Fungible Token
     let factory = vft_client::VftFactory::new(remoting.clone());
@@ -849,10 +870,18 @@ async fn update_vfts() -> Result<()> {
         hex::encode(vft_manager_id)
     );
 
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
     // non-authorized user cannot update VFT-addresses
     let api_unauthorized = api.clone().with(suri2).unwrap();
-    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized));
-    let result = service
+    let mut service_unauthorized = vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized));
+    let result = service_unauthorized
         .update_vfts([].to_vec())
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
@@ -917,7 +946,6 @@ async fn update_vfts() -> Result<()> {
         hex::encode(extended_vft_id_2)
     );
 
-    let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
         .map_vara_to_eth_address(vft, [1u8; 20].into(), TokenSupply::Gear)
         .with_gas_limit(gas_limit)
@@ -938,12 +966,11 @@ async fn update_vfts() -> Result<()> {
         .unwrap();
 
     // pause the VftManager
-    service
+    let _ = service
         .pause()
         .with_gas_limit(gas_limit)
         .send_recv(vft)
-        .await
-        .unwrap();
+        .await;
 
     // upgrade the VftManager so it exits
     service

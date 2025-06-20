@@ -87,7 +87,7 @@ async fn main() -> AnyResult<()> {
     let _ = dotenv::dotenv();
 
     pretty_env_logger::formatted_timed_builder()
-        .filter_level(log::LevelFilter::Off)
+        .filter_level(log::LevelFilter::Info)
         .format_target(false)
         .format_timestamp_secs()
         .parse_default_env()

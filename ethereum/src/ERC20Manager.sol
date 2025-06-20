@@ -18,6 +18,18 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
     address immutable MESSAGE_QUEUE;
     bytes32 immutable VFT_MANAGER;
 
+    /**
+     * @dev Size of the withdraw message.
+     *
+     *      ```solidity
+     *      struct WithdrawMessage {
+     *          address receiver; // 20 bytes
+     *          address token; // 20 bytes
+     *          uint256 amount; // 32 bytes
+     *          bytes32 tokens_sender; // 32 bytes
+     *      }
+     *      ```
+     */
     uint256 private constant WITHDRAW_MESSAGE_SIZE = 104; //20 + 20 + 32 + 32
 
     mapping(address token => SupplyType supplyType) private tokenSupplyType;
@@ -94,7 +106,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         if (msg.sender != MESSAGE_QUEUE) {
             revert NotAuthorized();
         }
-        if (payload.length != WITHDRAW_MESSAGE_SIZE) {
+        if (payload.length < WITHDRAW_MESSAGE_SIZE) {
             revert BadArguments();
         }
         if (sender != VFT_MANAGER) {
@@ -104,7 +116,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         address receiver = address(bytes20(payload[0:20]));
         address token = address(bytes20(payload[20:40]));
         uint256 amount = uint256(bytes32(payload[40:72]));
-        bytes32 sender1 = bytes32(payload[72:104]);
+        bytes32 tokens_sender = bytes32(payload[72:104]);
 
         SupplyType supplyType = tokenSupplyType[token];
 
@@ -118,7 +130,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
             IERC20Mintable(token).mint(receiver, amount);
         }
 
-        emit BridgingAccepted(receiver, token, amount, sender1);
+        emit BridgingAccepted(receiver, token, amount, tokens_sender);
     }
 
     function getTokenSupplyType(address token) public view returns (SupplyType) {

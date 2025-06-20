@@ -367,7 +367,7 @@ contract MessageQueueTest is TestHelper {
             receiver: ETH_ADDRESS_3,
             token: address(erc20_token),
             amount: 10 * (10 ** 18),
-            sender: VARA_ADDRESS_3
+            tokens_sender: VARA_ADDRESS_3
         });
 
         VaraMessage memory vara_message = VaraMessage({

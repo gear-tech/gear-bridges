@@ -18,10 +18,12 @@ use relayer::message_relayer::eth_to_gear::{
 };
 use ruzstd::{self, StreamingDecoder};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::AtomicUsize;
+use std::sync::LazyLock;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-const BLOCK_4011537: &[u8] = include_bytes!("./blocks/block_4011537.json.zst");
+/*const BLOCK_4011537: &[u8] = include_bytes!("./blocks/block_4011537.json.zst");
 const RECEIPTS_4011537: &[u8] = include_bytes!("./blocks/receipts_4011537.json.zst");
 const HEADER_4011538: &[u8] = include_bytes!("./blocks/headers_4011538.json.zst");
 
@@ -52,11 +54,6 @@ fn holesky_header(bytes: &[u8]) -> BlockHeader {
         .data
         .header
         .message
-}
-
-#[derive(Deserialize)]
-struct Receipts {
-    result: Vec<TransactionReceipt>,
 }
 
 fn holesky_receipt(bytes: &[u8]) -> Vec<TransactionReceipt> {
@@ -246,4 +243,85 @@ async fn test_relayer() {
         .await
         .is_ok());
     drop(deposit_event_tx);
+}
+*/
+
+#[derive(Deserialize, Debug)]
+struct Receipts {
+    result: Vec<TransactionReceipt>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Tx {
+    pub tx_hash: FixedBytes<32>,
+    pub tx_index: u64,
+    pub block_number: u64,
+    pub slot_number: u64,
+    pub epoch_number: u64,
+    pub checkpoint: u64,
+    pub receipts: Receipts,
+    pub block: BeaconBlockResponse<Block>,
+    pub headers: Vec<BeaconBlockHeaderResponse>,
+}
+
+impl Tx {
+    pub fn event(&self) -> EthToVaraEvent {
+        let receipts = self.receipts
+            .result
+            .iter()
+            .map(|tx_receipt| {
+                tx_receipt
+                    .transaction_index
+                    .map(|i| (i, eth_utils::map_receipt_envelope(tx_receipt)))
+            }).collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+        let headers = self.headers.clone();
+
+        let MerkleProof {
+            proof, receipt
+        } = eth_utils::generate_merkle_proof(self.tx_index,
+            &receipts
+        ).unwrap();
+        i
+        println!("Proof for tx #{}:\n{:#?}", self.tx_index, proof);
+
+        let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
+        Encodable::encode(&receipt, &mut receipt_rlp);
+
+        let block = BlockGenericForBlockBody {
+            slot: self.block.data.message.slot,
+            proposer_index: self.block.data.message.proposer_index,
+            parent_root: self.block.data.message.parent_root,
+            state_root: self.block.data.message.state_root,
+            body: self.block.data.message.body  
+        };
+
+        EthToVaraEvent {
+            proof_block: BlockInclusionProof {
+                block: self.block.data.message.clone(),
+                headers,
+                proof: proof.clone(),
+                transaction
+            }
+        }
+    }
+}
+
+static TRANSACTIONS_BYTES: &[u8] = include_bytes!("./transactions.json.zst");
+static TRANSACTIONS: LazyLock<HashMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
+    let mut txs = TRANSACTIONS_BYTES;
+    let mut decoder = StreamingDecoder::new(&mut txs).unwrap();
+    let mut result = Vec::new();
+    decoder.read_to_end(&mut result).unwrap();
+
+    let txs: Vec<Tx> = serde_json::from_slice(&result).unwrap();
+
+    txs.into_iter().map(|tx| (tx.tx_hash, tx)).collect()
+});
+
+struct MockProofComposer;
+
+#[tokio::test]
+async fn test_relayer() {
+    let txs = &*TRANSACTIONS;
 }

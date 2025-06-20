@@ -1,12 +1,6 @@
-const ETH_TOKEN_ABI = [
-  {
-    type: 'constructor',
-    inputs: [
-      { name: '_name', type: 'string', internalType: 'string' },
-      { name: '_symbol', type: 'string', internalType: 'string' },
-    ],
-    stateMutability: 'nonpayable',
-  },
+const WRAPPED_ETH_ABI = [
+  { type: 'constructor', inputs: [], stateMutability: 'nonpayable' },
+  { type: 'receive', stateMutability: 'payable' },
   {
     type: 'function',
     name: 'allowance',
@@ -39,8 +33,9 @@ const ETH_TOKEN_ABI = [
     name: 'decimals',
     inputs: [],
     outputs: [{ name: '', type: 'uint8', internalType: 'uint8' }],
-    stateMutability: 'pure',
+    stateMutability: 'view',
   },
+  { type: 'function', name: 'deposit', inputs: [], outputs: [], stateMutability: 'payable' },
   {
     type: 'function',
     name: 'name',
@@ -50,19 +45,11 @@ const ETH_TOKEN_ABI = [
   },
   {
     type: 'function',
-    name: 'release',
-    inputs: [{ name: 'amount', type: 'uint256', internalType: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
     name: 'symbol',
     inputs: [],
     outputs: [{ name: '', type: 'string', internalType: 'string' }],
     stateMutability: 'view',
   },
-  { type: 'function', name: 'tokenize', inputs: [], outputs: [], stateMutability: 'payable' },
   {
     type: 'function',
     name: 'totalSupply',
@@ -92,6 +79,13 @@ const ETH_TOKEN_ABI = [
     stateMutability: 'nonpayable',
   },
   {
+    type: 'function',
+    name: 'withdraw',
+    inputs: [{ name: 'value', type: 'uint256', internalType: 'uint256' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
     type: 'event',
     name: 'Approval',
     inputs: [
@@ -103,19 +97,10 @@ const ETH_TOKEN_ABI = [
   },
   {
     type: 'event',
-    name: 'Released',
+    name: 'Deposit',
     inputs: [
-      { name: 'owner', type: 'address', indexed: true, internalType: 'address' },
-      { name: 'amount', type: 'uint256', indexed: false, internalType: 'uint256' },
-    ],
-    anonymous: false,
-  },
-  {
-    type: 'event',
-    name: 'Tokenized',
-    inputs: [
-      { name: 'owner', type: 'address', indexed: true, internalType: 'address' },
-      { name: 'amount', type: 'uint256', indexed: false, internalType: 'uint256' },
+      { name: 'to', type: 'address', indexed: true, internalType: 'address' },
+      { name: 'value', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
     anonymous: false,
   },
@@ -125,6 +110,15 @@ const ETH_TOKEN_ABI = [
     inputs: [
       { name: 'from', type: 'address', indexed: true, internalType: 'address' },
       { name: 'to', type: 'address', indexed: true, internalType: 'address' },
+      { name: 'value', type: 'uint256', indexed: false, internalType: 'uint256' },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Withdrawal',
+    inputs: [
+      { name: 'from', type: 'address', indexed: true, internalType: 'address' },
       { name: 'value', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
     anonymous: false,
@@ -169,4 +163,4 @@ const ETH_TOKEN_ABI = [
   },
 ] as const;
 
-export { ETH_TOKEN_ABI };
+export { WRAPPED_ETH_ABI };

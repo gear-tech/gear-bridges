@@ -60,11 +60,11 @@ function TransactionModal({
   close,
 }: Props) {
   const { addressToToken } = useTokens();
-  const isGearNetwork = sourceNetwork === Network.Gear;
+  const isVaraNetwork = sourceNetwork === Network.Vara;
 
   const { fee: varaFee } = useVaraFee();
   const { fee: ethFee } = useEthFee();
-  const fee = isGearNetwork ? varaFee : ethFee;
+  const fee = isVaraNetwork ? varaFee : ethFee;
 
   const { account } = useAccount();
   const payFee = usePayFee();
@@ -72,7 +72,7 @@ function TransactionModal({
   const queryClient = useQueryClient();
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.AwaitingPayment;
 
-  const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isGearNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
+  const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isVaraNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
@@ -80,8 +80,8 @@ function TransactionModal({
   const sourceToken = addressToToken?.[source as HexString];
   const destinationToken = addressToToken?.[destination as HexString];
 
-  const formattedSenderAddress = isGearNetwork ? getVaraAddress(sender) : sender;
-  const formattedReceiverAddress = isGearNetwork ? receiver : getVaraAddress(receiver);
+  const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
+  const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const handlePayFeeButtonClick = () => {
     if (!nonce) throw new Error('Nonce is not found');
@@ -135,7 +135,7 @@ function TransactionModal({
 
           <span className={styles.network}>
             <SourceNetworkSVG />
-            {isGearNetwork ? 'Vara' : sourceNetwork}
+            {isVaraNetwork ? 'Vara' : sourceNetwork}
           </span>
         </span>
 
@@ -153,7 +153,7 @@ function TransactionModal({
 
           <span className={styles.network}>
             <DestinationNetworkSVG className={styles.networkSvg} />
-            {isGearNetwork ? destNetwork : 'Vara'}
+            {isVaraNetwork ? destNetwork : 'Vara'}
           </span>
         </span>
 
@@ -173,7 +173,7 @@ function TransactionModal({
       {renderProgressBar?.()}
 
       <footer className={styles.footer}>
-        <FeeAndTimeFooter isVaraNetwork={isGearNetwork} />
+        <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} />
 
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>

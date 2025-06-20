@@ -6,7 +6,7 @@ import { NETWORK_SVG } from './icons';
 import { TRANSACTIONS_LIMIT, TRANSFERS_QUERY } from './queries';
 
 const EXPLORER_URL = {
-  [Network.Gear]: 'https://vara.subscan.io',
+  [Network.Vara]: 'https://vara.subscan.io',
   [Network.Ethereum]: 'https://holesky.etherscan.io',
 } as const;
 

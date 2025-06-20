@@ -113,6 +113,10 @@ pub enum Event {
     ///
     /// It means that normal operation is continued after the pause.
     Unpaused,
+    /// Address of the `historical-proxy` program was changed.
+    HistoricalProxyAddressChanged { old: ActorId, new: ActorId },
+    /// Address of the `ERC20Manager` contract address on Ethereum was changed.
+    Erc20ManagerAddressChanged { old: H160, new: H160 },
 }
 
 static mut STATE: Option<State> = None;
@@ -203,17 +207,29 @@ pub struct Config {
 #[service(events = Event)]
 impl VftManager {
     /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
-    pub fn update_erc20_manager_address(&mut self, new_erc20_manager_address: H160) {
+    pub fn update_erc20_manager_address(&mut self, erc20_manager_address_new: H160) {
         self.ensure_admin();
 
-        self.state_mut().erc20_manager_address = new_erc20_manager_address;
+        let old = self.state_mut().erc20_manager_address;
+        self.state_mut().erc20_manager_address = erc20_manager_address_new;
+
+        let _ = self.emit_event(Event::Erc20ManagerAddressChanged {
+            old,
+            new: erc20_manager_address_new,
+        });
     }
 
     /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
     pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
 
+        let old = self.state_mut().historical_proxy_address;
         self.state_mut().historical_proxy_address = historical_proxy_address_new;
+
+        let _ = self.emit_event(Event::HistoricalProxyAddressChanged {
+            old,
+            new: historical_proxy_address_new,
+        });
     }
 
     /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].

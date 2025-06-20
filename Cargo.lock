@@ -4731,6 +4731,17 @@ dependencies = [
 [[package]]
 name = "gbuiltin-eth-bridge"
 version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "370e03a4190a34bbe99ab6736dc162d4c08c6a69cec8deffcd35ac7fc9f8aa82"
+dependencies = [
+ "gprimitives 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
+name = "gbuiltin-eth-bridge"
+version = "1.8.1"
 source = "git+https://github.com/gear-tech/gear.git?tag=v1.8.1#5419ab259257c47e1805a66786b7935905e6425f"
 dependencies = [
  "gprimitives 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
@@ -5624,7 +5635,7 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "dotenv",
- "gbuiltin-eth-bridge",
+ "gbuiltin-eth-bridge 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gclient",
  "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
@@ -9041,7 +9052,7 @@ dependencies = [
  "binary-merkle-tree",
  "frame-support 38.0.0",
  "frame-system 38.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
- "gbuiltin-eth-bridge",
+ "gbuiltin-eth-bridge 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
  "gear-common 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
  "gear-core 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
  "gprimitives 1.8.1 (git+https://github.com/gear-tech/gear.git?tag=v1.8.1)",
@@ -15296,7 +15307,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
  "ethereum-common",
- "gbuiltin-eth-bridge",
+ "gbuiltin-eth-bridge 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.16",
  "git-download",
  "gstd 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -17,26 +17,13 @@ contract ProxyContract is Proxy {
     }
 
     /**
-     * @dev If caller is the admin process the call internally, otherwise transparently fallback to
-     * the proxy behavior.
-     */
-    fallback() external payable override {
-        super._fallback();
-    }
-
-    receive() external payable {}
-
-    /**
      * @dev Upgrade the implementation of the proxy. See {ERC1967Utils-upgradeToAndCall}.
      *
      * Requirements:
      *
      * - If `data` is empty, `msg.value` must be zero.
      */
-    function upgradeToAndCall(
-        address newImplementation,
-        bytes calldata data
-    ) public {
+    function upgradeToAndCall(address newImplementation, bytes calldata data) public {
         if (msg.sender != ERC1967Utils.getAdmin()) {
             revert ProxyDeniedAdminAccess();
         } else {
@@ -59,21 +46,7 @@ contract ProxyContract is Proxy {
      * the https://eth.wiki/json-rpc/API#eth_getstorageat[`eth_getStorageAt`] RPC call.
      * `0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`
      */
-    function _implementation()
-        internal
-        view
-        virtual
-        override
-        returns (address)
-    {
+    function _implementation() internal view virtual override returns (address) {
         return ERC1967Utils.getImplementation();
-    }
-
-    function implementation() public view returns (address) {
-        return _implementation();
-    }
-
-    function proxyAdmin() public view returns (address) {
-        return ERC1967Utils.getAdmin();
     }
 }

@@ -111,7 +111,10 @@ impl TransactionManager {
                 .await;
             self.update_storage().await;
             match result {
-                Ok(false) => break,
+                Ok(false) => {
+                    log::error!("One of channels are closed, terminating transaction manager");
+                    break;
+                }
                 Ok(true) => continue,
                 Err(err) => {
                     log::error!("Transaction manager got error: {err:?}");
@@ -130,23 +133,27 @@ impl TransactionManager {
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
         tokio::select! {
-            Some(tx) = message_paid_events.recv() =>
-                if !self.compose_proof(tx, proof_composer).await? {
-                    return Ok(false);
-                },
-            Some(proof_composer::Response { payload, tx_uuid }) = proof_composer.recv() =>
-                if !self.submit_message(tx_uuid, payload, message_sender).await? {
-                    return Ok(false);
-                },
+           value = message_paid_events.recv() =>
+               match value {
+                   Some(tx) =>  self.compose_proof(tx, proof_composer).await,
+                   None => Ok(false)
+               },
+           value = proof_composer.recv() =>
+               match value {
+                   Some(proof_composer::Response { tx_uuid, payload }) =>
+                       self.submit_message(tx_uuid, payload, message_sender).await,
+                   None => Ok(false)
+               },
 
-            Some(response) = message_sender.recv() => self.finalize_transaction(response).await?,
-            else => {
-                log::info!("One of connections terminated, exiting...");
-                return Ok(false);
-            }
+           value = message_sender.recv() =>
+               match value {
+                   Some(response) => {
+                       self.finalize_transaction(response).await?;
+                       Ok(true)
+                    },
+                   None => Ok(false),
+               }
         }
-
-        Ok(true)
     }
 
     async fn resume(
@@ -193,7 +200,7 @@ impl TransactionManager {
 
         self.transactions.write().await.insert(tx_uuid, tx);
 
-        if proof_composer.compose_proof_for(tx_uuid, tx_hash) {
+        if !proof_composer.compose_proof_for(tx_uuid, tx_hash) {
             log::error!("Proof composer connection closed, exiting...");
             Ok(false)
         } else {

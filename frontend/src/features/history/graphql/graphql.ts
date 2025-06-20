@@ -120,9 +120,82 @@ export type CompletedTransfersConnection = {
   totalCount: Scalars['Int']['output'];
 };
 
+export type EthBridgeProgram = {
+  __typename?: 'EthBridgeProgram';
+  id: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+};
+
+export type EthBridgeProgramEdge = {
+  __typename?: 'EthBridgeProgramEdge';
+  cursor: Scalars['String']['output'];
+  node: EthBridgeProgram;
+};
+
+export enum EthBridgeProgramOrderByInput {
+  IdAsc = 'id_ASC',
+  IdAscNullsFirst = 'id_ASC_NULLS_FIRST',
+  IdAscNullsLast = 'id_ASC_NULLS_LAST',
+  IdDesc = 'id_DESC',
+  IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
+  IdDescNullsLast = 'id_DESC_NULLS_LAST',
+  NameAsc = 'name_ASC',
+  NameAscNullsFirst = 'name_ASC_NULLS_FIRST',
+  NameAscNullsLast = 'name_ASC_NULLS_LAST',
+  NameDesc = 'name_DESC',
+  NameDescNullsFirst = 'name_DESC_NULLS_FIRST',
+  NameDescNullsLast = 'name_DESC_NULLS_LAST',
+}
+
+export type EthBridgeProgramWhereInput = {
+  AND: InputMaybe<Array<EthBridgeProgramWhereInput>>;
+  OR: InputMaybe<Array<EthBridgeProgramWhereInput>>;
+  id_contains: InputMaybe<Scalars['String']['input']>;
+  id_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  id_endsWith: InputMaybe<Scalars['String']['input']>;
+  id_eq: InputMaybe<Scalars['String']['input']>;
+  id_gt: InputMaybe<Scalars['String']['input']>;
+  id_gte: InputMaybe<Scalars['String']['input']>;
+  id_in: InputMaybe<Array<Scalars['String']['input']>>;
+  id_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  id_lt: InputMaybe<Scalars['String']['input']>;
+  id_lte: InputMaybe<Scalars['String']['input']>;
+  id_not_contains: InputMaybe<Scalars['String']['input']>;
+  id_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  id_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  id_not_eq: InputMaybe<Scalars['String']['input']>;
+  id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  id_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  id_startsWith: InputMaybe<Scalars['String']['input']>;
+  name_contains: InputMaybe<Scalars['String']['input']>;
+  name_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  name_endsWith: InputMaybe<Scalars['String']['input']>;
+  name_eq: InputMaybe<Scalars['String']['input']>;
+  name_gt: InputMaybe<Scalars['String']['input']>;
+  name_gte: InputMaybe<Scalars['String']['input']>;
+  name_in: InputMaybe<Array<Scalars['String']['input']>>;
+  name_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  name_lt: InputMaybe<Scalars['String']['input']>;
+  name_lte: InputMaybe<Scalars['String']['input']>;
+  name_not_contains: InputMaybe<Scalars['String']['input']>;
+  name_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  name_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  name_not_eq: InputMaybe<Scalars['String']['input']>;
+  name_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  name_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  name_startsWith: InputMaybe<Scalars['String']['input']>;
+};
+
+export type EthBridgeProgramsConnection = {
+  __typename?: 'EthBridgeProgramsConnection';
+  edges: Array<EthBridgeProgramEdge>;
+  pageInfo: PageInfo;
+  totalCount: Scalars['Int']['output'];
+};
+
 export enum Network {
   Ethereum = 'Ethereum',
-  Gear = 'Gear',
+  Vara = 'Vara',
 }
 
 export type PageInfo = {
@@ -135,13 +208,17 @@ export type PageInfo = {
 
 export type Pair = {
   __typename?: 'Pair';
+  activeSinceBlock: Scalars['BigInt']['output'];
+  activeToBlock: Maybe<Scalars['BigInt']['output']>;
   ethToken: Scalars['String']['output'];
   ethTokenDecimals: Scalars['Int']['output'];
   ethTokenName: Scalars['String']['output'];
   ethTokenSymbol: Scalars['String']['output'];
   id: Scalars['String']['output'];
+  isActive: Scalars['Boolean']['output'];
   isRemoved: Scalars['Boolean']['output'];
   tokenSupply: Network;
+  upgradedTo: Maybe<Scalars['String']['output']>;
   varaToken: Scalars['String']['output'];
   varaTokenDecimals: Scalars['Int']['output'];
   varaTokenName: Scalars['String']['output'];
@@ -155,6 +232,18 @@ export type PairEdge = {
 };
 
 export enum PairOrderByInput {
+  ActiveSinceBlockAsc = 'activeSinceBlock_ASC',
+  ActiveSinceBlockAscNullsFirst = 'activeSinceBlock_ASC_NULLS_FIRST',
+  ActiveSinceBlockAscNullsLast = 'activeSinceBlock_ASC_NULLS_LAST',
+  ActiveSinceBlockDesc = 'activeSinceBlock_DESC',
+  ActiveSinceBlockDescNullsFirst = 'activeSinceBlock_DESC_NULLS_FIRST',
+  ActiveSinceBlockDescNullsLast = 'activeSinceBlock_DESC_NULLS_LAST',
+  ActiveToBlockAsc = 'activeToBlock_ASC',
+  ActiveToBlockAscNullsFirst = 'activeToBlock_ASC_NULLS_FIRST',
+  ActiveToBlockAscNullsLast = 'activeToBlock_ASC_NULLS_LAST',
+  ActiveToBlockDesc = 'activeToBlock_DESC',
+  ActiveToBlockDescNullsFirst = 'activeToBlock_DESC_NULLS_FIRST',
+  ActiveToBlockDescNullsLast = 'activeToBlock_DESC_NULLS_LAST',
   EthTokenDecimalsAsc = 'ethTokenDecimals_ASC',
   EthTokenDecimalsAscNullsFirst = 'ethTokenDecimals_ASC_NULLS_FIRST',
   EthTokenDecimalsAscNullsLast = 'ethTokenDecimals_ASC_NULLS_LAST',
@@ -185,6 +274,12 @@ export enum PairOrderByInput {
   IdDesc = 'id_DESC',
   IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
   IdDescNullsLast = 'id_DESC_NULLS_LAST',
+  IsActiveAsc = 'isActive_ASC',
+  IsActiveAscNullsFirst = 'isActive_ASC_NULLS_FIRST',
+  IsActiveAscNullsLast = 'isActive_ASC_NULLS_LAST',
+  IsActiveDesc = 'isActive_DESC',
+  IsActiveDescNullsFirst = 'isActive_DESC_NULLS_FIRST',
+  IsActiveDescNullsLast = 'isActive_DESC_NULLS_LAST',
   IsRemovedAsc = 'isRemoved_ASC',
   IsRemovedAscNullsFirst = 'isRemoved_ASC_NULLS_FIRST',
   IsRemovedAscNullsLast = 'isRemoved_ASC_NULLS_LAST',
@@ -197,6 +292,12 @@ export enum PairOrderByInput {
   TokenSupplyDesc = 'tokenSupply_DESC',
   TokenSupplyDescNullsFirst = 'tokenSupply_DESC_NULLS_FIRST',
   TokenSupplyDescNullsLast = 'tokenSupply_DESC_NULLS_LAST',
+  UpgradedToAsc = 'upgradedTo_ASC',
+  UpgradedToAscNullsFirst = 'upgradedTo_ASC_NULLS_FIRST',
+  UpgradedToAscNullsLast = 'upgradedTo_ASC_NULLS_LAST',
+  UpgradedToDesc = 'upgradedTo_DESC',
+  UpgradedToDescNullsFirst = 'upgradedTo_DESC_NULLS_FIRST',
+  UpgradedToDescNullsLast = 'upgradedTo_DESC_NULLS_LAST',
   VaraTokenDecimalsAsc = 'varaTokenDecimals_ASC',
   VaraTokenDecimalsAscNullsFirst = 'varaTokenDecimals_ASC_NULLS_FIRST',
   VaraTokenDecimalsAscNullsLast = 'varaTokenDecimals_ASC_NULLS_LAST',
@@ -226,6 +327,24 @@ export enum PairOrderByInput {
 export type PairWhereInput = {
   AND: InputMaybe<Array<PairWhereInput>>;
   OR: InputMaybe<Array<PairWhereInput>>;
+  activeSinceBlock_eq: InputMaybe<Scalars['BigInt']['input']>;
+  activeSinceBlock_gt: InputMaybe<Scalars['BigInt']['input']>;
+  activeSinceBlock_gte: InputMaybe<Scalars['BigInt']['input']>;
+  activeSinceBlock_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
+  activeSinceBlock_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  activeSinceBlock_lt: InputMaybe<Scalars['BigInt']['input']>;
+  activeSinceBlock_lte: InputMaybe<Scalars['BigInt']['input']>;
+  activeSinceBlock_not_eq: InputMaybe<Scalars['BigInt']['input']>;
+  activeSinceBlock_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
+  activeToBlock_eq: InputMaybe<Scalars['BigInt']['input']>;
+  activeToBlock_gt: InputMaybe<Scalars['BigInt']['input']>;
+  activeToBlock_gte: InputMaybe<Scalars['BigInt']['input']>;
+  activeToBlock_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
+  activeToBlock_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  activeToBlock_lt: InputMaybe<Scalars['BigInt']['input']>;
+  activeToBlock_lte: InputMaybe<Scalars['BigInt']['input']>;
+  activeToBlock_not_eq: InputMaybe<Scalars['BigInt']['input']>;
+  activeToBlock_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
   ethTokenDecimals_eq: InputMaybe<Scalars['Int']['input']>;
   ethTokenDecimals_gt: InputMaybe<Scalars['Int']['input']>;
   ethTokenDecimals_gte: InputMaybe<Scalars['Int']['input']>;
@@ -303,6 +422,9 @@ export type PairWhereInput = {
   id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
   id_not_startsWith: InputMaybe<Scalars['String']['input']>;
   id_startsWith: InputMaybe<Scalars['String']['input']>;
+  isActive_eq: InputMaybe<Scalars['Boolean']['input']>;
+  isActive_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  isActive_not_eq: InputMaybe<Scalars['Boolean']['input']>;
   isRemoved_eq: InputMaybe<Scalars['Boolean']['input']>;
   isRemoved_isNull: InputMaybe<Scalars['Boolean']['input']>;
   isRemoved_not_eq: InputMaybe<Scalars['Boolean']['input']>;
@@ -311,6 +433,23 @@ export type PairWhereInput = {
   tokenSupply_isNull: InputMaybe<Scalars['Boolean']['input']>;
   tokenSupply_not_eq: InputMaybe<Network>;
   tokenSupply_not_in: InputMaybe<Array<Network>>;
+  upgradedTo_contains: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_endsWith: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_eq: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_gt: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_gte: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_in: InputMaybe<Array<Scalars['String']['input']>>;
+  upgradedTo_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  upgradedTo_lt: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_lte: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_not_contains: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_not_eq: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  upgradedTo_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  upgradedTo_startsWith: InputMaybe<Scalars['String']['input']>;
   varaTokenDecimals_eq: InputMaybe<Scalars['Int']['input']>;
   varaTokenDecimals_gt: InputMaybe<Scalars['Int']['input']>;
   varaTokenDecimals_gte: InputMaybe<Scalars['Int']['input']>;
@@ -385,6 +524,9 @@ export type Query = {
   completedTransferById: Maybe<CompletedTransfer>;
   completedTransfers: Array<CompletedTransfer>;
   completedTransfersConnection: CompletedTransfersConnection;
+  ethBridgeProgramById: Maybe<EthBridgeProgram>;
+  ethBridgePrograms: Array<EthBridgeProgram>;
+  ethBridgeProgramsConnection: EthBridgeProgramsConnection;
   pairById: Maybe<Pair>;
   pairs: Array<Pair>;
   pairsConnection: PairsConnection;
@@ -392,6 +534,9 @@ export type Query = {
   transferById: Maybe<Transfer>;
   transfers: Array<Transfer>;
   transfersConnection: TransfersConnection;
+  varaBridgeProgramById: Maybe<VaraBridgeProgram>;
+  varaBridgePrograms: Array<VaraBridgeProgram>;
+  varaBridgeProgramsConnection: VaraBridgeProgramsConnection;
 };
 
 export type QueryCompletedTransferByIdArgs = {
@@ -410,6 +555,24 @@ export type QueryCompletedTransfersConnectionArgs = {
   first: InputMaybe<Scalars['Int']['input']>;
   orderBy: Array<CompletedTransferOrderByInput>;
   where: InputMaybe<CompletedTransferWhereInput>;
+};
+
+export type QueryEthBridgeProgramByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+export type QueryEthBridgeProgramsArgs = {
+  limit: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy: InputMaybe<Array<EthBridgeProgramOrderByInput>>;
+  where: InputMaybe<EthBridgeProgramWhereInput>;
+};
+
+export type QueryEthBridgeProgramsConnectionArgs = {
+  after: InputMaybe<Scalars['String']['input']>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  orderBy: Array<EthBridgeProgramOrderByInput>;
+  where: InputMaybe<EthBridgeProgramWhereInput>;
 };
 
 export type QueryPairByIdArgs = {
@@ -448,6 +611,24 @@ export type QueryTransfersConnectionArgs = {
   where: InputMaybe<TransferWhereInput>;
 };
 
+export type QueryVaraBridgeProgramByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+export type QueryVaraBridgeProgramsArgs = {
+  limit: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy: InputMaybe<Array<VaraBridgeProgramOrderByInput>>;
+  where: InputMaybe<VaraBridgeProgramWhereInput>;
+};
+
+export type QueryVaraBridgeProgramsConnectionArgs = {
+  after: InputMaybe<Scalars['String']['input']>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  orderBy: Array<VaraBridgeProgramOrderByInput>;
+  where: InputMaybe<VaraBridgeProgramWhereInput>;
+};
+
 export type SquidStatus = {
   __typename?: 'SquidStatus';
   /** The hash of the last processed finalized block */
@@ -470,7 +651,7 @@ export enum Status {
 export type Transfer = {
   __typename?: 'Transfer';
   amount: Scalars['BigInt']['output'];
-  blockNumber: Scalars['String']['output'];
+  blockNumber: Scalars['BigInt']['output'];
   completedAt: Maybe<Scalars['DateTime']['output']>;
   destNetwork: Network;
   destination: Scalars['String']['output'];
@@ -590,23 +771,15 @@ export type TransferWhereInput = {
   amount_lte: InputMaybe<Scalars['BigInt']['input']>;
   amount_not_eq: InputMaybe<Scalars['BigInt']['input']>;
   amount_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
-  blockNumber_contains: InputMaybe<Scalars['String']['input']>;
-  blockNumber_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  blockNumber_endsWith: InputMaybe<Scalars['String']['input']>;
-  blockNumber_eq: InputMaybe<Scalars['String']['input']>;
-  blockNumber_gt: InputMaybe<Scalars['String']['input']>;
-  blockNumber_gte: InputMaybe<Scalars['String']['input']>;
-  blockNumber_in: InputMaybe<Array<Scalars['String']['input']>>;
+  blockNumber_eq: InputMaybe<Scalars['BigInt']['input']>;
+  blockNumber_gt: InputMaybe<Scalars['BigInt']['input']>;
+  blockNumber_gte: InputMaybe<Scalars['BigInt']['input']>;
+  blockNumber_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
   blockNumber_isNull: InputMaybe<Scalars['Boolean']['input']>;
-  blockNumber_lt: InputMaybe<Scalars['String']['input']>;
-  blockNumber_lte: InputMaybe<Scalars['String']['input']>;
-  blockNumber_not_contains: InputMaybe<Scalars['String']['input']>;
-  blockNumber_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
-  blockNumber_not_endsWith: InputMaybe<Scalars['String']['input']>;
-  blockNumber_not_eq: InputMaybe<Scalars['String']['input']>;
-  blockNumber_not_in: InputMaybe<Array<Scalars['String']['input']>>;
-  blockNumber_not_startsWith: InputMaybe<Scalars['String']['input']>;
-  blockNumber_startsWith: InputMaybe<Scalars['String']['input']>;
+  blockNumber_lt: InputMaybe<Scalars['BigInt']['input']>;
+  blockNumber_lte: InputMaybe<Scalars['BigInt']['input']>;
+  blockNumber_not_eq: InputMaybe<Scalars['BigInt']['input']>;
+  blockNumber_not_in: InputMaybe<Array<Scalars['BigInt']['input']>>;
   completedAt_eq: InputMaybe<Scalars['DateTime']['input']>;
   completedAt_gt: InputMaybe<Scalars['DateTime']['input']>;
   completedAt_gte: InputMaybe<Scalars['DateTime']['input']>;
@@ -768,6 +941,79 @@ export type TransfersConnection = {
   totalCount: Scalars['Int']['output'];
 };
 
+export type VaraBridgeProgram = {
+  __typename?: 'VaraBridgeProgram';
+  id: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+};
+
+export type VaraBridgeProgramEdge = {
+  __typename?: 'VaraBridgeProgramEdge';
+  cursor: Scalars['String']['output'];
+  node: VaraBridgeProgram;
+};
+
+export enum VaraBridgeProgramOrderByInput {
+  IdAsc = 'id_ASC',
+  IdAscNullsFirst = 'id_ASC_NULLS_FIRST',
+  IdAscNullsLast = 'id_ASC_NULLS_LAST',
+  IdDesc = 'id_DESC',
+  IdDescNullsFirst = 'id_DESC_NULLS_FIRST',
+  IdDescNullsLast = 'id_DESC_NULLS_LAST',
+  NameAsc = 'name_ASC',
+  NameAscNullsFirst = 'name_ASC_NULLS_FIRST',
+  NameAscNullsLast = 'name_ASC_NULLS_LAST',
+  NameDesc = 'name_DESC',
+  NameDescNullsFirst = 'name_DESC_NULLS_FIRST',
+  NameDescNullsLast = 'name_DESC_NULLS_LAST',
+}
+
+export type VaraBridgeProgramWhereInput = {
+  AND: InputMaybe<Array<VaraBridgeProgramWhereInput>>;
+  OR: InputMaybe<Array<VaraBridgeProgramWhereInput>>;
+  id_contains: InputMaybe<Scalars['String']['input']>;
+  id_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  id_endsWith: InputMaybe<Scalars['String']['input']>;
+  id_eq: InputMaybe<Scalars['String']['input']>;
+  id_gt: InputMaybe<Scalars['String']['input']>;
+  id_gte: InputMaybe<Scalars['String']['input']>;
+  id_in: InputMaybe<Array<Scalars['String']['input']>>;
+  id_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  id_lt: InputMaybe<Scalars['String']['input']>;
+  id_lte: InputMaybe<Scalars['String']['input']>;
+  id_not_contains: InputMaybe<Scalars['String']['input']>;
+  id_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  id_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  id_not_eq: InputMaybe<Scalars['String']['input']>;
+  id_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  id_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  id_startsWith: InputMaybe<Scalars['String']['input']>;
+  name_contains: InputMaybe<Scalars['String']['input']>;
+  name_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  name_endsWith: InputMaybe<Scalars['String']['input']>;
+  name_eq: InputMaybe<Scalars['String']['input']>;
+  name_gt: InputMaybe<Scalars['String']['input']>;
+  name_gte: InputMaybe<Scalars['String']['input']>;
+  name_in: InputMaybe<Array<Scalars['String']['input']>>;
+  name_isNull: InputMaybe<Scalars['Boolean']['input']>;
+  name_lt: InputMaybe<Scalars['String']['input']>;
+  name_lte: InputMaybe<Scalars['String']['input']>;
+  name_not_contains: InputMaybe<Scalars['String']['input']>;
+  name_not_containsInsensitive: InputMaybe<Scalars['String']['input']>;
+  name_not_endsWith: InputMaybe<Scalars['String']['input']>;
+  name_not_eq: InputMaybe<Scalars['String']['input']>;
+  name_not_in: InputMaybe<Array<Scalars['String']['input']>>;
+  name_not_startsWith: InputMaybe<Scalars['String']['input']>;
+  name_startsWith: InputMaybe<Scalars['String']['input']>;
+};
+
+export type VaraBridgeProgramsConnection = {
+  __typename?: 'VaraBridgeProgramsConnection';
+  edges: Array<VaraBridgeProgramEdge>;
+  pageInfo: PageInfo;
+  totalCount: Scalars['Int']['output'];
+};
+
 export type TransfersQueryQueryVariables = Exact<{
   limit: Scalars['Int']['input'];
   offset: Scalars['Int']['input'];
@@ -814,7 +1060,7 @@ export type PairsQueryQuery = {
     ethTokenName: string;
     ethTokenSymbol: string;
     id: string;
-    isRemoved: boolean;
+    isActive: boolean;
     tokenSupply: Network;
     varaToken: string;
     varaTokenDecimals: number;
@@ -962,7 +1208,7 @@ export const PairsQueryDocument = {
                 { kind: 'Field', name: { kind: 'Name', value: 'ethTokenName' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'ethTokenSymbol' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'id' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'isRemoved' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'isActive' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'tokenSupply' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'varaToken' } },
                 { kind: 'Field', name: { kind: 'Name', value: 'varaTokenDecimals' } },

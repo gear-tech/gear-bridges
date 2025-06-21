@@ -544,6 +544,35 @@ impl VftManager {
         }
     }
 
+    pub async fn insert_transactions(&mut self, data: Vec<(u64, u64)>) {
+        self.ensure_admin();
+
+        if !self.state().is_paused {
+            panic!("Not paused");
+        }
+
+        let transactions = submit_receipt::transactions_mut();
+        for key in data {
+            if transactions.contains(&key) {
+                continue;
+            }
+
+            if transactions.len() >= submit_receipt::TX_HISTORY_DEPTH {
+                if transactions
+                    .first()
+                    .map(|first| &key < first)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
+                transactions.pop_first();
+            }
+
+            transactions.insert(key);
+        }
+    }
+
     /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Populates the collection with processed transactions.
     ///

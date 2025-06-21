@@ -1119,3 +1119,102 @@ async fn init() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn migrate_transactions() -> Result<()> {
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE, DEFAULT_BALANCE],
+        "vft-manager",
+        &[WASM_VFT_MANAGER],
+    )
+    .await;
+
+    let accounts = conn.accounts;
+    let code_ids = conn.code_ids;
+    let gas_limit = conn.gas_limit;
+    let salt = conn.salt;
+    let suri = accounts[0].2.clone();
+    let suri2 = accounts[1].2.clone();
+    let code_id = code_ids[0];
+    let api = conn.api.with(suri).unwrap();
+
+    // deploy VFT-manager
+    let remoting = GClientRemoting::new(api.clone());
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
+    let vft_manager_id = factory
+        .new(InitConfig {
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    // request from a non-authorized source should fail
+    let api_unauthorized = api.clone().with(suri2).unwrap();
+    let mut service =
+        vft_manager_client::VftManager::new(GClientRemoting::new(api_unauthorized.clone()));
+    let result = service
+        .insert_transactions(vec![])
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err(), "result = {result:?}");
+
+    // request to the running VftManager should fail
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    let result = service
+        .insert_transactions(vec![])
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err(), "result = {result:?}");
+
+    // pause the VftManager
+    service
+        .pause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    // insert some transactions
+    let transactions = vec![(4_178_375, 22), (4_182_830, 22), (4_182_948, 26)];
+    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    service
+        .insert_transactions(transactions.clone())
+        .with_gas_limit(gas_limit)
+        .send(vft_manager_id)
+        .await
+        .unwrap();
+
+    let result = service
+        .transactions(Order::Direct, 0, transactions.len() as _)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(result, transactions);
+
+    Ok(())
+}

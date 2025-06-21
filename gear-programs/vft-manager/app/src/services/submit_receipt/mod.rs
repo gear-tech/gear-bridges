@@ -13,7 +13,7 @@ static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 
 /// Maximum amount of successfully processed Ethereum transactions that this
 /// program can store.
-const TX_HISTORY_DEPTH: usize = 50_000_000;
+pub const TX_HISTORY_DEPTH: usize = 50_000_000;
 
 /// Get reference to a transactions storage.
 pub fn transactions() -> &'static BTreeSet<(u64, u64)> {

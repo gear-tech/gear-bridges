@@ -205,10 +205,6 @@ impl JSONStorage {
     }
 
     async fn write_tx(&self, tx_uuid: &Uuid, tx: &Transaction) -> anyhow::Result<()> {
-        if matches!(tx.status, TxStatus::Completed) {
-            self.block_storage().complete_transaction(&tx.tx).await;
-        }
-
         let filename = self.path.join(tx_uuid.to_string());
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)

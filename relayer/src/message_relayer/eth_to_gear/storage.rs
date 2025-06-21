@@ -104,7 +104,7 @@ impl BlockStorage {
     pub async fn prune(&self) {
         let mut blocks = self.blocks.write().await;
 
-        if blocks.len() <= 100 {
+        if blocks.len() <= self.n_to_keep {
             return;
         }
 

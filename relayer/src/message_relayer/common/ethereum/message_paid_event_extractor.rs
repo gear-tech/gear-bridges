@@ -12,7 +12,7 @@ use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::{EthereumBlockNumber, TxHashWithSlot},
-        eth_to_gear::storage::*,
+        eth_to_gear::storage::{Storage, BlockStorage},
     },
 };
 

@@ -82,7 +82,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
     onSubmit,
-    requiredBalance: requiredBalance!,
+    requiredBalance,
     onValidation: () => setIsDetailsOpen(true),
   });
 
@@ -186,7 +186,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             isOpen={isDetailsOpen}
             onToggle={() => setIsDetailsOpen((prevValue) => !prevValue)}
             isVaraNetwork={network.isVara}
-            feeValue={requiredBalance?.data}
+            feeValue={requiredBalance?.data?.fees}
             decimals={network.isVara ? 12 : 18}
             isLoading={requiredBalance?.isPending}
           />

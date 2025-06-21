@@ -6,7 +6,6 @@ import { definedAssert } from '@/utils';
 
 import { SUBMIT_STATUS } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { useApprove } from './use-approve';
@@ -85,18 +84,23 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
     return txs;
   };
 
-  const validateBalance = async (txs: Transaction[]) => {
+  const getRequiredBalance = async (values: FormattedValues) => {
     definedAssert(accountBalance, 'Account balance');
+    definedAssert(fee, 'Fee value');
 
+    const txs = await getTransactions(values);
     const { maxFeePerGas } = await estimateFeesPerGas(config);
 
     const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * maxFeePerGas;
     const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
     const requiredBalance = totalValue + totalGasLimit;
+    const fees = totalGasLimit + fee;
 
-    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError('ETH', requiredBalance);
+    return { requiredBalance, fees };
   };
+
+  const requiredBalance = useMutation({ mutationFn: getRequiredBalance });
 
   const resetState = () => {
     mint.reset();
@@ -107,7 +111,6 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
   const onSubmit = async (values: FormattedValues) => {
     const txs = await getTransactions(values);
-    await validateBalance(txs);
 
     resetState();
     onTransactionStart(values);
@@ -127,7 +130,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
   const { mutateAsync, isPending, error } = useMutation({ mutationFn: onSubmit });
   const status = getStatus();
 
-  return { onSubmit: mutateAsync, isPending, error, status };
+  return { onSubmit: mutateAsync, isPending: isPending || requiredBalance.isPending, error, status, requiredBalance };
 }
 
 export { useHandleEthSubmit };

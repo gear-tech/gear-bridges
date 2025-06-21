@@ -126,8 +126,9 @@ function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSu
     return result;
   };
 
-  const getRequiredBalanceFn = async (values: FormattedValues) => {
+  const getRequiredBalance = async (values: FormattedValues) => {
     definedAssert(api, 'API');
+    definedAssert(fee, 'Fee value');
 
     const txs = await getTransactions(values);
 
@@ -135,10 +136,13 @@ function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSu
     const totalEstimatedFee = txs.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
     const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
-    return totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
+    const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
+    const fees = totalGasLimit + totalEstimatedFee + fee;
+
+    return { requiredBalance, fees };
   };
 
-  const requiredBalance = useMutation({ mutationFn: getRequiredBalanceFn });
+  const requiredBalance = useMutation({ mutationFn: getRequiredBalance });
 
   const getStatus = () => {
     if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;

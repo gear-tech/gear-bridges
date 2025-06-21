@@ -93,7 +93,7 @@ contract ERC20ManagerTest is Test {
 
     function test_unauthorizedFails() public {
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
-        vm.expectRevert(IERC20Manager.BadVftManagerAddress.selector);
+        vm.expectRevert(IERC20Manager.BadSender.selector);
         erc20Manager.processVaraMessage(
             FAKE_VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );

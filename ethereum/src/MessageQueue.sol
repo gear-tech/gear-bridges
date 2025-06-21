@@ -15,22 +15,43 @@ contract MessageQueue is IMessageQueue {
 
     IRelayer immutable RELAYER;
 
+    mapping(bytes32 messageNonce => bool isProcessed) private _processedMessages;
+
+    /**
+     * @dev Initializes the MessageQueue contract with the Relayer address.
+     * @param relayer The address of the Relayer contract that will store merkle roots.
+     */
     constructor(IRelayer relayer) {
         RELAYER = relayer;
     }
 
-    mapping(bytes32 => bool) private _processedMessages;
-
     /**
-     * @dev Unpack message from merkle tree and relay it to the receiver.
+     * @dev Verifies and processes message originated from Vara Network.
      *
-     * @param blockNumber - Block number of block containing target merkle tree.
-     * @param totalLeaves - Number of leaves in target merkle tree.
-     * @param leafIndex - Index of leaf containing target message. See `binary_merkle_tree` for
-     *  reference.
-     * @param message - Target message.
-     * @param proof - Merkle proof of inclusion of leaf #`leafIndex` into target merkle tree that
-     *  was included into `blockNumber`.
+     *      In this process, MessageQueue smart contract will calculate Merkle root
+     *      for message and validate that it corresponds to Merkle root which is already stored
+     *      in Relayer smart contract for same block number. If proof is correct, nonce of received
+     *      message will be stored in smart contract and message will be forwarded to adequate message
+     *      receiver, either ERC20Manager or ProxyUpdater smart contract.
+     *
+     *      Upon successful processing of the message MessageProcessed event is emited.
+     *
+     *      It is important to note that anyone can submit a message because all messages
+     *      will be validated against previously stored Merkle roots in the Relayer smart contract.
+     *
+     * @param blockNumber Block number of block containing target merkle tree.
+     * @param totalLeaves Number of leaves in target merkle tree.
+     * @param leafIndex Index of leaf containing target message.
+     * @param message Target message.
+     * @param proof Merkle proof of inclusion of leaf #`leafIndex` into target merkle tree that
+     *              was included into `blockNumber`.
+     *
+     * @dev Reverts if:
+     *      - Relayer emergency stop status is set.
+     *      - Message nonce is already processed.
+     *      - Merkle root is not set for the block number in Relayer smart contract.
+     *      - Merkle proof is invalid.
+     *      - Message processing fails (failed to call IMessageQueueReceiver interface).
      */
     function processMessage(
         uint256 blockNumber,
@@ -38,7 +59,7 @@ contract MessageQueue is IMessageQueue {
         uint256 leafIndex,
         VaraMessage calldata message,
         bytes32[] calldata proof
-    ) public {
+    ) external {
         if (RELAYER.emergencyStop()) {
             revert RelayerEmergencyStop();
         }

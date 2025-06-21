@@ -18,7 +18,16 @@ import {MessageQueue} from "../src/MessageQueue.sol";
 import {IMessageQueue, VaraMessage, Hasher} from "../src/interfaces/IMessageQueue.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 
-import {TestHelper, OWNER, USER, VARA_ADDRESS_3, VARA_ADDRESS_7, ETH_ADDRESS_3, ETH_ADDRESS_5, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
+import {
+    TestHelper,
+    OWNER,
+    USER,
+    VARA_ADDRESS_3,
+    VARA_ADDRESS_7,
+    ETH_ADDRESS_3,
+    ETH_ADDRESS_5,
+    VFT_MANAGER_ADDRESS
+} from "./TestHelper.t.sol";
 
 contract MessageQueueTest is TestHelper {
     using Address for address;
@@ -27,9 +36,7 @@ contract MessageQueueTest is TestHelper {
 
     uint256 private constant BLOCK_ID = 273;
     bytes32 private constant BLOCK_MERKLE_ROOT =
-        bytes32(
-            0xa25559d02a45bf58afd5344964269d38e947a432c1097c342f937a4ad052a683
-        );
+        bytes32(0xa25559d02a45bf58afd5344964269d38e947a432c1097c342f937a4ad052a683);
 
     function setUp() public override {
         super.setUp();
@@ -46,320 +53,148 @@ contract MessageQueueTest is TestHelper {
     }
 
     function test_calculate_root_buffer() public pure {
-        // prettier-ignore
-        uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
-        bytes memory m = new bytes(msgt.length);
-        for (uint i = 0; i < m.length; i++) {
-            m[i] = bytes1(msgt[i]);
-        }
+        bytes memory m = bytes(
+            hex"0303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030300000000000000000000000000000000000000000000000000000000000000030303"
+        );
 
         bytes32 messageHash = keccak256(m);
         console.logBytes32(messageHash);
 
         bytes32[] memory proof = new bytes32[](1);
-        proof[0] = bytes32(
-            0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8
-        );
+        proof[0] = bytes32(0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            3,
-            2,
-            messageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 3, 2, messageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0x9f88b3c5da39e8d08c9ce048d51e9be248a1c07b2abc986ea5522d2f8e662044
-            )
-        );
+        assertEq(root, bytes32(0x9f88b3c5da39e8d08c9ce048d51e9be248a1c07b2abc986ea5522d2f8e662044));
     }
 
     function test_calculate_root_buffer_2() public pure {
-        // prettier-ignore
-        uint8[86] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
-        bytes memory m = new bytes(msgt.length);
-        for (uint i = 0; i < m.length; i++) {
-            m[i] = bytes1(msgt[i]);
-        }
+        bytes memory m = bytes(
+            hex"0303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030300000000000000000000000000000000000000000000000000000000000000030303"
+        );
 
         bytes32 messageHash = keccak256(m);
         console.logBytes32(messageHash);
 
         bytes32[] memory proof = new bytes32[](1);
-        proof[0] = bytes32(
-            0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e
-        );
+        proof[0] = bytes32(0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e);
         console.logBytes32(proof[0]);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            3,
-            2,
-            messageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 3, 2, messageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0xbd0053b78e8ecfb691c483db70d9792b0ff1b9956dc78967af2c4d4f1872f206
-            )
-        );
+        assertEq(root, bytes32(0xbd0053b78e8ecfb691c483db70d9792b0ff1b9956dc78967af2c4d4f1872f206));
     }
 
     function test_calculate_root_buffer_3() public pure {
-        // prettier-ignore
-        uint8[98] memory msgt = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
-        bytes memory m = new bytes(msgt.length);
-        for (uint i = 0; i < m.length; i++) {
-            m[i] = bytes1(msgt[i]);
-        }
+        bytes memory m = bytes(
+            hex"0404040404040404040404040404040404040404040404040404040404040404030303030303030303030303030303030303030303030303030303030303030300000000000000000000000000000000000000000000000000000000000000030303"
+        );
 
         bytes32 messageHash = keccak256(m);
         console.logBytes32(messageHash);
 
         bytes32[] memory proof = new bytes32[](1);
-        proof[0] = bytes32(
-            0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8
-        );
+        proof[0] = bytes32(0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8);
         console.logBytes32(proof[0]);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            3,
-            2,
-            messageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 3, 2, messageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0x7188ce46fd6dc24003be8667cd73ca4a4cef97687b21343020681d2e192f5fcc
-            )
-        );
+        assertEq(root, bytes32(0x7188ce46fd6dc24003be8667cd73ca4a4cef97687b21343020681d2e192f5fcc));
     }
 
     function test_calculate_root() public pure {
-        uint8[2] memory msgt = [3, 3];
-        bytes memory m = new bytes(msgt.length);
-        for (uint i = 0; i < m.length; i++) {
-            m[i] = bytes1(msgt[i]);
-        }
+        bytes memory payload = bytes(hex"0303");
 
-        bytes memory payload = abi.encodePacked(m);
-
-        VaraMessage memory content_message = VaraMessage({
-            sender: VARA_ADDRESS_3,
-            receiver: ETH_ADDRESS_3,
-            nonce: bytes32(uint256(0x03)),
-            data: payload
-        });
+        VaraMessage memory content_message =
+            VaraMessage({sender: VARA_ADDRESS_3, receiver: ETH_ADDRESS_3, nonce: bytes32(uint256(0x03)), data: payload});
 
         bytes memory ms = abi.encodePacked(
-            content_message.nonce,
-            content_message.sender,
-            content_message.receiver,
-            content_message.data
+            content_message.nonce, content_message.sender, content_message.receiver, content_message.data
         );
 
-        bytes32 expectedMessageHash = keccak256(
-            abi.encodePacked(keccak256(ms))
-        );
+        bytes32 expectedMessageHash = keccak256(abi.encodePacked(keccak256(ms)));
 
         bytes32 msg_hash = content_message.hash();
-        assertEq(
-            msg_hash,
-            bytes32(
-                0xe846804ca285c03c8923a0ed51340c4c29bcc7b005c5eeb7fb5b4b54a3f8bca5
-            )
-        );
+        assertEq(msg_hash, bytes32(0xe846804ca285c03c8923a0ed51340c4c29bcc7b005c5eeb7fb5b4b54a3f8bca5));
 
         assertEq(expectedMessageHash, msg_hash);
 
         bytes32[] memory proof = new bytes32[](1);
-        proof[0] = bytes32(
-            0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e
-        );
+        proof[0] = bytes32(0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            3,
-            2,
-            expectedMessageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 3, 2, expectedMessageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0xc739e5c26b49b1a0753fc66f21703ef508ecb53549290219fba0df2819d95aa0
-            )
-        );
+        assertEq(root, bytes32(0xc739e5c26b49b1a0753fc66f21703ef508ecb53549290219fba0df2819d95aa0));
     }
 
     function test_calculate_root_buffer_leaf_2() public pure {
-        // prettier-ignore
-        uint8[98] memory msgt = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2];
-
-        bytes memory ms = new bytes(msgt.length);
-        for (uint i = 0; i < ms.length; i++) {
-            ms[i] = bytes1(msgt[i]);
-        }
+        bytes memory ms = bytes(
+            hex"0202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200000000000000000000000000000000000000000000000000000000000000020202"
+        );
 
         bytes32 messageHash = keccak256(ms);
         console.logBytes32(messageHash);
 
         bytes32[] memory proof = new bytes32[](7);
-        proof[0] = bytes32(
-            0xac9f1d13ebef420edd0101b06f534ec2495ca41af6c23cf14bc94f67bae8dfe1
-        );
-        proof[1] = bytes32(
-            0x30cdfaedf81fed4b4564ef0e8c04c56d3481e0121501c2dcc12288e01f3ceb94
-        );
-        proof[2] = bytes32(
-            0xf87bc57ba7962a2b733f78df0e777ca31499b78c4d6f64c6d49ab0fd1dc60f44
-        );
-        proof[3] = bytes32(
-            0xed0dcf662c10b0827133e6e99e415b0d97da1a92ce69eb717838d55cc9067c49
-        );
-        proof[4] = bytes32(
-            0x2387406c963403e53d56621d1cef73b80089994ee4c5866ae2d21eaa9fcdfe01
-        );
-        proof[5] = bytes32(
-            0x08ab6b1030ad30cece656ac2638a8aed651bd759a6486241a293610f84927f52
-        );
-        proof[6] = bytes32(
-            0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac
-        );
+        proof[0] = bytes32(0xac9f1d13ebef420edd0101b06f534ec2495ca41af6c23cf14bc94f67bae8dfe1);
+        proof[1] = bytes32(0x30cdfaedf81fed4b4564ef0e8c04c56d3481e0121501c2dcc12288e01f3ceb94);
+        proof[2] = bytes32(0xf87bc57ba7962a2b733f78df0e777ca31499b78c4d6f64c6d49ab0fd1dc60f44);
+        proof[3] = bytes32(0xed0dcf662c10b0827133e6e99e415b0d97da1a92ce69eb717838d55cc9067c49);
+        proof[4] = bytes32(0x2387406c963403e53d56621d1cef73b80089994ee4c5866ae2d21eaa9fcdfe01);
+        proof[5] = bytes32(0x08ab6b1030ad30cece656ac2638a8aed651bd759a6486241a293610f84927f52);
+        proof[6] = bytes32(0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            101,
-            2,
-            messageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 101, 2, messageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0xbd18567f3cd28d09dc4f8b0f367415dc19f0e32d47424015eaf22103a4bf4cb3
-            )
-        );
+        assertEq(root, bytes32(0xbd18567f3cd28d09dc4f8b0f367415dc19f0e32d47424015eaf22103a4bf4cb3));
     }
 
     function test_calculate_root_buffer_leaf_3() public pure {
-        // prettier-ignore
-        uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
-
-        bytes memory ms = new bytes(msgt.length);
-        for (uint i = 0; i < ms.length; i++) {
-            ms[i] = bytes1(msgt[i]);
-        }
+        bytes memory ms = bytes(
+            hex"0303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030300000000000000000000000000000000000000000000000000000000000000030303"
+        );
 
         bytes32 messageHash = keccak256(ms);
         console.logBytes32(messageHash);
 
-        assertEq(
-            messageHash,
-            bytes32(
-                0xac9f1d13ebef420edd0101b06f534ec2495ca41af6c23cf14bc94f67bae8dfe1
-            )
-        );
+        assertEq(messageHash, bytes32(0xac9f1d13ebef420edd0101b06f534ec2495ca41af6c23cf14bc94f67bae8dfe1));
 
         bytes32[] memory proof = new bytes32[](7);
-        proof[0] = bytes32(
-            0x57caf83a5d10cdf3f3a28cdc6426da6a94ce5c2b966a8d08f948470358be53a8
-        );
-        proof[1] = bytes32(
-            0x30cdfaedf81fed4b4564ef0e8c04c56d3481e0121501c2dcc12288e01f3ceb94
-        );
-        proof[2] = bytes32(
-            0xf87bc57ba7962a2b733f78df0e777ca31499b78c4d6f64c6d49ab0fd1dc60f44
-        );
-        proof[3] = bytes32(
-            0xed0dcf662c10b0827133e6e99e415b0d97da1a92ce69eb717838d55cc9067c49
-        );
-        proof[4] = bytes32(
-            0x2387406c963403e53d56621d1cef73b80089994ee4c5866ae2d21eaa9fcdfe01
-        );
-        proof[5] = bytes32(
-            0x08ab6b1030ad30cece656ac2638a8aed651bd759a6486241a293610f84927f52
-        );
-        proof[6] = bytes32(
-            0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac
-        );
+        proof[0] = bytes32(0x57caf83a5d10cdf3f3a28cdc6426da6a94ce5c2b966a8d08f948470358be53a8);
+        proof[1] = bytes32(0x30cdfaedf81fed4b4564ef0e8c04c56d3481e0121501c2dcc12288e01f3ceb94);
+        proof[2] = bytes32(0xf87bc57ba7962a2b733f78df0e777ca31499b78c4d6f64c6d49ab0fd1dc60f44);
+        proof[3] = bytes32(0xed0dcf662c10b0827133e6e99e415b0d97da1a92ce69eb717838d55cc9067c49);
+        proof[4] = bytes32(0x2387406c963403e53d56621d1cef73b80089994ee4c5866ae2d21eaa9fcdfe01);
+        proof[5] = bytes32(0x08ab6b1030ad30cece656ac2638a8aed651bd759a6486241a293610f84927f52);
+        proof[6] = bytes32(0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            101,
-            3,
-            messageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 101, 3, messageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0xbd18567f3cd28d09dc4f8b0f367415dc19f0e32d47424015eaf22103a4bf4cb3
-            )
-        );
+        assertEq(root, bytes32(0xbd18567f3cd28d09dc4f8b0f367415dc19f0e32d47424015eaf22103a4bf4cb3));
     }
 
     function test_calculate_root_buffer_leaf_100() public pure {
-        uint8[3] memory msgt = [3, 3, 3];
-        bytes memory m = new bytes(msgt.length);
-        for (uint i = 0; i < m.length; i++) {
-            m[i] = bytes1(msgt[i]);
-        }
+        bytes memory payload = bytes(hex"030303");
 
-        bytes memory payload = abi.encodePacked(m);
-
-        VaraMessage memory content_message = VaraMessage({
-            sender: VARA_ADDRESS_7,
-            receiver: ETH_ADDRESS_5,
-            nonce: bytes32(uint256(10)),
-            data: payload
-        });
+        VaraMessage memory content_message =
+            VaraMessage({sender: VARA_ADDRESS_7, receiver: ETH_ADDRESS_5, nonce: bytes32(uint256(10)), data: payload});
 
         bytes memory ms = abi.encodePacked(
-            content_message.sender,
-            content_message.receiver,
-            content_message.nonce,
-            content_message.data
+            content_message.sender, content_message.receiver, content_message.nonce, content_message.data
         );
 
         bytes32 expectedMessageHash = keccak256(ms);
 
-        assertEq(
-            expectedMessageHash,
-            bytes32(
-                0xcee28748a98c81d3eb24f23af4876c8d71c75efc61416bfd2bb018390b138794
-            )
-        );
+        assertEq(expectedMessageHash, bytes32(0xcee28748a98c81d3eb24f23af4876c8d71c75efc61416bfd2bb018390b138794));
 
         bytes32[] memory proof = new bytes32[](3);
-        proof[0] = bytes32(
-            0x69b655dccf32e0c3e4d4f427875a09b8cde36a2e6d1b980a8b1f8b134425652f
-        );
-        proof[1] = bytes32(
-            0x6d6e07bcb08ba34a789918ab09f0a8aabd1c42a1e7b8625448dab3ed03a02b59
-        );
-        proof[2] = bytes32(
-            0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b
-        );
+        proof[0] = bytes32(0x69b655dccf32e0c3e4d4f427875a09b8cde36a2e6d1b980a8b1f8b134425652f);
+        proof[1] = bytes32(0x6d6e07bcb08ba34a789918ab09f0a8aabd1c42a1e7b8625448dab3ed03a02b59);
+        proof[2] = bytes32(0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b);
 
-        bytes32 root = BinaryMerkleTree.processProof(
-            proof,
-            101,
-            100,
-            expectedMessageHash
-        );
+        bytes32 root = BinaryMerkleTree.processProof(proof, 101, 100, expectedMessageHash);
 
-        assertEq(
-            root,
-            bytes32(
-                0x8db8d383e63f1ff7bbd1b35d7d1f240f6fce68aa12e60cd3a446021f8cd04226
-            )
-        );
+        assertEq(root, bytes32(0x8db8d383e63f1ff7bbd1b35d7d1f240f6fce68aa12e60cd3a446021f8cd04226));
     }
 
     function test_submit_transaction() public {
@@ -367,7 +202,7 @@ contract MessageQueueTest is TestHelper {
             receiver: ETH_ADDRESS_3,
             token: address(erc20_token),
             amount: 10 * (10 ** 18),
-            tokens_sender: VARA_ADDRESS_3
+            gearTokensSender: VARA_ADDRESS_3
         });
 
         VaraMessage memory vara_message = VaraMessage({
@@ -378,32 +213,14 @@ contract MessageQueueTest is TestHelper {
         });
 
         bytes32 msg_hash = vara_message.hash();
-        bytes32 hash1 = keccak256(abi.encodePacked(vara_message.nonce, vara_message.sender, vara_message.receiver, vara_message.data));
-        console.logBytes32(hash1);
-        console.log("*******");
-        assertEq(
-            msg_hash,
-            bytes32(
-                0xb4d0caba814ed52512784ca8bbee50bf4dfb85a9a86c88146cf45ad2bedeba92
-            )
-        );
+        assertEq(msg_hash, bytes32(0xb4d0caba814ed52512784ca8bbee50bf4dfb85a9a86c88146cf45ad2bedeba92));
 
         bytes32[] memory proof = new bytes32[](1);
         proof[0] = bytes32(0x1f163ac825edf91f97faf688eb5ee88449b3ae1ff315141e8b9785707181fcea);
 
-        bytes32 calculatedRoot = BinaryMerkleTree.processProof(
-            proof,
-            3,
-            2,
-            msg_hash
-        );
+        bytes32 calculatedRoot = BinaryMerkleTree.processProof(proof, 3, 2, msg_hash);
 
-        assertEq(
-            calculatedRoot,
-            bytes32(
-                0xd4530dc2881e9a1a34d2bd07b3fa20984981c29beccc18a99421a7bc366654e4
-            )
-        );
+        assertEq(calculatedRoot, bytes32(0xd4530dc2881e9a1a34d2bd07b3fa20984981c29beccc18a99421a7bc366654e4));
 
         bytes memory block_proof = bytes(hex"00");
 
@@ -418,24 +235,14 @@ contract MessageQueueTest is TestHelper {
     }
 
     function test_relayer_contract_emergency_mode() public {
-        bytes32 bad_block_merkle_root = bytes32(
-            0xbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadb
-        );
+        bytes32 bad_block_merkle_root = bytes32(0xbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadb);
 
-        relayer.submitMerkleRoot(
-            BLOCK_ID,
-            bad_block_merkle_root,
-            bytes(hex"baad")
-        );
+        relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
         assert(relayer.emergencyStop());
 
         // Should revert because of emergency stop
         vm.expectRevert(IRelayer.EmergencyStop.selector);
-        relayer.submitMerkleRoot(
-            BLOCK_ID,
-            bad_block_merkle_root,
-            bytes(hex"baad")
-        );
+        relayer.submitMerkleRoot(BLOCK_ID, bad_block_merkle_root, bytes(hex"baad"));
 
         assertTrue(relayer.emergencyStop());
     }

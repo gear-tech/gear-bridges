@@ -1,13 +1,15 @@
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
-use std::iter;
+use std::{iter, sync::Arc};
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use utils_prometheus::MeteredService;
 
 use super::{
-    message_sender::MessageSender, proof_composer::ProofComposer, storage,
+    message_sender::MessageSender,
+    proof_composer::ProofComposer,
+    storage::{JSONStorage, Storage},
     tx_manager::TransactionManager,
 };
 
@@ -33,6 +35,10 @@ pub struct Relayer {
 
     proof_composer: ProofComposer,
     gear_message_sender: MessageSender,
+
+    storage: Arc<dyn Storage>,
+
+    tx_manager: TransactionManager,
 }
 
 impl MeteredService for Relayer {
@@ -56,16 +62,20 @@ impl Relayer {
         historical_proxy_address: H256,
         vft_manager_address: H256,
         api_provider: ApiProviderConnection,
+        storage_path: String,
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
+        let storage = Arc::new(JSONStorage::new(storage_path));
+
         let deposit_event_extractor = DepositEventExtractor::new(
             eth_api.clone(),
             beacon_client.clone(),
             erc20_manager_address,
+            storage.clone(),
         );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
@@ -89,6 +99,8 @@ impl Relayer {
             suri,
         );
 
+        let tx_manager = TransactionManager::new(storage.clone());
+
         Ok(Self {
             gear_block_listener,
             ethereum_block_listener,
@@ -98,10 +110,13 @@ impl Relayer {
 
             proof_composer,
             gear_message_sender,
+
+            storage,
+            tx_manager,
         })
     }
 
-    pub async fn run(self, storage_path: &str) {
+    pub async fn run(self) {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
@@ -110,10 +125,16 @@ impl Relayer {
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.gear_message_sender.run();
 
-        let storage = storage::JSONStorage::new(storage_path);
+        if let Err(err) = self.storage.load(&self.tx_manager).await {
+            log::error!("Failed to load transactions and blocks from storage: {err:?}");
+        }
 
-        let _ = TransactionManager::new(Some(Box::new(storage)))
+        if let Err(err) = self
+            .tx_manager
             .run(deposit_events, proof_composer, message_sender)
-            .await;
+            .await
+        {
+            log::error!("Transaction manager exited with error: {err:?}");
+        }
     }
 }

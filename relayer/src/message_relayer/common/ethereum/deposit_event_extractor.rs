@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -8,7 +10,10 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
+    message_relayer::{
+        common::{EthereumBlockNumber, TxHashWithSlot},
+        eth_to_gear::storage::{Storage, UnprocessedBlocks},
+    },
 };
 
 use super::find_slot_by_block_number;
@@ -18,6 +23,8 @@ pub struct DepositEventExtractor {
     beacon_client: BeaconClient,
 
     erc20_manager_address: H160,
+
+    storage: Arc<dyn Storage>,
 
     metrics: Metrics,
 }
@@ -38,12 +45,18 @@ impl_metered_service! {
 }
 
 impl DepositEventExtractor {
-    pub fn new(eth_api: EthApi, beacon_client: BeaconClient, erc20_manager_address: H160) -> Self {
+    pub fn new(
+        eth_api: EthApi,
+        beacon_client: BeaconClient,
+        erc20_manager_address: H160,
+        storage: Arc<dyn Storage>,
+    ) -> Self {
         Self {
             eth_api,
             beacon_client,
 
             erc20_manager_address,
+            storage,
 
             metrics: Metrics::new(),
         }
@@ -57,9 +70,26 @@ impl DepositEventExtractor {
 
         tokio::task::spawn(async move {
             let mut attempts = 0;
+            let UnprocessedBlocks {
+                last_block,
+                mut unprocessed,
+            } = self.storage.block_storage().unprocessed_blocks().await;
 
+            if let Some(last_block) = last_block {
+                let latest_finalized_block = match blocks.recv().await {
+                    Some(block) => block,
+                    None => {
+                        log::error!("Failed to fetch missing blocks: channel closed");
+                        return;
+                    }
+                };
+
+                for block in last_block.0 + 1..=latest_finalized_block.0 {
+                    unprocessed.push(EthereumBlockNumber(block));
+                }
+            }
             loop {
-                let res = self.run_inner(&sender, &mut blocks).await;
+                let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
                 if let Err(err) = res {
                     attempts += 1;
                     let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
@@ -81,6 +111,9 @@ impl DepositEventExtractor {
                             }
                         }
                     }
+                } else {
+                    log::info!("Block listener connection closed, exiting...");
+                    return;
                 }
             }
         });
@@ -92,12 +125,16 @@ impl DepositEventExtractor {
         &self,
         sender: &UnboundedSender<TxHashWithSlot>,
         blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
+        missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
-        loop {
-            while let Some(block) = blocks.recv().await {
-                self.process_block_events(block, sender).await?;
-            }
+        while let Some(block) = missing_blocks.pop() {
+            self.process_block_events(block, sender).await?;
         }
+        while let Some(block) = blocks.recv().await {
+            self.process_block_events(block, sender).await?;
+        }
+
+        Ok(())
     }
 
     async fn process_block_events(
@@ -110,30 +147,36 @@ impl DepositEventExtractor {
             .fetch_deposit_events(self.erc20_manager_address, block.0)
             .await?;
 
-        if events.is_empty() {
-            return Ok(());
-        }
-
         let slot_number =
             find_slot_by_block_number(&self.eth_api, &self.beacon_client, block).await?;
+
+        self.storage
+            .block_storage()
+            .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
+            .await;
 
         self.metrics
             .total_deposits_found
             .inc_by(events.len() as u64);
 
-        for ev in &events {
+        for DepositEventEntry {
+            tx_hash,
+            from,
+            to,
+            token,
+            amount,
+        } in events
+        {
             log::info!(
                 "Found deposit event: tx_hash={}, from={}, to={}, token={}, amount={}, slot_number={}",
-                hex::encode(ev.tx_hash.0),
-                hex::encode(ev.from.0),
-                hex::encode(ev.to.0),
-                hex::encode(ev.token.0),
-                ev.amount,
+                hex::encode(tx_hash.0),
+                hex::encode(from.0),
+                hex::encode(to.0),
+                hex::encode(token.0),
+                amount,
                 slot_number.0,
             );
-        }
 
-        for DepositEventEntry { tx_hash, .. } in events {
             sender.send(TxHashWithSlot {
                 slot_number,
                 tx_hash,

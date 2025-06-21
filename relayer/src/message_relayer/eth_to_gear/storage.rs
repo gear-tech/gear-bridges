@@ -1,25 +1,154 @@
+use super::tx_manager::{Transaction, TransactionManager, TxStatus};
+use crate::message_relayer::common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot};
+use async_trait::async_trait;
+use ethereum_client::TxHash;
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     ffi::OsString,
     path::{Path, PathBuf},
     str::FromStr,
 };
-
-use super::tx_manager::{Transaction, TransactionManager};
-use async_trait::async_trait;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::RwLock,
+};
 use uuid::Uuid;
+
+/// Storage type implementing
+/// storage for Ethereum blocks.
+pub struct BlockStorage {
+    blocks: RwLock<BTreeMap<EthereumSlotNumber, Block>>,
+    n_to_keep: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Block {
+    pub number: EthereumBlockNumber,
+    pub transactions: HashSet<TxHash>,
+}
+
+impl Block {
+    pub fn is_processed(&self) -> bool {
+        self.transactions.is_empty()
+    }
+}
+
+impl BlockStorage {
+    pub fn new() -> Self {
+        Self {
+            blocks: RwLock::new(BTreeMap::new()),
+            n_to_keep: 100,
+        }
+    }
+
+    pub async fn complete_transaction(&self, tx: &TxHashWithSlot) {
+        let mut blocks = self.blocks.write().await;
+        let Some(block) = blocks.get_mut(&tx.slot_number) else {
+            log::warn!(
+                "Block at slot #{} associated with transaction #{:?} not found in storage",
+                tx.slot_number,
+                tx.tx_hash
+            );
+            return;
+        };
+
+        if !block.transactions.remove(&tx.tx_hash) {
+            log::warn!(
+                "Transaction #{:?} in block at slot #{} is already completed",
+                tx.slot_number.0,
+                tx.tx_hash
+            );
+        };
+    }
+
+    pub async fn add_block(
+        &self,
+        slot: EthereumSlotNumber,
+        number: EthereumBlockNumber,
+        txs: impl Iterator<Item = TxHash>,
+    ) {
+        if self
+            .blocks
+            .write()
+            .await
+            .insert(
+                slot,
+                Block {
+                    number,
+                    transactions: txs.collect(),
+                },
+            )
+            .is_some()
+        {
+            log::warn!("Block at slot #{} is already in storage", slot.0);
+        };
+    }
+
+    pub async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
+        let blocks = self.blocks.read().await;
+
+        let unprocessed = blocks
+            .iter()
+            .filter_map(|(_, block)| (!block.is_processed()).then_some(block.number))
+            .collect::<Vec<_>>();
+
+        let last_block = blocks.last_key_value().map(|(_, block)| block.number);
+
+        UnprocessedBlocks {
+            unprocessed,
+            last_block,
+        }
+    }
+
+    pub async fn prune(&self) {
+        let mut blocks = self.blocks.write().await;
+
+        let mut remove_until = None;
+
+        for (index, (slot, block)) in blocks.iter().enumerate() {
+            if index + self.n_to_keep > blocks.len() {
+                remove_until = Some(*slot);
+                break;
+            }
+
+            if !block.is_processed() {
+                remove_until = Some(*slot);
+                break;
+            }
+        }
+
+        if let Some(remove_until) = remove_until {
+            *blocks = blocks.split_off(&remove_until);
+        }
+    }
+}
+
+pub struct UnprocessedBlocks {
+    pub last_block: Option<EthereumBlockNumber>,
+    pub unprocessed: Vec<EthereumBlockNumber>,
+}
 
 #[async_trait]
 pub trait Storage: Send + Sync {
+    fn block_storage(&self) -> &BlockStorage;
     async fn save(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
     async fn load(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
 }
 
-pub struct NoStorage;
+pub struct NoStorage(BlockStorage);
+
+impl NoStorage {
+    pub fn new() -> Self {
+        Self(BlockStorage::new())
+    }
+}
 
 #[async_trait]
 impl Storage for NoStorage {
+    fn block_storage(&self) -> &BlockStorage {
+        &self.0
+    }
     async fn save(&self, _tx_manager: &TransactionManager) -> anyhow::Result<()> {
         /* no-op */
         Ok(())
@@ -35,16 +164,22 @@ impl Storage for NoStorage {
 /// specified directory.
 pub struct JSONStorage {
     path: PathBuf,
+    block_storage: BlockStorage,
 }
 
 impl JSONStorage {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
+            block_storage: BlockStorage::new(),
         }
     }
 
     async fn write_tx(&self, tx_uuid: &Uuid, tx: &Transaction) -> anyhow::Result<()> {
+        if matches!(tx.status, TxStatus::Completed) {
+            self.block_storage().complete_transaction(&tx.tx).await;
+        }
+
         let filename = self.path.join(tx_uuid.to_string());
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
@@ -85,6 +220,10 @@ impl JSONStorage {
 
 #[async_trait]
 impl Storage for JSONStorage {
+    fn block_storage(&self) -> &BlockStorage {
+        &self.block_storage
+    }
+
     async fn save(&self, tx_manager: &TransactionManager) -> anyhow::Result<()> {
         if !self.path.exists() {
             tokio::fs::create_dir_all(&self.path).await?;
@@ -114,6 +253,23 @@ impl Storage for JSONStorage {
         failed_file.write_all(str.as_bytes()).await?;
         failed_file.flush().await?;
 
+        let blocks_new = self.path.join("blocks.json.new");
+        let blocks_old = self.path.join("blocks.json");
+        let mut blocks_file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&blocks_new)
+            .await?;
+        // just keep 100 processed blocks in JSON storage for now...
+        self.block_storage().prune().await;
+        let blocks = self.block_storage().blocks.read().await;
+        let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
+        blocks_file.write_all(blocks_json.as_bytes()).await?;
+        blocks_file.flush().await?;
+        tokio::fs::remove_file(&blocks_old).await?;
+        tokio::fs::rename(blocks_new, blocks_old).await?;
+
         Ok(())
     }
 
@@ -130,6 +286,10 @@ impl Storage for JSONStorage {
                     let contents = tokio::fs::read_to_string(entry.path()).await?;
                     let map: BTreeMap<Uuid, String> = serde_json::from_str(&contents)?;
                     *tx_manager.failed.write().await = map;
+                } else if entry.file_name().to_str() == Some("blocks.json") {
+                    let contents = tokio::fs::read_to_string(entry.path()).await?;
+                    let map: BTreeMap<EthereumSlotNumber, Block> = serde_json::from_str(&contents)?;
+                    *self.block_storage().blocks.write().await = map;
                 } else {
                     let tx = self.read_tx(entry.path(), entry.file_name()).await?;
 

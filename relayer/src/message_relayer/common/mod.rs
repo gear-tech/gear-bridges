@@ -13,7 +13,19 @@ pub struct AuthoritySetId(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
 pub struct GearBlockNumber(pub u32);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Debug,
+    derive_more::Display,
+    Serialize,
+    Deserialize,
+)]
 pub struct EthereumBlockNumber(pub u64);
 
 #[derive(

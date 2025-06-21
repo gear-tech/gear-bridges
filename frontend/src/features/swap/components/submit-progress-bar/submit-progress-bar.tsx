@@ -3,67 +3,53 @@ import { CSSProperties } from 'react';
 import { Card } from '@/components';
 import { cx, getErrorMessage } from '@/utils';
 
+import { SUBMIT_STATUS } from '../../consts';
 import { UseHandleSubmit } from '../../types';
 
 import styles from './submit-progress-bar.module.scss';
 
-type Props = ReturnType<UseHandleSubmit>;
+type Props = Pick<ReturnType<UseHandleSubmit>, 'status' | 'isPending' | 'error'> & {
+  isVaraNetwork: boolean;
+};
 
 const VARA_PERCENTAGE = {
-  default: 0,
-  mint: 0,
-  approve: 0,
-  permitUSDC: 0,
-  transfer: 50,
-  fee: 75,
-  success: 100,
+  [SUBMIT_STATUS.MINT]: 0,
+  [SUBMIT_STATUS.APPROVE]: 0,
+  [SUBMIT_STATUS.PERMIT]: 0,
+  [SUBMIT_STATUS.BRIDGE]: 50,
+  [SUBMIT_STATUS.FEE]: 75,
+  [SUBMIT_STATUS.SUCCESS]: 100,
 } as const;
 
 const ETH_PERCENTAGE = {
-  default: 0,
-  fee: 0,
-  mint: 25,
-  approve: 50,
-  permitUSDC: 50,
-  transfer: 75,
-  success: 100,
+  [SUBMIT_STATUS.FEE]: 0,
+  [SUBMIT_STATUS.MINT]: 25,
+  [SUBMIT_STATUS.APPROVE]: 50,
+  [SUBMIT_STATUS.PERMIT]: 50,
+  [SUBMIT_STATUS.BRIDGE]: 75,
+  [SUBMIT_STATUS.SUCCESS]: 100,
 } as const;
 
 const TEXT = {
-  default: '',
-  mint: 'Locking tokens',
-  approve: 'Approving tokens',
-  permitUSDC: 'Requesting signature to permit token spending',
-  transfer: 'Requesting transfer',
-  fee: 'Paying fee',
-  success: 'Your transfer request and fee payment have been successful',
+  [SUBMIT_STATUS.MINT]: 'Locking tokens',
+  [SUBMIT_STATUS.APPROVE]: 'Approving tokens',
+  [SUBMIT_STATUS.PERMIT]: 'Requesting signature to permit token spending',
+  [SUBMIT_STATUS.BRIDGE]: 'Requesting transfer',
+  [SUBMIT_STATUS.FEE]: 'Paying fee',
+  [SUBMIT_STATUS.SUCCESS]: 'Your transfer request and fee payment have been successful',
 } as const;
 
 const ERROR_TEXT = {
-  default: '',
-  mint: 'Tokens lock',
-  approve: 'Tokens approval',
-  permitUSDC: 'Permit signature',
-  transfer: 'Transfer request',
-  fee: 'Fee payment',
-  success: '',
+  [SUBMIT_STATUS.MINT]: 'Tokens lock',
+  [SUBMIT_STATUS.APPROVE]: 'Tokens approval',
+  [SUBMIT_STATUS.PERMIT]: 'Permit signature',
+  [SUBMIT_STATUS.BRIDGE]: 'Transfer request',
+  [SUBMIT_STATUS.FEE]: 'Fee payment',
+  [SUBMIT_STATUS.SUCCESS]: '',
 } as const;
 
-function SubmitProgressBar({ approve, submit, payFee, mint, permitUSDC }: Props) {
-  const { isSuccess, isPending, error } = submit;
+function SubmitProgressBar({ isVaraNetwork, status, isPending, error }: Props) {
   const errorMessage = error ? getErrorMessage(error) : '';
-
-  const getStatus = () => {
-    if (mint?.isPending || mint?.error) return 'mint';
-    if (payFee?.isPending || payFee?.error) return 'fee';
-    if (permitUSDC?.isPending || permitUSDC?.error) return 'permitUSDC';
-    if (approve?.isPending || approve?.error) return 'approve';
-    if (submit.isPending || submit.error) return 'transfer';
-    if (isSuccess) return 'success';
-    return 'default';
-  };
-
-  const status = getStatus();
 
   return (
     <Card className={cx(styles.container, isPending && styles.loading, errorMessage && styles.error)}>
@@ -71,7 +57,7 @@ function SubmitProgressBar({ approve, submit, payFee, mint, permitUSDC }: Props)
 
       <div
         className={styles.bar}
-        style={{ '--width': `${mint ? ETH_PERCENTAGE[status] : VARA_PERCENTAGE[status]}%` } as CSSProperties}
+        style={{ '--width': `${isVaraNetwork ? VARA_PERCENTAGE[status] : ETH_PERCENTAGE[status]}%` } as CSSProperties}
       />
     </Card>
   );

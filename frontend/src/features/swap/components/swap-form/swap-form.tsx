@@ -16,7 +16,7 @@ import PlusSVG from '../../assets/plus.svg?react';
 import { FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
-import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from '../../types';
+import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance, FormattedValues } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
@@ -54,9 +54,11 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransacionModal = (amount: string, receiver: string) => {
+  const openTransactionModal = (values: FormattedValues) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
+    const amount = values.amount.toString();
+    const receiver = values.accountAddress;
     const source = token.address;
     const destination = destinationToken.address;
     const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;
@@ -67,20 +69,19 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const { submit, approve, payFee, mint, permitUSDC } = useHandleSubmit(
-    fee.value,
-    allowance.data,
-    ftBalance.data,
-    accountBalance.data,
-    openTransacionModal,
-  );
+  const { onSubmit, ...submit } = useHandleSubmit({
+    fee: fee.value,
+    allowance: allowance.data,
+    accountBalance: accountBalance.data,
+    onTransactionStart: openTransactionModal,
+  });
 
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
     network.isVara,
     accountBalance,
     ftBalance,
     token?.decimals,
-    submit.mutateAsync,
+    onSubmit,
   );
 
   const renderFromBalance = () => {
@@ -108,9 +109,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const getButtonText = () => {
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
-    if (approve?.isPending) return 'Approving...';
-    if (submit.isPending) return 'Transferring...';
-
     return 'Transfer';
   };
 
@@ -121,10 +119,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} />;
-
-  const renderProgressBar = () => (
-    <SubmitProgressBar mint={mint} approve={approve} submit={submit} payFee={payFee} permitUSDC={permitUSDC} />
-  );
+  const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
 
   return (
     <>

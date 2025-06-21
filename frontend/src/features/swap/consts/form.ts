@@ -37,4 +37,13 @@ const ADDRESS_SCHEMA = {
   ETH: ETH_ADDRESS_SCHEMA,
 };
 
-export { FIELD_NAME, ERROR_MESSAGE, DEFAULT_VALUES, ADDRESS_SCHEMA };
+const SUBMIT_STATUS = {
+  SUCCESS: 'success',
+  BRIDGE: 'bridge',
+  FEE: 'fee',
+  MINT: 'mint',
+  APPROVE: 'approve',
+  PERMIT: 'permit',
+} as const;
+
+export { FIELD_NAME, ERROR_MESSAGE, DEFAULT_VALUES, ADDRESS_SCHEMA, SUBMIT_STATUS };

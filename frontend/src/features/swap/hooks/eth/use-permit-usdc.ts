@@ -9,7 +9,7 @@ import { useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
 
-import { ERC20_MANAGER_CONTRACT_ADDRESS, USDC_ABI } from '../../consts';
+import { CONTRACT_ADDRESS, USDC_ABI } from '../../consts';
 
 const PERMIT_DURATION_SECONDS = 60 * 60;
 
@@ -62,7 +62,7 @@ function usePermitUSDC() {
 
     const message = {
       owner: ethAccount.address,
-      spender: ERC20_MANAGER_CONTRACT_ADDRESS,
+      spender: CONTRACT_ADDRESS.ERC20_MANAGER,
       value,
       nonce: await getNonce(),
       deadline,

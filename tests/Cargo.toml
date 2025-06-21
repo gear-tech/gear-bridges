@@ -41,6 +41,7 @@ ethereum_beacon_client.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-sol-types.workspace = true
 ark-bls12-381 = { workspace = true, features = ["curve"] }
 ark-ec.workspace = true
 ark-scale.workspace = true

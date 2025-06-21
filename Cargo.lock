@@ -14271,6 +14271,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-sol-types",
  "anyhow",
  "ark-bls12-381",
  "ark-ec",

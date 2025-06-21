@@ -123,6 +123,13 @@ pub enum Event {
     HistoricalProxyAddressChanged { old: ActorId, new: ActorId },
     /// Address of the `ERC20Manager` contract address on Ethereum was changed.
     Erc20ManagerAddressChanged { old: H160, new: H160 },
+    /// Rlp receipt submitted via [VftManager::submit_receipt] processed successfully.
+    RlpReceiptProcessed {
+        /// Slot of the processed receipt.
+        slot: u64,
+        /// Transaction index of the processed receipt.
+        transaction_index: u64,
+    },
 }
 
 static mut STATE: Option<State> = None;
@@ -379,7 +386,14 @@ impl VftManager {
     ) -> Result<(), Error> {
         self.ensure_running()?;
 
-        submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
+        submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp)
+            .await
+            .map(|_| {
+                let _ = self.emit_event(Event::RlpReceiptProcessed {
+                    slot,
+                    transaction_index,
+                });
+            })
     }
 
     /// Request bridging of tokens from Gear to Ethereum.

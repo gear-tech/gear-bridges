@@ -1,5 +1,5 @@
 use super::super::{Config, Error};
-use gstd::msg;
+use gstd::{errors::Error as GStdError, msg};
 use sails_rs::{
     calls::{ActionIo, Call},
     gstd::calls::GStdRemoting,
@@ -9,18 +9,18 @@ use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
 use vft_vara_client::traits::VftNativeExchangeAdmin;
 
 trait Reply {
-    fn check(&self);
+    fn check(&self) -> Result<(), Error>;
 }
 
 impl Reply for () {
-    fn check(&self) {}
+    fn check(&self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 impl Reply for bool {
-    fn check(&self) {
-        if !*self {
-            panic!("Request to transfer tokens failed");
-        }
+    fn check(&self) -> Result<(), Error> {
+        self.then_some(()).ok_or(Error::InvalidReply)
     }
 }
 
@@ -48,9 +48,19 @@ where
         .handle_reply(move || handle_reply::<Action>(slot, transaction_index))
         .map_err(|_| Error::ReplyHook)?
         .await
-        .map_err(|_| Error::ReplyFailure)?;
-
-    Ok(())
+        .map_err(|e| match e {
+            GStdError::Timeout(..) => Error::ReplyTimeout,
+            _ => Error::Internal(format!("{e:?}").into_bytes()),
+        })
+        .and_then(|_| {
+            let key = (slot, transaction_index);
+            match super::reply_statuses_mut().remove(&key) {
+                Some(status) => status.clone(),
+                None => {
+                    unreachable!("Status always set if a VFT invocation was successful");
+                }
+            }
+        })
 }
 
 fn handle_reply<Action>(slot: u64, transaction_index: u64)
@@ -58,12 +68,30 @@ where
     Action: ActionIo,
     Action::Reply: Reply,
 {
-    let reply_bytes = msg::load_bytes()
-        .expect("May fail because of the insufficient gas only but the limit was specified by the caller; qed");
-    let reply = Action::decode_reply(&reply_bytes)
-        .expect("May fail only if there is no VFT-program at the specified address; qed");
+    let status = {
+        || {
+            let reply_code = msg::reply_code().map_err(|_| Error::ReplyCode)?;
+            if let ReplyCode::Error(_reason) = reply_code {
+                // An error reply received. The error description will be extracted by the sender.
+                // However, we must set status to `Err` here to skip further processing.
+                return Err(Error::ReplyFailure);
+            }
+            let reply_bytes = msg::load_bytes().map_err(|_| Error::GasForReplyTooLow)?;
 
-    reply.check();
+            // At this point we assume the reply is a legit VFT reply and try to treat it as such.
+            let reply =
+                Action::decode_reply(&reply_bytes).map_err(|_| Error::Internal(reply_bytes))?;
+
+            reply.check()
+        }
+    }();
+
+    let reply_statuses = super::reply_statuses_mut();
+    reply_statuses.insert((slot, transaction_index), status.clone());
+
+    if status.is_err() {
+        return;
+    }
 
     // To that point we have a successful response from the VFT and enough gas to save
     // the information about processed Ethereum transaction.

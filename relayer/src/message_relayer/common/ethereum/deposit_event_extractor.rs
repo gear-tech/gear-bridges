@@ -73,15 +73,15 @@ impl DepositEventExtractor {
             let mut unprocessed = self.storage.block_storage().unprocessed_blocks().await;
 
             if let Some(last_block) = unprocessed.last_block {
-                let latest_finalized_block = match self.eth_api.finalized_block_number().await {
-                    Ok(block) => block,
-                    Err(err) => {
-                        log::error!("Failed to fetch missing blocks: {err:?}");
+                let latest_finalized_block = match blocks.recv().await {
+                    Some(block) => block,
+                    None => {
+                        log::error!("Failed to fetch missing blocks: channel closed");
                         return;
                     }
                 };
 
-                for block in last_block.0 + 1..=latest_finalized_block {
+                for block in last_block.0 + 1..=latest_finalized_block.0 {
                     unprocessed.unprocessed.push(EthereumBlockNumber(block));
                 }
             }

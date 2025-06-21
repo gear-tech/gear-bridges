@@ -194,6 +194,14 @@ impl TransactionManager {
 
         self.transactions.write().await.insert(tx_uuid, tx);
 
+        // now that we've seen the transaction it will be saved
+        // in regular storage, not in block storage. We can remove
+        // it from block storage to avoid doing double work.
+        self.storage
+            .block_storage()
+            .complete_transaction(&tx_hash)
+            .await;
+
         if !proof_composer.compose_proof_for(tx_uuid, tx_hash) {
             log::error!("Proof composer connection closed, exiting...");
             Ok(false)

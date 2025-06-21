@@ -11,6 +11,8 @@ pub enum Error {
     ReplyTimeout,
     /// Failed to set reply hook.
     ReplyHook,
+    /// Failed to extract the reply code from a reply message.
+    ReplyCode,
 
     /// Original `MessageId` wasn't found in message tracker when processing reply.
     MessageNotFound,
@@ -28,6 +30,8 @@ pub enum Error {
 
     /// Failed to decode payload from gear-eth-bridge built-in actor.
     BuiltinDecode,
+    /// Gas reservation for reply is too low.
+    GasForReplyTooLow,
 
     /// `ERC20` address wasn't found in the token mapping.
     NoCorrespondingEthAddress,
@@ -46,4 +50,9 @@ pub enum Error {
 
     /// Vft-manager is paused and cannot process the request.
     Paused,
+
+    /// Internal unspecified VFT error
+    Internal(Vec<u8>),
+    /// Invalid or unexpected reply received from a VFT program.
+    InvalidReply,
 }

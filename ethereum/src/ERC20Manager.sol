@@ -12,7 +12,7 @@ import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
 import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 
-contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
+contract ERC20Manager is IMessageQueueReceiver, IERC20Manager {
     using SafeERC20 for IERC20;
 
     address immutable MESSAGE_QUEUE;
@@ -26,7 +26,7 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
      *          address receiver; // 20 bytes
      *          address token; // 20 bytes
      *          uint256 amount; // 32 bytes
-     *          bytes32 tokens_sender; // 32 bytes
+     *          bytes32 gearTokensSender; // 32 bytes
      *      }
      *      ```
      */
@@ -34,6 +34,11 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
 
     mapping(address token => SupplyType supplyType) private tokenSupplyType;
 
+    /**
+     * @dev Initializes the ERC20Manager contract with the message queue and VFT manager addresses.
+     * @param messageQueue The address of the message queue contract.
+     * @param vftManager The address of the VFT manager contract (on Vara Network).
+     */
     constructor(address messageQueue, bytes32 vftManager) {
         MESSAGE_QUEUE = messageQueue;
         VFT_MANAGER = vftManager;
@@ -89,15 +94,17 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
 
     /**
      * @dev Accept bridging request made on other side of bridge.
-     * This request must be sent by `MessageQueue` only. When such a request is accepted, tokens
-     * are minted/unlocked to the corresponding account address, specified in `payload`.
      *
-     * Expected `payload` consisits of these:
-     *  - `receiver` - account to mint tokens to
-     *  - `token` - token to mint
-     *  - `amount` - amount of tokens to mint
+     *      This request must be sent by `MessageQueue` only. When such a request is accepted, tokens
+     *      are minted/unlocked to the corresponding account address, specified in `payload`.
      *
-     * Expected sender should be `vft-manager` program on gear.
+     *      Expected `payload` consisits of these:
+     *      - `receiver` - account to mint tokens to
+     *      - `token` - token to mint
+     *      - `amount` - amount of tokens to mint
+     *      - `gearTokensSender` - sender of tokens on gear side
+     *
+     *      Expected sender should be `vft-manager` program on gear.
      *
      * @param sender sender of message on the gear side.
      * @param payload payload of the message.
@@ -109,31 +116,35 @@ contract ERC20Manager is IERC20Manager, IMessageQueueReceiver {
         if (payload.length < WITHDRAW_MESSAGE_SIZE) {
             revert BadArguments();
         }
-        if (sender != VFT_MANAGER) {
-            revert BadVftManagerAddress();
-        }
 
-        address receiver = address(bytes20(payload[0:20]));
-        address token = address(bytes20(payload[20:40]));
-        uint256 amount = uint256(bytes32(payload[40:72]));
-        bytes32 tokens_sender = bytes32(payload[72:104]);
+        bytes32 governance = bytes32(0);
+        if (sender == VFT_MANAGER) {
+            address receiver = address(bytes20(payload[0:20]));
+            address token = address(bytes20(payload[20:40]));
+            uint256 amount = uint256(bytes32(payload[40:72]));
+            bytes32 gearTokensSender = bytes32(payload[72:104]);
 
-        SupplyType supplyType = tokenSupplyType[token];
+            SupplyType supplyType = tokenSupplyType[token];
 
-        if (supplyType == SupplyType.Ethereum) {
-            IERC20(token).safeTransfer(receiver, amount);
-        } else {
-            if (supplyType == SupplyType.Unknown) {
-                tokenSupplyType[token] = SupplyType.Gear;
+            if (supplyType == SupplyType.Ethereum) {
+                IERC20(token).safeTransfer(receiver, amount);
+            } else {
+                if (supplyType == SupplyType.Unknown) {
+                    tokenSupplyType[token] = SupplyType.Gear;
+                }
+
+                IERC20Mintable(token).mint(receiver, amount);
             }
 
-            IERC20Mintable(token).mint(receiver, amount);
+            emit BridgingAccepted(receiver, token, amount, gearTokensSender);
+        } else if (sender == governance) {
+            //TODO: some special logic for governance
+        } else {
+            revert BadSender();
         }
-
-        emit BridgingAccepted(receiver, token, amount, tokens_sender);
     }
 
-    function getTokenSupplyType(address token) public view returns (SupplyType) {
+    function getTokenSupplyType(address token) external view returns (SupplyType) {
         return tokenSupplyType[token];
     }
 }

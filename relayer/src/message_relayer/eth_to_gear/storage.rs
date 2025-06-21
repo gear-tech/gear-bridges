@@ -19,11 +19,11 @@ use uuid::Uuid;
 /// storage for Ethereum blocks.
 pub struct BlockStorage {
     blocks: RwLock<BTreeMap<EthereumSlotNumber, Block>>,
+    n_to_keep: usize,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Block {
-    pub slot_number: EthereumSlotNumber,
     pub number: EthereumBlockNumber,
     pub transactions: HashSet<TxHash>,
 }
@@ -38,6 +38,7 @@ impl BlockStorage {
     pub fn new() -> Self {
         Self {
             blocks: RwLock::new(BTreeMap::new()),
+            n_to_keep: 100,
         }
     }
 
@@ -74,7 +75,6 @@ impl BlockStorage {
             .insert(
                 slot,
                 Block {
-                    slot_number: slot,
                     number,
                     transactions: txs.collect(),
                 },
@@ -85,115 +85,70 @@ impl BlockStorage {
         };
     }
 
-    pub async fn missing_blocks(
-        &self,
-        eth_api: &EthApi,
-    ) -> anyhow::Result<VecDeque<EthereumBlockNumber>> {
+    pub async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
         let blocks = self.blocks.read().await;
 
-        if blocks.is_empty() {
-            // if there are no finalized blocks processing will start from latest
-            // finalized block
-            return Ok(VecDeque::new());
-        }
-
-        let mut missing = VecDeque::new();
-        let min = blocks
+        let unprocessed = blocks
             .iter()
-            .min_by_key(|(_, block)| block.number)
-            .unwrap()
-            .1
-            .number;
-        let max = blocks
-            .iter()
-            .max_by_key(|(_, block)| block.number)
-            .unwrap()
-            .1
-            .number;
+            .filter_map(|(_, block)| (!block.is_processed()).then_some(block.number))
+            .collect::<VecDeque<_>>();
 
-        let mut expected = min;
+        let last_block = blocks.last_key_value().map(|(_, block)| block.number);
 
-        for (_, block) in blocks.iter() {
-            while expected < block.number {
-                missing.push_back(expected);
-                expected.0 += 1;
-            }
+        UnprocessedBlocks {
+            unprocessed,
+            last_block,
         }
-
-        while expected <= max {
-            missing.push_back(expected);
-            expected.0 += 1;
-        }
-
-        let latest_finalized = eth_api.finalized_block_number().await?;
-
-        while expected.0 <= latest_finalized {
-            missing.push_back(expected);
-            expected.0 += 1;
-        }
-
-        Ok(missing)
     }
 
-    pub async fn prune(&self, n_to_keep: usize) {
+    pub async fn prune(&self) {
         let mut blocks = self.blocks.write().await;
 
-        let processed_count = blocks
-            .iter()
-            .filter(|(_, block)| block.is_processed())
-            .count();
-
-        if processed_count <= n_to_keep {
-            log::debug!("Not pruning block storage. Processed blocks: {processed_count}, Target: {n_to_keep}");
+        if blocks.len() <= 100 {
+            return;
         }
 
-        let num_to_remove = processed_count - n_to_keep;
-
-        log::debug!("Removing {num_to_remove} processed block(s)");
-
-        let mut removal_candidates = Vec::new();
-        let mut current_run = Vec::new();
-        let mut last_slot = None::<EthereumSlotNumber>;
-
-        for (&slot, block) in blocks.iter() {
-            if block.is_processed() {
-                if let Some(last_slot) = last_slot {
-                    if slot.0 == last_slot.0 + 1 {
-                        current_run.push(slot);
-                    } else {
-                        // the sequence is broken by a hole, finalize the previous run
-                        if !current_run.is_empty() {
-                            removal_candidates.append(&mut current_run);
+        let nprocessed = blocks.iter().filter(|(_, b)| b.is_processed()).count();
+        let processed =
+            blocks.iter().scan(
+                None::<EthereumBlockNumber>,
+                |prev, (slot, block)| match prev {
+                    Some(prev_number) => {
+                        if prev_number.0 + 1 == block.number.0 && block.is_processed() {
+                            *prev = Some(block.number);
+                            Some(*slot)
+                        } else {
+                            None
                         }
-                        // start a new run
-                        current_run.push(slot);
                     }
-                } else {
-                    current_run.push(slot);
-                }
-                last_slot = Some(slot);
-            } else {
-                if !current_run.is_empty() {
-                    removal_candidates.append(&mut current_run);
-                    current_run.clear();
-                }
 
-                last_slot = None;
-            }
-        }
-
-        if !current_run.is_empty() {
-            removal_candidates.append(&mut current_run);
-        }
-
-        for slot_to_remove in removal_candidates.iter().take(num_to_remove) {
-            log::debug!(
-                "Pruning processed block at slot #{} from block storage",
-                slot_to_remove.0
+                    None => {
+                        if block.is_processed() {
+                            *prev = Some(block.number);
+                            Some(*slot)
+                        } else {
+                            None
+                        }
+                    }
+                },
             );
-            blocks.remove(slot_to_remove);
+        if nprocessed <= self.n_to_keep {
+            return;
+        }
+
+        let to_remove = processed
+            .take(nprocessed - self.n_to_keep)
+            .collect::<Vec<_>>();
+
+        for slot in to_remove {
+            blocks.remove(&slot);
         }
     }
+}
+
+pub struct UnprocessedBlocks {
+    pub last_block: Option<EthereumBlockNumber>,
+    pub unprocessed: VecDeque<EthereumBlockNumber>,
 }
 
 #[async_trait]
@@ -325,7 +280,7 @@ impl Storage for JSONStorage {
             .open(block_storage_path)
             .await?;
         // just keep 100 processed blocks in JSON storage for now...
-        self.block_storage().prune(100).await;
+        self.block_storage().prune().await;
         let blocks = self.block_storage().blocks.read().await;
         let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
         blocks_file.write_all(blocks_json.as_bytes()).await?;

@@ -70,21 +70,26 @@ impl DepositEventExtractor {
 
         tokio::task::spawn(async move {
             let mut attempts = 0;
-            let mut missing_blocks = match self
-                .storage
-                .block_storage()
-                .missing_blocks(&self.eth_api)
-                .await
-            {
-                Ok(blocks) => blocks,
-                Err(err) => {
-                    log::error!("Failed to fetch missing blocks from storage: {err:?}");
-                    return;
+            let mut unprocessed = self.storage.block_storage().unprocessed_blocks().await;
+
+            if let Some(last_block) = unprocessed.last_block {
+                let latest_finalized_block = match self.eth_api.finalized_block_number().await {
+                    Ok(block) => block,
+                    Err(err) => {
+                        log::error!("Failed to fetch missing blocks: {err:?}");
+                        return;
+                    }
+                };
+
+                for block in last_block.0 + 1..=latest_finalized_block {
+                    unprocessed
+                        .unprocessed
+                        .push_back(EthereumBlockNumber(block));
                 }
-            };
+            }
             loop {
                 let res = self
-                    .run_inner(&sender, &mut blocks, &mut missing_blocks)
+                    .run_inner(&sender, &mut blocks, &mut unprocessed.unprocessed)
                     .await;
                 if let Err(err) = res {
                     attempts += 1;

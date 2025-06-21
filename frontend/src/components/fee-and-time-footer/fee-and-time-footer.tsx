@@ -5,7 +5,6 @@ import { TOKEN_ID, TokenPrice } from '@/features/token-price';
 import { useVaraSymbol } from '@/hooks';
 import { cx } from '@/utils';
 
-import { FormattedBalance } from '../formatted-balance';
 import { Skeleton } from '../layout';
 
 import styles from './fee-and-time-footer.module.scss';
@@ -35,7 +34,7 @@ function FeeAndTimeFooter({ feeValue, decimals, isVaraNetwork, isLoading, classN
         <span className={styles.value}>
           {feeValue && decimals && symbol ? (
             <>
-              <FormattedBalance value={feeValue} decimals={decimals} symbol={symbol} />
+              {formatUnits(feeValue, decimals)} {symbol}
               <TokenPrice id={tokenId} amount={formatUnits(feeValue, decimals)} />
             </>
           ) : (

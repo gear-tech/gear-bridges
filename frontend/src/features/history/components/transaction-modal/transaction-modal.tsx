@@ -70,6 +70,8 @@ function TransactionModal({
   const payFee = usePayFee();
   const alert = useAlert();
   const queryClient = useQueryClient();
+
+  const rawNonce = isVaraNetwork && nonce ? `0x${nonce.padStart(64, '0')}` : nonce;
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.AwaitingPayment;
 
   const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isVaraNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
@@ -84,13 +86,11 @@ function TransactionModal({
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const handlePayFeeButtonClick = () => {
-    if (!nonce) throw new Error('Nonce is not found');
+    if (!rawNonce) throw new Error('Nonce is not found');
     if (isUndefined(fee.value)) throw new Error('Fee is not found');
 
-    const nonceHex = `0x${nonce.padStart(64, '0')}`;
-
     payFee
-      .sendTransactionAsync({ args: [nonceHex], value: fee.value })
+      .sendTransactionAsync({ args: [rawNonce], value: fee.value })
       .then(() => {
         close();
         alert.success('Fee paid successfully');
@@ -106,17 +106,27 @@ function TransactionModal({
       headerAddon={status && <TransactionStatus status={status} />}
       close={close}
       maxWidth="large">
-      {(txHash || timestamp) && (
+      {(txHash || rawNonce || timestamp) && (
         <header className={styles.header}>
-          {txHash && (
-            <p className={styles.transactionHash}>
-              <a href={explorerUrl} target="_blank" rel="noreferrer">
-                {getTruncatedText(txHash)}
-              </a>
+          <div className={styles.txHashAndNonce}>
+            {txHash && (
+              <p className={styles.txHash}>
+                <a href={explorerUrl} target="_blank" rel="noreferrer">
+                  {getTruncatedText(txHash)}
+                </a>
 
-              <CopyButton value={txHash} />
-            </p>
-          )}
+                <CopyButton value={txHash} message="Transaction hash copied" />
+              </p>
+            )}
+
+            {rawNonce && (
+              <p className={styles.nonce}>
+                Nonce:
+                <Address value={rawNonce} prefixLength={4} />
+                <CopyButton value={rawNonce} />
+              </p>
+            )}
+          </div>
 
           {timestamp && <TransactionDate timestamp={timestamp} className={styles.date} />}
         </header>

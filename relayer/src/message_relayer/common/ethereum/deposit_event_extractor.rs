@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
 use prometheus::IntCounter;
 use sails_rs::H160;

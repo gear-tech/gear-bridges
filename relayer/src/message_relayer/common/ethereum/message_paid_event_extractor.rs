@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
 use prometheus::IntCounter;
 use sails_rs::H160;
@@ -12,7 +12,7 @@ use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::{EthereumBlockNumber, TxHashWithSlot},
-        eth_to_gear::storage::{BlockStorage, Storage},
+        eth_to_gear::storage::Storage,
     },
 };
 

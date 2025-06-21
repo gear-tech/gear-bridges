@@ -2,14 +2,14 @@ use crate::message_relayer::{common::TxHashWithSlot, eth_to_gear::message_sender
 use eth_events_electra_client::EthToVaraEvent;
 use sails_rs::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedReceiver, RwLock};
 use uuid::Uuid;
 
 use super::{
     message_sender::{self, MessageSenderIo},
     proof_composer::{self, ProofComposerIo},
-    storage::{NoStorage, Storage},
+    storage::Storage,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -44,16 +44,16 @@ pub struct TransactionManager {
 
     pub completed: RwLock<BTreeMap<Uuid, Transaction>>,
     pub failed: RwLock<BTreeMap<Uuid, String>>,
-    pub storage: Box<dyn Storage>,
+    pub storage: Arc<dyn Storage>,
 }
 
 impl TransactionManager {
-    pub fn new(storage: Option<Box<dyn Storage>>) -> Self {
+    pub fn new(storage: Arc<dyn Storage>) -> Self {
         Self {
             transactions: RwLock::new(BTreeMap::new()),
             completed: RwLock::new(BTreeMap::new()),
             failed: RwLock::new(BTreeMap::new()),
-            storage: storage.unwrap_or_else(|| Box::new(NoStorage)),
+            storage,
         }
     }
 
@@ -79,19 +79,12 @@ impl TransactionManager {
         }
     }
 
-    async fn read_from_storage(&self) {
-        if let Err(err) = self.storage.load(self).await {
-            log::error!("Failed to load transactions from storage: {err:?}");
-        }
-    }
-
     pub async fn run(
         self,
         mut message_paid_events: UnboundedReceiver<TxHashWithSlot>,
         mut proof_composer: ProofComposerIo,
         mut message_sender: MessageSenderIo,
     ) -> anyhow::Result<()> {
-        self.read_from_storage().await;
         if !self
             .resume(&mut message_sender, &mut proof_composer)
             .await?

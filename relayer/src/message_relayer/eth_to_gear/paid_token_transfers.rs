@@ -1,9 +1,13 @@
-use super::{message_sender, proof_composer, storage, tx_manager};
+use super::{
+    message_sender, proof_composer,
+    storage::{JSONStorage, Storage},
+    tx_manager,
+};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
-use std::iter;
+use std::{iter, sync::Arc};
 use tx_manager::TransactionManager;
 use utils_prometheus::MeteredService;
 
@@ -29,6 +33,9 @@ pub struct Relayer {
 
     message_sender: message_sender::MessageSender,
     proof_composer: proof_composer::ProofComposer,
+    tx_manager: TransactionManager,
+
+    storage: Arc<dyn Storage>,
 }
 
 impl MeteredService for Relayer {
@@ -52,16 +59,22 @@ impl Relayer {
         historical_proxy_address: H256,
         vft_manager_address: H256,
         api_provider: ApiProviderConnection,
+        storage_path: String,
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
+        let storage = Arc::new(JSONStorage::new(storage_path));
+
+        let tx_manager = TransactionManager::new(storage.clone());
+
         let message_paid_event_extractor = MessagePaidEventExtractor::new(
             eth_api.clone(),
             beacon_client.clone(),
             bridging_payment_address,
+            storage.clone(),
         );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
@@ -94,22 +107,29 @@ impl Relayer {
 
             message_sender,
             proof_composer,
+            tx_manager,
+
+            storage,
         })
     }
 
-    pub async fn run(self, storage_path: &str) {
+    pub async fn run(self) {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
+        if let Err(err) = self.storage.load(&self.tx_manager).await {
+            log::warn!("Failed to load transaction and block status from storage: {err:?}")
+        }
         let message_paid_events = self.message_paid_event_extractor.run(ethereum_blocks).await;
         let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.message_sender.run();
-
-        let storage = storage::JSONStorage::new(storage_path);
-
-        let _ = TransactionManager::new(Some(Box::new(storage)))
+        if let Err(err) = self
+            .tx_manager
             .run(message_paid_events, proof_composer, message_sender)
-            .await;
+            .await
+        {
+            log::error!("Transaction manager exited with error: {err:?}");
+        }
     }
 }

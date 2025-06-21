@@ -272,6 +272,7 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        storage_path,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -283,7 +284,7 @@ async fn main() {
                         .await;
 
                     provider.spawn();
-                    relayer.run(&storage_path).await;
+                    relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -301,6 +302,7 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        storage_path,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -311,7 +313,7 @@ async fn main() {
                         .run(prometheus_args.endpoint)
                         .await;
                     provider.spawn();
-                    relayer.run(&storage_path).await;
+                    relayer.run().await;
                 }
             }
 

@@ -1,9 +1,7 @@
-use primitive_types::H256;
-
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, TxHash};
-use tokio::sync::mpsc::unbounded_channel;
-
+use super::{
+    api_provider::ApiProviderConnection, message_sender::MessageSender,
+    proof_composer::ProofComposer, storage::NoStorage, tx_manager::TransactionManager,
+};
 use crate::message_relayer::common::{
     gear::{
         block_listener::BlockListener as GearBlockListener,
@@ -11,11 +9,11 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber, TxHashWithSlot,
 };
-
-use super::{
-    api_provider::ApiProviderConnection, message_sender::MessageSender,
-    proof_composer::ProofComposer, tx_manager::TransactionManager,
-};
+use ethereum_beacon_client::BeaconClient;
+use ethereum_client::{EthApi, TxHash};
+use primitive_types::H256;
+use std::sync::Arc;
+use tokio::sync::mpsc::unbounded_channel;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -64,7 +62,7 @@ pub async fn relay(
 
     let checkpoints = checkpoints_extractor.run(gear_blocks).await;
 
-    let tx_manager = TransactionManager::new(None);
+    let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
 
     let message_sender = message_sender.run();
     let proof_composer = proof_composer.run(checkpoints);

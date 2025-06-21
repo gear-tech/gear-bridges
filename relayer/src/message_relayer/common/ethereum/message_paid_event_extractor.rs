@@ -1,3 +1,5 @@
+use std::{collections::VecDeque, sync::Arc};
+
 use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -8,7 +10,10 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::common::{EthereumBlockNumber, TxHashWithSlot},
+    message_relayer::{
+        common::{EthereumBlockNumber, TxHashWithSlot},
+        eth_to_gear::storage::*,
+    },
 };
 
 use super::find_slot_by_block_number;
@@ -16,6 +21,8 @@ use super::find_slot_by_block_number;
 pub struct MessagePaidEventExtractor {
     eth_api: EthApi,
     beacon_client: BeaconClient,
+
+    storage: Arc<dyn Storage>,
 
     bridging_payment_address: H160,
 
@@ -42,8 +49,10 @@ impl MessagePaidEventExtractor {
         eth_api: EthApi,
         beacon_client: BeaconClient,
         bridging_payment_address: H160,
+        storage: Arc<dyn Storage>,
     ) -> Self {
         Self {
+            storage,
             eth_api,
             beacon_client,
 
@@ -62,8 +71,20 @@ impl MessagePaidEventExtractor {
         tokio::task::spawn(async move {
             let mut attempts = 0;
 
+            let Ok(mut missing_blocks) = self
+                .storage
+                .block_storage()
+                .missing_blocks(&self.eth_api)
+                .await
+            else {
+                log::error!("Failed to read missing blocks");
+                return;
+            };
+
             loop {
-                let res = self.run_inner(&sender, &mut blocks).await;
+                let res = self
+                    .run_inner(&sender, &mut blocks, &mut missing_blocks)
+                    .await;
                 if let Err(err) = res {
                     attempts += 1;
                     log::error!(
@@ -86,6 +107,9 @@ impl MessagePaidEventExtractor {
                             }
                         };
                     }
+                } else {
+                    log::info!("Connection to block listener closed, exiting...");
+                    break;
                 }
             }
         });
@@ -97,12 +121,17 @@ impl MessagePaidEventExtractor {
         &self,
         sender: &UnboundedSender<TxHashWithSlot>,
         blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
+        missing_blocks: &mut VecDeque<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
-        loop {
-            while let Some(block) = blocks.recv().await {
-                self.process_block_events(block, sender).await?;
-            }
+        while let Some(block) = missing_blocks.pop_front() {
+            self.process_block_events(block, sender).await?;
         }
+
+        while let Some(block) = blocks.recv().await {
+            self.process_block_events(block, sender).await?;
+        }
+
+        Ok(())
     }
 
     async fn process_block_events(
@@ -115,26 +144,31 @@ impl MessagePaidEventExtractor {
             .fetch_fee_paid_events(self.bridging_payment_address, block.0)
             .await?;
 
-        if events.is_empty() {
-            return Ok(());
-        }
-
         let slot_number =
             find_slot_by_block_number(&self.eth_api, &self.beacon_client, block).await?;
 
+        if events.is_empty() {
+            self.storage
+                .block_storage()
+                .add_block(slot_number, block, std::iter::empty())
+                .await;
+            return Ok(());
+        }
         self.metrics
             .total_paid_messages_found
             .inc_by(events.len() as u64);
 
-        for ev in &events {
+        self.storage
+            .block_storage()
+            .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
+            .await;
+        for FeePaidEntry { tx_hash } in events {
             log::info!(
                 "Found fee paid event: tx_hash={}, slot_number={}",
-                hex::encode(ev.tx_hash.0),
+                hex::encode(tx_hash.0),
                 slot_number.0,
             );
-        }
 
-        for FeePaidEntry { tx_hash } in events {
             sender.send(TxHashWithSlot {
                 slot_number,
                 tx_hash,

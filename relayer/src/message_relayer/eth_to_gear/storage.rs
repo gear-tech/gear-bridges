@@ -104,44 +104,21 @@ impl BlockStorage {
     pub async fn prune(&self) {
         let mut blocks = self.blocks.write().await;
 
-        if blocks.len() <= self.n_to_keep {
-            return;
+        let mut remove_until = None;
+
+        for (index, (slot, block)) in blocks.iter().enumerate() {
+            if index + self.n_to_keep > blocks.len() {
+                remove_until = Some(*slot);
+                break;
+            }
+
+            if !block.is_processed() {
+                break;
+            }
         }
 
-        let nprocessed = blocks.iter().filter(|(_, b)| b.is_processed()).count();
-        let processed =
-            blocks.iter().scan(
-                None::<EthereumBlockNumber>,
-                |prev, (slot, block)| match prev {
-                    Some(prev_number) => {
-                        if prev_number.0 + 1 == block.number.0 && block.is_processed() {
-                            *prev = Some(block.number);
-                            Some(*slot)
-                        } else {
-                            None
-                        }
-                    }
-
-                    None => {
-                        if block.is_processed() {
-                            *prev = Some(block.number);
-                            Some(*slot)
-                        } else {
-                            None
-                        }
-                    }
-                },
-            );
-        if nprocessed <= self.n_to_keep {
-            return;
-        }
-
-        let to_remove = processed
-            .take(nprocessed - self.n_to_keep)
-            .collect::<Vec<_>>();
-
-        for slot in to_remove {
-            blocks.remove(&slot);
+        if let Some(remove_until) = remove_until {
+            *blocks = blocks.split_off(&remove_until);
         }
     }
 }

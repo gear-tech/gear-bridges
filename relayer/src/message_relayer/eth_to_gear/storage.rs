@@ -145,6 +145,7 @@ impl BlockStorage {
 
         if processed_count <= n_to_keep {
             log::debug!("Not pruning block storage. Processed blocks: {processed_count}, Target: {n_to_keep}");
+            return;
         }
 
         let num_to_remove = processed_count - n_to_keep;

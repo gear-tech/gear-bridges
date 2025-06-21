@@ -19,7 +19,7 @@ import { getAmountSchema } from '../utils';
 type Params = {
   accountBalance: bigint | undefined;
   ftBalance: bigint | undefined;
-  requiredBalance: UseMutationResult<bigint, Error, FormattedValues, unknown>;
+  requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
   onSubmit: (values: FormattedValues) => Promise<unknown>;
   onValidation: () => void;
 };
@@ -59,7 +59,7 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance, onV
     definedAssert(accountBalance, 'Account balance is not defined');
     definedAssert(varaSymbol, 'Vara symbol is not defined');
 
-    const _requiredBalance = await requiredBalance.mutateAsync(values);
+    const { requiredBalance: _requiredBalance } = await requiredBalance.mutateAsync(values);
     const symbol = network.isVara ? varaSymbol : 'ETH';
 
     if (accountBalance < _requiredBalance) throw new InsufficientAccountBalanceError(symbol, _requiredBalance);

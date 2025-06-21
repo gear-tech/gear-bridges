@@ -24,8 +24,7 @@ type UseHandleSubmit = (params: UseHandleSubmitParameters) => {
   status: SubmitStatus;
   isPending: boolean;
   error: Error | null;
-  requiredBalance?: UseMutationResult<bigint, Error, FormattedValues, unknown>;
-  isLoading?: boolean;
+  requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
 };
 
 export type { Values, FormattedValues, UseHandleSubmitParameters, UseHandleSubmit };

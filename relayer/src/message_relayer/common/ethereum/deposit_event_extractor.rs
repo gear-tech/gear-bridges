@@ -12,7 +12,7 @@ use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::{EthereumBlockNumber, TxHashWithSlot},
-        eth_to_gear::storage::Storage,
+        eth_to_gear::storage::{Storage, UnprocessedBlocks},
     },
 };
 
@@ -70,9 +70,12 @@ impl DepositEventExtractor {
 
         tokio::task::spawn(async move {
             let mut attempts = 0;
-            let mut unprocessed = self.storage.block_storage().unprocessed_blocks().await;
+            let UnprocessedBlocks {
+                last_block,
+                mut unprocessed,
+            } = self.storage.block_storage().unprocessed_blocks().await;
 
-            if let Some(last_block) = unprocessed.last_block {
+            if let Some(last_block) = last_block {
                 let latest_finalized_block = match blocks.recv().await {
                     Some(block) => block,
                     None => {
@@ -82,13 +85,11 @@ impl DepositEventExtractor {
                 };
 
                 for block in last_block.0 + 1..=latest_finalized_block.0 {
-                    unprocessed.unprocessed.push(EthereumBlockNumber(block));
+                    unprocessed.push(EthereumBlockNumber(block));
                 }
             }
             loop {
-                let res = self
-                    .run_inner(&sender, &mut blocks, &mut unprocessed.unprocessed)
-                    .await;
+                let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
                 if let Err(err) = res {
                     attempts += 1;
                     let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);

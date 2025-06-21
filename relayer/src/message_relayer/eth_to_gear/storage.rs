@@ -113,6 +113,7 @@ impl BlockStorage {
             }
 
             if !block.is_processed() {
+                remove_until = Some(*slot);
                 break;
             }
         }

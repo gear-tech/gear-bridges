@@ -1,10 +1,10 @@
 use super::tx_manager::{Transaction, TransactionManager, TxStatus};
 use crate::message_relayer::common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot};
 use async_trait::async_trait;
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::TxHash;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet},
     ffi::OsString,
     path::{Path, PathBuf},
     str::FromStr,
@@ -91,7 +91,7 @@ impl BlockStorage {
         let unprocessed = blocks
             .iter()
             .filter_map(|(_, block)| (!block.is_processed()).then_some(block.number))
-            .collect::<VecDeque<_>>();
+            .collect::<Vec<_>>();
 
         let last_block = blocks.last_key_value().map(|(_, block)| block.number);
 
@@ -125,7 +125,7 @@ impl BlockStorage {
 
 pub struct UnprocessedBlocks {
     pub last_block: Option<EthereumBlockNumber>,
-    pub unprocessed: VecDeque<EthereumBlockNumber>,
+    pub unprocessed: Vec<EthereumBlockNumber>,
 }
 
 #[async_trait]
@@ -248,13 +248,13 @@ impl Storage for JSONStorage {
         failed_file.write_all(str.as_bytes()).await?;
         failed_file.flush().await?;
 
-        let block_storage_path = self.path.join("blocks.json");
-
+        let blocks_new = self.path.join("blocks.json.new");
+        let blocks_old = self.path.join("blocks.json");
         let mut blocks_file = tokio::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
-            .open(block_storage_path)
+            .open(&blocks_new)
             .await?;
         // just keep 100 processed blocks in JSON storage for now...
         self.block_storage().prune().await;
@@ -262,6 +262,8 @@ impl Storage for JSONStorage {
         let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
         blocks_file.write_all(blocks_json.as_bytes()).await?;
         blocks_file.flush().await?;
+        tokio::fs::remove_file(&blocks_old).await?;
+        tokio::fs::rename(blocks_new, blocks_old).await?;
 
         Ok(())
     }

@@ -81,6 +81,7 @@ pub struct MessageSender {
     pub historical_proxy_address: H256,
     pub api_provider: ApiProviderConnection,
     pub suri: String,
+    pub last_request: Option<Request>,
 }
 
 impl MessageSender {
@@ -97,6 +98,7 @@ impl MessageSender {
             historical_proxy_address,
             api_provider,
             suri,
+            last_request: None,
         }
     }
 
@@ -116,9 +118,31 @@ impl MessageSender {
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.gclient_client(&self.suri)?;
 
+        if let Some(request) = self.last_request.take() {
+            match self.process(responses, &gear_api, &request).await {
+                Ok(cont) => {
+                    if !cont {
+                        return Ok(());
+                    }
+                }
+                Err(err) => {
+                    self.last_request = Some(request);
+                    return Err(err);
+                }
+            }
+        }
+
         while let Some(request) = requests.recv().await {
-            if !self.process(responses, &gear_api, request).await? {
-                return Ok(());
+            match self.process(responses, &gear_api, &request).await {
+                Ok(cont) => {
+                    if !cont {
+                        return Ok(());
+                    }
+                }
+                Err(err) => {
+                    self.last_request = Some(request);
+                    return Err(err);
+                }
             }
         }
 
@@ -129,13 +153,14 @@ impl MessageSender {
         &mut self,
         responses: &mut UnboundedSender<Response>,
         gear_api: &GearApi,
-        request: Request,
+        request: &Request,
     ) -> anyhow::Result<bool> {
         let Request {
             tx_uuid,
             payload,
             tx_hash,
         } = request;
+        let tx_uuid = *tx_uuid;
         let gas_limit_block = gear_api.block_gas_limit()?;
         let gas_limit = gas_limit_block / 100 * 95;
 

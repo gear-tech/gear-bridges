@@ -14,6 +14,7 @@ sol!(
 
 sol!(
     #[sol(rpc)]
+    #[allow(clippy::too_many_arguments)]
     IERC20Manager,
     "../../api/ethereum/IERC20Manager.json"
 );

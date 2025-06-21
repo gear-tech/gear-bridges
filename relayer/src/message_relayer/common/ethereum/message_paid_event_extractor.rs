@@ -12,7 +12,7 @@ use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::{EthereumBlockNumber, TxHashWithSlot},
-        eth_to_gear::storage::{Storage, BlockStorage},
+        eth_to_gear::storage::{BlockStorage, Storage},
     },
 };
 
@@ -83,9 +83,7 @@ impl MessagePaidEventExtractor {
                 };
 
                 for block in last_block.0 + 1..=latest_finalized_block {
-                    unprocessed
-                        .unprocessed
-                        .push_back(EthereumBlockNumber(block));
+                    unprocessed.unprocessed.push(EthereumBlockNumber(block));
                 }
             }
 
@@ -129,9 +127,9 @@ impl MessagePaidEventExtractor {
         &self,
         sender: &UnboundedSender<TxHashWithSlot>,
         blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
-        missing_blocks: &mut VecDeque<EthereumBlockNumber>,
+        missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
-        while let Some(block) = missing_blocks.pop_front() {
+        while let Some(block) = missing_blocks.pop() {
             self.process_block_events(block, sender).await?;
         }
 
@@ -155,21 +153,15 @@ impl MessagePaidEventExtractor {
         let slot_number =
             find_slot_by_block_number(&self.eth_api, &self.beacon_client, block).await?;
 
-        if events.is_empty() {
-            self.storage
-                .block_storage()
-                .add_block(slot_number, block, std::iter::empty())
-                .await;
-            return Ok(());
-        }
-        self.metrics
-            .total_paid_messages_found
-            .inc_by(events.len() as u64);
-
         self.storage
             .block_storage()
             .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
             .await;
+
+        self.metrics
+            .total_paid_messages_found
+            .inc_by(events.len() as u64);
+
         for FeePaidEntry { tx_hash } in events {
             log::info!(
                 "Found fee paid event: tx_hash={}, slot_number={}",

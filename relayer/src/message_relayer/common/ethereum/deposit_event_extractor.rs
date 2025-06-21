@@ -82,9 +82,7 @@ impl DepositEventExtractor {
                 };
 
                 for block in last_block.0 + 1..=latest_finalized_block {
-                    unprocessed
-                        .unprocessed
-                        .push_back(EthereumBlockNumber(block));
+                    unprocessed.unprocessed.push(EthereumBlockNumber(block));
                 }
             }
             loop {
@@ -126,9 +124,9 @@ impl DepositEventExtractor {
         &self,
         sender: &UnboundedSender<TxHashWithSlot>,
         blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
-        missing_blocks: &mut VecDeque<EthereumBlockNumber>,
+        missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
-        while let Some(block) = missing_blocks.pop_front() {
+        while let Some(block) = missing_blocks.pop() {
             self.process_block_events(block, sender).await?;
         }
         while let Some(block) = blocks.recv().await {
@@ -151,18 +149,14 @@ impl DepositEventExtractor {
         let slot_number =
             find_slot_by_block_number(&self.eth_api, &self.beacon_client, block).await?;
 
-        if events.is_empty() {
-            return Ok(());
-        }
-
-        self.metrics
-            .total_deposits_found
-            .inc_by(events.len() as u64);
-
         self.storage
             .block_storage()
             .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
             .await;
+
+        self.metrics
+            .total_deposits_found
+            .inc_by(events.len() as u64);
 
         for DepositEventEntry {
             tx_hash,

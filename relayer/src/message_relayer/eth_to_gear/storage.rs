@@ -122,6 +122,29 @@ impl BlockStorage {
             *blocks = blocks.split_off(&remove_until);
         }
     }
+
+    pub async fn save(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let blocks_new = path.join("blocks.json.new");
+        let blocks_old = path.join("blocks.json");
+        let mut blocks_file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&blocks_new)
+            .await?;
+        // just keep 100 processed blocks in JSON storage for now...
+        self.prune().await;
+        let blocks = self.blocks.read().await;
+        let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
+        blocks_file.write_all(blocks_json.as_bytes()).await?;
+        blocks_file.flush().await?;
+        if blocks_old.exists() {
+            tokio::fs::remove_file(&blocks_old).await?;
+        }
+        tokio::fs::rename(blocks_new, blocks_old).await?;
+        Ok(())
+    }
 }
 
 pub struct UnprocessedBlocks {
@@ -134,6 +157,7 @@ pub trait Storage: Send + Sync {
     fn block_storage(&self) -> &BlockStorage;
     async fn save(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
     async fn load(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
+    async fn save_blocks(&self) -> anyhow::Result<()>;
 }
 
 pub struct NoStorage(BlockStorage);
@@ -155,6 +179,11 @@ impl Storage for NoStorage {
     }
 
     async fn load(&self, _tx_manager: &TransactionManager) -> anyhow::Result<()> {
+        /* no-op */
+        Ok(())
+    }
+
+    async fn save_blocks(&self) -> anyhow::Result<()> {
         /* no-op */
         Ok(())
     }
@@ -252,23 +281,7 @@ impl Storage for JSONStorage {
         let str = serde_json::to_string(&failed)?;
         failed_file.write_all(str.as_bytes()).await?;
         failed_file.flush().await?;
-
-        let blocks_new = self.path.join("blocks.json.new");
-        let blocks_old = self.path.join("blocks.json");
-        let mut blocks_file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&blocks_new)
-            .await?;
-        // just keep 100 processed blocks in JSON storage for now...
-        self.block_storage().prune().await;
-        let blocks = self.block_storage().blocks.read().await;
-        let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
-        blocks_file.write_all(blocks_json.as_bytes()).await?;
-        blocks_file.flush().await?;
-        tokio::fs::remove_file(&blocks_old).await?;
-        tokio::fs::rename(blocks_new, blocks_old).await?;
+        self.block_storage.save(&self.path).await?;
 
         Ok(())
     }
@@ -299,5 +312,9 @@ impl Storage for JSONStorage {
         }
 
         Ok(())
+    }
+
+    async fn save_blocks(&self) -> anyhow::Result<()> {
+        self.block_storage().save(&self.path).await
     }
 }

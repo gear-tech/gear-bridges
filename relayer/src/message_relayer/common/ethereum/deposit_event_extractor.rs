@@ -154,7 +154,7 @@ impl DepositEventExtractor {
             .block_storage()
             .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
             .await;
-
+        self.storage.save_blocks().await?;
         self.metrics
             .total_deposits_found
             .inc_by(events.len() as u64);

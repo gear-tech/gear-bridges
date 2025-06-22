@@ -1,16 +1,16 @@
 import { HexString } from '@gear-js/api';
+import { useMutation } from '@tanstack/react-query';
 import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { definedAssert } from '@/utils';
 
-import { ERC20_MANAGER_ABI, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS, ERC20_MANAGER_CONTRACT_ADDRESS } from '../../consts';
+import { ERC20_MANAGER_ABI, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 
 type Parameters = { amount: bigint; accountAddress: HexString };
-type TxParameters = Parameters & { gasLimit: bigint | undefined };
-type PermitTxParameters = Parameters & { permit: { deadline: bigint; v: number; r: HexString; s: HexString } };
+type PermitParameters = Parameters & { permit: { deadline: bigint; v: number; r: HexString; s: HexString } };
 
 function useTransfer(fee: bigint | undefined) {
   const { token } = useBridgeContext();
@@ -25,50 +25,40 @@ function useTransfer(fee: bigint | undefined) {
     const encodedData = encodeFunctionData({
       abi: ERC20_MANAGER_ABI,
       functionName: 'requestBridgingPayingFee',
-      args: [token.address, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+      args: [token.address, amount, accountAddress, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
     });
 
     return estimateGas(config, {
-      to: ERC20_MANAGER_CONTRACT_ADDRESS,
+      to: CONTRACT_ADDRESS.ERC20_MANAGER,
       data: encodedData,
       value: fee,
     });
   };
 
-  const transfer = async ({ amount, accountAddress, gasLimit }: TxParameters) => {
+  const transfer = async ({ amount, accountAddress, ...params }: Parameters | PermitParameters) => {
     definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
 
-    const hash = await writeContractAsync({
-      abi: ERC20_MANAGER_ABI,
-      address: ERC20_MANAGER_CONTRACT_ADDRESS,
-      functionName: 'requestBridgingPayingFee',
-      args: [token.address, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
-      value: fee,
-      gas: gasLimit,
-    });
+    const tx = { abi: ERC20_MANAGER_ABI, address: CONTRACT_ADDRESS.ERC20_MANAGER, value: fee };
+    const permit = 'permit' in params ? params.permit : undefined;
+    const permitArgs = permit ? ([permit.deadline, permit.v, permit.r, permit.s] as const) : undefined;
+
+    const hash = permitArgs
+      ? await writeContractAsync({
+          ...tx,
+          functionName: 'requestBridgingPayingFeeWithPermit',
+          args: [token.address, amount, accountAddress, ...permitArgs, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
+        })
+      : await writeContractAsync({
+          ...tx,
+          functionName: 'requestBridgingPayingFee',
+          args: [token.address, amount, accountAddress, CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT],
+        });
 
     return waitForTransactionReceipt(config, { hash });
   };
 
-  const transferWithPermit = async ({ amount, accountAddress, permit }: PermitTxParameters) => {
-    definedAssert(token?.address, 'Fungible token address');
-    definedAssert(fee, 'Fee');
-
-    const { deadline, v, r, s } = permit;
-
-    const hash = await writeContractAsync({
-      abi: ERC20_MANAGER_ABI,
-      address: ERC20_MANAGER_CONTRACT_ADDRESS,
-      functionName: 'requestBridgingPayingFeeWithPermit',
-      args: [token.address, amount, accountAddress, deadline, v, r, s, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
-      value: fee,
-    });
-
-    return waitForTransactionReceipt(config, { hash });
-  };
-
-  return { mutateAsync: transfer, mutateWithPermitAsync: transferWithPermit, getGasLimit };
+  return { ...useMutation({ mutationFn: transfer }), getGasLimit };
 }
 
 export { useTransfer };

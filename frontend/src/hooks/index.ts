@@ -7,7 +7,6 @@ import { useVaraAccountBalance } from './use-vara-account-balance';
 import { useVaraFTBalance } from './use-vara-ft-balance';
 import { useVaraFTBalances } from './use-vara-ft-balances';
 import { useVaraSymbol } from './use-vara-symbol';
-import { useVFTManagerProgram } from './use-vft-manager-program';
 import { useVFTProgram } from './use-vft-program';
 import { useWrappedVaraProgram } from './use-wrapped-vara-program';
 
@@ -27,5 +26,4 @@ export {
   useVaraSymbol,
   useWrappedVaraProgram,
   useVFTProgram,
-  useVFTManagerProgram,
 };

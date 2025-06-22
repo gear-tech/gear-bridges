@@ -6,7 +6,7 @@ import { JSX } from 'react';
 
 import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } from '@/components';
 import { useTokens } from '@/context';
-import { BridgingPaymentProgram, BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '@/features/swap/consts';
+import { BridgingPaymentProgram, CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useEthFee, useVaraFee } from '@/features/swap/hooks';
 import { cx, getErrorMessage, isUndefined, getTruncatedText } from '@/utils';
 
@@ -34,7 +34,7 @@ type Props = Pick<
 function usePayFee() {
   const { data: program } = useProgram({
     library: BridgingPaymentProgram,
-    id: BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+    id: CONTRACT_ADDRESS.BRIDGING_PAYMENT,
   });
 
   return useSendProgramTransaction({

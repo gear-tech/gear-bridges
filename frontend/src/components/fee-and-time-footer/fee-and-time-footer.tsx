@@ -35,7 +35,7 @@ function FeeAndTimeFooter({ feeValue, decimals, isVaraNetwork, isLoading, classN
           {feeValue && decimals && symbol ? (
             <>
               {formatUnits(feeValue, decimals)} {symbol}
-              <TokenPrice id={tokenId} amount={formatUnits(feeValue, decimals)} />
+              <TokenPrice id={tokenId} amount={formatUnits(feeValue, decimals)} fraction={4} />
             </>
           ) : (
             <>

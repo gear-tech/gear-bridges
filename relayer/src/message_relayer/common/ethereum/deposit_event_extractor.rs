@@ -4,27 +4,28 @@ use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{DepositEventEntry, EthApi};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
-        common::{EthereumBlockNumber, TxHashWithSlot},
+        common::{
+            ethereum::block_listener::ETHEREUM_BLOCK_TIME_APPROX, EthereumBlockNumber,
+            EthereumSlotNumber, TxHashWithSlot,
+        },
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
     },
 };
 
-use super::find_slot_by_block_number;
-
 pub struct DepositEventExtractor {
     eth_api: EthApi,
-    beacon_client: BeaconClient,
 
     erc20_manager_address: H160,
 
     storage: Arc<dyn Storage>,
+
+    genesis_time: u64,
 
     metrics: Metrics,
 }
@@ -47,16 +48,18 @@ impl_metered_service! {
 impl DepositEventExtractor {
     pub fn new(
         eth_api: EthApi,
-        beacon_client: BeaconClient,
+
         erc20_manager_address: H160,
         storage: Arc<dyn Storage>,
+        genesis_time: u64,
     ) -> Self {
         Self {
             eth_api,
-            beacon_client,
 
             erc20_manager_address,
             storage,
+
+            genesis_time,
 
             metrics: Metrics::new(),
         }
@@ -146,9 +149,11 @@ impl DepositEventExtractor {
             .eth_api
             .fetch_deposit_events(self.erc20_manager_address, block.0)
             .await?;
+        let timestamp = self.eth_api.get_block_timestamp(block.0).await?;
 
-        let slot_number =
-            find_slot_by_block_number(&self.eth_api, &self.beacon_client, block).await?;
+        let slot_number = EthereumSlotNumber(
+            timestamp.saturating_sub(self.genesis_time) / ETHEREUM_BLOCK_TIME_APPROX.as_secs(),
+        );
 
         self.storage
             .block_storage()

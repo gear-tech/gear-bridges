@@ -235,6 +235,17 @@ impl EthApi {
             .collect())
     }
 
+    pub async fn get_block_timestamp(&self, block: u64) -> Result<u64, Error> {
+        Ok(self
+            .raw_provider()
+            .get_block_by_number(BlockNumberOrTag::Number(block))
+            .await
+            .map_err(Error::ErrorInHTTPTransport)?
+            .ok_or(Error::ErrorFetchingBlock)?
+            .header
+            .timestamp)
+    }
+
     pub async fn fetch_fee_paid_events(
         &self,
         contract_address: H160,

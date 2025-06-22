@@ -8,7 +8,7 @@ use super::{
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::Log;
+use alloy_primitives::{FixedBytes, Log, B256};
 use alloy_rlp::Encodable;
 use core::{fmt, str::FromStr};
 use serde::{de, Deserialize};
@@ -141,6 +141,19 @@ pub struct UpdateData {
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
 pub type UpdateResponse = Vec<UpdateData>;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenesisResponse {
+    pub data: GenesisData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenesisData {
+    #[serde(deserialize_with = "deserialize_u64")]
+    pub genesis_time: u64,
+    pub genesis_validator_root: B256,
+    pub genesis_fork_version: FixedBytes<4>,
+}
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_epoch_at_slot).
 pub const fn calculate_epoch(slot: u64) -> u64 {

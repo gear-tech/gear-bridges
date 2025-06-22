@@ -63,6 +63,7 @@ impl Relayer {
         vft_manager_address: H256,
         api_provider: ApiProviderConnection,
         storage_path: String,
+        genesis_time: u64,
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
@@ -73,9 +74,9 @@ impl Relayer {
 
         let deposit_event_extractor = DepositEventExtractor::new(
             eth_api.clone(),
-            beacon_client.clone(),
             erc20_manager_address,
             storage.clone(),
+            genesis_time,
         );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);

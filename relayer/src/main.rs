@@ -256,6 +256,15 @@ async fn main() {
             let vft_manager_address =
                 hex_utils::decode_h256(&vft_manager_address).expect("Failed to parse address");
 
+            let genesis_time = beacon_client
+                .get_genesis()
+                .await
+                .expect("failed to fetch chain genesis")
+                .data
+                .genesis_time;
+
+            log::debug!("Genesis time: {genesis_time}");
+
             match command {
                 EthGearTokensCommands::AllTokenTransfers {
                     erc20_manager_address,
@@ -273,6 +282,7 @@ async fn main() {
                         vft_manager_address,
                         provider.connection(),
                         storage_path,
+                        genesis_time,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -303,6 +313,7 @@ async fn main() {
                         vft_manager_address,
                         provider.connection(),
                         storage_path,
+                        genesis_time,
                     )
                     .await
                     .expect("Failed to create relayer");

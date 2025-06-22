@@ -62,7 +62,7 @@ function usePermitUSDC() {
     definedAssert(usdcToken, 'USDC token');
     definedAssert(ethAccount.address, 'Account address');
 
-    const domain = await getDomain();
+    const [nonce, domain] = await Promise.all([getNonce(), getDomain()]);
     const timestampSeconds = Math.floor(Date.now() / 1000);
     const deadline = BigInt(timestampSeconds + PERMIT_DURATION_SECONDS);
 
@@ -70,7 +70,7 @@ function usePermitUSDC() {
       owner: ethAccount.address,
       spender: CONTRACT_ADDRESS.ERC20_MANAGER,
       value,
-      nonce: await getNonce(),
+      nonce,
       deadline,
     };
 

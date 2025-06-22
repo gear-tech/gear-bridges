@@ -4,14 +4,23 @@ import { hexToNumber, slice } from 'viem';
 import { useConfig, useSignTypedData } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
-import { ETH_CHAIN_ID } from '@/consts';
 import { useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
 
-import { CONTRACT_ADDRESS, USDC_ABI } from '../../consts';
+import { CONTRACT_ADDRESS, ERC20PERMIT_NONCES_ABI, ERC5267_ABI } from '../../consts';
 
 const PERMIT_DURATION_SECONDS = 60 * 60;
+
+const PERMIT_TYPES = {
+  Permit: [
+    { name: 'owner', type: 'address' },
+    { name: 'spender', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const;
 
 function usePermitUSDC() {
   const ethAccount = useEthAccount();
@@ -29,34 +38,31 @@ function usePermitUSDC() {
     definedAssert(ethAccount.address, 'Account address');
 
     return readContract(config, {
-      abi: USDC_ABI,
+      abi: ERC20PERMIT_NONCES_ABI,
       address: usdcToken.address,
       functionName: 'nonces',
       args: [ethAccount.address],
     });
   };
 
+  const getDomain = async () => {
+    definedAssert(usdcToken, 'USDC token');
+    definedAssert(ethAccount.address, 'Account address');
+
+    const [, name, version, chainId, verifyingContract] = await readContract(config, {
+      abi: ERC5267_ABI,
+      address: usdcToken.address,
+      functionName: 'eip712Domain',
+    });
+
+    return { name, version, chainId, verifyingContract };
+  };
+
   const permit = async (value: bigint) => {
     definedAssert(usdcToken, 'USDC token');
     definedAssert(ethAccount.address, 'Account address');
 
-    const types = {
-      Permit: [
-        { name: 'owner', type: 'address' },
-        { name: 'spender', type: 'address' },
-        { name: 'value', type: 'uint256' },
-        { name: 'nonce', type: 'uint256' },
-        { name: 'deadline', type: 'uint256' },
-      ],
-    };
-
-    const domain = {
-      name: usdcToken.name,
-      version: '1', // hardcoded for now, should be fetched from the contract but for now there's no such query
-      chainId: ETH_CHAIN_ID,
-      verifyingContract: usdcToken.address,
-    };
-
+    const domain = await getDomain();
     const timestampSeconds = Math.floor(Date.now() / 1000);
     const deadline = BigInt(timestampSeconds + PERMIT_DURATION_SECONDS);
 
@@ -69,7 +75,7 @@ function usePermitUSDC() {
     };
 
     const signature = await signTypedDataAsync({
-      types,
+      types: PERMIT_TYPES,
       primaryType: 'Permit',
       domain,
       message,

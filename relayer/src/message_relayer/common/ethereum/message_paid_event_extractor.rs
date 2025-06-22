@@ -10,7 +10,10 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
-        common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
+        common::{
+            ethereum::block_listener::ETHEREUM_BLOCK_TIME_APPROX, EthereumBlockNumber,
+            EthereumSlotNumber, TxHashWithSlot,
+        },
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
     },
 };
@@ -152,7 +155,9 @@ impl MessagePaidEventExtractor {
 
         let timestamp = self.eth_api.get_block_timestamp(block.0).await?;
 
-        let slot_number = EthereumSlotNumber(timestamp.saturating_sub(self.genesis_time) / 12);
+        let slot_number = EthereumSlotNumber(
+            timestamp.saturating_sub(self.genesis_time) / ETHEREUM_BLOCK_TIME_APPROX.as_secs(),
+        );
         self.storage
             .block_storage()
             .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))

@@ -8,7 +8,7 @@ use super::{
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{FixedBytes, Log};
+use alloy_primitives::{FixedBytes, Log, B256};
 use alloy_rlp::Encodable;
 use core::{fmt, str::FromStr};
 use serde::{de, Deserialize};
@@ -151,7 +151,7 @@ pub struct GenesisResponse {
 pub struct GenesisData {
     #[serde(deserialize_with = "deserialize_u64")]
     pub genesis_time: u64,
-    pub genesis_validator_root: FixedBytes<32>,
+    pub genesis_validator_root: B256,
     pub genesis_fork_version: FixedBytes<4>,
 }
 

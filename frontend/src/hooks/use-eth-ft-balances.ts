@@ -2,7 +2,7 @@ import { HexString } from '@gear-js/api';
 import { useMemo } from 'react';
 import { useReadContracts } from 'wagmi';
 
-import { FUNGIBLE_TOKEN_ABI } from '@/consts';
+import { ERC20_ABI } from '@/consts';
 import { useTokens } from '@/context';
 import { useEthAccount, useInvalidateOnBlock } from '@/hooks';
 import { isUndefined } from '@/utils';
@@ -16,7 +16,7 @@ function useEthFTBalances() {
     () =>
       tokens.eth?.map(({ address }) => ({
         address,
-        abi: FUNGIBLE_TOKEN_ABI,
+        abi: ERC20_ABI,
         functionName: 'balanceOf',
         args: [ethAccount.address],
       })),

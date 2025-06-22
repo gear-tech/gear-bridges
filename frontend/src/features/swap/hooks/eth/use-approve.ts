@@ -3,14 +3,14 @@ import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
-import { FUNGIBLE_TOKEN_ABI } from '@/consts';
+import { ERC20_ABI } from '@/consts';
 import { definedAssert } from '@/utils';
 
 import { CONTRACT_ADDRESS } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
 import { useBridgeContext } from '../../context';
 
-const abi = FUNGIBLE_TOKEN_ABI;
+const abi = ERC20_ABI;
 
 function useApprove() {
   const { token } = useBridgeContext();

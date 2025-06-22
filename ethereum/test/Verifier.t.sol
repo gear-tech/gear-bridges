@@ -26,4 +26,39 @@ contract VerifierTest is Test {
 
         assertTrue(verifier.verifyProof(proof, publicInputs));
     }
+
+    function test_VerifyProofWithWrongNumberOfPublicInputs() public view {
+        bytes memory proof = new bytes(0);
+        uint256[] memory publicInputs = new uint256[](0);
+
+        assertFalse(verifier.verifyProof(proof, publicInputs));
+    }
+
+    function test_VerifyProofWithPublicInputsAreBiggerThanRMod() public view {
+        bytes memory proof = new bytes(0);
+        uint256[] memory publicInputs = new uint256[](2);
+        for (uint256 i = 0; i < publicInputs.length; i++) {
+            publicInputs[i] = type(uint256).max;
+        }
+
+        assertFalse(verifier.verifyProof(proof, publicInputs));
+    }
+
+    function test_VerifyProofWithWrongProofSize() public view {
+        bytes memory proof = new bytes(0);
+        uint256[] memory publicInputs = new uint256[](2);
+
+        assertFalse(verifier.verifyProof(proof, publicInputs));
+    }
+
+    function test_VerifyProofWithWrongProofOpeningsSize() public view {
+        bytes memory proof = new bytes(0x3a0);
+        for (uint256 i = 0; i < proof.length; i++) {
+            proof[i] = 0xff;
+        }
+
+        uint256[] memory publicInputs = new uint256[](2);
+
+        assertFalse(verifier.verifyProof(proof, publicInputs));
+    }
 }

@@ -23,7 +23,6 @@ interface IVerifier {
      *        assert(publicInputs[1] == 0x0000000000000000bbbbbbbbbbbbbbbbcccccccc000000000000000000000000);
      *        ```
      * @return success `true` if proof is valid, `false` otherwise.
-     * @dev Reverts if `proof` or `publicInputs` are malformed (depends on implementation).
      */
     function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool success);
 }

@@ -4,14 +4,12 @@ pragma solidity ^0.8.30;
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.
  *      - https://github.com/gear-tech/gear/blob/v1.8.1/pallets/gear-eth-bridge/src/internal.rs#L58
- *
- * TODO: rename fields.
  */
 struct VaraMessage {
-    bytes32 nonce;
-    bytes32 sender;
-    address receiver;
-    bytes data;
+    uint256 nonce;
+    bytes32 source;
+    address destination;
+    bytes payload;
 }
 
 /**
@@ -26,7 +24,7 @@ interface IMessageQueue {
     /**
      * @dev Message nonce is already processed.
      */
-    error MessageAlreadyProcessed(bytes32 messageNonce);
+    error MessageAlreadyProcessed(uint256 messageNonce);
 
     /**
      * @dev Message is not processed (failed to call IMessageQueueReceiver interface).
@@ -47,7 +45,7 @@ interface IMessageQueue {
      * @dev Emitted when message is processed.
      */
     event MessageProcessed(
-        uint256 indexed blockNumber, bytes32 indexed messageHash, bytes32 indexed messageNonce, address messageReceiver
+        uint256 indexed blockNumber, bytes32 indexed messageHash, uint256 indexed messageNonce, address messageReceiver
     );
 
     /**
@@ -91,7 +89,7 @@ interface IMessageQueue {
      * @param messageNonce Message nonce to check.
      * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
-    function isProcessed(bytes32 messageNonce) external view returns (bool);
+    function isProcessed(uint256 messageNonce) external view returns (bool);
 }
 
 /**
@@ -106,7 +104,7 @@ library Hasher {
      * TODO: avoid double hashing.
      */
     function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
-        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.sender, message.receiver, message.data));
+        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
 
         bytes32 hash2;
         assembly ("memory-safe") {
@@ -125,7 +123,7 @@ library Hasher {
      * TODO: avoid double hashing.
      */
     function hash(VaraMessage memory message) internal pure returns (bytes32) {
-        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.sender, message.receiver, message.data));
+        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
 
         bytes32 hash2;
         assembly ("memory-safe") {

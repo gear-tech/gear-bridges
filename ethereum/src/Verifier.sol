@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
+import {IPlonkVerifier} from "./interfaces/IPlonkVerifier.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {PlonkVerifier} from "./libraries/PlonkVerifier.sol";
 
@@ -13,6 +14,10 @@ contract Verifier is IVerifier, PlonkVerifier {
      * @dev See {IVerifier-verifyProof}.
      */
     function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
-        return Verify(proof, publicInputs);
+        try IPlonkVerifier(address(this)).Verify(proof, publicInputs) returns (bool success) {
+            return success;
+        } catch {
+            return false;
+        }
     }
 }

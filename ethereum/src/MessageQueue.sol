@@ -15,7 +15,7 @@ contract MessageQueue is IMessageQueue {
 
     IRelayer immutable RELAYER;
 
-    mapping(bytes32 messageNonce => bool isProcessed) private _processedMessages;
+    mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
     /**
      * @dev Initializes the MessageQueue contract with the Relayer address.
@@ -80,18 +80,9 @@ contract MessageQueue is IMessageQueue {
 
         _processedMessages[message.nonce] = true;
 
-        if (message.receiver.code.length == 0) {
-            revert MessageNotProcessed();
-        }
+        IMessageQueueReceiver(message.destination).processVaraMessage(message.source, message.payload);
 
-        (bool success,) = message.receiver.call(
-            abi.encodeWithSelector(IMessageQueueReceiver.processVaraMessage.selector, message.sender, message.data)
-        );
-        if (!success) {
-            revert MessageNotProcessed();
-        }
-
-        emit MessageProcessed(blockNumber, messageHash, message.nonce, message.receiver);
+        emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);
     }
 
     /**
@@ -99,7 +90,7 @@ contract MessageQueue is IMessageQueue {
      * @param messageNonce Message nonce to check.
      * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
-    function isProcessed(bytes32 messageNonce) external view returns (bool) {
+    function isProcessed(uint256 messageNonce) external view returns (bool) {
         return _processedMessages[messageNonce];
     }
 }

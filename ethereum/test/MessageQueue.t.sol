@@ -103,13 +103,11 @@ contract MessageQueueTest is TestHelper {
     }
 
     function test_calculate_root() public pure {
-        bytes memory payload = bytes(hex"0303");
-
         VaraMessage memory content_message =
-            VaraMessage({sender: VARA_ADDRESS_3, receiver: ETH_ADDRESS_3, nonce: bytes32(uint256(0x03)), data: payload});
+            VaraMessage({nonce: 0x03, source: VARA_ADDRESS_3, destination: ETH_ADDRESS_3, payload: bytes(hex"0303")});
 
         bytes memory ms = abi.encodePacked(
-            content_message.nonce, content_message.sender, content_message.receiver, content_message.data
+            content_message.nonce, content_message.source, content_message.destination, content_message.payload
         );
 
         bytes32 expectedMessageHash = keccak256(abi.encodePacked(keccak256(ms)));
@@ -174,13 +172,11 @@ contract MessageQueueTest is TestHelper {
     }
 
     function test_calculate_root_buffer_leaf_100() public pure {
-        bytes memory payload = bytes(hex"030303");
-
         VaraMessage memory content_message =
-            VaraMessage({sender: VARA_ADDRESS_7, receiver: ETH_ADDRESS_5, nonce: bytes32(uint256(10)), data: payload});
+            VaraMessage({nonce: 10, source: VARA_ADDRESS_7, destination: ETH_ADDRESS_5, payload: bytes(hex"030303")});
 
         bytes memory ms = abi.encodePacked(
-            content_message.sender, content_message.receiver, content_message.nonce, content_message.data
+            content_message.source, content_message.destination, content_message.nonce, content_message.payload
         );
 
         bytes32 expectedMessageHash = keccak256(ms);
@@ -206,10 +202,10 @@ contract MessageQueueTest is TestHelper {
         });
 
         VaraMessage memory vara_message = VaraMessage({
-            sender: VFT_MANAGER_ADDRESS,
-            receiver: address(erc20_manager),
-            nonce: bytes32(uint256(10)),
-            data: withdraw_msg.pack()
+            nonce: 10,
+            source: VFT_MANAGER_ADDRESS,
+            destination: address(erc20_manager),
+            payload: withdraw_msg.pack()
         });
 
         bytes32 msg_hash = vara_message.hash();

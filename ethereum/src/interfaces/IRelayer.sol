@@ -29,7 +29,7 @@ interface IRelayer {
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
      *      Upon successfully storing data about block number and corresponding Merkle root,
-     *      Relayer smart contract will emit a MerkleRoot event.
+     *      Relayer smart contract will emit a `MerkleRoot` event.
      *
      *      It is important to note that anyone can submit a Merkle root because only
      *      validated Merkle roots will be stored in the Relayer smart contract.
@@ -37,8 +37,8 @@ interface IRelayer {
      * @param blockNumber Block number on Vara Network
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number
      * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
-     * @dev Reverts if emergency stop status is set.
-     * @dev Reverts if `proof` or `publicInputs` are malformed (depends on implementation of `IVerifier`).
+     * @dev Reverts if emergency stop status is set with `EmergencyStop` error.
+     * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external;
 

@@ -40,7 +40,7 @@ contract ProxyUpdaterTest is Test {
             address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(initialImpl)
         );
 
-        updater.processVaraMessage(GOVERNANCE, abi.encodePacked(uint8(0), changedImpl, ""));
+        updater.processMessage(GOVERNANCE, abi.encodePacked(uint8(0), changedImpl, ""));
 
         assertEq(
             address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.IMPLEMENTATION_SLOT)))), address(changedImpl)
@@ -52,7 +52,7 @@ contract ProxyUpdaterTest is Test {
 
         assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.ADMIN_SLOT)))), address(updater));
 
-        updater.processVaraMessage(GOVERNANCE, abi.encodePacked(uint8(1), NEW_ADMIN));
+        updater.processMessage(GOVERNANCE, abi.encodePacked(uint8(1), NEW_ADMIN));
 
         assertEq(address(uint160(uint256(vm.load(address(proxy), ERC1967Utils.ADMIN_SLOT)))), NEW_ADMIN);
     }
@@ -62,7 +62,7 @@ contract ProxyUpdaterTest is Test {
 
         assertEq(updater.getGovernance(), GOVERNANCE);
 
-        updater.processVaraMessage(GOVERNANCE, abi.encodePacked(uint8(2), NEW_GOVERNANCE));
+        updater.processMessage(GOVERNANCE, abi.encodePacked(uint8(2), NEW_GOVERNANCE));
 
         assertEq(updater.getGovernance(), NEW_GOVERNANCE);
     }

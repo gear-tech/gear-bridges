@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IMessageQueueReceiver} from "./interfaces/IMessageQueueReceiver.sol";
+import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
 import {ProxyContract} from "./ProxyContract.sol";
 
-contract ProxyUpdater is IMessageQueueReceiver {
+contract ProxyUpdater is IMessageQueueProcessor {
     error NotAuthorized();
     error NotGovernance();
     error BadArguments();
@@ -62,14 +62,14 @@ contract ProxyUpdater is IMessageQueueReceiver {
      *      If first byte = `0x01` then change admin of the underlying proxy.
      *      If first byte = `0x02` then change governance.
      *
-     * @param sender sender of message on the gear side.
-     * @param payload payload of the message.
+     * @param source Source of message on the gear side.
+     * @param payload Payload of the message.
      */
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external {
+    function processMessage(bytes32 source, bytes calldata payload) external {
         if (msg.sender != MESSAGE_QUEUE) {
             revert NotAuthorized();
         }
-        if (sender != governance) {
+        if (source != governance) {
             revert NotGovernance();
         }
 

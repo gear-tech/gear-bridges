@@ -2,13 +2,13 @@
 pragma solidity ^0.8.30;
 
 /**
- * @dev Interface for the message receiver.
+ * @dev Interface for the message processor.
  */
-interface IMessageQueueReceiver {
+interface IMessageQueueProcessor {
     /**
      * @dev Processes message originated from Vara Network.
-     * @param sender Sender of the message.
+     * @param source Source of the message.
      * @param payload Payload of the message.
      */
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external;
+    function processMessage(bytes32 source, bytes calldata payload) external;
 }

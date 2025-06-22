@@ -55,7 +55,7 @@ contract ERC20ManagerTest is Test {
         // Unlock ethereum-supply tokens.
 
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
-        erc20Manager.processVaraMessage(
+        erc20Manager.processMessage(
             VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedEther), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
@@ -70,7 +70,7 @@ contract ERC20ManagerTest is Test {
         assertEq(uint8(erc20Manager.getTokenSupplyType(address(wrappedVara))), uint8(IERC20Manager.SupplyType.Unknown));
 
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
-        erc20Manager.processVaraMessage(
+        erc20Manager.processMessage(
             VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
@@ -94,14 +94,14 @@ contract ERC20ManagerTest is Test {
     function test_unauthorizedFails() public {
         vm.startPrank(MESSAGE_QUEUE, MESSAGE_QUEUE);
         vm.expectRevert(IERC20Manager.BadSender.selector);
-        erc20Manager.processVaraMessage(
+        erc20Manager.processMessage(
             FAKE_VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();
 
         vm.startPrank(FAKE_MESSAGE_QUEUE, FAKE_MESSAGE_QUEUE);
         vm.expectRevert(IERC20Manager.NotAuthorized.selector);
-        erc20Manager.processVaraMessage(
+        erc20Manager.processMessage(
             VFT_MANAGER, abi.encodePacked(ETH_TOKEN_RECEIVER, address(wrappedVara), TRANSFER_AMOUNT, VARA_ADDRESS)
         );
         vm.stopPrank();

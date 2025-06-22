@@ -27,11 +27,6 @@ interface IMessageQueue {
     error MessageAlreadyProcessed(uint256 messageNonce);
 
     /**
-     * @dev Message is not processed (failed to call IMessageQueueReceiver interface).
-     */
-    error MessageNotProcessed();
-
-    /**
      * @dev Merkle root is not set for the block number in Relayer smart contract.
      */
     error MerkleRootNotSet(uint256 blockNumber);
@@ -45,7 +40,10 @@ interface IMessageQueue {
      * @dev Emitted when message is processed.
      */
     event MessageProcessed(
-        uint256 indexed blockNumber, bytes32 indexed messageHash, uint256 indexed messageNonce, address messageReceiver
+        uint256 indexed blockNumber,
+        bytes32 indexed messageHash,
+        uint256 indexed messageNonce,
+        address messageDestination
     );
 
     /**
@@ -74,7 +72,7 @@ interface IMessageQueue {
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in Relayer smart contract.
      *      - Merkle proof is invalid.
-     *      - Message processing fails (failed to call IMessageQueueReceiver interface).
+     *      - Message processing fails.
      */
     function processMessage(
         uint256 blockNumber,

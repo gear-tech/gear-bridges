@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IMessageQueueReceiver} from "./IMessageQueueReceiver.sol";
+import {IMessageQueueProcessor} from "./IMessageQueueProcessor.sol";
 
 /**
  * @dev Interface for the ERC20Manager contract.
  */
-interface IERC20Manager is IMessageQueueReceiver {
+interface IERC20Manager is IMessageQueueProcessor {
     error NotAuthorized();
     error BadArguments();
     error BadSender();

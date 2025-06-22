@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IRelayer} from "./interfaces/IRelayer.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
-import {IMessageQueueReceiver} from "./interfaces/IMessageQueueReceiver.sol";
+import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
+import {IRelayer} from "./interfaces/IRelayer.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
 /**
@@ -32,7 +32,7 @@ contract MessageQueue is IMessageQueue {
      *      for message and validate that it corresponds to Merkle root which is already stored
      *      in Relayer smart contract for same block number. If proof is correct, nonce of received
      *      message will be stored in smart contract and message will be forwarded to adequate message
-     *      receiver, either ERC20Manager or ProxyUpdater smart contract.
+     *      processor, either ERC20Manager or Governance smart contract.
      *
      *      Upon successful processing of the message MessageProcessed event is emited.
      *
@@ -51,7 +51,7 @@ contract MessageQueue is IMessageQueue {
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in Relayer smart contract.
      *      - Merkle proof is invalid.
-     *      - Message processing fails (failed to call IMessageQueueReceiver interface).
+     *      - Message processing fails.
      */
     function processMessage(
         uint256 blockNumber,
@@ -80,7 +80,7 @@ contract MessageQueue is IMessageQueue {
 
         _processedMessages[message.nonce] = true;
 
-        IMessageQueueReceiver(message.destination).processVaraMessage(message.source, message.payload);
+        IMessageQueueProcessor(message.destination).processMessage(message.source, message.payload);
 
         emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);
     }

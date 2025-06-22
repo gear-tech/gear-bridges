@@ -7,12 +7,12 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
-import {IMessageQueueReceiver} from "./interfaces/IMessageQueueReceiver.sol";
+import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
 import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
 import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 
-contract ERC20Manager is IMessageQueueReceiver, IERC20Manager {
+contract ERC20Manager is IMessageQueueProcessor, IERC20Manager {
     using SafeERC20 for IERC20;
 
     address immutable MESSAGE_QUEUE;
@@ -106,19 +106,20 @@ contract ERC20Manager is IMessageQueueReceiver, IERC20Manager {
      *
      *      Expected sender should be `vft-manager` program on gear.
      *
-     * @param sender sender of message on the gear side.
-     * @param payload payload of the message.
+     * @param source Source of message on the gear side.
+     * @param payload Payload of the message.
      */
-    function processVaraMessage(bytes32 sender, bytes calldata payload) external {
+    function processMessage(bytes32 source, bytes calldata payload) external {
         if (msg.sender != MESSAGE_QUEUE) {
             revert NotAuthorized();
         }
-        if (payload.length < WITHDRAW_MESSAGE_SIZE) {
-            revert BadArguments();
-        }
 
         bytes32 governance = bytes32(0);
-        if (sender == VFT_MANAGER) {
+        if (source == VFT_MANAGER) {
+            if (payload.length != WITHDRAW_MESSAGE_SIZE) {
+                revert BadArguments();
+            }
+
             address receiver = address(bytes20(payload[0:20]));
             address token = address(bytes20(payload[20:40]));
             uint256 amount = uint256(bytes32(payload[40:72]));
@@ -137,7 +138,7 @@ contract ERC20Manager is IMessageQueueReceiver, IERC20Manager {
             }
 
             emit BridgingAccepted(receiver, token, amount, gearTokensSender);
-        } else if (sender == governance) {
+        } else if (source == governance) {
             //TODO: some special logic for governance
         } else {
             revert BadSender();

@@ -111,7 +111,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const getButtonText = () => {
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
-    return 'Transfer';
+    return requiredBalance.data ? 'Confirm Transfer' : 'Transfer';
   };
 
   const handleConnectWalletButtonClick = () => {

@@ -6,24 +6,24 @@ pragma solidity ^0.8.30;
  */
 interface IRelayer {
     /**
-     * @dev The plonk proof is invalid.
-     */
-    error InvalidPlonkProof();
-
-    /**
      * @dev Emergency stop status is active.
      */
     error EmergencyStop();
 
     /**
-     * @dev Emitted when block number and merkle root are stored.
+     * @dev The plonk proof is invalid.
      */
-    event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
+    error InvalidPlonkProof();
 
     /**
      * @dev Emitted when emergency stop status is set.
      */
     event EmergencyStopSet();
+
+    /**
+     * @dev Emitted when block number and merkle root are stored.
+     */
+    event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.

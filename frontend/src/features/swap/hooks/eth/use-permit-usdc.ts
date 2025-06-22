@@ -47,7 +47,6 @@ function usePermitUSDC() {
 
   const getDomain = async () => {
     definedAssert(usdcToken, 'USDC token');
-    definedAssert(ethAccount.address, 'Account address');
 
     const [, name, version, chainId, verifyingContract] = await readContract(config, {
       abi: ERC5267_ABI,
@@ -59,7 +58,6 @@ function usePermitUSDC() {
   };
 
   const permit = async (value: bigint) => {
-    definedAssert(usdcToken, 'USDC token');
     definedAssert(ethAccount.address, 'Account address');
 
     const [nonce, domain] = await Promise.all([getNonce(), getDomain()]);

@@ -53,7 +53,7 @@ interface IMessageQueue {
      *      for message and validate that it corresponds to Merkle root which is already stored
      *      in Relayer smart contract for same block number. If proof is correct, nonce of received
      *      message will be stored in smart contract and message will be forwarded to adequate message
-     *      receiver, either ERC20Manager or ProxyUpdater smart contract.
+     *      processor, either ERC20Manager or Governance smart contract.
      *
      *      Upon successful processing of the message MessageProcessed event is emited.
      *

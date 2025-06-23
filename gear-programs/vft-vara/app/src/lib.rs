@@ -13,6 +13,7 @@ use awesome_sails_services::{
     vft_extension,
     vft_metadata::{self, Metadata},
     vft_native_exchange,
+    vft_native_exchange_admin,
 };
 use core::cell::RefCell;
 use sails_rs::{gstd::msg, prelude::*};
@@ -59,6 +60,12 @@ impl Program {
         }
     }
 
+    #[allow(dead_code)]
+    #[handle_reply]
+    fn handle_reply(&self) {
+        self.vft_native_exchange_admin().handle_reply()
+    }
+
     pub fn vft(&self) -> vft_common::Service<'_> {
         vft_common::Service::new(&self.allowances, &self.balances, &self.metadata)
     }
@@ -87,6 +94,10 @@ impl Program {
 
     pub fn vft_native_exchange(&self) -> vft_native_exchange::Service<'_> {
         vft_native_exchange::Service::new(&self.balances, self.vft2())
+    }
+
+    pub fn vft_native_exchange_admin(&self) -> vft_native_exchange_admin::Service<'_> {
+        vft_native_exchange_admin::Service::new(self.vft_admin())
     }
 }
 

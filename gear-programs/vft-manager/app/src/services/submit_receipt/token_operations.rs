@@ -1,7 +1,8 @@
 use super::super::{Config, Error};
 use gstd::msg;
-use sails_rs::{calls::ActionIo, prelude::*};
+use sails_rs::{calls::{ActionIo, Call}, gstd::calls::GStdRemoting, prelude::*};
 use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
+use vft_vara_client::traits::VftNativeExchangeAdmin;
 
 trait Reply {
     fn check(&self);
@@ -115,5 +116,13 @@ pub async fn unlock(
         &(sender, receiver, amount),
         config,
     )
-    .await
+    .await?;
+
+    let remoting = GStdRemoting;
+    let mut service = vft_vara_client::VftNativeExchangeAdmin::new(remoting);
+    service
+        .burn_from(receiver, amount)
+        .send_recv(token_id)
+        .await
+        .map_err(|e| Error::BurnFromFailed(format!("{e:?}")))
 }

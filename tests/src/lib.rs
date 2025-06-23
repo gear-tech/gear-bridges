@@ -1,3 +1,4 @@
+use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use gclient::GearApi;
 use gear_core::ids::prelude::*;
 use sails_rs::prelude::*;
@@ -12,7 +13,6 @@ use std::{
 };
 use tokio::sync::Mutex;
 use vft_manager_app::services::eth_abi::ERC20_MANAGER;
-use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 
 #[cfg(test)]
 mod checkpoint_light_client;
@@ -103,7 +103,11 @@ pub async fn connect_to_node(
 
 pub fn create_receipt_rlp(
     erc20_manager_address: H160,
-    from: H160, receiver: ActorId, token: H160, amount: U256) -> Vec<u8> {
+    from: H160,
+    receiver: ActorId,
+    token: H160,
+    amount: U256,
+) -> Vec<u8> {
     let event = ERC20_MANAGER::BridgingRequested {
         from: from.0.into(),
         to: receiver.into_bytes().into(),

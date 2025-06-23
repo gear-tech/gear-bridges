@@ -1,14 +1,14 @@
+use crate::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::gas::GasInfo;
-use sails_rs::{calls::*, gclient::calls::*, prelude::*, events::EventIo};
+use sails_rs::{calls::*, events::EventIo, gclient::calls::*, prelude::*};
 use std::collections::HashMap;
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
-use vft_vara::WASM_BINARY as WASM_VFT_VARA;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, Order, TokenSupply};
-use crate::{connect_to_node, DEFAULT_BALANCE};
+use vft_vara::WASM_BINARY as WASM_VFT_VARA;
 
 pub mod gtest;
 
@@ -1224,8 +1224,8 @@ async fn migrate_transactions() -> Result<()> {
 #[tokio::test]
 async fn vft_burn_from() -> Result<()> {
     use vft_vara_client::{
+        traits::{Vft, VftAdmin, VftExtension, VftVaraFactory},
         vft_2::events::Vft2Events,
-        traits::{VftAdmin, VftExtension, VftVaraFactory, Vft},
     };
 
     let conn = connect_to_node(
@@ -1328,7 +1328,8 @@ async fn vft_burn_from() -> Result<()> {
     let amount_total: U256 = 10_000_000_000_000u64.into();
     let amount_1 = amount_total / 3;
     let amount_2 = amount_total - amount_1;
-    api.transfer_keep_alive(vft_id, amount_total.try_into().unwrap()).await?;
+    api.transfer_keep_alive(vft_id, amount_total.try_into().unwrap())
+        .await?;
 
     let address_token = [2u8; 20];
     let address_from = [3u8; 20];
@@ -1362,7 +1363,13 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    let receipt_rlp = crate::create_receipt_rlp(address_erc20_manager.into(), address_from.into(), address_receiver, address_token.into(), amount_1);
+    let receipt_rlp = crate::create_receipt_rlp(
+        address_erc20_manager.into(),
+        address_from.into(),
+        address_receiver,
+        address_token.into(),
+        amount_1,
+    );
     service
         .submit_receipt(10, 2, receipt_rlp)
         .with_gas_limit(gas_limit)
@@ -1403,7 +1410,13 @@ async fn vft_burn_from() -> Result<()> {
     let balance_vft_native_before = api.total_balance(vft_id).await?;
 
     let mut listener = api.subscribe().await?;
-    let receipt_rlp = crate::create_receipt_rlp(address_erc20_manager.into(), address_from.into(), vft_id, address_token.into(), amount_2);
+    let receipt_rlp = crate::create_receipt_rlp(
+        address_erc20_manager.into(),
+        address_from.into(),
+        vft_id,
+        address_token.into(),
+        amount_2,
+    );
     service
         .submit_receipt(10, 3, receipt_rlp)
         .with_gas_limit(gas_limit)
@@ -1420,25 +1433,24 @@ async fn vft_burn_from() -> Result<()> {
     assert_eq!(balance, 0.into());
 
     listener
-        .proc(
-            |event| match event {
-                gclient::Event::Gear(gclient::GearEvent::UserMessageSent { message, .. })
-                    if message.source.0 == vft_id.into_bytes()
-                        && message.destination.0 == [0; 32] =>
-                    {
-                        if let Ok(Vft2Events::Transfer { from, to, value }) = Vft2Events::decode_event(&message.payload.0) {
-                            if from.is_zero() && to == vft_id {
-                                assert_eq!(value, amount_2);
-                                return Some(());
-                            }
-                        }
-
-                        None
+        .proc(|event| match event {
+            gclient::Event::Gear(gclient::GearEvent::UserMessageSent { message, .. })
+                if message.source.0 == vft_id.into_bytes() && message.destination.0 == [0; 32] =>
+            {
+                if let Ok(Vft2Events::Transfer { from, to, value }) =
+                    Vft2Events::decode_event(&message.payload.0)
+                {
+                    if from.is_zero() && to == vft_id {
+                        assert_eq!(value, amount_2);
+                        return Some(());
                     }
+                }
 
-                _ => None,
-            },
-        )
+                None
+            }
+
+            _ => None,
+        })
         .await?;
 
     let balance = service_vft

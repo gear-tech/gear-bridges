@@ -232,7 +232,13 @@ async fn test_gear_supply_token() {
     let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
     assert_eq!(vft_manager_balance, amount);
 
-    let receipt_rlp = crate::create_receipt_rlp(ERC20_MANAGER_ADDRESS, [3u8; 20].into(), account_id, ERC20_TOKEN_GEAR_SUPPLY, amount);
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_GEAR_SUPPLY,
+        amount,
+    );
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -262,7 +268,13 @@ async fn test_eth_supply_token() {
         .mint_to(account_id, 100_000_000_000_000_000);
     let amount = U256::from(10_000_000_000_u64);
 
-    let receipt_rlp = crate::create_receipt_rlp(ERC20_MANAGER_ADDRESS, [3u8; 20].into(), account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -332,7 +344,13 @@ async fn test_withdraw_fails_with_bad_origin() {
     let mut vft_manager = VftManagerC::new(remoting.clone());
 
     let account_id: ActorId = 42.into();
-    let receipt_rlp = crate::create_receipt_rlp(ERC20_MANAGER_ADDRESS, [3u8; 20].into(), account_id, ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_GEAR_SUPPLY,
+        U256::zero(),
+    );
     let result = vft_manager
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)

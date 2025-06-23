@@ -7,8 +7,9 @@ use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, Order, TokenSupply};
-
 use crate::{connect_to_node, DEFAULT_BALANCE};
+
+pub mod gtest;
 
 async fn calculate_reply_gas(
     api: &GearApi,

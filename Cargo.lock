@@ -14314,6 +14314,8 @@ name = "tests"
 version = "0.3.0"
 dependencies = [
  "alloy",
+ "alloy-consensus",
+ "alloy-primitives",
  "alloy-rlp",
  "anyhow",
  "ark-bls12-381",
@@ -14339,8 +14341,10 @@ dependencies = [
  "hex-literal",
  "historical-proxy",
  "historical-proxy-client",
+ "parity-scale-codec",
  "ruzstd",
  "sails-rs",
+ "scale-info",
  "serde",
  "serde_json",
  "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
@@ -14349,6 +14353,7 @@ dependencies = [
  "vft",
  "vft-client",
  "vft-manager",
+ "vft-manager-app",
  "vft-manager-client",
 ]
 
@@ -15275,23 +15280,9 @@ dependencies = [
 name = "vft-manager"
 version = "0.3.0"
 dependencies = [
- "alloy-consensus",
- "alloy-primitives",
- "alloy-rlp",
- "blake2",
- "gclient",
- "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "gtest",
- "parity-scale-codec",
  "sails-idl-gen",
  "sails-rs",
- "scale-info",
- "tokio",
- "vft",
- "vft-client",
- "vft-manager",
  "vft-manager-app",
- "vft-manager-client",
 ]
 
 [[package]]

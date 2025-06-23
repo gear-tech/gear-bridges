@@ -1,6 +1,10 @@
 use super::super::{Config, Error};
 use gstd::msg;
-use sails_rs::{calls::{ActionIo, Call}, gstd::calls::GStdRemoting, prelude::*};
+use sails_rs::{
+    calls::{ActionIo, Call},
+    gstd::calls::GStdRemoting,
+    prelude::*,
+};
 use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
 use vft_vara_client::traits::VftNativeExchangeAdmin;
 

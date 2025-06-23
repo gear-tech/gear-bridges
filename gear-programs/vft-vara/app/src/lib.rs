@@ -12,8 +12,7 @@ use awesome_sails_services::{
     },
     vft_extension,
     vft_metadata::{self, Metadata},
-    vft_native_exchange,
-    vft_native_exchange_admin,
+    vft_native_exchange, vft_native_exchange_admin,
 };
 use core::cell::RefCell;
 use sails_rs::{gstd::msg, prelude::*};

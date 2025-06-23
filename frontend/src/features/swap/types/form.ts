@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { UseMutationResult } from '@tanstack/react-query';
 
 import { DEFAULT_VALUES, FIELD_NAME, SUBMIT_STATUS } from '../consts';
 
@@ -23,7 +24,7 @@ type UseHandleSubmit = (params: UseHandleSubmitParameters) => {
   status: SubmitStatus;
   isPending: boolean;
   error: Error | null;
-  isLoading?: boolean;
+  requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
 };
 
 export type { Values, FormattedValues, UseHandleSubmitParameters, UseHandleSubmit };

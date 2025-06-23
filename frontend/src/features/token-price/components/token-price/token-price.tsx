@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+
 import { Skeleton } from '@/components';
 import { cx, isUndefined } from '@/utils';
 
@@ -7,17 +9,19 @@ import styles from './token-price.module.scss';
 
 type BaseProps = {
   amount: string | undefined;
+  fraction?: number;
   className?: string;
 };
 
 type SymbolProps = BaseProps & { symbol: string | undefined };
 type IdProps = BaseProps & { id: TokenId };
 type Props = SymbolProps | IdProps;
-
-const FORMATTER = new Intl.NumberFormat('en', { style: 'currency', currency: 'USD' });
-
-function TokenPrice({ amount, className, ...props }: Props) {
+function TokenPrice({ amount, className, fraction = 2, ...props }: Props) {
   const { data, isLoading } = useTokenPrices();
+
+  const formatter = useRef(
+    new Intl.NumberFormat('en', { style: 'currency', currency: 'USD', maximumFractionDigits: fraction }),
+  );
 
   const getTokenId = () => {
     if ('symbol' in props) {
@@ -42,7 +46,7 @@ function TokenPrice({ amount, className, ...props }: Props) {
 
     const value = price * Number(amount);
 
-    return FORMATTER.format(isNaN(value) ? 0 : value);
+    return formatter.current.format(isNaN(value) ? 0 : value);
   };
 
   return (

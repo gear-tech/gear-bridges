@@ -52,6 +52,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
   const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
 
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
   const varaSymbol = useVaraSymbol();
 
   const openTransactionModal = (values: FormattedValues) => {
@@ -69,20 +71,20 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
   };
 
-  const { onSubmit, ...submit } = useHandleSubmit({
+  const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
     fee: fee.value,
     allowance: allowance.data,
     accountBalance: accountBalance.data,
     onTransactionStart: openTransactionModal,
   });
 
-  const { form, amount, handleSubmit, setMaxBalance } = useSwapForm(
-    network.isVara,
-    accountBalance,
-    ftBalance,
-    token?.decimals,
+  const { form, amount, handleSubmit, setMaxBalance } = useSwapForm({
+    accountBalance: accountBalance.data,
+    ftBalance: ftBalance.data,
     onSubmit,
-  );
+    requiredBalance,
+    onValidation: () => setIsDetailsOpen(true),
+  });
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -101,15 +103,15 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const isEnoughBalance = () => {
     if (!api || isUndefined(fee.value) || !accountBalance.data) return false;
 
-    const requiredBalance = network.isVara ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
+    const minBalance = network.isVara ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
 
-    return accountBalance.data > requiredBalance;
+    return accountBalance.data > minBalance;
   };
 
   const getButtonText = () => {
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
-    return 'Transfer';
+    return requiredBalance.data ? 'Confirm Transfer' : 'Transfer';
   };
 
   const handleConnectWalletButtonClick = () => {
@@ -180,7 +182,14 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <DetailsAccordion isVaraNetwork={network.isVara} />
+          <DetailsAccordion
+            isOpen={isDetailsOpen}
+            onToggle={() => setIsDetailsOpen((prevValue) => !prevValue)}
+            isVaraNetwork={network.isVara}
+            feeValue={requiredBalance?.data?.fees}
+            decimals={network.isVara ? 12 : 18}
+            isLoading={requiredBalance?.isPending}
+          />
 
           {isNetworkAccountConnected ? (
             <Button
@@ -197,7 +206,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
               block
             />
           ) : (
-            <Button type="button" text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
+            <Button text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
           )}
         </form>
       </FormProvider>

@@ -1,3 +1,5 @@
+import { formatUnits } from 'viem';
+
 import ClockSVG from '@/assets/clock.svg?react';
 import { TOKEN_ID, TokenPrice } from '@/features/token-price';
 import { useVaraSymbol } from '@/hooks';
@@ -9,16 +11,16 @@ import styles from './fee-and-time-footer.module.scss';
 import GasSVG from './gas.svg?react';
 
 type Props = {
-  // TODO: uncomment once we won't need hardcoded values
-  // fee: string | undefined;
+  feeValue: bigint | undefined;
+  decimals: number | undefined;
   isVaraNetwork: boolean;
+  isLoading?: boolean;
   className?: string;
 };
 
-function FeeAndTimeFooter({ isVaraNetwork, className }: Props) {
+function FeeAndTimeFooter({ feeValue, decimals, isVaraNetwork, isLoading, className }: Props) {
   const varaSymbol = useVaraSymbol();
 
-  const fee = isVaraNetwork ? '18' : '0.0000005';
   const tokenId = isVaraNetwork ? TOKEN_ID.VARA : TOKEN_ID.ETH;
   const symbol = isVaraNetwork ? varaSymbol : 'ETH';
 
@@ -30,8 +32,17 @@ function FeeAndTimeFooter({ isVaraNetwork, className }: Props) {
         </span>
 
         <span className={styles.value}>
-          {fee && symbol ? `${fee} ${symbol}` : <Skeleton width="3.5rem" />}
-          <TokenPrice id={tokenId} amount={fee} />
+          {feeValue && decimals && symbol ? (
+            <>
+              {formatUnits(feeValue, decimals)} {symbol}
+              <TokenPrice id={tokenId} amount={formatUnits(feeValue, decimals)} fraction={4} />
+            </>
+          ) : (
+            <>
+              <Skeleton width="3.5rem" disabled={!isLoading} />
+              <Skeleton width="3.5rem" disabled={!isLoading} />
+            </>
+          )}
         </span>
       </p>
 

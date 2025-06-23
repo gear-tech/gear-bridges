@@ -24,6 +24,8 @@ vft-manager-app.workspace = true
 vft-manager-client.workspace = true
 vft = { workspace = true, features = ["wasm-binary"] }
 vft-client = { workspace = true }
+vft-vara = { workspace = true, features = ["wasm-binary"] }
+vft-vara-client.workspace = true
 serde_json = { workspace = true }
 serde = { workspace = true }
 alloy = { workspace = true }

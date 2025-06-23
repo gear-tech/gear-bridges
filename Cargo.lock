@@ -14367,6 +14367,8 @@ dependencies = [
  "vft-manager",
  "vft-manager-app",
  "vft-manager-client",
+ "vft-vara",
+ "vft-vara-client",
 ]
 
 [[package]]

@@ -15316,6 +15316,7 @@ dependencies = [
  "sails-rs",
  "scale-info",
  "vft-client",
+ "vft-vara-client",
 ]
 
 [[package]]

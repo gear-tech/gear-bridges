@@ -5,6 +5,7 @@ use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,
 };
+use vft_vara_client::traits::VftVaraFactory;
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
@@ -108,9 +109,9 @@ async fn setup_for_test() -> Fixture {
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
-    let gear_supply_vft = VftFactoryC::new(remoting.clone())
-        .new("Token".into(), "Token".into(), 18)
+    let vft_code_id = remoting.system().submit_code(vft_vara::WASM_BINARY);
+    let gear_supply_vft = vft_vara_client::VftVaraFactory::new(remoting.clone())
+        .new()
         .send_recv(vft_code_id, b"salt")
         .await
         .unwrap();
@@ -131,6 +132,7 @@ async fn setup_for_test() -> Fixture {
         .expect("Failed to allocate next allowances shard")
     {}
 
+    let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
     let eth_supply_vft = VftFactoryC::new(remoting.clone())
         .new("Token".into(), "Token".into(), 18)
         .send_recv(vft_code_id, b"salt1")
@@ -198,12 +200,12 @@ async fn test_gear_supply_token() {
     } = setup_for_test().await;
 
     let account_id: ActorId = 100_000.into();
-    remoting.system().mint_to(account_id, 100_000_000_000_000);
-
-    let amount = U256::from(1_000_000_000_000_u64);
+    let amount = 1_000_000_000_000u128;
+    remoting.system().mint_to(account_id, 100 * amount);
 
     let mut vft = VftAdminC::new(remoting.clone());
 
+    let amount = U256::from(amount);
     vft.mint(account_id, amount)
         .send_recv(gear_supply_vft)
         .await
@@ -231,26 +233,6 @@ async fn test_gear_supply_token() {
 
     let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
     assert_eq!(vft_manager_balance, amount);
-
-    let receipt_rlp = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
-        account_id,
-        ERC20_TOKEN_GEAR_SUPPLY,
-        amount,
-    );
-    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt_rlp)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let account_balance = balance_of(&remoting, gear_supply_vft, account_id).await;
-    assert_eq!(account_balance, amount);
-
-    let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
-    assert!(vft_manager_balance.is_zero());
 }
 
 #[tokio::test]

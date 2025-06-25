@@ -70,6 +70,8 @@ type Error = enum {
   ReplyTimeout,
   /// Failed to set reply hook.
   ReplyHook,
+  /// Failed to extract the reply code from a reply message.
+  ReplyCode,
   /// Original `MessageId` wasn't found in message tracker when processing reply.
   MessageNotFound,
   /// Invalid message status was found in the message tracker when processing reply.
@@ -84,6 +86,8 @@ type Error = enum {
   MintTokensDecode,
   /// Failed to decode payload from gear-eth-bridge built-in actor.
   BuiltinDecode,
+  /// Gas reservation for reply is too low.
+  GasForReplyTooLow,
   /// `ERC20` address wasn't found in the token mapping.
   NoCorrespondingEthAddress,
   /// `VFT` address wasn't found in the token mapping.
@@ -100,6 +104,10 @@ type Error = enum {
   Paused,
   /// Failed to burn tokens from the receiver in VftVara.
   BurnFromFailed: str,
+  /// Internal unspecified VFT error
+  Internal: vec u8,
+  /// Invalid or unexpected reply received from a VFT program.
+  InvalidReply,
 };
 
 /// State in which message processing can be.
@@ -305,6 +313,13 @@ service VftManager {
     Erc20ManagerAddressChanged: struct {
       old: h160,
       new: h160,
+    };
+    /// Rlp receipt submitted via [VftManager::submit_receipt] processed successfully.
+    RlpReceiptProcessed: struct {
+      /// Slot of the processed receipt.
+      slot: u64,
+      /// Transaction index of the processed receipt.
+      transaction_index: u64,
     };
   }
 };

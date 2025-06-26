@@ -1608,7 +1608,7 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 [[package]]
 name = "awesome-sails"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "derive_more 2.0.1",
  "sails-rs",
@@ -1618,7 +1618,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-services"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails-vft-admin-service",
  "awesome-sails-vft-extension-service",
@@ -1631,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-admin-service"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "awesome-sails-vft-service",
@@ -1642,7 +1642,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-extension-service"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "awesome-sails-vft-service",
@@ -1653,7 +1653,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-metadata-service"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "sails-rs",
@@ -1662,7 +1662,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-native-exchange-admin-service"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "awesome-sails-vft-admin-service",
@@ -1673,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-native-exchange-service"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "awesome-sails-vft-service",
@@ -1683,7 +1683,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-service"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "awesome-sails-vft-service-utils",
@@ -1693,7 +1693,7 @@ dependencies = [
 [[package]]
 name = "awesome-sails-vft-service-utils"
 version = "0.1.0"
-source = "git+https://github.com/gear-tech/awesome-sails?rev=6362b38dd857bfd54753282cf2660a204bda0381#6362b38dd857bfd54753282cf2660a204bda0381"
+source = "git+https://github.com/gear-tech/awesome-sails?rev=f8d97300d724ea3f51b72028b574adc0c21793d0#f8d97300d724ea3f51b72028b574adc0c21793d0"
 dependencies = [
  "awesome-sails",
  "sails-rs",

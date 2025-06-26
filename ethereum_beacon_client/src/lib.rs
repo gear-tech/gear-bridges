@@ -85,7 +85,7 @@ impl BeaconClient {
     }
 
     pub async fn get_genesis(&self) -> AnyResult<GenesisResponse> {
-        let url = format!("{}/eth/v1/genesis", self.rpc_url);
+        let url = format!("{}/eth/v1/beacon/genesis", self.rpc_url);
 
         get::<GenesisResponse>(self.client.get(&url)).await
     }

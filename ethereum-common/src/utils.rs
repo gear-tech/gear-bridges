@@ -151,7 +151,7 @@ pub struct GenesisResponse {
 pub struct GenesisData {
     #[serde(deserialize_with = "deserialize_u64")]
     pub genesis_time: u64,
-    pub genesis_validator_root: B256,
+    pub genesis_validators_root: B256,
     pub genesis_fork_version: FixedBytes<4>,
 }
 

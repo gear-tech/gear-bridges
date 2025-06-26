@@ -115,9 +115,37 @@ impl MessageSender {
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.gclient_client(&self.suri)?;
 
+<<<<<<< Updated upstream
         while let Some(request) = requests.recv().await {
             if !self.process(responses, &gear_api, request).await? {
                 return Ok(());
+=======
+        if let Some(request) = self.last_request.take() {
+            match self.process(responses, &gear_api, &request).await {
+                Ok(exit) => {
+                    if exit {
+                        return Ok(());
+                    }
+                }
+                Err(err) => {
+                    self.last_request = Some(request);
+                    return Err(err);
+                }
+            }
+        }
+
+        while let Some(request) = requests.recv().await {
+            match self.process(responses, &gear_api, &request).await {
+                Ok(exit) => {
+                    if exit {
+                        return Ok(());
+                    }
+                }
+                Err(err) => {
+                    self.last_request = Some(request);
+                    return Err(err);
+                }
+>>>>>>> Stashed changes
             }
         }
 
@@ -196,7 +224,7 @@ impl MessageSender {
                     })
                     .is_err()
                 {
-                    return Ok(false);
+                    return Ok(true);
                 }
             }
 
@@ -209,7 +237,7 @@ impl MessageSender {
                     })
                     .is_err()
                 {
-                    return Ok(false);
+                    return Ok(true);
                 }
             }
 
@@ -223,7 +251,7 @@ impl MessageSender {
                     })
                     .is_err()
                 {
-                    return Ok(false);
+                    return Ok(true);
                 }
             }
 
@@ -237,11 +265,11 @@ impl MessageSender {
                     })
                     .is_err()
                 {
-                    return Ok(false);
+                    return Ok(true);
                 }
             }
         }
-        Ok(true)
+        Ok(false)
     }
 }
 

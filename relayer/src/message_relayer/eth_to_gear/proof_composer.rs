@@ -192,6 +192,17 @@ async fn handle_requests(
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
     loop {
+<<<<<<< Updated upstream
+=======
+        while !this.to_process.is_empty() {
+            // safe to call last() and pop() here since to_process vector is not empty.
+            let (tx_uuid, tx) = this.to_process.last().expect("vector must not be empty");
+            log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
+            this.process(responses, tx.clone(), *tx_uuid).await?;
+            this.to_process.pop().expect("vector must not be empty");
+        }
+
+>>>>>>> Stashed changes
         tokio::select! {
             Some(checkpoint) = checkpoints.recv() => {
                 log::info!("Received checkpoint: {checkpoint}");

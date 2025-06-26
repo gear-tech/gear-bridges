@@ -93,11 +93,6 @@ impl MessagePaidEventExtractor {
             }
 
             loop {
-                if blocks.is_closed() {
-                    log::error!("Connection to block listener is closed, exiting...");
-                    return;
-                }
-
                 let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
                 if let Err(err) = res {
                     attempts += 1;
@@ -121,8 +116,7 @@ impl MessagePaidEventExtractor {
                             }
                         };
                     }
-                }
-                if blocks.is_closed() {
+                } else {
                     log::info!("Connection to block listener closed, exiting...");
                     return;
                 }

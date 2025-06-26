@@ -269,6 +269,8 @@ impl TransactionManager {
 
                 MessageStatus::Failure(message) => {
                     self.fail_transaction(tx_uuid, message).await;
+                    // add transaction back to tx queue. It can be restarted later.
+                    transactions.insert(tx_uuid, tx);
                 }
             }
         } else {

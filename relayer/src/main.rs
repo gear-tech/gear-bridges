@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
+use relayer::*;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
@@ -16,15 +17,6 @@ use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
-mod cli;
-mod common;
-mod ethereum_checkpoints;
-mod hex_utils;
-mod kill_switch;
-mod message_relayer;
-mod proof_storage;
-mod prover_interface;
-mod relay_merkle_roots;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,

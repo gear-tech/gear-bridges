@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
@@ -12,11 +12,8 @@ import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
 import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 
-contract ERC20Manager is IMessageQueueProcessor, IERC20Manager {
+contract ERC20Manager is Initializable, IMessageQueueProcessor, IERC20Manager {
     using SafeERC20 for IERC20;
-
-    address immutable MESSAGE_QUEUE;
-    bytes32 immutable VFT_MANAGER;
 
     /**
      * @dev Size of the withdraw message.
@@ -32,6 +29,8 @@ contract ERC20Manager is IMessageQueueProcessor, IERC20Manager {
      */
     uint256 private constant WITHDRAW_MESSAGE_SIZE = 104; //20 + 20 + 32 + 32
 
+    address private _messageQueue;
+    bytes32 private _vftManager;
     mapping(address token => SupplyType supplyType) private tokenSupplyType;
 
     /**
@@ -39,9 +38,9 @@ contract ERC20Manager is IMessageQueueProcessor, IERC20Manager {
      * @param messageQueue The address of the message queue contract.
      * @param vftManager The address of the VFT manager contract (on Vara Network).
      */
-    constructor(address messageQueue, bytes32 vftManager) {
-        MESSAGE_QUEUE = messageQueue;
-        VFT_MANAGER = vftManager;
+    function initialize(address messageQueue, bytes32 vftManager) public initializer {
+        _messageQueue = messageQueue;
+        _vftManager = vftManager;
     }
 
     /**
@@ -110,12 +109,12 @@ contract ERC20Manager is IMessageQueueProcessor, IERC20Manager {
      * @param payload Payload of the message.
      */
     function processMessage(bytes32 source, bytes calldata payload) external {
-        if (msg.sender != MESSAGE_QUEUE) {
+        if (msg.sender != _messageQueue) {
             revert NotAuthorized();
         }
 
         bytes32 governance = bytes32(0);
-        if (source == VFT_MANAGER) {
+        if (source == _vftManager) {
             if (payload.length != WITHDRAW_MESSAGE_SIZE) {
                 revert BadArguments();
             }
@@ -139,7 +138,7 @@ contract ERC20Manager is IMessageQueueProcessor, IERC20Manager {
 
             emit BridgingAccepted(receiver, token, amount, gearTokensSender);
         } else if (source == governance) {
-            //TODO: some special logic for governance
+            // TODO: some special logic for governance
         } else {
             revert BadSender();
         }

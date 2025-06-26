@@ -68,6 +68,7 @@ interface IMessageQueue {
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
+     *      - MessageQueue is paused and message source is not any governance address.
      *      - Relayer emergency stop status is set.
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in Relayer smart contract.
@@ -98,12 +99,11 @@ library Hasher {
      * @dev Hashes VaraMessage.
      * @param message Message to hash.
      * @return hash Hash of the message.
-     *
-     * TODO: avoid double hashing.
      */
     function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
         bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
 
+        // TODO: avoid double hashing.
         bytes32 hash2;
         assembly ("memory-safe") {
             mstore(0x00, hash1)
@@ -117,12 +117,11 @@ library Hasher {
      * @dev Hashes VaraMessage.
      * @param message Message to hash.
      * @return hash Hash of the message.
-     *
-     * TODO: avoid double hashing.
      */
     function hash(VaraMessage memory message) internal pure returns (bytes32) {
         bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
 
+        // TODO: avoid double hashing.
         bytes32 hash2;
         assembly ("memory-safe") {
             mstore(0x00, hash1)

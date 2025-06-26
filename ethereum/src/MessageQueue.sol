@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {IGovernance} from "./interfaces/IGovernance.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
 import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
@@ -10,20 +15,72 @@ import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
  * @dev MessageQueue smart contract is responsible for verifying and processing
  *      received messages originated from Vara Network.
  */
-contract MessageQueue is IMessageQueue {
+contract MessageQueue is
+    Initializable,
+    AccessControlUpgradeable,
+    PausableUpgradeable,
+    UUPSUpgradeable,
+    IMessageQueue
+{
     using Hasher for VaraMessage;
 
-    IRelayer immutable RELAYER;
+    bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
+    IGovernance private _governanceAdmin;
+    IGovernance private _governancePauser;
+    IRelayer private _relayer;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
     /**
+     * @custom:oz-upgrades-unsafe-allow constructor
+     */
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
      * @dev Initializes the MessageQueue contract with the Relayer address.
+     * @param governanceAdmin The address of the GovernanceAdmin contract that will process messages.
+     * @param governancePauser The address of the GovernanceAdmin contract that will process pauser messages.
      * @param relayer The address of the Relayer contract that will store merkle roots.
      */
-    constructor(IRelayer relayer) {
-        RELAYER = relayer;
+    function initialize(IGovernance governanceAdmin, IGovernance governancePauser, IRelayer relayer)
+        public
+        initializer
+    {
+        __AccessControl_init();
+        __Pausable_init();
+        __UUPSUpgradeable_init();
+
+        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin));
+
+        _grantRole(PAUSER_ROLE, address(governanceAdmin));
+        _grantRole(PAUSER_ROLE, address(governancePauser));
+
+        _governanceAdmin = governanceAdmin;
+        _governancePauser = governancePauser;
+        _relayer = relayer;
     }
+
+    /**
+     * @dev Pauses the contract.
+     */
+    function pause() public onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    /**
+     * @dev Unpauses the contract.
+     */
+    function unpause() public onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+
+    /**
+     * @dev Function that should revert when `msg.sender` is not authorized to upgrade the contract.
+     *      Called by {upgradeToAndCall}.
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /**
      * @dev Verifies and processes message originated from Vara Network.
@@ -47,6 +104,7 @@ contract MessageQueue is IMessageQueue {
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
+     *      - MessageQueue is paused and message source is not any governance address.
      *      - Relayer emergency stop status is set.
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in Relayer smart contract.
@@ -60,7 +118,13 @@ contract MessageQueue is IMessageQueue {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external {
-        if (RELAYER.emergencyStop()) {
+        bool isFromAdminOrPauser =
+            message.source == _governanceAdmin.governance() || message.source == _governancePauser.governance();
+        if (paused() && !isFromAdminOrPauser) {
+            revert EnforcedPause();
+        }
+
+        if (_relayer.emergencyStop()) {
             revert RelayerEmergencyStop();
         }
 
@@ -68,7 +132,7 @@ contract MessageQueue is IMessageQueue {
             revert MessageAlreadyProcessed(message.nonce);
         }
 
-        bytes32 merkleRoot = RELAYER.getMerkleRoot(blockNumber);
+        bytes32 merkleRoot = _relayer.getMerkleRoot(blockNumber);
         if (merkleRoot == bytes32(0)) {
             revert MerkleRootNotSet(blockNumber);
         }

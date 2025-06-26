@@ -102,7 +102,7 @@ where
 /// Mint `amount` tokens into the `receiver` address.
 ///
 /// It will send `Mint` call to the corresponding `VFT` program and
-/// asyncronously wait for the reply.
+/// asynchronously wait for the reply.
 pub async fn mint(
     slot: u64,
     transaction_index: u64,
@@ -125,7 +125,7 @@ pub async fn mint(
 /// effectively unlocking them.
 ///
 /// It will send `TransferFrom` call to the corresponding `VFT` program and
-/// asyncronously wait for the reply.
+/// asynchronously wait for the reply.
 pub async fn unlock(
     slot: u64,
     transaction_index: u64,

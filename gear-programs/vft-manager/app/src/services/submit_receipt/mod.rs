@@ -29,12 +29,12 @@ pub fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe { static_mut!(TRANSACTIONS).as_mut() }.expect("Program should be constructed")
 }
 
-/// Get reference to a transactions storage.
+/// Get a reference to the reply statuses global map.
 pub fn reply_statuses() -> &'static BTreeMap<(u64, u64), Result<(), Error>> {
     unsafe { static_ref!(REPLY_STATUSES).as_ref() }.expect("Program should be constructed")
 }
 
-/// Get mutable reference to a transactions storage.
+/// Get a mutable reference to the reply statuses global map.
 pub fn reply_statuses_mut() -> &'static mut BTreeMap<(u64, u64), Result<(), Error>> {
     unsafe { static_mut!(REPLY_STATUSES).as_mut() }.expect("Program should be constructed")
 }

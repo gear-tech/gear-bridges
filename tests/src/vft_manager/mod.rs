@@ -1485,7 +1485,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
 
     // Subscribe to the events listeners
     let mut listener = api.subscribe().await.unwrap();
-    let mut listener2 = api.clone().subscribe().await.unwrap();
+    let mut another_listener = api.clone().subscribe().await.unwrap();
 
     let receipt_rlp = create_receipt_rlp(42.into(), ERC20_TOKEN_ETH_SUPPLY, U256::zero());
     let result = service
@@ -1497,7 +1497,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
 
     // Trying to listen for the `RlpReceiptProcessed` event emitted by the VFT manager,
     // but there isn't supposed to be one since the VFT contract finished with an error.
-    // We wait for 30 seconds before cocluding that the event was not emitted.
+    // We wait for 30 seconds before concluding that the event was not emitted.
     let emitted = tokio::select! {
         _ = listener.proc(|e| {
             match e {
@@ -1525,7 +1525,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
         }
     };
 
-    let usr_msg = listener2
+    let usr_msg = another_listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
                 if message.destination == user_id.into() =>
@@ -1724,8 +1724,6 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
     use core::panic;
 
     const REPLY_TIMEOUT: u32 = 10;
-    // Number of blocks before message is evicted from mailbox `MailboxThreshold / MailboxCost`
-    const MAILBOX_DURATION: u32 = 30;
 
     let (remoting, api, vft_manager_id, user_id, _) =
         deploy_programs(false, false, TokenSupply::Gear).await?;
@@ -1743,9 +1741,11 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
         .map_err(|e| anyhow!("{e:?}"))?;
     assert!(txs.is_empty());
 
-    // Subscribe to the events listeners
+    // Subscribe to two event listeners
     let mut listener = api.subscribe().await.unwrap();
-    let mut listener2 = api.clone().subscribe().await.unwrap();
+    let mut another_listener = api.clone().subscribe().await.unwrap();
+
+    let start_block = api.last_block_number().await.unwrap();
 
     // Send `submit_receipt` request to Vft-manager
     let result = service
@@ -1755,10 +1755,32 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
         .await
         .unwrap();
 
-    // Waiting for the `RlpReceiptProcessed` event fo 30 seconds.
+    let _ = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == user_id.into() =>
+            {
+                message
+                    .payload
+                    .0
+                    .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
+                    .then_some(())
+            }
+            _ => None,
+        })
+        .await;
+    let end_block = api.last_block_number().await.unwrap();
+
+    // We shouldn't be getting the final user reply for at least `REPLY_TIMEOUT` blocks
+    assert!(
+        end_block >= start_block + REPLY_TIMEOUT,
+        "end_block: {end_block}, start_block: {start_block}, REPLY_TIMEOUT: {REPLY_TIMEOUT}"
+    );
+
+    // Waiting for the `RlpReceiptProcessed` event for another 30 seconds.
     // If no event is detected, we conclude that it has not been emitted.
     let emitted = tokio::select! {
-        _ = listener.proc(|e| {
+        _ = another_listener.proc(|e| {
             match e {
                 Event::Gear(GearEvent::UserMessageSent { message, .. })
                     if message.destination.0 == [0_u8; 32]
@@ -1785,39 +1807,6 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
     };
 
     assert!(emitted.is_none(), "RlpReceiptProcessed event was emitted");
-
-    let predicate = |e| match e {
-        Event::Gear(GearEvent::UserMessageSent { message, .. })
-            if message.destination == user_id.into() =>
-        {
-            message
-                .payload
-                .0
-                .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
-                .then_some(0_u32)
-        }
-        Event::Gear(GearEvent::MessageWaited { expiration, .. }) => Some(expiration),
-        _ => None,
-    };
-
-    let now = api.last_block_number().await.unwrap();
-
-    let expiration: u32 = listener2
-        .proc_many(predicate, |pairs| {
-            let len = pairs.len();
-
-            (pairs, len > 1)
-        })
-        .await
-        .unwrap()
-        .into_iter()
-        .sum();
-    let started_waiting_at = expiration - MAILBOX_DURATION + 1;
-
-    assert!(
-        now >= started_waiting_at + REPLY_TIMEOUT,
-        "now: {now}, started_waiting_at: {started_waiting_at}, REPLY_TIMEOUT: {REPLY_TIMEOUT}"
-    );
 
     // Successful transactions number didn't change
     let txs = service

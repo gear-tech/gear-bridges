@@ -184,6 +184,8 @@ async fn task(
                 log::error!("Non recoverable error, exiting: {err:?}");
                 return;
             }
+        } else {
+            return;
         }
     }
 }
@@ -209,37 +211,41 @@ async fn handle_requests(
         }
 
         tokio::select! {
+            value = checkpoints.recv() => {
+                if let Some(checkpoint) = value {
+                    log::info!("Received checkpoint: {checkpoint}");
+                    this.last_checkpoint = Some(checkpoint);
 
-            Some(checkpoint) = checkpoints.recv() => {
-                log::info!("Received checkpoint: {checkpoint}");
-                this.last_checkpoint = Some(checkpoint);
+                    this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
+                        if tx.slot_number <= checkpoint {
+                            this.to_process.push((*tx_uuid, tx.clone()));
+                            false
+                        } else {
+                            true
+                        }
+                    });
 
-                this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
-                    if tx.slot_number <= checkpoint {
-                        this.to_process.push((*tx_uuid, tx.clone()));
-                        false
-                    } else {
-                        true
-                    }
-                });
-
-                continue;
-            }
-
-            Some(Request { tx_uuid, tx }) = requests.recv() => {
-                if this.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
-                    .is_some()
-                {
-                    this.to_process.push((tx_uuid, tx.clone()));
+                    continue;
                 } else {
-                    log::debug!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
-                    this.waiting_for_checkpoints.push((tx_uuid, tx));
+                    log::info!("Checkpoints channel closed, exiting...");
+                    return Ok(());
                 }
             }
 
-            else => {
-                log::info!("Channels closed, exiting...");
-                return Ok(());
+            value = requests.recv() => {
+                if let Some(Request { tx_uuid, tx }) = value {
+                    if this.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
+                        .is_some()
+                    {
+                        this.to_process.push((tx_uuid, tx.clone()));
+                    } else {
+                        log::debug!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
+                        this.waiting_for_checkpoints.push((tx_uuid, tx));
+                    }
+                } else {
+                    log::info!("Requests channel connection closed, exiting...");
+                    return Ok(());
+                }
             }
         }
     }

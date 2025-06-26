@@ -114,8 +114,7 @@ impl DepositEventExtractor {
                             }
                         }
                     }
-                }
-                if blocks.is_closed() {
+                } else {
                     log::info!("Block listener connection closed, exiting...");
                     return;
                 }

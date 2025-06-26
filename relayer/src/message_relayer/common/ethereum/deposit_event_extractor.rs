@@ -102,7 +102,7 @@ impl DepositEventExtractor {
                     );
                     if attempts >= MAX_RETRIES {
                         log::error!("Maximum attempts reached, exiting...");
-                        break;
+                        return;
                     }
                     tokio::time::sleep(delay).await;
                     if common::is_transport_error_recoverable(&err) {
@@ -110,11 +110,12 @@ impl DepositEventExtractor {
                             Ok(api) => api,
                             Err(err) => {
                                 log::error!("Failed to reconnect to Ethereum: {err}");
-                                break;
+                                return;
                             }
                         }
                     }
-                } else {
+                }
+                if blocks.is_closed() {
                     log::info!("Block listener connection closed, exiting...");
                     return;
                 }

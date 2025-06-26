@@ -1,9 +1,12 @@
-import { usePrepareProgramTransaction } from '@gear-js/react-hooks';
+import { usePrepareProgramTransaction, useProgram } from '@gear-js/react-hooks';
 
-import { useVFTManagerProgram } from '@/hooks';
+import { CONTRACT_ADDRESS, VftManagerProgram } from '../../consts';
 
 function usePrepareRequestBridging() {
-  const { data: program } = useVFTManagerProgram();
+  const { data: program } = useProgram({
+    library: VftManagerProgram,
+    id: CONTRACT_ADDRESS.VFT_MANAGER,
+  });
 
   return {
     program,

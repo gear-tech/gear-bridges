@@ -1,16 +1,13 @@
-import { HexString } from '@gear-js/api';
-import { useAccount, useApi } from '@gear-js/react-hooks';
+import { useApi } from '@gear-js/react-hooks';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
 import { useMutation } from '@tanstack/react-query';
 
-import { VFT_MANAGER_CONTRACT_ADDRESS } from '@/consts';
-import { useVaraSymbol } from '@/hooks';
 import { definedAssert } from '@/utils';
 
+import { SUBMIT_STATUS, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { InsufficientAccountBalanceError } from '../../errors';
-import { FormattedValues } from '../../types';
+import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { usePayFee } from './use-pay-fee';
 import { usePrepareApprove } from './use-prepare-approve';
@@ -18,98 +15,108 @@ import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
 
-const DEFAULT_TX = { transaction: undefined, awaited: { fee: BigInt(0) } };
-const BRIDGING_REQUEST_GAS_LIMIT = 150_000_000_000n;
-const APPROXIMATE_PAY_FEE_GAS_LIMIT = 10_000_000_000n;
+type Extrinsic = SubmittableExtrinsic<'promise', ISubmittableResult>;
 
-function useHandleVaraSubmit(
-  feeValue: bigint | undefined,
-  allowance: bigint | undefined,
-  ftBalance: bigint | undefined,
-  accountBalance: bigint | undefined,
-  openTransactionModal: (amount: string, receiver: string) => void,
-) {
+type Transaction = {
+  extrinsic: Extrinsic | undefined;
+  gasLimit: bigint;
+  estimatedFee: bigint;
+  value?: bigint;
+};
+
+const GAS_LIMIT = {
+  BRIDGE: 150_000_000_000n,
+  APPROXIMATE_PAY_FEE: 10_000_000_000n,
+} as const;
+
+function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSubmitParameters) {
   const { api } = useApi();
-  const { account } = useAccount();
   const { token } = useBridgeContext();
-  const varaSymbol = useVaraSymbol();
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
+  const payFee = usePayFee(fee);
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
-  const payFee = usePayFee(feeValue);
-
-  const validateBalance = async (amount: bigint, accountAddress: HexString) => {
-    definedAssert(api, 'API');
-    definedAssert(varaSymbol, 'Vara symbol');
-    definedAssert(token?.address, 'Fungible token address');
-    definedAssert(feeValue, 'Fee value');
+  const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
-    definedAssert(ftBalance, 'Fungible token balance');
-    definedAssert(accountBalance, 'Account balance');
+    definedAssert(fee, 'Fee value');
+    definedAssert(token, 'Fungible token');
 
-    const valueToMint = token.isNative ? amount : 0n;
-    const isApproveRequired = amount > allowance;
+    const txs: Transaction[] = [];
+    const shouldMint = token.isNative;
+    const shouldApprove = amount > allowance;
 
-    const preparedMint =
-      valueToMint > 0n ? await mint.prepareTransactionAsync({ args: [], value: valueToMint }) : DEFAULT_TX;
+    if (shouldMint) {
+      const { transaction, awaited } = await mint.prepareTransactionAsync({ args: [], value: amount });
 
-    const preparedApprove = isApproveRequired
-      ? await approve.prepareTransactionAsync({ args: [VFT_MANAGER_CONTRACT_ADDRESS, amount] })
-      : DEFAULT_TX;
+      txs.push({
+        extrinsic: transaction.extrinsic,
+        gasLimit: transaction.gasInfo.min_limit.toBigInt(),
+        estimatedFee: awaited.fee,
+        value: amount,
+      });
+    }
 
-    const preparedRequestBridging = await requestBridging.prepareTransactionAsync({
-      gasLimit: BRIDGING_REQUEST_GAS_LIMIT,
+    if (shouldApprove) {
+      const { transaction, awaited } = await approve.prepareTransactionAsync({
+        args: [CONTRACT_ADDRESS.VFT_MANAGER, amount],
+      });
+
+      txs.push({
+        extrinsic: transaction.extrinsic,
+        gasLimit: transaction.gasInfo.min_limit.toBigInt(),
+        estimatedFee: awaited.fee,
+      });
+    }
+
+    const { transaction, awaited } = await requestBridging.prepareTransactionAsync({
+      gasLimit: GAS_LIMIT.BRIDGE,
       args: [token.address, amount, accountAddress],
     });
 
-    const mintGasLimit = preparedMint.transaction?.gasInfo.min_limit.toBigInt() ?? 0n;
-    const approveGasLimit = preparedApprove.transaction?.gasInfo.min_limit.toBigInt() ?? 0n;
+    txs.push({
+      extrinsic: transaction.extrinsic,
+      gasLimit: GAS_LIMIT.BRIDGE,
+      estimatedFee: awaited.fee,
+    });
 
-    // cuz we don't know payFees gas limit yet
-    const bridgingEstimatedFee = preparedRequestBridging.awaited.fee * 2n;
+    txs.push({
+      extrinsic: undefined,
+      gasLimit: GAS_LIMIT.APPROXIMATE_PAY_FEE,
+      estimatedFee: awaited.fee, // cuz we don't know payFees gas limit yet
+      value: fee,
+    });
 
-    const totalGasLimit =
-      (mintGasLimit + approveGasLimit + BRIDGING_REQUEST_GAS_LIMIT + APPROXIMATE_PAY_FEE_GAS_LIMIT) *
-      api.valuePerGas.toBigInt();
-
-    const totalEstimatedFee = preparedMint.awaited.fee + preparedApprove.awaited.fee + bridgingEstimatedFee;
-
-    const requiredBalance =
-      valueToMint + totalGasLimit + totalEstimatedFee + feeValue + api.existentialDeposit.toBigInt();
-
-    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError(varaSymbol, requiredBalance);
-
-    return {
-      mintTx: preparedMint.transaction,
-      approveTx: preparedApprove.transaction,
-      transferTx: preparedRequestBridging.transaction,
-    };
+    return txs;
   };
 
-  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
+  const resetState = () => {
+    signAndSend.reset();
+    payFee.reset();
+  };
+
+  const sendTransactions = async (values: FormattedValues) => {
     definedAssert(api, 'API');
-    definedAssert(account, 'Account');
-    definedAssert(feeValue, 'Fee value');
 
-    const { mintTx, approveTx, transferTx } = await validateBalance(amount, accountAddress);
+    const txs = await getTransactions(values);
 
-    const extrinsics = [mintTx?.extrinsic, approveTx?.extrinsic, transferTx.extrinsic].filter(
-      Boolean,
-    ) as SubmittableExtrinsic<'promise', ISubmittableResult>[];
+    resetState();
+    onTransactionStart(values);
 
     // event subscription to get nonce from bridging request reply, and send pay fee transaction.
     // since we're already checking replies in useSignAndSend,
     // would be nice to have the ability to decode it's payload there. perhaps some api in sails-js can be implemented?
-    const { result, unsubscribe } = payFee.awaitBridgingRequest({ amount, accountAddress });
-
-    openTransactionModal(amount.toString(), accountAddress);
-
-    const extrinsic = api.tx.utility.batchAll(extrinsics);
+    const { result, unsubscribe } = payFee.awaitBridgingRequest(values);
 
     try {
+      const extrinsics = txs
+        .map(({ extrinsic }) => extrinsic)
+        .filter((extrinsic): extrinsic is Extrinsic => Boolean(extrinsic));
+
+      const extrinsic = api.tx.utility.batchAll(extrinsics);
+
       await signAndSend.mutateAsync({ extrinsic });
     } catch (error) {
       unsubscribe();
@@ -119,9 +126,35 @@ function useHandleVaraSubmit(
     return result;
   };
 
-  const submit = useMutation({ mutationFn: onSubmit });
+  const getRequiredBalance = async (values: FormattedValues) => {
+    definedAssert(api, 'API');
+    definedAssert(fee, 'Fee value');
 
-  return { submit, payFee };
+    const txs = await getTransactions(values);
+
+    const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * api.valuePerGas.toBigInt();
+    const totalEstimatedFee = txs.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
+    const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
+
+    const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
+    const fees = totalGasLimit + totalEstimatedFee + fee;
+
+    return { requiredBalance, fees };
+  };
+
+  const requiredBalance = useMutation({ mutationFn: getRequiredBalance });
+
+  const getStatus = () => {
+    if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;
+    if (payFee.isPending || payFee.error) return SUBMIT_STATUS.FEE;
+
+    return SUBMIT_STATUS.SUCCESS;
+  };
+
+  const { mutateAsync, isPending, error } = useMutation({ mutationFn: sendTransactions });
+  const status = getStatus();
+
+  return { onSubmit: mutateAsync, isPending: isPending || requiredBalance.isPending, error, status, requiredBalance };
 }
 
 export { useHandleVaraSubmit };

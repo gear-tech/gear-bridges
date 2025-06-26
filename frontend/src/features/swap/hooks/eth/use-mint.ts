@@ -13,7 +13,7 @@ function useMint() {
   const { writeContractAsync } = useWriteContract();
   const config = useConfig();
 
-  const mint = async ({ value, gas }: { value: bigint; gas: bigint }) => {
+  const mint = async ({ value }: { value: bigint }) => {
     definedAssert(token?.address, 'Fungible token address');
 
     const hash = await writeContractAsync({
@@ -21,7 +21,6 @@ function useMint() {
       address: token.address, // only for wrapped eth
       functionName: 'deposit',
       value,
-      gas,
     });
 
     return waitForTransactionReceipt(config, { hash });

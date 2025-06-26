@@ -196,10 +196,16 @@ async fn handle_requests(
 ) -> anyhow::Result<()> {
     loop {
         while !this.to_process.is_empty() {
-            let (tx_uuid, tx) = this.to_process.last().unwrap();
+            // safe to use `last` and `pop` since we check that `to_process` is not empty
+            let (tx_uuid, tx) = this
+                .to_process
+                .last()
+                .expect("to_process should not be empty");
             log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
             this.process(responses, tx.clone(), *tx_uuid).await?;
-            this.to_process.pop().unwrap();
+            this.to_process
+                .pop()
+                .expect("to_process should not be empty");
         }
 
         tokio::select! {

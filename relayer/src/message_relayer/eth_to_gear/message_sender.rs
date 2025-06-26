@@ -120,8 +120,8 @@ impl MessageSender {
 
         if let Some(request) = self.last_request.take() {
             match self.process(responses, &gear_api, &request).await {
-                Ok(cont) => {
-                    if !cont {
+                Ok(should_continue) => {
+                    if !should_continue {
                         return Ok(());
                     }
                 }
@@ -134,8 +134,8 @@ impl MessageSender {
 
         while let Some(request) = requests.recv().await {
             match self.process(responses, &gear_api, &request).await {
-                Ok(cont) => {
-                    if !cont {
+                Ok(should_continue) => {
+                    if !should_continue {
                         return Ok(());
                     }
                 }

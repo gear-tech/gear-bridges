@@ -86,7 +86,7 @@ impl Tx {
     }
 }
 
-static TRANSACTIONS_BYTES: &[u8] = include_bytes!("./data/transactions.json.zst");
+static TRANSACTIONS_BYTES: &[u8] = include_bytes!("./transactions.json.zst");
 static TRANSACTIONS: LazyLock<HashMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
     let mut txs = TRANSACTIONS_BYTES;
     let mut decoder = StreamingDecoder::new(&mut txs).unwrap();

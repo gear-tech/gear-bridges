@@ -87,6 +87,7 @@ pub struct ProofComposer {
     pub last_checkpoint: Option<EthereumSlotNumber>,
     pub historical_proxy_address: H256,
     pub suri: String,
+    pub to_process: Vec<(Uuid, TxHashWithSlot)>,
 }
 
 impl ProofComposer {
@@ -105,6 +106,7 @@ impl ProofComposer {
             last_checkpoint: None,
             historical_proxy_address,
             suri,
+            to_process: Vec::with_capacity(100),
         }
     }
 
@@ -193,33 +195,42 @@ async fn handle_requests(
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
     loop {
+        while !this.to_process.is_empty() {
+            // safe to use `last` and `pop` since we check that `to_process` is not empty
+            let (tx_uuid, tx) = this
+                .to_process
+                .last()
+                .expect("to_process should not be empty");
+            log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
+            this.process(responses, tx.clone(), *tx_uuid).await?;
+            this.to_process
+                .pop()
+                .expect("to_process should not be empty");
+        }
+
         tokio::select! {
+
             Some(checkpoint) = checkpoints.recv() => {
                 log::info!("Received checkpoint: {checkpoint}");
                 this.last_checkpoint = Some(checkpoint);
 
-                let mut to_process = Vec::new();
-
                 this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
                     if tx.slot_number <= checkpoint {
-                        to_process.push((*tx_uuid, tx.clone()));
+                        this.to_process.push((*tx_uuid, tx.clone()));
                         false
                     } else {
                         true
                     }
                 });
 
-                for (tx_uuid, tx) in to_process {
-                    log::debug!("Processing waiting transaction {tx_uuid}: {tx:?}");
-                    this.process(responses, tx, tx_uuid).await?;
-                }
+                continue;
             }
 
             Some(Request { tx_uuid, tx }) = requests.recv() => {
                 if this.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
                     .is_some()
                 {
-                    this.process(responses, tx, tx_uuid).await?;
+                    this.to_process.push((tx_uuid, tx.clone()));
                 } else {
                     log::debug!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
                     this.waiting_for_checkpoints.push((tx_uuid, tx));

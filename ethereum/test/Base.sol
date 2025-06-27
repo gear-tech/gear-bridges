@@ -8,6 +8,7 @@ import {StdChains} from "forge-std/StdChains.sol";
 import {StdCheats} from "forge-std/StdCheats.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import {CircleToken} from "../src/erc20/CircleToken.sol";
 import {TetherToken} from "../src/erc20/TetherToken.sol";
@@ -27,7 +28,8 @@ struct DeploymentArguments {
     uint256 privateKey;
     address deployerAddress;
     bytes32 vftManager;
-    bytes32 governance;
+    bytes32 governanceAdmin;
+    bytes32 governancePauser;
     address bridgingPaymentAdmin;
     uint256 bridgingPaymentFee;
 }
@@ -36,18 +38,19 @@ library BaseConstants {
     uint256 internal constant DEPLOYER_INITIAL_BALANCE = 100 ether;
     address internal constant DEPLOYER_ADDRESS = 0x1111111111111111111111111111111111111111;
     bytes32 internal constant VFT_MANAGER = 0x2222222222222222222222222222222222222222222222222222222222222222;
-    bytes32 internal constant GOVERNANCE = 0x3333333333333333333333333333333333333333333333333333333333333333;
-    address internal constant BRIDGING_PAYMENT_ADMIN = 0x4444444444444444444444444444444444444444;
+    bytes32 internal constant GOVERNANCE_ADMIN = 0x3333333333333333333333333333333333333333333333333333333333333333;
+    bytes32 internal constant GOVERNANCE_PAUSER = 0x4444444444444444444444444444444444444444444444444444444444444444;
+    address internal constant BRIDGING_PAYMENT_ADMIN = 0x5555555555555555555555555555555555555555;
     uint256 internal constant BRIDGING_PAYMENT_FEE = 1 wei;
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
     DeploymentArguments public deploymentArguments;
 
-    CircleToken public circleToken;
-    TetherToken public tetherToken;
-    WrappedEther public wrappedEther;
-    WrappedVara public wrappedVara;
+    IERC20Metadata public circleToken;
+    IERC20Metadata public tetherToken;
+    IERC20Metadata public wrappedEther;
+    IERC20Metadata public wrappedVara;
 
     GovernanceAdmin public governanceAdmin;
     GovernancePauser public governancePauser;
@@ -66,7 +69,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 privateKey: 0,
                 deployerAddress: BaseConstants.DEPLOYER_ADDRESS,
                 vftManager: BaseConstants.VFT_MANAGER,
-                governance: BaseConstants.GOVERNANCE,
+                governanceAdmin: BaseConstants.GOVERNANCE_ADMIN,
+                governancePauser: BaseConstants.GOVERNANCE_PAUSER,
                 bridgingPaymentAdmin: BaseConstants.BRIDGING_PAYMENT_ADMIN,
                 bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
             })
@@ -82,7 +86,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 privateKey: privateKey,
                 deployerAddress: deployerAddress,
                 vftManager: vm.envBytes32("VFT_MANAGER"),
-                governance: vm.envBytes32("GOVERNANCE"),
+                governanceAdmin: vm.envBytes32("GOVERNANCE_ADMIN"),
+                governancePauser: vm.envBytes32("GOVERNANCE_PAUSER"),
                 bridgingPaymentAdmin: vm.envAddress("BRIDGING_PAYMENT_ADMIN"),
                 bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE")
             })
@@ -99,7 +104,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("    deployerAddress:     ", deploymentArguments.deployerAddress);
         console.log("    vftManager:          ", vm.toString(deploymentArguments.vftManager));
-        console.log("    governance:          ", vm.toString(deploymentArguments.governance));
+        console.log("    governanceAdmin:     ", vm.toString(deploymentArguments.governanceAdmin));
+        console.log("    governancePauser:    ", vm.toString(deploymentArguments.governancePauser));
         console.log("    bridgingPaymentAdmin:", deploymentArguments.bridgingPaymentAdmin);
         console.log("    bridgingPaymentFee:  ", deploymentArguments.bridgingPaymentFee, "wei");
 
@@ -152,10 +158,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         proxies[1] = messageQueueAddress;
         proxies[2] = erc20ManagerAddress;
 
-        governanceAdmin = new GovernanceAdmin(deploymentArguments.governance, messageQueueAddress, proxies);
+        governanceAdmin = new GovernanceAdmin(deploymentArguments.governanceAdmin, messageQueueAddress, proxies);
         console.log("    GovernanceAdmin:     ", address(governanceAdmin));
 
-        governancePauser = new GovernancePauser(deploymentArguments.governance, messageQueueAddress, proxies);
+        governancePauser = new GovernancePauser(deploymentArguments.governancePauser, messageQueueAddress, proxies);
         console.log("    GovernancePauser:    ", address(governancePauser));
 
         console.log();

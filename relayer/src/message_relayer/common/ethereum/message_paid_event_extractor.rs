@@ -102,7 +102,7 @@ impl MessagePaidEventExtractor {
 
                     if attempts >= MAX_RETRIES {
                         log::error!("Max attempts reached, exiting...");
-                        break;
+                        return;
                     }
 
                     tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
@@ -112,13 +112,13 @@ impl MessagePaidEventExtractor {
                             Ok(eth_api) => eth_api,
                             Err(err) => {
                                 log::error!("Failed to reconnect to Ethereum API: {err}");
-                                break;
+                                return;
                             }
                         };
                     }
                 } else {
                     log::info!("Connection to block listener closed, exiting...");
-                    break;
+                    return;
                 }
             }
         });

@@ -8,7 +8,7 @@ use super::{
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Log, B256};
+use alloy_primitives::{FixedBytes, Log, B256};
 use alloy_rlp::Encodable;
 use core::{fmt, str::FromStr};
 use serde::{de, Deserialize};
@@ -151,9 +151,8 @@ pub struct GenesisResponse {
 pub struct GenesisData {
     #[serde(deserialize_with = "deserialize_u64")]
     pub genesis_time: u64,
-    pub genesis_validator_root: B256,
-    #[serde(deserialize_with = "deserialize_u64")]
-    pub genesis_fork_version: u64,
+    pub genesis_validators_root: B256,
+    pub genesis_fork_version: FixedBytes<4>,
 }
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_epoch_at_slot).

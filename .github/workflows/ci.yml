@@ -50,7 +50,7 @@ jobs:
           npx @openzeppelin/upgrades-core@^1.37.0
 
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force
         working-directory: ./ethereum
 
       - name: Build
@@ -136,7 +136,7 @@ jobs:
           npx @openzeppelin/upgrades-core@^1.37.0
 
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force
         working-directory: ./ethereum
 
       - name: Run clippy
@@ -180,7 +180,7 @@ jobs:
           npx @openzeppelin/upgrades-core@^1.37.0
 
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force
         working-directory: ./ethereum
 
       - name: Pull & run Gear node container
@@ -200,7 +200,7 @@ jobs:
       - name: Run solidity tests
         run: |
           cd ethereum
-          forge test
+          forge test --force
 
       - name: Stop Gear node container (if any)
         continue-on-error: true

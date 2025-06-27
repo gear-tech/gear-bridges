@@ -110,10 +110,12 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
   };
 
   const onSubmit = async (values: FormattedValues) => {
+    definedAssert(requiredBalance.data, 'Required balance');
+
     const txs = await getTransactions(values);
 
     resetState();
-    onTransactionStart(values);
+    onTransactionStart(values, requiredBalance.data.fees);
 
     for (const { call } of txs) await call();
   };

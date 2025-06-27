@@ -26,6 +26,7 @@ type Props = Pick<
   timestamp?: Transfer['timestamp'];
   status?: Transfer['status'];
   nonce?: Transfer['nonce'];
+  estimatedFees?: bigint;
   close: () => void;
   renderProgressBar?: () => JSX.Element;
 };
@@ -56,6 +57,7 @@ function TransactionModal({
   sender,
   receiver,
   nonce,
+  estimatedFees,
   renderProgressBar,
   close,
 }: Props) {
@@ -183,11 +185,7 @@ function TransactionModal({
       {renderProgressBar?.()}
 
       <footer className={styles.footer}>
-        <FeeAndTimeFooter
-          isVaraNetwork={isVaraNetwork}
-          feeValue={isVaraNetwork ? 1000000000000n : 1n}
-          decimals={isVaraNetwork ? 12 : 18}
-        />
+        {estimatedFees && <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} />}
 
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>

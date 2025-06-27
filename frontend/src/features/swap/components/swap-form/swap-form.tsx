@@ -56,7 +56,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransactionModal = (values: FormattedValues) => {
+  const openTransactionModal = (values: FormattedValues, estimatedFees: bigint) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
     const amount = values.amount.toString();
@@ -68,7 +68,17 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
     const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
+    setTransactionModal({
+      amount,
+      source,
+      destination,
+      sourceNetwork,
+      destNetwork,
+      sender,
+      receiver,
+      estimatedFees,
+      close,
+    });
   };
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
@@ -187,7 +197,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             onToggle={() => setIsDetailsOpen((prevValue) => !prevValue)}
             isVaraNetwork={network.isVara}
             feeValue={requiredBalance?.data?.fees}
-            decimals={network.isVara ? 12 : 18}
             isLoading={requiredBalance?.isPending}
           />
 

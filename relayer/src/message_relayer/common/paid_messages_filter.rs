@@ -150,7 +150,7 @@ mod tests {
         let message0 = MessageInBlock {
             message: Message {
                 destination: [0u8; 20],
-                source: account0.into(),
+                source: account0,
                 nonce_le: [0u8; 32],
                 payload: vec![1, 2, 3],
             },
@@ -162,7 +162,7 @@ mod tests {
         let message1 = MessageInBlock {
             message: Message {
                 destination: [0u8; 20],
-                source: account1.into(),
+                source: account1,
                 nonce_le: [1u8; 32],
                 payload: vec![4, 5, 6],
             },

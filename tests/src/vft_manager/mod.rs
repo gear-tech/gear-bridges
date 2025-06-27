@@ -1,14 +1,22 @@
+use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use anyhow::anyhow;
-use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
+use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::gas::GasInfo;
-use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sails_rs::{calls::*, events::EventIo, gclient::calls::*, prelude::*};
 use std::collections::HashMap;
+use tokio::time::{sleep, Duration};
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
-use vft_manager_client::{traits::*, Config, InitConfig, Order, TokenSupply};
+use vft_manager_app::services::eth_abi::ERC20_MANAGER;
+use vft_manager_client::vft_manager::events::VftManagerEvents;
+use vft_manager_client::{traits::*, Config, Error, InitConfig, Order, TokenSupply};
 
 use crate::{connect_to_node, DEFAULT_BALANCE};
+
+const ERC20_MANAGER_ADDRESS: H160 = H160([1; 20]);
+const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
+const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
 
 async fn calculate_reply_gas(
     api: &GearApi,
@@ -27,7 +35,7 @@ async fn calculate_reply_gas(
     let origin = H256::from_slice(account);
     let account = ActorId::from(*account);
 
-    let mut listener = api.subscribe().await?;
+    let mut listener = api.subscribe().await.map_err(|e| anyhow!("{e:?}"))?;
 
     service
         .calculate_gas_for_reply(i, i, supply_type.clone())
@@ -77,6 +85,36 @@ fn average(array: &[u64]) -> u64 {
         // odd
         _ => array[len / 2],
     }
+}
+
+fn create_receipt_rlp(receiver: ActorId, token: H160, amount: U256) -> Vec<u8> {
+    let event = ERC20_MANAGER::BridgingRequested {
+        from: [3u8; 20].into(),
+        to: receiver.into_bytes().into(),
+        token: token.0.into(),
+        amount: {
+            let mut bytes = [0u8; 32];
+            amount.to_little_endian(&mut bytes[..]);
+
+            alloy_primitives::U256::from_le_bytes(bytes)
+        },
+    };
+
+    let receipt = ReceiptWithBloom::from(Receipt {
+        status: true.into(),
+        cumulative_gas_used: 100_000u64,
+        logs: vec![alloy_primitives::Log {
+            address: ERC20_MANAGER_ADDRESS.0.into(),
+            data: Into::into(&event),
+        }],
+    });
+
+    let receipt = ReceiptEnvelope::Eip2930(receipt);
+
+    let mut receipt_rlp = vec![];
+    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
+
+    receipt_rlp
 }
 
 async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
@@ -1215,6 +1253,573 @@ async fn migrate_transactions() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
     assert_eq!(result, transactions);
+
+    Ok(())
+}
+
+// A helper function. Returns a remoting, a GearApi instance, the vft-manager id, the user id,
+// an extended VFT id with specified token supply type.
+async fn deploy_programs(
+    create_vft: bool,
+    add_roles: bool,
+    supply_type: TokenSupply,
+) -> Result<(impl Remoting + Clone, GearApi, ActorId, ActorId, ActorId)> {
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "vft-manager",
+        &[WASM_VFT_MANAGER, WASM_VFT],
+    )
+    .await;
+
+    let user_id = conn.accounts[0].0;
+    let vft_manager_code_id = conn.code_ids[0];
+    let vft_code_id = conn.code_ids[1];
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let gas_limit = conn.gas_limit;
+    let salt = conn.salt;
+
+    println!("user_id = {:?}", hex::encode(user_id));
+
+    // Deploy VFT-manager
+    let remoting = GClientRemoting::new(api.clone());
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
+
+    let vft_manager_id = factory
+        .new(InitConfig {
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: user_id,
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 20_000_000_000,
+                gas_to_send_request_to_builtin: 10_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 10,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .send_recv(vft_manager_code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    // Deploy an extended Vara Fungible Token program if a VFT id is not provided
+    let extended_vft_id = if !create_vft {
+        user_id
+    } else {
+        let factory = vft_client::VftFactory::new(remoting.clone());
+        factory
+            .new("TEST_TOKEN".into(), "TT".into(), 20)
+            .send_recv(vft_code_id, salt)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?
+    };
+    println!(
+        "program_id = {:?} (extended_vft)",
+        hex::encode(extended_vft_id)
+    );
+
+    // Unpause and update the VFT-manager
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    service
+        .update_erc_20_manager_address(ERC20_MANAGER_ADDRESS)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    let erc20_addr = match supply_type {
+        TokenSupply::Gear => ERC20_TOKEN_GEAR_SUPPLY,
+        TokenSupply::Ethereum => ERC20_TOKEN_ETH_SUPPLY,
+    };
+    // Add Vara to ETH mappings
+    service
+        .map_vara_to_eth_address(extended_vft_id, erc20_addr, supply_type)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    // Add roles to the extended VFT if required
+    let mut service_vft = vft_client::VftAdmin::new(remoting.clone());
+    if add_roles {
+        service_vft
+            .set_minter(vft_manager_id)
+            .send_recv(extended_vft_id)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?;
+        service_vft
+            .set_burner(vft_manager_id)
+            .send_recv(extended_vft_id)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?;
+    }
+
+    Ok((remoting, api, vft_manager_id, user_id, extended_vft_id))
+}
+
+// "Sunny day" test for the `submit_receipt` method of the VFT manager.
+#[tokio::test]
+async fn submit_receipt_works() -> Result<()> {
+    let (remoting, api, vft_manager_id, user_id, _) =
+        deploy_programs(true, true, TokenSupply::Ethereum).await?;
+
+    let receipt_rlp = create_receipt_rlp(42.into(), ERC20_TOKEN_ETH_SUPPLY, U256::zero());
+
+    let gas_limit = api.block_gas_limit().unwrap();
+
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    // Subscribe to the events listener
+    let mut listener = api.subscribe().await.unwrap();
+
+    // Send `submit_receipt` request to Vft-manager
+    let result = service
+        .submit_receipt(0, 1, receipt_rlp)
+        .with_gas_limit(gas_limit / 100 * 95)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    // Checking two things:
+    // - a reply to the `submit_receipt` request has been sent to the user
+    // - a `RlpReceiptProcessed` event has been emitted by the VFT manager
+    let predicate = |e| match e {
+        Event::Gear(GearEvent::UserMessageSent { message, .. })
+            if message.destination == user_id.into() && message.source == vft_manager_id.into() =>
+        {
+            message
+                .payload
+                .0
+                .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
+                .then_some(())
+        }
+        Event::Gear(GearEvent::UserMessageSent { message, .. })
+            if message.destination.0 == [0_u8; 32] && message.source == vft_manager_id.into() =>
+        {
+            if let VftManagerEvents::RlpReceiptProcessed {
+                slot,
+                transaction_index,
+            } = VftManagerEvents::decode_event(&message.payload.0).unwrap()
+            {
+                assert_eq!(slot, 0);
+                assert_eq!(transaction_index, 1);
+
+                Some(())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    listener
+        .proc_many(predicate, |tuples| {
+            let total = tuples.len();
+
+            (tuples, total > 1)
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_ok(), "Result: {result:?}");
+
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    assert_eq!(txs.len(), 1, "Transactions list must contain one pair");
+    assert!(txs.iter().any(|(slot, tx_idx)| *slot == 0 && *tx_idx == 1));
+
+    Ok(())
+}
+
+// Check whether an error in a VFT contract is propagated correctly to the sender
+// of the `submit_receipt` message.
+// Prerequisites:
+// - Deploying a vft-manager.
+// - Deploying a VFT contract with token supply type Ethereum, but not adding any roles to it.
+// Test scenario:
+// - on behalf of the historical proxy, sending `submit_receipt` message to the VFT manager,
+//   with the rlp receipt indicating a transfer of the ERC20_TOKEN_ETH_SUPPLY
+// - the upstream VFT contract will panic attempting to mint tokens.
+// Expecting:
+// - no events are emitted
+// - the transactions list is not updated
+// - the correct error is propagated to the sender.
+#[tokio::test]
+async fn error_in_vft_propagated_correctly() -> Result<()> {
+    use core::panic;
+
+    let (remoting, api, vft_manager_id, user_id, _) =
+        deploy_programs(true, false, TokenSupply::Ethereum).await?;
+
+    let gas_limit = api.block_gas_limit().unwrap();
+
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    // Subscribe to the events listeners
+    let mut listener = api.subscribe().await.unwrap();
+    let mut another_listener = api.clone().subscribe().await.unwrap();
+
+    let receipt_rlp = create_receipt_rlp(42.into(), ERC20_TOKEN_ETH_SUPPLY, U256::zero());
+    let result = service
+        .submit_receipt(0, 1, receipt_rlp)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    // Trying to listen for the `RlpReceiptProcessed` event emitted by the VFT manager,
+    // but there isn't supposed to be one since the VFT contract finished with an error.
+    // We wait for 30 seconds before concluding that the event was not emitted.
+    let emitted = tokio::select! {
+        _ = listener.proc(|e| {
+            match e {
+                Event::Gear(GearEvent::UserMessageSent { message, .. })
+                    if message.destination.0 == [0_u8; 32]
+                        && message.source == vft_manager_id.into() =>
+                {
+                    if let VftManagerEvents::RlpReceiptProcessed {
+                        slot: _slot,
+                        transaction_index: _transaction_index,
+                    } = VftManagerEvents::decode_event(&message.payload.0).unwrap()
+                    {
+                        Some(())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }) => {
+            Some(())
+        },
+        _ = sleep(Duration::from_secs(30)) => {
+            None
+        }
+    };
+
+    let usr_msg = another_listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == user_id.into() =>
+            {
+                message
+                    .payload
+                    .0
+                    .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
+                    .then_some(())
+            }
+            _ => None,
+        })
+        .await;
+
+    // The `RlpReceiptProcessed` event is not expected to be emitted, but the user message is
+    // expected to be sent back to the user.
+    assert!(emitted.is_none(), "RlpReceiptProcessed event was emitted");
+    assert!(usr_msg.is_ok(), "User message was not sent back");
+
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    assert!(
+        matches!(result, Err(Error::Internal { .. })),
+        "Result: {result:?}"
+    );
+
+    Ok(())
+}
+
+// Check whether a failure check the reply in `handle_reply` hook is handled correctly.
+//
+// Prerequisites:
+// - Deploying a vft-manager.
+// - Registering ourselves (the user) as both the historical proxy and a VFT contract
+// (with token supply type Gear).
+// Test scenario:
+// - on behalf of the historical proxy, sending `submit_receipt` message to the VFT manager,
+//   with the rlp receipt indicating a transfer of the ERC20_TOKEN_GEAR_SUPPLY
+// - waiting (as a VFT contract) for a message from the vft-manager to do `transfer_from` action
+// - replying with `false` to the vft-manager meaning that the transfer was not successful
+// Expecting:
+// - the `handle_reply` hook fails to check the reply and exits without updating the transactions
+// - the transactions are not updated
+// - no `RlpReceiptProcessed` event is emitted
+#[tokio::test]
+async fn illegal_reply_in_handle_reply() -> Result<()> {
+    let (remoting, api, vft_manager_id, user_id, extended_vft_id) =
+        deploy_programs(false, false, TokenSupply::Gear).await?;
+
+    let receipt_rlp = create_receipt_rlp(42.into(), ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
+
+    let gas_limit = api.block_gas_limit().unwrap();
+
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    // Subscribe to the events listener
+    let mut listener = api.subscribe().await.unwrap();
+
+    // Send `submit_receipt` request to Vft-manager
+    let reply_ticket = service
+        .submit_receipt(0, 1, receipt_rlp)
+        .with_gas_limit(gas_limit / 100 * 95)
+        .send(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    let mut vft_msg_id: MessageId = Default::default();
+    let mut submit_receipt_msg_id: MessageId = Default::default();
+
+    // At this point expecting the vft-manager to have sent a `transfer_from` call,
+    // to the token minter, while itself having been placed in the waitlist.
+    let predicate = |e| match e {
+        Event::Gear(GearEvent::UserMessageSent { message, .. })
+            if message.destination == extended_vft_id.into()
+                && message.source == vft_manager_id.into() =>
+        {
+            message
+                .payload
+                .0
+                .starts_with(vft_client::vft::io::TransferFrom::ROUTE)
+                .then_some((MessageId::new(message.id.0), 0_usize))
+        }
+        Event::Gear(GearEvent::MessageWaited { id, .. }) => Some((MessageId::new(id.0), 1_usize)),
+        _ => None,
+    };
+
+    for (msg_id, idx) in listener
+        .proc_many(predicate, |pairs| {
+            let len = pairs.len();
+
+            (pairs, len > 1)
+        })
+        .await
+        .unwrap()
+    {
+        if idx == 0 {
+            vft_msg_id = msg_id;
+        } else if idx == 1 {
+            submit_receipt_msg_id = msg_id;
+        }
+    }
+
+    // Sending `false` as a reply to the vft-manager
+    let reply: <vft_client::vft::io::TransferFrom as ActionIo>::Reply = false;
+    let reply_payload = {
+        let mut buffer = vft_client::vft::io::TransferFrom::ROUTE.to_vec();
+        reply.encode_to(&mut buffer);
+
+        buffer
+    };
+
+    let mut listener = api.subscribe().await.unwrap();
+    let (reply_message_id, _, _) = match api
+        .send_reply_bytes(vft_msg_id, reply_payload, gas_limit / 100 * 95, 0)
+        .await
+    {
+        Ok(reply) => reply,
+        Err(err) => {
+            let block = api.last_block_number().await.unwrap();
+            println!("Failed to send reply to {vft_msg_id:?}: {err:?}, block={block}");
+            let result = reply_ticket.recv().await.unwrap();
+            println!("{result:?}");
+            crate::panic!("{:?}", err);
+        }
+    };
+
+    let result = reply_ticket.recv().await.map_err(|e| anyhow!("{e:?}"))?;
+
+    let predicate = |e| match e {
+        Event::Gear(GearEvent::UserMessageSent { message, .. })
+            if message.destination == user_id.into() && message.source == vft_manager_id.into() =>
+        {
+            message
+                .payload
+                .0
+                .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
+                .then_some(())
+        }
+        Event::Gear(GearEvent::MessageWoken { id, .. }) => {
+            assert_eq!(id.0, submit_receipt_msg_id.into_bytes());
+            Some(())
+        }
+        Event::Gear(GearEvent::MessagesDispatched { statuses, .. }) => {
+            statuses.into_iter().find_map(|(msg_id, status)| {
+                if msg_id.0 == reply_message_id.into_bytes() {
+                    assert_eq!(DispatchStatus::from(status), DispatchStatus::Success);
+                    Some(())
+                } else {
+                    None
+                }
+            })
+        }
+        _ => None,
+    };
+
+    listener
+        .proc_many(predicate, |tuples| {
+            let total = tuples.len();
+
+            (tuples, total > 2)
+        })
+        .await
+        .unwrap();
+
+    // Successful transactions number didn't change
+    let service = vft_manager_client::VftManager::new(remoting.clone());
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    assert!(
+        matches!(result, Err(Error::InvalidReply)),
+        "Result: {result:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn vft_token_operation_timeout_works() -> Result<()> {
+    use core::panic;
+
+    const REPLY_TIMEOUT: u32 = 10;
+
+    let (remoting, api, vft_manager_id, user_id, _) =
+        deploy_programs(false, false, TokenSupply::Gear).await?;
+
+    let receipt_rlp = create_receipt_rlp(42.into(), ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
+
+    let gas_limit = api.block_gas_limit().unwrap();
+
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    // Subscribe to two event listeners
+    let mut listener = api.subscribe().await.unwrap();
+    let mut another_listener = api.clone().subscribe().await.unwrap();
+
+    let start_block = api.last_block_number().await.unwrap();
+
+    // Send `submit_receipt` request to Vft-manager
+    let result = service
+        .submit_receipt(0, 1, receipt_rlp)
+        .with_gas_limit(gas_limit / 100 * 95)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
+    let _ = listener
+        .proc(|e| match e {
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.destination == user_id.into() =>
+            {
+                message
+                    .payload
+                    .0
+                    .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
+                    .then_some(())
+            }
+            _ => None,
+        })
+        .await;
+    let end_block = api.last_block_number().await.unwrap();
+
+    // We shouldn't be getting the final user reply for at least `REPLY_TIMEOUT` blocks
+    assert!(
+        end_block >= start_block + REPLY_TIMEOUT,
+        "end_block: {end_block}, start_block: {start_block}, REPLY_TIMEOUT: {REPLY_TIMEOUT}"
+    );
+
+    // Waiting for the `RlpReceiptProcessed` event for another 30 seconds.
+    // If no event is detected, we conclude that it has not been emitted.
+    let emitted = tokio::select! {
+        _ = another_listener.proc(|e| {
+            match e {
+                Event::Gear(GearEvent::UserMessageSent { message, .. })
+                    if message.destination.0 == [0_u8; 32]
+                        && message.source == vft_manager_id.into() =>
+                {
+                    if let VftManagerEvents::RlpReceiptProcessed {
+                        slot: _slot,
+                        transaction_index: _transaction_index,
+                    } = VftManagerEvents::decode_event(&message.payload.0).unwrap()
+                    {
+                        Some(())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }) => {
+            Some(())
+        },
+        _ = sleep(Duration::from_secs(30)) => {
+            None
+        }
+    };
+
+    assert!(emitted.is_none(), "RlpReceiptProcessed event was emitted");
+
+    // Successful transactions number didn't change
+    let txs = service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(txs.is_empty());
+
+    assert!(
+        matches!(result, Err(Error::ReplyTimeout)),
+        "Result: {result:?}"
+    );
 
     Ok(())
 }

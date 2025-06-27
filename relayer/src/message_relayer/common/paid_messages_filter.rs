@@ -3,7 +3,6 @@ use futures::{
     pin_mut,
 };
 use gclient::ext::sp_runtime::AccountId32;
-use primitive_types::H256;
 
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};

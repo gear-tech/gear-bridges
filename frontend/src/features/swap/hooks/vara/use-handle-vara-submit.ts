@@ -99,11 +99,12 @@ function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSu
 
   const sendTransactions = async (values: FormattedValues) => {
     definedAssert(api, 'API');
+    definedAssert(requiredBalance.data, 'Required balance');
 
     const txs = await getTransactions(values);
 
     resetState();
-    onTransactionStart(values);
+    onTransactionStart(values, requiredBalance.data.fees);
 
     // event subscription to get nonce from bridging request reply, and send pay fee transaction.
     // since we're already checking replies in useSignAndSend,

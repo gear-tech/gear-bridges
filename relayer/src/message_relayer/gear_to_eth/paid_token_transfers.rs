@@ -1,6 +1,7 @@
-use std::iter;
+use std::{collections::HashSet, iter};
 
 use ethereum_client::EthApi;
+use gclient::ext::sp_runtime::AccountId32;
 use primitive_types::H256;
 use utils_prometheus::MeteredService;
 
@@ -58,6 +59,7 @@ impl Relayer {
         api_provider: ApiProviderConnection,
         confirmations_merkle_root: u64,
         confirmations_status: u64,
+        excluded_from_fees: HashSet<AccountId32>,
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
@@ -65,7 +67,7 @@ impl Relayer {
 
         let message_paid_listener = MessagePaidEventExtractor::new(bridging_payment_address);
 
-        let paid_messages_filter = PaidMessagesFilter::new();
+        let paid_messages_filter = PaidMessagesFilter::new(excluded_from_fees);
 
         let merkle_root_extractor = MerkleRootExtractor::new(
             eth_api.clone(),

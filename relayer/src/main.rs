@@ -148,9 +148,9 @@ async fn main() {
             let api = provider.connection().client();
 
             let mut excluded_from_fees = HashSet::new();
-            match args.fee_payers {
+            match args.no_fee {
                 None => {
-                    log::warn!("No fee payers specified, using default: bridgeAdmin and bridgePauser from chain constants");
+                    log::warn!("No free from charge accounts listed, using default: bridgeAdmin and bridgePauser from chain constants");
                     match api.bridge_admin().await.map(AccountId32::from) {
                         Ok(admin) => {
                             log::info!("Bridge admin: {admin}");
@@ -172,14 +172,14 @@ async fn main() {
                     };
 
                     if excluded_from_fees.is_empty() {
-                        log::error!("No fee payers found, exiting");
+                        log::error!("Exiting");
 
                         return;
                     }
                 }
 
                 Some(FeePayers::All) => {
-                    log::warn!("All accounts will be required to pay fees");
+                    log::info!("All accounts haave to pay fees");
                 }
 
                 Some(FeePayers::ExcludedIds(ids)) => {
@@ -191,6 +191,8 @@ async fn main() {
                             }
                             Err(e) => {
                                 log::error!("Failed to decode address '{id}': {e}");
+
+                                return;
                             }
                         }
                     }

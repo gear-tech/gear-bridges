@@ -100,8 +100,10 @@ async fn run_inner(
                         hex::encode(message.message.nonce_le)
                     );
                     sender.send(message)?;
+
                     continue;
                 }
+
                 if let Some(msg) = self_
                     .pending_messages
                     .insert(message.message.nonce_le, message)

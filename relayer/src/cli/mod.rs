@@ -102,12 +102,11 @@ pub struct GearEthTokensArgs {
     pub confirmations_status: Option<u64>,
 
     #[arg(
-        long = "no-fee", 
+        long,
         help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"), 
         value_parser = parse_fee_payers,
-        env = "NO_FEE"
     )]
-    pub fee_payers: Option<FeePayers>,
+    pub no_fee: Option<FeePayers>,
 }
 
 #[derive(Subcommand)]
@@ -262,15 +261,14 @@ pub enum FeePayers {
     ExcludedIds(Vec<String>),
 }
 
-fn parse_fee_payers(s: &str) -> Result<FeePayers, String> {
+fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
     if s.trim().eq_ignore_ascii_case("none") {
-        Ok(FeePayers::All)
+        return Ok(FeePayers::All);
+    }
+    let ids: Vec<String> = s.split(',').map(String::from).collect();
+    if ids.is_empty() {
+        Err(anyhow::anyhow!("Fee payers cannot be empty"))
     } else {
-        let ids: Vec<String> = s.split(',').map(String::from).collect();
-        if ids.is_empty() {
-            Err("Fee payers cannot be empty".to_string())
-        } else {
-            Ok(FeePayers::ExcludedIds(ids))
-        }
+        Ok(FeePayers::ExcludedIds(ids))
     }
 }

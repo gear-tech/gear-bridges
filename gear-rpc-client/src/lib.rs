@@ -689,28 +689,38 @@ impl GearApi {
         Ok(events.collect())
     }
 
-    /* todo(playX18): some version mismatch between relayer and this crate does not allow us to return AccountId32 as is, return raw bytes for now */
-    pub async fn bridge_admin(&self) -> anyhow::Result<[u8; 32]> {
-        let addr = subxt::dynamic::constant("GearEthBridge", "BridgeAdmin");
+    pub async fn get_constant(
+        &self,
+        pallete: &str,
+        constant: &str,
+    ) -> anyhow::Result<DecodedValueThunk> {
+        let addr = subxt::dynamic::constant(pallete, constant);
         let res = self
             .api
             .constants()
             .at(&addr)
-            .context("Failed to get BridgeAdmin address")?;
-        AccountId32::decode(&mut res.encoded())
-            .context("Failed to decode BridgeAdmin address")
-            .map(AccountId32::into)
+            .context(format!("Failed to get {pallete}.{constant} address"))?;
+        Ok(res)
+    }
+
+    /* todo(playX18): some version mismatch between relayer and this crate does not allow us to return AccountId32 as is, return raw bytes for now */
+    pub async fn bridge_admin(&self) -> anyhow::Result<[u8; 32]> {
+        self.get_constant("GearEthBridge", "BridgeAdmin")
+            .await
+            .and_then(|res| {
+                AccountId32::decode(&mut res.encoded())
+                    .context("Failed to decode BridgeAdmin address")
+                    .map(AccountId32::into)
+            })
     }
 
     pub async fn bridge_pauser(&self) -> anyhow::Result<[u8; 32]> {
-        let addr = subxt::dynamic::constant("GearEthBridge", "BridgePauser");
-        let res = self
-            .api
-            .constants()
-            .at(&addr)
-            .context("Failed to get BridgePauser address")?;
-        AccountId32::decode(&mut res.encoded())
-            .context("Failed to decode BridgePauser address")
-            .map(AccountId32::into)
+        self.get_constant("GearEthBridge", "BridgePauser")
+            .await
+            .and_then(|res| {
+                AccountId32::decode(&mut res.encoded())
+                    .context("Failed to decode BridgePauser address")
+                    .map(AccountId32::into)
+            })
     }
 }

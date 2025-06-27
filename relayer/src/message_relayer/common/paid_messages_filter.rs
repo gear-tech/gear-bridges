@@ -132,10 +132,10 @@ async fn run_inner(
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber};
     use gear_rpc_client::dto::Message;
+    use primitive_types::H256;
 
     #[tokio::test]
     async fn fee_payer_filter() {

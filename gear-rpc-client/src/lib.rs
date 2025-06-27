@@ -697,7 +697,8 @@ impl GearApi {
             .constants()
             .at(&addr)
             .context("Failed to get BridgeAdmin address")?;
-        AccountId32::decode(&mut res.encoded()).context("Failed to decode BridgeAdmin address")
+        AccountId32::decode(&mut res.encoded())
+            .context("Failed to decode BridgeAdmin address")
             .map(AccountId32::into)
     }
 
@@ -708,7 +709,8 @@ impl GearApi {
             .constants()
             .at(&addr)
             .context("Failed to get BridgePauser address")?;
-        AccountId32::decode(&mut res.encoded()).context("Failed to decode BridgePauser address")
+        AccountId32::decode(&mut res.encoded())
+            .context("Failed to decode BridgePauser address")
             .map(AccountId32::into)
     }
 }

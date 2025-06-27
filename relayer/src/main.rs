@@ -197,7 +197,6 @@ async fn main() {
                 }
             }
 
-
             match args.command {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(

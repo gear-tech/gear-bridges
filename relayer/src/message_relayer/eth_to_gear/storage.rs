@@ -42,6 +42,10 @@ impl BlockStorage {
         }
     }
 
+    pub fn blocks_raw(&self) -> &RwLock<BTreeMap<EthereumSlotNumber, Block>> {
+        &self.blocks
+    }
+
     pub async fn complete_transaction(&self, tx: &TxHashWithSlot) {
         let mut blocks = self.blocks.write().await;
         let Some(block) = blocks.get_mut(&tx.slot_number) else {

@@ -44,6 +44,7 @@ version = "0.3.0"
 edition = "2021"
 
 [workspace.dependencies]
+relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }

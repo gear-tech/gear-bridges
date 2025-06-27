@@ -41,3 +41,7 @@ ark-ec.workspace = true
 ark-scale.workspace = true
 ark-serialize.workspace = true
 ruzstd.workspace = true
+relayer.workspace = true
+ethereum-client.workspace = true
+primitive-types.workspace = true
+async-trait.workspace = true

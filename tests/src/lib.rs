@@ -19,6 +19,8 @@ mod historical_proxy;
 mod vft;
 #[cfg(test)]
 mod vft_manager;
+#[cfg(test)]
+mod relayer;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 

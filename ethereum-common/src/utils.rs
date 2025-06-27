@@ -53,19 +53,19 @@ pub enum LightClientHeader {
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Beacon {
     pub beacon: BlockHeader,
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BeaconBlockHeaderResponse {
     pub data: BeaconBlockHeaderData,
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BeaconBlockHeaderData {
     pub header: SignedBeaconBlockHeader,
 }

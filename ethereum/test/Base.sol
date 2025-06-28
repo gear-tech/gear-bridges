@@ -202,13 +202,13 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridge:");
 
-        // TODO: replace TransparentProxy with UUPSProxy
-        // TODO: replace deployer address with governance address (admin and pauser)
         erc20Manager = ERC20Manager(
-            Upgrades.deployTransparentProxy(
+            Upgrades.deployUUPSProxy(
                 "ERC20Manager.sol",
-                deploymentArguments.deployerAddress,
-                abi.encodeCall(ERC20Manager.initialize, (address(messageQueue), deploymentArguments.vftManager))
+                abi.encodeCall(
+                    ERC20Manager.initialize,
+                    (governanceAdmin, governancePauser, address(messageQueue), deploymentArguments.vftManager)
+                )
             )
         );
         console.log("    ERC20Manager:        ", address(erc20Manager));
@@ -222,7 +222,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridging payment:");
 
         bridgingPayment = new BridgingPayment(
-            address(erc20Manager), deploymentArguments.bridgingPaymentFee, deploymentArguments.deployerAddress
+            address(erc20Manager), deploymentArguments.bridgingPaymentFee, deploymentArguments.bridgingPaymentAdmin
         );
         console.log("    BridgingPayment:     ", address(bridgingPayment));
 

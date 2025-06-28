@@ -28,6 +28,7 @@ contract Relayer is Initializable, OwnableUpgradeable, UUPSUpgradeable, IRelayer
 
     /**
      * @dev Initializes the Relayer contract with the Verifier address.
+     *      GovernanceAdmin contract is used to upgrade the Relayer contract.
      * @param governanceAdmin The address of the GovernanceAdmin contract that will process messages.
      * @param verifier The address of the Verifier contract that will be used to verify Merkle roots.
      */

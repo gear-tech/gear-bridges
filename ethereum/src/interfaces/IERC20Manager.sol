@@ -13,7 +13,7 @@ interface IERC20Manager is IMessageQueueProcessor {
 
     event BridgingRequested(address indexed from, bytes32 indexed to, address indexed token, uint256 amount);
 
-    event BridgingAccepted(address indexed to, address indexed token, uint256 amount, bytes32 gearTokensSender);
+    event BridgingAccepted(bytes32 indexed from, address indexed to, address indexed token, uint256 amount);
 
     enum SupplyType {
         Unknown,
@@ -46,10 +46,10 @@ interface IERC20Manager is IMessageQueueProcessor {
  *      Also see `gear-programs/vft-manager/app/src/services/request_bridging/bridge_builtin_operations.rs`.
  */
 struct WithdrawMessage {
+    bytes32 sender;
     address receiver;
     address token;
     uint256 amount;
-    bytes32 gearTokensSender;
 }
 
 /**
@@ -62,6 +62,6 @@ library Packer {
      * @return packed Packed message.
      */
     function pack(WithdrawMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(message.receiver, message.token, message.amount, message.gearTokensSender);
+        return abi.encodePacked(message.sender, message.receiver, message.token, message.amount);
     }
 }

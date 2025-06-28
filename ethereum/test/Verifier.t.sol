@@ -56,7 +56,6 @@ contract VerifierTest is Test {
         for (uint256 i = 0; i < proof.length; i++) {
             proof[i] = 0xff;
         }
-
         uint256[] memory publicInputs = new uint256[](2);
 
         assertFalse(verifier.verifyProof(proof, publicInputs));

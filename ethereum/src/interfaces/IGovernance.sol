@@ -4,6 +4,29 @@ pragma solidity ^0.8.30;
 import {IMessageQueueProcessor} from "./IMessageQueueProcessor.sol";
 
 /**
+ * @dev Governance constants.
+ */
+library GovernanceConstants {
+    uint256 internal constant CHANGE_GOVERNANCE = 0x00;
+    uint256 internal constant PAUSE_PROXY = 0x01;
+    uint256 internal constant UNPAUSE_PROXY = 0x02;
+    uint256 internal constant UPGRADE_PROXY = 0x03;
+
+    uint256 internal constant DISCRIMINANT_SIZE = 1; // `uint8 discriminant`
+    uint256 internal constant NEW_GOVERNANCE_SIZE = 32; // `bytes32 newGovernance`
+    uint256 internal constant PROXY_ADDRESS_SIZE = 20; // `address proxy`
+    uint256 internal constant NEW_IMPLEMENTATION_SIZE = 20; // `address newImplementation`
+
+    uint256 internal constant OFFSET1 = 1; // DISCRIMINANT_SIZE
+    uint256 internal constant OFFSET2 = 21; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE
+    uint256 internal constant OFFSET3 = 41; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE
+
+    uint256 internal constant CHANGE_GOVERNANCE_SIZE = 33; // DISCRIMINANT_SIZE + NEW_GOVERNANCE_SIZE
+    uint256 internal constant PAUSE_UNPAUSE_PROXY_SIZE = 21; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE
+    uint256 internal constant UPGRADE_PROXY_SIZE = 41; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE
+}
+
+/**
  * @dev Interface for the Governance contract.
  */
 interface IGovernance is IMessageQueueProcessor {

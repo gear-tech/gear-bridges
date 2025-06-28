@@ -40,6 +40,8 @@ contract MessageQueue is
 
     /**
      * @dev Initializes the MessageQueue contract with the Relayer address.
+     *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
+     *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
      * @param governanceAdmin The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser The address of the GovernanceAdmin contract that will process pauser messages.
      * @param relayer The address of the Relayer contract that will store merkle roots.

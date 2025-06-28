@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IGovernance} from "./interfaces/IGovernance.sol";
+import {GovernanceConstants, IGovernance} from "./interfaces/IGovernance.sol";
 import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
 import {IPausable} from "./interfaces/IPausable.sol";
-import {IUUPSUpgradeable} from "./interfaces/IUUPSUpgradeable.sol";
 
 /**
  * @dev GovernancePauser smart contract is responsible for processing messages
@@ -12,6 +11,11 @@ import {IUUPSUpgradeable} from "./interfaces/IUUPSUpgradeable.sol";
  *      and pause/unpause proxies.
  */
 contract GovernancePauser is IMessageQueueProcessor, IGovernance {
+    uint256 internal constant DISCRIMINANT_BIT_SHIFT = 248;
+    uint256 internal constant PROXY_ADDRESS_BIT_SHIFT = 96;
+
+    uint256 internal constant OFFSET1 = 1; // DISCRIMINANT_SIZE
+
     bytes32 public governance;
     address public messageQueue;
     mapping(address proxy => bool isKnownProxy) private _proxies;
@@ -60,17 +64,17 @@ contract GovernancePauser is IMessageQueueProcessor, IGovernance {
      *      ```
      *
      *      `discriminant` can be:
-     *      - `0x00` - change governance address to `newGovernance`
+     *      - `GovernanceConstants.CHANGE_GOVERNANCE = 0x00` - change governance address to `newGovernance`
      *          ```solidity
      *          bytes32 newGovernance;
      *          ```
      *
-     *      - `0x01` - pause `proxy`
+     *      - `GovernanceConstants.PAUSE_PROXY = 0x01` - pause `proxy`
      *          ```solidity
      *          address proxy;
      *          ```
      *
-     *      - `0x02` - unpause `proxy`
+     *      - `GovernanceConstants.UNPAUSE_PROXY = 0x02` - unpause `proxy`
      *          ```solidity
      *          address proxy;
      *          ```
@@ -85,23 +89,25 @@ contract GovernancePauser is IMessageQueueProcessor, IGovernance {
 
         uint256 discriminant;
         assembly ("memory-safe") {
-            // `248` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-            discriminant := shr(248, calldataload(payload.offset))
+            // `DISCRIMINANT_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
         }
 
-        if (!(discriminant >= 0x00 && discriminant <= 0x02)) {
+        if (
+            !(discriminant >= GovernanceConstants.CHANGE_GOVERNANCE && discriminant <= GovernanceConstants.UNPAUSE_PROXY)
+        ) {
             return false;
         }
 
-        if (discriminant == 0x00) {
-            if (!(payload.length == 33)) {
+        if (discriminant == GovernanceConstants.CHANGE_GOVERNANCE) {
+            if (!(payload.length == GovernanceConstants.CHANGE_GOVERNANCE_SIZE)) {
                 return false;
             }
 
-            // we use offset 1 to skip `uint8 discriminant`
+            // we use offset `OFFSET1 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
             bytes32 newGovernance;
             assembly ("memory-safe") {
-                newGovernance := calldataload(add(payload.offset, 1))
+                newGovernance := calldataload(add(payload.offset, OFFSET1))
             }
 
             bytes32 previousGovernance = governance;
@@ -112,29 +118,29 @@ contract GovernancePauser is IMessageQueueProcessor, IGovernance {
             return true;
         }
 
-        if (!(payload.length > 20)) {
+        if (!(payload.length > GovernanceConstants.PROXY_ADDRESS_SIZE)) {
             return false;
         }
 
-        // we use offset 1 to skip `uint8 discriminant`
+        // we use offset `OFFSET1 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
         address proxy;
         assembly ("memory-safe") {
-            // `96` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-            proxy := shr(96, calldataload(add(payload.offset, 1)))
+            // `PROXY_ADDRESS_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            proxy := shr(PROXY_ADDRESS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
         }
 
         if (!(_proxies[proxy])) {
             return false;
         }
 
-        if (discriminant >= 0x01 && discriminant <= 0x02) {
-            if (!(payload.length == 21)) {
+        if (discriminant >= GovernanceConstants.PAUSE_PROXY && discriminant <= GovernanceConstants.UNPAUSE_PROXY) {
+            if (!(payload.length == GovernanceConstants.PAUSE_UNPAUSE_PROXY_SIZE)) {
                 return false;
             }
 
-            if (discriminant == 0x01) {
+            if (discriminant == GovernanceConstants.PAUSE_PROXY) {
                 IPausable(proxy).pause();
-            } else if (discriminant == 0x02) {
+            } else if (discriminant == GovernanceConstants.UNPAUSE_PROXY) {
                 IPausable(proxy).unpause();
             }
 

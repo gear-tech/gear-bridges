@@ -98,6 +98,8 @@ type Error = enum {
   AlreadyProcessed,
   /// Vft-manager is paused and cannot process the request.
   Paused,
+  /// Failed to burn tokens from the receiver in VftVara.
+  BurnFromFailed: str,
 };
 
 /// State in which message processing can be.

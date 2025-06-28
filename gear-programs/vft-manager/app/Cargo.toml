@@ -13,6 +13,7 @@ ethereum-common.workspace = true
 gstd.workspace = true
 gbuiltin-eth-bridge.workspace = true
 vft-client.workspace = true
+vft-vara-client.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "none"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }

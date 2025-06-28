@@ -274,7 +274,7 @@ impl EthApi {
                 U256::from(block_number),
                 U256::from(total_leaves),
                 U256::from(leaf_index),
-                B256::from(nonce),
+                U256::from_be_bytes(nonce),
                 B256::from(sender),
                 Address::from(receiver),
                 Bytes::from(payload),
@@ -284,7 +284,9 @@ impl EthApi {
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
-        self.contracts.is_message_processed(B256::from(nonce)).await
+        self.contracts
+            .is_message_processed(U256::from_be_bytes(nonce))
+            .await
     }
 
     pub async fn subscribe_logs(
@@ -466,10 +468,10 @@ impl Contracts {
         block_number: U256,
         total_leaves: U256,
         leaf_index: U256,
-        nonce: B256,
-        sender: B256,
-        receiver: Address,
-        data: Bytes,
+        nonce: U256,
+        source: B256,
+        destination: Address,
+        payload: Bytes,
         proof: Vec<B256>,
     ) -> Result<TxHash, Error> {
         let call = self.message_queue_instance.processMessage(
@@ -478,9 +480,9 @@ impl Contracts {
             leaf_index,
             VaraMessage {
                 nonce,
-                sender,
-                receiver,
-                data,
+                source,
+                destination,
+                payload,
             },
             proof,
         );
@@ -514,7 +516,7 @@ impl Contracts {
         Ok((root != [0; 32]).then_some(root))
     }
 
-    pub async fn is_message_processed(&self, nonce: B256) -> Result<bool, Error> {
+    pub async fn is_message_processed(&self, nonce: U256) -> Result<bool, Error> {
         let processed = self
             .message_queue_instance
             .isProcessed(nonce)

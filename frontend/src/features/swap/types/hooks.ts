@@ -16,8 +16,9 @@ type UseFTBalance = (ftAddress: HexString | undefined) => {
 };
 
 type UseFee = () => {
-  fee: BalanceValues;
+  bridgingFee: BalanceValues;
   isLoading: boolean;
+  vftManagerFee?: BalanceValues;
 };
 
 type UseFTAllowance = (address: HexString | undefined) => {

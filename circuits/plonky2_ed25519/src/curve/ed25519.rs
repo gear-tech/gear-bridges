@@ -1,9 +1,10 @@
 use plonky2_field::types::Field;
 use serde::{Deserialize, Serialize};
 
-use crate::curve::curve_types::{AffinePoint, Curve, ProjectivePoint};
-use crate::field::ed25519_base::Ed25519Base;
-use crate::field::ed25519_scalar::Ed25519Scalar;
+use crate::{
+    curve::curve_types::{AffinePoint, Curve, ProjectivePoint},
+    field::{ed25519_base::Ed25519Base, ed25519_scalar::Ed25519Scalar},
+};
 use plonky2_field::types::PrimeField;
 
 #[derive(Debug, Copy, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -77,10 +78,13 @@ mod tests {
     use num::BigUint;
     use plonky2_field::types::Field;
 
-    use crate::curve::curve_types::Curve;
-    use crate::curve::ed25519::mul_naive;
-    use crate::curve::ed25519::Ed25519;
-    use crate::field::ed25519_scalar::Ed25519Scalar;
+    use crate::{
+        curve::{
+            curve_types::Curve,
+            ed25519::{mul_naive, Ed25519},
+        },
+        field::ed25519_scalar::Ed25519Scalar,
+    };
 
     #[test]
     fn test_generator() {

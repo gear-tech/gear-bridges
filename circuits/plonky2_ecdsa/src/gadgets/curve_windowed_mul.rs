@@ -1,22 +1,30 @@
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
 use num::BigUint;
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::{Field, Sample};
-use plonky2::hash::hash_types::RichField;
-use plonky2::hash::keccak::KeccakHash;
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::config::{GenericHashOut, Hasher};
+use plonky2::{
+    field::{
+        extension::Extendable,
+        types::{Field, Sample},
+    },
+    hash::{hash_types::RichField, keccak::KeccakHash},
+    iop::target::{BoolTarget, Target},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericHashOut, Hasher},
+    },
+};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
-use crate::curve::curve_types::{Curve, CurveScalar};
-use crate::gadgets::biguint::BigUintTarget;
-use crate::gadgets::curve::{AffinePointTarget, CircuitBuilderCurve};
-use crate::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
-use crate::gadgets::split_nonnative::CircuitBuilderSplit;
+use crate::{
+    curve::curve_types::{Curve, CurveScalar},
+    gadgets::{
+        biguint::BigUintTarget,
+        curve::{AffinePointTarget, CircuitBuilderCurve},
+        nonnative::{CircuitBuilderNonNative, NonNativeTarget},
+        split_nonnative::CircuitBuilderSplit,
+    },
+};
 
 const WINDOW_SIZE: usize = 4;
 
@@ -174,12 +182,15 @@ mod tests {
     use core::ops::Neg;
 
     use anyhow::Result;
-    use plonky2::field::secp256k1_scalar::Secp256K1Scalar;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::rngs::OsRng;
-    use rand::Rng;
+    use plonky2::{
+        field::secp256k1_scalar::Secp256K1Scalar,
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{rngs::OsRng, Rng};
 
     use super::*;
     use crate::curve::secp256k1::Secp256K1;

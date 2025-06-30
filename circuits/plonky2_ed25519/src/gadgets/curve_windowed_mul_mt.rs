@@ -1,28 +1,42 @@
 use anyhow::Result;
 use log::Level;
 use num::{BigUint, One};
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::Target;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{
-    CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
+use plonky2::{
+    hash::hash_types::RichField,
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
+        config::{AlgebraicHasher, GenericConfig, Hasher},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+    util::timing::TimingTree,
 };
-use plonky2::plonk::config::{AlgebraicHasher, GenericConfig, Hasher};
-use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
-use plonky2::util::timing::TimingTree;
 use plonky2_ecdsa::gadgets::biguint::WitnessBigUint;
-use plonky2_field::extension::Extendable;
-use plonky2_field::types::{Field, PrimeField};
+use plonky2_field::{
+    extension::Extendable,
+    types::{Field, PrimeField},
+};
 use plonky2_u32::gadgets::arithmetic_u32::CircuitBuilderU32;
 
-use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
-use crate::curve::ed25519::Ed25519;
-use crate::field::ed25519_base::Ed25519Base;
-use crate::field::ed25519_scalar::Ed25519Scalar;
-use crate::gadgets::curve::{AffinePointTarget, CircuitBuilderCurve};
-use crate::gadgets::curve_windowed_mul::CircuitBuilderWindowedMul;
-use crate::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+use crate::{
+    curve::{
+        curve_types::{AffinePoint, Curve, CurveScalar},
+        ed25519::Ed25519,
+    },
+    field::{ed25519_base::Ed25519Base, ed25519_scalar::Ed25519Scalar},
+    gadgets::{
+        curve::{AffinePointTarget, CircuitBuilderCurve},
+        curve_windowed_mul::CircuitBuilderWindowedMul,
+        nonnative::{CircuitBuilderNonNative, NonNativeTarget},
+    },
+};
 
 const NUM_LIMBS: usize = 32; // 32 = 256 / 4 / 2
 
@@ -373,14 +387,20 @@ mod tests {
     use std::ops::Neg;
 
     use anyhow::Result;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::{
+        circuit_data::CircuitConfig,
+        config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
     use plonky2_field::types::{Field, Sample};
 
-    use crate::curve::curve_types::{Curve, CurveScalar};
-    use crate::curve::ed25519::Ed25519;
-    use crate::field::ed25519_scalar::Ed25519Scalar;
-    use crate::gadgets::curve_windowed_mul_mt::prove_curve25519_mul_mt;
+    use crate::{
+        curve::{
+            curve_types::{Curve, CurveScalar},
+            ed25519::Ed25519,
+        },
+        field::ed25519_scalar::Ed25519Scalar,
+        gadgets::curve_windowed_mul_mt::prove_curve25519_mul_mt,
+    };
 
     #[test]
     fn test_prove_curve25519_mul_mt() -> Result<()> {

@@ -1,8 +1,6 @@
 mod committee;
 
-use crate::services::Event;
-use crate::State;
-use crate::{crypto, utils};
+use crate::{crypto, services::Event, utils, State};
 use cell::RefCell;
 use checkpoint_light_client_io::{
     Error as SyncCommitteeUpdateError, ReplayBack, Slot, SyncCommitteeKeys,

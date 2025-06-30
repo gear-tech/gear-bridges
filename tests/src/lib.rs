@@ -1,11 +1,11 @@
 use gclient::GearApi;
 use gear_core::ids::prelude::*;
 use sails_rs::prelude::*;
-use sp_core::Pair as _;
-use sp_core::{crypto::DEV_PHRASE, sr25519::Pair};
-use sp_runtime::traits::IdentifyAccount;
-use sp_runtime::traits::Verify;
-use sp_runtime::MultiSignature;
+use sp_core::{crypto::DEV_PHRASE, sr25519::Pair, Pair as _};
+use sp_runtime::{
+    traits::{IdentifyAccount, Verify},
+    MultiSignature,
+};
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::LazyLock,

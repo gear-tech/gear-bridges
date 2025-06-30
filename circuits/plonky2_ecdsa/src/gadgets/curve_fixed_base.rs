@@ -2,18 +2,24 @@
 use alloc::vec::Vec;
 
 use num::BigUint;
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::Field;
-use plonky2::hash::hash_types::RichField;
-use plonky2::hash::keccak::KeccakHash;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::config::{GenericHashOut, Hasher};
+use plonky2::{
+    field::{extension::Extendable, types::Field},
+    hash::{hash_types::RichField, keccak::KeccakHash},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericHashOut, Hasher},
+    },
+};
 
-use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
-use crate::gadgets::curve::{AffinePointTarget, CircuitBuilderCurve};
-use crate::gadgets::curve_windowed_mul::CircuitBuilderWindowedMul;
-use crate::gadgets::nonnative::NonNativeTarget;
-use crate::gadgets::split_nonnative::CircuitBuilderSplit;
+use crate::{
+    curve::curve_types::{AffinePoint, Curve, CurveScalar},
+    gadgets::{
+        curve::{AffinePointTarget, CircuitBuilderCurve},
+        curve_windowed_mul::CircuitBuilderWindowedMul,
+        nonnative::NonNativeTarget,
+        split_nonnative::CircuitBuilderSplit,
+    },
+};
 
 /// Compute windowed fixed-base scalar multiplication, using a 4-bit window.
 pub fn fixed_base_curve_mul_circuit<C: Curve, F: RichField + Extendable<D>, const D: usize>(
@@ -69,19 +75,29 @@ pub fn fixed_base_curve_mul_circuit<C: Curve, F: RichField + Extendable<D>, cons
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::secp256k1_scalar::Secp256K1Scalar;
-    use plonky2::field::types::{PrimeField, Sample};
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        field::{
+            secp256k1_scalar::Secp256K1Scalar,
+            types::{PrimeField, Sample},
+        },
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
 
-    use crate::curve::curve_types::{Curve, CurveScalar};
-    use crate::curve::secp256k1::Secp256K1;
-    use crate::gadgets::biguint::WitnessBigUint;
-    use crate::gadgets::curve::CircuitBuilderCurve;
-    use crate::gadgets::curve_fixed_base::fixed_base_curve_mul_circuit;
-    use crate::gadgets::nonnative::CircuitBuilderNonNative;
+    use crate::{
+        curve::{
+            curve_types::{Curve, CurveScalar},
+            secp256k1::Secp256K1,
+        },
+        gadgets::{
+            biguint::WitnessBigUint, curve::CircuitBuilderCurve,
+            curve_fixed_base::fixed_base_curve_mul_circuit, nonnative::CircuitBuilderNonNative,
+        },
+    };
 
     #[test]
     fn test_fixed_base() -> Result<()> {

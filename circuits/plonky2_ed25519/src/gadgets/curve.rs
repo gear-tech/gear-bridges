@@ -1,18 +1,28 @@
 use std::marker::PhantomData;
 
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::{PartitionWitness, Witness};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    hash::hash_types::RichField,
+    iop::{
+        generator::{GeneratedValues, SimpleGenerator},
+        target::{BoolTarget, Target},
+        witness::{PartitionWitness, Witness},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_ecdsa::gadgets::biguint::GeneratedValuesBigUint;
-use plonky2_field::extension::Extendable;
-use plonky2_field::types::{Field, PrimeField, Sample};
+use plonky2_field::{
+    extension::Extendable,
+    types::{Field, PrimeField, Sample},
+};
 use plonky2_sha512::circuit::biguint_to_bits_target;
 
-use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
-use crate::curve::eddsa::point_decompress;
-use crate::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+use crate::{
+    curve::{
+        curve_types::{AffinePoint, Curve, CurveScalar},
+        eddsa::point_decompress,
+    },
+    gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget},
+};
 
 /// A Target representing an affine point on the curve `C`. We use incomplete arithmetic for efficiency,
 /// so we assume these points are not zero.
@@ -390,18 +400,24 @@ mod tests {
     use std::ops::Neg;
 
     use anyhow::Result;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
     use plonky2_field::types::{Field, Sample};
 
-    use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
-    use crate::curve::ed25519::Ed25519;
-    use crate::field::ed25519_base::Ed25519Base;
-    use crate::field::ed25519_scalar::Ed25519Scalar;
-    use crate::gadgets::curve::CircuitBuilderCurve;
-    use crate::gadgets::nonnative::CircuitBuilderNonNative;
+    use crate::{
+        curve::{
+            curve_types::{AffinePoint, Curve, CurveScalar},
+            ed25519::Ed25519,
+        },
+        field::{ed25519_base::Ed25519Base, ed25519_scalar::Ed25519Scalar},
+        gadgets::{curve::CircuitBuilderCurve, nonnative::CircuitBuilderNonNative},
+    };
 
     #[test]
     fn test_curve_point_is_valid() -> Result<()> {

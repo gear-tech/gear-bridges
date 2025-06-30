@@ -12,17 +12,17 @@ import GasSVG from './gas.svg?react';
 
 type Props = {
   feeValue: bigint | undefined;
-  decimals: number | undefined;
   isVaraNetwork: boolean;
   isLoading?: boolean;
   className?: string;
 };
 
-function FeeAndTimeFooter({ feeValue, decimals, isVaraNetwork, isLoading, className }: Props) {
+function FeeAndTimeFooter({ feeValue, isVaraNetwork, isLoading, className }: Props) {
   const varaSymbol = useVaraSymbol();
 
   const tokenId = isVaraNetwork ? TOKEN_ID.VARA : TOKEN_ID.ETH;
   const symbol = isVaraNetwork ? varaSymbol : 'ETH';
+  const decimals = isVaraNetwork ? 12 : 18;
 
   return (
     <footer className={cx(styles.footer, className)}>

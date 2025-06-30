@@ -1,21 +1,23 @@
-use alloc::string::String;
-use alloc::vec::Vec;
-use alloc::{format, vec};
+use alloc::{format, string::String, vec, vec::Vec};
 use core::marker::PhantomData;
 
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::Field;
-use plonky2::gates::gate::Gate;
-use plonky2::gates::util::StridedConstraintConsumer;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::ext_target::ExtensionTarget;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator, WitnessGeneratorRef};
-use plonky2::iop::target::Target;
-use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::plonk_common::{reduce_with_powers, reduce_with_powers_ext_circuit};
-use plonky2::plonk::vars::{EvaluationTargets, EvaluationVars, EvaluationVarsBase};
-use plonky2::util::ceil_div_usize;
+use plonky2::{
+    field::{extension::Extendable, types::Field},
+    gates::{gate::Gate, util::StridedConstraintConsumer},
+    hash::hash_types::RichField,
+    iop::{
+        ext_target::ExtensionTarget,
+        generator::{GeneratedValues, SimpleGenerator, WitnessGeneratorRef},
+        target::Target,
+        witness::{PartitionWitness, Witness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        plonk_common::{reduce_with_powers, reduce_with_powers_ext_circuit},
+        vars::{EvaluationTargets, EvaluationVars, EvaluationVarsBase},
+    },
+    util::ceil_div_usize,
+};
 
 /// A gate which can decompose a number into base B little-endian limbs.
 #[derive(Copy, Clone, Debug)]
@@ -246,14 +248,15 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 mod tests {
     use anyhow::Result;
     use itertools::unfold;
-    use plonky2::field::extension::quartic::QuarticExtension;
-    use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::field::types::Sample;
-    use plonky2::gates::gate_testing::{test_eval_fns, test_low_degree};
-    use plonky2::hash::hash_types::HashOut;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::rngs::OsRng;
-    use rand::Rng;
+    use plonky2::{
+        field::{
+            extension::quartic::QuarticExtension, goldilocks_field::GoldilocksField, types::Sample,
+        },
+        gates::gate_testing::{test_eval_fns, test_low_degree},
+        hash::hash_types::HashOut,
+        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+    };
+    use rand::{rngs::OsRng, Rng};
 
     use super::*;
 

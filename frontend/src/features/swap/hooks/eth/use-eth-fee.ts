@@ -12,12 +12,12 @@ function useEthFee() {
     functionName: 'fee',
   });
 
-  const fee = {
+  const bridgingFee = {
     value: data,
     formattedValue: !isUndefined(data) ? formatEther(data) : undefined,
   };
 
-  return { fee, isLoading };
+  return { bridgingFee, isLoading };
 }
 
 export { useEthFee };

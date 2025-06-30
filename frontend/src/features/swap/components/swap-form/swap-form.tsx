@@ -39,7 +39,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const { api } = useApi();
 
-  const { fee, ...config } = useFee();
+  const { bridgingFee, vftManagerFee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
   const allowance = useFTAllowance(token?.address);
@@ -82,7 +82,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
-    fee: fee.value,
+    bridgingFee: bridgingFee.value,
+    vftManagerFee: vftManagerFee?.value,
     allowance: allowance.data,
     accountBalance: accountBalance.data,
     onTransactionStart: openTransactionModal,
@@ -111,9 +112,15 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const isEnoughBalance = () => {
-    if (!api || isUndefined(fee.value) || !accountBalance.data) return false;
+    if (!api || isUndefined(bridgingFee.value) || !accountBalance.data) return false;
 
-    const minBalance = network.isVara ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
+    let minBalance = bridgingFee.value;
+
+    if (network.isVara) {
+      if (isUndefined(vftManagerFee?.value)) return false;
+
+      minBalance += vftManagerFee.value + api.existentialDeposit.toBigInt();
+    }
 
     return accountBalance.data > minBalance;
   };

@@ -42,8 +42,7 @@ interface IERC20Manager is IMessageQueueProcessor {
      *
      *      - `Unknown` - token is not registered.
      *
-     *      - `Ethereum` - token is located on Ethereum.
-     *         Token supply is located on Ethereum.
+     *      - `Ethereum` - token supply is located on Ethereum.
      *
      *         This means that we're working with some pre-existing `ERC20` token on Ethereum and with
      *         wrapped `VFT` token on Gear.
@@ -54,8 +53,7 @@ interface IERC20Manager is IMessageQueueProcessor {
      *         For example this type of token supply can be used to work with
      *         `USDT ERC20 token`/`wrappedUSDT VFT token` pair.
      *
-     *      - `Gear` - token is located on Gear.
-     *         Token supply is located on Gear.
+     *      - `Gear` - token supply is located on Gear.
      *
      *         This means that we're working with some pre-existing `VFT` token on Gear and with
      *         wrapped `ERC20` token on Ethereum.

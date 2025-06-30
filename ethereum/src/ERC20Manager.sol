@@ -225,6 +225,20 @@ contract ERC20Manager is
         }
     }
 
+    /**
+     * @dev Tries to parse and apply withdraw message originated from Vara Network.
+     *
+     *      Payload format:
+     *      ```solidity
+     *      address sender;
+     *      address receiver;
+     *      address token;
+     *      uint256 amount;
+     *      ```
+     *
+     * @param payload Payload of the message (message from Vara Network).
+     * @return success `true` if the message is parsed and applied, `false` otherwise.
+     */
     function _tryParseAndApplyWithdrawMessage(bytes calldata payload) private returns (bool) {
         if (!(payload.length == WITHDRAW_MESSAGE_SIZE)) {
             return false;

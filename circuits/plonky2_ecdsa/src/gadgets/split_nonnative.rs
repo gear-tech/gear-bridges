@@ -3,15 +3,15 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use itertools::Itertools;
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::Field;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::Target;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    field::{extension::Extendable, types::Field},
+    hash::hash_types::RichField,
+    iop::target::Target,
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
-use crate::gadgets::biguint::BigUintTarget;
-use crate::gadgets::nonnative::NonNativeTarget;
+use crate::gadgets::{biguint::BigUintTarget, nonnative::NonNativeTarget};
 
 pub trait CircuitBuilderSplit<F: RichField + Extendable<D>, const D: usize> {
     fn split_u32_to_4_bit_limbs(&mut self, val: U32Target) -> Vec<Target>;
@@ -98,11 +98,14 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderSplit<F, D>
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::secp256k1_scalar::Secp256K1Scalar;
-    use plonky2::field::types::Sample;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        field::{secp256k1_scalar::Secp256K1Scalar, types::Sample},
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
 
     use super::*;
     use crate::gadgets::nonnative::CircuitBuilderNonNative;

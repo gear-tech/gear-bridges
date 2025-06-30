@@ -1,12 +1,15 @@
-use num::rational::Ratio;
-use num::BigUint;
-use plonky2::field::secp256k1_base::Secp256K1Base;
-use plonky2::field::secp256k1_scalar::Secp256K1Scalar;
-use plonky2::field::types::{Field, PrimeField};
+use num::{rational::Ratio, BigUint};
+use plonky2::field::{
+    secp256k1_base::Secp256K1Base,
+    secp256k1_scalar::Secp256K1Scalar,
+    types::{Field, PrimeField},
+};
 
-use crate::curve::curve_msm::msm_parallel;
-use crate::curve::curve_types::{AffinePoint, ProjectivePoint};
-use crate::curve::secp256k1::Secp256K1;
+use crate::curve::{
+    curve_msm::msm_parallel,
+    curve_types::{AffinePoint, ProjectivePoint},
+    secp256k1::Secp256K1,
+};
 
 pub const GLV_BETA: Secp256K1Base = Secp256K1Base([
     13923278643952681454,
@@ -102,12 +105,16 @@ pub fn glv_mul(p: ProjectivePoint<Secp256K1>, k: Secp256K1Scalar) -> ProjectiveP
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::secp256k1_scalar::Secp256K1Scalar;
-    use plonky2::field::types::{Field, Sample};
+    use plonky2::field::{
+        secp256k1_scalar::Secp256K1Scalar,
+        types::{Field, Sample},
+    };
 
-    use crate::curve::curve_types::{Curve, CurveScalar};
-    use crate::curve::glv::{decompose_secp256k1_scalar, glv_mul, GLV_S};
-    use crate::curve::secp256k1::Secp256K1;
+    use crate::curve::{
+        curve_types::{Curve, CurveScalar},
+        glv::{decompose_secp256k1_scalar, glv_mul, GLV_S},
+        secp256k1::Secp256K1,
+    };
 
     #[test]
     fn test_glv_decompose() -> Result<()> {

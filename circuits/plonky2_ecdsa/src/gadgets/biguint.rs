@@ -7,16 +7,26 @@ use core::marker::PhantomData;
 use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
 
 use num::{BigUint, Integer, Zero};
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::{PrimeField, PrimeField64};
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::{PartitionWitness, Witness};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
-use plonky2_u32::gadgets::multiple_comparison::list_le_u32_circuit;
-use plonky2_u32::witness::{GeneratedValuesU32, WitnessU32};
+use plonky2::{
+    field::{
+        extension::Extendable,
+        types::{PrimeField, PrimeField64},
+    },
+    hash::hash_types::RichField,
+    iop::{
+        generator::{GeneratedValues, SimpleGenerator},
+        target::{BoolTarget, Target},
+        witness::{PartitionWitness, Witness},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
+use plonky2_u32::{
+    gadgets::{
+        arithmetic_u32::{CircuitBuilderU32, U32Target},
+        multiple_comparison::list_le_u32_circuit,
+    },
+    witness::{GeneratedValuesU32, WitnessU32},
+};
 
 #[derive(Clone, Debug)]
 pub struct BigUintTarget {
@@ -378,12 +388,15 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 mod tests {
     use anyhow::Result;
     use num::{BigUint, FromPrimitive, Integer};
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::rngs::OsRng;
-    use rand::Rng;
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{rngs::OsRng, Rng};
 
     use crate::gadgets::biguint::{CircuitBuilderBiguint, WitnessBigUint};
 

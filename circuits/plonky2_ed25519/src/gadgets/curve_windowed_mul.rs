@@ -1,20 +1,26 @@
 use std::marker::PhantomData;
 
 use num::BigUint;
-use plonky2::hash::hash_types::RichField;
-use plonky2::hash::keccak::KeccakHash;
-use plonky2::iop::target::Target;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::config::{GenericHashOut, Hasher};
+use plonky2::{
+    hash::{hash_types::RichField, keccak::KeccakHash},
+    iop::target::Target,
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericHashOut, Hasher},
+    },
+};
 use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
-use plonky2_field::extension::Extendable;
-use plonky2_field::types::Field;
+use plonky2_field::{extension::Extendable, types::Field};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
-use crate::curve::curve_types::{AffinePoint, Curve, CurveScalar};
-use crate::gadgets::curve::{AffinePointTarget, CircuitBuilderCurve};
-use crate::gadgets::nonnative::NonNativeTarget;
-use crate::gadgets::split_nonnative::CircuitBuilderSplit;
+use crate::{
+    curve::curve_types::{AffinePoint, Curve, CurveScalar},
+    gadgets::{
+        curve::{AffinePointTarget, CircuitBuilderCurve},
+        nonnative::NonNativeTarget,
+        split_nonnative::CircuitBuilderSplit,
+    },
+};
 
 const WINDOW_SIZE: usize = 4;
 
@@ -187,20 +193,29 @@ mod tests {
 
     use anyhow::Result;
     use log::Level;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use plonky2::util::timing::TimingTree;
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+        util::timing::TimingTree,
+    };
     use plonky2_field::types::{Field, Sample};
     use rand::Rng;
 
-    use crate::curve::curve_types::{Curve, CurveScalar};
-    use crate::curve::ed25519::Ed25519;
-    use crate::field::ed25519_scalar::Ed25519Scalar;
-    use crate::gadgets::curve::CircuitBuilderCurve;
-    use crate::gadgets::curve_windowed_mul::CircuitBuilderWindowedMul;
-    use crate::gadgets::nonnative::CircuitBuilderNonNative;
+    use crate::{
+        curve::{
+            curve_types::{Curve, CurveScalar},
+            ed25519::Ed25519,
+        },
+        field::ed25519_scalar::Ed25519Scalar,
+        gadgets::{
+            curve::CircuitBuilderCurve, curve_windowed_mul::CircuitBuilderWindowedMul,
+            nonnative::CircuitBuilderNonNative,
+        },
+    };
 
     #[test]
     fn test_random_access_curve_points() -> Result<()> {

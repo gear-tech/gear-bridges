@@ -1,16 +1,26 @@
 use std::marker::PhantomData;
 
 use num::{BigUint, Integer, One, Zero};
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::{PartitionWitness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_field::types::PrimeField;
-use plonky2_field::{extension::Extendable, types::Field};
-use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
-use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
-use plonky2_u32::witness::GeneratedValuesU32;
+use plonky2::{
+    hash::hash_types::RichField,
+    iop::{
+        generator::{GeneratedValues, SimpleGenerator},
+        target::{BoolTarget, Target},
+        witness::{PartitionWitness, WitnessWrite},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
+use plonky2_field::{
+    extension::Extendable,
+    types::{Field, PrimeField},
+};
+use plonky2_u32::{
+    gadgets::{
+        arithmetic_u32::{CircuitBuilderU32, U32Target},
+        range_check::range_check_u32_circuit,
+    },
+    witness::GeneratedValuesU32,
+};
 use plonky2_util::ceil_div_usize;
 
 use plonky2_ecdsa::gadgets::biguint::{
@@ -758,14 +768,17 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
     use plonky2_field::types::{Field, PrimeField, Sample};
 
-    use crate::field::ed25519_base::Ed25519Base;
-    use crate::gadgets::nonnative::CircuitBuilderNonNative;
+    use crate::{field::ed25519_base::Ed25519Base, gadgets::nonnative::CircuitBuilderNonNative};
 
     #[test]
     fn test_nonnative_add() -> Result<()> {

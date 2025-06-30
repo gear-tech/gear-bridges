@@ -1,14 +1,14 @@
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
-use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::util::ceil_div_usize;
+use plonky2::{
+    field::extension::Extendable,
+    hash::hash_types::RichField,
+    iop::target::{BoolTarget, Target},
+    plonk::circuit_builder::CircuitBuilder,
+    util::ceil_div_usize,
+};
 
-use crate::gadgets::arithmetic_u32::U32Target;
-use crate::gates::comparison::ComparisonGate;
+use crate::{gadgets::arithmetic_u32::U32Target, gates::comparison::ComparisonGate};
 
 /// Returns true if a is less than or equal to b, considered as base-`2^num_bits` limbs of a large value.
 /// This range-checks its inputs.
@@ -81,12 +81,15 @@ pub fn list_le_u32_circuit<F: RichField + Extendable<D>, const D: usize>(
 mod tests {
     use anyhow::Result;
     use num::BigUint;
-    use plonky2::field::types::Field;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::rngs::OsRng;
-    use rand::Rng;
+    use plonky2::{
+        field::types::Field,
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{rngs::OsRng, Rng};
 
     use super::*;
 

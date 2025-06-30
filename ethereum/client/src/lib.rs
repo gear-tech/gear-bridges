@@ -23,8 +23,10 @@ pub use alloy::primitives::TxHash;
 
 pub mod abi;
 use abi::{
-    BridgingPayment, IERC20Manager, IMessageQueue, IMessageQueue::IMessageQueueInstance,
-    IMessageQueue::VaraMessage, IRelayer, IRelayer::IRelayerInstance, IRelayer::MerkleRoot,
+    BridgingPayment, IERC20Manager, IMessageQueue,
+    IMessageQueue::{IMessageQueueInstance, VaraMessage},
+    IRelayer,
+    IRelayer::{IRelayerInstance, MerkleRoot},
 };
 
 pub mod error;

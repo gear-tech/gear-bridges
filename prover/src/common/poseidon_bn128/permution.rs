@@ -191,11 +191,14 @@ mod permutation_tests {
 #[cfg(test)]
 mod merkle_tree_tests {
     use anyhow::Result;
-    use plonky2::field::extension::Extendable;
-    use plonky2::hash::hash_types::RichField;
-    use plonky2::hash::merkle_proofs::verify_merkle_proof_to_cap;
-    use plonky2::hash::merkle_tree::MerkleTree;
-    use plonky2::plonk::config::GenericConfig;
+    use plonky2::{
+        field::extension::Extendable,
+        hash::{
+            hash_types::RichField, merkle_proofs::verify_merkle_proof_to_cap,
+            merkle_tree::MerkleTree,
+        },
+        plonk::config::GenericConfig,
+    };
 
     use super::super::super::PoseidonBN128GoldilocksConfig;
 

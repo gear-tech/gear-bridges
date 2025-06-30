@@ -5,8 +5,10 @@ use itertools::Itertools;
 use plonky2::field::types::{Field, PrimeField};
 use plonky2_maybe_rayon::*;
 
-use crate::curve::curve_summation::affine_multisummation_best;
-use crate::curve::curve_types::{AffinePoint, Curve, ProjectivePoint};
+use crate::curve::{
+    curve_summation::affine_multisummation_best,
+    curve_types::{AffinePoint, Curve, ProjectivePoint},
+};
 
 /// In Yao's method, we compute an affine summation for each digit. In a parallel setting, it would
 /// be easiest to assign individual summations to threads, but this would be sub-optimal because

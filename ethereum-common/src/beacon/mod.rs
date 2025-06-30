@@ -14,9 +14,7 @@ pub use common::*;
 pub use execution_payload::ExecutionPayload;
 
 pub mod electra {
-    pub use super::block::electra::Block;
-    pub use super::block_body::electra::BlockBody;
-    pub use super::common::electra::*;
+    pub use super::{block::electra::Block, block_body::electra::BlockBody, common::electra::*};
 }
 
 #[cfg(test)]

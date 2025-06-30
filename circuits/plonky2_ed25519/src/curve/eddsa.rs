@@ -4,11 +4,13 @@ use plonky2_field::types::Field;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 
-use crate::curve::curve_types::{AffinePoint, Curve};
-use crate::curve::ed25519::mul_naive;
-use crate::curve::ed25519::Ed25519;
-use crate::field::ed25519_base::Ed25519Base;
-use crate::field::ed25519_scalar::Ed25519Scalar;
+use crate::{
+    curve::{
+        curve_types::{AffinePoint, Curve},
+        ed25519::{mul_naive, Ed25519},
+    },
+    field::{ed25519_base::Ed25519Base, ed25519_scalar::Ed25519Scalar},
+};
 
 pub const SAMPLE_MSG1: &str = "test message";
 pub const SAMPLE_MSG2: &str = "plonky2";

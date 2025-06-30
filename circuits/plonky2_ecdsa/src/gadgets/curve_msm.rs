@@ -1,18 +1,24 @@
 use alloc::vec;
 
 use num::BigUint;
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::Field;
-use plonky2::hash::hash_types::RichField;
-use plonky2::hash::keccak::KeccakHash;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::config::{GenericHashOut, Hasher};
+use plonky2::{
+    field::{extension::Extendable, types::Field},
+    hash::{hash_types::RichField, keccak::KeccakHash},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        config::{GenericHashOut, Hasher},
+    },
+};
 
-use crate::curve::curve_types::{Curve, CurveScalar};
-use crate::gadgets::curve::{AffinePointTarget, CircuitBuilderCurve};
-use crate::gadgets::curve_windowed_mul::CircuitBuilderWindowedMul;
-use crate::gadgets::nonnative::NonNativeTarget;
-use crate::gadgets::split_nonnative::CircuitBuilderSplit;
+use crate::{
+    curve::curve_types::{Curve, CurveScalar},
+    gadgets::{
+        curve::{AffinePointTarget, CircuitBuilderCurve},
+        curve_windowed_mul::CircuitBuilderWindowedMul,
+        nonnative::NonNativeTarget,
+        split_nonnative::CircuitBuilderSplit,
+    },
+};
 
 /// Computes `n*p + m*q` using windowed MSM, with a 2-bit window.
 /// See Algorithm 9.23 in Handbook of Elliptic and Hyperelliptic Curve Cryptography for a
@@ -81,18 +87,26 @@ pub fn curve_msm_circuit<C: Curve, F: RichField + Extendable<D>, const D: usize>
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::secp256k1_scalar::Secp256K1Scalar;
-    use plonky2::field::types::Sample;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        field::{secp256k1_scalar::Secp256K1Scalar, types::Sample},
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
 
-    use crate::curve::curve_types::{Curve, CurveScalar};
-    use crate::curve::secp256k1::Secp256K1;
-    use crate::gadgets::curve::CircuitBuilderCurve;
-    use crate::gadgets::curve_msm::curve_msm_circuit;
-    use crate::gadgets::nonnative::CircuitBuilderNonNative;
+    use crate::{
+        curve::{
+            curve_types::{Curve, CurveScalar},
+            secp256k1::Secp256K1,
+        },
+        gadgets::{
+            curve::CircuitBuilderCurve, curve_msm::curve_msm_circuit,
+            nonnative::CircuitBuilderNonNative,
+        },
+    };
 
     #[test]
     fn test_curve_msm() -> Result<()> {

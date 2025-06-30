@@ -1,18 +1,24 @@
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
-use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
-use plonky2::iop::target::Target;
-use plonky2::iop::witness::{PartitionWitness, Witness};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    field::extension::Extendable,
+    hash::hash_types::RichField,
+    iop::{
+        generator::{GeneratedValues, SimpleGenerator},
+        target::Target,
+        witness::{PartitionWitness, Witness},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
 
-use crate::gates::add_many_u32::U32AddManyGate;
-use crate::gates::arithmetic_u32::U32ArithmeticGate;
-use crate::gates::subtraction_u32::U32SubtractionGate;
-use crate::witness::GeneratedValuesU32;
+use crate::{
+    gates::{
+        add_many_u32::U32AddManyGate, arithmetic_u32::U32ArithmeticGate,
+        subtraction_u32::U32SubtractionGate,
+    },
+    witness::GeneratedValuesU32,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct U32Target(pub Target);
@@ -281,11 +287,14 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    use rand::rngs::OsRng;
-    use rand::Rng;
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use rand::{rngs::OsRng, Rng};
 
     use super::*;
 

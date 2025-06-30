@@ -114,7 +114,10 @@ async fn test_eth_event_extractor() {
         let blocks = blocks.read().await;
 
         let block = blocks.get(&tx.slot_number);
-        assert!(block.is_some(), "Block for transaction not found in storage");
+        assert!(
+            block.is_some(),
+            "Block for transaction not found in storage"
+        );
         let block = block.unwrap();
         assert!(
             block.transactions.contains(&tx.tx_hash),

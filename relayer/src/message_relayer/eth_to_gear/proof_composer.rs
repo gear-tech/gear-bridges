@@ -24,7 +24,7 @@ use futures::executor::block_on;
 use historical_proxy_client::traits::HistoricalProxy as _;
 use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
-use sails_rs::{calls::Query, gclient::calls::GClientRemoting, ActorId};
+use sails_rs::{calls::{Action, Query}, gclient::calls::GClientRemoting, ActorId};
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
@@ -353,25 +353,26 @@ async fn build_inclusion_proof(
         .await?;
 
     let slot = beacon_block.slot;
-
+    let gas_limit = gear_api.block_gas_limit()?;
     let endpoint = historical_proxy
         .endpoint_for(slot)
         .recv(historical_proxy_id)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?
+        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{}: {:?}", slot, e))?;
 
     let checkpoint_endpoint = eth_events
         .checkpoint_light_client_address()
         .recv(endpoint)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint endpoint: {e:?}"))?;
 
     let (checkpoint_slot, checkpoint) = service_checkpoint
         .get(slot)
+        .with_gas_limit(gas_limit)
         .recv(checkpoint_endpoint)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?
+        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Checkpoint error: {:?}", e))?;
 
     let block = BlockGenericForBlockBody {

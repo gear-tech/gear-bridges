@@ -14,6 +14,7 @@ gtest.workspace = true
 eth-events-common.workspace = true
 eth-events-deneb = { workspace = true, features = ["wasm-binary"] }
 eth-events-deneb-client.workspace = true
+eth-events-electra = { workspace = true, features = ["wasm-binary"] }
 eth-events-electra-client.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
@@ -45,3 +46,7 @@ relayer.workspace = true
 ethereum-client.workspace = true
 primitive-types.workspace = true
 async-trait.workspace = true
+bridging-payment.workspace = true
+alloy-sol-types.workspace = true
+pretty_env_logger.workspace = true
+log.workspace = true

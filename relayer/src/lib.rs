@@ -1,9 +1,9 @@
-pub mod message_relayer;
-pub mod relay_merkle_roots;
 pub mod cli;
 pub mod common;
 pub mod ethereum_checkpoints;
 pub mod hex_utils;
 pub mod kill_switch;
+pub mod message_relayer;
 pub mod proof_storage;
 pub mod prover_interface;
+pub mod relay_merkle_roots;

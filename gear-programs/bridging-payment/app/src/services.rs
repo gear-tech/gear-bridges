@@ -111,4 +111,11 @@ impl BridgingPayment {
     pub fn get_state(&self) -> State {
         self.state().clone()
     }
+
+    /// Upgrades the program to the provided new address.
+    pub async fn upgrade(&mut self, new: ActorId) {
+        self.ensure_admin();
+
+        exec::exit(new);
+    }
 }

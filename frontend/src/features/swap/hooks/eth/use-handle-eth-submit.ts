@@ -1,124 +1,136 @@
-import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
-import { encodeFunctionData } from 'viem';
-import { useConfig, useWriteContract } from 'wagmi';
-import { estimateFeesPerGas, estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
+import { useConfig } from 'wagmi';
+import { estimateFeesPerGas } from 'wagmi/actions';
 
 import { definedAssert } from '@/utils';
 
-import { ERC20_MANAGER_ABI, ERC20_MANAGER_CONTRACT_ADDRESS, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS } from '../../consts';
+import { SUBMIT_STATUS } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { InsufficientAccountBalanceError } from '../../errors';
-import { FormattedValues } from '../../types';
+import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { useApprove } from './use-approve';
 import { useMint } from './use-mint';
+import { usePermitUSDC } from './use-permit-usdc';
+import { useTransfer } from './use-transfer';
 
 const TRANSFER_GAS_LIMIT_FALLBACK = 21000n * 10n;
 
-function useHandleEthSubmit(
-  fee: bigint | undefined,
-  allowance: bigint | undefined,
-  ftBalance: bigint | undefined,
-  accountBalance: bigint | undefined,
-  openTransactionModal: (amount: string, receiver: string) => void,
-) {
+type Transaction = {
+  call: () => Promise<unknown>;
+  gasLimit: bigint;
+  value?: bigint;
+};
+
+function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
   const { token } = useBridgeContext();
-  const { writeContractAsync } = useWriteContract();
+  const isUSDC = token?.symbol.toLowerCase().includes('usdc');
+
   const mint = useMint();
   const approve = useApprove();
+  const permitUSDC = usePermitUSDC();
+  const transfer = useTransfer(fee);
+
   const config = useConfig();
 
-  const getTransferGasLimit = (amount: bigint, accountAddress: HexString) => {
-    definedAssert(fee, 'Fee');
-    definedAssert(token?.address, 'Fungible token address');
-
-    const encodedData = encodeFunctionData({
-      abi: ERC20_MANAGER_ABI,
-      functionName: 'requestBridgingPayingFee',
-      args: [token.address, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
-    });
-
-    return estimateGas(config, {
-      to: ERC20_MANAGER_CONTRACT_ADDRESS,
-      data: encodedData,
-      value: fee,
-    });
-  };
-
-  const validateBalance = async (amount: bigint, accountAddress: HexString) => {
-    definedAssert(token?.address, 'Fungible token address');
-    definedAssert(fee, 'Fee');
+  const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
-    definedAssert(ftBalance, 'Fungible token balance');
-    definedAssert(accountBalance, 'Account balance');
+    definedAssert(fee, 'Fee');
+    definedAssert(token, 'Fungible token');
 
-    const valueToMint = token.isNative ? amount : 0n;
-    const isMintRequired = valueToMint > 0n;
-    const mintGasLimit = isMintRequired ? await mint.getGasLimit(valueToMint) : 0n;
+    const txs: Transaction[] = [];
+    const shouldMint = token.isNative;
+    const shouldApprove = amount > allowance;
 
-    const isApproveRequired = amount > allowance;
-    const approveGasLimit = isApproveRequired ? await approve.getGasLimit(amount) : 0n;
+    if (shouldMint) {
+      const value = amount;
+      const gasLimit = await mint.getGasLimit(value);
+
+      txs.push({
+        call: () => mint.mutateAsync({ value }),
+        gasLimit,
+        value,
+      });
+    }
 
     // if approve is not made, transfer gas estimate will fail.
     // it can be avoided by using stateOverride,
     // but it requires the knowledge of the storage slot or state diff of the allowance for each token,
     // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
-    const transferGasLimit = isApproveRequired ? undefined : await getTransferGasLimit(amount, accountAddress);
 
-    // TRANSFER_GAS_LIMIT_FALLBACK is just for balance check, during the actual transfer it will be recalculated
-    const gasLimit = mintGasLimit + approveGasLimit + (transferGasLimit || TRANSFER_GAS_LIMIT_FALLBACK);
-
-    const { maxFeePerGas } = await estimateFeesPerGas(config);
-    const weiGasLimit = gasLimit * maxFeePerGas;
-
-    const balanceToWithdraw = valueToMint + weiGasLimit + fee;
-
-    if (balanceToWithdraw > accountBalance) throw new InsufficientAccountBalanceError('ETH', balanceToWithdraw);
-
-    return { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit };
-  };
-
-  const transfer = async (amount: bigint, accountAddress: HexString, gasLimit: bigint | undefined) => {
-    definedAssert(token?.address, 'Fungible token address');
-    definedAssert(fee, 'Fee');
-
-    const hash = await writeContractAsync({
-      abi: ERC20_MANAGER_ABI,
-      address: ERC20_MANAGER_CONTRACT_ADDRESS,
-      functionName: 'requestBridgingPayingFee',
-      args: [token.address, amount, accountAddress, ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+    const bridgeTx = {
+      gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
       value: fee,
-      gas: gasLimit,
-    });
+    };
 
-    return waitForTransactionReceipt(config, { hash });
-  };
+    if (shouldApprove && isUSDC) {
+      const call = () =>
+        permitUSDC.mutateAsync(amount).then((permit) => transfer.mutateAsync({ amount, accountAddress, permit }));
 
-  const onSubmit = async ({ amount, accountAddress }: FormattedValues) => {
-    const { isMintRequired, valueToMint, isApproveRequired, mintGasLimit, approveGasLimit, transferGasLimit } =
-      await validateBalance(amount, accountAddress);
+      txs.push({ call, ...bridgeTx });
 
-    openTransactionModal(amount.toString(), accountAddress);
-
-    if (isMintRequired) {
-      await mint.mutateAsync({ value: valueToMint, gas: mintGasLimit });
-    } else {
-      mint.reset();
+      return txs;
     }
 
-    if (isApproveRequired) {
-      await approve.mutateAsync({ amount, gas: approveGasLimit });
-    } else {
-      approve.reset();
+    if (shouldApprove) {
+      const call = () => approve.mutateAsync({ amount });
+      const gasLimit = await approve.getGasLimit(amount);
+
+      txs.push({ call, gasLimit });
     }
 
-    return transfer(amount, accountAddress, transferGasLimit);
+    const call = () => transfer.mutateAsync({ amount, accountAddress });
+    txs.push({ call, ...bridgeTx });
+
+    return txs;
   };
 
-  const submit = useMutation({ mutationFn: onSubmit });
+  const getRequiredBalance = async (values: FormattedValues) => {
+    definedAssert(accountBalance, 'Account balance');
+    definedAssert(fee, 'Fee value');
 
-  return [submit, approve, undefined, mint] as const;
+    const txs = await getTransactions(values);
+    const { maxFeePerGas } = await estimateFeesPerGas(config);
+
+    const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * maxFeePerGas;
+    const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
+
+    const requiredBalance = totalValue + totalGasLimit;
+    const fees = totalGasLimit + fee;
+
+    return { requiredBalance, fees };
+  };
+
+  const requiredBalance = useMutation({ mutationFn: getRequiredBalance });
+
+  const resetState = () => {
+    mint.reset();
+    approve.reset();
+    permitUSDC.reset();
+    transfer.reset();
+  };
+
+  const onSubmit = async (values: FormattedValues) => {
+    const txs = await getTransactions(values);
+
+    resetState();
+    onTransactionStart(values);
+
+    for (const { call } of txs) await call();
+  };
+
+  const getStatus = () => {
+    if (mint.isPending || mint.error) return SUBMIT_STATUS.MINT;
+    if (approve.isPending || approve.error) return SUBMIT_STATUS.APPROVE;
+    if (permitUSDC.isPending || permitUSDC.error) return SUBMIT_STATUS.PERMIT;
+    if (transfer.isPending || transfer.error) return SUBMIT_STATUS.BRIDGE;
+
+    return SUBMIT_STATUS.SUCCESS;
+  };
+
+  const { mutateAsync, isPending, error } = useMutation({ mutationFn: onSubmit });
+  const status = getStatus();
+
+  return { onSubmit: mutateAsync, isPending: isPending || requiredBalance.isPending, error, status, requiredBalance };
 }
 
 export { useHandleEthSubmit };

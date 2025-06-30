@@ -11,10 +11,10 @@ contract DeployWrappedVaraScript is Script {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
 
-        address erc20_manager_proxy_address = vm.envAddress("ERC20_MANAGER_PROXY");
+        address erc20ManagerProxy = vm.envAddress("ERC20_MANAGER_PROXY");
 
-        WrappedVara token = new WrappedVara(erc20_manager_proxy_address, "Wrapped VARA", "WVARA");
-        console.log("Address:", address(token));
+        WrappedVara wrappedVara = new WrappedVara(erc20ManagerProxy);
+        console.log("WVARA:", address(wrappedVara));
 
         vm.stopBroadcast();
     }

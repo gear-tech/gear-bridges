@@ -4,18 +4,15 @@ pragma solidity ^0.8.30;
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {PlonkVerifier} from "./libraries/PlonkVerifier.sol";
 
+/**
+ * @dev Verifier smart contract is responsible for verifying zk-SNARK Plonk proofs.
+ *      This is done with help of PlonkVerifier smart contract.
+ */
 contract Verifier is IVerifier, PlonkVerifier {
-    /** @dev Verify a proof. Calls `verifyProof` in `PlonkVerifier` and reverts if the proof or the
-     * public inputs are malformed.
-     *
-     * @param proof Serialised plonk proof (using gnark's `MarshalSolidity`).
-     * @param public_inputs Reduced public inputs.
-     * @return success If proof is valid.
+    /**
+     * @dev See {IVerifier-verifyProof}.
      */
-    function verifyProof(
-        bytes calldata proof,
-        uint256[] calldata public_inputs
-    ) external view returns (bool) {
-        return Verify(proof, public_inputs);
+    function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
+        return Verify(proof, publicInputs);
     }
 }

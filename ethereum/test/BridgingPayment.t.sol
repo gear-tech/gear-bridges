@@ -2,10 +2,10 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {WrappedVara} from "../src/erc20/WrappedVara.sol";
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IBridgingPayment} from "../src/interfaces/IBridgingPayment.sol";
 import {BridgingPayment} from "../src/BridgingPayment.sol";
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 import {ProxyContract} from "../src/ProxyContract.sol";
 
 contract BridgingPaymentTest is Test {
@@ -23,15 +23,16 @@ contract BridgingPaymentTest is Test {
 
     BridgingPayment public bridging_payment;
     ERC20Manager public erc20_manager;
-    ERC20Mock public erc20_mock;
+    WrappedVara public wrappedVara;
 
     function setUp() public {
         vm.startPrank(DEPLOYER, DEPLOYER);
 
-        erc20_mock = new ERC20Mock("Mock");
+        wrappedVara = new WrappedVara(DEPLOYER);
+        wrappedVara.mint(DEPLOYER, type(uint256).max);
 
-        bool transferred = erc20_mock.transfer(USER, TOKEN_TRANSFER_AMOUNT);
-        assertEq(transferred, true);
+        bool transferred = wrappedVara.transfer(USER, TOKEN_TRANSFER_AMOUNT);
+        assertTrue(transferred);
 
         ERC20Manager erc20_manager_impl = new ERC20Manager(address(0), VFT_MANAGER);
         ProxyContract _erc20_manager = new ProxyContract();
@@ -52,10 +53,10 @@ contract BridgingPaymentTest is Test {
         emit IBridgingPayment.FeePaid();
 
         erc20_manager.requestBridgingPayingFee{value: FEE}(
-            address(erc20_mock), TOKEN_TRANSFER_AMOUNT, bytes32(0), address(bridging_payment)
+            address(wrappedVara), TOKEN_TRANSFER_AMOUNT, bytes32(0), address(bridging_payment)
         );
 
-        assertEq(erc20_mock.balanceOf(address(erc20_manager)), TOKEN_TRANSFER_AMOUNT);
+        assertEq(wrappedVara.balanceOf(address(erc20_manager)), TOKEN_TRANSFER_AMOUNT);
         assertEq(ADMIN.balance, FEE);
     }
 
@@ -67,12 +68,12 @@ contract BridgingPaymentTest is Test {
 
         vm.expectRevert();
         erc20_manager.requestBridgingPayingFee{value: NOT_ENOUGH_FEE}(
-            address(erc20_mock), TOKEN_TRANSFER_AMOUNT, bytes32(0), address(bridging_payment)
+            address(wrappedVara), TOKEN_TRANSFER_AMOUNT, bytes32(0), address(bridging_payment)
         );
     }
 
     function approveTransfer() public {
-        bool approved = erc20_mock.approve(address(erc20_manager), TOKEN_TRANSFER_AMOUNT);
-        assertEq(approved, true);
+        bool approved = wrappedVara.approve(address(erc20_manager), TOKEN_TRANSFER_AMOUNT);
+        assertTrue(approved);
     }
 }

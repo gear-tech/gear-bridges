@@ -35,6 +35,7 @@ members = [
     "tools/governance", 
     "tests",
     "gear-common",
+    "tools/vft-manager-tool",
 ]
 
 resolver = "2"
@@ -180,7 +181,8 @@ gsdk = "=1.8.1"
 gclient = "=1.8.1"
 gear-core = "=1.8.1"
 gbuiltin-bls381 = "=1.8.1"
-gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", tag = "v1.8.1" }
+gbuiltin-eth-bridge = "=1.8.1"
+# TODO: publish package to crates.io
 pallet-gear-eth-bridge-rpc-runtime-api = { git = "https://github.com/gear-tech/gear.git", tag = "v1.8.1", default-features = false, features = [
     "std",
 ] }

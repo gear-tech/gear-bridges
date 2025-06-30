@@ -17,13 +17,15 @@ pub struct Payload {
     pub token_id: H160,
     /// Bridged amount.
     pub amount: U256,
+    /// Account of the tokens sender.
+    pub sender: ActorId,
 }
 
 impl Payload {
     /// Pack [Payload] into a binary format that `ERC20Manager` will parse.
     pub fn pack(self) -> Vec<u8> {
-        // H160 is 20 bytes, U256 is 32 bytes
-        let mut packed = Vec::with_capacity(20 + 20 + 32);
+        // H160 is 20 bytes, U256 is 32 bytes, ActorId is 32 bytes
+        let mut packed = Vec::with_capacity(20 + 20 + 32 + 32);
 
         packed.extend_from_slice(self.receiver.as_bytes());
         packed.extend_from_slice(self.token_id.as_bytes());
@@ -31,6 +33,8 @@ impl Payload {
         let mut amount_bytes = [0u8; 32];
         self.amount.to_big_endian(&mut amount_bytes);
         packed.extend_from_slice(&amount_bytes);
+
+        packed.extend_from_slice(self.sender.as_ref());
 
         packed
     }

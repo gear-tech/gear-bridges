@@ -13,6 +13,8 @@ out/
 tmp/
 
 ethereum/broadcast
+ethereum/coverage
+ethereum/lcov.info
 ethereum/remappings.txt
 
 .env

@@ -10,23 +10,31 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
-import {CircleToken} from "../src/erc20/CircleToken.sol";
-import {TetherToken} from "../src/erc20/TetherToken.sol";
-import {WrappedEther} from "../src/erc20/WrappedEther.sol";
-import {WrappedVara} from "../src/erc20/WrappedVara.sol";
-import {IVerifier} from "../src/interfaces/IVerifier.sol";
-import {VerifierMock} from "../src/mocks/VerifierMock.sol";
-import {BridgingPayment} from "../src/BridgingPayment.sol";
-import {ERC20Manager} from "../src/ERC20Manager.sol";
-import {GovernanceAdmin} from "../src/GovernanceAdmin.sol";
-import {GovernancePauser} from "../src/GovernancePauser.sol";
-import {MessageQueue} from "../src/MessageQueue.sol";
-import {Relayer} from "../src/Relayer.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {CircleToken} from "src/erc20/CircleToken.sol";
+import {TetherToken} from "src/erc20/TetherToken.sol";
+import {WrappedEther} from "src/erc20/WrappedEther.sol";
+import {WrappedVara} from "src/erc20/WrappedVara.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {VerifierMock} from "src/mocks/VerifierMock.sol";
+import {BridgingPayment} from "src/BridgingPayment.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
+import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
+import {GovernancePauser} from "src/GovernancePauser.sol";
+import {MessageQueue} from "src/MessageQueue.sol";
+import {Relayer} from "src/Relayer.sol";
+import {Verifier} from "src/Verifier.sol";
+
+struct Overrides {
+    address circleToken;
+    address tetherToken;
+    address wrappedEther;
+}
 
 struct DeploymentArguments {
     uint256 privateKey;
     address deployerAddress;
+    Overrides overrides;
     bytes32 vftManager;
     bytes32 governanceAdmin;
     bytes32 governancePauser;
@@ -35,6 +43,7 @@ struct DeploymentArguments {
 }
 
 library BaseConstants {
+    address internal constant ZERO_ADDRESS = address(0);
     uint256 internal constant DEPLOYER_INITIAL_BALANCE = 100 ether;
     address internal constant DEPLOYER_ADDRESS = 0x1111111111111111111111111111111111111111;
     bytes32 internal constant VFT_MANAGER = 0x2222222222222222222222222222222222222222222222222222222222222222;
@@ -68,6 +77,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             DeploymentArguments({
                 privateKey: 0,
                 deployerAddress: BaseConstants.DEPLOYER_ADDRESS,
+                overrides: Overrides({
+                    circleToken: BaseConstants.ZERO_ADDRESS,
+                    tetherToken: BaseConstants.ZERO_ADDRESS,
+                    wrappedEther: BaseConstants.ZERO_ADDRESS
+                }),
                 vftManager: BaseConstants.VFT_MANAGER,
                 governanceAdmin: BaseConstants.GOVERNANCE_ADMIN,
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
@@ -85,6 +99,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             DeploymentArguments({
                 privateKey: privateKey,
                 deployerAddress: deployerAddress,
+                overrides: Overrides({
+                    circleToken: vm.envExists("CIRCLE_TOKEN") ? vm.envAddress("CIRCLE_TOKEN") : BaseConstants.ZERO_ADDRESS,
+                    tetherToken: vm.envExists("TETHER_TOKEN") ? vm.envAddress("TETHER_TOKEN") : BaseConstants.ZERO_ADDRESS,
+                    wrappedEther: vm.envExists("WRAPPED_ETHER") ? vm.envAddress("WRAPPED_ETHER") : BaseConstants.ZERO_ADDRESS
+                }),
                 vftManager: vm.envBytes32("VFT_MANAGER"),
                 governanceAdmin: vm.envBytes32("GOVERNANCE_ADMIN"),
                 governancePauser: vm.envBytes32("GOVERNANCE_PAUSER"),
@@ -122,14 +141,20 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("ERC20 tokens:");
 
-        // TODO: add ability to override token addresses (when deploying to mainnet)
-        circleToken = new CircleToken(deploymentArguments.deployerAddress);
+        if (isTest) {
+            deployTestTokens();
+        } else if (isScript) {
+            if (shouldUseOverrides()) {
+                circleToken = IERC20Metadata(deploymentArguments.overrides.circleToken);
+                tetherToken = IERC20Metadata(deploymentArguments.overrides.tetherToken);
+                wrappedEther = IERC20Metadata(deploymentArguments.overrides.wrappedEther);
+            } else {
+                deployTestTokens();
+            }
+        }
+
         console.log("    USDC:                ", address(circleToken));
-
-        tetherToken = new TetherToken(deploymentArguments.deployerAddress);
         console.log("    USDT:                ", address(tetherToken));
-
-        wrappedEther = new WrappedEther();
         console.log("    WETH:                ", address(wrappedEther));
 
         address erc20ManagerAddress = vm.computeCreateAddress(
@@ -202,12 +227,19 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridge:");
 
+        IERC20Manager.TokenWithSupplyType[] memory tokens = new IERC20Manager.TokenWithSupplyType[](4);
+
+        tokens[0] = IERC20Manager.TokenWithSupplyType(address(circleToken), IERC20Manager.SupplyType.Ethereum);
+        tokens[1] = IERC20Manager.TokenWithSupplyType(address(tetherToken), IERC20Manager.SupplyType.Ethereum);
+        tokens[2] = IERC20Manager.TokenWithSupplyType(address(wrappedEther), IERC20Manager.SupplyType.Ethereum);
+        tokens[3] = IERC20Manager.TokenWithSupplyType(address(wrappedVara), IERC20Manager.SupplyType.Gear);
+
         erc20Manager = ERC20Manager(
             Upgrades.deployUUPSProxy(
                 "ERC20Manager.sol",
                 abi.encodeCall(
                     ERC20Manager.initialize,
-                    (governanceAdmin, governancePauser, address(messageQueue), deploymentArguments.vftManager)
+                    (governanceAdmin, governancePauser, address(messageQueue), deploymentArguments.vftManager, tokens)
                 )
             )
         );
@@ -243,6 +275,18 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         } else if (isScript) {
             vm.stopBroadcast();
         }
+    }
+
+    function deployTestTokens() public {
+        circleToken = new CircleToken(deploymentArguments.deployerAddress);
+        tetherToken = new TetherToken(deploymentArguments.deployerAddress);
+        wrappedEther = new WrappedEther();
+    }
+
+    function shouldUseOverrides() public view returns (bool) {
+        return deploymentArguments.overrides.circleToken != BaseConstants.ZERO_ADDRESS
+            && deploymentArguments.overrides.tetherToken != BaseConstants.ZERO_ADDRESS
+            && deploymentArguments.overrides.wrappedEther != BaseConstants.ZERO_ADDRESS;
     }
 
     function printContractInfo(string memory contractName, address contractAddress, address expectedImplementation)

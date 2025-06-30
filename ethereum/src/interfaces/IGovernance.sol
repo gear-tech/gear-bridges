@@ -7,23 +7,65 @@ import {IMessageQueueProcessor} from "./IMessageQueueProcessor.sol";
  * @dev Governance constants.
  */
 library GovernanceConstants {
+    /**
+     * @dev Change governance message discriminant.
+     */
     uint256 internal constant CHANGE_GOVERNANCE = 0x00;
+    /**
+     * @dev Pause proxy message discriminant.
+     */
     uint256 internal constant PAUSE_PROXY = 0x01;
+    /**
+     * @dev Unpause proxy message discriminant.
+     */
     uint256 internal constant UNPAUSE_PROXY = 0x02;
+    /**
+     * @dev Upgrade proxy message discriminant.
+     */
     uint256 internal constant UPGRADE_PROXY = 0x03;
 
-    uint256 internal constant DISCRIMINANT_SIZE = 1; // `uint8 discriminant`
-    uint256 internal constant NEW_GOVERNANCE_SIZE = 32; // `bytes32 newGovernance`
-    uint256 internal constant PROXY_ADDRESS_SIZE = 20; // `address proxy`
-    uint256 internal constant NEW_IMPLEMENTATION_SIZE = 20; // `address newImplementation`
+    /**
+     * @dev `uint8 discriminant` size.
+     */
+    uint256 internal constant DISCRIMINANT_SIZE = 1;
+    /**
+     * @dev `bytes32 newGovernance` size.
+     */
+    uint256 internal constant NEW_GOVERNANCE_SIZE = 32;
+    /**
+     * @dev `address proxy` size.
+     */
+    uint256 internal constant PROXY_ADDRESS_SIZE = 20;
+    /**
+     * @dev `address newImplementation` size.
+     */
+    uint256 internal constant NEW_IMPLEMENTATION_SIZE = 20;
 
-    uint256 internal constant OFFSET1 = 1; // DISCRIMINANT_SIZE
-    uint256 internal constant OFFSET2 = 21; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE
-    uint256 internal constant OFFSET3 = 41; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE
+    /**
+     * @dev `DISCRIMINANT_SIZE` offset.
+     */
+    uint256 internal constant OFFSET1 = 1;
+    /**
+     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` offset.
+     */
+    uint256 internal constant OFFSET2 = 21;
+    /**
+     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE` offset.
+     */
+    uint256 internal constant OFFSET3 = 41;
 
-    uint256 internal constant CHANGE_GOVERNANCE_SIZE = 33; // DISCRIMINANT_SIZE + NEW_GOVERNANCE_SIZE
-    uint256 internal constant PAUSE_UNPAUSE_PROXY_SIZE = 21; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE
-    uint256 internal constant UPGRADE_PROXY_SIZE = 41; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE
+    /**
+     * @dev `DISCRIMINANT_SIZE + NEW_GOVERNANCE_SIZE` size.
+     */
+    uint256 internal constant CHANGE_GOVERNANCE_SIZE = 33;
+    /**
+     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` size.
+     */
+    uint256 internal constant PAUSE_UNPAUSE_PROXY_SIZE = 21;
+    /**
+     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE` size.
+     */
+    uint256 internal constant UPGRADE_PROXY_SIZE = 41;
 }
 
 /**
@@ -63,4 +105,77 @@ interface IGovernance is IMessageQueueProcessor {
      * @return messageQueue The message queue address.
      */
     function messageQueue() external view returns (address);
+}
+
+/**
+ * @dev Type representing payload of the message that changes governance address.
+ */
+struct ChangeGovernanceMessage {
+    bytes32 newGovernance;
+}
+
+/**
+ * @dev Type representing payload of the message that pauses proxy.
+ */
+struct PauseProxyMessage {
+    address proxy;
+}
+
+/**
+ * @dev Type representing payload of the message that unpauses proxy.
+ */
+struct UnpauseProxyMessage {
+    address proxy;
+}
+
+/**
+ * @dev Type representing payload of the message that upgrades proxy.
+ */
+struct UpgradeProxyMessage {
+    address proxy;
+    address newImplementation;
+    bytes data;
+}
+
+/**
+ * @dev Library for packing `Governance` messages into a binary format.
+ */
+library GovernancePacker {
+    /**
+     * @dev Packs `ChangeGovernanceMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(ChangeGovernanceMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(uint8(GovernanceConstants.CHANGE_GOVERNANCE), message.newGovernance);
+    }
+
+    /**
+     * @dev Packs `PauseProxyMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(PauseProxyMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(uint8(GovernanceConstants.PAUSE_PROXY), message.proxy);
+    }
+
+    /**
+     * @dev Packs `UnpauseProxyMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(UnpauseProxyMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(uint8(GovernanceConstants.UNPAUSE_PROXY), message.proxy);
+    }
+
+    /**
+     * @dev Packs `UpgradeProxyMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(UpgradeProxyMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            uint8(GovernanceConstants.UPGRADE_PROXY), message.proxy, message.newImplementation, message.data
+        );
+    }
 }

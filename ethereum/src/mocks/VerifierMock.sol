@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IVerifier} from "../interfaces/IVerifier.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
 
 /**
  * @dev Mock Verifier smart contract is responsible for verifying zk-SNARK Plonk proofs.

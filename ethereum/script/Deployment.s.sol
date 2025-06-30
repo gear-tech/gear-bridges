@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Base} from "../test/Base.sol";
+import {Base} from "test/Base.sol";
 
 contract DeploymentScript is Script, Base {
     function setUp() public {}

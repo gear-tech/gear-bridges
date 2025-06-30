@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Verifier} from "../src/Verifier.sol";
+import {Verifier} from "src/Verifier.sol";
 
 contract VerifierTest is Test {
     Verifier public verifier;

@@ -11,10 +11,19 @@ import {IPausable} from "./interfaces/IPausable.sol";
  *      and pause/unpause proxies.
  */
 contract GovernancePauser is IMessageQueueProcessor, IGovernance {
+    /**
+     * @dev `uint8 discriminant` bit shift.
+     */
     uint256 internal constant DISCRIMINANT_BIT_SHIFT = 248;
+    /**
+     * @dev `address proxy` bit shift.
+     */
     uint256 internal constant PROXY_ADDRESS_BIT_SHIFT = 96;
 
-    uint256 internal constant OFFSET1 = 1; // DISCRIMINANT_SIZE
+    /**
+     * @dev `DISCRIMINANT_SIZE` offset.
+     */
+    uint256 internal constant OFFSET1 = 1;
 
     bytes32 public governance;
     address public messageQueue;

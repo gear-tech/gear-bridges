@@ -12,12 +12,27 @@ import {IUUPSUpgradeable} from "./interfaces/IUUPSUpgradeable.sol";
  *      upgrade proxies and pause/unpause them.
  */
 contract GovernanceAdmin is IMessageQueueProcessor, IGovernance {
+    /**
+     * @dev `uint8 discriminant` bit shift.
+     */
     uint256 internal constant DISCRIMINANT_BIT_SHIFT = 248;
+    /**
+     * @dev `address proxy` bit shift.
+     */
     uint256 internal constant PROXY_ADDRESS_BIT_SHIFT = 96;
+    /**
+     * @dev `address newImplementation` bit shift.
+     */
     uint256 internal constant NEW_IMPLEMENTATION_BIT_SHIFT = 96;
 
-    uint256 internal constant OFFSET1 = 1; // DISCRIMINANT_SIZE
-    uint256 internal constant OFFSET2 = 21; // DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE
+    /**
+     * @dev `DISCRIMINANT_SIZE` offset.
+     */
+    uint256 internal constant OFFSET1 = 1;
+    /**
+     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` offset.
+     */
+    uint256 internal constant OFFSET2 = 21;
 
     bytes32 public governance;
     address public messageQueue;

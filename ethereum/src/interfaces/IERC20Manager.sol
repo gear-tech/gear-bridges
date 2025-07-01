@@ -115,6 +115,13 @@ interface IERC20Manager is IMessageQueueProcessor {
      * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
      */
     function getTokenSupplyType(address token) external view returns (SupplyType);
+
+    /**
+     * @dev Returns whether the bridging payment is known.
+     * @param bridgingPayment Bridging payment address.
+     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
+     */
+    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool);
 }
 
 /**

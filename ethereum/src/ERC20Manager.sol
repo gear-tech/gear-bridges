@@ -219,7 +219,7 @@ contract ERC20Manager is
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
-    function requestBridging(address token, uint256 amount, bytes32 to) public {
+    function requestBridging(address token, uint256 amount, bytes32 to) public whenNotPaused {
         SupplyType supplyType = _tokenSupplyType[token];
 
         if (supplyType == SupplyType.Unknown) {
@@ -236,6 +236,7 @@ contract ERC20Manager is
     function requestBridgingPayingFee(address token, uint256 amount, bytes32 to, address bridgingPayment)
         public
         payable
+        whenNotPaused
     {
         if (!_knownBridgingPayments[bridgingPayment]) {
             revert InvalidBridgingPayment();
@@ -254,7 +255,7 @@ contract ERC20Manager is
         bytes32 r,
         bytes32 s,
         address bridgingPayment
-    ) public payable {
+    ) public payable whenNotPaused {
         if (!_knownBridgingPayments[bridgingPayment]) {
             revert InvalidBridgingPayment();
         }
@@ -264,7 +265,7 @@ contract ERC20Manager is
         requestBridging(token, amount, to);
     }
 
-    function createBridgingPayment(uint256 fee) external returns (address) {
+    function createBridgingPayment(uint256 fee) external whenNotPaused returns (address) {
         BridgingPayment bridgingPayment = new BridgingPayment(address(this), fee, msg.sender);
 
         address bridgingPaymentAddress = address(bridgingPayment);
@@ -442,5 +443,14 @@ contract ERC20Manager is
      */
     function getTokenSupplyType(address token) external view returns (SupplyType) {
         return _tokenSupplyType[token];
+    }
+
+    /**
+     * @dev Returns whether the bridging payment is known.
+     * @param bridgingPayment Bridging payment address.
+     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
+     */
+    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool) {
+        return _knownBridgingPayments[bridgingPayment];
     }
 }

@@ -113,6 +113,10 @@ pub enum Event {
     ///
     /// It means that normal operation is continued after the pause.
     Unpaused,
+    /// Address of the `historical-proxy` program was changed.
+    HistoricalProxyAddressChanged { old: ActorId, new: ActorId },
+    /// Address of the `ERC20Manager` contract address on Ethereum was changed.
+    Erc20ManagerAddressChanged { old: H160, new: H160 },
 }
 
 static mut STATE: Option<State> = None;
@@ -138,7 +142,7 @@ pub struct State {
     /// Address of the `ERC20Manager` contract address on Ethereum.
     ///
     /// Can be adjusted by the [State::admin].
-    erc20_manager_address: H160,
+    erc20_manager_address: Option<H160>,
     /// Mapping between `VFT` and `ERC20` tokens.
     ///
     /// Can be adjusted by the [State::admin].
@@ -160,10 +164,6 @@ pub struct State {
 /// Config that should be provided to this service on initialization.
 #[derive(Debug, Decode, Encode, TypeInfo)]
 pub struct InitConfig {
-    /// Address of the `ERC20Manager` contract on ethereum.
-    ///
-    /// For more info see [State::erc20_manager_address].
-    pub erc20_manager_address: H160,
     /// Address of the gear-eth-bridge built-in actor.
     pub gear_bridge_builtin: ActorId,
     /// Address of the `historical-proxy` program.
@@ -203,17 +203,33 @@ pub struct Config {
 #[service(events = Event)]
 impl VftManager {
     /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
-    pub fn update_erc20_manager_address(&mut self, new_erc20_manager_address: H160) {
+    pub fn update_erc20_manager_address(&mut self, erc20_manager_address_new: H160) {
         self.ensure_admin();
 
-        self.state_mut().erc20_manager_address = new_erc20_manager_address;
+        if erc20_manager_address_new == Default::default() {
+            panic!("Invalid address of ERC20Manger");
+        }
+
+        let old = self.state_mut().erc20_manager_address.unwrap_or_default();
+        self.state_mut().erc20_manager_address = Some(erc20_manager_address_new);
+
+        let _ = self.emit_event(Event::Erc20ManagerAddressChanged {
+            old,
+            new: erc20_manager_address_new,
+        });
     }
 
     /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
     pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
 
+        let old = self.state_mut().historical_proxy_address;
         self.state_mut().historical_proxy_address = historical_proxy_address_new;
+
+        let _ = self.emit_event(Event::HistoricalProxyAddressChanged {
+            old,
+            new: historical_proxy_address_new,
+        });
     }
 
     /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
@@ -476,7 +492,7 @@ impl VftManager {
     }
 
     /// Get current [State::erc20_manager_address] address.
-    pub fn erc20_manager_address(&self) -> H160 {
+    pub fn erc20_manager_address(&self) -> Option<H160> {
         self.state().erc20_manager_address
     }
 
@@ -525,6 +541,35 @@ impl VftManager {
         match order {
             Order::Direct => collect(start, count, submit_receipt::transactions().iter()),
             Order::Reverse => collect(start, count, submit_receipt::transactions().iter().rev()),
+        }
+    }
+
+    pub async fn insert_transactions(&mut self, data: Vec<(u64, u64)>) {
+        self.ensure_admin();
+
+        if !self.state().is_paused {
+            panic!("Not paused");
+        }
+
+        let transactions = submit_receipt::transactions_mut();
+        for key in data {
+            if transactions.contains(&key) {
+                continue;
+            }
+
+            if transactions.len() >= submit_receipt::TX_HISTORY_DEPTH {
+                if transactions
+                    .first()
+                    .map(|first| &key < first)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
+                transactions.pop_first();
+            }
+
+            transactions.insert(key);
         }
     }
 
@@ -632,10 +677,10 @@ impl VftManager {
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 admin: source,
                 pause_admin: source,
-                erc20_manager_address: config.erc20_manager_address,
+                erc20_manager_address: None,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
-                is_paused: false,
+                is_paused: true,
                 vft_manager_new: None,
             });
             CONFIG = Some(config.config);

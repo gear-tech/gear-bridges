@@ -79,7 +79,6 @@ async fn setup_for_test() -> Fixture {
     // Vft Manager
     let vft_manager_code_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
     let init_config = InitConfig {
-        erc20_manager_address: ERC20_MANAGER_ADDRESS,
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         historical_proxy_address: HISTORICAL_PROXY_ID.into(),
         config: Config {
@@ -95,6 +94,18 @@ async fn setup_for_test() -> Fixture {
     let vft_manager_program_id = VftManagerFactoryC::new(remoting.clone())
         .new(init_config)
         .send_recv(vft_manager_code_id, b"salt")
+        .await
+        .unwrap();
+
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    service
+        .update_erc_20_manager_address(ERC20_MANAGER_ADDRESS)
+        .send_recv(vft_manager_program_id)
         .await
         .unwrap();
 

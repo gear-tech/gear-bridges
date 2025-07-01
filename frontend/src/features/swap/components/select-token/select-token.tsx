@@ -102,9 +102,9 @@ function SelectTokenModal({ close }: ModalProps) {
   };
 
   return (
-    <Modal heading="Select Token" maxWidth="490px" close={close}>
+    <Modal heading="Select Token to Transfer" maxWidth="490px" close={close}>
       <div className={styles.networks}>
-        <h4 className={styles.heading}>Network</h4>
+        <h4 className={styles.heading}>Select Network</h4>
 
         <div className={styles.list}>
           <button

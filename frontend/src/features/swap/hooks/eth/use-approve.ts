@@ -3,14 +3,14 @@ import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
-import { FUNGIBLE_TOKEN_ABI } from '@/consts';
+import { ERC20_ABI } from '@/consts';
 import { definedAssert } from '@/utils';
 
-import { ERC20_MANAGER_CONTRACT_ADDRESS } from '../../consts';
+import { CONTRACT_ADDRESS } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
 import { useBridgeContext } from '../../context';
 
-const abi = FUNGIBLE_TOKEN_ABI;
+const abi = ERC20_ABI;
 
 function useApprove() {
   const { token } = useBridgeContext();
@@ -23,20 +23,20 @@ function useApprove() {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
-    const args = [ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
+    const args = [CONTRACT_ADDRESS.ERC20_MANAGER, amount] as const;
     const to = address;
     const data = encodeFunctionData({ abi, functionName, args });
 
     return estimateGas(config, { to, data });
   };
 
-  const approve = async ({ amount, gas }: { amount: bigint; gas: bigint }) => {
+  const approve = async ({ amount }: { amount: bigint }) => {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
-    const args = [ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
+    const args = [CONTRACT_ADDRESS.ERC20_MANAGER, amount] as const;
 
-    const hash = await writeContractAsync({ address, abi, functionName, args, gas });
+    const hash = await writeContractAsync({ address, abi, functionName, args });
 
     return waitForTransactionReceipt(config, { hash });
   };

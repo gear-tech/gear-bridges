@@ -1,18 +1,16 @@
-import { FUNGIBLE_TOKEN_ABI, ETH_TOKEN_ABI } from './abi';
-import { VARA_NODE_ADDRESS, ETH_NODE_ADDRESS, ETH_CHAIN_ID, VFT_MANAGER_CONTRACT_ADDRESS, GTM_ID } from './env';
+import { ERC20_ABI, WRAPPED_ETH_ABI } from './abi';
+import { VARA_NODE_ADDRESS, ETH_NODE_ADDRESS, ETH_CHAIN_ID, GTM_ID } from './env';
 import { ROUTE } from './routing';
-import { VftManagerProgram, VftProgram, WrappedVaraProgram } from './sails';
+import { VftProgram, WrappedVaraProgram } from './sails';
 
 export {
-  FUNGIBLE_TOKEN_ABI,
-  ETH_TOKEN_ABI,
+  ERC20_ABI,
+  WRAPPED_ETH_ABI,
   VARA_NODE_ADDRESS,
   ETH_NODE_ADDRESS,
   ETH_CHAIN_ID,
   ROUTE,
-  VFT_MANAGER_CONTRACT_ADDRESS,
   GTM_ID,
-  VftManagerProgram,
   VftProgram,
   WrappedVaraProgram,
 };

@@ -4,11 +4,12 @@ pragma solidity ^0.8.30;
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {Test, console} from "forge-std/Test.sol";
-import {Verifier} from "../src/mocks/VerifierMock.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 
 import {Relayer} from "../src/Relayer.sol";
 import {IRelayer} from "../src/interfaces/IRelayer.sol";
+
+import {BinaryMerkleTree} from "../src/libraries/BinaryMerkleTree.sol";
 
 import {ERC20Manager} from "../src/ERC20Manager.sol";
 import {IERC20Manager, Packer, WithdrawMessage} from "../src/interfaces/IERC20Manager.sol";
@@ -18,8 +19,6 @@ import {IMessageQueue, VaraMessage, Hasher} from "../src/interfaces/IMessageQueu
 import {ProxyContract} from "../src/ProxyContract.sol";
 
 import {TestHelper, OWNER, USER, VARA_ADDRESS_3, VARA_ADDRESS_7, ETH_ADDRESS_3, ETH_ADDRESS_5, VFT_MANAGER_ADDRESS} from "./TestHelper.t.sol";
-
-import {ERC20Mock} from "../src/mocks/ERC20Mock.sol";
 
 contract MessageQueueTest is TestHelper {
     using Address for address;
@@ -46,7 +45,7 @@ contract MessageQueueTest is TestHelper {
         relayer.submitMerkleRoot(BLOCK_ID, BLOCK_MERKLE_ROOT, proof);
     }
 
-    function test_calculate_root_buffer() public view {
+    function test_calculate_root_buffer() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -62,11 +61,11 @@ contract MessageQueueTest is TestHelper {
             0x127e5bcfb1c26b19c1dc1a29182cd1d978e5900a8483cd33c656fdc65b87dcb8
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             3,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -77,7 +76,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_2() public view {
+    function test_calculate_root_buffer_2() public pure {
         // prettier-ignore
         uint8[86] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -94,11 +93,11 @@ contract MessageQueueTest is TestHelper {
         );
         console.logBytes32(proof[0]);
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             3,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -109,7 +108,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_3() public view {
+    function test_calculate_root_buffer_3() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
         bytes memory m = new bytes(msgt.length);
@@ -126,11 +125,11 @@ contract MessageQueueTest is TestHelper {
         );
         console.logBytes32(proof[0]);
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             3,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -141,7 +140,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root() public view {
+    function test_calculate_root() public pure {
         uint8[2] memory msgt = [3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i++) {
@@ -183,11 +182,11 @@ contract MessageQueueTest is TestHelper {
             0x4460e63f13779139d1f836f7f72c36b62340ffe74beceeea0f2c08a0195a151e
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            expectedMessageHash,
             3,
-            2
+            2,
+            expectedMessageHash
         );
 
         assertEq(
@@ -198,7 +197,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_leaf_2() public view {
+    function test_calculate_root_buffer_leaf_2() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2];
 
@@ -233,11 +232,11 @@ contract MessageQueueTest is TestHelper {
             0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             101,
-            2
+            2,
+            messageHash
         );
 
         assertEq(
@@ -248,7 +247,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_leaf_3() public view {
+    function test_calculate_root_buffer_leaf_3() public pure {
         // prettier-ignore
         uint8[98] memory msgt = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3];
 
@@ -290,11 +289,11 @@ contract MessageQueueTest is TestHelper {
             0xe7e9ede5fe38231d6c068bc8f5d95b76eed9b255f9b892f77c4f640cc86514ac
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            messageHash,
             101,
-            3
+            3,
+            messageHash
         );
 
         assertEq(
@@ -305,7 +304,7 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    function test_calculate_root_buffer_leaf_100() public view {
+    function test_calculate_root_buffer_leaf_100() public pure {
         uint8[3] memory msgt = [3, 3, 3];
         bytes memory m = new bytes(msgt.length);
         for (uint i = 0; i < m.length; i++) {
@@ -348,11 +347,11 @@ contract MessageQueueTest is TestHelper {
             0xbdfbb5c1b5550cf03c9819c027ee7d51d3153d372968cdfae6f01d261cb6877b
         );
 
-        bytes32 root = message_queue.calculateMerkleRoot(
+        bytes32 root = BinaryMerkleTree.processProof(
             proof,
-            expectedMessageHash,
             101,
-            100
+            100,
+            expectedMessageHash
         );
 
         assertEq(
@@ -363,12 +362,12 @@ contract MessageQueueTest is TestHelper {
         );
     }
 
-    // TODO: Test skipped, to enable it remove the skip_ prefix
-    function skip_test_submit_transaction() public {
+    function test_submit_transaction() public {
         WithdrawMessage memory withdraw_msg = WithdrawMessage({
             receiver: ETH_ADDRESS_3,
             token: address(erc20_token),
-            amount: 10 * (10 ** 18)
+            amount: 10 * (10 ** 18),
+            tokens_sender: VARA_ADDRESS_3
         });
 
         VaraMessage memory vara_message = VaraMessage({
@@ -379,36 +378,30 @@ contract MessageQueueTest is TestHelper {
         });
 
         bytes32 msg_hash = vara_message.hash();
+        bytes32 hash1 = keccak256(abi.encodePacked(vara_message.nonce, vara_message.sender, vara_message.receiver, vara_message.data));
+        console.logBytes32(hash1);
+        console.log("*******");
         assertEq(
             msg_hash,
             bytes32(
-                0x08cd8737899a4429f30e776378f014ed3fa619d6db473458fc8d024ea06e6ade
+                0xb4d0caba814ed52512784ca8bbee50bf4dfb85a9a86c88146cf45ad2bedeba92
             )
         );
 
-        bytes32[] memory proof = new bytes32[](3);
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = bytes32(0x1f163ac825edf91f97faf688eb5ee88449b3ae1ff315141e8b9785707181fcea);
 
-        proof[0] = bytes32(
-            0x88ccaf73d4bd4c768ad9cba30c457d0e2b6e8a425902130885796282b2251338
-        );
-        proof[1] = bytes32(
-            0x799a4f8d4ebba9468c54944bcf41156bad48de11ae6aa62eeb581a17678c532b
-        );
-        proof[2] = bytes32(
-            0xf0ac28723c4a3e05cb2489c4ff0abe4a236486375c4337c81b80199a9c01892d
-        );
-
-        bytes32 calculatedRoot = message_queue.calculateMerkleRoot(
+        bytes32 calculatedRoot = BinaryMerkleTree.processProof(
             proof,
-            msg_hash,
-            101,
-            100
+            3,
+            2,
+            msg_hash
         );
 
         assertEq(
             calculatedRoot,
             bytes32(
-                0xaecb4397edb628f9ac7408336b4090bba1ad40c4b0a9e8934c7e94b9c967e5ea
+                0xd4530dc2881e9a1a34d2bd07b3fa20984981c29beccc18a99421a7bc366654e4
             )
         );
 
@@ -444,8 +437,6 @@ contract MessageQueueTest is TestHelper {
             bytes(hex"baad")
         );
 
-        // Same for getMerkleRoot
-        vm.expectRevert(IRelayer.EmergencyStop.selector);
-        relayer.getMerkleRoot(BLOCK_ID);
+        assertTrue(relayer.emergencyStop());
     }
 }

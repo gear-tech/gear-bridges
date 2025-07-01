@@ -31,6 +31,11 @@ pub async fn request_bridging(
     receiver: H160,
 ) -> Result<(U256, H160), Error> {
     let state = service.state();
+
+    let Some(erc20_manager_address) = state.erc20_manager_address else {
+        panic!("Address of the ERC20Manger is not set");
+    };
+
     let msg_id = gstd::msg::id();
     let eth_token_id = service.state().token_map.get_eth_token_id(&vara_token_id)?;
     let supply_type = service.state().token_map.get_supply_type(&vara_token_id)?;
@@ -67,13 +72,14 @@ pub async fn request_bridging(
         receiver,
         token_id: eth_token_id,
         amount,
+        sender,
     };
 
     msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
 
     let bridge_builtin_reply = bridge_builtin_operations::send_message_to_bridge_builtin(
         state.gear_bridge_builtin,
-        state.erc20_manager_address,
+        erc20_manager_address,
         payload,
         config,
         msg_id,

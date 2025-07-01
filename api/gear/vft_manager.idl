@@ -1,9 +1,5 @@
 /// Config that should be provided to this service on initialization.
 type InitConfig = struct {
-  /// Address of the `ERC20Manager` contract on ethereum.
-  /// 
-  /// For more info see [State::erc20_manager_address].
-  erc20_manager_address: h160,
   /// Address of the gear-eth-bridge built-in actor.
   gear_bridge_builtin: actor_id,
   /// Address of the `historical-proxy` program.
@@ -183,6 +179,7 @@ service VftManager {
   /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Inserts the message info into the corresponding collection.
   InsertMessageInfo : (_msg_id: message_id, _status: MessageStatus, _details: TxDetails) -> null;
+  InsertTransactions : (data: vec struct { u64, u64 }) -> null;
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
   /// Pause the `vft-manager`.
@@ -222,7 +219,7 @@ service VftManager {
   /// For more info see [Config] docs.
   UpdateConfig : (config: Config) -> null;
   /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
-  UpdateErc20ManagerAddress : (new_erc20_manager_address: h160) -> null;
+  UpdateErc20ManagerAddress : (erc20_manager_address_new: h160) -> null;
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
   UpdateVfts : (vft_map: vec struct { actor_id, actor_id }) -> null;
@@ -230,7 +227,7 @@ service VftManager {
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
   /// Get current [State::erc20_manager_address] address.
-  query Erc20ManagerAddress : () -> h160;
+  query Erc20ManagerAddress : () -> opt h160;
   /// Get current [State::gear_bridge_builtin] address.
   query GearBridgeBuiltin : () -> actor_id;
   /// Get current [Config].
@@ -297,6 +294,16 @@ service VftManager {
     /// 
     /// It means that normal operation is continued after the pause.
     Unpaused;
+    /// Address of the `historical-proxy` program was changed.
+    HistoricalProxyAddressChanged: struct {
+      old: actor_id,
+      new: actor_id,
+    };
+    /// Address of the `ERC20Manager` contract address on Ethereum was changed.
+    Erc20ManagerAddressChanged: struct {
+      old: h160,
+      new: h160,
+    };
   }
 };
 

@@ -16,14 +16,14 @@ import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/
 type Documents = {
   '\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      txHash\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n      nonce\n      blockNumber\n    }\n  }\n': typeof types.TransfersQueryDocument;
   '\n  query TransfersConnectionQuery($where: TransferWhereInput) {\n    transfersConnection(orderBy: timestamp_DESC, where: $where) {\n      totalCount\n    }\n  }\n': typeof types.TransfersConnectionQueryDocument;
-  '\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isRemoved\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n': typeof types.PairsQueryDocument;
+  '\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isActive\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n': typeof types.PairsQueryDocument;
 };
 const documents: Documents = {
   '\n  query TransfersQuery($limit: Int!, $offset: Int!, $where: TransferWhereInput) {\n    transfers(limit: $limit, offset: $offset, orderBy: timestamp_DESC, where: $where) {\n      amount\n      txHash\n      destNetwork\n      destination\n      id\n      receiver\n      sender\n      source\n      sourceNetwork\n      status\n      timestamp\n      nonce\n      blockNumber\n    }\n  }\n':
     types.TransfersQueryDocument,
   '\n  query TransfersConnectionQuery($where: TransferWhereInput) {\n    transfersConnection(orderBy: timestamp_DESC, where: $where) {\n      totalCount\n    }\n  }\n':
     types.TransfersConnectionQueryDocument,
-  '\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isRemoved\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n':
+  '\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isActive\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n':
     types.PairsQueryDocument,
 };
 
@@ -57,8 +57,8 @@ export function graphql(
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(
-  source: '\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isRemoved\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n',
-): (typeof documents)['\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isRemoved\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n'];
+  source: '\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isActive\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n',
+): (typeof documents)['\n  query PairsQuery {\n    pairs {\n      ethToken\n      ethTokenDecimals\n      ethTokenName\n      ethTokenSymbol\n      id\n      isActive\n      tokenSupply\n      varaToken\n      varaTokenDecimals\n      varaTokenName\n      varaTokenSymbol\n    }\n  }\n'];
 
 export function graphql(source: string) {
   return (documents as any)[source] ?? {};

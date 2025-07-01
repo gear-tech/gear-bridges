@@ -29,19 +29,20 @@ const GAS_LIMIT = {
   APPROXIMATE_PAY_FEE: 10_000_000_000n,
 } as const;
 
-function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSubmitParameters) {
+function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransactionStart }: UseHandleSubmitParameters) {
   const { api } = useApi();
   const { token } = useBridgeContext();
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
-  const payFee = usePayFee(fee);
+  const payFee = usePayFee(bridgingFee);
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
-    definedAssert(fee, 'Fee value');
+    definedAssert(bridgingFee, 'Bridging fee value');
+    definedAssert(vftManagerFee, 'VFT Manager fee value');
     definedAssert(token, 'Fungible token');
 
     const txs: Transaction[] = [];
@@ -80,13 +81,14 @@ function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSu
       extrinsic: transaction.extrinsic,
       gasLimit: GAS_LIMIT.BRIDGE,
       estimatedFee: awaited.fee,
+      value: vftManagerFee,
     });
 
     txs.push({
       extrinsic: undefined,
       gasLimit: GAS_LIMIT.APPROXIMATE_PAY_FEE,
       estimatedFee: awaited.fee, // cuz we don't know payFees gas limit yet
-      value: fee,
+      value: bridgingFee,
     });
 
     return txs;
@@ -129,7 +131,8 @@ function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSu
 
   const getRequiredBalance = async (values: FormattedValues) => {
     definedAssert(api, 'API');
-    definedAssert(fee, 'Fee value');
+    definedAssert(bridgingFee, 'Fee value');
+    definedAssert(vftManagerFee, 'VFT Manager fee value');
 
     const txs = await getTransactions(values);
 
@@ -138,7 +141,7 @@ function useHandleVaraSubmit({ fee, allowance, onTransactionStart }: UseHandleSu
     const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
     const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
-    const fees = totalGasLimit + totalEstimatedFee + fee;
+    const fees = totalGasLimit + totalEstimatedFee + bridgingFee + vftManagerFee;
 
     return { requiredBalance, fees };
   };

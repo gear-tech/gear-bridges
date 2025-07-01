@@ -319,7 +319,6 @@ async fn test_api_provider() {
 
 #[tokio::test]
 async fn test_tx_manager() {
-    
     pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
@@ -404,9 +403,11 @@ async fn test_tx_manager() {
         })
         .unwrap();
 
-    checkpoints_tx.send(EthereumSlotNumber(
-        TRANSACTIONS.get(&TX_TO_FAIL).unwrap().checkpoint,
-    )).unwrap();
+    checkpoints_tx
+        .send(EthereumSlotNumber(
+            TRANSACTIONS.get(&TX_TO_FAIL).unwrap().checkpoint,
+        ))
+        .unwrap();
 
     while let Ok(true) = tx_manager
         .process(

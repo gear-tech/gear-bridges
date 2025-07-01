@@ -24,8 +24,7 @@ mod vft_manager;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 
-static LOCK: LazyLock<Mutex<State>> =
-    LazyLock::new(|| Mutex::new((1_000, HashMap::new())));
+static LOCK: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new((1_000, HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 

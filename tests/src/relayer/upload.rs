@@ -219,8 +219,6 @@ impl EthContracts {
             historical_proxy
         };
 
-        
-
         EthContracts {
             api,
             admin,

@@ -24,7 +24,11 @@ use futures::executor::block_on;
 use historical_proxy_client::traits::HistoricalProxy as _;
 use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
-use sails_rs::{calls::{Action, Query}, gclient::calls::GClientRemoting, ActorId};
+use sails_rs::{
+    calls::{Action, Query},
+    gclient::calls::GClientRemoting,
+    ActorId,
+};
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,

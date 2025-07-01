@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {GovernanceConstants, IGovernance} from "./interfaces/IGovernance.sol";
-import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
+import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
 import {IPausable} from "./interfaces/IPausable.sol";
 
 /**
@@ -10,7 +10,7 @@ import {IPausable} from "./interfaces/IPausable.sol";
  *      originated from Vara Network. It is used to change governance address,
  *      and pause/unpause proxies.
  */
-contract GovernancePauser is IMessageQueueProcessor, IGovernance {
+contract GovernancePauser is IMessageHandler, IGovernance {
     /**
      * @dev `uint8 discriminant` bit shift.
      */
@@ -46,11 +46,11 @@ contract GovernancePauser is IMessageQueueProcessor, IGovernance {
     }
 
     /**
-     * @dev Processes message originated from Vara Network.
+     * @dev Handles message originated from Vara Network.
      * @param source Source of the message (`ActorId` from Vara Network).
      * @param payload Payload of the message (message from Vara Network).
      */
-    function processMessage(bytes32 source, bytes calldata payload) external {
+    function handleMessage(bytes32 source, bytes calldata payload) external {
         if (msg.sender != messageQueue) {
             revert InvalidSender();
         }

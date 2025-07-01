@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IMessageQueueProcessor} from "./IMessageQueueProcessor.sol";
+import {IMessageHandler} from "./IMessageHandler.sol";
 
 /**
  * @dev Governance constants.
@@ -71,7 +71,7 @@ library GovernanceConstants {
 /**
  * @dev Interface for the Governance contract.
  */
-interface IGovernance is IMessageQueueProcessor {
+interface IGovernance is IMessageHandler {
     /**
      * @dev Error thrown when the sender is not the message queue.
      */

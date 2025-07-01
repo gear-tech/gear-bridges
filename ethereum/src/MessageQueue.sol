@@ -6,8 +6,8 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IGovernance} from "./interfaces/IGovernance.sol";
+import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
-import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
 import {IRelayer} from "./interfaces/IRelayer.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
@@ -146,7 +146,7 @@ contract MessageQueue is
 
         _processedMessages[message.nonce] = true;
 
-        IMessageQueueProcessor(message.destination).processMessage(message.source, message.payload);
+        IMessageHandler(message.destination).handleMessage(message.source, message.payload);
 
         emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);
     }

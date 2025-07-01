@@ -16,14 +16,14 @@ import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {IGovernance} from "./interfaces/IGovernance.sol";
-import {IMessageQueueProcessor} from "./interfaces/IMessageQueueProcessor.sol";
+import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
 
 contract ERC20Manager is
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
-    IMessageQueueProcessor,
+    IMessageHandler,
     IERC20Manager
 {
     using SafeERC20 for IERC20;
@@ -276,7 +276,7 @@ contract ERC20Manager is
         return bridgingPaymentAddress;
     }
 
-    function processMessage(bytes32 source, bytes calldata payload) external {
+    function handleMessage(bytes32 source, bytes calldata payload) external {
         if (msg.sender != _messageQueue) {
             revert InvalidSender();
         }

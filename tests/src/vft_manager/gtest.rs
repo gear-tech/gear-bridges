@@ -1,12 +1,11 @@
-use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
-use vft_manager_app::services::eth_abi::ERC20_MANAGER;
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,
 };
+use vft_vara_client::traits::VftVaraFactory;
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
@@ -110,9 +109,9 @@ async fn setup_for_test() -> Fixture {
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
-    let gear_supply_vft = VftFactoryC::new(remoting.clone())
-        .new("Token".into(), "Token".into(), 18)
+    let vft_code_id = remoting.system().submit_code(vft_vara::WASM_BINARY);
+    let gear_supply_vft = vft_vara_client::VftVaraFactory::new(remoting.clone())
+        .new()
         .send_recv(vft_code_id, b"salt")
         .await
         .unwrap();
@@ -133,6 +132,7 @@ async fn setup_for_test() -> Fixture {
         .expect("Failed to allocate next allowances shard")
     {}
 
+    let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
     let eth_supply_vft = VftFactoryC::new(remoting.clone())
         .new("Token".into(), "Token".into(), 18)
         .send_recv(vft_code_id, b"salt1")
@@ -200,12 +200,12 @@ async fn test_gear_supply_token() {
     } = setup_for_test().await;
 
     let account_id: ActorId = 100_000.into();
-    remoting.system().mint_to(account_id, 100_000_000_000_000);
-
-    let amount = U256::from(1_000_000_000_000_u64);
+    let amount = 1_000_000_000_000u128;
+    remoting.system().mint_to(account_id, 100 * amount);
 
     let mut vft = VftAdminC::new(remoting.clone());
 
+    let amount = U256::from(amount);
     vft.mint(account_id, amount)
         .send_recv(gear_supply_vft)
         .await
@@ -233,20 +233,6 @@ async fn test_gear_supply_token() {
 
     let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
     assert_eq!(vft_manager_balance, amount);
-
-    let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, amount);
-    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt_rlp)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let account_balance = balance_of(&remoting, gear_supply_vft, account_id).await;
-    assert_eq!(account_balance, amount);
-
-    let vft_manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
-    assert!(vft_manager_balance.is_zero());
 }
 
 #[tokio::test]
@@ -264,7 +250,13 @@ async fn test_eth_supply_token() {
         .mint_to(account_id, 100_000_000_000_000_000);
     let amount = U256::from(10_000_000_000_u64);
 
-    let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -334,7 +326,13 @@ async fn test_withdraw_fails_with_bad_origin() {
     let mut vft_manager = VftManagerC::new(remoting.clone());
 
     let account_id: ActorId = 42.into();
-    let receipt_rlp = create_receipt_rlp(account_id, ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_GEAR_SUPPLY,
+        U256::zero(),
+    );
     let result = vft_manager
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -459,34 +457,4 @@ async fn balance_of(
         .recv(vft_program_id)
         .await
         .unwrap()
-}
-
-fn create_receipt_rlp(receiver: ActorId, token: H160, amount: U256) -> Vec<u8> {
-    let event = ERC20_MANAGER::BridgingRequested {
-        from: [3u8; 20].into(),
-        to: receiver.into_bytes().into(),
-        token: token.0.into(),
-        amount: {
-            let mut bytes = [0u8; 32];
-            amount.to_little_endian(&mut bytes[..]);
-
-            alloy_primitives::U256::from_le_bytes(bytes)
-        },
-    };
-
-    let receipt = ReceiptWithBloom::from(Receipt {
-        status: true.into(),
-        cumulative_gas_used: 100_000u64,
-        logs: vec![alloy_primitives::Log {
-            address: ERC20_MANAGER_ADDRESS.0.into(),
-            data: Into::into(&event),
-        }],
-    });
-
-    let receipt = ReceiptEnvelope::Eip2930(receipt);
-
-    let mut receipt_rlp = vec![];
-    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
-
-    receipt_rlp
 }

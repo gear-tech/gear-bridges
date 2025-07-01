@@ -20,13 +20,15 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
 vft-manager = { workspace = true, features = ["wasm-binary", "mocks"] }
+vft-manager-app.workspace = true
 vft-manager-client.workspace = true
 vft = { workspace = true, features = ["wasm-binary"] }
 vft-client = { workspace = true }
+vft-vara = { workspace = true, features = ["wasm-binary"] }
+vft-vara-client.workspace = true
 serde_json = { workspace = true }
 serde = { workspace = true }
 alloy = { workspace = true }
-alloy-rlp = { workspace = true }
 checkpoint-light-client-client.workspace = true
 ethereum-common =  { workspace = true, features = ["std"] }
 hex-literal = { workspace = true }
@@ -36,8 +38,13 @@ hex.workspace = true
 checkpoint-light-client = { workspace = true, features = ["wasm-binary"] }
 checkpoint-light-client-io.workspace = true
 ethereum_beacon_client.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 ark-bls12-381 = { workspace = true, features = ["curve"] }
 ark-ec.workspace = true
 ark-scale.workspace = true
 ark-serialize.workspace = true
+parity-scale-codec.workspace = true
 ruzstd.workspace = true
+scale-info.workspace = true

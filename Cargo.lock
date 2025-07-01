@@ -14365,7 +14365,6 @@ dependencies = [
  "mock-contract",
  "pretty_env_logger",
  "primitive-types 0.12.2",
- "rand 0.8.5",
  "relayer",
  "ruzstd",
  "sails-rs",

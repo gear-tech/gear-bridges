@@ -1,17 +1,11 @@
-use futures::StreamExt;
-use gclient::{EventProcessor, GearApi};
-use gear_core::ids::{prelude::*, ProgramId};
-use sails_rs::calls::{ActionIo, RemotingAction};
-use sails_rs::events::Listener;
-use sails_rs::gclient::calls::GClientRemoting;
+use gclient::GearApi;
+use gear_core::ids::prelude::*;
 use sails_rs::prelude::*;
 use sp_core::Pair as _;
 use sp_core::{crypto::DEV_PHRASE, sr25519::Pair};
 use sp_runtime::traits::IdentifyAccount;
 use sp_runtime::traits::Verify;
 use sp_runtime::MultiSignature;
-
-use std::str::FromStr;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::LazyLock,
@@ -30,7 +24,8 @@ mod vft_manager;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 
-static LOCK: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new((rand::random(), HashMap::new())));
+static LOCK: LazyLock<Mutex<State>> =
+    LazyLock::new(|| Mutex::new((1_000, HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 
@@ -103,77 +98,5 @@ pub async fn connect_to_node(
         code_ids,
         gas_limit,
         salt: origin.to_le_bytes(),
-    }
-}
-
-/// Mock endpoint `A` for testing purposes.
-///
-/// You can use this type by constructing it with `ActorId` which is the id of the actor
-/// you want to mock. Then use `recv` and `send` methods.
-pub struct MockEndpoint {
-    pub suri: String,
-    pub actor_id: [u8; 32],
-    pub route: &'static [u8],
-}
-
-impl MockEndpoint {
-    pub fn new<A: ActionIo>(suri: String, actor_id: ActorId) -> Self {
-        Self {
-            route: A::ROUTE,
-            suri,
-            actor_id: actor_id.into_bytes(),
-        }
-    }
-
-    //// Receives a message from the actor and returns the reply.
-    ///
-    /// Returns message sender and reply.
-    pub async fn recv<P: Decode>(&self, api: &GearApi) -> gclient::Result<(ActorId, P)> {
-        let api = api.clone().with(&self.suri).unwrap();
-        let mut listener = api.subscribe().await?;
-
-        listener
-            .proc(|event| {
-                if let gclient::Event::Gear(gclient::GearEvent::UserMessageSent {
-                    message, ..
-                }) = event
-                {
-                    if message.destination.0 == self.actor_id
-                        && message.payload.0.starts_with(self.route)
-                    {
-                        let source = message.source;
-                        let reply = message.destination;
-
-                        let params_raw = &message.payload.0[self.route.len()..];
-                        let params =
-                            P::decode(&mut &params_raw[..]).expect("Failed to decode params");
-
-                        Some((ActorId::new(source.0), params))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .await
-    }
-
-    pub async fn reply_to<R: Encode>(
-        &self,
-        api: &GearApi,
-        source: ActorId,
-        reply: R,
-        gas_limit: u64,
-        value: u128,
-    ) -> gclient::Result<(MessageId, H256)> {
-        let api = api.clone().with(&self.suri).unwrap();
-        let mut bytes = Vec::with_capacity(reply.encoded_size() + self.route.len());
-
-        bytes.extend_from_slice(self.route);
-        reply.encode_to(&mut bytes);
-
-        api.send_message_bytes(source, bytes, gas_limit, value)
-            .await
     }
 }

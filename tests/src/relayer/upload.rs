@@ -4,10 +4,12 @@ use alloy::primitives::fixed_bytes;
 use eth_events_electra_client::traits::EthEventsElectraFactory;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
-use ethereum_common::Hash256;
+
+use crate::{connect_to_node, DEFAULT_BALANCE};
 use gclient::GearApi;
 use gstd::{ActorId, Encode};
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
+use primitive_types::H160;
 use relayer::message_relayer::eth_to_gear::api_provider::ApiProvider;
 use vft_client::traits::{VftAdmin, VftExtension, VftFactory};
 use vft_manager_client::{
@@ -15,10 +17,9 @@ use vft_manager_client::{
     Config, InitConfig, TokenSupply,
 };
 
-use crate::{connect_to_node, DEFAULT_BALANCE};
-
 /// Contracts required to run Eth->Gear relayer.
-pub struct EthContracts {
+#[allow(dead_code)]
+pub(crate) struct EthContracts {
     pub api: GearApi,
     pub admin: ActorId,
     pub suri: String,
@@ -84,7 +85,6 @@ impl EthContracts {
 
             let vft_manager = vft_manager_client::VftManagerFactory::new(remoting.clone())
                 .new(InitConfig {
-                    erc20_manager_address: Default::default(),
                     gear_bridge_builtin: Default::default(),
                     historical_proxy_address: Default::default(),
                     config: Config {
@@ -100,6 +100,20 @@ impl EthContracts {
                 .send_recv(connection.code_ids[2], connection.salt)
                 .await
                 .expect("Failed to deploy vft-manager");
+
+            vft_manager_client::VftManager::new(remoting.clone())
+                .unpause()
+                .send_recv(vft_manager)
+                .await
+                .expect("Failed to unpause vft-manager");
+
+            vft_manager_client::VftManager::new(remoting.clone())
+                .update_erc_20_manager_address(H160(
+                    fixed_bytes!("0xa84a9eac078195b32f914f845d7555c45c0ad936").0,
+                ))
+                .send_recv(vft_manager)
+                .await
+                .expect("Failed to update ERC20 manager address");
 
             let factory = vft_client::VftFactory::new(remoting.clone());
 
@@ -182,22 +196,30 @@ impl EthContracts {
                     .expect("Failed to deploy historical proxy");
 
             let mut service = historical_proxy_client::HistoricalProxy::new(remoting.clone());
+
+            let min_slot = super::eth_to_gear::TRANSACTIONS
+                .iter()
+                .map(|(_, tx_data)| tx_data.slot_number)
+                .min()
+                .expect("No transactions found");
+
+            println!("Add endpoint #{min_slot}");
             service
-                .add_endpoint(
-                    super::eth_to_gear::TRANSACTIONS
-                        .first_key_value()
-                        .unwrap()
-                        .1
-                        .slot_number
-                        - 100,
-                    eth_events,
-                )
+                .add_endpoint(min_slot, eth_events)
                 .send_recv(historical_proxy)
                 .await
                 .expect("Failed to add endpoint to historical proxy");
 
+            vft_manager_client::VftManager::new(remoting.clone())
+                .update_historical_proxy_address(historical_proxy)
+                .send_recv(vft_manager)
+                .await
+                .expect("Failed to set historical proxy for VFT manager");
+
             historical_proxy
         };
+
+        
 
         EthContracts {
             api,

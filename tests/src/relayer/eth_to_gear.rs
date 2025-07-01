@@ -1,25 +1,12 @@
 use alloy::primitives::{fixed_bytes, FixedBytes};
 use alloy::rpc::types::TransactionReceipt;
-
-use alloy::signers::k256::elliptic_curve::bigint::const_residue;
 use alloy_rlp::Encodable;
-use checkpoint_light_client_client::checkpoint_light_client_factory::io::Init;
-use checkpoint_light_client_client::traits::CheckpointLightClientFactory;
-use checkpoint_light_client_client::{service_checkpoint_for, CheckpointError};
-use checkpoint_light_client_io::{FixedArray, Network, Update};
-use eth_events_electra_client::traits::EthEventsElectraFactory;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
 use ethereum_common::utils::{BeaconBlockHeaderResponse, MerkleProof, ReceiptEnvelope};
 use ethereum_common::{
     beacon::electra::Block,
     utils::{self as eth_utils, BeaconBlockResponse},
 };
-
-use gclient::{EventListener, EventProcessor, GearApi, WSAddress};
-use gstd::{ActorId, Decode, Encode};
-use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
 use primitive_types::H256;
 use relayer::message_relayer::common::{EthereumSlotNumber, TxHashWithSlot};
 use relayer::message_relayer::eth_to_gear::api_provider::ApiProvider;
@@ -32,19 +19,15 @@ use relayer::message_relayer::eth_to_gear::{
     tx_manager::*,
 };
 use ruzstd::{self, StreamingDecoder};
-use sails_rs::calls::{ActionIo, Activation, Call, Query};
+use sails_rs::calls::{ActionIo, Call};
 use sails_rs::gclient::calls::GClientRemoting;
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
-use vft_client::traits::{VftAdmin, VftExtension, VftFactory};
-use vft_manager_client::traits::{VftManager, VftManagerFactory as _};
-use vft_manager_client::{Config, InitConfig, TokenSupply};
+use vft_manager_client::traits::VftManager;
 
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
-use crate::{connect_to_node, MockEndpoint, DEFAULT_BALANCE};
 
 #[derive(Deserialize, Debug)]
 pub struct Receipts {
@@ -58,8 +41,6 @@ pub struct Tx {
 
     pub slot_number: u64,
     pub checkpoint: u64,
-    pub block_root: FixedBytes<32>,
-    pub checkpoint_root: FixedBytes<32>,
 
     pub receipts: Receipts,
     pub block: BeaconBlockResponse<Block>,
@@ -84,7 +65,7 @@ impl Tx {
             .logs()
             .iter()
             .find_map(|log| {
-                let address = H160::from(log.address.0 .0);
+
                 let event = ethereum_client::abi::IERC20Manager::BridgingRequested::decode_raw_log_validate(
                     log.topics(),
                     &log.data.data,
@@ -336,27 +317,19 @@ async fn test_api_provider() {
     );
 }
 
-/*     pretty_env_logger::formatted_timed_builder()
-.filter_level(log::LevelFilter::Off)
-.format_target(false)
-.filter(Some("prover"), log::LevelFilter::Info)
-.filter(Some("relayer"), log::LevelFilter::Debug)
-.filter(Some("ethereum-client"), log::LevelFilter::Info)
-.filter(Some("metrics"), log::LevelFilter::Info)
-.format_timestamp_secs()
-.parse_default_env()
-.init(); */
-
-/* steps to run relayer:
-    1) run gear node in dev mode
-    2) upload contracts: vft-manager, historical-proxy, vft
-    3) create account with enough balance to pay fees
-    4) Mock eth transactions manually from TRANSACTIONS
-*/
-
-
 #[tokio::test]
-async fn test_compose_proof() {
+async fn test_tx_manager() {
+    
+    pretty_env_logger::formatted_timed_builder()
+        .filter_level(log::LevelFilter::Off)
+        .format_target(false)
+        .filter(Some("prover"), log::LevelFilter::Info)
+        .filter(Some("relayer"), log::LevelFilter::Debug)
+        .filter(Some("ethereum-client"), log::LevelFilter::Info)
+        .filter(Some("metrics"), log::LevelFilter::Info)
+        .format_timestamp_secs()
+        .parse_default_env()
+        .init();
     let contracts = super::upload::EthContracts::new().await;
     let (eth, beacon, api_provider) = super::upload::connections().await;
 
@@ -366,6 +339,8 @@ async fn test_compose_proof() {
         .gclient_client(&contracts.suri)
         .expect("Failed to create GClient client");
 
+    let (checkpoints_tx, checkpoints_rx) = unbounded_channel();
+
     let proof_composer = ProofComposer::new(
         conn.clone(),
         beacon.clone(),
@@ -373,61 +348,84 @@ async fn test_compose_proof() {
         H256(contracts.historical_proxy.into_bytes()),
         contracts.suri.clone(),
     );
+    let mut proof_composer_io = proof_composer.run(checkpoints_rx);
 
-    let tx_data = TRANSACTIONS.first_key_value().unwrap().1;
-
-    let (mut checkpoints_tx, checkpoints_rx) = unbounded_channel();
-
-    checkpoints_tx
-        .send(EthereumSlotNumber(tx_data.slot_number))
-        .unwrap();
-
-    let mut io = proof_composer.run(checkpoints_rx);
-
-    let tx = Transaction::new(
-        TxHashWithSlot {
-            slot_number: EthereumSlotNumber(tx_data.slot_number),
-            tx_hash: tx_data.tx_hash,
-        },
-        TxStatus::ComposeProof,
+    let message_sender = MessageSender::new(
+        contracts.vft_manager.into(),
+        <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+        contracts.historical_proxy.into(),
+        conn.clone(),
+        contracts.suri.clone(),
     );
 
-    assert!(io.compose_proof_for(tx.uuid, tx.tx));
+    let mut message_sender_io = message_sender.run();
 
-    let proof = io.recv().await.expect("Failed to receive proof");
+    let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
 
-    assert_eq!(proof.tx_uuid, tx.uuid);
-    let event = tx_data.event();
-   
-    assert_eq!(proof.payload.proof, event.proof);
-    assert_eq!(proof.payload.transaction_index, event.transaction_index);
-    assert_eq!(proof.payload.receipt_rlp, event.receipt_rlp);
-    if proof.payload.proof_block.headers.len() != event.proof_block.headers.len() {
+    let (events_tx, mut events_rx) = unbounded_channel();
 
-        let mut f1 = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("proof_block_headers.json")
-            .expect("Failed to open file");
-        serde_json::to_writer_pretty(&mut f1, &proof.payload.proof_block.headers)
-            .expect("Failed to write proof block headers to file");
+    for (_, tx_data) in TRANSACTIONS.iter().filter(|(hash, _)| **hash != TX_TO_FAIL) {
+        let tx_event = TxHashWithSlot {
+            tx_hash: tx_data.tx_hash,
+            slot_number: EthereumSlotNumber(tx_data.slot_number),
+        };
 
-        let mut f2 = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("event_proof_block_headers.json")
-            .expect("Failed to open file");
-        serde_json::to_writer_pretty(&mut f2, &event.proof_block.headers)
-            .expect("Failed to write event proof block headers to file");
-
-        panic!(
-            "Proof block headers length mismatch: expected {}, got {}",
-            proof.payload.proof_block.headers.len(),
-            event.proof_block.headers.len()
-        );
+        events_tx.send(tx_event).unwrap();
+        checkpoints_tx
+            .send(EthereumSlotNumber(tx_data.checkpoint))
+            .unwrap();
     }
-    assert_eq!(proof.payload.proof_block, event.proof_block);
-    
+
+    while let Ok(true) = tx_manager
+        .process(
+            &mut events_rx,
+            &mut proof_composer_io,
+            &mut message_sender_io,
+        )
+        .await
+    {
+        if tx_manager.completed.read().await.len() == TRANSACTIONS.len() - 1 {
+            break;
+        }
+    }
+
+    let remoting = GClientRemoting::new(client.clone());
+
+    vft_manager_client::VftManager::new(remoting)
+        .pause()
+        .send_recv(contracts.vft_manager.into())
+        .await
+        .expect("Failed to pause vft-manager");
+
+    events_tx
+        .send(TxHashWithSlot {
+            tx_hash: TX_TO_FAIL,
+            slot_number: EthereumSlotNumber(TRANSACTIONS.get(&TX_TO_FAIL).unwrap().slot_number),
+        })
+        .unwrap();
+
+    checkpoints_tx.send(EthereumSlotNumber(
+        TRANSACTIONS.get(&TX_TO_FAIL).unwrap().checkpoint,
+    )).unwrap();
+
+    while let Ok(true) = tx_manager
+        .process(
+            &mut events_rx,
+            &mut proof_composer_io,
+            &mut message_sender_io,
+        )
+        .await
+    {
+        if tx_manager.failed.read().await.len() == 1 {
+            break;
+        }
+    }
+
+    let failed = tx_manager.failed.read().await;
+    let msg = failed.first_key_value().unwrap().1;
+
+    assert!(msg.contains("Paused"));
+
+    drop(events_tx);
+    // now let's upgrade vft-manager and then check that tx manager fails the transaction
 }

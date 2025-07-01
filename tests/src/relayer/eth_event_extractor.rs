@@ -95,7 +95,7 @@ async fn test_eth_event_extractor() {
 
     let mut receiver = extractor.run(blocks_rx).await;
 
-    for i in 0..TRANSACTIONS.len() {
+    for _ in 0..TRANSACTIONS.len() {
         let tx = receiver
             .recv()
             .await

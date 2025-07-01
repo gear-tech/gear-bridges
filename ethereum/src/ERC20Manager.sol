@@ -407,12 +407,12 @@ contract ERC20Manager is
             }
 
             uint8 tokenNameLength = uint8(tokenName[0]);
-            if (!(tokenNameLength >= 1 && tokenNameLength <= 32)) {
+            if (!(tokenNameLength >= 1 && tokenNameLength <= 31)) {
                 return false;
             }
 
             uint8 tokenSymbolLength = uint8(tokenSymbol[0]);
-            if (!(tokenSymbolLength >= 1 && tokenSymbolLength <= 32)) {
+            if (!(tokenSymbolLength >= 1 && tokenSymbolLength <= 31)) {
                 return false;
             }
 

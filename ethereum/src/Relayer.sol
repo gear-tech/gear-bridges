@@ -70,7 +70,7 @@ contract Relayer is Initializable, OwnableUpgradeable, UUPSUpgradeable, IRelayer
         publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)
             | ((blockNumber & uint256(type(uint32).max)) << 96);
 
-        if (!_verifier.verifyProof(proof, publicInputs)) {
+        if (!_verifier.safeVerifyProof(proof, publicInputs)) {
             revert InvalidPlonkProof();
         }
 

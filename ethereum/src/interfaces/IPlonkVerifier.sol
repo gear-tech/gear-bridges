@@ -12,5 +12,5 @@ interface IPlonkVerifier {
      * @return success `true` if the proof passes, `false` otherwise.
      * @dev Reverts if the proof or the public inputs are malformed.
      */
-    function Verify(bytes calldata proof, uint256[] calldata public_inputs) external view returns (bool success);
+    function verifyProof(bytes calldata proof, uint256[] calldata public_inputs) external view returns (bool success);
 }

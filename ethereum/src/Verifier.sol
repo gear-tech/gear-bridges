@@ -9,12 +9,12 @@ import {PlonkVerifier} from "./libraries/PlonkVerifier.sol";
  * @dev Verifier smart contract is responsible for verifying zk-SNARK Plonk proofs.
  *      This is done with help of PlonkVerifier smart contract.
  */
-contract Verifier is IVerifier, PlonkVerifier {
+contract Verifier is IVerifier, IPlonkVerifier, PlonkVerifier {
     /**
-     * @dev See {IVerifier-verifyProof}.
+     * @dev See {IVerifier-safeVerifyProof}.
      */
-    function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
-        try IPlonkVerifier(address(this)).Verify(proof, publicInputs) returns (bool success) {
+    function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
+        try IPlonkVerifier(address(this)).verifyProof(proof, publicInputs) returns (bool success) {
             return success;
         } catch {
             return false;

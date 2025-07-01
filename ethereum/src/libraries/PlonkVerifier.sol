@@ -18,7 +18,9 @@
 
 pragma solidity ^0.8.19;
 
-contract PlonkVerifier {
+import {IPlonkVerifier} from "src/interfaces/IPlonkVerifier.sol";
+
+contract PlonkVerifier is IPlonkVerifier {
     uint256 private constant R_MOD =
         21888242871839275222246405745257275088548364400416034343698204186575808495617;
     uint256 private constant P_MOD =
@@ -204,7 +206,7 @@ contract PlonkVerifier {
     /// @param proof serialised plonk proof (using gnark's MarshalSolidity)
     /// @param public_inputs (must be reduced)
     /// @return success true if the proof passes false otherwise
-    function Verify(
+    function verifyProof(
         bytes calldata proof,
         uint256[] calldata public_inputs
     ) public view returns (bool success) {

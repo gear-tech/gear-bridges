@@ -9,9 +9,9 @@ import {IVerifier} from "src/interfaces/IVerifier.sol";
  */
 contract VerifierMock is IVerifier {
     /**
-     * @dev See {IVerifier-verifyProof}.
+     * @dev See {IVerifier-safeVerifyProof}.
      */
-    function verifyProof(bytes calldata, uint256[] calldata) external pure returns (bool) {
+    function safeVerifyProof(bytes calldata, uint256[] calldata) external pure returns (bool) {
         return true;
     }
 }

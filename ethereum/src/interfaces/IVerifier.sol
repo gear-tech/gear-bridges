@@ -23,6 +23,11 @@ interface IVerifier {
      *        assert(publicInputs[1] == 0x0000000000000000bbbbbbbbbbbbbbbbcccccccc000000000000000000000000);
      *        ```
      * @return success `true` if proof is valid, `false` otherwise.
+     * @dev Actually, it is a wrapper around `IPlonkVerifier.verifyProof` function.
+     *      It is used to avoid reverts in case of invalid proof.
      */
-    function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool success);
+    function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs)
+        external
+        view
+        returns (bool success);
 }

@@ -49,6 +49,10 @@ jobs:
           # version from ethereum/lib/openzeppelin-foundry-upgrades/src/internal/Versions.sol
           npx @openzeppelin/upgrades-core@^1.37.0
 
+      - name: Check ethereum smart-contracts formatting
+        run: forge fmt --check
+        working-directory: ./ethereum
+
       - name: Build ethereum smart-contracts
         run: forge build --force
         working-directory: ./ethereum
@@ -133,6 +137,10 @@ jobs:
           # version from ethereum/lib/openzeppelin-foundry-upgrades/src/internal/Versions.sol
           npx @openzeppelin/upgrades-core@^1.37.0
 
+      - name: Check ethereum smart-contracts formatting
+        run: forge fmt --check
+        working-directory: ./ethereum
+
       - name: Build ethereum smart-contracts
         run: forge build --force
         working-directory: ./ethereum
@@ -176,6 +184,10 @@ jobs:
           npm cache clean --force
           # version from ethereum/lib/openzeppelin-foundry-upgrades/src/internal/Versions.sol
           npx @openzeppelin/upgrades-core@^1.37.0
+
+      - name: Check ethereum smart-contracts formatting
+        run: forge fmt --check
+        working-directory: ./ethereum
 
       - name: Build ethereum smart-contracts
         run: forge build --force

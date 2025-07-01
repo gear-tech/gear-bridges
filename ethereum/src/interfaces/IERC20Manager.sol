@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
+import {IBridgingPayment} from "./IBridgingPayment.sol";
 import {IMessageQueueProcessor} from "./IMessageQueueProcessor.sol";
 
 /**
@@ -28,6 +29,11 @@ interface IERC20Manager is IMessageQueueProcessor {
     error InvalidSupplyType();
 
     /**
+     * @dev Error thrown when the bridging payment is invalid (not created by `ERC20Manager`).
+     */
+    error InvalidBridgingPayment();
+
+    /**
      * @dev Event emitted when bridging request is made.
      */
     event BridgingRequested(address indexed from, bytes32 indexed to, address indexed token, uint256 amount);
@@ -36,6 +42,11 @@ interface IERC20Manager is IMessageQueueProcessor {
      * @dev Event emitted when bridging request is accepted.
      */
     event BridgingAccepted(bytes32 indexed from, address indexed to, address indexed token, uint256 amount);
+
+    /**
+     * @dev Event emitted when bridging payment is created.
+     */
+    event BridgingPaymentCreated(address indexed bridgingPayment);
 
     /**
      * @dev Enum representing supply type of token.
@@ -94,6 +105,8 @@ interface IERC20Manager is IMessageQueueProcessor {
         bytes32 s,
         address bridgingPayment
     ) external payable;
+
+    function createBridgingPayment(uint256 fee) external returns (address);
 
     /**
      * @dev Returns supply type of token.

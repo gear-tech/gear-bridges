@@ -38,7 +38,6 @@ struct DeploymentArguments {
     bytes32 vftManager;
     bytes32 governanceAdmin;
     bytes32 governancePauser;
-    address bridgingPaymentAdmin;
     uint256 bridgingPaymentFee;
 }
 
@@ -49,7 +48,6 @@ library BaseConstants {
     bytes32 internal constant VFT_MANAGER = 0x2222222222222222222222222222222222222222222222222222222222222222;
     bytes32 internal constant GOVERNANCE_ADMIN = 0x3333333333333333333333333333333333333333333333333333333333333333;
     bytes32 internal constant GOVERNANCE_PAUSER = 0x4444444444444444444444444444444444444444444444444444444444444444;
-    address internal constant BRIDGING_PAYMENT_ADMIN = 0x5555555555555555555555555555555555555555;
     uint256 internal constant BRIDGING_PAYMENT_FEE = 1 wei;
 }
 
@@ -85,7 +83,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 vftManager: BaseConstants.VFT_MANAGER,
                 governanceAdmin: BaseConstants.GOVERNANCE_ADMIN,
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
-                bridgingPaymentAdmin: BaseConstants.BRIDGING_PAYMENT_ADMIN,
                 bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
             })
         );
@@ -107,7 +104,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 vftManager: vm.envBytes32("VFT_MANAGER"),
                 governanceAdmin: vm.envBytes32("GOVERNANCE_ADMIN"),
                 governancePauser: vm.envBytes32("GOVERNANCE_PAUSER"),
-                bridgingPaymentAdmin: vm.envAddress("BRIDGING_PAYMENT_ADMIN"),
                 bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE")
             })
         );
@@ -125,7 +121,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    vftManager:          ", vm.toString(deploymentArguments.vftManager));
         console.log("    governanceAdmin:     ", vm.toString(deploymentArguments.governanceAdmin));
         console.log("    governancePauser:    ", vm.toString(deploymentArguments.governancePauser));
-        console.log("    bridgingPaymentAdmin:", deploymentArguments.bridgingPaymentAdmin);
         console.log("    bridgingPaymentFee:  ", deploymentArguments.bridgingPaymentFee, "wei");
 
         if (isTest) {
@@ -253,9 +248,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridging payment:");
 
-        bridgingPayment = new BridgingPayment(
-            address(erc20Manager), deploymentArguments.bridgingPaymentFee, deploymentArguments.bridgingPaymentAdmin
-        );
+        bridgingPayment = BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
         console.log("    BridgingPayment:     ", address(bridgingPayment));
 
         if (isScript) {

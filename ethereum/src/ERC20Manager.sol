@@ -10,6 +10,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC20GearSupply} from "./erc20/managed/ERC20GearSupply.sol";
 import {LibString} from "./libraries/LibString.sol";
+import {BridgingPayment} from "./BridgingPayment.sol";
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
@@ -147,6 +148,7 @@ contract ERC20Manager is
     address private _messageQueue;
     bytes32 private _vftManager;
     mapping(address token => SupplyType supplyType) private _tokenSupplyType;
+    mapping(address bridgingPayment => bool isKnown) private _knownBridgingPayments;
 
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
@@ -217,15 +219,6 @@ contract ERC20Manager is
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
-    /**
-     * @dev Request token bridging. When the bridging is requested tokens are burned/locked (based on the type of supply)
-     * from account that've sent transaction and `BridgingRequested` event is emitted that later can be verified
-     * on other side of bridge.
-     *
-     * @param token token address to transfer over bridge
-     * @param amount quantity of tokens to transfer over bridge
-     * @param to destination of transfer on gear
-     */
     function requestBridging(address token, uint256 amount, bytes32 to) public {
         SupplyType supplyType = _tokenSupplyType[token];
 
@@ -244,6 +237,10 @@ contract ERC20Manager is
         public
         payable
     {
+        if (!_knownBridgingPayments[bridgingPayment]) {
+            revert InvalidBridgingPayment();
+        }
+
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
         requestBridging(token, amount, to);
     }
@@ -258,28 +255,26 @@ contract ERC20Manager is
         bytes32 s,
         address bridgingPayment
     ) public payable {
+        if (!_knownBridgingPayments[bridgingPayment]) {
+            revert InvalidBridgingPayment();
+        }
+
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
         try IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
         requestBridging(token, amount, to);
     }
 
-    /**
-     * @dev Accept bridging request made on other side of bridge.
-     *
-     *      This request must be sent by `MessageQueue` only. When such a request is accepted, tokens
-     *      are minted/unlocked to the corresponding account address, specified in `payload`.
-     *
-     *      Expected `payload` consisits of these:
-     *      - `sender` - sender of tokens on gear side
-     *      - `receiver` - account to mint tokens to
-     *      - `token` - token to mint
-     *      - `amount` - amount of tokens to mint
-     *
-     *      Expected sender should be `vft-manager` program on gear.
-     *
-     * @param source Source of message on the gear side.
-     * @param payload Payload of the message.
-     */
+    function createBridgingPayment(uint256 fee) external returns (address) {
+        BridgingPayment bridgingPayment = new BridgingPayment(address(this), fee, msg.sender);
+
+        address bridgingPaymentAddress = address(bridgingPayment);
+        _knownBridgingPayments[bridgingPaymentAddress] = true;
+
+        emit BridgingPaymentCreated(bridgingPaymentAddress);
+
+        return bridgingPaymentAddress;
+    }
+
     function processMessage(bytes32 source, bytes calldata payload) external {
         if (msg.sender != _messageQueue) {
             revert InvalidSender();

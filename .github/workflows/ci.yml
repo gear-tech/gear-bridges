@@ -67,7 +67,6 @@ jobs:
             "./api/ethereum/IMessageQueue.json"
             "./api/ethereum/WrappedEther.json"
             "./api/ethereum/ERC20Manager.json"
-            "./api/ethereum/IRelayer.json"
             "./api/ethereum/MessageQueue.json"
             "./api/ethereum/BridgingPayment.json"
 
@@ -84,7 +83,6 @@ jobs:
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
             "./ethereum/out/WrappedEther.sol/WrappedEther.json"
             "./ethereum/out/ERC20Manager.sol/ERC20Manager.json"
-            "./ethereum/out/IRelayer.sol/IRelayer.json"
             "./ethereum/out/MessageQueue.sol/MessageQueue.json"
             "./ethereum/out/BridgingPayment.sol/BridgingPayment.json"
 

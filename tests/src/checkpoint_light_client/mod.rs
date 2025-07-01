@@ -1,10 +1,9 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
 use checkpoint_light_client::WASM_BINARY;
-use checkpoint_light_client_client::service_replay_back::events::ServiceReplayBackEvents;
-use checkpoint_light_client_client::service_sync_update;
-use checkpoint_light_client_client::service_sync_update::events::ServiceSyncUpdateEvents;
 use checkpoint_light_client_client::{
-    checkpoint_light_client_factory::io as factory_io, traits::*,
+    checkpoint_light_client_factory::io as factory_io,
+    service_replay_back::events::ServiceReplayBackEvents, service_sync_update,
+    service_sync_update::events::ServiceSyncUpdateEvents, traits::*,
 };
 use checkpoint_light_client_io::{Error, Init, ReplayBackError, ReplayBackStatus, G2};
 use ethereum_beacon_client::utils;
@@ -22,8 +21,12 @@ use ethereum_common::{
 use futures::StreamExt;
 use gclient::{EventProcessor, GearApi, Result};
 use ruzstd::StreamingDecoder;
-use sails_rs::events::EventIo;
-use sails_rs::{calls::*, events::Listener, gclient::calls::*, prelude::*};
+use sails_rs::{
+    calls::*,
+    events::{EventIo, Listener},
+    gclient::calls::*,
+    prelude::*,
+};
 use std::io::Read;
 
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =

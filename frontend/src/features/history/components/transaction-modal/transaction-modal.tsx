@@ -7,7 +7,7 @@ import { JSX } from 'react';
 import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } from '@/components';
 import { useTokens } from '@/context';
 import { BridgingPaymentProgram, CONTRACT_ADDRESS } from '@/features/swap/consts';
-import { useEthFee, useVaraFee } from '@/features/swap/hooks';
+import { useVaraFee } from '@/features/swap/hooks';
 import { cx, getErrorMessage, isUndefined, getTruncatedText } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -26,6 +26,7 @@ type Props = Pick<
   timestamp?: Transfer['timestamp'];
   status?: Transfer['status'];
   nonce?: Transfer['nonce'];
+  estimatedFees?: bigint;
   close: () => void;
   renderProgressBar?: () => JSX.Element;
 };
@@ -56,21 +57,19 @@ function TransactionModal({
   sender,
   receiver,
   nonce,
+  estimatedFees,
   renderProgressBar,
   close,
 }: Props) {
   const { addressToToken } = useTokens();
   const isVaraNetwork = sourceNetwork === Network.Vara;
 
-  const { fee: varaFee } = useVaraFee();
-  const { fee: ethFee } = useEthFee();
-  const fee = isVaraNetwork ? varaFee : ethFee;
-
   const { account } = useAccount();
   const payFee = usePayFee();
   const alert = useAlert();
   const queryClient = useQueryClient();
 
+  const { bridgingFee: varaBridgingFee } = useVaraFee();
   const rawNonce = isVaraNetwork && nonce ? `0x${nonce.padStart(64, '0')}` : nonce;
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.AwaitingPayment;
 
@@ -87,10 +86,10 @@ function TransactionModal({
 
   const handlePayFeeButtonClick = () => {
     if (!rawNonce) throw new Error('Nonce is not found');
-    if (isUndefined(fee.value)) throw new Error('Fee is not found');
+    if (isUndefined(varaBridgingFee.value)) throw new Error('Fee is not found');
 
     payFee
-      .sendTransactionAsync({ args: [rawNonce], value: fee.value })
+      .sendTransactionAsync({ args: [rawNonce], value: varaBridgingFee.value })
       .then(() => {
         close();
         alert.success('Fee paid successfully');
@@ -183,7 +182,7 @@ function TransactionModal({
       {renderProgressBar?.()}
 
       <footer className={styles.footer}>
-        <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} />
+        {!isUndefined(estimatedFees) && <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} />}
 
         {(txHash || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>

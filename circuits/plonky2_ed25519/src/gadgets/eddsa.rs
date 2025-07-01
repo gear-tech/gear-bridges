@@ -1,16 +1,21 @@
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::BoolTarget;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    hash::hash_types::RichField,
+    iop::{
+        target::BoolTarget,
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_field::extension::Extendable;
 use plonky2_sha512::circuit::{array_to_bits, bits_to_biguint_target, sha512_circuit};
 
-use crate::curve::curve_types::Curve;
-use crate::curve::ed25519::Ed25519;
-use crate::gadgets::curve::CircuitBuilderCurve;
-use crate::gadgets::curve_fixed_base::fixed_base_curve_mul_circuit;
-use crate::gadgets::curve_windowed_mul::CircuitBuilderWindowedMul;
-use crate::gadgets::nonnative::CircuitBuilderNonNative;
+use crate::{
+    curve::{curve_types::Curve, ed25519::Ed25519},
+    gadgets::{
+        curve::CircuitBuilderCurve, curve_fixed_base::fixed_base_curve_mul_circuit,
+        curve_windowed_mul::CircuitBuilderWindowedMul, nonnative::CircuitBuilderNonNative,
+    },
+};
 
 pub struct EDDSATargets {
     pub msg: Vec<BoolTarget>,
@@ -117,14 +122,20 @@ pub fn fill_circuits<F: RichField + Extendable<D>, const D: usize>(
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
     use rand::Rng;
 
-    use crate::curve::eddsa::{SAMPLE_MSG1, SAMPLE_PK1, SAMPLE_SIG1};
-    use crate::gadgets::eddsa::{fill_circuits, make_verify_circuits};
+    use crate::{
+        curve::eddsa::{SAMPLE_MSG1, SAMPLE_PK1, SAMPLE_SIG1},
+        gadgets::eddsa::{fill_circuits, make_verify_circuits},
+    };
 
     fn test_eddsa_circuit_with_config(config: CircuitConfig) -> Result<()> {
         const D: usize = 2;

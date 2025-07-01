@@ -2,10 +2,14 @@ use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 
 use ethereum_common::Hash256;
 use futures::StreamExt;
-use gsdk::metadata::gear::Event as GearEvent;
-use gsdk::metadata::runtime_types::gear_core::message::user::UserMessage;
-use gsdk::metadata::runtime_types::gprimitives::ActorId;
-use gsdk::{config::Header, subscription::BlockEvents};
+use gsdk::{
+    config::Header,
+    metadata::{
+        gear::Event as GearEvent,
+        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
+    },
+    subscription::BlockEvents,
+};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use subxt::config::Header as _;

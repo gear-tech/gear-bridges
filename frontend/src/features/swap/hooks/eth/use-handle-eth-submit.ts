@@ -6,7 +6,6 @@ import { definedAssert } from '@/utils';
 
 import { SUBMIT_STATUS } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { InsufficientAccountBalanceError } from '../../errors';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { useApprove } from './use-approve';
@@ -22,20 +21,20 @@ type Transaction = {
   value?: bigint;
 };
 
-function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
+function useHandleEthSubmit({ bridgingFee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
   const { token } = useBridgeContext();
   const isUSDC = token?.symbol.toLowerCase().includes('usdc');
 
   const mint = useMint();
   const approve = useApprove();
   const permitUSDC = usePermitUSDC();
-  const transfer = useTransfer(fee);
+  const transfer = useTransfer(bridgingFee);
 
   const config = useConfig();
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
-    definedAssert(fee, 'Fee');
+    definedAssert(bridgingFee, 'Fee');
     definedAssert(token, 'Fungible token');
 
     const txs: Transaction[] = [];
@@ -60,7 +59,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
     const bridgeTx = {
       gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
-      value: fee,
+      value: bridgingFee,
     };
 
     if (shouldApprove && isUSDC) {
@@ -85,18 +84,23 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
     return txs;
   };
 
-  const validateBalance = async (txs: Transaction[]) => {
+  const getRequiredBalance = async (values: FormattedValues) => {
     definedAssert(accountBalance, 'Account balance');
+    definedAssert(bridgingFee, 'Fee value');
 
+    const txs = await getTransactions(values);
     const { maxFeePerGas } = await estimateFeesPerGas(config);
 
     const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * maxFeePerGas;
     const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
     const requiredBalance = totalValue + totalGasLimit;
+    const fees = totalGasLimit + bridgingFee;
 
-    if (accountBalance < requiredBalance) throw new InsufficientAccountBalanceError('ETH', requiredBalance);
+    return { requiredBalance, fees };
   };
+
+  const requiredBalance = useMutation({ mutationFn: getRequiredBalance });
 
   const resetState = () => {
     mint.reset();
@@ -106,11 +110,12 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
   };
 
   const onSubmit = async (values: FormattedValues) => {
+    definedAssert(requiredBalance.data, 'Required balance');
+
     const txs = await getTransactions(values);
-    await validateBalance(txs);
 
     resetState();
-    onTransactionStart(values);
+    onTransactionStart(values, requiredBalance.data.fees);
 
     for (const { call } of txs) await call();
   };
@@ -127,7 +132,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
   const { mutateAsync, isPending, error } = useMutation({ mutationFn: onSubmit });
   const status = getStatus();
 
-  return { onSubmit: mutateAsync, isPending, error, status };
+  return { onSubmit: mutateAsync, isPending: isPending || requiredBalance.isPending, error, status, requiredBalance };
 }
 
 export { useHandleEthSubmit };

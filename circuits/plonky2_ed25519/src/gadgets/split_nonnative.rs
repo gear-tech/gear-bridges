@@ -1,11 +1,10 @@
 use std::marker::PhantomData;
 
 use itertools::Itertools;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::Target;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_field::extension::Extendable;
-use plonky2_field::types::Field;
+use plonky2::{
+    hash::hash_types::RichField, iop::target::Target, plonk::circuit_builder::CircuitBuilder,
+};
+use plonky2_field::{extension::Extendable, types::Field};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
 use crate::gadgets::nonnative::NonNativeTarget;
@@ -96,15 +95,23 @@ impl<F: RichField + Extendable<D>, const D: usize> CircuitBuilderSplit<F, D>
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
     use plonky2_field::types::Sample;
 
-    use crate::field::ed25519_scalar::Ed25519Scalar;
-    use crate::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
-    use crate::gadgets::split_nonnative::CircuitBuilderSplit;
+    use crate::{
+        field::ed25519_scalar::Ed25519Scalar,
+        gadgets::{
+            nonnative::{CircuitBuilderNonNative, NonNativeTarget},
+            split_nonnative::CircuitBuilderSplit,
+        },
+    };
 
     #[test]
     fn test_split_nonnative() -> Result<()> {

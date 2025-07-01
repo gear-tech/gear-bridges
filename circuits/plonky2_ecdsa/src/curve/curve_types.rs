@@ -1,11 +1,15 @@
 #[cfg(not(test))]
 use alloc::vec::Vec;
-use core::fmt::Debug;
-use core::hash::{Hash, Hasher};
-use core::ops::Neg;
+use core::{
+    fmt::Debug,
+    hash::{Hash, Hasher},
+    ops::Neg,
+};
 
-use plonky2::field::ops::Square;
-use plonky2::field::types::{Field, PrimeField};
+use plonky2::field::{
+    ops::Square,
+    types::{Field, PrimeField},
+};
 use serde::{Deserialize, Serialize};
 
 // To avoid implementation conflicts from associated types,

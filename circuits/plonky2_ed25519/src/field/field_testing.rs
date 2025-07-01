@@ -6,8 +6,7 @@ macro_rules! test_field_arithmetic {
 
             use num::bigint::BigUint;
             use plonky2_field::types::{Field, Sample};
-            use rand::rngs::OsRng;
-            use rand::Rng;
+            use rand::{rngs::OsRng, Rng};
 
             #[test]
             fn batch_inversion() {

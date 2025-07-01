@@ -100,6 +100,13 @@ pub struct GearEthTokensArgs {
 
     #[arg(long, help = format!("How many confirmations wait for message transaction on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
     pub confirmations_status: Option<u64>,
+
+    #[arg(
+        long,
+        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"), 
+        value_parser = parse_fee_payers,
+    )]
+    pub no_fee: Option<FeePayers>,
 }
 
 #[derive(Subcommand)]
@@ -244,4 +251,24 @@ pub struct FetchMerkleRootsArgs {
 
     #[clap(flatten)]
     pub gear_args: GearArgs,
+}
+
+#[derive(Debug, Clone)]
+pub enum FeePayers {
+    /// User explicitly requests for all fees to be paid.
+    All,
+    /// Accounts which are excluded from fee payment.
+    ExcludedIds(Vec<String>),
+}
+
+fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
+    if s.trim().eq_ignore_ascii_case("none") {
+        return Ok(FeePayers::All);
+    }
+    let ids: Vec<String> = s.split(',').map(String::from).collect();
+    if ids.is_empty() {
+        Err(anyhow::anyhow!("Fee payers cannot be empty"))
+    } else {
+        Ok(FeePayers::ExcludedIds(ids))
+    }
 }

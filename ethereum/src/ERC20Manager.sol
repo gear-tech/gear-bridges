@@ -46,9 +46,9 @@ contract ERC20Manager is
     uint256 internal constant AMOUNT_SIZE = 32;
 
     /**
-     * @dev Size of withdraw message.
+     * @dev Size of transfer message.
      */
-    uint256 internal constant WITHDRAW_MESSAGE_SIZE = SENDER_SIZE + RECEIVER_SIZE + TOKEN1_SIZE + AMOUNT_SIZE;
+    uint256 internal constant TRANSFER_MESSAGE_SIZE = SENDER_SIZE + RECEIVER_SIZE + TOKEN1_SIZE + AMOUNT_SIZE;
 
     /**
      * @dev `address receiver` bit shift.
@@ -282,7 +282,7 @@ contract ERC20Manager is
         }
 
         if (source == _vftManager) {
-            if (!_tryParseAndApplyWithdrawMessage(payload)) {
+            if (!_tryParseAndApplyTransferMessage(payload)) {
                 revert InvalidPayload();
             }
         } else if (source == _governanceAdmin.governance()) {
@@ -295,7 +295,7 @@ contract ERC20Manager is
     }
 
     /**
-     * @dev Tries to parse and apply withdraw message originated from Vara Network.
+     * @dev Tries to parse and apply transfer message originated from Vara Network.
      *
      *      Payload format:
      *      ```solidity
@@ -308,8 +308,8 @@ contract ERC20Manager is
      * @param payload Payload of the message (message from Vara Network).
      * @return success `true` if the message is parsed and applied, `false` otherwise.
      */
-    function _tryParseAndApplyWithdrawMessage(bytes calldata payload) private returns (bool) {
-        if (!(payload.length == WITHDRAW_MESSAGE_SIZE)) {
+    function _tryParseAndApplyTransferMessage(bytes calldata payload) private returns (bool) {
+        if (!(payload.length == TRANSFER_MESSAGE_SIZE)) {
             return false;
         }
 

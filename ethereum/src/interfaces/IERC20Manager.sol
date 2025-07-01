@@ -129,7 +129,7 @@ interface IERC20Manager is IMessageHandler {
  *      from `gear-programs/vft-manager` program.
  *      Also see `gear-programs/vft-manager/app/src/services/request_bridging/bridge_builtin_operations.rs`.
  */
-struct WithdrawMessage {
+struct TransferMessage {
     bytes32 sender;
     address receiver;
     address token;
@@ -157,11 +157,11 @@ struct RegisterGearTokenMessage {
  */
 library ERC20ManagerPacker {
     /**
-     * @dev Packs `WithdrawMessage` into a binary format.
+     * @dev Packs `TransferMessage` into a binary format.
      * @param message Message to pack.
      * @return packed Packed message.
      */
-    function pack(WithdrawMessage memory message) internal pure returns (bytes memory) {
+    function pack(TransferMessage memory message) internal pure returns (bytes memory) {
         return abi.encodePacked(message.sender, message.receiver, message.token, message.amount);
     }
 

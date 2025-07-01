@@ -231,6 +231,3 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
     "json-rpc",
     "rpc-types",
 ] }
-
-[patch."https://github.com/gear-tech/gear"]
-gsys = "=1.8.1"

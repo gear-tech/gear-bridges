@@ -14314,7 +14314,10 @@ name = "tests"
 version = "0.3.0"
 dependencies = [
  "alloy",
+ "alloy-consensus",
+ "alloy-primitives",
  "alloy-rlp",
+ "alloy-sol-types",
  "anyhow",
  "ark-bls12-381",
  "ark-ec",
@@ -14349,6 +14352,7 @@ dependencies = [
  "vft",
  "vft-client",
  "vft-manager",
+ "vft-manager-app",
  "vft-manager-client",
 ]
 

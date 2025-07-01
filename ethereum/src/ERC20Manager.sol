@@ -8,6 +8,8 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ERC20GearSupply} from "./erc20/managed/ERC20GearSupply.sol";
+import {LibString} from "./libraries/LibString.sol";
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
 import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
@@ -25,8 +27,6 @@ contract ERC20Manager is
 {
     using SafeERC20 for IERC20;
 
-    bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
-
     /**
      * @dev `bytes32 sender` size.
      */
@@ -38,7 +38,7 @@ contract ERC20Manager is
     /**
      * @dev `address token` size.
      */
-    uint256 internal constant TOKEN_SIZE = 20;
+    uint256 internal constant TOKEN1_SIZE = 20;
     /**
      * @dev `uint256 amount` size.
      */
@@ -47,7 +47,7 @@ contract ERC20Manager is
     /**
      * @dev Size of withdraw message.
      */
-    uint256 internal constant WITHDRAW_MESSAGE_SIZE = SENDER_SIZE + RECEIVER_SIZE + TOKEN_SIZE + AMOUNT_SIZE;
+    uint256 internal constant WITHDRAW_MESSAGE_SIZE = SENDER_SIZE + RECEIVER_SIZE + TOKEN1_SIZE + AMOUNT_SIZE;
 
     /**
      * @dev `address receiver` bit shift.
@@ -56,7 +56,7 @@ contract ERC20Manager is
     /**
      * @dev `address token` bit shift.
      */
-    uint256 internal constant TOKEN_BIT_SHIFT = 96;
+    uint256 internal constant TOKEN1_BIT_SHIFT = 96;
 
     /**
      * @dev `SENDER_SIZE` offset.
@@ -67,9 +67,80 @@ contract ERC20Manager is
      */
     uint256 internal constant OFFSET2 = 52;
     /**
-     * @dev `SENDER_SIZE + RECEIVER_SIZE + TOKEN_SIZE` offset.
+     * @dev `SENDER_SIZE + RECEIVER_SIZE + TOKEN1_SIZE` offset.
      */
     uint256 internal constant OFFSET3 = 72;
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * @dev `uint8 discriminant` size.
+     */
+    uint256 internal constant DISCRIMINANT_SIZE = 1;
+
+    /**
+     * @dev `uint8 discriminant` bit shift.
+     */
+    uint256 internal constant DISCRIMINANT_BIT_SHIFT = 248;
+
+    /**
+     * @dev `DISCRIMINANT_SIZE` offset.
+     */
+    uint256 internal constant OFFSET4 = 1;
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * @dev `bytes32 tokenName` size.
+     */
+    uint256 internal constant TOKEN_NAME_SIZE = 32;
+    /**
+     * @dev `bytes32 tokenSymbol` size.
+     */
+    uint256 internal constant TOKEN_SYMBOL_SIZE = 32;
+    /**
+     * @dev `uint8 tokenDecimals` size.
+     */
+    uint256 internal constant TOKEN_DECIMALS_SIZE = 1;
+
+    /**
+     * @dev `uint8 tokenDecimals` bit shift.
+     */
+    uint256 internal constant TOKEN_DECIMALS_BIT_SHIFT = 248;
+
+    /**
+     * @dev `DISCRIMINANT_SIZE + TOKEN_NAME_SIZE` offset.
+     */
+    uint256 internal constant OFFSET5 = 33;
+    /**
+     * @dev `DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE` offset.
+     */
+    uint256 internal constant OFFSET6 = 65;
+
+    /**
+     * @dev Size of register token message (for `SupplyType.Ethereum`).
+     */
+    uint256 internal constant REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE =
+        DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE + TOKEN_DECIMALS_SIZE;
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * @dev `address token` size.
+     */
+    uint256 internal constant TOKEN2_SIZE = 20;
+
+    /**
+     * @dev Size of register token message (for `SupplyType.Gear`).
+     */
+    uint256 internal constant REGISTER_GEAR_TOKEN_MESSAGE_SIZE = DISCRIMINANT_SIZE + TOKEN2_SIZE;
+
+    /**
+     * @dev `address token` bit shift.
+     */
+    uint256 internal constant TOKEN2_BIT_SHIFT = 96;
+
+    bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
@@ -219,7 +290,9 @@ contract ERC20Manager is
                 revert InvalidPayload();
             }
         } else if (source == _governanceAdmin.governance()) {
-            // TODO: some special logic for governance (register new token)
+            if (!_tryParseAndApplyRegisterTokenMessage(payload)) {
+                revert InvalidPayload();
+            }
         } else {
             revert InvalidSource();
         }
@@ -254,8 +327,8 @@ contract ERC20Manager is
             sender := calldataload(payload.offset)
             // `RECEIVER_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             receiver := shr(RECEIVER_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
-            // `TOKEN_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-            token := shr(TOKEN_BIT_SHIFT, calldataload(add(payload.offset, OFFSET2)))
+            // `TOKEN1_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            token := shr(TOKEN1_BIT_SHIFT, calldataload(add(payload.offset, OFFSET2)))
             amount := calldataload(add(payload.offset, OFFSET3))
         }
 
@@ -270,6 +343,99 @@ contract ERC20Manager is
         }
 
         emit BridgingAccepted(sender, receiver, token, amount);
+
+        return true;
+    }
+
+    /**
+     * @dev Tries to parse and apply register token message originated from Vara Network.
+     *
+     *      Payload format:
+     *      ```solidity
+     *      uint8 discriminant;
+     *      ```
+     *
+     *      `discriminant` can be:
+     *      - `SupplyType.Ethereum = 0x01` - register Ethereum token
+     *          ```solidity
+     *          bytes32 tokenName; // 1 byte length + 31 bytes datas
+     *          bytes32 tokenSymbol; // 1 byte length + 31 bytes data
+     *          uint8 tokenDecimals; // 1 byte
+     *          ```
+     *
+     *      - `SupplyType.Gear = 0x02` - register Gear token
+     *          ```solidity
+     *          address token; // 20 bytes
+     *          ```
+     *
+     * @param payload Payload of the message (message from Vara Network).
+     * @return success `true` if the message is parsed and applied, `false` otherwise.
+     */
+    function _tryParseAndApplyRegisterTokenMessage(bytes calldata payload) private returns (bool) {
+        if (!(payload.length > 0)) {
+            return false;
+        }
+
+        uint256 discriminant;
+        assembly ("memory-safe") {
+            // `DISCRIMINANT_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
+        }
+
+        if (!(discriminant >= uint256(SupplyType.Ethereum) && discriminant <= uint256(SupplyType.Gear))) {
+            return false;
+        }
+
+        if (discriminant == uint256(SupplyType.Ethereum)) {
+            if (!(payload.length == REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE)) {
+                return false;
+            }
+
+            bytes32 tokenName;
+            bytes32 tokenSymbol;
+            uint8 tokenDecimals;
+
+            // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
+            // we use offset `OFFSET5 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE` to skip `uint8 discriminant` and `bytes32 tokenName`
+            // we use offset `OFFSET6 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE` to skip `uint8 discriminant`, `bytes32 tokenName` and `bytes32 tokenSymbol`
+            assembly ("memory-safe") {
+                tokenName := calldataload(add(payload.offset, OFFSET4))
+                tokenSymbol := calldataload(add(payload.offset, OFFSET5))
+                tokenDecimals := calldataload(add(payload.offset, OFFSET6))
+                // `TOKEN_DECIMALS_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+                tokenDecimals := shr(TOKEN_DECIMALS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET6)))
+            }
+
+            uint8 tokenNameLength = uint8(tokenName[0]);
+            if (!(tokenNameLength >= 1 && tokenNameLength <= 32)) {
+                return false;
+            }
+
+            uint8 tokenSymbolLength = uint8(tokenSymbol[0]);
+            if (!(tokenSymbolLength >= 1 && tokenSymbolLength <= 32)) {
+                return false;
+            }
+
+            ERC20GearSupply token = new ERC20GearSupply(
+                address(this), LibString.unpackOne(tokenName), LibString.unpackOne(tokenSymbol), tokenDecimals
+            );
+            _tokenSupplyType[address(token)] = SupplyType.Ethereum;
+        }
+
+        if (discriminant == uint256(SupplyType.Gear)) {
+            if (!(payload.length == REGISTER_GEAR_TOKEN_MESSAGE_SIZE)) {
+                return false;
+            }
+
+            // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
+            address token;
+            assembly ("memory-safe") {
+                // `TOKEN2_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+                token := shr(TOKEN2_BIT_SHIFT, calldataload(add(payload.offset, OFFSET4)))
+            }
+
+            _tokenSupplyType[token] = SupplyType.Gear;
+        }
 
         return true;
     }

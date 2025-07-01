@@ -22,9 +22,9 @@ pub struct Payload {
 }
 
 impl Payload {
-    /// Pack [Payload] into a binary format that `ERC20Manager` will parse.
+    /// Pack [`Payload`] into a binary format that `ERC20Manager` will parse.
     pub fn pack(self) -> Vec<u8> {
-        // ActorId is 32 bytes, H160 is 20 bytes, U256 is 32 bytes
+        // ActorId is 32 bytes, H160 is 20 bytes (two fields), U256 is 32 bytes
         let mut packed = Vec::with_capacity(32 + 20 + 20 + 32);
 
         packed.extend_from_slice(self.sender.as_ref());

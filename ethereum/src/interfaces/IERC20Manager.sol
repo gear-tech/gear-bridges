@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {IBridgingPayment} from "./IBridgingPayment.sol";
 import {IMessageQueueProcessor} from "./IMessageQueueProcessor.sol";
+import {LibString} from "src/libraries/LibString.sol";
 
 /**
  * @dev Interface for the ERC20Manager contract.
@@ -129,6 +130,22 @@ struct WithdrawMessage {
 }
 
 /**
+ * @dev Type representing payload of the message that registers Ethereum token.
+ */
+struct RegisterEthereumTokenMessage {
+    string tokenName;
+    string tokenSymbol;
+    uint8 tokenDecimals;
+}
+
+/**
+ * @dev Type representing payload of the message that registers Gear token.
+ */
+struct RegisterGearTokenMessage {
+    address token;
+}
+
+/**
  * @dev Library for packing `ERC20Manager` messages into a binary format.
  */
 library ERC20ManagerPacker {
@@ -139,5 +156,28 @@ library ERC20ManagerPacker {
      */
     function pack(WithdrawMessage memory message) internal pure returns (bytes memory) {
         return abi.encodePacked(message.sender, message.receiver, message.token, message.amount);
+    }
+
+    /**
+     * @dev Packs `RegisterEthereumTokenMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(RegisterEthereumTokenMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            uint8(IERC20Manager.SupplyType.Ethereum),
+            LibString.packOne(message.tokenName),
+            LibString.packOne(message.tokenSymbol),
+            message.tokenDecimals
+        );
+    }
+
+    /**
+     * @dev Packs `RegisterGearTokenMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(RegisterGearTokenMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(uint8(IERC20Manager.SupplyType.Gear), message.token);
     }
 }

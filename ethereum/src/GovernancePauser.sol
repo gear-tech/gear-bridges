@@ -33,7 +33,7 @@ contract GovernancePauser is IMessageHandler, IGovernance {
      * @dev Initializes the GovernancePauser contract.
      * @param _governance The governance address (Vara Network address).
      * @param _messageQueue The message queue address.
-     * @param proxies The proxies addresses (Relayer, MessageQueue, ERC20Manager).
+     * @param proxies The proxies addresses (MessageQueue, ERC20Manager).
      */
     constructor(bytes32 _governance, address _messageQueue, address[] memory proxies) {
         governance = _governance;

@@ -8,11 +8,15 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {IGovernance} from "./interfaces/IGovernance.sol";
 import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
-import {IRelayer} from "./interfaces/IRelayer.sol";
+import {IVerifier} from "./interfaces/IVerifier.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
 /**
- * @dev MessageQueue smart contract is responsible for verifying and processing
+ * @dev MessageQueue smart contract is responsible for storing Merkle roots for blocks
+ *      that were observed on Vara Network. Before storing Merkle roots, MessageQueue
+ *      verifies received Merkle roots with help of Verifier smart contract.
+ *
+ *      MessageQueue smart contract is also responsible for verifying and processing
  *      received messages originated from Vara Network.
  */
 contract MessageQueue is
@@ -28,7 +32,10 @@ contract MessageQueue is
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
-    IRelayer private _relayer;
+    IVerifier private _verifier;
+    bool private _emergencyStop;
+    mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
+    mapping(bytes32 merkleRoot => uint256 blockNumber) private _merkleRoots;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
     /**
@@ -39,14 +46,14 @@ contract MessageQueue is
     }
 
     /**
-     * @dev Initializes the MessageQueue contract with the Relayer address.
+     * @dev Initializes the MessageQueue contract with the Verifier address.
      *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
      * @param governanceAdmin The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param relayer The address of the Relayer contract that will store merkle roots.
+     * @param verifier The address of the Verifier contract that will verify merkle roots.
      */
-    function initialize(IGovernance governanceAdmin, IGovernance governancePauser, IRelayer relayer)
+    function initialize(IGovernance governanceAdmin, IGovernance governancePauser, IVerifier verifier)
         public
         initializer
     {
@@ -61,7 +68,7 @@ contract MessageQueue is
 
         _governanceAdmin = governanceAdmin;
         _governancePauser = governancePauser;
-        _relayer = relayer;
+        _verifier = verifier;
     }
 
     /**
@@ -85,18 +92,90 @@ contract MessageQueue is
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /**
+     * @dev Receives, verifies and stores Merkle roots from Vara Network.
+     *
+     *      Upon successfully storing data about block number and corresponding Merkle root,
+     *      MessageQueue smart contract will emit a `MerkleRoot` event.
+     *
+     *      It is important to note that anyone can submit a Merkle root because only
+     *      validated Merkle roots will be stored in the MessageQueue smart contract.
+     *
+     * @param blockNumber Block number on Vara Network.
+     * @param merkleRoot Merkle root of transactions included in block with corresponding block number.
+     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
+     * @dev Reverts if emergency stop status is set with `EmergencyStop` error.
+     * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
+     */
+    function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
+        if (_emergencyStop) {
+            revert EmergencyStop();
+        }
+
+        uint256[] memory publicInputs = new uint256[](2);
+        publicInputs[0] = uint256(merkleRoot) >> 64;
+        publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)
+            | ((blockNumber & uint256(type(uint32).max)) << 96);
+
+        if (!_verifier.safeVerifyProof(proof, publicInputs)) {
+            revert InvalidPlonkProof();
+        }
+
+        // Check if the provided Merkle root is a duplicate.
+        // If it is a duplicate, set the emergency stop status, emit `EmergencyStopSet` event.
+        bytes32 originalMerkleRoot = _blockNumbers[blockNumber];
+        if (originalMerkleRoot != 0 && originalMerkleRoot != merkleRoot) {
+            _emergencyStop = true;
+
+            emit EmergencyStopSet();
+        } else {
+            _blockNumbers[blockNumber] = merkleRoot;
+            _merkleRoots[merkleRoot] = blockNumber;
+
+            emit MerkleRoot(blockNumber, merkleRoot);
+        }
+    }
+
+    /**
+     * @dev Returns merkle root for specified block number.
+     *      Returns `bytes32(0)` if merkle root was not provided for specified block number.
+     * @param blockNumber Target block number.
+     * @return merkleRoot Merkle root for specified block number.
+     */
+    function getMerkleRoot(uint256 blockNumber) external view returns (bytes32) {
+        return _blockNumbers[blockNumber];
+    }
+
+    /**
+     * @dev Returns block number for provided merkle root.
+     *      Returns `uint256(0)` if block number was not provided for specified merkle root.
+     * @param merkleRoot Target merkle root.
+     * @return blockNumber Block number for provided merkle root.
+     */
+    function getBlockNumber(bytes32 merkleRoot) external view returns (uint256) {
+        return _merkleRoots[merkleRoot];
+    }
+
+    /**
+     * @dev Returns emergency stop status.
+     * @return emergencyStop emergency stop status.
+     */
+    function emergencyStop() external view returns (bool) {
+        return _emergencyStop;
+    }
+
+    /**
      * @dev Verifies and processes message originated from Vara Network.
      *
      *      In this process, MessageQueue smart contract will calculate Merkle root
      *      for message and validate that it corresponds to Merkle root which is already stored
-     *      in Relayer smart contract for same block number. If proof is correct, nonce of received
+     *      in MessageQueue smart contract for same block number. If proof is correct, nonce of received
      *      message will be stored in smart contract and message will be forwarded to adequate message
      *      processor, either ERC20Manager or Governance smart contract.
      *
      *      Upon successful processing of the message MessageProcessed event is emited.
      *
      *      It is important to note that anyone can submit a message because all messages
-     *      will be validated against previously stored Merkle roots in the Relayer smart contract.
+     *      will be validated against previously stored Merkle roots in the MessageQueue smart contract.
      *
      * @param blockNumber Block number of block containing target merkle tree.
      * @param totalLeaves Number of leaves in target merkle tree.
@@ -107,9 +186,9 @@ contract MessageQueue is
      *
      * @dev Reverts if:
      *      - MessageQueue is paused and message source is not any governance address.
-     *      - Relayer emergency stop status is set.
+     *      - MessageQueue emergency stop status is set.
      *      - Message nonce is already processed.
-     *      - Merkle root is not set for the block number in Relayer smart contract.
+     *      - Merkle root is not set for the block number in MessageQueue smart contract.
      *      - Merkle proof is invalid.
      *      - Message processing fails.
      */
@@ -126,15 +205,15 @@ contract MessageQueue is
             revert EnforcedPause();
         }
 
-        if (_relayer.emergencyStop()) {
-            revert RelayerEmergencyStop();
+        if (_emergencyStop) {
+            revert EmergencyStop();
         }
 
         if (_processedMessages[message.nonce]) {
             revert MessageAlreadyProcessed(message.nonce);
         }
 
-        bytes32 merkleRoot = _relayer.getMerkleRoot(blockNumber);
+        bytes32 merkleRoot = _blockNumbers[blockNumber];
         if (merkleRoot == bytes32(0)) {
             revert MerkleRootNotSet(blockNumber);
         }

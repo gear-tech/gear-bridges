@@ -22,7 +22,6 @@ import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {Relayer} from "src/Relayer.sol";
 import {Verifier} from "src/Verifier.sol";
 
 struct Overrides {
@@ -63,7 +62,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     GovernancePauser public governancePauser;
 
     IVerifier public verifier;
-    Relayer public relayer;
     MessageQueue public messageQueue;
 
     ERC20Manager public erc20Manager;
@@ -153,7 +151,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    WETH:                ", address(wrappedEther));
 
         address erc20ManagerAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 9
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 7
         );
 
         wrappedVara = new WrappedVara(erc20ManagerAddress);
@@ -165,18 +163,14 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridge governance:");
 
-        address relayerAddress = vm.computeCreateAddress(
+        address messageQueueAddress = vm.computeCreateAddress(
             deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 4
         );
-        address messageQueueAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 6
-        );
 
-        address[] memory proxies = new address[](3);
+        address[] memory proxies = new address[](2);
 
-        proxies[0] = relayerAddress;
-        proxies[1] = messageQueueAddress;
-        proxies[2] = erc20ManagerAddress;
+        proxies[0] = messageQueueAddress;
+        proxies[1] = erc20ManagerAddress;
 
         governanceAdmin = new GovernanceAdmin(deploymentArguments.governanceAdmin, messageQueueAddress, proxies);
         console.log("    GovernanceAdmin:     ", address(governanceAdmin));
@@ -199,17 +193,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    Verifier:            ", address(verifier));
 
         // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
-        relayer = Relayer(
-            Upgrades.deployUUPSProxy("Relayer.sol", abi.encodeCall(Relayer.initialize, (governanceAdmin, verifier)))
-        );
-        console.log("    Relayer:             ", address(relayer));
-
-        assertEq(relayerAddress, address(relayer));
-
         messageQueue = MessageQueue(
             Upgrades.deployUUPSProxy(
                 "MessageQueue.sol",
-                abi.encodeCall(MessageQueue.initialize, (governanceAdmin, governancePauser, relayer))
+                abi.encodeCall(MessageQueue.initialize, (governanceAdmin, governancePauser, verifier))
             )
         );
         console.log("    MessageQueue:        ", address(messageQueue));
@@ -254,7 +241,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         if (isScript) {
             console.log();
 
-            printContractInfo("Relayer", address(relayer), Upgrades.getImplementationAddress(address(relayer)));
             printContractInfo(
                 "MessageQueue", address(messageQueue), Upgrades.getImplementationAddress(address(messageQueue))
             );

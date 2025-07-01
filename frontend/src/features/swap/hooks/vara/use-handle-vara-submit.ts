@@ -75,6 +75,7 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
     const { transaction, awaited } = await requestBridging.prepareTransactionAsync({
       gasLimit: GAS_LIMIT.BRIDGE,
       args: [token.address, amount, accountAddress],
+      value: vftManagerFee,
     });
 
     txs.push({

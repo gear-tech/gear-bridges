@@ -36,7 +36,10 @@ function usePayFee(feeValue: bigint | undefined) {
     let unsubscribe: () => void | undefined;
 
     const result = new Promise((resolve, reject) => {
-      const onEvent = ({ nonce, sender, receiver, ...data }: BridgingRequestedEventData) => {
+      const onEvent = (payload: BridgingRequestedEventData) => {
+        console.log('payload: ', payload);
+
+        const { nonce, sender, receiver, ...data } = payload;
         if (
           data.vara_token_id !== token.address ||
           BigInt(data.amount) !== amount ||

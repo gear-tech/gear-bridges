@@ -1,0 +1,23 @@
+[package]
+name = "mock-contract"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+gstd.workspace = true
+hex.workspace = true
+primitive-types.workspace = true
+checkpoint-light-client-client.workspace = true
+sails-rs.workspace = true
+[build-dependencies]
+gear-wasm-builder.workspace = true
+
+[features]
+debug = ["gstd/debug"]
+std = []
+default = ["std"]
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "none"))'.dependencies]
+getrandom = { workspace = true, features = ["custom"] }
+lazy_static = { workspace = true, features = ["spin_no_std"] }

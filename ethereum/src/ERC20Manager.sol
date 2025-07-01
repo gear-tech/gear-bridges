@@ -219,6 +219,14 @@ contract ERC20Manager is
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
+    /**
+     * @dev Requests bridging of tokens.
+     *      Emits `BridgingRequested` event.
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @dev Reverts if token is not registered with `InvalidSupplyType` error.
+     */
     function requestBridging(address token, uint256 amount, bytes32 to) public whenNotPaused {
         SupplyType supplyType = _tokenSupplyType[token];
 
@@ -233,6 +241,13 @@ contract ERC20Manager is
         emit BridgingRequested(msg.sender, to, token, amount);
     }
 
+    /**
+     * @dev Requests bridging of tokens and pays fee to one of the `bridgingPayment` contracts.
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @param bridgingPayment Bridging payment address.
+     */
     function requestBridgingPayingFee(address token, uint256 amount, bytes32 to, address bridgingPayment)
         public
         payable
@@ -246,6 +261,19 @@ contract ERC20Manager is
         requestBridging(token, amount, to);
     }
 
+    /**
+     * @dev Requests bridging of tokens and pays fee to one of the `bridgingPayment` contracts.
+     *      This function uses `permit` to approve spending of tokens to optimize gas costs.
+     *      (If token supports `permit` function).
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @param deadline Deadline for the transaction to be executed.
+     * @param v ECDSA signature parameter.
+     * @param r ECDSA signature parameter.
+     * @param s ECDSA signature parameter.
+     * @param bridgingPayment Bridging payment address.
+     */
     function requestBridgingPayingFeeWithPermit(
         address token,
         uint256 amount,
@@ -265,6 +293,12 @@ contract ERC20Manager is
         requestBridging(token, amount, to);
     }
 
+    /**
+     * @dev Creates a new `BridgingPayment` contract (ERC20Manager is factory).
+     *      Emits `BridgingPaymentCreated` event.
+     * @param fee Fee amount in wei.
+     * @return bridgingPaymentAddress Address of the created `bridgingPayment` contract.
+     */
     function createBridgingPayment(uint256 fee) external whenNotPaused returns (address) {
         BridgingPayment bridgingPayment = new BridgingPayment(address(this), fee, msg.sender);
 
@@ -276,6 +310,11 @@ contract ERC20Manager is
         return bridgingPaymentAddress;
     }
 
+    /**
+     * @dev Handles message originated from Vara Network.
+     * @param source Source of the message (`ActorId` from Vara Network).
+     * @param payload Payload of the message (message from Vara Network).
+     */
     function handleMessage(bytes32 source, bytes calldata payload) external {
         if (msg.sender != _messageQueue) {
             revert InvalidSender();

@@ -90,12 +90,40 @@ interface IERC20Manager is IMessageHandler {
         SupplyType supplyType;
     }
 
+    /**
+     * @dev Requests bridging of tokens.
+     *      Emits `BridgingRequested` event.
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @dev Reverts if token is not registered with `InvalidSupplyType` error.
+     */
     function requestBridging(address token, uint256 amount, bytes32 to) external;
 
+    /**
+     * @dev Requests bridging of tokens and pays fee to one of the `bridgingPayment` contracts.
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @param bridgingPayment Bridging payment address.
+     */
     function requestBridgingPayingFee(address token, uint256 amount, bytes32 to, address bridgingPayment)
         external
         payable;
 
+    /**
+     * @dev Requests bridging of tokens and pays fee to one of the `bridgingPayment` contracts.
+     *      This function uses `permit` to approve spending of tokens to optimize gas costs.
+     *      (If token supports `permit` function).
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @param deadline Deadline for the transaction to be executed.
+     * @param v ECDSA signature parameter.
+     * @param r ECDSA signature parameter.
+     * @param s ECDSA signature parameter.
+     * @param bridgingPayment Bridging payment address.
+     */
     function requestBridgingPayingFeeWithPermit(
         address token,
         uint256 amount,
@@ -107,6 +135,12 @@ interface IERC20Manager is IMessageHandler {
         address bridgingPayment
     ) external payable;
 
+    /**
+     * @dev Creates a new `BridgingPayment` contract (ERC20Manager is factory).
+     *      Emits `BridgingPaymentCreated` event.
+     * @param fee Fee amount in wei.
+     * @return bridgingPaymentAddress Address of the created `bridgingPayment` contract.
+     */
     function createBridgingPayment(uint256 fee) external returns (address);
 
     /**

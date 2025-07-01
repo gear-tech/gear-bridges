@@ -8200,6 +8200,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-contract"
+version = "0.1.0"
+dependencies = [
+ "checkpoint-light-client-client",
+ "gear-wasm-builder 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "getrandom 0.2.16",
+ "gstd 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
+ "lazy_static",
+ "primitive-types 0.12.2",
+ "sails-rs",
+]
+
+[[package]]
 name = "mockall"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14335,8 +14349,10 @@ dependencies = [
  "historical-proxy",
  "historical-proxy-client",
  "log",
+ "mock-contract",
  "pretty_env_logger",
  "primitive-types 0.12.2",
+ "rand 0.8.5",
  "relayer",
  "ruzstd",
  "sails-rs",

@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "mock-contract",
     "ethereum/client",
     "gear-rpc-client",
     "prover",
@@ -44,6 +45,7 @@ version = "0.3.0"
 edition = "2021"
 
 [workspace.dependencies]
+mock-contract = { path = "./mock-contract" }
 relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
@@ -86,6 +88,7 @@ vft-common = { path = "gear-programs/vft-common" }
 vft-vara = { path = "gear-programs/vft-vara" }
 vft-vara-app = { path = "gear-programs/vft-vara/app" }
 vft-vara-client = { path = "gear-programs/vft-vara/client" }
+#mock-contract = { path = "tests/mock-contract" }
 
 # Contracts' deps
 
@@ -236,5 +239,3 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
 [patch."https://github.com/gear-tech/gear"]
 gsys = "=1.8.1"
 
-[profile.dev]
-opt-level = 2

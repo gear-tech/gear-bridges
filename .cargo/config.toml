@@ -1,0 +1,2 @@
+[target.'cfg(all(target_arch = "wasm32", target_os = "none"))']
+rustflags = ["-C", "target-feature=-bulk-memory"]

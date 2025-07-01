@@ -145,7 +145,7 @@ static TRANSACTIONS_BYTES: &[u8] = include_bytes!("./transactions.json.zst");
 
 /* use btreemap and btreeset to make tests behaviour predictable */
 
-static TRANSACTIONS: LazyLock<BTreeMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
+pub static TRANSACTIONS: LazyLock<BTreeMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
     let mut txs = TRANSACTIONS_BYTES;
     let mut decoder = StreamingDecoder::new(&mut txs).unwrap();
     let mut result = Vec::new();
@@ -156,7 +156,7 @@ static TRANSACTIONS: LazyLock<BTreeMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
     txs.into_iter().map(|tx| (tx.tx_hash, tx)).collect()
 });
 
-static ETH_TOKEN_IDS: LazyLock<BTreeSet<H160>> =
+pub static ETH_TOKEN_IDS: LazyLock<BTreeSet<H160>> =
     LazyLock::new(|| TRANSACTIONS.values().map(|tx| tx.eth_token_id()).collect());
 static TX_TO_FAIL: FixedBytes<32> =
     fixed_bytes!("0xe2a0d9a04a9ce1328a79096a9df1f5f16f9c227169e9fb1b3e43a2370b54b592");
@@ -336,333 +336,98 @@ async fn test_api_provider() {
     );
 }
 
+/*     pretty_env_logger::formatted_timed_builder()
+.filter_level(log::LevelFilter::Off)
+.format_target(false)
+.filter(Some("prover"), log::LevelFilter::Info)
+.filter(Some("relayer"), log::LevelFilter::Debug)
+.filter(Some("ethereum-client"), log::LevelFilter::Info)
+.filter(Some("metrics"), log::LevelFilter::Info)
+.format_timestamp_secs()
+.parse_default_env()
+.init(); */
+
 /* steps to run relayer:
     1) run gear node in dev mode
     2) upload contracts: vft-manager, historical-proxy, vft
     3) create account with enough balance to pay fees
     4) Mock eth transactions manually from TRANSACTIONS
 */
+
+
 #[tokio::test]
-async fn test_relayer() {
-    pretty_env_logger::formatted_timed_builder()
-        .filter_level(log::LevelFilter::Off)
-        .format_target(false)
-        .filter(Some("prover"), log::LevelFilter::Info)
-        .filter(Some("relayer"), log::LevelFilter::Debug)
-        .filter(Some("ethereum-client"), log::LevelFilter::Info)
-        .filter(Some("metrics"), log::LevelFilter::Info)
-        .format_timestamp_secs()
-        .parse_default_env()
-        .init();
+async fn test_compose_proof() {
+    let contracts = super::upload::EthContracts::new().await;
+    let (eth, beacon, api_provider) = super::upload::connections().await;
 
-    let eth_api = EthApi::new(
-        "wss://reth-rpc.gear-tech.io/ws",
-        "0xE3e5514AC6cAF71560777B9EaD6CaD5f6171D3de",
-        "0x521030B5F81aFaaa1267748f6A7eE74735a42fc3",
-        None,
-    )
-    .await
-    .unwrap();
-    let api_provider = ApiProvider::new("ws://127.0.0.1".to_owned(), 9944, 2)
-        .await
-        .unwrap();
-    let contracts = Contracts::new().await;
-    let proof_composer = ProofComposer::new(
-        api_provider.connection(),
-        BeaconClient::new(
-            "http://testing.holesky.beacon-api.nimbus.team".to_string(),
-            None,
-        )
-        .await
-        .unwrap(),
-        eth_api,
-        H256::from(contracts.historical_proxy.into_bytes()),
-        contracts.suri.clone(),
-    );
+    let mut conn = api_provider.connection();
 
-    let client = api_provider
-        .connection()
+    let client = conn
         .gclient_client(&contracts.suri)
         .expect("Failed to create GClient client");
-    let remoting = GClientRemoting::new(client.clone());
 
-    let vft_manager_admin = vft_manager_client::VftManager::new(remoting.clone())
-        .admin()
-        .recv(contracts.vft_manager)
-        .await
-        .expect("Failed to get VFT Manager admin");
-
-    assert_eq!(vft_manager_admin, contracts.admin);
-
-    let historical_proxy_admin = historical_proxy_client::HistoricalProxy::new(remoting.clone())
-        .admin()
-        .recv(contracts.historical_proxy)
-        .await
-        .expect("Failed to get Historical Proxy admin");
-    assert_eq!(historical_proxy_admin, contracts.admin);
-
-    let route = <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
-
-    let message_sender = MessageSender::new(
-        H256::from(contracts.vft_manager.into_bytes()),
-        route,
-        H256::from(contracts.historical_proxy.into_bytes()),
-        api_provider.connection(),
+    let proof_composer = ProofComposer::new(
+        conn.clone(),
+        beacon.clone(),
+        eth.clone(),
+        H256(contracts.historical_proxy.into_bytes()),
         contracts.suri.clone(),
     );
 
-    let check = api_provider.connection();
-
-    let message_sender_io = message_sender.run();
+    let tx_data = TRANSACTIONS.first_key_value().unwrap().1;
 
     let (mut checkpoints_tx, checkpoints_rx) = unbounded_channel();
 
-    let mut proof_composer_io = proof_composer.run(checkpoints_rx);
+    checkpoints_tx
+        .send(EthereumSlotNumber(tx_data.slot_number))
+        .unwrap();
 
-    let (tx_hash, tx) = TRANSACTIONS
-        .first_key_value()
-        .expect("No transactions found");
+    let mut io = proof_composer.run(checkpoints_rx);
 
-    checkpoints_tx.send(EthereumSlotNumber(tx.slot_number + 100));
-
-    let trans = Transaction::new(
+    let tx = Transaction::new(
         TxHashWithSlot {
-            slot_number: EthereumSlotNumber(tx.slot_number),
-            tx_hash: *tx_hash,
+            slot_number: EthereumSlotNumber(tx_data.slot_number),
+            tx_hash: tx_data.tx_hash,
         },
         TxStatus::ComposeProof,
     );
 
-    let listener = client
-        .subscribe()
-        .await
-        .expect("msg failed to subscribe to API");
+    assert!(io.compose_proof_for(tx.uuid, tx.tx));
 
-    proof_composer_io.compose_proof_for(trans.uuid, trans.tx);
+    let proof = io.recv().await.expect("Failed to receive proof");
 
-    let mocker = CheckpointMocker(contracts.admin);
+    assert_eq!(proof.tx_uuid, tx.uuid);
+    let event = tx_data.event();
+   
+    assert_eq!(proof.payload.proof, event.proof);
+    assert_eq!(proof.payload.transaction_index, event.transaction_index);
+    assert_eq!(proof.payload.receipt_rlp, event.receipt_rlp);
+    if proof.payload.proof_block.headers.len() != event.proof_block.headers.len() {
 
-    let api = client.with(contracts.suri.clone()).unwrap();
-    mocker.run(listener, &api).await;
+        let mut f1 = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("proof_block_headers.json")
+            .expect("Failed to open file");
+        serde_json::to_writer_pretty(&mut f1, &proof.payload.proof_block.headers)
+            .expect("Failed to write proof block headers to file");
 
-    let proof = proof_composer_io
-        .recv()
-        .await
-        .expect("Failed to receive proof");
+        let mut f2 = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("event_proof_block_headers.json")
+            .expect("Failed to open file");
+        serde_json::to_writer_pretty(&mut f2, &event.proof_block.headers)
+            .expect("Failed to write event proof block headers to file");
 
-    assert_eq!(proof.payload, tx.event());
-
-    drop(checkpoints_tx);
-}
-
-struct Contracts {
-    admin: ActorId,
-    suri: String,
-    vft_manager: ActorId,
-    historical_proxy: ActorId,
-    eth_events: ActorId,
-    vft_id: Vec<ActorId>,
-}
-
-impl Contracts {
-    async fn new() -> Self {
-        let balances = vec![DEFAULT_BALANCE; ETH_TOKEN_IDS.len() + 4];
-        let mut programs = vec![vft::WASM_BINARY; ETH_TOKEN_IDS.len() + 4];
-
-        programs[1] = vft_manager::WASM_BINARY;
-        programs[2] = historical_proxy::WASM_BINARY;
-        programs[3] = eth_events_electra::WASM_BINARY;
-
-        let conn = connect_to_node(&balances, "relayer", &programs).await;
-        let admin = conn.accounts[0].0;
-        let suri = conn.accounts[0].2.clone();
-        let salt = conn.salt;
-        let api = conn.api.clone().with(suri.clone()).unwrap().clone();
-
-        let code_vft_manager = conn.code_ids[1];
-        let code_historical_proxy = conn.code_ids[2];
-        let code_eth_events = conn.code_ids[3];
-
-        let code_vft = &conn.code_ids[4..];
-        let vft_accounts = &conn.accounts[4..];
-
-        let api = api.with(suri.clone()).unwrap();
-
-        let remoting = GClientRemoting::new(api.clone());
-
-        let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
-
-        let vft_manager_id = factory
-            .new(InitConfig {
-                erc20_manager_address: Default::default(),
-                gear_bridge_builtin: Default::default(),
-                historical_proxy_address: Default::default(),
-                config: Config {
-                    gas_for_token_ops: 10_000_000_000,
-                    gas_for_reply_deposit: 10_000_000_000,
-                    gas_to_send_request_to_builtin: 10_000_000_000,
-                    gas_for_swap_token_maps: 1_500_000_000,
-                    reply_timeout: 100,
-                    fee_bridge: 0,
-                    fee_incoming: 0,
-                },
-            })
-            .send_recv(code_vft_manager, salt)
-            .await
-            .expect("Failed to create VFT Manager");
-
-        let factory = vft_client::VftFactory::new(remoting.clone());
-        // for every eth token id, create corresponding VFT
-
-        let mut vft_ids = Vec::new();
-
-        for (i, eth_token_id) in ETH_TOKEN_IDS.iter().enumerate() {
-            println!(
-                "Creating VFT for ETH token ID: {:?}\nCode ID={:?}",
-                eth_token_id, code_vft[i]
-            );
-            let salt = vft_accounts[i].1;
-            let name = format!("TEST_TOKEN_{}", eth_token_id);
-            let vft_id = factory
-                .new(name.into(), "TT".to_owned(), 20)
-                .send_recv(code_vft[i], salt)
-                .await
-                .expect("Failed to create VFT");
-
-            vft_ids.push(vft_id);
-
-            let mut vft = vft_client::VftAdmin::new(remoting.clone());
-
-            vft.set_minter(vft_manager_id)
-                .send_recv(vft_id)
-                .await
-                .expect("Failed to set minter");
-
-            vft.set_burner(vft_manager_id)
-                .send_recv(vft_id)
-                .await
-                .expect("Failed to set burner");
-
-            let mut vft_extension = vft_client::VftExtension::new(remoting.clone());
-
-            while vft_extension
-                .allocate_next_balances_shard()
-                .send_recv(vft_id)
-                .await
-                .expect("Failed to allocate next balances shard")
-            {}
-
-            while vft_extension
-                .allocate_next_allowances_shard()
-                .send_recv(vft_id)
-                .await
-                .expect("Failed to allocate next allowances shard")
-            {}
-
-            let mut service = vft_manager_client::VftManager::new(remoting.clone());
-
-            service
-                .map_vara_to_eth_address(vft_id, *eth_token_id, TokenSupply::Ethereum)
-                .send_recv(vft_manager_id)
-                .await
-                .expect("Failed to map VFT to ETH address");
-            println!("Mapped VFT {:?} to ETH address {:?}", vft_id, eth_token_id);
-        }
-
-        let eth_events = eth_events_electra_client::EthEventsElectraFactory::new(remoting.clone())
-            .new(admin)
-            .send_recv(code_eth_events, salt)
-            .await
-            .expect("Failed to create Eth Events Electra");
-
-        let historical_proxy =
-            historical_proxy_client::HistoricalProxyFactory::new(remoting.clone())
-                .new()
-                .send_recv(code_historical_proxy, salt)
-                .await
-                .expect("Failed to create Historical Proxy");
-
-        let mut historical_proxy_client = historical_proxy_client::HistoricalProxy::new(remoting);
-
-        historical_proxy_client
-            .add_endpoint(
-                TRANSACTIONS.first_key_value().unwrap().1.slot_number - 100,
-                eth_events,
-            )
-            .send_recv(historical_proxy)
-            .await
-            .expect("Failed to add endpoint to Historical Proxy");
-
-        Contracts {
-            admin,
-            suri,
-            vft_manager: vft_manager_id,
-            historical_proxy,
-            vft_id: vft_ids,
-            eth_events,
-        }
+        panic!(
+            "Proof block headers length mismatch: expected {}, got {}",
+            proof.payload.proof_block.headers.len(),
+            event.proof_block.headers.len()
+        );
     }
-}
-
-struct CheckpointMocker(ActorId);
-
-impl CheckpointMocker {
-    async fn run(&self, mut listener: EventListener, api: &GearApi) {
-        let (source, value, message_id) = listener
-            .proc(|event| {
-                if let gclient::Event::Gear(gclient::GearEvent::UserMessageSent {
-                    message, ..
-                }) = event
-                {
-                    if message.destination.0 == self.0.into_bytes()
-                        && message
-                            .payload
-                            .0
-                            .starts_with(service_checkpoint_for::io::Get::ROUTE)
-                        && message.details.is_none()
-                    {
-                        let source = message.source;
-
-                        let params_raw =
-                            &message.payload.0[service_checkpoint_for::io::Get::ROUTE.len()..];
-                        let params: u64 =
-                            Decode::decode(&mut &params_raw[..]).expect("Failed to decode params");
-
-                        return Some((source, params, message.id));
-                    }
-                }
-
-                None
-            })
-            .await
-            .expect("Failed to process event");
-
-        println!("Received checkpoint request for slot #{value}");
-
-        let txs = &*TRANSACTIONS;
-
-        for tx in txs.iter() {
-            if tx.1.slot_number == value {
-                let checkpoint = tx.1.checkpoint;
-                let root = H256::from(tx.1.checkpoint_root.0);
-                let gas_limit = api.block_gas_limit().unwrap();
-                println!("checkpoint for slot #{value} is {checkpoint}, root={root:?}");
-
-                let reply: <service_checkpoint_for::io::Get as ActionIo>::Reply =
-                    Ok((checkpoint, root));
-
-                let mut bytes = Vec::with_capacity(
-                    reply.encoded_size() + service_checkpoint_for::io::Get::ROUTE.len(),
-                );
-
-                bytes.extend_from_slice(&service_checkpoint_for::io::Get::ROUTE);
-                reply.encode_to(&mut bytes);
-
-                api.send_reply_bytes(message_id.into(), bytes, gas_limit, 0)
-                    .await
-                    .expect("Failed to send message");
-                break;
-            }
-        }
-    }
+    assert_eq!(proof.payload.proof_block, event.proof_block);
+    
 }

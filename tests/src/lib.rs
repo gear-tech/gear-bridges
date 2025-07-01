@@ -10,6 +10,7 @@ use sp_core::{crypto::DEV_PHRASE, sr25519::Pair};
 use sp_runtime::traits::IdentifyAccount;
 use sp_runtime::traits::Verify;
 use sp_runtime::MultiSignature;
+
 use std::str::FromStr;
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -29,7 +30,7 @@ mod vft_manager;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 
-static LOCK: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new((1_000, HashMap::new())));
+static LOCK: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new((rand::random(), HashMap::new())));
 
 pub const DEFAULT_BALANCE: u128 = 500_000_000_000_000;
 

@@ -1,8 +1,10 @@
+use serde::Serialize;
+
 use super::*;
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#beaconblockheader).
 #[derive(
-    Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
+    Debug, Clone, Decode, Encode, Deserialize, Serialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
 pub struct BlockHeader {
     #[serde(deserialize_with = "utils::deserialize_u64")]

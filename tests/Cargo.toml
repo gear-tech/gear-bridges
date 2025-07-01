@@ -50,3 +50,5 @@ bridging-payment.workspace = true
 alloy-sol-types.workspace = true
 pretty_env_logger.workspace = true
 log.workspace = true
+mock-contract = { workspace = true, features = ["std"] }
+rand.workspace = true

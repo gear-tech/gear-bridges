@@ -126,7 +126,7 @@ impl MessageSender {
                     }
                 }
                 Err(err) => {
-                    self.last_request = Some(request);
+                    log::error!("Transaction {} failed for second time, aborting: {err:?}", request.tx_hash);
                     return Err(err);
                 }
             }

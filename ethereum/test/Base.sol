@@ -167,15 +167,12 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 4
         );
 
-        address[] memory proxies = new address[](2);
-
-        proxies[0] = messageQueueAddress;
-        proxies[1] = erc20ManagerAddress;
-
-        governanceAdmin = new GovernanceAdmin(deploymentArguments.governanceAdmin, messageQueueAddress, proxies);
+        governanceAdmin =
+            new GovernanceAdmin(deploymentArguments.governanceAdmin, messageQueueAddress, erc20ManagerAddress);
         console.log("    GovernanceAdmin:     ", address(governanceAdmin));
 
-        governancePauser = new GovernancePauser(deploymentArguments.governancePauser, messageQueueAddress, proxies);
+        governancePauser =
+            new GovernancePauser(deploymentArguments.governancePauser, messageQueueAddress, erc20ManagerAddress);
         console.log("    GovernancePauser:    ", address(governancePauser));
 
         console.log();

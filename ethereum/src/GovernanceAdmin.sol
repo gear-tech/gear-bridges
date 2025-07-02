@@ -36,22 +36,18 @@ contract GovernanceAdmin is IMessageHandler, IGovernance {
 
     bytes32 public governance;
     address public messageQueue;
-    mapping(address proxy => bool isKnownProxy) private _proxies;
+    address public erc20Manager;
 
     /**
      * @dev Initializes the GovernanceAdmin contract.
      * @param _governance The governance address (Vara Network address).
      * @param _messageQueue The message queue address.
-     * @param proxies The proxies addresses (MessageQueue, ERC20Manager).
+     * @param _erc20Manager The ERC20Manager address.
      */
-    constructor(bytes32 _governance, address _messageQueue, address[] memory proxies) {
+    constructor(bytes32 _governance, address _messageQueue, address _erc20Manager) {
         governance = _governance;
         messageQueue = _messageQueue;
-
-        for (uint256 i = 0; i < proxies.length; i++) {
-            address proxy = proxies[i];
-            _proxies[proxy] = true;
-        }
+        erc20Manager = _erc20Manager;
     }
 
     /**
@@ -154,7 +150,7 @@ contract GovernanceAdmin is IMessageHandler, IGovernance {
             proxy := shr(PROXY_ADDRESS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
         }
 
-        if (!(_proxies[proxy])) {
+        if (!(proxy == messageQueue || proxy == erc20Manager)) {
             return false;
         }
 

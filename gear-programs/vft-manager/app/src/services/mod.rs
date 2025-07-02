@@ -6,6 +6,7 @@ use sails_rs::{
     prelude::*,
 };
 use vft_client::traits::*;
+use vft_manager_client::traits::VftManager as _;
 
 mod error;
 mod token_mapping;
@@ -18,6 +19,10 @@ mod request_bridging;
 pub mod submit_receipt;
 
 pub use submit_receipt::abi as eth_abi;
+
+mod vft_manager_client {
+    include!(concat!(env!("OUT_DIR"), "/vft_manager_client.rs"));
+}
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
 
@@ -422,6 +427,13 @@ impl VftManager {
         if !self.state().is_paused {
             panic!("Not paused");
         }
+
+        let service = vft_manager_client::VftManager::new(GStdRemoting);
+        service
+            .is_paused()
+            .recv(vft_manager_new)
+            .await
+            .expect("vft_manager_new doesn't seem to be a VftManager program");
 
         if self
             .state()

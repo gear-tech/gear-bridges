@@ -17,12 +17,14 @@ import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
 import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
 import {IGovernance} from "./interfaces/IGovernance.sol";
 import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
+import {IPausable} from "./interfaces/IPausable.sol";
 
 contract ERC20Manager is
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
+    IPausable,
     IMessageHandler,
     IERC20Manager
 {

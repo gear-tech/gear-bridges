@@ -8,6 +8,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {IGovernance} from "./interfaces/IGovernance.sol";
 import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
+import {IPausable} from "./interfaces/IPausable.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
 import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
 
@@ -24,6 +25,7 @@ contract MessageQueue is
     AccessControlUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
+    IPausable,
     IMessageQueue
 {
     using Hasher for VaraMessage;

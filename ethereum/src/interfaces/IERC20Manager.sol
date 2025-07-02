@@ -3,12 +3,13 @@ pragma solidity ^0.8.30;
 
 import {IBridgingPayment} from "./IBridgingPayment.sol";
 import {IMessageHandler} from "./IMessageHandler.sol";
+import {IPausable} from "./IPausable.sol";
 import {LibString} from "src/libraries/LibString.sol";
 
 /**
  * @dev Interface for the ERC20Manager contract.
  */
-interface IERC20Manager is IMessageHandler {
+interface IERC20Manager is IPausable, IMessageHandler {
     /**
      * @dev Error thrown when the sender is not the message queue.
      */

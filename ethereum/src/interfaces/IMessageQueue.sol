@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
+import {IPausable} from "./IPausable.sol";
+
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.
  *      - https://github.com/gear-tech/gear/blob/v1.8.1/pallets/gear-eth-bridge/src/internal.rs#L58
@@ -15,7 +17,7 @@ struct VaraMessage {
 /**
  * @dev Interface for the MessageQueue contract.
  */
-interface IMessageQueue {
+interface IMessageQueue is IPausable {
     /**
      * @dev Emergency stop status is active.
      */

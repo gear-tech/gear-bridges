@@ -64,6 +64,30 @@ interface IMessageQueue is IPausable {
     );
 
     /**
+     * @dev Returns governance admin address.
+     * @return governanceAdmin Governance admin address.
+     */
+    function governanceAdmin() external view returns (address);
+
+    /**
+     * @dev Returns governance pauser address.
+     * @return governancePauser Governance pauser address.
+     */
+    function governancePauser() external view returns (address);
+
+    /**
+     * @dev Returns verifier address.
+     * @return verifier Verifier address.
+     */
+    function verifier() external view returns (address);
+
+    /**
+     * @dev Returns emergency stop status.
+     * @return emergencyStop emergency stop status.
+     */
+    function emergencyStop() external view returns (bool);
+
+    /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
      *      Upon successfully storing data about block number and corresponding Merkle root,
@@ -95,12 +119,6 @@ interface IMessageQueue is IPausable {
      * @return blockNumber Block number for provided merkle root.
      */
     function getBlockNumber(bytes32 merkleRoot) external view returns (uint256);
-
-    /**
-     * @dev Returns emergency stop status.
-     * @return emergencyStop emergency stop status.
-     */
-    function emergencyStop() external view returns (bool);
 
     /**
      * @dev Verifies and processes message originated from Vara Network.

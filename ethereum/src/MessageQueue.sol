@@ -51,11 +51,11 @@ contract MessageQueue is
      * @dev Initializes the MessageQueue contract with the Verifier address.
      *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
-     * @param governanceAdmin The address of the GovernanceAdmin contract that will process messages.
-     * @param governancePauser The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param verifier The address of the Verifier contract that will verify merkle roots.
+     * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
+     * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
+     * @param verifier_ The address of the Verifier contract that will verify merkle roots.
      */
-    function initialize(IGovernance governanceAdmin, IGovernance governancePauser, IVerifier verifier)
+    function initialize(IGovernance governanceAdmin_, IGovernance governancePauser_, IVerifier verifier_)
         public
         initializer
     {
@@ -63,14 +63,46 @@ contract MessageQueue is
         __Pausable_init();
         __UUPSUpgradeable_init();
 
-        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin));
+        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
 
-        _grantRole(PAUSER_ROLE, address(governanceAdmin));
-        _grantRole(PAUSER_ROLE, address(governancePauser));
+        _grantRole(PAUSER_ROLE, address(governanceAdmin_));
+        _grantRole(PAUSER_ROLE, address(governancePauser_));
 
-        _governanceAdmin = governanceAdmin;
-        _governancePauser = governancePauser;
-        _verifier = verifier;
+        _governanceAdmin = governanceAdmin_;
+        _governancePauser = governancePauser_;
+        _verifier = verifier_;
+    }
+
+    /**
+     * @dev Returns governance admin address.
+     * @return governanceAdmin Governance admin address.
+     */
+    function governanceAdmin() external view returns (address) {
+        return address(_governanceAdmin);
+    }
+
+    /**
+     * @dev Returns governance pauser address.
+     * @return governancePauser Governance pauser address.
+     */
+    function governancePauser() external view returns (address) {
+        return address(_governancePauser);
+    }
+
+    /**
+     * @dev Returns verifier address.
+     * @return verifier Verifier address.
+     */
+    function verifier() external view returns (address) {
+        return address(_verifier);
+    }
+
+    /**
+     * @dev Returns emergency stop status.
+     * @return emergencyStop emergency stop status.
+     */
+    function emergencyStop() external view returns (bool) {
+        return _emergencyStop;
     }
 
     /**
@@ -155,14 +187,6 @@ contract MessageQueue is
      */
     function getBlockNumber(bytes32 merkleRoot) external view returns (uint256) {
         return _merkleRoots[merkleRoot];
-    }
-
-    /**
-     * @dev Returns emergency stop status.
-     * @return emergencyStop emergency stop status.
-     */
-    function emergencyStop() external view returns (bool) {
-        return _emergencyStop;
     }
 
     /**

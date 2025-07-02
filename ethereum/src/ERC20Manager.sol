@@ -163,16 +163,16 @@ contract ERC20Manager is
      * @dev Initializes the ERC20Manager contract with the message queue and VFT manager addresses.
      *      GovernanceAdmin contract is used to upgrade, pause/unpause the ERC20Manager contract.
      *      GovernancePauser contract is used to pause/unpause the ERC20Manager contract.
-     * @param governanceAdmin The address of the GovernanceAdmin contract that will process messages.
-     * @param governancePauser The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param messageQueue The address of the message queue contract.
+     * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
+     * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
+     * @param messageQueue_ The address of the message queue contract.
      * @param vftManager The address of the VFT manager contract (on Vara Network).
      * @param tokens The tokens that will be registered.
      */
     function initialize(
-        IGovernance governanceAdmin,
-        IGovernance governancePauser,
-        address messageQueue,
+        IGovernance governanceAdmin_,
+        IGovernance governancePauser_,
+        address messageQueue_,
         bytes32 vftManager,
         TokenWithSupplyType[] memory tokens
     ) public initializer {
@@ -180,14 +180,14 @@ contract ERC20Manager is
         __Pausable_init();
         __UUPSUpgradeable_init();
 
-        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin));
+        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
 
-        _grantRole(PAUSER_ROLE, address(governanceAdmin));
-        _grantRole(PAUSER_ROLE, address(governancePauser));
+        _grantRole(PAUSER_ROLE, address(governanceAdmin_));
+        _grantRole(PAUSER_ROLE, address(governancePauser_));
 
-        _governanceAdmin = governanceAdmin;
-        _governancePauser = governancePauser;
-        _messageQueue = messageQueue;
+        _governanceAdmin = governanceAdmin_;
+        _governancePauser = governancePauser_;
+        _messageQueue = messageQueue_;
         _vftManager = vftManager;
 
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -199,6 +199,30 @@ contract ERC20Manager is
                 _tokenSupplyType[tokenWithSupplyType.token] = tokenWithSupplyType.supplyType;
             }
         }
+    }
+
+    /**
+     * @dev Returns governance admin address.
+     * @return governanceAdmin Governance admin address.
+     */
+    function governanceAdmin() external view returns (address) {
+        return address(_governanceAdmin);
+    }
+
+    /**
+     * @dev Returns governance pauser address.
+     * @return governancePauser Governance pauser address.
+     */
+    function governancePauser() external view returns (address) {
+        return address(_governancePauser);
+    }
+
+    /**
+     * @dev Returns message queue address.
+     * @return messageQueue Message queue address.
+     */
+    function messageQueue() external view returns (address) {
+        return address(_messageQueue);
     }
 
     /**

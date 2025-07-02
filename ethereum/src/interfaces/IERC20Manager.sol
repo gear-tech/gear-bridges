@@ -92,6 +92,24 @@ interface IERC20Manager is IPausable, IMessageHandler {
     }
 
     /**
+     * @dev Returns governance admin address.
+     * @return governanceAdmin Governance admin address.
+     */
+    function governanceAdmin() external view returns (address);
+
+    /**
+     * @dev Returns governance pauser address.
+     * @return governancePauser Governance pauser address.
+     */
+    function governancePauser() external view returns (address);
+
+    /**
+     * @dev Returns message queue address.
+     * @return messageQueue Message queue address.
+     */
+    function messageQueue() external view returns (address);
+
+    /**
      * @dev Requests bridging of tokens.
      *      Emits `BridgingRequested` event.
      * @param token Token address.

@@ -8,6 +8,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ERC20GearSupply} from "./erc20/managed/ERC20GearSupply.sol";
 import {LibString} from "./libraries/LibString.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
@@ -29,6 +30,8 @@ contract ERC20Manager is
     IERC20Manager
 {
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.Bytes32Set;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     /**
      * @dev `bytes32 sender` size.
@@ -94,6 +97,23 @@ contract ERC20Manager is
     //////////////////////////////////////////////////////////////////////////////
 
     /**
+     * @dev Add VFT manager message discriminant.
+     */
+    uint256 internal constant ADD_VFT_MANAGER = 0x00;
+
+    /**
+     * @dev `bytes32 vftManager` size.
+     */
+    uint256 internal constant VFT_MANAGER_SIZE = 32;
+
+    /**
+     * @dev Size of add VFT manager message.
+     */
+    uint256 internal constant ADD_VFT_MANAGER_MESSAGE_SIZE = DISCRIMINANT_SIZE + VFT_MANAGER_SIZE;
+
+    //////////////////////////////////////////////////////////////////////////////
+
+    /**
      * @dev `bytes32 tokenName` size.
      */
     uint256 internal constant TOKEN_NAME_SIZE = 32;
@@ -148,9 +168,10 @@ contract ERC20Manager is
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
     address private _messageQueue;
-    bytes32 private _vftManager;
+    EnumerableSet.Bytes32Set private _knownVftManagers;
+    address[] private _knownTokens;
     mapping(address token => SupplyType supplyType) private _tokenSupplyType;
-    mapping(address bridgingPayment => bool isKnown) private _knownBridgingPayments;
+    EnumerableSet.AddressSet private _knownBridgingPayments;
 
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
@@ -188,7 +209,7 @@ contract ERC20Manager is
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
         _messageQueue = messageQueue_;
-        _vftManager = vftManager;
+        _knownVftManagers.add(vftManager);
 
         for (uint256 i = 0; i < tokens.length; i++) {
             TokenWithSupplyType memory tokenWithSupplyType = tokens[i];
@@ -196,6 +217,7 @@ contract ERC20Manager is
             if (tokenWithSupplyType.supplyType == SupplyType.Unknown) {
                 revert InvalidSupplyType();
             } else {
+                _knownTokens.push(tokenWithSupplyType.token);
                 _tokenSupplyType[tokenWithSupplyType.token] = tokenWithSupplyType.supplyType;
             }
         }
@@ -223,6 +245,57 @@ contract ERC20Manager is
      */
     function messageQueue() external view returns (address) {
         return address(_messageQueue);
+    }
+
+    /**
+     * @dev Returns list of known VFT managers.
+     * @return knownVftManagers List of known VFT managers.
+     */
+    function knownVftManagers() external view returns (bytes32[] memory) {
+        return _knownVftManagers.values();
+    }
+
+    /**
+     * @dev Returns whether the VFT manager is known.
+     * @param vftManager VFT manager address.
+     * @return isKnown `true` if the VFT manager is known, `false` otherwise.
+     */
+    function isKnownVftManager(bytes32 vftManager) external view returns (bool) {
+        return _knownVftManagers.contains(vftManager);
+    }
+
+    /**
+     * @dev Returns list of known tokens.
+     * @return knownTokens List of known tokens.
+     */
+    function knownTokens() external view returns (address[] memory) {
+        return _knownTokens;
+    }
+
+    /**
+     * @dev Returns supply type of token.
+     * @param token Token address.
+     * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
+     */
+    function getTokenSupplyType(address token) external view returns (SupplyType) {
+        return _tokenSupplyType[token];
+    }
+
+    /**
+     * @dev Returns list of known bridging payments.
+     * @return knownBridgingPayments List of known bridging payments.
+     */
+    function knownBridgingPayments() external view returns (address[] memory) {
+        return _knownBridgingPayments.values();
+    }
+
+    /**
+     * @dev Returns whether the bridging payment is known.
+     * @param bridgingPayment Bridging payment address.
+     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
+     */
+    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool) {
+        return _knownBridgingPayments.contains(bridgingPayment);
     }
 
     /**
@@ -279,7 +352,7 @@ contract ERC20Manager is
         payable
         whenNotPaused
     {
-        if (!_knownBridgingPayments[bridgingPayment]) {
+        if (!_knownBridgingPayments.contains(bridgingPayment)) {
             revert InvalidBridgingPayment();
         }
 
@@ -310,7 +383,7 @@ contract ERC20Manager is
         bytes32 s,
         address bridgingPayment
     ) public payable whenNotPaused {
-        if (!_knownBridgingPayments[bridgingPayment]) {
+        if (!_knownBridgingPayments.contains(bridgingPayment)) {
             revert InvalidBridgingPayment();
         }
 
@@ -329,7 +402,7 @@ contract ERC20Manager is
         BridgingPayment bridgingPayment = new BridgingPayment(address(this), fee, msg.sender);
 
         address bridgingPaymentAddress = address(bridgingPayment);
-        _knownBridgingPayments[bridgingPaymentAddress] = true;
+        _knownBridgingPayments.add(bridgingPaymentAddress);
 
         emit BridgingPaymentCreated(bridgingPaymentAddress);
 
@@ -346,12 +419,12 @@ contract ERC20Manager is
             revert InvalidSender();
         }
 
-        if (source == _vftManager) {
+        if (_knownVftManagers.contains(source)) {
             if (!_tryParseAndApplyTransferMessage(payload)) {
                 revert InvalidPayload();
             }
         } else if (source == _governanceAdmin.governance()) {
-            if (!_tryParseAndApplyRegisterTokenMessage(payload)) {
+            if (!_tryParseAndApplyGovernanceMessage(payload)) {
                 revert InvalidPayload();
             }
         } else {
@@ -409,7 +482,7 @@ contract ERC20Manager is
     }
 
     /**
-     * @dev Tries to parse and apply register token message originated from Vara Network.
+     * @dev Tries to parse and apply governance message originated from Vara Network.
      *
      *      Payload format:
      *      ```solidity
@@ -417,6 +490,11 @@ contract ERC20Manager is
      *      ```
      *
      *      `discriminant` can be:
+     *      - `ADD_VFT_MANAGER = 0x00` - add new VFT manager to list of known VFT managers
+     *          ```solidity
+     *          bytes32 vftManager; // 32 bytes
+     *          ```
+     *
      *      - `SupplyType.Ethereum = 0x01` - register Ethereum token
      *          ```solidity
      *          bytes32 tokenName; // 1 byte length + 31 bytes datas
@@ -432,7 +510,7 @@ contract ERC20Manager is
      * @param payload Payload of the message (message from Vara Network).
      * @return success `true` if the message is parsed and applied, `false` otherwise.
      */
-    function _tryParseAndApplyRegisterTokenMessage(bytes calldata payload) private returns (bool) {
+    function _tryParseAndApplyGovernanceMessage(bytes calldata payload) private returns (bool) {
         if (!(payload.length > 0)) {
             return false;
         }
@@ -443,8 +521,23 @@ contract ERC20Manager is
             discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
         }
 
-        if (!(discriminant >= uint256(SupplyType.Ethereum) && discriminant <= uint256(SupplyType.Gear))) {
+        if (!(discriminant >= ADD_VFT_MANAGER && discriminant <= uint256(SupplyType.Gear))) {
             return false;
+        }
+
+        if (discriminant == ADD_VFT_MANAGER) {
+            if (!(payload.length == ADD_VFT_MANAGER_MESSAGE_SIZE)) {
+                return false;
+            }
+
+            bytes32 vftManager;
+            assembly ("memory-safe") {
+                vftManager := calldataload(payload.offset)
+            }
+
+            _knownVftManagers.add(vftManager);
+
+            emit VftManagerAdded(vftManager);
         }
 
         if (discriminant == uint256(SupplyType.Ethereum)) {
@@ -477,10 +570,15 @@ contract ERC20Manager is
                 return false;
             }
 
-            ERC20GearSupply token = new ERC20GearSupply(
-                address(this), LibString.unpackOne(tokenName), LibString.unpackOne(tokenSymbol), tokenDecimals
-            );
+            string memory tokenNameStr = LibString.unpackOne(tokenName);
+            string memory tokenSymbolStr = LibString.unpackOne(tokenSymbol);
+
+            ERC20GearSupply token = new ERC20GearSupply(address(this), tokenNameStr, tokenSymbolStr, tokenDecimals);
+
+            _knownTokens.push(address(token));
             _tokenSupplyType[address(token)] = SupplyType.Ethereum;
+
+            emit EthereumTokenRegistered(tokenNameStr, tokenSymbolStr, tokenDecimals);
         }
 
         if (discriminant == uint256(SupplyType.Gear)) {
@@ -495,27 +593,12 @@ contract ERC20Manager is
                 token := shr(TOKEN2_BIT_SHIFT, calldataload(add(payload.offset, OFFSET4)))
             }
 
+            _knownTokens.push(token);
             _tokenSupplyType[token] = SupplyType.Gear;
+
+            emit GearTokenRegistered(token);
         }
 
         return true;
-    }
-
-    /**
-     * @dev Returns supply type of token.
-     * @param token Token address.
-     * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
-     */
-    function getTokenSupplyType(address token) external view returns (SupplyType) {
-        return _tokenSupplyType[token];
-    }
-
-    /**
-     * @dev Returns whether the bridging payment is known.
-     * @param bridgingPayment Bridging payment address.
-     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
-     */
-    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool) {
-        return _knownBridgingPayments[bridgingPayment];
     }
 }

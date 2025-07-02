@@ -51,6 +51,21 @@ interface IERC20Manager is IPausable, IMessageHandler {
     event BridgingPaymentCreated(address indexed bridgingPayment);
 
     /**
+     * @dev Event emitted when VFT manager is added to list of known VFT managers.
+     */
+    event VftManagerAdded(bytes32 indexed vftManager);
+
+    /**
+     * @dev Event emitted when Ethereum token is registered.
+     */
+    event EthereumTokenRegistered(string indexed tokenName, string indexed tokenSymbol, uint8 tokenDecimals);
+
+    /**
+     * @dev Event emitted when Gear token is registered.
+     */
+    event GearTokenRegistered(address indexed token);
+
+    /**
      * @dev Enum representing supply type of token.
      *
      *      - `Unknown` - token is not registered.
@@ -110,6 +125,45 @@ interface IERC20Manager is IPausable, IMessageHandler {
     function messageQueue() external view returns (address);
 
     /**
+     * @dev Returns list of known VFT managers.
+     * @return knownVftManagers List of known VFT managers.
+     */
+    function knownVftManagers() external view returns (bytes32[] memory);
+
+    /**
+     * @dev Returns whether the VFT manager is known.
+     * @param vftManager VFT manager address.
+     * @return isKnown `true` if the VFT manager is known, `false` otherwise.
+     */
+    function isKnownVftManager(bytes32 vftManager) external view returns (bool);
+
+    /**
+     * @dev Returns list of known tokens.
+     * @return knownTokens List of known tokens.
+     */
+    function knownTokens() external view returns (address[] memory);
+
+    /**
+     * @dev Returns supply type of token.
+     * @param token Token address.
+     * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
+     */
+    function getTokenSupplyType(address token) external view returns (SupplyType);
+
+    /**
+     * @dev Returns list of known bridging payments.
+     * @return knownBridgingPayments List of known bridging payments.
+     */
+    function knownBridgingPayments() external view returns (address[] memory);
+
+    /**
+     * @dev Returns whether the bridging payment is known.
+     * @param bridgingPayment Bridging payment address.
+     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
+     */
+    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool);
+
+    /**
      * @dev Requests bridging of tokens.
      *      Emits `BridgingRequested` event.
      * @param token Token address.
@@ -161,20 +215,6 @@ interface IERC20Manager is IPausable, IMessageHandler {
      * @return bridgingPaymentAddress Address of the created `bridgingPayment` contract.
      */
     function createBridgingPayment(uint256 fee) external returns (address);
-
-    /**
-     * @dev Returns supply type of token.
-     * @param token Token address.
-     * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
-     */
-    function getTokenSupplyType(address token) external view returns (SupplyType);
-
-    /**
-     * @dev Returns whether the bridging payment is known.
-     * @param bridgingPayment Bridging payment address.
-     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
-     */
-    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool);
 }
 
 /**
@@ -187,6 +227,13 @@ struct TransferMessage {
     address receiver;
     address token;
     uint256 amount;
+}
+
+/**
+ * @dev Type representing payload of the message that adds VFT manager to list of known VFT managers.
+ */
+struct AddVftManagerMessage {
+    bytes32 vftManager;
 }
 
 /**
@@ -216,6 +263,15 @@ library ERC20ManagerPacker {
      */
     function pack(TransferMessage memory message) internal pure returns (bytes memory) {
         return abi.encodePacked(message.sender, message.receiver, message.token, message.amount);
+    }
+
+    /**
+     * @dev Packs `AddVftManagerMessage` into a binary format.
+     * @param message Message to pack.
+     * @return packed Packed message.
+     */
+    function pack(AddVftManagerMessage memory message) internal pure returns (bytes memory) {
+        return abi.encodePacked(uint8(0x00), message.vftManager);
     }
 
     /**

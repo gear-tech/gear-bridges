@@ -125,7 +125,6 @@ ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
 getrandom = { version = "0.2", default-features = false }
-git-download = "0.1"
 hash-db = { version = "0.15.2", default-features = false }
 hash256-std-hasher = { version = "0.15.2", default-features = false }
 hex = { version = "0.4.3", default-features = false }

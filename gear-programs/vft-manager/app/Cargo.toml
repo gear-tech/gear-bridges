@@ -19,7 +19,6 @@ getrandom = { workspace = true, features = ["custom"] }
 lazy_static = { workspace = true, features = ["spin_no_std"] }
 
 [build-dependencies]
-git-download.workspace = true
 sails-client-gen.workspace = true
 
 [features]

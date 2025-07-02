@@ -20,6 +20,7 @@ pub mod submit_receipt;
 
 pub use submit_receipt::abi as eth_abi;
 
+#[allow(dead_code)]
 mod vft_manager_client {
     include!(concat!(env!("OUT_DIR"), "/vft_manager_client.rs"));
 }

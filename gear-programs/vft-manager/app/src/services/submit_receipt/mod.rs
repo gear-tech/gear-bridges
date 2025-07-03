@@ -120,12 +120,14 @@ pub async fn submit_receipt(
 
     let amount = U256::from_little_endian(event.amount.as_le_slice());
     let receiver = ActorId::from(event.to.0);
+    let erc20_sender = H160::from(event.from.0 .0);
 
     match service.state().token_map.get_supply_type(&vara_token_id)? {
         TokenSupply::Ethereum => {
             token_operations::mint(
                 slot,
                 transaction_index,
+                erc20_sender,
                 vara_token_id,
                 receiver,
                 amount,
@@ -138,6 +140,7 @@ pub async fn submit_receipt(
             token_operations::unlock(
                 slot,
                 transaction_index,
+                erc20_sender,
                 vara_token_id,
                 receiver,
                 amount,

@@ -123,12 +123,16 @@ pub enum Event {
     HistoricalProxyAddressChanged { old: ActorId, new: ActorId },
     /// Address of the `ERC20Manager` contract address on Ethereum was changed.
     Erc20ManagerAddressChanged { old: H160, new: H160 },
-    /// Rlp receipt submitted via [VftManager::submit_receipt] processed successfully.
-    RlpReceiptProcessed {
-        /// Slot of the processed receipt.
-        slot: u64,
-        /// Transaction index of the processed receipt.
-        transaction_index: u64,
+    /// Transaction receipt submitted via [VftManager::submit_receipt] processed successfully.
+    BridgingAccepted {
+        /// The recipient
+        to: ActorId,
+        /// The sender on Ethereum side
+        from: H160,
+        /// The amount bridged
+        amount: U256,
+        /// Respective Vara token Id
+        token: ActorId,
     },
 }
 
@@ -386,14 +390,7 @@ impl VftManager {
     ) -> Result<(), Error> {
         self.ensure_running()?;
 
-        submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp)
-            .await
-            .map(|_| {
-                let _ = self.emit_event(Event::RlpReceiptProcessed {
-                    slot,
-                    transaction_index,
-                });
-            })
+        submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
     }
 
     /// Request bridging of tokens from Gear to Ethereum.
@@ -647,11 +644,13 @@ impl VftManager {
             use submit_receipt::token_operations;
 
             let source = Syscall::message_source();
+            let erc20_sender = H160::zero();
             match _supply_type {
                 TokenSupply::Ethereum => {
                     token_operations::mint(
                         _slot,
                         _transaction_index,
+                        erc20_sender,
                         source,
                         source,
                         100u32.into(),
@@ -664,6 +663,7 @@ impl VftManager {
                     token_operations::unlock(
                         _slot,
                         _transaction_index,
+                        erc20_sender,
                         source,
                         source,
                         100u32.into(),

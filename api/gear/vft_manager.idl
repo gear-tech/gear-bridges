@@ -71,7 +71,7 @@ type Error = enum {
   /// Failed to set reply hook.
   ReplyHook,
   /// Failed to extract the reply code from a reply message.
-  ReplyCode,
+  NoReplyCode,
   /// Original `MessageId` wasn't found in message tracker when processing reply.
   MessageNotFound,
   /// Invalid message status was found in the message tracker when processing reply.
@@ -314,12 +314,16 @@ service VftManager {
       old: h160,
       new: h160,
     };
-    /// Rlp receipt submitted via [VftManager::submit_receipt] processed successfully.
-    RlpReceiptProcessed: struct {
-      /// Slot of the processed receipt.
-      slot: u64,
-      /// Transaction index of the processed receipt.
-      transaction_index: u64,
+    /// Transaction receipt submitted via [VftManager::submit_receipt] processed successfully.
+    BridgingAccepted: struct {
+        /// The recipient
+        to: ActorId,
+        /// The sender on Ethereum side
+        from: H160,
+        /// The amount bridged
+        amount: U256,
+        /// Respective Vara token Id
+        token: ActorId,
     };
   }
 };

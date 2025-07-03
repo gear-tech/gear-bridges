@@ -1,6 +1,4 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
-use alloy::signers::k256::elliptic_curve::rand_core::le;
-use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use anyhow::anyhow;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::gas::GasInfo;
@@ -10,7 +8,6 @@ use tokio::time::{sleep, Duration};
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
-use vft_manager_app::services::eth_abi::ERC20_MANAGER;
 use vft_manager_client::{
     traits::*, vft_manager::events::VftManagerEvents, Config, Error, InitConfig, Order, TokenSupply,
 };
@@ -1517,7 +1514,7 @@ async fn deploy_programs(
     create_vft: bool,
     add_roles: bool,
     supply_type: TokenSupply,
-) -> Result<(impl Remoting + Clone, GearApi, ActorId, ActorId, ActorId)> {
+) -> Result<(impl Remoting + Clone, GearApi, ActorId, ActorId, ActorId, H160)> {
     let conn = connect_to_node(
         &[DEFAULT_BALANCE],
         "vft-manager",
@@ -1635,9 +1632,10 @@ async fn submit_receipt_works() -> Result<()> {
         deploy_programs(true, true, TokenSupply::Ethereum).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
+    let sender = H160([99_u8; 20]);
     let receipt_rlp = crate::create_receipt_rlp(
         erc20_manager_address,
-        99.into(),
+        sender,
         42.into(),
         erc20_addr,
         U256::zero(),
@@ -1737,7 +1735,7 @@ async fn submit_receipt_works() -> Result<()> {
 async fn error_in_vft_propagated_correctly() -> Result<()> {
     use core::panic;
 
-    let (remoting, api, vft_manager_id, user_id, _) =
+    let (remoting, api, vft_manager_id, user_id, _, erc20_addr) =
         deploy_programs(true, false, TokenSupply::Ethereum).await?;
 
     let gas_limit = api.block_gas_limit().unwrap();
@@ -1755,7 +1753,15 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
     let mut listener = api.subscribe().await.unwrap();
     let mut another_listener = api.clone().subscribe().await.unwrap();
 
-    let receipt_rlp = create_receipt_rlp(42.into(), ERC20_TOKEN_ETH_SUPPLY, U256::zero());
+    let erc20_manager_address = H160([1_u8; 20]);
+    let sender = H160([99_u8; 20]);
+    let receipt_rlp = crate::create_receipt_rlp(
+        erc20_manager_address,
+        sender,
+        42.into(),
+        erc20_addr,
+        U256::zero(),
+    );
     let result = service
         .submit_receipt(0, 1, receipt_rlp)
         .with_gas_limit(gas_limit)
@@ -1848,9 +1854,10 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         deploy_programs(false, false, TokenSupply::Gear).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
+    let sender = H160([99_u8; 20]);
     let receipt_rlp = crate::create_receipt_rlp(
         erc20_manager_address,
-        99.into(),
+        sender,
         42.into(),
         erc20_addr,
         U256::zero(),
@@ -2003,9 +2010,10 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
         deploy_programs(false, false, TokenSupply::Gear).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
+    let sender = H160([99_u8; 20]);
     let receipt_rlp = crate::create_receipt_rlp(
         erc20_manager_address,
-        99.into(),
+        sender,
         42.into(),
         erc20_addr,
         U256::zero(),

@@ -944,63 +944,46 @@ async fn update_vfts() -> Result<()> {
         .await;
     assert!(result.is_err());
 
-    // deploy another VFT-manager that used as an upgraded VFT
-    let salt2 = {
-        let mut salt_new = Vec::with_capacity(2 * salt.len());
-
-        salt_new.extend_from_slice(&salt);
-        salt_new.extend_from_slice(&salt);
-
-        salt_new
-    };
-    let vft = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt2.clone())
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    println!("program_id = {:?} (vft)", hex::encode(vft));
-
-    // deploy Vara Fungible Token
+    // deploy Vara Fungible Token programs
     let factory = vft_client::VftFactory::new(remoting.clone());
-    let extended_vft_id_1 = factory
+    let vft = factory
         .new("TEST_TOKEN1".into(), "TT1".into(), 20)
         .with_gas_limit(gas_limit)
         .send_recv(code_id_vft, salt)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    println!(
-        "program_id = {:?} (extended_vft1)",
-        hex::encode(extended_vft_id_1)
-    );
+    println!("program_id = {:?} (vft)", hex::encode(vft));
 
-    // deploy another Vara Fungible Token
-    let factory = vft_client::VftFactory::new(remoting.clone());
-    let extended_vft_id_2 = factory
-        .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+    let vft_upgraded = factory
+        .new("TEST_TOKEN12".into(), "TT12".into(), 20)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id_vft, salt2)
+        .send_recv(code_id_vft, [salt, salt].concat())
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
     println!(
-        "program_id = {:?} (extended_vft2)",
-        hex::encode(extended_vft_id_2)
+        "program_id = {:?} (vft_upgraded)",
+        hex::encode(vft_upgraded)
     );
+
+    let vft1 = factory
+        .new("TEST_TOKEN1".into(), "TT1".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, [salt, salt, salt].concat())
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft1)", hex::encode(vft1));
+
+    let vft2 = factory
+        .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, [salt, salt, salt, salt].concat())
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft2)", hex::encode(vft2));
 
     service
         .map_vara_to_eth_address(vft, [1u8; 20].into(), TokenSupply::Gear)
@@ -1009,28 +992,29 @@ async fn update_vfts() -> Result<()> {
         .await
         .unwrap();
     service
-        .map_vara_to_eth_address(extended_vft_id_1, [2u8; 20].into(), TokenSupply::Ethereum)
+        .map_vara_to_eth_address(vft1, [2u8; 20].into(), TokenSupply::Ethereum)
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
     service
-        .map_vara_to_eth_address(extended_vft_id_2, [3u8; 20].into(), TokenSupply::Ethereum)
+        .map_vara_to_eth_address(vft2, [3u8; 20].into(), TokenSupply::Ethereum)
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
 
-    // pause the VftManager
-    let _ = service
+    // pause the Vft
+    let mut service_vft = vft_client::VftAdmin::new(remoting.clone());
+    let _ = service_vft
         .pause()
         .with_gas_limit(gas_limit)
         .send_recv(vft)
         .await;
 
-    // upgrade the VftManager so it exits
-    service
-        .upgrade(Default::default())
+    // upgrade the Vft
+    service_vft
+        .exit(vft_upgraded)
         .with_gas_limit(gas_limit)
         .send(vft)
         .await
@@ -1039,10 +1023,10 @@ async fn update_vfts() -> Result<()> {
     service
         .update_vfts(
             [
-                // upgraded "VFT"
-                (vft, Default::default()),
+                // upgraded VFT
+                (vft, vft_upgraded),
                 // the VFT isn't upgraded so should stay the same
-                (extended_vft_id_1, [1u8; 32].into()),
+                (vft1, [1u8; 32].into()),
             ]
             .to_vec(),
         )
@@ -1052,14 +1036,12 @@ async fn update_vfts() -> Result<()> {
         .unwrap();
 
     let mut expected: HashMap<_, _> = [
-        (
-            ActorId::default(),
-            (H160::from([1u8; 20]), TokenSupply::Gear),
-        ),
-        (extended_vft_id_1, ([2u8; 20].into(), TokenSupply::Ethereum)),
-        (extended_vft_id_2, ([3u8; 20].into(), TokenSupply::Ethereum)),
+        (vft_upgraded, (H160::from([1u8; 20]), TokenSupply::Gear)),
+        (vft1, ([2u8; 20].into(), TokenSupply::Ethereum)),
+        (vft2, ([3u8; 20].into(), TokenSupply::Ethereum)),
     ]
     .into();
+
     for (vft, erc20, supply) in service
         .vara_to_eth_addresses()
         .with_gas_limit(gas_limit)

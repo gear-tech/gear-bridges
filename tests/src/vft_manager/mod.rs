@@ -628,6 +628,8 @@ async fn upgrade() -> Result<()> {
         .send_recv(vft_manager_id)
         .await;
     assert!(result.is_err(), "result = {result:?}");
+    let error = format!("{result:?}");
+    assert!(error.contains("panicked with"), "error = {error}");
 
     // unpause the VftManager
     service

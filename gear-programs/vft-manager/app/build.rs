@@ -13,7 +13,6 @@ fn main() {
 
     // Generate client code from IDL file
     ClientGenerator::from_idl_path(&path_idl_file)
-        // .with_mocks("mocks")
         .generate_to(PathBuf::from(env::var("OUT_DIR").unwrap()).join("vft_manager_client.rs"))
         .unwrap();
 }

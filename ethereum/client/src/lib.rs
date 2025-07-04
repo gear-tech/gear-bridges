@@ -24,9 +24,7 @@ pub use alloy::primitives::TxHash;
 pub mod abi;
 use abi::{
     BridgingPayment, IERC20Manager, IMessageQueue,
-    IMessageQueue::{IMessageQueueInstance, VaraMessage},
-    IRelayer,
-    IRelayer::{IRelayerInstance, MerkleRoot},
+    IMessageQueue::{IMessageQueueInstance, MerkleRoot, VaraMessage},
 };
 
 pub mod error;
@@ -47,7 +45,6 @@ type ProviderType = FillProvider<
 pub struct Contracts {
     provider: ProviderType,
     message_queue_instance: IMessageQueueInstance<ProviderType, Ethereum>,
-    relayer_instance: IRelayerInstance<ProviderType, Ethereum>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,7 +87,6 @@ impl EthApi {
     pub async fn new(
         url: &str,
         message_queue_address: &str,
-        relayer_address: &str,
         private_key: Option<&str>,
     ) -> Result<EthApi, Error> {
         let signer = match private_key {
@@ -109,7 +105,6 @@ impl EthApi {
         let message_queue_address: Address = message_queue_address
             .parse()
             .map_err(|_| Error::WrongAddress)?;
-        let relayer_address: Address = relayer_address.parse().map_err(|_| Error::WrongAddress)?;
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
         let ws = WsConnect::new(url.clone());
@@ -118,11 +113,7 @@ impl EthApi {
             .connect_ws(ws)
             .await?;
 
-        let contracts = Contracts::new(
-            provider,
-            message_queue_address.into_array(),
-            relayer_address.into_array(),
-        )?;
+        let contracts = Contracts::new(provider, message_queue_address.into_array())?;
 
         Ok(EthApi {
             contracts,
@@ -142,7 +133,6 @@ impl EthApi {
         let contracts = Contracts::new(
             provider,
             self.contracts.message_queue_instance.address().0 .0,
-            self.contracts.relayer_instance.address().0 .0,
         )?;
 
         Ok(EthApi {
@@ -295,28 +285,20 @@ impl EthApi {
         &self,
     ) -> Result<Subscription<RpcLog>, RpcError<TransportErrorKind>> {
         let filter = Filter::new()
-            .address(*self.contracts.relayer_instance.address())
-            .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH);
+            .address(*self.contracts.message_queue_instance.address())
+            .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH);
 
         self.raw_provider().clone().subscribe_logs(&filter).await
     }
 }
 
 impl Contracts {
-    pub fn new(
-        provider: ProviderType,
-        message_queue_address: [u8; 20],
-        relayer_address: [u8; 20],
-    ) -> Result<Self, Error> {
-        let relayer_address = Address::from(relayer_address);
+    pub fn new(provider: ProviderType, message_queue_address: [u8; 20]) -> Result<Self, Error> {
         let message_queue_address = Address::from(message_queue_address);
-
-        let relayer_instance = IRelayer::new(relayer_address, provider.clone());
         let message_queue_instance = IMessageQueue::new(message_queue_address, provider.clone());
 
         Ok(Contracts {
             provider,
-            relayer_instance,
             message_queue_instance,
         })
     }
@@ -334,7 +316,7 @@ impl Contracts {
         proof: Bytes,
     ) -> Result<TxHash, Error> {
         match self
-            .relayer_instance
+            .message_queue_instance
             .submitMerkleRoot(block_number, merkle_root, proof.clone())
             .estimate_gas()
             .await
@@ -342,7 +324,7 @@ impl Contracts {
             Ok(gas_used) => {
                 log::info!("Gas used: {gas_used}");
                 match self
-                    .relayer_instance
+                    .message_queue_instance
                     .submitMerkleRoot(block_number, merkle_root, proof.clone())
                     .send()
                     .await
@@ -392,8 +374,8 @@ impl Contracts {
         to: u64,
     ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         let filter = Filter::new()
-            .address(*self.relayer_instance.address())
-            .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH)
+            .address(*self.message_queue_instance.address())
+            .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH)
             .from_block(from)
             .to_block(to);
 
@@ -507,7 +489,7 @@ impl Contracts {
         block_tag: BlockNumberOrTag,
     ) -> Result<Option<[u8; 32]>, Error> {
         let root = self
-            .relayer_instance
+            .message_queue_instance
             .getMerkleRoot(block)
             .block(BlockId::Number(block_tag))
             .call()

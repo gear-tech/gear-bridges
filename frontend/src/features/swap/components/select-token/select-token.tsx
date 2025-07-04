@@ -59,8 +59,8 @@ function SelectTokenModal({ close }: ModalProps) {
     );
   };
 
-  const filteredTokens = tokens[networkName]?.filter(({ symbol }) => {
-    const lowerCaseSymbol = symbol.toLocaleLowerCase();
+  const filteredTokens = tokens[networkName]?.filter(({ displaySymbol }) => {
+    const lowerCaseSymbol = displaySymbol.toLocaleLowerCase();
     const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
 
     return lowerCaseSymbol.includes(lowerCaseSearchQuery);
@@ -69,7 +69,7 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!filteredTokens) return;
 
-    return filteredTokens.map(({ address, symbol, isNative }, index) => {
+    return filteredTokens.map(({ address, symbol, displaySymbol, isNative }, index) => {
       const isActive = address === token?.address;
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
@@ -89,7 +89,7 @@ function SelectTokenModal({ close }: ModalProps) {
               <TokenSVG symbol={symbol} network={networkName} sizes={[32, 20]} />
 
               <span className={styles.token}>
-                <span className={styles.symbol}>{symbol}</span>
+                <span className={styles.symbol}>{displaySymbol}</span>
                 <span className={styles.network}>{networkText}</span>
               </span>
             </span>

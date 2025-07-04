@@ -29,8 +29,8 @@ function TokensCard() {
   const alert = useAlert();
 
   const { tokens, nativeToken: _nativeToken } = useTokens();
+  const networkTokens = tokens[network];
   const nativeToken = _nativeToken?.[network];
-  const nonNativeTokens = tokens[network]?.filter(({ isNative }) => !isNative);
 
   const burnVara = useBurnVaraTokens();
   const burnEth = useBurnEthTokens();
@@ -38,47 +38,52 @@ function TokensCard() {
 
   const { data: varaFtBalances, refetch: refetchVaraBalances } = useVaraFTBalances();
   const { data: ethFtBalances, refetch: refetchEthBalances } = useEthFTBalances();
-
   const ftBalances = varaFtBalances || ethFtBalances;
-  const lockedBalance = nativeToken?.address ? ftBalances?.[nativeToken.address] : undefined;
 
   const varaAccountBalance = useVaraAccountBalance();
   const ethAccountBalance = useEthAccountBalance();
   const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
+  const handleBurnClick = (value: bigint) => {
+    const sendTx = account ? () => burnVara.sendTransactionAsync({ args: [value] }) : () => burnEth.mutateAsync(value);
+    const refetchBalances = account ? refetchVaraBalances : refetchEthBalances;
+
+    sendTx()
+      .then(async () => {
+        alert.success('Tokens converted successfully');
+
+        return refetchBalances();
+      })
+      .catch((error: Error) => alert.error(getErrorMessage(error)));
+  };
+
   const renderBalances = () => {
-    if (!nonNativeTokens || !ftBalances)
+    if (!networkTokens || !ftBalances)
       return new Array(4).fill(null).map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
-    return nonNativeTokens.map(({ address, decimals, symbol }) => {
+    return networkTokens.map(({ address, decimals, symbol, isNative }) => {
       const balance = ftBalances[address];
 
       return (
         <li key={address}>
           <BalanceCard value={balance} decimals={decimals ?? 0} symbol={symbol ?? 'Unit'} network={network}>
-            <GetBalanceButton.EthToken address={address} symbol={symbol ?? 'Unit'} onSuccess={refetchEthBalances} />
+            {isNative ? (
+              Boolean(balance) && (
+                <Button
+                  text={`Convert To ${symbol}`}
+                  size="small"
+                  onClick={() => handleBurnClick(balance)}
+                  isLoading={burn.isPending}
+                  className={styles.burnButton}
+                />
+              )
+            ) : (
+              <GetBalanceButton.EthToken address={address} symbol={symbol ?? 'Unit'} onSuccess={refetchEthBalances} />
+            )}
           </BalanceCard>
         </li>
       );
     });
-  };
-
-  const handleUnlockBalanceClick = () => {
-    if (isUndefined(lockedBalance)) throw new Error('Locked balance is not found');
-
-    const sendTx = account
-      ? () => burnVara.sendTransactionAsync({ args: [lockedBalance] })
-      : () => burnEth.mutateAsync(lockedBalance);
-
-    const refetchBalances = account ? refetchVaraBalances : refetchEthBalances;
-
-    sendTx()
-      .then(async () => {
-        alert.success('Tokens unlocked successfully');
-
-        return refetchBalances();
-      })
-      .catch((error: Error) => alert.error(getErrorMessage(error)));
   };
 
   return (
@@ -111,23 +116,6 @@ function TokensCard() {
 
         {renderBalances()}
       </ul>
-
-      {!isUndefined(lockedBalance) && nativeToken && (
-        <>
-          <h4 className={styles.lockedHeading}>Locked Tokens</h4>
-
-          <BalanceCard
-            value={lockedBalance}
-            decimals={nativeToken.decimals ?? 0}
-            symbol={nativeToken.symbol ?? 'Unit'}
-            network={network}
-            locked>
-            {Boolean(lockedBalance) && (
-              <Button text="Unlock" size="small" onClick={handleUnlockBalanceClick} isLoading={burn.isPending} />
-            )}
-          </BalanceCard>
-        </>
-      )}
     </div>
   );
 }

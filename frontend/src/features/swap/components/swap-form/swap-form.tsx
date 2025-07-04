@@ -104,7 +104,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
       <Balance
         value={balance.data}
         decimals={token?.decimals}
-        symbol={token?.symbol}
+        symbol={token?.displaySymbol}
         isLoading={balance.isLoading}
         onMaxButtonClick={setMaxBalance}
       />
@@ -156,6 +156,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   type="select"
                   address={token?.address}
                   symbol={token?.symbol}
+                  displaySymbol={token?.displaySymbol}
                   networkText={network.isVara ? 'Vara Testnet' : 'Ethereum Holesky'}
                   network={network.name}
                 />
@@ -179,6 +180,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   type="text"
                   address={destinationToken?.address}
                   symbol={destinationToken?.symbol}
+                  displaySymbol={destinationToken?.displaySymbol}
                   networkText={network.isVara ? 'Ethereum Holesky' : 'Vara Testnet'}
                   network={network.name === NETWORK.VARA ? NETWORK.ETH : NETWORK.VARA}
                 />

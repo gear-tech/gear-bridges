@@ -1,6 +1,6 @@
 use alloy::{
     contract::Event,
-    network::{Ethereum, EthereumWallet},
+    network::{Ethereum, EthereumWallet, TransactionBuilder},
     primitives::{Address, Bytes, B256, U256},
     providers::{
         fillers::{
@@ -31,6 +31,11 @@ use abi::{
 
 pub mod error;
 pub use error::Error;
+
+// 2 Gwei
+const MAX_FEE_PER_GAS: u128 = 2_000_000_000;
+// 0.5 Gwei
+const MAX_PRIORITY_FEE_PER_GAS: u128 = 500_000_000;
 
 type ProviderType = FillProvider<
     JoinFill<
@@ -474,6 +479,12 @@ impl Contracts {
         data: Bytes,
         proof: Vec<B256>,
     ) -> Result<TxHash, Error> {
+        log::trace!(
+            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, "
+            "leaf_index = {leaf_index}, nonce = {nonce}, sender = {sender}, receiver = {receiver}, "
+            "data = {data}, proof = {proof:?}"
+        );
+
         let call = self.message_queue_instance.processMessage(
             block_number,
             total_leaves,
@@ -487,15 +498,57 @@ impl Contracts {
             proof,
         );
 
-        match call.estimate_gas().await {
-            Ok(_gas_used) => match call.send().await {
-                Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
-                Err(e) => {
-                    log::error!("Sending error: {e:?}");
-                    Err(Error::ErrorSendingTransaction(e))
+        let gas_estimated = match call.estimate_gas().await {
+            Ok(gas_estimated) => gas_estimated,
+            Err(e) => return Err(Error::ErrorDuringContractExecution(e)),
+        };
+
+        let max_priority_fee_per_gas = self.provider.get_max_priority_fee_per_gas().await;
+        let gas_price = self.provider.get_gas_price().await;
+        log::trace!("max_priority_fee_per_gas_chain = {max_priority_fee_per_gas:?}, gas_price_chain = {gas_price:?}");
+
+        let max_fee_per_gas = gas_price
+            .map(|gas_price| {
+                if gas_price < MAX_FEE_PER_GAS {
+                    MAX_FEE_PER_GAS
+                } else {
+                    gas_price
                 }
-            },
-            Err(e) => Err(Error::ErrorDuringContractExecution(e)),
+            })
+            .unwrap_or(MAX_FEE_PER_GAS);
+
+        let max_priority_fee_per_gas = max_priority_fee_per_gas
+            .map(|max_priority_fee_per_gas| {
+                if max_priority_fee_per_gas < MAX_PRIORITY_FEE_PER_GAS {
+                    MAX_PRIORITY_FEE_PER_GAS
+                } else {
+                    max_priority_fee_per_gas
+                }
+            })
+            .unwrap_or(MAX_PRIORITY_FEE_PER_GAS);
+
+        let call = call
+            .max_fee_per_gas(max_fee_per_gas)
+            .max_priority_fee_per_gas(max_priority_fee_per_gas);
+
+        let request = call.as_ref();
+        log::trace!(
+            "new max_priority_fee_per_gas = {max_priority_fee_per_gas:?}, "
+            "new max_fee_per_gas = {max_fee_per_gas:?}, gas_estimated = {gas_estimated}, "
+            "gas_price = {:?}, max_fee_per_gas = {:?}, max_priority_fee_per_gas = {:?}, "
+            "gas_limit = {:?}",
+            request.gas_price(),
+            request.max_fee_per_gas(),
+            request.max_priority_fee_per_gas(),
+            request.gas_limit(),
+        );
+
+        match call.send().await {
+            Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
+            Err(e) => {
+                log::error!("Sending error: {e:?}");
+                Err(Error::ErrorSendingTransaction(e))
+            }
         }
     }
 

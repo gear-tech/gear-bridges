@@ -480,9 +480,7 @@ impl Contracts {
         proof: Vec<B256>,
     ) -> Result<TxHash, Error> {
         log::trace!(
-            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, "
-            "leaf_index = {leaf_index}, nonce = {nonce}, sender = {sender}, receiver = {receiver}, "
-            "data = {data}, proof = {proof:?}"
+            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, leaf_index = {leaf_index}, nonce = {nonce}, sender = {sender}, receiver = {receiver}, data = {data}, proof = {proof:?}",
         );
 
         let call = self.message_queue_instance.processMessage(
@@ -533,10 +531,7 @@ impl Contracts {
 
         let request = call.as_ref();
         log::trace!(
-            "new max_priority_fee_per_gas = {max_priority_fee_per_gas:?}, "
-            "new max_fee_per_gas = {max_fee_per_gas:?}, gas_estimated = {gas_estimated}, "
-            "gas_price = {:?}, max_fee_per_gas = {:?}, max_priority_fee_per_gas = {:?}, "
-            "gas_limit = {:?}",
+            "new max_priority_fee_per_gas = {max_priority_fee_per_gas:?}, new max_fee_per_gas = {max_fee_per_gas:?}, gas_estimated = {gas_estimated}, gas_price = {:?}, max_fee_per_gas = {:?}, max_priority_fee_per_gas = {:?}, gas_limit = {:?}",
             request.gas_price(),
             request.max_fee_per_gas(),
             request.max_priority_fee_per_gas(),

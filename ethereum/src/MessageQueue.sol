@@ -37,7 +37,6 @@ contract MessageQueue is
     IVerifier private _verifier;
     bool private _emergencyStop;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
-    mapping(bytes32 merkleRoot => uint256 blockNumber) private _merkleRoots;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
     /**
@@ -163,7 +162,6 @@ contract MessageQueue is
             emit EmergencyStopSet();
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
-            _merkleRoots[merkleRoot] = blockNumber; // TODO: maybe remove?
 
             emit MerkleRoot(blockNumber, merkleRoot);
         }
@@ -177,16 +175,6 @@ contract MessageQueue is
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32) {
         return _blockNumbers[blockNumber];
-    }
-
-    /**
-     * @dev Returns block number for provided merkle root.
-     *      Returns `uint256(0)` if block number was not provided for specified merkle root.
-     * @param merkleRoot Target merkle root.
-     * @return blockNumber Block number for provided merkle root.
-     */
-    function getBlockNumber(bytes32 merkleRoot) external view returns (uint256) {
-        return _merkleRoots[merkleRoot];
     }
 
     /**

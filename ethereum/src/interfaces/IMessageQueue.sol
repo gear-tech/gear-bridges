@@ -110,14 +110,6 @@ interface IMessageQueue is IPausable {
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32);
 
     /**
-     * @dev Returns block number for provided merkle root.
-     *      Returns `uint256(0)` if block number was not provided for specified merkle root.
-     * @param merkleRoot Target merkle root.
-     * @return blockNumber Block number for provided merkle root.
-     */
-    function getBlockNumber(bytes32 merkleRoot) external view returns (uint256);
-
-    /**
      * @dev Verifies and processes message originated from Vara Network.
      *
      *      In this process, MessageQueue smart contract will calculate Merkle root

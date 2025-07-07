@@ -326,7 +326,6 @@ contract MessageQueueTest is Test, Base {
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-        assertEq(messageQueue.getBlockNumber(merkleRoot), blockNumber);
     }
 
     function test_SubmitMerkleRootTwice() public {
@@ -341,7 +340,6 @@ contract MessageQueueTest is Test, Base {
             messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
             assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-            assertEq(messageQueue.getBlockNumber(merkleRoot), blockNumber);
         }
     }
 
@@ -367,7 +365,6 @@ contract MessageQueueTest is Test, Base {
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-        assertEq(messageQueue.getBlockNumber(merkleRoot), blockNumber);
 
         merkleRoot = bytes32(uint256(0x33));
 
@@ -422,7 +419,6 @@ contract MessageQueueTest is Test, Base {
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-        assertEq(messageQueue.getBlockNumber(merkleRoot), blockNumber);
 
         merkleRoot = bytes32(uint256(0x33));
 

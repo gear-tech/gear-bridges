@@ -1,5 +1,6 @@
 use super::tx_manager::{Transaction, TransactionManager};
 use crate::message_relayer::common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot};
+use anyhow::Context;
 use async_trait::async_trait;
 use ethereum_client::TxHash;
 use serde::{Deserialize, Serialize};
@@ -136,17 +137,41 @@ impl BlockStorage {
             .truncate(true)
             .write(true)
             .open(&blocks_new)
-            .await?;
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to open or create blocks file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
         // just keep 100 processed blocks in JSON storage for now...
         self.prune().await;
         let blocks = self.blocks.read().await;
         let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
-        blocks_file.write_all(blocks_json.as_bytes()).await?;
+        blocks_file
+            .write_all(blocks_json.as_bytes())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to write blocks to file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
         blocks_file.flush().await?;
         if blocks_old.exists() {
-            tokio::fs::remove_file(&blocks_old).await?;
+            tokio::fs::remove_file(&blocks_old).await.with_context(|| {
+                format!(
+                    "Failed to remove old blocks file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
         }
-        tokio::fs::rename(blocks_new, blocks_old).await?;
+        tokio::fs::rename(blocks_new, blocks_old).await.with_context(|| {
+            format!(
+                "Failed to rename new blocks file in storage path: '{}'",
+                path.display()
+            )
+        })?;
         Ok(())
     }
 }
@@ -230,10 +255,16 @@ impl JSONStorage {
             .ok_or_else(|| anyhow::anyhow!("Invalid UUID in filename {tx_file:?}"))?;
         let mut contents = String::new();
 
-        let mut file = tokio::fs::File::open(path).await?;
-        file.read_to_string(&mut contents).await?;
+        let mut file = tokio::fs::File::open(path)
+            .await
+            .with_context(|| format!("Failed to open transaction file: {:?}", tx_file))?;
+        file.read_to_string(&mut contents)
+            .await
+            .with_context(|| format!("Failed to read transaction file: {:?}", tx_file))?;
 
-        let tx: Transaction = serde_json::from_str(&contents)?;
+        let tx: Transaction = serde_json::from_str(&contents).with_context(|| {
+            format!("Failed to deserialize transaction from file: {:?}", tx_file)
+        })?;
 
         if tx.uuid != uuid {
             return Err(anyhow::anyhow!(
@@ -276,10 +307,24 @@ impl Storage for JSONStorage {
             .truncate(true)
             .write(true)
             .open(self.path.join("failed"))
-            .await?;
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to open or create 'failed' file in storage path: '{}'",
+                    self.path.display()
+                )
+            })?;
 
         let str = serde_json::to_string(&failed)?;
-        failed_file.write_all(str.as_bytes()).await?;
+        failed_file
+            .write_all(str.as_bytes())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to write failed transactions to 'failed' file in storage path: '{}'",
+                    self.path.display()
+                )
+            })?;
         failed_file.flush().await?;
         self.block_storage.save(&self.path).await?;
 
@@ -294,13 +339,34 @@ impl Storage for JSONStorage {
         let mut dir = tokio::fs::read_dir(&self.path).await?;
 
         while let Some(entry) = dir.next_entry().await? {
-            if entry.file_type().await?.is_file() {
+            if entry
+                .file_type()
+                .await
+                .context("directory entry is unaccessible")?
+                .is_file()
+            {
                 if entry.file_name().to_str() == Some("failed") {
-                    let contents = tokio::fs::read_to_string(entry.path()).await?;
+                    let contents =
+                        tokio::fs::read_to_string(entry.path())
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "Failed to read 'failed' file in storage path: '{}'",
+                                    self.path.display()
+                                )
+                            })?;
                     let map: BTreeMap<Uuid, String> = serde_json::from_str(&contents)?;
                     *tx_manager.failed.write().await = map;
                 } else if entry.file_name().to_str() == Some("blocks.json") {
-                    let contents = tokio::fs::read_to_string(entry.path()).await?;
+                    let contents =
+                        tokio::fs::read_to_string(entry.path())
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "Failed to read blocks file in storage path: '{}'",
+                                    self.path.display()
+                                )
+                            })?;
                     let map: BTreeMap<EthereumSlotNumber, Block> = serde_json::from_str(&contents)?;
                     *self.block_storage().blocks.write().await = map;
                 } else {

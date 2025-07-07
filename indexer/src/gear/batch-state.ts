@@ -1,5 +1,5 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
-import { Network, Pair } from '../model';
+import { InitiatedTransfer, Network, Pair, Status, Transfer } from '../model';
 import { Store } from '@subsquid/typeorm-store';
 import { BaseBatchState, hash } from '../common';
 import { In } from 'typeorm';
@@ -31,12 +31,16 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       activeToBlock: bigint;
     }
   >;
+  private _initiatedTransfers: Map<string, InitiatedTransfer>;
+  private _transfersToRemove: Set<Transfer>;
 
   constructor() {
     super(NETWORK);
     this._addedPairs = new Map();
     this._removedPairs = new Map();
     this._upgradedPairs = new Map();
+    this._initiatedTransfers = new Map();
+    this._transfersToRemove = new Set();
   }
 
   public async new(ctx: DataHandlerContext<Store, any>) {
@@ -44,6 +48,11 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._addedPairs.clear();
     this._removedPairs.clear();
     this._upgradedPairs.clear();
+    this._initiatedTransfers.clear();
+    const initTransfers = await ctx.store.find(InitiatedTransfer);
+    for (const transfer of initTransfers) {
+      this._initiatedTransfers.set(transfer.id, transfer);
+    }
   }
 
   private async _savePairs() {
@@ -86,10 +95,63 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     }
   }
 
+  private async _saveInitiatedTransfers() {
+    const transfers = Array.from(this._transfers.values());
+
+    const initTransfers = Array.from(this._initiatedTransfers.values()).filter(
+      ({ id }) => !Boolean(transfers.find((t) => t.id === id)),
+    );
+
+    const initTransfersToRemove = Array.from(this._initiatedTransfers.values()).filter(({ id }) =>
+      Boolean(transfers.find((t) => t.id === id)),
+    );
+
+    await this._ctx.store.save(initTransfers);
+    await this._ctx.store.remove(initTransfersToRemove);
+  }
+
   public async save() {
+    if (this._transfersToRemove.size > 0) {
+      await this._ctx.store.remove(Array.from(this._transfersToRemove.values()));
+    }
+
     await super.save();
 
     await this._savePairs();
+    await this._saveInitiatedTransfers();
+  }
+
+  public async handleRequestBridgingReply(id: string, nonce?: string) {
+    const initTransfer = this._initiatedTransfers.get(id);
+
+    if (!initTransfer) {
+      this._ctx.log.error(`Initiated transfer ${id} not found`);
+      return;
+    }
+
+    if (!nonce) {
+      this._ctx.log.error(`Nonce not provided for initiated transfer ${id}`);
+      return;
+    }
+
+    const transfer = await this._getTransfer(nonce);
+
+    if (!transfer) {
+      this._ctx.log.error(`Transfer ${nonce} not found`);
+      return;
+    }
+
+    this._transfersToRemove.add(transfer);
+
+    this._transfers.set(
+      transfer.nonce,
+      new Transfer({
+        ...transfer,
+        id,
+        txHash: initTransfer.txHash,
+        blockNumber: initTransfer.blockNumber,
+      }),
+    );
   }
 
   public async addPair(varaToken: string, ethToken: string, supply: Network, blockHeader: BlockHeader) {
@@ -228,5 +290,12 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       .map(({ varaToken }) => varaToken);
 
     return activePairs;
+  }
+
+  public async addInitiatedTransfer(transfer: InitiatedTransfer) {
+    transfer.txHash = transfer.txHash.toLowerCase();
+    this._initiatedTransfers.set(transfer.id, transfer);
+
+    this._ctx.log.info(`${transfer.id}: Transfer requested in block ${transfer.blockNumber}`);
   }
 }

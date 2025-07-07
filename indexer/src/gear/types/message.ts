@@ -18,7 +18,7 @@ export interface UserMessageSentArgs {
     readonly destination: string;
     readonly payload: `0x${string}`;
     readonly value: string;
-    readonly details: UserMessageSentArgs;
+    readonly details: UserMessageSentDetails;
   };
 }
 

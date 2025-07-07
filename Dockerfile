@@ -24,7 +24,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo install wasm-opt
 
 # Install go
-ENV GO_VERSION=1.24.4
+ENV GO_VERSION=1.20.1
 RUN wget -P /tmp "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" && \
     tar -C /usr/local -xzf "/tmp/go${GO_VERSION}.linux-amd64.tar.gz" && \
     rm "/tmp/go${GO_VERSION}.linux-amd64.tar.gz"

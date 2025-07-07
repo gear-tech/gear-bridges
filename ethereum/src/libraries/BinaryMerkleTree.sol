@@ -70,7 +70,7 @@ library BinaryMerkleTree {
                 positionPlusOne = position + 1;
             }
 
-            // TODO: consider optimizing this (use OpenZeppelin's `keccak256` instead of `efficientKeccak256`).
+            // TODO: consider optimizing this (use OpenZeppelin's `commutativeKeccak256` instead of `efficientKeccak256`).
             if (position % 2 == 1 || positionPlusOne == width) {
                 computed = Hashes.efficientKeccak256(b, a);
             } else {
@@ -143,6 +143,7 @@ library BinaryMerkleTree {
                 positionPlusOne = position + 1;
             }
 
+            // TODO: consider optimizing this (use OpenZeppelin's `commutativeKeccak256` instead of `efficientKeccak256`).
             if (position % 2 == 1 || positionPlusOne == width) {
                 computed = Hashes.efficientKeccak256(b, a);
             } else {

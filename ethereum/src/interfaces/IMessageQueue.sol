@@ -34,9 +34,9 @@ interface IMessageQueue is IPausable {
     error MessageAlreadyProcessed(uint256 messageNonce);
 
     /**
-     * @dev Merkle root is not set for the block number in MessageQueue smart contract.
+     * @dev Merkle root is not found for the block number in MessageQueue smart contract.
      */
-    error MerkleRootNotSet(uint256 blockNumber);
+    error MerkleRootNotFound(uint256 blockNumber);
 
     /**
      * @dev Merkle proof is invalid.
@@ -51,16 +51,13 @@ interface IMessageQueue is IPausable {
     /**
      * @dev Emitted when block number and merkle root are stored.
      */
-    event MerkleRoot(uint256 indexed blockNumber, bytes32 indexed merkleRoot);
+    event MerkleRoot(uint256 indexed blockNumber, bytes32 merkleRoot);
 
     /**
      * @dev Emitted when message is processed.
      */
     event MessageProcessed(
-        uint256 indexed blockNumber,
-        bytes32 indexed messageHash,
-        uint256 indexed messageNonce,
-        address messageDestination
+        uint256 indexed blockNumber, bytes32 messageHash, uint256 messageNonce, address messageDestination
     );
 
     /**
@@ -77,15 +74,17 @@ interface IMessageQueue is IPausable {
 
     /**
      * @dev Returns verifier address.
+     *      Verifier is smart contract that is responsible for verifying
+     *      the validity of the Merkle proof.
      * @return verifier Verifier address.
      */
     function verifier() external view returns (address);
 
     /**
      * @dev Returns emergency stop status.
-     * @return emergencyStop emergency stop status.
+     * @return isEmergencyStopped emergency stop status.
      */
-    function emergencyStop() external view returns (bool);
+    function isEmergencyStopped() external view returns (bool);
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
@@ -129,7 +128,7 @@ interface IMessageQueue is IPausable {
      *      message will be stored in smart contract and message will be forwarded to adequate message
      *      processor, either ERC20Manager or Governance smart contract.
      *
-     *      Upon successful processing of the message MessageProcessed event is emited.
+     *      Upon successful processing of the message `MessageProcessed` event is emitted.
      *
      *      It is important to note that anyone can submit a message because all messages
      *      will be validated against previously stored Merkle roots in the MessageQueue smart contract.

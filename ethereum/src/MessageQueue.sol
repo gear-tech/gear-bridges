@@ -99,9 +99,9 @@ contract MessageQueue is
 
     /**
      * @dev Returns emergency stop status.
-     * @return emergencyStop emergency stop status.
+     * @return isEmergencyStopped emergency stop status.
      */
-    function emergencyStop() external view returns (bool) {
+    function isEmergencyStopped() external view returns (bool) {
         return _emergencyStop;
     }
 
@@ -163,7 +163,7 @@ contract MessageQueue is
             emit EmergencyStopSet();
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
-            _merkleRoots[merkleRoot] = blockNumber;
+            _merkleRoots[merkleRoot] = blockNumber; // TODO: maybe remove?
 
             emit MerkleRoot(blockNumber, merkleRoot);
         }
@@ -241,7 +241,7 @@ contract MessageQueue is
 
         bytes32 merkleRoot = _blockNumbers[blockNumber];
         if (merkleRoot == bytes32(0)) {
-            revert MerkleRootNotSet(blockNumber);
+            revert MerkleRootNotFound(blockNumber);
         }
 
         bytes32 messageHash = message.hashCalldata();

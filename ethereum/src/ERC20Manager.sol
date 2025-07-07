@@ -141,7 +141,7 @@ contract ERC20Manager is
     uint256 internal constant OFFSET6 = 65;
 
     /**
-     * @dev Size of register token message (for `SupplyType.Ethereum`).
+     * @dev Size of register token message (for `TokenType.Ethereum`).
      */
     uint256 internal constant REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE =
         DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE + TOKEN_DECIMALS_SIZE;
@@ -154,7 +154,7 @@ contract ERC20Manager is
     uint256 internal constant TOKEN2_SIZE = 20;
 
     /**
-     * @dev Size of register token message (for `SupplyType.Gear`).
+     * @dev Size of register token message (for `TokenType.Gear`).
      */
     uint256 internal constant REGISTER_GEAR_TOKEN_MESSAGE_SIZE = DISCRIMINANT_SIZE + TOKEN2_SIZE;
 
@@ -168,10 +168,10 @@ contract ERC20Manager is
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
     address private _messageQueue;
-    EnumerableSet.Bytes32Set private _knownVftManagers;
-    address[] private _knownTokens;
-    mapping(address token => SupplyType supplyType) private _tokenSupplyType;
-    EnumerableSet.AddressSet private _knownBridgingPayments;
+    EnumerableSet.Bytes32Set private _vftManagers;
+    address[] private _tokens;
+    mapping(address token => TokenType tokenType) private _tokenType;
+    EnumerableSet.AddressSet private _bridgingPayments;
 
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
@@ -188,14 +188,14 @@ contract ERC20Manager is
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
      * @param messageQueue_ The address of the message queue contract.
      * @param vftManager The address of the VFT manager contract (on Vara Network).
-     * @param tokens The tokens that will be registered.
+     * @param tokens_ The tokens that will be registered.
      */
     function initialize(
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
         address messageQueue_,
         bytes32 vftManager,
-        TokenWithSupplyType[] memory tokens
+        TokenInfo[] memory tokens_
     ) public initializer {
         __AccessControl_init();
         __Pausable_init();
@@ -209,16 +209,16 @@ contract ERC20Manager is
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
         _messageQueue = messageQueue_;
-        _knownVftManagers.add(vftManager);
+        _vftManagers.add(vftManager);
 
-        for (uint256 i = 0; i < tokens.length; i++) {
-            TokenWithSupplyType memory tokenWithSupplyType = tokens[i];
+        for (uint256 i = 0; i < tokens_.length; i++) {
+            TokenInfo memory tokenInfo = tokens_[i];
 
-            if (tokenWithSupplyType.supplyType == SupplyType.Unknown) {
-                revert InvalidSupplyType();
+            if (tokenInfo.tokenType == TokenType.Unknown) {
+                revert InvalidTokenType();
             } else {
-                _knownTokens.push(tokenWithSupplyType.token);
-                _tokenSupplyType[tokenWithSupplyType.token] = tokenWithSupplyType.supplyType;
+                _tokens.push(tokenInfo.token);
+                _tokenType[tokenInfo.token] = tokenInfo.tokenType;
             }
         }
     }
@@ -248,54 +248,54 @@ contract ERC20Manager is
     }
 
     /**
-     * @dev Returns list of known VFT managers.
-     * @return knownVftManagers List of known VFT managers.
+     * @dev Returns list of VFT managers.
+     * @return vftManagers List of VFT managers.
      */
-    function knownVftManagers() external view returns (bytes32[] memory) {
-        return _knownVftManagers.values();
+    function vftManagers() external view returns (bytes32[] memory) {
+        return _vftManagers.values();
     }
 
     /**
-     * @dev Returns whether the VFT manager is known.
+     * @dev Returns whether the VFT manager is registered.
      * @param vftManager VFT manager address.
-     * @return isKnown `true` if the VFT manager is known, `false` otherwise.
+     * @return isVftManager `true` if the VFT manager is registered, `false` otherwise.
      */
-    function isKnownVftManager(bytes32 vftManager) external view returns (bool) {
-        return _knownVftManagers.contains(vftManager);
+    function isVftManager(bytes32 vftManager) external view returns (bool) {
+        return _vftManagers.contains(vftManager);
     }
 
     /**
-     * @dev Returns list of known tokens.
-     * @return knownTokens List of known tokens.
+     * @dev Returns list of tokens.
+     * @return tokens List of tokens.
      */
-    function knownTokens() external view returns (address[] memory) {
-        return _knownTokens;
+    function tokens() external view returns (address[] memory) {
+        return _tokens;
     }
 
     /**
-     * @dev Returns supply type of token.
+     * @dev Returns token type.
      * @param token Token address.
-     * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
+     * @return tokenType Token type. Returns `TokenType.Unknown` if token is not registered.
      */
-    function getTokenSupplyType(address token) external view returns (SupplyType) {
-        return _tokenSupplyType[token];
+    function getTokenType(address token) external view returns (TokenType) {
+        return _tokenType[token];
     }
 
     /**
-     * @dev Returns list of known bridging payments.
-     * @return knownBridgingPayments List of known bridging payments.
+     * @dev Returns list of bridging payments.
+     * @return bridgingPayments List of bridging payments.
      */
-    function knownBridgingPayments() external view returns (address[] memory) {
-        return _knownBridgingPayments.values();
+    function bridgingPayments() external view returns (address[] memory) {
+        return _bridgingPayments.values();
     }
 
     /**
-     * @dev Returns whether the bridging payment is known.
+     * @dev Returns whether the bridging payment is registered.
      * @param bridgingPayment Bridging payment address.
-     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
+     * @return isBridgingPayment `true` if the bridging payment is registered, `false` otherwise.
      */
-    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool) {
-        return _knownBridgingPayments.contains(bridgingPayment);
+    function isBridgingPayment(address bridgingPayment) external view returns (bool) {
+        return _bridgingPayments.contains(bridgingPayment);
     }
 
     /**
@@ -324,16 +324,16 @@ contract ERC20Manager is
      * @param token Token address.
      * @param amount Amount of tokens to bridge.
      * @param to Destination address.
-     * @dev Reverts if token is not registered with `InvalidSupplyType` error.
+     * @dev Reverts if token is not registered with `InvalidTokenType` error.
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public whenNotPaused {
-        SupplyType supplyType = _tokenSupplyType[token];
+        TokenType tokenType = _tokenType[token];
 
-        if (supplyType == SupplyType.Unknown) {
-            revert InvalidSupplyType();
-        } else if (supplyType == SupplyType.Ethereum) {
+        if (tokenType == TokenType.Unknown) {
+            revert InvalidTokenType();
+        } else if (tokenType == TokenType.Ethereum) {
             IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        } else if (supplyType == SupplyType.Gear) {
+        } else if (tokenType == TokenType.Gear) {
             IERC20Burnable(token).burnFrom(msg.sender, amount);
         }
 
@@ -352,7 +352,7 @@ contract ERC20Manager is
         payable
         whenNotPaused
     {
-        if (!_knownBridgingPayments.contains(bridgingPayment)) {
+        if (!_bridgingPayments.contains(bridgingPayment)) {
             revert InvalidBridgingPayment();
         }
 
@@ -383,7 +383,7 @@ contract ERC20Manager is
         bytes32 s,
         address bridgingPayment
     ) public payable whenNotPaused {
-        if (!_knownBridgingPayments.contains(bridgingPayment)) {
+        if (!_bridgingPayments.contains(bridgingPayment)) {
             revert InvalidBridgingPayment();
         }
 
@@ -402,7 +402,7 @@ contract ERC20Manager is
         BridgingPayment bridgingPayment = new BridgingPayment(address(this), fee, msg.sender);
 
         address bridgingPaymentAddress = address(bridgingPayment);
-        _knownBridgingPayments.add(bridgingPaymentAddress);
+        _bridgingPayments.add(bridgingPaymentAddress);
 
         emit BridgingPaymentCreated(bridgingPaymentAddress);
 
@@ -419,7 +419,7 @@ contract ERC20Manager is
             revert InvalidSender();
         }
 
-        if (_knownVftManagers.contains(source)) {
+        if (_vftManagers.contains(source)) {
             if (!_tryParseAndApplyTransferMessage(payload)) {
                 revert InvalidPayload();
             }
@@ -466,17 +466,17 @@ contract ERC20Manager is
             amount := calldataload(add(payload.offset, OFFSET3))
         }
 
-        SupplyType supplyType = _tokenSupplyType[token];
+        TokenType tokenType = _tokenType[token];
 
-        if (supplyType == SupplyType.Unknown) {
-            revert InvalidSupplyType();
-        } else if (supplyType == SupplyType.Ethereum) {
+        if (tokenType == TokenType.Unknown) {
+            revert InvalidTokenType();
+        } else if (tokenType == TokenType.Ethereum) {
             IERC20(token).safeTransfer(receiver, amount);
-        } else if (supplyType == SupplyType.Gear) {
+        } else if (tokenType == TokenType.Gear) {
             IERC20Mintable(token).mint(receiver, amount);
         }
 
-        emit BridgingAccepted(sender, receiver, token, amount);
+        emit Bridged(sender, receiver, token, amount);
 
         return true;
     }
@@ -490,7 +490,7 @@ contract ERC20Manager is
      *      ```
      *
      *      `discriminant` can be:
-     *      - `ADD_VFT_MANAGER = 0x00` - add new VFT manager to list of known VFT managers
+     *      - `ADD_VFT_MANAGER = 0x00` - add new VFT manager to list of registered VFT managers
      *          ```solidity
      *          bytes32 vftManager; // 32 bytes
      *          ```
@@ -521,7 +521,7 @@ contract ERC20Manager is
             discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
         }
 
-        if (!(discriminant >= ADD_VFT_MANAGER && discriminant <= uint256(SupplyType.Gear))) {
+        if (!(discriminant >= ADD_VFT_MANAGER && discriminant <= uint256(TokenType.Gear))) {
             return false;
         }
 
@@ -535,12 +535,12 @@ contract ERC20Manager is
                 vftManager := calldataload(payload.offset)
             }
 
-            _knownVftManagers.add(vftManager);
+            _vftManagers.add(vftManager);
 
             emit VftManagerAdded(vftManager);
         }
 
-        if (discriminant == uint256(SupplyType.Ethereum)) {
+        if (discriminant == uint256(TokenType.Ethereum)) {
             if (!(payload.length == REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE)) {
                 return false;
             }
@@ -575,13 +575,13 @@ contract ERC20Manager is
 
             ERC20GearSupply token = new ERC20GearSupply(address(this), tokenNameStr, tokenSymbolStr, tokenDecimals);
 
-            _knownTokens.push(address(token));
-            _tokenSupplyType[address(token)] = SupplyType.Ethereum;
+            _tokens.push(address(token));
+            _tokenType[address(token)] = TokenType.Ethereum;
 
             emit EthereumTokenRegistered(tokenNameStr, tokenSymbolStr, tokenDecimals);
         }
 
-        if (discriminant == uint256(SupplyType.Gear)) {
+        if (discriminant == uint256(TokenType.Gear)) {
             if (!(payload.length == REGISTER_GEAR_TOKEN_MESSAGE_SIZE)) {
                 return false;
             }
@@ -593,8 +593,8 @@ contract ERC20Manager is
                 token := shr(TOKEN2_BIT_SHIFT, calldataload(add(payload.offset, OFFSET4)))
             }
 
-            _knownTokens.push(token);
-            _tokenSupplyType[token] = SupplyType.Gear;
+            _tokens.push(token);
+            _tokenType[token] = TokenType.Gear;
 
             emit GearTokenRegistered(token);
         }

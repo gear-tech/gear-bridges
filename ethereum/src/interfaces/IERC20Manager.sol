@@ -26,9 +26,9 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidPayload();
 
     /**
-     * @dev Error thrown when the supply type is invalid (`SupplyType.Unknown`).
+     * @dev Error thrown when the token type is invalid (`TokenType.Unknown`).
      */
-    error InvalidSupplyType();
+    error InvalidTokenType();
 
     /**
      * @dev Error thrown when the bridging payment is invalid (not created by `ERC20Manager`).
@@ -43,30 +43,30 @@ interface IERC20Manager is IPausable, IMessageHandler {
     /**
      * @dev Event emitted when bridging request is accepted.
      */
-    event BridgingAccepted(bytes32 indexed from, address indexed to, address indexed token, uint256 amount);
+    event Bridged(bytes32 indexed from, address indexed to, address indexed token, uint256 amount);
 
     /**
      * @dev Event emitted when bridging payment is created.
      */
-    event BridgingPaymentCreated(address indexed bridgingPayment);
+    event BridgingPaymentCreated(address bridgingPayment);
 
     /**
-     * @dev Event emitted when VFT manager is added to list of known VFT managers.
+     * @dev Event emitted when VFT manager is added to list of VFT managers.
      */
-    event VftManagerAdded(bytes32 indexed vftManager);
+    event VftManagerAdded(bytes32 vftManager);
 
     /**
      * @dev Event emitted when Ethereum token is registered.
      */
-    event EthereumTokenRegistered(string indexed tokenName, string indexed tokenSymbol, uint8 tokenDecimals);
+    event EthereumTokenRegistered(string tokenName, string tokenSymbol, uint8 tokenDecimals);
 
     /**
      * @dev Event emitted when Gear token is registered.
      */
-    event GearTokenRegistered(address indexed token);
+    event GearTokenRegistered(address token);
 
     /**
-     * @dev Enum representing supply type of token.
+     * @dev Enum representing token type.
      *
      *      - `Unknown` - token is not registered.
      *
@@ -92,18 +92,18 @@ interface IERC20Manager is IPausable, IMessageHandler {
      *         For example this type of token supply can be used to work with
      *         `VARA VFT token`/`wrappedVARA ERC20 token` pair.
      */
-    enum SupplyType {
+    enum TokenType {
         Unknown,
         Ethereum,
         Gear
     }
 
     /**
-     * @dev Struct representing information about token (address and supply type).
+     * @dev Struct representing information about token (address and token type).
      */
-    struct TokenWithSupplyType {
+    struct TokenInfo {
         address token;
-        SupplyType supplyType;
+        TokenType tokenType;
     }
 
     /**
@@ -125,43 +125,43 @@ interface IERC20Manager is IPausable, IMessageHandler {
     function messageQueue() external view returns (address);
 
     /**
-     * @dev Returns list of known VFT managers.
-     * @return knownVftManagers List of known VFT managers.
+     * @dev Returns list of VFT managers.
+     * @return vftManagers List of VFT managers.
      */
-    function knownVftManagers() external view returns (bytes32[] memory);
+    function vftManagers() external view returns (bytes32[] memory);
 
     /**
-     * @dev Returns whether the VFT manager is known.
+     * @dev Returns whether the VFT manager is registered.
      * @param vftManager VFT manager address.
-     * @return isKnown `true` if the VFT manager is known, `false` otherwise.
+     * @return isVftManager `true` if the VFT manager is registered, `false` otherwise.
      */
-    function isKnownVftManager(bytes32 vftManager) external view returns (bool);
+    function isVftManager(bytes32 vftManager) external view returns (bool);
 
     /**
-     * @dev Returns list of known tokens.
-     * @return knownTokens List of known tokens.
+     * @dev Returns list of tokens.
+     * @return tokens List of tokens.
      */
-    function knownTokens() external view returns (address[] memory);
+    function tokens() external view returns (address[] memory);
 
     /**
-     * @dev Returns supply type of token.
+     * @dev Returns token type.
      * @param token Token address.
-     * @return supplyType Supply type of token. Returns `SupplyType.Unknown` if token is not registered.
+     * @return tokenType Token type. Returns `TokenType.Unknown` if token is not registered.
      */
-    function getTokenSupplyType(address token) external view returns (SupplyType);
+    function getTokenType(address token) external view returns (TokenType);
 
     /**
-     * @dev Returns list of known bridging payments.
-     * @return knownBridgingPayments List of known bridging payments.
+     * @dev Returns list of bridging payments.
+     * @return bridgingPayments List of bridging payments.
      */
-    function knownBridgingPayments() external view returns (address[] memory);
+    function bridgingPayments() external view returns (address[] memory);
 
     /**
-     * @dev Returns whether the bridging payment is known.
+     * @dev Returns whether the bridging payment is registered.
      * @param bridgingPayment Bridging payment address.
-     * @return isKnown `true` if the bridging payment is known, `false` otherwise.
+     * @return isBridgingPayment `true` if the bridging payment is registered, `false` otherwise.
      */
-    function isKnownBridgingPayment(address bridgingPayment) external view returns (bool);
+    function isBridgingPayment(address bridgingPayment) external view returns (bool);
 
     /**
      * @dev Requests bridging of tokens.
@@ -169,7 +169,7 @@ interface IERC20Manager is IPausable, IMessageHandler {
      * @param token Token address.
      * @param amount Amount of tokens to bridge.
      * @param to Destination address.
-     * @dev Reverts if token is not registered with `InvalidSupplyType` error.
+     * @dev Reverts if token is not registered with `InvalidTokenType` error.
      */
     function requestBridging(address token, uint256 amount, bytes32 to) external;
 
@@ -230,7 +230,7 @@ struct TransferMessage {
 }
 
 /**
- * @dev Type representing payload of the message that adds VFT manager to list of known VFT managers.
+ * @dev Type representing payload of the message that adds VFT manager to list of registered VFT managers.
  */
 struct AddVftManagerMessage {
     bytes32 vftManager;
@@ -281,7 +281,7 @@ library ERC20ManagerPacker {
      */
     function pack(RegisterEthereumTokenMessage memory message) internal pure returns (bytes memory) {
         return abi.encodePacked(
-            uint8(IERC20Manager.SupplyType.Ethereum),
+            uint8(IERC20Manager.TokenType.Ethereum),
             LibString.packOne(message.tokenName),
             LibString.packOne(message.tokenSymbol),
             message.tokenDecimals
@@ -294,6 +294,6 @@ library ERC20ManagerPacker {
      * @return packed Packed message.
      */
     function pack(RegisterGearTokenMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint8(IERC20Manager.SupplyType.Gear), message.token);
+        return abi.encodePacked(uint8(IERC20Manager.TokenType.Gear), message.token);
     }
 }

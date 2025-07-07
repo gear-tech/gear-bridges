@@ -16,6 +16,8 @@ import {WrappedEther} from "src/erc20/WrappedEther.sol";
 import {WrappedVara} from "src/erc20/WrappedVara.sol";
 import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
+import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
 import {VerifierMock} from "src/mocks/VerifierMock.sol";
 import {BridgingPayment} from "src/BridgingPayment.sol";
 import {ERC20Manager} from "src/ERC20Manager.sol";
@@ -67,6 +69,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     ERC20Manager public erc20Manager;
 
     BridgingPayment public bridgingPayment;
+
+    MessageHandlerMock public messageHandlerMock;
+    NewImplementationMock public newImplementationMock;
 
     function deployBridgeFromConstants() public {
         deployBridge(
@@ -182,7 +187,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridge core:");
 
         if (isTest) {
-            verifier = new VerifierMock();
+            verifier = new VerifierMock(true);
         } else if (isScript) {
             verifier = new Verifier();
         }
@@ -199,6 +204,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    MessageQueue:        ", address(messageQueue));
 
         assertEq(messageQueueAddress, address(messageQueue));
+        assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
+        assertEq(messageQueue.governancePauser(), address(governancePauser));
+        assertEq(messageQueue.verifier(), address(verifier));
+        assertEq(messageQueue.isEmergencyStopped(), false);
 
         console.log();
 
@@ -206,12 +215,12 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridge:");
 
-        IERC20Manager.TokenWithSupplyType[] memory tokens = new IERC20Manager.TokenWithSupplyType[](4);
+        IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](4);
 
-        tokens[0] = IERC20Manager.TokenWithSupplyType(address(circleToken), IERC20Manager.SupplyType.Ethereum);
-        tokens[1] = IERC20Manager.TokenWithSupplyType(address(tetherToken), IERC20Manager.SupplyType.Ethereum);
-        tokens[2] = IERC20Manager.TokenWithSupplyType(address(wrappedEther), IERC20Manager.SupplyType.Ethereum);
-        tokens[3] = IERC20Manager.TokenWithSupplyType(address(wrappedVara), IERC20Manager.SupplyType.Gear);
+        tokens[0] = IERC20Manager.TokenInfo(address(circleToken), IERC20Manager.TokenType.Ethereum);
+        tokens[1] = IERC20Manager.TokenInfo(address(tetherToken), IERC20Manager.TokenType.Ethereum);
+        tokens[2] = IERC20Manager.TokenInfo(address(wrappedEther), IERC20Manager.TokenType.Ethereum);
+        tokens[3] = IERC20Manager.TokenInfo(address(wrappedVara), IERC20Manager.TokenType.Gear);
 
         erc20Manager = ERC20Manager(
             Upgrades.deployUUPSProxy(
@@ -235,8 +244,22 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         bridgingPayment = BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
         console.log("    BridgingPayment:     ", address(bridgingPayment));
 
-        if (isScript) {
+        //////////////////////////////////////////////////////////////////////////////
+
+        if (isTest) {
             console.log();
+
+            console.log("Test specific:");
+
+            messageHandlerMock = new MessageHandlerMock();
+            console.log("    MessageHandlerMock:  ", address(messageHandlerMock));
+
+            newImplementationMock = new NewImplementationMock();
+            console.log("    NewImplementationMock:", address(newImplementationMock));
+        } else if (isScript) {
+            console.log();
+
+            console.log("Script specific:");
 
             printContractInfo(
                 "MessageQueue", address(messageQueue), Upgrades.getImplementationAddress(address(messageQueue))
@@ -245,6 +268,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 "ERC20Manager", address(erc20Manager), Upgrades.getImplementationAddress(address(erc20Manager))
             );
         }
+
+        //////////////////////////////////////////////////////////////////////////////
 
         if (isTest) {
             vm.stopPrank();

@@ -13,6 +13,7 @@ use crate::{
     prover_interface::{self, FinalProof},
 };
 use ethereum_client::{EthApi, TxHash, TxStatus};
+use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use prover::proving::GenesisConfig;
 use tokio::sync::broadcast::{error::RecvError, Receiver};
@@ -152,6 +153,15 @@ impl MerkleRootRelayer {
         }
     }
 
+    fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
+        block.events().iter().find_map(|event| match event {
+            gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(root)) => {
+                Some(*root)
+            }
+            _ => None,
+        })
+    }
+
     async fn main_loop(&mut self, blocks_rx: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
         let balance = self.eth_api.get_approx_balance().await?;
         self.metrics.fee_payer_balance.set(balance);
@@ -159,7 +169,7 @@ impl MerkleRootRelayer {
         loop {
             match blocks_rx.recv().await {
                 Ok(block) => {
-                    if let Some(merkle_root) = block.queue_merkle_root_changed() {
+                    if let Some(merkle_root) = Self::queue_merkle_root_changed(&block) {
                         log::info!(
                             "Queue merkle root changed in block #{}: {:?}",
                             block.number(),

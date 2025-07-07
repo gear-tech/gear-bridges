@@ -70,6 +70,10 @@ async fn main() {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let block_listener = message_relayer::common::gear::block_listener::BlockListener::new(
+                api_provider.connection(),
+            );
+
             let relayer = MerkleRootRelayer::new(
                 api_provider.connection(),
                 eth_api,
@@ -85,7 +89,12 @@ async fn main() {
                 .run(args.prometheus_args.endpoint)
                 .await;
             api_provider.spawn();
-            relayer.run().await.expect("Merkle root relayer failed");
+
+            let [blocks] = block_listener.run().await;
+            relayer
+                .run(blocks)
+                .await
+                .expect("Merkle root relayer failed");
         }
         CliCommands::KillSwitch(args) => {
             let api_provider = ApiProvider::new(

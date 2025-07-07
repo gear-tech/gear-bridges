@@ -6,6 +6,7 @@ use gsdk::{
     config::Header,
     metadata::{
         gear::Event as GearEvent,
+        gear_eth_bridge::Event as GearEthBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
     },
     subscription::BlockEvents,
@@ -56,6 +57,15 @@ impl GearBlock {
                 ..
             }) if source == &ActorId(from_program.0) && destination == &ActorId(to_user.0) => {
                 Some(payload.0.as_ref())
+            }
+            _ => None,
+        })
+    }
+
+    pub fn queue_merkle_root_changed(&self) -> Option<H256> {
+        self.events.iter().find_map(move |event| match event {
+            gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(root)) => {
+                Some(*root)
             }
             _ => None,
         })

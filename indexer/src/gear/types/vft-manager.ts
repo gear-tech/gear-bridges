@@ -18,3 +18,9 @@ export interface HistoricalProxyAddressChanged {
   readonly new: string;
   readonly old: string;
 }
+
+export interface RequestBridgingArgs {
+  readonly vara_token_id: string;
+  readonly amount: string;
+  readonly receiver: string;
+}

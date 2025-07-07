@@ -6,8 +6,7 @@
   border-radius: 16px;
 }
 
-.header,
-.lockedHeading {
+.header {
   font-weight: 600;
   line-height: 24px;
   color: #f6f6f6e5;
@@ -40,6 +39,9 @@
   gap: 8px;
 }
 
-.lockedHeading {
-  margin: 32px 0 16px;
+.burnButton {
+  // same as GetBalanceButton
+  --font-size: 14px;
+  --padding: 4px 8px;
+  --spinner-size: 14px;
 }

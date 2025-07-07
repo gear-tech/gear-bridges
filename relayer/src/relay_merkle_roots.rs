@@ -1,20 +1,23 @@
-use std::time::{Duration, Instant};
-
 use prometheus::{Gauge, IntGauge};
-
-use ethereum_client::{EthApi, TxHash, TxStatus};
-use prover::proving::GenesisConfig;
-use utils_prometheus::{impl_metered_service, MeteredService};
+use std::time::{Duration, Instant};
 
 use crate::{
     common::{
         self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
         BASE_RETRY_DELAY, MAX_RETRIES,
     },
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
+    message_relayer::{
+        common::gear::block_listener::GearBlock, eth_to_gear::api_provider::ApiProviderConnection,
+    },
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
+use ethereum_client::{EthApi, TxHash, TxStatus};
+use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
+use primitive_types::H256;
+use prover::proving::GenesisConfig;
+use tokio::sync::broadcast::{error::RecvError, Receiver};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 
@@ -95,7 +98,7 @@ impl MerkleRootRelayer {
         }
     }
 
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn run(mut self, mut blocks_rx: Receiver<GearBlock>) -> anyhow::Result<()> {
         log::info!("Starting relayer");
 
         let mut attempts = 0;
@@ -103,7 +106,7 @@ impl MerkleRootRelayer {
         loop {
             attempts += 1;
             let now = Instant::now();
-            let res = self.main_loop().await;
+            let res = self.main_loop(&mut blocks_rx).await;
 
             if let Err(err) = res {
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
@@ -138,6 +141,9 @@ impl MerkleRootRelayer {
                         .map_err(|err| anyhow::anyhow!(err))?;
                     self.eras.update_eth_api(self.eth_api.clone());
                 }
+            } else {
+                log::warn!("Gear block listener connection closed, exiting");
+                return Ok(());
             }
 
             let main_loop_duration = now.elapsed();
@@ -147,17 +153,52 @@ impl MerkleRootRelayer {
         }
     }
 
-    async fn main_loop(&mut self) -> anyhow::Result<()> {
+    fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
+        block.events().iter().find_map(|event| match event {
+            gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(root)) => {
+                Some(*root)
+            }
+            _ => None,
+        })
+    }
+
+    async fn main_loop(&mut self, blocks_rx: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
         let balance = self.eth_api.get_approx_balance().await?;
         self.metrics.fee_payer_balance.set(balance);
 
-        self.sync_authority_set_completely().await?;
+        loop {
+            match blocks_rx.recv().await {
+                Ok(block) => {
+                    if let Some(merkle_root) = Self::queue_merkle_root_changed(&block) {
+                        log::info!(
+                            "Queue merkle root changed in block #{}: {:?}",
+                            block.number(),
+                            merkle_root
+                        );
 
-        self.eras.process(self.proof_storage.as_mut()).await?;
+                        self.sync_authority_set_completely().await?;
 
-        self.submit_merkle_root().await?;
+                        self.eras.process(self.proof_storage.as_mut()).await?;
 
-        self.try_finalize_submitted_merkle_root().await
+                        self.submit_merkle_root(block, merkle_root).await?;
+
+                        self.try_finalize_submitted_merkle_root().await?;
+                    }
+                }
+
+                Err(RecvError::Closed) => {
+                    log::warn!("Gear block listener connection closed");
+                    return Ok(());
+                }
+
+                Err(RecvError::Lagged(n)) => {
+                    log::error!(
+                        "Gear block listener lagged behind {n} blocks, skipping some blocks"
+                    );
+                    continue;
+                }
+            }
+        }
     }
 
     async fn sync_authority_set_completely(&mut self) -> anyhow::Result<()> {
@@ -208,15 +249,17 @@ impl MerkleRootRelayer {
         .await
     }
 
-    async fn submit_merkle_root(&mut self) -> anyhow::Result<()> {
+    async fn submit_merkle_root(
+        &mut self,
+        block: GearBlock,
+        merkle_root: H256,
+    ) -> anyhow::Result<()> {
         log::info!("Submitting merkle root to ethereum");
 
         let gear_api = self.api_provider.client();
 
-        let finalized_head = gear_api.latest_finalized_block().await?;
-        let finalized_block_number = gear_api.block_hash_to_number(finalized_head).await?;
-
-        let merkle_root = gear_api.fetch_queue_merkle_root(finalized_head).await?;
+        let finalized_head = block.hash();
+        let finalized_block_number = block.number();
 
         if merkle_root.is_zero() {
             log::info!("Message queue at block #{finalized_block_number} is empty. Skipping");

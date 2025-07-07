@@ -91,13 +91,7 @@ impl MessagePaidEventExtractor {
                     .map(|BridgingPaymentEvents::BridgingPaid { nonce }| nonce)
             });
 
-        log::info!(
-            "Processing block #{} with hash {}",
-            block.number(),
-            block_hash
-        );
         let mut total = 0;
-
         for nonce in messages {
             let mut nonce_le = [0; 32];
             nonce.to_little_endian(&mut nonce_le);
@@ -105,7 +99,14 @@ impl MessagePaidEventExtractor {
             sender.send(PaidMessage { nonce: nonce_le })?;
             total += 1;
         }
-        log::info!("Found {} paid messages in block #{}", total, block.number());
+
+        if total > 0 {
+            log::info!(
+                "Found {total} paid messages in block #{} ({block_hash}",
+                block.number()
+            );
+        }
+
         self.metrics.total_messages_found.inc_by(total as u64);
 
         Ok(())

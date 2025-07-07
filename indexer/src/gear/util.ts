@@ -28,6 +28,7 @@ export const enum VftManagerMethods {
   TokenMappingAdded = 'TokenMappingAdded',
   TokenMappingRemoved = 'TokenMappingRemoved',
   HistoricalProxyAddressChanged = 'HistoricalProxyAddressChanged',
+  RequestBridging = 'RequestBridging',
 }
 
 export const enum HistoricalProxyServices {

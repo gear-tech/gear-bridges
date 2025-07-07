@@ -60,7 +60,7 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     }
 
     if (completed.length > 0) {
-      this._ctx.log.info(`Loaded ${completed.length} completed transfers`);
+      this._ctx.log.debug(`Loaded ${completed.length} completed transfers`);
     }
   }
 
@@ -122,7 +122,7 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
 
     if (this._completed.size > 0) {
       operations.push(this._ctx.store.save(Array.from(this._completed.values())));
-      this._ctx.log.info(`Saved ${this._completed.size} completed transfers`);
+      this._ctx.log.debug(`Saved ${this._completed.size} completed transfers`);
     }
 
     await Promise.all(operations);
@@ -197,5 +197,16 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     );
 
     this._ctx.log.info(`${nonce}: Transfer completed`);
+  }
+
+  protected async _getTransfer(nonce: string): Promise<Transfer | undefined> {
+    if (this._transfers.has(nonce)) {
+      return this._transfers.get(nonce);
+    }
+    const t = await this._ctx.store.findOneBy(Transfer, { nonce });
+    if (t) {
+      this._transfers.set(nonce, t);
+    }
+    return t;
   }
 }

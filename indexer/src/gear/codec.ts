@@ -14,10 +14,7 @@ export class Decoder {
     return new Decoder(sails);
   }
 
-  decodeInput<T>(data: `0x${string}`): T {
-    const service = getServiceNamePrefix(data);
-    const fn = getFnNamePrefix(data);
-
+  decodeInput<T>(service: string, fn: string, data: `0x${string}`): T {
     return this.sails.services[service].functions[fn].decodePayload<T>(data);
   }
 

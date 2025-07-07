@@ -464,7 +464,7 @@ impl Contracts {
         proof: Vec<B256>,
     ) -> Result<TxHash, Error> {
         log::trace!(
-            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, leaf_index = {leaf_index}, nonce = {nonce}, sender = {sender}, receiver = {receiver}, data = {data}, proof = {proof:?}",
+            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, leaf_index = {leaf_index}, nonce = {nonce}, source = {source}, destination = {destination}, payload = {payload}, proof = {proof:?}",
         );
 
         let call = self.message_queue_instance.processMessage(

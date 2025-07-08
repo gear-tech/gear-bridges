@@ -11,13 +11,12 @@ use ethereum_common::{
         ReceiptEnvelope,
     },
 };
-use primitive_types::H256;
 use relayer::message_relayer::{
     common::{EthereumSlotNumber, TxHashWithSlot},
     eth_to_gear::{
         api_provider::ApiProvider,
         message_sender::{self, MessageSender, MessageSenderIo},
-        proof_composer::{self, ProofComposer, ProofComposerIo},
+        proof_composer::{self, ProofComposerIo},
         storage::NoStorage,
         tx_manager::*,
     },
@@ -53,7 +52,6 @@ pub struct TestTx {
     pub tx_index: u64,
 
     pub slot_number: u64,
-    pub checkpoint: u64,
 
     pub receipts: Receipts,
     pub block: BeaconBlockResponse<Block>,
@@ -304,7 +302,7 @@ async fn test_relayer_mock() {
         msg, "Mock failure for testing",
         "Failed transaction does not match expected failure message"
     );
-    println!("Failed transaction: {:?}, reason: {}", failed_tx, msg);
+    println!("Failed transaction: {failed_tx:?}, reason: {msg}");
 
     // drop here so that channel is not closed before the tasks finish
     drop(events_tx);
@@ -348,14 +346,12 @@ async fn test_tx_manager() {
     let api_provider = ApiProvider::new("ws://127.0.0.1".to_owned(), 9944, 2)
         .await
         .unwrap();
-    
+
     let mut conn = api_provider.connection();
 
     let client = conn
         .gclient_client(&contracts.suri)
         .expect("Failed to create GClient client");
-
-    let (checkpoints_tx, checkpoints_rx) = unbounded_channel();
 
     let (proof_req_tx, proof_req_rx) = unbounded_channel();
     let (proof_res_tx, proof_res_rx) = unbounded_channel();
@@ -385,9 +381,6 @@ async fn test_tx_manager() {
         };
 
         events_tx.send(tx_event).unwrap();
-        checkpoints_tx
-            .send(EthereumSlotNumber(tx_data.checkpoint))
-            .unwrap();
     }
 
     while let Ok(true) = tx_manager
@@ -407,7 +400,7 @@ async fn test_tx_manager() {
 
     vft_manager_client::VftManager::new(remoting)
         .pause()
-        .send_recv(contracts.vft_manager.into())
+        .send_recv(contracts.vft_manager)
         .await
         .expect("Failed to pause vft-manager");
 
@@ -416,12 +409,6 @@ async fn test_tx_manager() {
             tx_hash: TX_TO_FAIL,
             slot_number: EthereumSlotNumber(TRANSACTIONS.get(&TX_TO_FAIL).unwrap().slot_number),
         })
-        .unwrap();
-
-    checkpoints_tx
-        .send(EthereumSlotNumber(
-            TRANSACTIONS.get(&TX_TO_FAIL).unwrap().checkpoint,
-        ))
         .unwrap();
 
     while let Ok(true) = tx_manager

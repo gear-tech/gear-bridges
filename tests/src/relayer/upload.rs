@@ -2,15 +2,12 @@
 
 use alloy::primitives::fixed_bytes;
 use eth_events_electra_client::traits::EthEventsElectraFactory;
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
 
 use crate::{connect_to_node, DEFAULT_BALANCE};
 use gclient::GearApi;
 use gstd::{ActorId, Encode};
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
 use primitive_types::H160;
-use relayer::message_relayer::eth_to_gear::api_provider::ApiProvider;
 use sails_rs::{
     calls::{ActionIo, Activation, Call},
     gclient::calls::GClientRemoting,
@@ -129,7 +126,7 @@ impl EthContracts {
                     eth_token_id, code_vft[i]
                 );
 
-                let salt = vft_accounts[i].1.clone();
+                let salt = vft_accounts[i].1;
                 let name = format!("TEST_TOKEN_{eth_token_id}");
 
                 let vft_id = factory
@@ -202,8 +199,8 @@ impl EthContracts {
             let mut service = historical_proxy_client::HistoricalProxy::new(remoting.clone());
 
             let min_slot = super::eth_to_gear::TRANSACTIONS
-                .iter()
-                .map(|(_, tx_data)| tx_data.slot_number)
+                .values()
+                .map(|tx_data| tx_data.slot_number)
                 .min()
                 .expect("No transactions found");
 

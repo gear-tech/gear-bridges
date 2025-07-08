@@ -4,8 +4,10 @@ use checkpoint_light_client_client::service_checkpoint_for;
 use gstd::{debug, exec, msg, prelude::*, ActorId};
 use hex_literal::hex;
 use primitive_types::H256;
-use sails_rs::calls::ActionIo;
-use sails_rs::prelude::{Decode, Encode};
+use sails_rs::{
+    calls::ActionIo,
+    prelude::{Decode, Encode},
+};
 
 /* associative list of slot -> (checkpoint, blockRoot) */
 static CHECKPOINTS: &[(u64, (u64, H256))] = &[

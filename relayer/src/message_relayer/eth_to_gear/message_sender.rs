@@ -2,8 +2,7 @@ use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
 use gclient::GearApi;
-use historical_proxy_client::traits::HistoricalProxy as _;
-use historical_proxy_client::HistoricalProxy;
+use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
@@ -93,8 +92,8 @@ pub struct MessageSender {
     pub api_provider: ApiProviderConnection,
     pub suri: String,
     pub last_request: Option<Request>,
-    
-    metrics: Metrics, 
+
+    metrics: Metrics,
 }
 
 impl MeteredService for MessageSender {

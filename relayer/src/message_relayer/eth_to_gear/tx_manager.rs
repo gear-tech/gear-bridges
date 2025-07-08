@@ -3,9 +3,9 @@ use eth_events_electra_client::EthToVaraEvent;
 use prometheus::IntCounter;
 use sails_rs::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use utils_prometheus::{impl_metered_service, MeteredService};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedReceiver, RwLock};
+use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
 use super::{
@@ -88,20 +88,15 @@ impl TransactionManager {
 
     pub async fn fail_transaction(&self, tx_uuid: Uuid, reason: String) {
         self.failed.write().await.insert(tx_uuid, reason);
-        self.metrics
-            .failed_transactions
-            .inc();
+        self.metrics.failed_transactions.inc();
     }
 
     pub async fn add_transaction(&self, tx: Transaction) {
-        self.metrics.total_transactions
-            .inc();
+        self.metrics.total_transactions.inc();
         match tx.status {
             TxStatus::Completed => {
                 self.completed.write().await.insert(tx.uuid, tx);
-                self.metrics
-                    .completed_transactions
-                    .inc();
+                self.metrics.completed_transactions.inc();
             }
 
             _ => {
@@ -302,9 +297,7 @@ impl TransactionManager {
                     // it from failed set if it succeeded.
                     self.failed.write().await.remove(&tx.uuid);
                     self.completed.write().await.insert(tx.uuid, tx);
-                    self.metrics
-                        .completed_transactions
-                        .inc();
+                    self.metrics.completed_transactions.inc();
                 }
 
                 MessageStatus::Failure(message) => {

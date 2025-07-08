@@ -172,12 +172,14 @@ impl BlockStorage {
                 )
             })?;
         }
-        tokio::fs::rename(blocks_new, blocks_old).await.with_context(|| {
-            format!(
-                "Failed to rename new blocks file in storage path: '{}'",
-                path.display()
-            )
-        })?;
+        tokio::fs::rename(blocks_new, blocks_old)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to rename new blocks file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
         Ok(())
     }
 }
@@ -274,9 +276,8 @@ impl JSONStorage {
             .await
             .with_context(|| format!("Failed to read transaction file: {tx_file:?}"))?;
 
-        let tx: Transaction = serde_json::from_str(&contents).with_context(|| {
-            format!("Failed to deserialize transaction from file: {tx_file:?}")
-        })?;
+        let tx: Transaction = serde_json::from_str(&contents)
+            .with_context(|| format!("Failed to deserialize transaction from file: {tx_file:?}"))?;
 
         if tx.uuid != uuid {
             return Err(anyhow::anyhow!(

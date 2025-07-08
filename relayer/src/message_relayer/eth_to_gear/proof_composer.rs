@@ -11,18 +11,15 @@ use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::Context;
-use checkpoint_light_client_client::traits::ServiceCheckpointFor as _;
-use checkpoint_light_client_client::ServiceCheckpointFor;
+use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
 use eth_events_electra_client::{
     traits::EthereumEventClient, BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, TxHash};
-use ethereum_common::utils as eth_utils;
-use ethereum_common::{beacon, tree_hash::TreeHash, utils::MerkleProof};
+use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
-use historical_proxy_client::traits::HistoricalProxy as _;
-use historical_proxy_client::HistoricalProxy;
+use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
@@ -233,7 +230,7 @@ async fn handle_requests(
         while let Some((tx_uuid, tx)) = this.to_process.pop() {
             log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
             match this.process(responses, tx.clone(), tx_uuid).await {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(err) => {
                     log::error!(
                         "Failed to process transaction {tx_uuid} (hash: {:?}): {err:?}",

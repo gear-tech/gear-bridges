@@ -15,9 +15,6 @@ use vft_vara::WASM_BINARY as WASM_VFT_VARA;
 
 pub mod gtest;
 
-const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
-const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
-
 async fn calculate_reply_gas(
     api: &GearApi,
     service: &mut vft_manager_client::VftManager<GClientRemoting>,
@@ -1725,7 +1722,7 @@ async fn submit_receipt_works() -> Result<()> {
 // - Deploying a VFT contract with token supply type Ethereum, but not adding any roles to it.
 // Test scenario:
 // - on behalf of the historical proxy, sending `submit_receipt` message to the VFT manager,
-//   with the rlp receipt indicating a transfer of the ERC20_TOKEN_ETH_SUPPLY
+//   with the rlp receipt indicating a transfer of an ERC20 token with Ethereum supply
 // - the upstream VFT contract will panic attempting to mint tokens.
 // Expecting:
 // - no events are emitted

@@ -299,6 +299,7 @@ async fn test_relayer_mock() {
     );
     println!("Failed transaction: {:?}, reason: {}", failed_tx, msg);
 
+    // drop here so that channel is not closed before the tasks finish
     drop(events_tx);
 }
 
@@ -432,6 +433,6 @@ async fn test_tx_manager() {
 
     assert!(msg.contains("Paused"));
 
+    // drop here so that channel is not closed before the tasks finish
     drop(events_tx);
-    // now let's upgrade vft-manager and then check that tx manager fails the transaction
 }

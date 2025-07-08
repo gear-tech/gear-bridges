@@ -94,7 +94,7 @@ pub struct MessageSender {
     pub suri: String,
     pub last_request: Option<Request>,
     
-    pub metrics: Metrics, 
+    metrics: Metrics, 
 }
 
 impl MeteredService for MessageSender {

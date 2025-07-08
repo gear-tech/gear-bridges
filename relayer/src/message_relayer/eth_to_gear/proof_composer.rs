@@ -24,6 +24,7 @@ use futures::executor::block_on;
 use historical_proxy_client::traits::HistoricalProxy as _;
 use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
+use prometheus::IntGauge;
 use sails_rs::{
     calls::{Action, Query},
     gclient::calls::GClientRemoting,
@@ -33,6 +34,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
 };
+use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -83,6 +85,19 @@ impl ProofComposerIo {
     }
 }
 
+impl_metered_service!(
+    struct Metrics {
+        messages_waiting_for_checkpoint: IntGauge = IntGauge::new(
+            "proof_composer_messages_waiting_for_checkpoint",
+            "Number of messages waiting for checkpoint"
+        ),
+        last_checkpoint: IntGauge = IntGauge::new(
+            "proof_composer_last_checkpoint",
+            "Last checkpoint slot number"
+        )
+    }
+);
+
 pub struct ProofComposer {
     pub api_provider: ApiProviderConnection,
     pub beacon_client: BeaconClient,
@@ -92,6 +107,14 @@ pub struct ProofComposer {
     pub historical_proxy_address: H256,
     pub suri: String,
     pub to_process: Vec<(Uuid, TxHashWithSlot)>,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for ProofComposer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl ProofComposer {
@@ -111,6 +134,8 @@ impl ProofComposer {
             historical_proxy_address,
             suri,
             to_process: Vec::with_capacity(100),
+
+            metrics: Metrics::new(),
         }
     }
 
@@ -201,6 +226,10 @@ async fn handle_requests(
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
     loop {
+        this.metrics
+            .messages_waiting_for_checkpoint
+            .set(this.waiting_for_checkpoints.len() as i64);
+
         while let Some((tx_uuid, tx)) = this.to_process.pop() {
             log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
             match this.process(responses, tx.clone(), tx_uuid).await {
@@ -219,6 +248,8 @@ async fn handle_requests(
                 if let Some(checkpoint) = value {
                     log::info!("Received checkpoint: {checkpoint}");
                     this.last_checkpoint = Some(checkpoint);
+
+                    this.metrics.last_checkpoint.set(checkpoint.0 as i64);
 
                     this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
                         if tx.slot_number <= checkpoint {

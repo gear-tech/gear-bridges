@@ -35,6 +35,12 @@ impl Block {
     }
 }
 
+impl Default for BlockStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockStorage {
     pub fn new() -> Self {
         Self {
@@ -191,6 +197,12 @@ pub trait Storage: Send + Sync {
 
 pub struct NoStorage(BlockStorage);
 
+impl Default for NoStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NoStorage {
     pub fn new() -> Self {
         Self(BlockStorage::new())
@@ -257,13 +269,13 @@ impl JSONStorage {
 
         let mut file = tokio::fs::File::open(path)
             .await
-            .with_context(|| format!("Failed to open transaction file: {:?}", tx_file))?;
+            .with_context(|| format!("Failed to open transaction file: {tx_file:?}"))?;
         file.read_to_string(&mut contents)
             .await
-            .with_context(|| format!("Failed to read transaction file: {:?}", tx_file))?;
+            .with_context(|| format!("Failed to read transaction file: {tx_file:?}"))?;
 
         let tx: Transaction = serde_json::from_str(&contents).with_context(|| {
-            format!("Failed to deserialize transaction from file: {:?}", tx_file)
+            format!("Failed to deserialize transaction from file: {tx_file:?}")
         })?;
 
         if tx.uuid != uuid {

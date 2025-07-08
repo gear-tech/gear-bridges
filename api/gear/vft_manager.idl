@@ -317,13 +317,13 @@ service VftManager {
     /// Transaction receipt submitted via [VftManager::submit_receipt] processed successfully.
     BridgingAccepted: struct {
         /// The recipient
-        to: ActorId,
+        to: actor_id,
         /// The sender on Ethereum side
-        from: H160,
+        from: h160,
         /// The amount bridged
-        amount: U256,
+        amount: u256,
         /// Respective Vara token Id
-        token: ActorId,
+        token: actor_id,
     };
   }
 };

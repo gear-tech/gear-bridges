@@ -204,7 +204,7 @@ async fn handle_requests(
         while let Some((tx_uuid, tx)) = this.to_process.pop() {
             log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
             match this.process(responses, tx.clone(), tx_uuid).await {
-                Ok(()) => (),
+                Ok(_) => {},
                 Err(err) => {
                     log::error!(
                         "Failed to process transaction {tx_uuid} (hash: {:?}): {err:?}",

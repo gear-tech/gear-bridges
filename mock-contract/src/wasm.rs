@@ -1,135 +1,128 @@
 extern crate alloc;
 
-use gstd::{ActorId, debug, exec, msg, prelude::*};
+use checkpoint_light_client_client::service_checkpoint_for;
+use gstd::{debug, exec, msg, prelude::*, ActorId};
+use hex_literal::hex;
 use primitive_types::H256;
 use sails_rs::calls::ActionIo;
 use sails_rs::prelude::{Decode, Encode};
-#[unsafe(no_mangle)]
-extern "C" fn init() {}
 
 /* associative list of slot -> (checkpoint, blockRoot) */
 static CHECKPOINTS: &[(u64, (u64, H256))] = &[
     (
-        4534630,
+        4_534_630,
         (
-            4534655,
-            H256([
-                202, 136, 183, 86, 83, 148, 27, 215, 9, 210, 57, 249, 207, 68, 170, 3, 39, 217, 83,
-                44, 226, 101, 219, 55, 246, 146, 222, 29, 241, 4, 160, 144,
-            ]),
+            4_534_655,
+            H256(hex!(
+                "ca88b75653941bd709d239f9cf44aa0327d9532ce265db37f692de1df104a090"
+            )),
         ),
     ),
     (
-        4534633,
+        4_534_633,
         (
-            4534655,
-            H256([
-                202, 136, 183, 86, 83, 148, 27, 215, 9, 210, 57, 249, 207, 68, 170, 3, 39, 217, 83,
-                44, 226, 101, 219, 55, 246, 146, 222, 29, 241, 4, 160, 144,
-            ]),
+            4_534_655,
+            H256(hex!(
+                "ca88b75653941bd709d239f9cf44aa0327d9532ce265db37f692de1df104a090"
+            )),
         ),
     ),
     (
-        4534682,
+        4_534_682,
         (
-            4534685,
-            H256([
-                48, 127, 233, 99, 78, 167, 225, 39, 128, 127, 170, 28, 137, 147, 92, 62, 23, 15,
-                27, 92, 196, 73, 179, 126, 239, 115, 52, 202, 66, 255, 223, 215,
-            ]),
+            4_534_685,
+            H256(hex!(
+                "307fe9634ea7e127807faa1c89935c3e170f1b5cc449b37eef7334ca42ffdfd7"
+            )),
         ),
     ),
     (
-        4534773,
+        4_534_773,
         (
-            4534783,
-            H256([
-                30, 252, 109, 220, 244, 201, 117, 118, 16, 184, 150, 99, 66, 117, 37, 76, 30, 220,
-                82, 44, 151, 227, 107, 170, 238, 115, 109, 189, 79, 148, 157, 168,
-            ]),
+            4_534_783,
+            H256(hex!(
+                "1efc6ddcf4c9757610b896634275254c1edc522c97e36baaee736dbd4f949da8"
+            )),
         ),
     ),
     (
-        4535105,
+        4_535_105,
         (
-            4535134,
-            H256([
-                32, 54, 120, 71, 81, 124, 15, 227, 181, 27, 168, 57, 149, 70, 117, 89, 103, 131,
-                139, 47, 63, 229, 196, 89, 245, 116, 119, 29, 200, 6, 126, 98,
-            ]),
+            4_535_134,
+            H256(hex!(
+                "20367847517c0fe3b51ba8399546755967838b2f3fe5c459f574771dc8067e62"
+            )),
         ),
     ),
     (
-        4535108,
+        4_535_108,
         (
-            4535134,
-            H256([
-                32, 54, 120, 71, 81, 124, 15, 227, 181, 27, 168, 57, 149, 70, 117, 89, 103, 131,
-                139, 47, 63, 229, 196, 89, 245, 116, 119, 29, 200, 6, 126, 98,
-            ]),
+            4_535_134,
+            H256(hex!(
+                "20367847517c0fe3b51ba8399546755967838b2f3fe5c459f574771dc8067e62"
+            )),
         ),
     ),
     (
-        4536096,
+        4_536_096,
         (
-            4536124,
-            H256([
-                45, 63, 241, 20, 162, 50, 118, 62, 44, 213, 232, 134, 128, 106, 12, 224, 165, 130,
-                216, 62, 63, 12, 145, 126, 27, 226, 223, 241, 238, 168, 152, 234,
-            ]),
+            4_536_124,
+            H256(hex!(
+                "2d3ff114a232763e2cd5e886806a0ce0a582d83e3f0c917e1be2dff1eea898ea"
+            )),
         ),
     ),
     (
-        4537829,
+        4_537_829,
         (
-            4537855,
-            H256([
-                101, 67, 243, 230, 237, 148, 116, 254, 208, 176, 48, 117, 124, 11, 77, 76, 185,
-                107, 135, 171, 159, 150, 78, 215, 252, 28, 76, 130, 179, 147, 142, 72,
-            ]),
+            4_537_855,
+            H256(hex!(
+                "6543f3e6ed9474fed0b030757c0b4d4cb96b87ab9f964ed7fc1c4c82b3938e48"
+            )),
         ),
     ),
     (
-        4540604,
+        4_540_604,
         (
-            4540607,
-            H256([
-                249, 176, 200, 43, 249, 193, 106, 84, 243, 16, 86, 224, 136, 213, 28, 43, 222, 146,
-                12, 35, 162, 0, 180, 21, 205, 120, 31, 178, 24, 38, 103, 177,
-            ]),
+            4_540_607,
+            H256(hex!(
+                "f9b0c82bf9c16a54f31056e088d51c2bde920c23a200b415cd781fb2182667b1"
+            )),
         ),
     ),
 ];
-use checkpoint_light_client_client::service_checkpoint_for;
+
 const GET_CHECKPOINT: &[u8] = <service_checkpoint_for::io::Get as ActionIo>::ROUTE;
+
+#[unsafe(no_mangle)]
+extern "C" fn init() {}
 
 #[unsafe(no_mangle)]
 extern "C" fn handle() {
     let id = msg::source();
     let payload = msg::load_bytes().expect("unable to load payload");
 
-    if payload.starts_with(GET_CHECKPOINT) {
-        let params = &payload[GET_CHECKPOINT.len()..];
-        let slot = <service_checkpoint_for::io::Get as ActionIo>::Params::decode(&mut &params[..])
-            .expect("unable to decode params");
-        debug!("Received request for checkpoint for slot: {}", slot);
-
-        let checkpoint = CHECKPOINTS
-            .iter()
-            .find(|(s, _)| *s == slot)
-            .map(|(_, (checkpoint, block_root))| (*checkpoint, *block_root))
-            .expect("checkpoint not found");
-
-        debug!("Found checkpoint: {:?}", checkpoint);
-
-        let mut bytes = Vec::with_capacity(GET_CHECKPOINT.len() + Encode::size_hint(&checkpoint));
-        bytes.extend_from_slice(GET_CHECKPOINT);
-        let result =
-            Result::<(u64, H256), checkpoint_light_client_client::CheckpointError>::Ok(checkpoint);
-        <service_checkpoint_for::io::Get as ActionIo>::Reply::encode_to(&result, &mut bytes);
-
-        msg::reply_bytes(bytes, 0).expect("unable to reply with checkpoint");
-    } else {
-        panic!("Unknown action: {:?}", payload);
+    if !payload.starts_with(GET_CHECKPOINT) {
+        panic!("Unknown action: {payload:?}");
     }
+    let params = &payload[GET_CHECKPOINT.len()..];
+    let slot = <service_checkpoint_for::io::Get as ActionIo>::Params::decode(&mut &params[..])
+        .expect("unable to decode params");
+    debug!("Received request for checkpoint for slot: {slot}");
+
+    let checkpoint = CHECKPOINTS
+        .iter()
+        .find(|(s, _)| *s == slot)
+        .map(|(_, (checkpoint, block_root))| (*checkpoint, *block_root))
+        .expect("checkpoint not found");
+
+    debug!("Found checkpoint: {checkpoint:?}");
+
+    let mut bytes = Vec::with_capacity(GET_CHECKPOINT.len() + Encode::size_hint(&checkpoint));
+    bytes.extend_from_slice(GET_CHECKPOINT);
+    let result =
+        Result::<(u64, H256), checkpoint_light_client_client::CheckpointError>::Ok(checkpoint);
+    <service_checkpoint_for::io::Get as ActionIo>::Reply::encode_to(&result, &mut bytes);
+
+    msg::reply_bytes(bytes, 0).expect("unable to reply with checkpoint");
 }

@@ -1,15 +1,16 @@
 [package]
 name = "mock-contract"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-
+checkpoint-light-client-client.workspace = true
 gstd.workspace = true
 hex.workspace = true
+hex-literal.workspace = true
 primitive-types.workspace = true
-checkpoint-light-client-client.workspace = true
 sails-rs.workspace = true
+
 [build-dependencies]
 gear-wasm-builder.workspace = true
 

@@ -8214,13 +8214,14 @@ dependencies = [
 
 [[package]]
 name = "mock-contract"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "checkpoint-light-client-client",
  "gear-wasm-builder 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "getrandom 0.2.16",
  "gstd 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "hex",
+ "hex-literal",
  "lazy_static",
  "primitive-types 0.12.2",
  "sails-rs",

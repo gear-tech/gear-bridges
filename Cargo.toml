@@ -89,7 +89,6 @@ vft-common = { path = "gear-programs/vft-common" }
 vft-vara = { path = "gear-programs/vft-vara" }
 vft-vara-app = { path = "gear-programs/vft-vara/app" }
 vft-vara-client = { path = "gear-programs/vft-vara/client" }
-#mock-contract = { path = "tests/mock-contract" }
 
 # Contracts' deps
 

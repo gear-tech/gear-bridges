@@ -11,6 +11,10 @@ use gstd::{ActorId, Encode};
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
 use primitive_types::H160;
 use relayer::message_relayer::eth_to_gear::api_provider::ApiProvider;
+use sails_rs::{
+    calls::{ActionIo, Activation, Call},
+    gclient::calls::GClientRemoting,
+};
 use vft_client::traits::{VftAdmin, VftExtension, VftFactory};
 use vft_manager_client::{
     traits::{VftManager, VftManagerFactory},
@@ -232,11 +236,6 @@ impl EthContracts {
         }
     }
 }
-
-use sails_rs::{
-    calls::{ActionIo, Activation, Call},
-    gclient::calls::GClientRemoting,
-};
 
 #[tokio::test]
 async fn mock_contract_test() {

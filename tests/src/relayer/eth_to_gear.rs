@@ -34,8 +34,14 @@ pub struct Receipts {
     pub result: Vec<TransactionReceipt>,
 }
 
+
+/// Test transaction stored in the `TRANSACTIONS` map.
+/// 
+/// Loaded from the `transactions.json.zst` file, which is a compressed JSON file containing
+/// a list of transactions with their details fetched from Holesky testnet. You can find 
+/// original transactions on `holesky.etherscan.io` or similar block explorers.
 #[derive(Deserialize, Debug)]
-pub struct Tx {
+pub struct TestTx {
     pub tx_hash: FixedBytes<32>,
     pub tx_index: u64,
 
@@ -48,7 +54,7 @@ pub struct Tx {
 }
 use primitive_types::H160;
 
-impl Tx {
+impl TestTx {
     pub fn eth_token_id(&self) -> H160 {
         use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
@@ -126,13 +132,13 @@ static TRANSACTIONS_BYTES: &[u8] = include_bytes!("./transactions.json.zst");
 
 /* use btreemap and btreeset to make tests behaviour predictable */
 
-pub static TRANSACTIONS: LazyLock<BTreeMap<FixedBytes<32>, Tx>> = LazyLock::new(|| {
+pub static TRANSACTIONS: LazyLock<BTreeMap<FixedBytes<32>, TestTx>> = LazyLock::new(|| {
     let mut txs = TRANSACTIONS_BYTES;
     let mut decoder = StreamingDecoder::new(&mut txs).unwrap();
     let mut result = Vec::new();
     decoder.read_to_end(&mut result).unwrap();
 
-    let txs: Vec<Tx> = serde_json::from_slice(&result).unwrap();
+    let txs: Vec<TestTx> = serde_json::from_slice(&result).unwrap();
 
     txs.into_iter().map(|tx| (tx.tx_hash, tx)).collect()
 });
@@ -340,14 +346,13 @@ async fn test_tx_manager() {
 
     let (checkpoints_tx, checkpoints_rx) = unbounded_channel();
 
-    let proof_composer = ProofComposer::new(
-        conn.clone(),
-        beacon.clone(),
-        eth.clone(),
-        H256(contracts.historical_proxy.into_bytes()),
-        contracts.suri.clone(),
-    );
-    let mut proof_composer_io = proof_composer.run(checkpoints_rx);
+        let (proof_req_tx, proof_req_rx) = unbounded_channel();
+    let (proof_res_tx, proof_res_rx) = unbounded_channel();
+
+    let mut proof_composer_io = ProofComposerIo::new(proof_req_tx, proof_res_rx);
+
+
+    MockProofComposer::run(proof_req_rx, proof_res_tx).await;
 
     let message_sender = MessageSender::new(
         contracts.vft_manager.into(),

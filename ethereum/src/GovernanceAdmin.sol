@@ -168,26 +168,23 @@ contract GovernanceAdmin is IMessageHandler, IGovernance {
             return true;
         }
 
-        if (discriminant == GovernanceConstants.UPGRADE_PROXY) {
-            if (!(payload.length >= GovernanceConstants.UPGRADE_PROXY_SIZE)) {
-                return false;
-            }
-
-            // we use offset `OFFSET2 = DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` to skip `uint8 discriminant` and `address proxy`
-            address newImplementation;
-            assembly ("memory-safe") {
-                // `NEW_IMPLEMENTATION_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-                newImplementation := shr(NEW_IMPLEMENTATION_BIT_SHIFT, calldataload(add(payload.offset, OFFSET2)))
-            }
-            // we use offset `OFFSET3 = DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE`
-            // to skip `uint8 discriminant`, `address proxy` and `address newImplementation`
-            // and get `bytes data`
-            bytes calldata data = payload[GovernanceConstants.OFFSET3:];
-
-            IUUPSUpgradeable(proxy).upgradeToAndCall(newImplementation, data);
-
-            return true;
+        // `discriminant == GovernanceConstants.UPGRADE_PROXY` is guaranteed by previous checks
+        if (!(payload.length >= GovernanceConstants.UPGRADE_PROXY_SIZE)) {
+            return false;
         }
+
+        // we use offset `OFFSET2 = DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` to skip `uint8 discriminant` and `address proxy`
+        address newImplementation;
+        assembly ("memory-safe") {
+            // `NEW_IMPLEMENTATION_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            newImplementation := shr(NEW_IMPLEMENTATION_BIT_SHIFT, calldataload(add(payload.offset, OFFSET2)))
+        }
+        // we use offset `OFFSET3 = DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE`
+        // to skip `uint8 discriminant`, `address proxy` and `address newImplementation`
+        // and get `bytes data`
+        bytes calldata data = payload[GovernanceConstants.OFFSET3:];
+
+        IUUPSUpgradeable(proxy).upgradeToAndCall(newImplementation, data);
 
         return true;
     }

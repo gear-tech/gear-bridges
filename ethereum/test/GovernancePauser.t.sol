@@ -4,13 +4,19 @@ pragma solidity ^0.8.30;
 import {Test, console} from "forge-std/Test.sol";
 import {Base} from "./Base.sol";
 import {
-    GovernanceConstants, IGovernance, ChangeGovernanceMessage, GovernancePacker
+    GovernanceConstants,
+    IGovernance,
+    ChangeGovernanceMessage,
+    PauseProxyMessage,
+    GovernancePacker
 } from "src/interfaces/IGovernance.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
 
 contract GovernancePauserTest is Test, Base {
     using Hasher for VaraMessage;
+
     using GovernancePacker for ChangeGovernanceMessage;
+    using GovernancePacker for PauseProxyMessage;
 
     function setUp() public {
         deployBridgeFromConstants();
@@ -181,6 +187,65 @@ contract GovernancePauserTest is Test, Base {
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: abi.encodePacked(uint8(GovernanceConstants.PAUSE_PROXY))
+        });
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+
+        bytes32 messageHash = message.hash();
+
+        uint256 blockNumber = 0x44;
+        bytes32 merkleRoot = messageHash;
+        bytes memory proof1 = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof2 = new bytes32[](0);
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+    }
+
+    function test_HandleMessageWithPauseAndInvalidProxy() public {
+        address invalidProxy = address(0x22);
+        VaraMessage memory message = VaraMessage({
+            nonce: 0x11,
+            source: governancePauser.governance(),
+            destination: address(governancePauser),
+            payload: PauseProxyMessage({proxy: invalidProxy}).pack()
+        });
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+
+        bytes32 messageHash = message.hash();
+
+        uint256 blockNumber = 0x44;
+        bytes32 merkleRoot = messageHash;
+        bytes memory proof1 = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof2 = new bytes32[](0);
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+    }
+
+    function test_HandleMessageWithPauseAndInvalidMessageSize() public {
+        VaraMessage memory message = VaraMessage({
+            nonce: 0x11,
+            source: governancePauser.governance(),
+            destination: address(governancePauser),
+            payload: bytes.concat(PauseProxyMessage({proxy: address(messageQueue)}).pack(), "ff")
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 

@@ -138,18 +138,16 @@ contract GovernancePauser is IMessageHandler, IGovernance {
             return false;
         }
 
-        if (discriminant >= GovernanceConstants.PAUSE_PROXY && discriminant <= GovernanceConstants.UNPAUSE_PROXY) {
-            if (!(payload.length == GovernanceConstants.PAUSE_UNPAUSE_PROXY_SIZE)) {
-                return false;
-            }
+        // `discriminant >= GovernanceConstants.PAUSE_PROXY && discriminant <= GovernanceConstants.UNPAUSE_PROXY`
+        // is guaranteed by previous checks
+        if (!(payload.length == GovernanceConstants.PAUSE_UNPAUSE_PROXY_SIZE)) {
+            return false;
+        }
 
-            if (discriminant == GovernanceConstants.PAUSE_PROXY) {
-                IPausable(proxy).pause();
-            } else if (discriminant == GovernanceConstants.UNPAUSE_PROXY) {
-                IPausable(proxy).unpause();
-            }
-
-            return true;
+        if (discriminant == GovernanceConstants.PAUSE_PROXY) {
+            IPausable(proxy).pause();
+        } else if (discriminant == GovernanceConstants.UNPAUSE_PROXY) {
+            IPausable(proxy).unpause();
         }
 
         return true;

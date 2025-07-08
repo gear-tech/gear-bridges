@@ -14320,6 +14320,7 @@ dependencies = [
  "historical-proxy-client",
  "log",
  "mock-contract",
+ "parity-scale-codec",
  "pretty_env_logger",
  "primitive-types 0.12.2",
  "relayer",

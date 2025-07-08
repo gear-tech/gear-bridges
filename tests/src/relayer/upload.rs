@@ -286,27 +286,3 @@ async fn mock_contract_test() {
         fixed_bytes!("0xca88b75653941bd709d239f9cf44aa0327d9532ce265db37f692de1df104a090").0
     );
 }
-
-pub async fn connections() -> (EthApi, BeaconClient, ApiProvider) {
-    let eth_api = EthApi::new(
-        "wss://reth-rpc.gear-tech.io/ws",
-        "0xE3e5514AC6cAF71560777B9EaD6CaD5f6171D3de",
-        "0x521030B5F81aFaaa1267748f6A7eE74735a42fc3",
-        None,
-    )
-    .await
-    .unwrap();
-
-    let api_provider = ApiProvider::new("ws://127.0.0.1".to_owned(), 9944, 2)
-        .await
-        .unwrap();
-
-    let beacon_client = BeaconClient::new(
-        "http://testing.holesky.beacon-api.nimbus.team".to_string(),
-        None,
-    )
-    .await
-    .unwrap();
-
-    (eth_api, beacon_client, api_provider)
-}

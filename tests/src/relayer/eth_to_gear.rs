@@ -1,29 +1,37 @@
-use alloy::primitives::{fixed_bytes, FixedBytes};
-use alloy::rpc::types::TransactionReceipt;
+use alloy::{
+    primitives::{fixed_bytes, FixedBytes},
+    rpc::types::TransactionReceipt,
+};
 use alloy_rlp::Encodable;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
-use ethereum_common::utils::{BeaconBlockHeaderResponse, MerkleProof, ReceiptEnvelope};
 use ethereum_common::{
     beacon::electra::Block,
-    utils::{self as eth_utils, BeaconBlockResponse},
+    utils::{
+        self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof,
+        ReceiptEnvelope,
+    },
 };
 use primitive_types::H256;
-use relayer::message_relayer::common::{EthereumSlotNumber, TxHashWithSlot};
-use relayer::message_relayer::eth_to_gear::api_provider::ApiProvider;
-use relayer::message_relayer::eth_to_gear::message_sender::MessageSender;
-use relayer::message_relayer::eth_to_gear::proof_composer::ProofComposer;
-use relayer::message_relayer::eth_to_gear::storage::NoStorage;
-use relayer::message_relayer::eth_to_gear::{
-    message_sender::{self, MessageSenderIo},
-    proof_composer::{self, ProofComposerIo},
-    tx_manager::*,
+use relayer::message_relayer::{
+    common::{EthereumSlotNumber, TxHashWithSlot},
+    eth_to_gear::{
+        api_provider::ApiProvider,
+        message_sender::{self, MessageSender, MessageSenderIo},
+        proof_composer::{self, ProofComposer, ProofComposerIo},
+        storage::NoStorage,
+        tx_manager::*,
+    },
 };
 use ruzstd::{self, StreamingDecoder};
-use sails_rs::calls::{ActionIo, Call};
-use sails_rs::gclient::calls::GClientRemoting;
+use sails_rs::{
+    calls::{ActionIo, Call},
+    gclient::calls::GClientRemoting,
+};
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Read,
+};
 use vft_manager_client::traits::VftManager;
 
 use std::sync::{Arc, LazyLock};
@@ -34,11 +42,10 @@ pub struct Receipts {
     pub result: Vec<TransactionReceipt>,
 }
 
-
 /// Test transaction stored in the `TRANSACTIONS` map.
-/// 
+///
 /// Loaded from the `transactions.json.zst` file, which is a compressed JSON file containing
-/// a list of transactions with their details fetched from Holesky testnet. You can find 
+/// a list of transactions with their details fetched from Holesky testnet. You can find
 /// original transactions on `holesky.etherscan.io` or similar block explorers.
 #[derive(Deserialize, Debug)]
 pub struct TestTx {
@@ -337,8 +344,11 @@ async fn test_tx_manager() {
         .parse_default_env()
         .init();
     let contracts = super::upload::EthContracts::new().await;
-    let (eth, beacon, api_provider) = super::upload::connections().await;
 
+    let api_provider = ApiProvider::new("ws://127.0.0.1".to_owned(), 9944, 2)
+        .await
+        .unwrap();
+    
     let mut conn = api_provider.connection();
 
     let client = conn
@@ -347,11 +357,10 @@ async fn test_tx_manager() {
 
     let (checkpoints_tx, checkpoints_rx) = unbounded_channel();
 
-        let (proof_req_tx, proof_req_rx) = unbounded_channel();
+    let (proof_req_tx, proof_req_rx) = unbounded_channel();
     let (proof_res_tx, proof_res_rx) = unbounded_channel();
 
     let mut proof_composer_io = ProofComposerIo::new(proof_req_tx, proof_res_rx);
-
 
     MockProofComposer::run(proof_req_rx, proof_res_tx).await;
 

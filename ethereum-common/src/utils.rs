@@ -53,19 +53,19 @@ pub enum LightClientHeader {
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Beacon {
     pub beacon: BlockHeader,
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BeaconBlockHeaderResponse {
     pub data: BeaconBlockHeaderData,
 }
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BeaconBlockHeaderData {
     pub header: SignedBeaconBlockHeader,
 }
@@ -141,6 +141,21 @@ pub struct UpdateData {
 
 /// According to Beacon API spec [v2.5.0](https://ethereum.github.io/beacon-APIs/?urls.primaryName=v2.5.0).
 pub type UpdateResponse = Vec<UpdateData>;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenesisResponse {
+    pub data: GenesisData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenesisData {
+    #[serde(deserialize_with = "deserialize_u64")]
+    pub genesis_time: u64,
+    #[serde(deserialize_with = "decode_hex_bytes")]
+    pub genesis_validators_root: Vec<u8>,
+    #[serde(deserialize_with = "deserialize_u64")]
+    pub genesis_fork_version: u64,
+}
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_epoch_at_slot).
 pub const fn calculate_epoch(slot: u64) -> u64 {

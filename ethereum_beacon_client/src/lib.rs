@@ -11,7 +11,7 @@ use ethereum_common::{
     beacon::{self, BlockHeader as BeaconBlockHeader, ExecutionPayload},
     utils::{
         self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, FinalityUpdate,
-        FinalityUpdateResponse, UpdateResponse,
+        FinalityUpdateResponse, GenesisResponse, UpdateResponse,
     },
     MAX_REQUEST_LIGHT_CLIENT_UPDATES,
 };
@@ -82,6 +82,12 @@ impl BeaconClient {
             rpc_url: self.rpc_url.clone(),
             timeout: self.timeout,
         })
+    }
+
+    pub async fn get_genesis(&self) -> AnyResult<GenesisResponse> {
+        let url = format!("{}/eth/v1/beacon/genesis", self.rpc_url);
+
+        get::<GenesisResponse>(self.client.get(&url)).await
     }
 
     pub async fn get_updates(&self, period: u64, count: u8) -> AnyResult<UpdateResponse> {

@@ -11,7 +11,7 @@ pub enum Error {
     ReplyTimeout,
     /// Failed to set reply hook.
     ReplyHook,
-    /// A supposedly reply message does not have a reply code.
+    /// A message does not have a reply code.
     NoReplyCode(String),
 
     /// Original `MessageId` wasn't found in message tracker when processing reply.

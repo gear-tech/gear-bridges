@@ -7,6 +7,7 @@ use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use kill_switch::KillSwitchRelayer;
+use merkle_roots::{submitter::MerkleRootSubmitter, MerkleRootRelayer};
 use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
     gear_to_eth,
@@ -14,7 +15,6 @@ use message_relayer::{
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
-use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
 
 mod cli;
@@ -22,10 +22,10 @@ mod common;
 mod ethereum_checkpoints;
 mod hex_utils;
 mod kill_switch;
+mod merkle_roots;
 mod message_relayer;
 mod proof_storage;
 mod prover_interface;
-mod relay_merkle_roots;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
@@ -76,12 +76,14 @@ async fn main() {
 
             let relayer = MerkleRootRelayer::new(
                 api_provider.connection(),
-                eth_api,
+                eth_api.clone(),
                 genesis_config,
                 proof_storage,
                 args.start_authority_set_id,
             )
             .await;
+
+            let proof_submitter = MerkleRootSubmitter::new(eth_api);
 
             metrics
                 .register_service(&relayer)
@@ -91,8 +93,9 @@ async fn main() {
             api_provider.spawn();
 
             let [blocks] = block_listener.run().await;
+            let proof_submitter = proof_submitter.run();
             relayer
-                .run(blocks)
+                .run(blocks, proof_submitter)
                 .await
                 .expect("Merkle root relayer failed");
         }

@@ -16,7 +16,10 @@ use ethereum_client::{EthApi, TxHash, TxStatus};
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use prover::proving::GenesisConfig;
-use tokio::sync::broadcast::{error::RecvError, Receiver};
+use tokio::sync::{
+    broadcast::{error::RecvError, Receiver},
+    mpsc::UnboundedSender,
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
@@ -45,17 +48,9 @@ pub struct MerkleRootRelayer {
     proof_storage: Box<dyn ProofStorage>,
     eras: Eras,
 
-    latest_submitted_merkle_root: Option<SubmittedMerkleRoot>,
-
     genesis_config: GenesisConfig,
 
     metrics: Metrics,
-}
-
-struct SubmittedMerkleRoot {
-    tx_hash: TxHash,
-    proof: FinalProof,
-    finalized: bool,
 }
 
 impl MeteredService for MerkleRootRelayer {
@@ -92,13 +87,16 @@ impl MerkleRootRelayer {
             eth_api,
             genesis_config,
             proof_storage,
-            latest_submitted_merkle_root: None,
             eras,
             metrics,
         }
     }
 
-    pub async fn run(mut self, mut blocks_rx: Receiver<GearBlock>) -> anyhow::Result<()> {
+    pub async fn run(
+        mut self,
+        mut blocks_rx: Receiver<GearBlock>,
+        mut proof_submitter: UnboundedSender<FinalProof>,
+    ) -> anyhow::Result<()> {
         log::info!("Starting relayer");
 
         let mut attempts = 0;
@@ -106,7 +104,7 @@ impl MerkleRootRelayer {
         loop {
             attempts += 1;
             let now = Instant::now();
-            let res = self.main_loop(&mut blocks_rx).await;
+            let res = self.run_impl(&mut blocks_rx, &mut proof_submitter).await;
 
             if let Err(err) = res {
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
@@ -162,13 +160,36 @@ impl MerkleRootRelayer {
         })
     }
 
-    async fn main_loop(&mut self, blocks_rx: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
-        let balance = self.eth_api.get_approx_balance().await?;
-        self.metrics.fee_payer_balance.set(balance);
+    fn authority_set_hash_changeed(block: &GearBlock) -> Option<H256> {
+        block.events().iter().find_map(|event| match event {
+            gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(hash)) => {
+                Some(*hash)
+            }
+            _ => None,
+        })
+    }
 
+    async fn run_impl(
+        &mut self,
+        blocks_rx: &mut Receiver<GearBlock>,
+        proof_submitter: &mut UnboundedSender<FinalProof>,
+    ) -> anyhow::Result<()> {
         loop {
+            let balance = self.eth_api.get_approx_balance().await?;
+            self.metrics.fee_payer_balance.set(balance);
+
             match blocks_rx.recv().await {
                 Ok(block) => {
+                    if Self::authority_set_hash_changeed(&block).is_some() {
+                        log::info!("Authority set hash changed in block #{}", block.number());
+                        if !self.sync_authority_set_completely(blocks_rx).await? {
+                            log::info!("Gear block listener connection closed during authority set sync, exiting");
+                            return Ok(());
+                        }
+
+                        self.eras.process(self.proof_storage.as_mut()).await?;
+                    }
+
                     if let Some(merkle_root) = Self::queue_merkle_root_changed(&block) {
                         log::info!(
                             "Queue merkle root changed in block #{}: {:?}",
@@ -176,13 +197,12 @@ impl MerkleRootRelayer {
                             merkle_root
                         );
 
-                        self.sync_authority_set_completely().await?;
-
-                        self.eras.process(self.proof_storage.as_mut()).await?;
-
-                        self.submit_merkle_root(block, merkle_root).await?;
-
-                        self.try_finalize_submitted_merkle_root().await?;
+                        if let Some(proof) = self.get_merkle_root_proof(block, merkle_root).await? {
+                            if proof_submitter.send(proof).is_err() {
+                                log::warn!("Proof submitter channel is closed, exiting...");
+                                return Ok(());
+                            }
+                        }
                     }
                 }
 
@@ -201,11 +221,29 @@ impl MerkleRootRelayer {
         }
     }
 
-    async fn sync_authority_set_completely(&mut self) -> anyhow::Result<()> {
+    async fn sync_authority_set_completely(
+        &mut self,
+        blocks_rx: &mut Receiver<GearBlock>,
+    ) -> anyhow::Result<bool> {
         log::info!("Syncing authority set");
 
         loop {
-            let sync_steps = self.sync_authority_set().await?;
+            let sync_steps = match blocks_rx.recv().await {
+                Ok(block) => self.sync_authority_set(&block).await?,
+
+                Err(RecvError::Closed) => {
+                    log::warn!("Gear block listener connection closed");
+                    return Ok(false);
+                }
+
+                Err(RecvError::Lagged(n)) => {
+                    log::error!(
+                        "Gear block listener lagged behind {n} blocks, skipping some blocks"
+                    );
+                    continue;
+                }
+            };
+
             if sync_steps == 0 {
                 break;
             } else {
@@ -215,19 +253,14 @@ impl MerkleRootRelayer {
 
         log::info!("Authority set is in sync");
 
-        Ok(())
+        Ok(true)
     }
 
-    async fn sync_authority_set(&mut self) -> anyhow::Result<SyncStepCount> {
+    async fn sync_authority_set(&mut self, block: &GearBlock) -> anyhow::Result<SyncStepCount> {
         let gear_api = self.api_provider.client();
-        let finalized_head = gear_api
-            .latest_finalized_block()
-            .await
-            .expect("should not fail");
-        let latest_authority_set_id = gear_api
-            .authority_set_id(finalized_head)
-            .await
-            .expect("should not fail");
+
+        let finalized_head = block.hash();
+        let latest_authority_set_id = gear_api.authority_set_id(finalized_head).await?;
 
         self.metrics
             .latest_observed_gear_era
@@ -249,11 +282,11 @@ impl MerkleRootRelayer {
         .await
     }
 
-    async fn submit_merkle_root(
+    async fn get_merkle_root_proof(
         &mut self,
         block: GearBlock,
         merkle_root: H256,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<FinalProof>> {
         log::info!("Submitting merkle root to ethereum");
 
         let gear_api = self.api_provider.client();
@@ -263,16 +296,7 @@ impl MerkleRootRelayer {
 
         if merkle_root.is_zero() {
             log::info!("Message queue at block #{finalized_block_number} is empty. Skipping");
-            return Ok(());
-        }
-
-        if let Some(submitted_merkle_root) = &self.latest_submitted_merkle_root {
-            if submitted_merkle_root.proof.merkle_root == merkle_root.0 {
-                log::info!(
-                    "Message queue at block #{finalized_block_number} don't contain new messages. Skipping"
-                );
-                return Ok(());
-            }
+            return Ok(None);
         }
 
         log::info!(
@@ -294,82 +318,7 @@ impl MerkleRootRelayer {
         )
         .await?;
 
-        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
-
-        log::info!("Merkle root submitted to ethereum");
-
-        self.latest_submitted_merkle_root = Some(SubmittedMerkleRoot {
-            tx_hash,
-            proof,
-            finalized: false,
-        });
-
-        Ok(())
-    }
-
-    async fn try_finalize_submitted_merkle_root(&mut self) -> anyhow::Result<()> {
-        let Some(submitted_merkle_root) = &mut self.latest_submitted_merkle_root else {
-            return Ok(());
-        };
-
-        if submitted_merkle_root.finalized {
-            return Ok(());
-        }
-
-        log::info!(
-            "Trying to finalize tx containing merkle root 0x{}",
-            hex::encode(submitted_merkle_root.proof.merkle_root)
-        );
-
-        let tx_status = self
-            .eth_api
-            .get_tx_status(submitted_merkle_root.tx_hash)
-            .await?;
-
-        match tx_status {
-            TxStatus::Finalized => {
-                submitted_merkle_root.finalized = true;
-
-                log::info!(
-                    "Tx containing merkle root 0x{} finalized",
-                    hex::encode(submitted_merkle_root.proof.merkle_root)
-                );
-
-                Ok(())
-            }
-            TxStatus::Pending => Ok(()),
-            TxStatus::Failed => {
-                let root_exists = self
-                    .eth_api
-                    .read_finalized_merkle_root(submitted_merkle_root.proof.block_number)
-                    .await?
-                    .is_some();
-
-                // Someone already relayed this merkle root.
-                if root_exists {
-                    log::info!(
-                        "Merkle root 0x{} was already finalized",
-                        hex::encode(submitted_merkle_root.proof.merkle_root)
-                    );
-
-                    submitted_merkle_root.finalized = true;
-                    return Ok(());
-                }
-
-                log::warn!(
-                    "Re-trying merkle root 0x{} sending",
-                    hex::encode(submitted_merkle_root.proof.merkle_root)
-                );
-
-                submitted_merkle_root.tx_hash = submit_merkle_root_to_ethereum(
-                    &self.eth_api,
-                    submitted_merkle_root.proof.clone(),
-                )
-                .await?;
-
-                Ok(())
-            }
-        }
+        Ok(Some(proof))
     }
 }
 
@@ -578,3 +527,5 @@ impl SealedNotFinalizedEra {
         }
     }
 }
+
+pub mod submitter;

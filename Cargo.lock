@@ -8177,6 +8177,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-contract"
+version = "0.3.0"
+dependencies = [
+ "checkpoint-light-client-client",
+ "gear-wasm-builder 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "getrandom 0.2.16",
+ "gstd 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex",
+ "hex-literal",
+ "lazy_static",
+ "primitive-types 0.12.2",
+ "sails-rs",
+]
+
+[[package]]
 name = "mockall"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10595,11 +10610,13 @@ dependencies = [
  "alloy-rlp",
  "anyhow",
  "ark-serialize 0.4.2",
+ "async-trait",
  "axum",
  "bridging-payment-client",
  "cgo_oligami",
  "checkpoint-light-client-client",
  "checkpoint-light-client-io",
+ "chrono",
  "clap",
  "derive_more 0.99.20",
  "dotenv",
@@ -10638,6 +10655,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "utils-prometheus",
+ "uuid",
  "vft-manager-client",
 ]
 
@@ -14277,13 +14295,17 @@ dependencies = [
  "ark-ec",
  "ark-scale",
  "ark-serialize 0.4.2",
+ "async-trait",
+ "bridging-payment",
  "checkpoint-light-client",
  "checkpoint-light-client-client",
  "checkpoint-light-client-io",
  "eth-events-common",
  "eth-events-deneb",
  "eth-events-deneb-client",
+ "eth-events-electra",
  "eth-events-electra-client",
+ "ethereum-client",
  "ethereum-common",
  "ethereum_beacon_client",
  "futures",
@@ -14296,7 +14318,12 @@ dependencies = [
  "hex-literal",
  "historical-proxy",
  "historical-proxy-client",
+ "log",
+ "mock-contract",
  "parity-scale-codec",
+ "pretty_env_logger",
+ "primitive-types 0.12.2",
+ "relayer",
  "ruzstd",
  "sails-rs",
  "scale-info",
@@ -15173,7 +15200,9 @@ version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
+ "getrandom 0.3.3",
  "js-sys",
+ "serde",
  "wasm-bindgen",
 ]
 

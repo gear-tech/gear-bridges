@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "mock-contract",
     "ethereum/client",
     "gear-rpc-client",
     "prover",
@@ -45,6 +46,8 @@ version = "0.3.0"
 edition = "2021"
 
 [workspace.dependencies]
+mock-contract = { path = "./mock-contract" }
+relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
@@ -168,7 +171,9 @@ tokio = { version = "1.23.0", features = ["full"] }
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
 unroll = "0.1.5"
-
+uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
+chrono = "0.4.41"
+async-trait = "0.1.88"
 # Gear/Substrate deps
 gstd = { version = "=1.8.1", features = ["nightly"] }
 gtest = "=1.8.1"
@@ -235,3 +240,4 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
 
 [patch."https://github.com/gear-tech/gear"]
 gsys = "=1.8.1"
+

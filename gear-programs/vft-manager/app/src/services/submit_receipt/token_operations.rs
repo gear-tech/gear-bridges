@@ -93,7 +93,7 @@ where
         .await
         .map_err(|e| match e {
             GStdError::Timeout(..) => Error::ReplyTimeout,
-            _ => Error::Internal(format!("{e:?}").into_bytes()),
+            _ => Error::Internal(format!("{e:?}")),
         })
         .and_then(|_| {
             // Careful: this might never run in case of OutOfGas error.
@@ -126,7 +126,7 @@ where
     let status = {
         || {
             // If a message is a reply, the reply code is always present.
-            let reply_code = msg::reply_code().map_err(|_| Error::NoReplyCode)?;
+            let reply_code = msg::reply_code().map_err(|e| Error::NoReplyCode(format!("{e:?}")))?;
 
             if let ReplyCode::Error(_reason) = reply_code {
                 // The actual error will be available in the original (awaiting) message.
@@ -134,13 +134,14 @@ where
             }
             // Under normal circumstances (if the reply hook has been benchmarked correctly) this
             // should never result in an error.
-            let reply_bytes = msg::load_bytes().map_err(|_| Error::GasForReplyTooLow)?;
+            let reply_bytes =
+                msg::load_bytes().map_err(|e| Error::GasForReplyTooLow(format!("{e:?}")))?;
 
             // At this point we assume the reply is a legit VFT reply and try to treat it as such.
             // An error can stem from a malformed reply payload. If occurs, we'll want to report it
             // to the calling message because it is not detectable otherwise.
-            let reply =
-                Action::decode_reply(&reply_bytes).map_err(|_| Error::Internal(reply_bytes))?;
+            let reply = Action::decode_reply(&reply_bytes)
+                .map_err(|e| Error::Internal(format!("{e:?}")))?;
 
             // Check if the reply is as expected.
             reply.check()

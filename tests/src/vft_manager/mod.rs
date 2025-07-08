@@ -1511,7 +1511,14 @@ async fn deploy_programs(
     create_vft: bool,
     add_roles: bool,
     supply_type: TokenSupply,
-) -> Result<(impl Remoting + Clone, GearApi, ActorId, ActorId, ActorId, H160)> {
+) -> Result<(
+    impl Remoting + Clone,
+    GearApi,
+    ActorId,
+    ActorId,
+    ActorId,
+    H160,
+)> {
     let conn = connect_to_node(
         &[DEFAULT_BALANCE],
         "vft-manager",

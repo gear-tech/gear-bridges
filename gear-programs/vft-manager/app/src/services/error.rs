@@ -12,7 +12,7 @@ pub enum Error {
     /// Failed to set reply hook.
     ReplyHook,
     /// A supposedly reply message does not have a reply code.
-    NoReplyCode,
+    NoReplyCode(String),
 
     /// Original `MessageId` wasn't found in message tracker when processing reply.
     MessageNotFound,
@@ -31,7 +31,7 @@ pub enum Error {
     /// Failed to decode payload from gear-eth-bridge built-in actor.
     BuiltinDecode,
     /// Gas reservation for reply is too low.
-    GasForReplyTooLow,
+    GasForReplyTooLow(String),
 
     /// `ERC20` address wasn't found in the token mapping.
     NoCorrespondingEthAddress,
@@ -55,7 +55,7 @@ pub enum Error {
     BurnFromFailed(String),
 
     /// Internal unspecified VFT error
-    Internal(Vec<u8>),
+    Internal(String),
     /// Invalid or unexpected reply received from a VFT program.
     InvalidReply,
 }

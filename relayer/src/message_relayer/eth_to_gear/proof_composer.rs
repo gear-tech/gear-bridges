@@ -24,11 +24,17 @@ use futures::executor::block_on;
 use historical_proxy_client::traits::HistoricalProxy as _;
 use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
-use sails_rs::{calls::Query, gclient::calls::GClientRemoting, ActorId};
+use prometheus::IntGauge;
+use sails_rs::{
+    calls::{Action, Query},
+    gclient::calls::GClientRemoting,
+    ActorId,
+};
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
 };
+use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -79,6 +85,19 @@ impl ProofComposerIo {
     }
 }
 
+impl_metered_service!(
+    struct Metrics {
+        messages_waiting_for_checkpoint: IntGauge = IntGauge::new(
+            "proof_composer_messages_waiting_for_checkpoint",
+            "Number of messages waiting for checkpoint"
+        ),
+        last_checkpoint: IntGauge = IntGauge::new(
+            "proof_composer_last_checkpoint",
+            "Last checkpoint slot number"
+        )
+    }
+);
+
 pub struct ProofComposer {
     pub api_provider: ApiProviderConnection,
     pub beacon_client: BeaconClient,
@@ -88,6 +107,14 @@ pub struct ProofComposer {
     pub historical_proxy_address: H256,
     pub suri: String,
     pub to_process: Vec<(Uuid, TxHashWithSlot)>,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for ProofComposer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl ProofComposer {
@@ -107,6 +134,8 @@ impl ProofComposer {
             historical_proxy_address,
             suri,
             to_process: Vec::with_capacity(100),
+
+            metrics: Metrics::new(),
         }
     }
 
@@ -197,17 +226,21 @@ async fn handle_requests(
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
     loop {
-        while !this.to_process.is_empty() {
-            // safe to use `last` and `pop` since we check that `to_process` is not empty
-            let (tx_uuid, tx) = this
-                .to_process
-                .last()
-                .expect("to_process should not be empty");
+        this.metrics
+            .messages_waiting_for_checkpoint
+            .set(this.waiting_for_checkpoints.len() as i64);
+
+        while let Some((tx_uuid, tx)) = this.to_process.pop() {
             log::debug!("Processing transaction #{tx_uuid} (hash: {:?})", tx.tx_hash);
-            this.process(responses, tx.clone(), *tx_uuid).await?;
-            this.to_process
-                .pop()
-                .expect("to_process should not be empty");
+            match this.process(responses, tx.clone(), tx_uuid).await {
+                Ok(_) => {},
+                Err(err) => {
+                    log::error!(
+                        "Failed to process transaction {tx_uuid} (hash: {:?}): {err:?}",
+                        tx.tx_hash
+                    );
+                }
+            }
         }
 
         tokio::select! {
@@ -215,6 +248,8 @@ async fn handle_requests(
                 if let Some(checkpoint) = value {
                     log::info!("Received checkpoint: {checkpoint}");
                     this.last_checkpoint = Some(checkpoint);
+
+                    this.metrics.last_checkpoint.set(checkpoint.0 as i64);
 
                     this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
                         if tx.slot_number <= checkpoint {
@@ -353,25 +388,26 @@ async fn build_inclusion_proof(
         .await?;
 
     let slot = beacon_block.slot;
-
+    let gas_limit = gear_api.block_gas_limit()?;
     let endpoint = historical_proxy
         .endpoint_for(slot)
         .recv(historical_proxy_id)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?
+        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{}: {:?}", slot, e))?;
 
     let checkpoint_endpoint = eth_events
         .checkpoint_light_client_address()
         .recv(endpoint)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint endpoint: {e:?}"))?;
 
     let (checkpoint_slot, checkpoint) = service_checkpoint
         .get(slot)
+        .with_gas_limit(gas_limit)
         .recv(checkpoint_endpoint)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?
+        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
         .map_err(|e| anyhow::anyhow!("Checkpoint error: {:?}", e))?;
 
     let block = BlockGenericForBlockBody {

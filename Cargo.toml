@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "mock-contract",
     "ethereum/client",
     "gear-rpc-client",
     "prover",
@@ -45,6 +46,8 @@ version = "0.3.0"
 edition = "2021"
 
 [workspace.dependencies]
+mock-contract = { path = "./mock-contract" }
+relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }
 prover = { path = "./prover" }
 plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
@@ -236,3 +239,4 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
 
 [patch."https://github.com/gear-tech/gear"]
 gsys = "=1.8.1"
+

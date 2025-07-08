@@ -5,6 +5,7 @@ use gclient::GearApi;
 use historical_proxy_client::traits::HistoricalProxy as _;
 use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
+use prometheus::IntGauge;
 use sails_rs::{
     calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
@@ -14,6 +15,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
 };
+use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
@@ -75,6 +77,15 @@ pub enum MessageStatus {
     Failure(String),
 }
 
+impl_metered_service!(
+    struct Metrics {
+        fee_payer_balance: IntGauge = IntGauge::new(
+            "gear_message_sender_fee_payer_balance",
+            "Balance of the fee payer account",
+        ),
+    }
+);
+
 pub struct MessageSender {
     pub receiver_address: H256,
     pub receiver_route: Vec<u8>,
@@ -82,6 +93,14 @@ pub struct MessageSender {
     pub api_provider: ApiProviderConnection,
     pub suri: String,
     pub last_request: Option<Request>,
+    
+    metrics: Metrics, 
+}
+
+impl MeteredService for MessageSender {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl MessageSender {
@@ -99,6 +118,8 @@ impl MessageSender {
             api_provider,
             suri,
             last_request: None,
+
+            metrics: Metrics::new(),
         }
     }
 
@@ -126,13 +147,18 @@ impl MessageSender {
                     }
                 }
                 Err(err) => {
-                    self.last_request = Some(request);
+                    log::error!(
+                        "Transaction {} failed for the second time, aborting: {err:?}",
+                        request.tx_hash
+                    );
                     return Err(err);
                 }
             }
         }
 
         while let Some(request) = requests.recv().await {
+            self.update_balance_metric(&gear_api).await?;
+
             match self.process(responses, &gear_api, &request).await {
                 Ok(should_continue) => {
                     if !should_continue {
@@ -268,6 +294,20 @@ impl MessageSender {
             }
         }
         Ok(true)
+    }
+
+    async fn update_balance_metric(&self, gear_api: &GearApi) -> anyhow::Result<()> {
+        let balance = gear_api
+            .total_balance(gear_api.account_id())
+            .await
+            .map_err(|e| anyhow::anyhow!("Unable to get total balance: {e:?}"))?;
+
+        let balance = balance / 1_000_000_000_000;
+        let balance: i64 = balance.try_into().unwrap_or(i64::MAX);
+
+        self.metrics.fee_payer_balance.set(balance);
+
+        Ok(())
     }
 }
 

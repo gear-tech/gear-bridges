@@ -16,6 +16,8 @@ mod checkpoint_light_client;
 #[cfg(test)]
 mod historical_proxy;
 #[cfg(test)]
+mod relayer;
+#[cfg(test)]
 mod vft;
 #[cfg(test)]
 mod vft_manager;

@@ -1,7 +1,9 @@
 use crate::message_relayer::{common::TxHashWithSlot, eth_to_gear::message_sender::MessageStatus};
 use eth_events_electra_client::EthToVaraEvent;
+use prometheus::IntCounter;
 use sails_rs::{Decode, Encode};
 use serde::{Deserialize, Serialize};
+use utils_prometheus::{impl_metered_service, MeteredService};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedReceiver, RwLock};
 use uuid::Uuid;
@@ -37,6 +39,23 @@ pub enum TxStatus {
     Completed,
 }
 
+impl_metered_service!(
+    struct Metrics {
+        total_transactions: IntCounter = IntCounter::new(
+            "eth_gear_transaction_manager_total_transactions",
+            "Total number of transactions processed by the transaction manager",
+        ),
+        completed_transactions: IntCounter = IntCounter::new(
+            "eth_gear_transaction_manager_completed_transactions",
+            "Total number of completed transactions",
+        ),
+        failed_transactions: IntCounter = IntCounter::new(
+            "eth_geartransaction_manager_failed_transactions",
+            "Total number of failed transactions",
+        ),
+    }
+);
+
 pub struct TransactionManager {
     /// Queue of transactions to be processed. Completed and failed
     /// transactions are moved to `completed` and `failed` maps.
@@ -45,6 +64,14 @@ pub struct TransactionManager {
     pub completed: RwLock<BTreeMap<Uuid, Transaction>>,
     pub failed: RwLock<BTreeMap<Uuid, String>>,
     pub storage: Arc<dyn Storage>,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for TransactionManager {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl TransactionManager {
@@ -54,17 +81,27 @@ impl TransactionManager {
             completed: RwLock::new(BTreeMap::new()),
             failed: RwLock::new(BTreeMap::new()),
             storage,
+
+            metrics: Metrics::new(),
         }
     }
 
     pub async fn fail_transaction(&self, tx_uuid: Uuid, reason: String) {
         self.failed.write().await.insert(tx_uuid, reason);
+        self.metrics
+            .failed_transactions
+            .inc();
     }
 
     pub async fn add_transaction(&self, tx: Transaction) {
+        self.metrics.total_transactions
+            .inc();
         match tx.status {
             TxStatus::Completed => {
                 self.completed.write().await.insert(tx.uuid, tx);
+                self.metrics
+                    .completed_transactions
+                    .inc();
             }
 
             _ => {
@@ -265,10 +302,15 @@ impl TransactionManager {
                     // it from failed set if it succeeded.
                     self.failed.write().await.remove(&tx.uuid);
                     self.completed.write().await.insert(tx.uuid, tx);
+                    self.metrics
+                        .completed_transactions
+                        .inc();
                 }
 
                 MessageStatus::Failure(message) => {
                     self.fail_transaction(tx_uuid, message).await;
+                    // add transaction back to tx queue. It can be restarted later.
+                    transactions.insert(tx_uuid, tx);
                 }
             }
         } else {

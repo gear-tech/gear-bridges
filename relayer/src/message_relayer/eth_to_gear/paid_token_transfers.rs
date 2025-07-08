@@ -45,6 +45,9 @@ impl MeteredService for Relayer {
             .chain(self.ethereum_block_listener.get_sources())
             .chain(self.message_paid_event_extractor.get_sources())
             .chain(self.checkpoints_extractor.get_sources())
+            .chain(self.message_sender.get_sources())
+            .chain(self.proof_composer.get_sources())
+            .chain(self.tx_manager.get_sources())
     }
 }
 

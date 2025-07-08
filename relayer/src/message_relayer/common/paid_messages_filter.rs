@@ -35,6 +35,12 @@ impl_metered_service! {
     }
 }
 
+impl Default for PaidMessagesFilter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaidMessagesFilter {
     pub fn new(excluded_from_fees: HashSet<AccountId32>) -> Self {
         Self {

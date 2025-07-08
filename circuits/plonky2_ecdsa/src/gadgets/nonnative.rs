@@ -6,17 +6,27 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use num::{BigUint, Integer, One, Zero};
-use plonky2::field::extension::Extendable;
-use plonky2::field::types::{Field, PrimeField};
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::{PartitionWitness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::util::ceil_div_usize;
-use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
-use plonky2_u32::gadgets::range_check::range_check_u32_circuit;
-use plonky2_u32::witness::GeneratedValuesU32;
+use plonky2::{
+    field::{
+        extension::Extendable,
+        types::{Field, PrimeField},
+    },
+    hash::hash_types::RichField,
+    iop::{
+        generator::{GeneratedValues, SimpleGenerator},
+        target::{BoolTarget, Target},
+        witness::{PartitionWitness, WitnessWrite},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+    util::ceil_div_usize,
+};
+use plonky2_u32::{
+    gadgets::{
+        arithmetic_u32::{CircuitBuilderU32, U32Target},
+        range_check::range_check_u32_circuit,
+    },
+    witness::GeneratedValuesU32,
+};
 
 use crate::gadgets::biguint::{
     BigUintTarget, CircuitBuilderBiguint, GeneratedValuesBigUint, WitnessBigUint,
@@ -757,12 +767,18 @@ impl<F: RichField + Extendable<D>, const D: usize, FF: PrimeField> SimpleGenerat
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::secp256k1_base::Secp256K1Base;
-    use plonky2::field::types::{Field, PrimeField, Sample};
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        field::{
+            secp256k1_base::Secp256K1Base,
+            types::{Field, PrimeField, Sample},
+        },
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
 
     use crate::gadgets::nonnative::CircuitBuilderNonNative;
 

@@ -46,4 +46,7 @@ pub enum Error {
 
     /// Vft-manager is paused and cannot process the request.
     Paused,
+
+    /// Failed to burn tokens from the receiver in VftVara.
+    BurnFromFailed(String),
 }

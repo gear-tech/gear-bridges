@@ -1,16 +1,21 @@
 use std::borrow::Borrow;
 
 use itertools::Itertools;
-use plonky2::field::extension::Extendable;
-use plonky2::gates::arithmetic_base::ArithmeticGate;
-use plonky2::gates::arithmetic_extension::ArithmeticExtensionGate;
+use plonky2::{
+    field::extension::Extendable,
+    gates::{arithmetic_base::ArithmeticGate, arithmetic_extension::ArithmeticExtensionGate},
+};
 
-use plonky2::gates::base_sum::BaseSumGate;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    gates::base_sum::BaseSumGate,
+    hash::hash_types::RichField,
+    iop::{
+        generator::{GeneratedValues, SimpleGenerator},
+        target::{BoolTarget, Target},
+        witness::{PartitionWitness, Witness, WitnessWrite},
+    },
+    plonk::circuit_builder::CircuitBuilder,
+};
 
 pub trait CircuitBuilderSplit<F: RichField + Extendable<D>, const D: usize> {
     fn split_le_base<const B: usize>(&mut self, x: Target, num_limbs: usize) -> Vec<Target>;
@@ -149,11 +154,15 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::split_base::CircuitBuilderSplit;
-    use plonky2::field::types::Field;
-    use plonky2::iop::witness::PartialWitness;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        field::types::Field,
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
 
     #[test]
     fn test_split_base() -> Result<()> {

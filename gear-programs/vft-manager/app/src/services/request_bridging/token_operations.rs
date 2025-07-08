@@ -8,8 +8,10 @@ use vft_client::{
 
 use crate::services::TokenSupply;
 
-use super::super::{Config, Error};
-use super::msg_tracker::{msg_tracker_mut, MessageStatus, MessageTracker};
+use super::{
+    super::{Config, Error},
+    msg_tracker::{msg_tracker_mut, MessageStatus, MessageTracker},
+};
 
 /// Burn `amount` tokens from the `sender` address.
 ///

@@ -1,14 +1,16 @@
+use crate::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
 use gclient::{Event, EventProcessor, GearApi, GearEvent, Result};
 use gear_core::gas::GasInfo;
-use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sails_rs::{calls::*, events::EventIo, gclient::calls::*, prelude::*};
 use std::collections::HashMap;
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{traits::*, Config, InitConfig, Order, TokenSupply};
+use vft_vara::WASM_BINARY as WASM_VFT_VARA;
 
-use crate::{connect_to_node, DEFAULT_BALANCE};
+pub mod gtest;
 
 async fn calculate_reply_gas(
     api: &GearApi,
@@ -593,8 +595,45 @@ async fn upgrade() -> Result<()> {
         hex::encode(vft_manager_id)
     );
 
-    // unpause the VftManager
+    // deploy Vara Fungible Token
+    let factory = vft_client::VftFactory::new(remoting.clone());
+    let vft_id_1 = factory
+        .new("TEST_TOKEN1".into(), "TT1".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, [])
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft_id_1)", hex::encode(vft_id_1));
+
+    // Allocating underlying shards.
+    let mut vft_extension = vft_client::VftExtension::new(remoting.clone());
+    while vft_extension
+        .allocate_next_balances_shard()
+        .send_recv(vft_id_1)
+        .await
+        .expect("Failed to allocate next balances shard")
+    {}
+
+    while vft_extension
+        .allocate_next_allowances_shard()
+        .send_recv(vft_id_1)
+        .await
+        .expect("Failed to allocate next allowances shard")
+    {}
+
+    // upgrade request with a non-VftManager program should fail
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    let result = service
+        .upgrade(vft_id_1)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err(), "result = {result:?}");
+    let error = format!("{result:?}");
+    assert!(error.contains("panicked with"), "error = {error}");
+
+    // unpause the VftManager
     service
         .unpause()
         .with_gas_limit(gas_limit)
@@ -614,52 +653,18 @@ async fn upgrade() -> Result<()> {
     assert!(result.is_err(), "result = {result:?}");
 
     // upgrade request to the running VftManager should fail
-    service
+    let result = service
         .upgrade(Default::default())
         .with_gas_limit(gas_limit)
-        .send(vft_manager_id)
-        .await
-        .unwrap();
+        .send_recv(vft_manager_id)
+        .await;
     assert!(result.is_err(), "result = {result:?}");
 
-    let result = service
-        .erc_20_manager_address()
-        .recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(result.is_none(), "result = {result:?}");
-
-    // deploy Vara Fungible Token
-    let factory = vft_client::VftFactory::new(remoting.clone());
-    let vft_id_1 = factory
-        .new("TEST_TOKEN1".into(), "TT1".into(), 20)
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id_vft, [])
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    println!("program_id = {:?} (extended_vft1)", hex::encode(vft_id_1));
-
-    // Allocating underlying shards.
-    let mut vft_extension = vft_client::VftExtension::new(remoting.clone());
-    while vft_extension
-        .allocate_next_balances_shard()
-        .send_recv(vft_id_1)
-        .await
-        .expect("Failed to allocate next balances shard")
-    {}
-
-    while vft_extension
-        .allocate_next_allowances_shard()
-        .send_recv(vft_id_1)
-        .await
-        .expect("Failed to allocate next allowances shard")
-    {}
-
     let mut service_vft = vft_client::VftAdmin::new(remoting.clone());
-    // mint some tokens to the user
+    // mint some tokens to the vft_manager_id
+    let balance_1 = 100.into();
     service_vft
-        .mint(vft_manager_id, 100.into())
+        .mint(vft_manager_id, balance_1)
         .with_gas_limit(gas_limit)
         .send_recv(vft_id_1)
         .await
@@ -674,7 +679,7 @@ async fn upgrade() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    println!("program_id = {:?} (extended_vft2)", hex::encode(vft_id_2));
+    println!("program_id = {:?} (vft_id_2)", hex::encode(vft_id_2));
 
     // Allocating underlying shards.
     while vft_extension
@@ -690,6 +695,15 @@ async fn upgrade() -> Result<()> {
         .await
         .expect("Failed to allocate next allowances shard")
     {}
+
+    // mint some vft2 tokens to the vft_manager_id
+    let balance_2 = 222.into();
+    service_vft
+        .mint(vft_manager_id, balance_2)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id_2)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
 
     // add token mappings
     service
@@ -713,10 +727,36 @@ async fn upgrade() -> Result<()> {
         .await
         .unwrap();
 
+    // deploy another VftManager
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
+    let vft_manager2_id = factory
+        .new(InitConfig {
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [salt, salt].concat())
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager2)",
+        hex::encode(vft_manager2_id)
+    );
+
     // upgrade the VftManager
-    let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
-        .upgrade(Default::default())
+        .upgrade(vft_manager2_id)
         .with_gas_limit(gas_limit)
         .send(vft_manager_id)
         .await
@@ -726,6 +766,22 @@ async fn upgrade() -> Result<()> {
     assert!(result.is_err(), "result = {result:?}");
     let error = format!("{result:?}");
     assert!(error.contains("InactiveProgram"));
+
+    // check that funds transferred to the new program
+    let service_vft = vft_client::Vft::new(remoting.clone());
+    let balance = service_vft
+        .balance_of(vft_manager2_id)
+        .recv(vft_id_1)
+        .await
+        .unwrap();
+    assert_eq!(balance_1, balance);
+
+    let balance = service_vft
+        .balance_of(vft_manager2_id)
+        .recv(vft_id_2)
+        .await
+        .unwrap();
+    assert_eq!(balance_2, balance);
 
     Ok(())
 }
@@ -892,63 +948,46 @@ async fn update_vfts() -> Result<()> {
         .await;
     assert!(result.is_err());
 
-    // deploy another VFT-manager that used as an upgraded VFT
-    let salt2 = {
-        let mut salt_new = Vec::with_capacity(2 * salt.len());
-
-        salt_new.extend_from_slice(&salt);
-        salt_new.extend_from_slice(&salt);
-
-        salt_new
-    };
-    let vft = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt2.clone())
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    println!("program_id = {:?} (vft)", hex::encode(vft));
-
-    // deploy Vara Fungible Token
+    // deploy Vara Fungible Token programs
     let factory = vft_client::VftFactory::new(remoting.clone());
-    let extended_vft_id_1 = factory
+    let vft = factory
         .new("TEST_TOKEN1".into(), "TT1".into(), 20)
         .with_gas_limit(gas_limit)
         .send_recv(code_id_vft, salt)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    println!(
-        "program_id = {:?} (extended_vft1)",
-        hex::encode(extended_vft_id_1)
-    );
+    println!("program_id = {:?} (vft)", hex::encode(vft));
 
-    // deploy another Vara Fungible Token
-    let factory = vft_client::VftFactory::new(remoting.clone());
-    let extended_vft_id_2 = factory
-        .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+    let vft_upgraded = factory
+        .new("TEST_TOKEN12".into(), "TT12".into(), 20)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id_vft, salt2)
+        .send_recv(code_id_vft, [salt, salt].concat())
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
     println!(
-        "program_id = {:?} (extended_vft2)",
-        hex::encode(extended_vft_id_2)
+        "program_id = {:?} (vft_upgraded)",
+        hex::encode(vft_upgraded)
     );
+
+    let vft1 = factory
+        .new("TEST_TOKEN1".into(), "TT1".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, [salt, salt, salt].concat())
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft1)", hex::encode(vft1));
+
+    let vft2 = factory
+        .new("TEST_TOKEN2".into(), "TT2".into(), 20)
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, [salt, salt, salt, salt].concat())
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft2)", hex::encode(vft2));
 
     service
         .map_vara_to_eth_address(vft, [1u8; 20].into(), TokenSupply::Gear)
@@ -957,28 +996,29 @@ async fn update_vfts() -> Result<()> {
         .await
         .unwrap();
     service
-        .map_vara_to_eth_address(extended_vft_id_1, [2u8; 20].into(), TokenSupply::Ethereum)
+        .map_vara_to_eth_address(vft1, [2u8; 20].into(), TokenSupply::Ethereum)
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
     service
-        .map_vara_to_eth_address(extended_vft_id_2, [3u8; 20].into(), TokenSupply::Ethereum)
+        .map_vara_to_eth_address(vft2, [3u8; 20].into(), TokenSupply::Ethereum)
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
         .unwrap();
 
-    // pause the VftManager
-    let _ = service
+    // pause the Vft
+    let mut service_vft = vft_client::VftAdmin::new(remoting.clone());
+    let _ = service_vft
         .pause()
         .with_gas_limit(gas_limit)
         .send_recv(vft)
         .await;
 
-    // upgrade the VftManager so it exits
-    service
-        .upgrade(Default::default())
+    // upgrade the Vft
+    service_vft
+        .exit(vft_upgraded)
         .with_gas_limit(gas_limit)
         .send(vft)
         .await
@@ -987,10 +1027,10 @@ async fn update_vfts() -> Result<()> {
     service
         .update_vfts(
             [
-                // upgraded "VFT"
-                (vft, Default::default()),
+                // upgraded VFT
+                (vft, vft_upgraded),
                 // the VFT isn't upgraded so should stay the same
-                (extended_vft_id_1, [1u8; 32].into()),
+                (vft1, [1u8; 32].into()),
             ]
             .to_vec(),
         )
@@ -1000,14 +1040,12 @@ async fn update_vfts() -> Result<()> {
         .unwrap();
 
     let mut expected: HashMap<_, _> = [
-        (
-            ActorId::default(),
-            (H160::from([1u8; 20]), TokenSupply::Gear),
-        ),
-        (extended_vft_id_1, ([2u8; 20].into(), TokenSupply::Ethereum)),
-        (extended_vft_id_2, ([3u8; 20].into(), TokenSupply::Ethereum)),
+        (vft_upgraded, (H160::from([1u8; 20]), TokenSupply::Gear)),
+        (vft1, ([2u8; 20].into(), TokenSupply::Ethereum)),
+        (vft2, ([3u8; 20].into(), TokenSupply::Ethereum)),
     ]
     .into();
+
     for (vft, erc20, supply) in service
         .vara_to_eth_addresses()
         .with_gas_limit(gas_limit)
@@ -1215,6 +1253,251 @@ async fn migrate_transactions() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
     assert_eq!(result, transactions);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn vft_burn_from() -> Result<()> {
+    use vft_vara_client::{
+        traits::{Vft, VftAdmin, VftExtension, VftVaraFactory},
+        vft_2::events::Vft2Events,
+    };
+
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE, DEFAULT_BALANCE],
+        "vft-manager",
+        &[WASM_VFT_MANAGER, WASM_VFT_VARA],
+    )
+    .await;
+
+    let accounts = conn.accounts;
+    let code_ids = conn.code_ids;
+    let gas_limit = conn.gas_limit;
+    let salt = conn.salt;
+    let suri = accounts[0].2.clone();
+    let code_id = code_ids[0];
+    let code_id_vft = code_ids[1];
+    let api = conn.api.with(suri).unwrap();
+
+    // deploy VFT-manager
+    let remoting = GClientRemoting::new(api.clone());
+    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
+    let vft_manager_id = factory
+        .new(InitConfig {
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: Default::default(),
+            config: Config {
+                gas_for_token_ops: 20_000_000_000,
+                gas_for_reply_deposit: 10_000_000_000,
+                gas_to_send_request_to_builtin: 20_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, salt)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!(
+        "program_id = {:?} (vft_manager)",
+        hex::encode(vft_manager_id)
+    );
+
+    // unpause the VftManager
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    let address_erc20_manager = [1u8; 20];
+    service
+        .update_erc_20_manager_address(address_erc20_manager.into())
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    service
+        .update_historical_proxy_address(accounts[0].0)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    // deploy Vara Fungible Token
+    let factory = vft_vara_client::VftVaraFactory::new(remoting.clone());
+    let vft_id = factory
+        .new()
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id_vft, [])
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    println!("program_id = {:?} (vft)", hex::encode(vft_id));
+
+    // Allocating underlying shards.
+    let mut vft_extension = vft_vara_client::VftExtension::new(remoting.clone());
+    while vft_extension
+        .allocate_next_balances_shard()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .expect("Failed to allocate next balances shard")
+    {}
+
+    while vft_extension
+        .allocate_next_allowances_shard()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .expect("Failed to allocate next allowances shard")
+    {}
+
+    // emulate that VftManager has some locked tokenized Vara
+
+    let amount_total: U256 = 10_000_000_000_000u64.into();
+    let amount_1 = amount_total / 3;
+    let amount_2 = amount_total - amount_1;
+    api.transfer_keep_alive(vft_id, amount_total.try_into().unwrap())
+        .await?;
+
+    let address_token = [2u8; 20];
+    let address_from = [3u8; 20];
+    let address_receiver = accounts[1].0;
+    let mut service_vft_admin = vft_vara_client::VftAdmin::new(remoting.clone());
+    // mint tokens to the vft-manager
+    service_vft_admin
+        .mint(vft_manager_id, amount_total)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    service_vft_admin
+        .set_minter(vft_manager_id)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    service_vft_admin
+        .set_burner(vft_manager_id)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    // add token mappings
+    service
+        .map_vara_to_eth_address(vft_id, address_token.into(), TokenSupply::Gear)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+
+    let receipt_rlp = crate::create_receipt_rlp(
+        address_erc20_manager.into(),
+        address_from.into(),
+        address_receiver,
+        address_token.into(),
+        amount_1,
+    );
+    service
+        .submit_receipt(10, 2, receipt_rlp)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("Failed to submit receipt: {e:?}"))?
+        .unwrap();
+
+    let service_vft = vft_vara_client::Vft::new(remoting.clone());
+    let balance = service_vft
+        .balance_of(vft_manager_id)
+        .recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    // VftManager should have (amount_total - amount_1) on its balance after transfer
+    assert_eq!(balance, amount_2);
+
+    let balance = service_vft
+        .balance_of(address_receiver)
+        .recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(balance, 0.into());
+
+    let api2 = api.clone().with(&accounts[1].2).unwrap();
+    let messages = api2.get_mailbox_messages(1).await?;
+    let (message, _interval) = messages.first().unwrap();
+    assert_eq!(message.value(), u128::try_from(amount_1).unwrap());
+
+    let (value_claimed, _block_hash) = api2.claim_value(message.id()).await?;
+    assert_eq!(value_claimed, u128::try_from(amount_1).unwrap());
+
+    let balance = api.total_balance(address_receiver).await?;
+    assert!(balance > DEFAULT_BALANCE);
+
+    // attempt to transfer and unwrap tokens to the program should fail
+
+    let balance_vft_native_before = api.total_balance(vft_id).await?;
+
+    let mut listener = api.subscribe().await?;
+    let receipt_rlp = crate::create_receipt_rlp(
+        address_erc20_manager.into(),
+        address_from.into(),
+        vft_id,
+        address_token.into(),
+        amount_2,
+    );
+    service
+        .submit_receipt(10, 3, receipt_rlp)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("Failed to submit receipt 2: {e:?}"))?
+        .unwrap();
+
+    let balance = service_vft
+        .balance_of(vft_manager_id)
+        .recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(balance, 0.into());
+
+    listener
+        .proc(|event| match event {
+            gclient::Event::Gear(gclient::GearEvent::UserMessageSent { message, .. })
+                if message.source.0 == vft_id.into_bytes() && message.destination.0 == [0; 32] =>
+            {
+                if let Ok(Vft2Events::Transfer { from, to, value }) =
+                    Vft2Events::decode_event(&message.payload.0)
+                {
+                    if from.is_zero() && to == vft_id {
+                        assert_eq!(value, amount_2);
+                        return Some(());
+                    }
+                }
+
+                None
+            }
+
+            _ => None,
+        })
+        .await?;
+
+    let balance = service_vft
+        .balance_of(vft_id)
+        .recv(vft_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(balance, amount_2);
+
+    let balance_vft_native = api.total_balance(vft_id).await?;
+    assert_eq!(balance_vft_native, balance_vft_native_before);
 
     Ok(())
 }

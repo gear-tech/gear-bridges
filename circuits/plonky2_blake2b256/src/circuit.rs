@@ -3,10 +3,12 @@
 //! Implementation is based on RFC7693
 //! https://datatracker.ietf.org/doc/html/rfc7693.
 
-use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::{
+    field::extension::Extendable,
+    hash::hash_types::RichField,
+    iop::target::{BoolTarget, Target},
+    plonk::circuit_builder::CircuitBuilder,
+};
 
 use crate::utils::*;
 

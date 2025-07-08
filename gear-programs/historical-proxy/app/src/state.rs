@@ -1,5 +1,4 @@
-use super::error::ProxyError;
-use super::{ActorId, Vec};
+use super::{error::ProxyError, ActorId, Vec};
 
 pub type Slot = u64;
 

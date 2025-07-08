@@ -5,17 +5,19 @@ import {
   BridgingRequested,
   HistoricalProxyAddressChanged,
   Relayed,
+  RequestBridgingArgs,
   TokenMappingAdded,
   TokenMappingRemoved,
 } from './types';
 import { ethNonce, gearNonce } from '../common';
 import { ProcessorContext, getProcessor } from './processor';
-import { Network, Status, Transfer } from '../model';
+import { InitiatedTransfer, Network, Status, Transfer } from '../model';
 import {
   BridgingPaymentMethods,
   BridgingPaymentServices,
   HistoricalProxyMethods,
   HistoricalProxyServices,
+  isMessageQueued,
   isProgramChanged,
   isUserMessageSent,
   ProgramName,
@@ -61,7 +63,7 @@ const handler = async (ctx: ProcessorContext) => {
       }
       if (isUserMessageSent(event)) {
         const msg = event.args.message;
-        const name = programs.get(msg.source)!;
+        const name = programs.get(msg.source);
         if (!name) {
           ctx.log.error(`Failed to get program name and decoder for ${msg.source}`);
           continue;
@@ -132,6 +134,13 @@ const handler = async (ctx: ProcessorContext) => {
                 await state.save();
                 process.exit(0);
               }
+              case VftManagerMethods.RequestBridging: {
+                const data = decoder.decodeOutput<{ ok: [nonce: string] }>(service, method, msg.payload);
+                if (data.ok) {
+                  await state.handleRequestBridgingReply(msg.details.to, gearNonce(data.ok[0]));
+                }
+                continue;
+              }
               default: {
                 continue;
               }
@@ -158,6 +167,34 @@ const handler = async (ctx: ProcessorContext) => {
           }
         }
       }
+
+      if (isMessageQueued(event)) {
+        const { id, destination } = event.args;
+        const name = programs.get(destination);
+
+        if (!name) continue;
+
+        if (name !== ProgramName.VftManager) continue;
+        const decoder = getDecoder(name);
+
+        if (event.call!.name !== `Gear.send_message`) continue;
+
+        const { payload } = event.call?.args;
+
+        const service = decoder.service(payload);
+        if (service !== VftManagerServices.VftManager) continue;
+
+        const method = decoder.method(payload);
+        if (method !== VftManagerMethods.RequestBridging) continue;
+
+        const transfer = new InitiatedTransfer({
+          id,
+          txHash: event.extrinsic!.hash,
+          blockNumber: blockNumber,
+        });
+        await state.addInitiatedTransfer(transfer);
+        continue;
+      }
     }
   }
 
@@ -174,7 +211,7 @@ const runProcessor = async () => {
 
   programs = (await init({
     [ProgramName.VftManager]: config.vftManager,
-    [ProgramName.HistoricalProxy]: config.hisotricalProxy,
+    [ProgramName.HistoricalProxy]: config.historicalProxy,
     [ProgramName.BridgingPayment]: config.bridgingPayment,
   })) as Map<string, ProgramName>;
 

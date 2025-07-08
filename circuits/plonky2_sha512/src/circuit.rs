@@ -1,9 +1,8 @@
-use num::bigint::BigUint;
-use num::FromPrimitive;
-use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::BoolTarget;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
+use num::{bigint::BigUint, FromPrimitive};
+use plonky2::{
+    field::extension::Extendable, hash::hash_types::RichField, iop::target::BoolTarget,
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_ecdsa::gadgets::biguint::{BigUintTarget, CircuitBuilderBiguint};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
@@ -445,10 +444,14 @@ pub fn sha512_circuit<F: RichField + Extendable<D>, const D: usize>(
 mod tests {
     use crate::circuit::{array_to_bits, sha512_circuit};
     use anyhow::Result;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::{
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
     use rand::Rng;
 
     const EXPECTED_RES: [u8; 512] = [

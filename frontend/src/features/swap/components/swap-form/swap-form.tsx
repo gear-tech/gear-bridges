@@ -39,7 +39,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const { api } = useApi();
 
-  const { fee, ...config } = useFee();
+  const { bridgingFee, vftManagerFee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
   const allowance = useFTAllowance(token?.address);
@@ -56,7 +56,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransactionModal = (values: FormattedValues) => {
+  const openTransactionModal = (values: FormattedValues, estimatedFees: bigint) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
     const amount = values.amount.toString();
@@ -68,11 +68,22 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
     const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({ amount, source, destination, sourceNetwork, destNetwork, sender, receiver, close });
+    setTransactionModal({
+      amount,
+      source,
+      destination,
+      sourceNetwork,
+      destNetwork,
+      sender,
+      receiver,
+      estimatedFees,
+      close,
+    });
   };
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
-    fee: fee.value,
+    bridgingFee: bridgingFee.value,
+    vftManagerFee: vftManagerFee?.value,
     allowance: allowance.data,
     accountBalance: accountBalance.data,
     onTransactionStart: openTransactionModal,
@@ -93,7 +104,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
       <Balance
         value={balance.data}
         decimals={token?.decimals}
-        symbol={token?.symbol}
+        symbol={token?.displaySymbol}
         isLoading={balance.isLoading}
         onMaxButtonClick={setMaxBalance}
       />
@@ -101,9 +112,15 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const isEnoughBalance = () => {
-    if (!api || isUndefined(fee.value) || !accountBalance.data) return false;
+    if (!api || isUndefined(bridgingFee.value) || !accountBalance.data) return false;
 
-    const minBalance = network.isVara ? fee.value + api.existentialDeposit.toBigInt() : fee.value;
+    let minBalance = bridgingFee.value;
+
+    if (network.isVara) {
+      if (isUndefined(vftManagerFee?.value)) return false;
+
+      minBalance += vftManagerFee.value + api.existentialDeposit.toBigInt();
+    }
 
     return accountBalance.data > minBalance;
   };
@@ -139,6 +156,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   type="select"
                   address={token?.address}
                   symbol={token?.symbol}
+                  displaySymbol={token?.displaySymbol}
                   networkText={network.isVara ? 'Vara Testnet' : 'Ethereum Holesky'}
                   network={network.name}
                 />
@@ -162,6 +180,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   type="text"
                   address={destinationToken?.address}
                   symbol={destinationToken?.symbol}
+                  displaySymbol={destinationToken?.displaySymbol}
                   networkText={network.isVara ? 'Ethereum Holesky' : 'Vara Testnet'}
                   network={network.name === NETWORK.VARA ? NETWORK.ETH : NETWORK.VARA}
                 />
@@ -187,7 +206,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             onToggle={() => setIsDetailsOpen((prevValue) => !prevValue)}
             isVaraNetwork={network.isVara}
             feeValue={requiredBalance?.data?.fees}
-            decimals={network.isVara ? 12 : 18}
             isLoading={requiredBalance?.isPending}
           />
 

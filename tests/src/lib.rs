@@ -1,16 +1,19 @@
+use alloy_consensus::{Receipt, ReceiptEnvelope, ReceiptWithBloom};
 use gclient::GearApi;
 use gear_core::ids::prelude::*;
 use sails_rs::prelude::*;
-use sp_core::Pair as _;
-use sp_core::{crypto::DEV_PHRASE, sr25519::Pair};
-use sp_runtime::traits::IdentifyAccount;
-use sp_runtime::traits::Verify;
-use sp_runtime::MultiSignature;
+use sp_core::{crypto::DEV_PHRASE, sr25519::Pair, Pair as _};
+use sp_runtime::{
+    traits::{IdentifyAccount, Verify},
+    MultiSignature,
+};
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::LazyLock,
 };
 use tokio::sync::Mutex;
+use vft_manager_app::services::eth_abi::ERC20_MANAGER;
+
 #[cfg(test)]
 mod checkpoint_light_client;
 #[cfg(test)]
@@ -96,4 +99,40 @@ pub async fn connect_to_node(
         gas_limit,
         salt: origin.to_le_bytes(),
     }
+}
+
+pub fn create_receipt_rlp(
+    erc20_manager_address: H160,
+    from: H160,
+    receiver: ActorId,
+    token: H160,
+    amount: U256,
+) -> Vec<u8> {
+    let event = ERC20_MANAGER::BridgingRequested {
+        from: from.0.into(),
+        to: receiver.into_bytes().into(),
+        token: token.0.into(),
+        amount: {
+            let mut bytes = [0u8; 32];
+            amount.to_little_endian(&mut bytes[..]);
+
+            alloy_primitives::U256::from_le_bytes(bytes)
+        },
+    };
+
+    let receipt = ReceiptWithBloom::from(Receipt {
+        status: true.into(),
+        cumulative_gas_used: 100_000u64,
+        logs: vec![alloy_primitives::Log {
+            address: erc20_manager_address.0.into(),
+            data: Into::into(&event),
+        }],
+    });
+
+    let receipt = ReceiptEnvelope::Eip2930(receipt);
+
+    let mut receipt_rlp = vec![];
+    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
+
+    receipt_rlp
 }

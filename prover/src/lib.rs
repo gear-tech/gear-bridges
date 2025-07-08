@@ -12,8 +12,9 @@ mod latest_validator_set;
 mod storage_inclusion;
 
 pub(crate) mod prelude {
-    use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+    use plonky2::{
+        field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig,
+    };
 
     pub type F = GoldilocksField;
     pub type C = PoseidonGoldilocksConfig;
@@ -49,7 +50,6 @@ pub mod consts {
 }
 
 pub mod proving {
-    use crate::prelude::*;
     use crate::{
         common::{self, targets::TargetSet},
         final_proof::{message_sent::MessageSent, FinalProof},
@@ -57,6 +57,7 @@ pub mod proving {
             next_validator_set::{NextValidatorSet, NextValidatorSetTarget},
             LatestValidatorSet,
         },
+        prelude::*,
     };
     use consts::BLAKE2_DIGEST_SIZE;
     use plonky2::{
@@ -68,8 +69,10 @@ pub mod proving {
     };
     use serde::{Deserialize, Serialize};
 
-    pub use crate::block_finality::{BlockFinality, PreCommit};
-    pub use crate::storage_inclusion::{BranchNodeData, StorageInclusion};
+    pub use crate::{
+        block_finality::{BlockFinality, PreCommit},
+        storage_inclusion::{BranchNodeData, StorageInclusion},
+    };
 
     use self::consts::BLAKE2_DIGEST_SIZE_IN_GOLDILOCKS_FIELD_ELEMENTS;
 

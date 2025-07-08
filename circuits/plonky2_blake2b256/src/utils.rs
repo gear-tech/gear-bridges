@@ -1,7 +1,9 @@
-use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::BoolTarget;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::{field::extension::Extendable, iop::target::Target};
+use plonky2::{
+    field::extension::Extendable,
+    hash::hash_types::RichField,
+    iop::target::{BoolTarget, Target},
+    plonk::circuit_builder::CircuitBuilder,
+};
 use plonky2_u32::gadgets::arithmetic_u32::{CircuitBuilderU32, U32Target};
 
 pub type Word = u64;
@@ -171,9 +173,11 @@ fn word_to_bits_le(w: Word) -> [bool; WORD_BITS] {
 mod tests {
     use super::*;
 
-    use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::{circuit_data::CircuitConfig, config::PoseidonGoldilocksConfig};
+    use plonky2::{
+        field::goldilocks_field::GoldilocksField,
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::{circuit_data::CircuitConfig, config::PoseidonGoldilocksConfig},
+    };
 
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;

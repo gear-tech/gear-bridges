@@ -27,6 +27,12 @@ type Transfer @entity {
   amount: BigInt!
 }
 
+type InitiatedTransfer @entity {
+  id: ID!
+  txHash: String!
+  blockNumber: BigInt!
+}
+
 type Pair @entity {
   id: ID!
   varaToken: String! @index

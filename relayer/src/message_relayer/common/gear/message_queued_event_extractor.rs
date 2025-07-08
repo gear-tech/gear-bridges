@@ -134,7 +134,10 @@ impl MessageQueuedEventExtractor {
             })?;
         }
 
-        log::info!("Found {total} queued messages in block #{}", block.number());
+        if total > 0 {
+            log::info!("Found {total} queued messages in block #{}", block.number());
+        }
+
         self.metrics.total_messages_found.inc_by(total);
 
         Ok(())

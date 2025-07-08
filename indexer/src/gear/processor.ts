@@ -31,7 +31,8 @@ const processor = new SubstrateBatchProcessor()
   .setBlockRange({
     from: config.fromBlock,
   })
-  .addEvent({ name: ['Gear.ProgramChanged'] });
+  .addEvent({ name: ['Gear.ProgramChanged'] })
+  .addEvent({ name: ['Gear.MessageQueued'], extrinsic: true, call: true });
 
 export type Fields = SubstrateBatchProcessorFields<typeof processor>;
 export type Block = BlockHeader<Fields>;

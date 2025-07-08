@@ -3,8 +3,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::iter::Sum;
 
-use plonky2::field::ops::Square;
-use plonky2::field::types::Field;
+use plonky2::field::{ops::Square, types::Field};
 
 use crate::curve::curve_types::{AffinePoint, Curve, ProjectivePoint};
 

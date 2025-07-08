@@ -21,20 +21,20 @@ type Transaction = {
   value?: bigint;
 };
 
-function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
+function useHandleEthSubmit({ bridgingFee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
   const { token } = useBridgeContext();
   const isUSDC = token?.symbol.toLowerCase().includes('usdc');
 
   const mint = useMint();
   const approve = useApprove();
   const permitUSDC = usePermitUSDC();
-  const transfer = useTransfer(fee);
+  const transfer = useTransfer(bridgingFee);
 
   const config = useConfig();
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
-    definedAssert(fee, 'Fee');
+    definedAssert(bridgingFee, 'Fee');
     definedAssert(token, 'Fungible token');
 
     const txs: Transaction[] = [];
@@ -59,7 +59,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
     const bridgeTx = {
       gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
-      value: fee,
+      value: bridgingFee,
     };
 
     if (shouldApprove && isUSDC) {
@@ -86,7 +86,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
 
   const getRequiredBalance = async (values: FormattedValues) => {
     definedAssert(accountBalance, 'Account balance');
-    definedAssert(fee, 'Fee value');
+    definedAssert(bridgingFee, 'Fee value');
 
     const txs = await getTransactions(values);
     const { maxFeePerGas } = await estimateFeesPerGas(config);
@@ -95,7 +95,7 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
     const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
     const requiredBalance = totalValue + totalGasLimit;
-    const fees = totalGasLimit + fee;
+    const fees = totalGasLimit + bridgingFee;
 
     return { requiredBalance, fees };
   };
@@ -110,10 +110,12 @@ function useHandleEthSubmit({ fee, allowance, accountBalance, onTransactionStart
   };
 
   const onSubmit = async (values: FormattedValues) => {
+    definedAssert(requiredBalance.data, 'Required balance');
+
     const txs = await getTransactions(values);
 
     resetState();
-    onTransactionStart(values);
+    onTransactionStart(values, requiredBalance.data.fees);
 
     for (const { call } of txs) await call();
   };

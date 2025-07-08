@@ -1,10 +1,11 @@
-use std::time::Duration;
+use std::{collections::HashSet, str::FromStr, time::Duration};
 
 use clap::Parser;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
+use gclient::ext::sp_runtime::AccountId32;
 use kill_switch::KillSwitchRelayer;
 use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
@@ -31,6 +32,8 @@ use cli::{
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
+
+use crate::cli::FeePayers;
 
 #[tokio::main]
 async fn main() {
@@ -67,6 +70,10 @@ async fn main() {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let block_listener = message_relayer::common::gear::block_listener::BlockListener::new(
+                api_provider.connection(),
+            );
+
             let relayer = MerkleRootRelayer::new(
                 api_provider.connection(),
                 eth_api,
@@ -82,7 +89,12 @@ async fn main() {
                 .run(args.prometheus_args.endpoint)
                 .await;
             api_provider.spawn();
-            relayer.run().await.expect("Merkle root relayer failed");
+
+            let [blocks] = block_listener.run().await;
+            relayer
+                .run(blocks)
+                .await
+                .expect("Merkle root relayer failed");
         }
         CliCommands::KillSwitch(args) => {
             let api_provider = ApiProvider::new(
@@ -142,6 +154,60 @@ async fn main() {
             .await
             .expect("Failed to create API provider");
 
+            let api = provider.connection().client();
+
+            let mut excluded_from_fees = HashSet::new();
+            match args.no_fee {
+                None => {
+                    log::warn!("No free from charge accounts listed, using default: bridgeAdmin and bridgePauser from chain constants");
+                    match api.bridge_admin().await.map(AccountId32::from) {
+                        Ok(admin) => {
+                            log::info!("Bridge admin: {admin}");
+                            excluded_from_fees.insert(admin);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to get bridge admin: {e}");
+                        }
+                    };
+
+                    match api.bridge_pauser().await.map(AccountId32::from) {
+                        Ok(pauser) => {
+                            log::info!("Bridge pauser: {pauser}");
+                            excluded_from_fees.insert(pauser);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to get bridge pauser: {e}");
+                        }
+                    };
+
+                    if excluded_from_fees.is_empty() {
+                        log::error!("Exiting");
+
+                        return;
+                    }
+                }
+
+                Some(FeePayers::All) => {
+                    log::info!("All accounts haave to pay fees");
+                }
+
+                Some(FeePayers::ExcludedIds(ids)) => {
+                    for id in ids {
+                        match AccountId32::from_str(id.as_str()) {
+                            Ok(account_id) => {
+                                log::debug!("Account {account_id} is excluded from paying fees");
+                                excluded_from_fees.insert(account_id);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to decode address '{id}': {e}");
+
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
             match args.command {
                 GearEthTokensCommands::AllTokenTransfers => {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
@@ -175,6 +241,7 @@ async fn main() {
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        excluded_from_fees,
                     )
                     .await
                     .unwrap();

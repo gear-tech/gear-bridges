@@ -2,7 +2,7 @@ use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, PollingEthApi};
+use ethereum_client::PollingEthApi;
 use utils_prometheus::MeteredService;
 use super::{
     message_sender::MessageSender,
@@ -54,7 +54,6 @@ impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         suri: String,
-        eth_api: EthApi,
         eth_api2: PollingEthApi,
         beacon_client: BeaconClient,
         erc20_manager_address: H160,
@@ -73,7 +72,7 @@ impl Relayer {
         let storage = Arc::new(JSONStorage::new(storage_path));
 
         let deposit_event_extractor = DepositEventExtractor::new(
-            eth_api.clone(),
+            eth_api2.clone(),
             erc20_manager_address,
             storage.clone(),
             genesis_time,

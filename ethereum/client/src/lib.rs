@@ -140,6 +140,47 @@ impl PollingEthApi {
             .map(|(_, log)| log.transaction_hash.context("Failed to fetch transaction"))
             .collect()
     }
+
+    pub async fn fetch_deposit_events(
+        &self,
+        contract_address: H160,
+        block: u64,
+    ) -> AnyResult<Vec<DepositEventEntry>> {
+        let filter = Filter::new()
+            .address(Address::from_slice(contract_address.as_bytes()))
+            .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
+            .from_block(block)
+            .to_block(block);
+
+        let event: Event<_, IERC20Manager::BridgingRequested, Ethereum> =
+            Event::new(self.provider.clone(), filter);
+
+        let logs = event.query().await.context("Failed to query event")?;
+
+        logs.into_iter()
+            .map(
+                |(
+                    IERC20Manager::BridgingRequested {
+                        from,
+                        to,
+                        token,
+                        amount,
+                    },
+                    log,
+                )| {
+                    let tx_hash = log.transaction_hash.context("Failed to fetch transaction")?;
+                    
+                    Ok(DepositEventEntry {
+                        from: H160(*from.0),
+                        to: H256(to.0),
+                        token: H160(*token.0),
+                        amount: primitive_types::U256::from_little_endian(&amount.to_le_bytes_vec()),
+                        tx_hash,
+                    })
+                }
+            )
+            .collect()
+    }
 }
 
 impl Deref for PollingEthApi {
@@ -293,36 +334,6 @@ impl EthApi {
         to: u64,
     ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         self.contracts.fetch_merkle_roots_in_range(from, to).await
-    }
-
-    pub async fn fetch_deposit_events(
-        &self,
-        contract_address: H160,
-        block: u64,
-    ) -> Result<Vec<DepositEventEntry>, Error> {
-        Ok(self
-            .contracts
-            .fetch_deposit_events(Address::from_slice(contract_address.as_bytes()), block)
-            .await?
-            .into_iter()
-            .map(
-                |(
-                    IERC20Manager::BridgingRequested {
-                        from,
-                        to,
-                        token,
-                        amount,
-                    },
-                    tx_hash,
-                )| DepositEventEntry {
-                    from: H160(*from.0),
-                    to: H256(to.0),
-                    token: H160(*token.0),
-                    amount: primitive_types::U256::from_little_endian(&amount.to_le_bytes_vec()),
-                    tx_hash,
-                },
-            )
-            .collect())
     }
 
     pub async fn get_block_timestamp(&self, block: u64) -> Result<u64, Error> {
@@ -486,33 +497,6 @@ impl Contracts {
                 )
             })
             .collect())
-    }
-
-    pub async fn fetch_deposit_events(
-        &self,
-        contract_address: Address,
-        block: u64,
-    ) -> Result<Vec<(IERC20Manager::BridgingRequested, TxHash)>, Error> {
-        let filter = Filter::new()
-            .address(contract_address)
-            .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
-            .from_block(block)
-            .to_block(block);
-
-        let event: Event<ProviderType, IERC20Manager::BridgingRequested, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
-
-        logs.into_iter()
-            .map(|(event, log)| {
-                Ok((
-                    event,
-                    log.transaction_hash
-                        .ok_or(Error::ErrorFetchingTransaction)?,
-                ))
-            })
-            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]

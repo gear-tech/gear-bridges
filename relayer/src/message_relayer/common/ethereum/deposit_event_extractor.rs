@@ -1,10 +1,8 @@
 use std::sync::Arc;
-
 use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
-use ethereum_client::{DepositEventEntry, EthApi};
+use ethereum_client::{DepositEventEntry, PollingEthApi};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
@@ -19,7 +17,7 @@ use crate::{
 };
 
 pub struct DepositEventExtractor {
-    eth_api: EthApi,
+    eth_api: PollingEthApi,
 
     erc20_manager_address: H160,
 
@@ -47,7 +45,7 @@ impl_metered_service! {
 
 impl DepositEventExtractor {
     pub fn new(
-        eth_api: EthApi,
+        eth_api: PollingEthApi,
 
         erc20_manager_address: H160,
         storage: Arc<dyn Storage>,
@@ -91,6 +89,7 @@ impl DepositEventExtractor {
                     unprocessed.push(EthereumBlockNumber(block));
                 }
             }
+
             loop {
                 let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
                 if let Err(err) = res {
@@ -149,7 +148,7 @@ impl DepositEventExtractor {
             .eth_api
             .fetch_deposit_events(self.erc20_manager_address, block.0)
             .await?;
-        let timestamp = self.eth_api.get_block_timestamp(block.0).await?;
+        let timestamp = self.eth_api.get_block(block.0).await?.header.timestamp;
 
         let slot_number = EthereumSlotNumber(
             timestamp.saturating_sub(self.genesis_time) / ETHEREUM_BLOCK_TIME_APPROX.as_secs(),

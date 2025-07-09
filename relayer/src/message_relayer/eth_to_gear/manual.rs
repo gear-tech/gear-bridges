@@ -59,10 +59,12 @@ pub async fn relay(
 
     let client = provider_connection
         .gclient_client(&gear_suri)
-        .expect("failed to create gclient");
+        .context("Failed to create gclient")?;
 
     let latest_checkpoint =
         super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
+
+    log::debug!("latest_checkpoint = {latest_checkpoint:?}");
 
     let message_sender = MessageSender::new(
         receiver_address,

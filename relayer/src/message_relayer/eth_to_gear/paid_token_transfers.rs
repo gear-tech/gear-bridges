@@ -4,7 +4,7 @@ use super::{
     tx_manager,
 };
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, PollingEthApi};
+use ethereum_client::PollingEthApi;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
@@ -57,7 +57,6 @@ impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         suri: String,
-        eth_api: EthApi,
         eth_api2: PollingEthApi,
         beacon_client: BeaconClient,
         bridging_payment_address: H160,
@@ -78,7 +77,7 @@ impl Relayer {
         let tx_manager = TransactionManager::new(storage.clone());
 
         let message_paid_event_extractor = MessagePaidEventExtractor::new(
-            eth_api.clone(),
+            eth_api2.clone(),
             bridging_payment_address,
             storage.clone(),
             genesis_time,
@@ -135,7 +134,8 @@ impl Relayer {
         if let Err(err) = self.storage.load(&self.tx_manager).await {
             log::warn!("Failed to load transaction and block status from storage: {err:?}")
         }
-        let message_paid_events = self.message_paid_event_extractor.run(ethereum_blocks).await;
+
+        let message_paid_events = self.message_paid_event_extractor.spawn(ethereum_blocks);
         let checkpoints = self
             .checkpoints_extractor
             .run(gear_blocks, self.latest_checkpoint)

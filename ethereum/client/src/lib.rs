@@ -72,11 +72,6 @@ pub struct DepositEventEntry {
     pub tx_hash: TxHash,
 }
 
-#[derive(Debug, Clone)]
-pub struct FeePaidEntry {
-    pub tx_hash: TxHash,
-}
-
 #[derive(Debug)]
 pub enum TxStatus {
     Finalized,
@@ -120,6 +115,31 @@ impl PollingEthApi {
     pub async fn finalized_block(&self) -> AnyResult<Block> {
         self::finalized_block(&self.provider).await
     }
+    
+    pub async fn get_block(&self, block: u64) -> AnyResult<Block> {
+        self::get_block(&self.provider, block).await
+    }
+
+    pub async fn fetch_fee_paid_events_txs(
+        &self,
+        contract_address: H160,
+        block: u64,
+    ) -> AnyResult<Vec<TxHash>> {
+        let filter = Filter::new()
+            .address(Address::from_slice(contract_address.as_bytes()))
+            .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
+            .from_block(block)
+            .to_block(block);
+
+        let event: Event<_, BridgingPayment::FeePaid, Ethereum> =
+            Event::new(self.provider.clone(), filter);
+
+        let logs = event.query().await.context("Failed to query event")?;
+
+        logs.into_iter()
+            .map(|(_, log)| log.transaction_hash.context("Failed to fetch transaction"))
+            .collect()
+    }
 }
 
 impl Deref for PollingEthApi {
@@ -135,6 +155,14 @@ pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
         .get_block_by_number(BlockNumberOrTag::Finalized)
         .await?
         .context("Finalized block is None")?
+    )
+}
+
+pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
+    Ok(provider
+        .get_block_by_number(BlockNumberOrTag::Number(block))
+        .await?
+        .context("Block is None")?
     )
 }
 
@@ -306,20 +334,6 @@ impl EthApi {
             .ok_or(Error::ErrorFetchingBlock)?
             .header
             .timestamp)
-    }
-
-    pub async fn fetch_fee_paid_events(
-        &self,
-        contract_address: H160,
-        block: u64,
-    ) -> Result<Vec<FeePaidEntry>, Error> {
-        Ok(self
-            .contracts
-            .fetch_fee_paid_events(Address::from_slice(contract_address.as_bytes()), block)
-            .await?
-            .into_iter()
-            .map(|tx_hash| FeePaidEntry { tx_hash })
-            .collect())
     }
 
     pub async fn block_number(&self) -> Result<u64, Error> {
@@ -498,27 +512,6 @@ impl Contracts {
                         .ok_or(Error::ErrorFetchingTransaction)?,
                 ))
             })
-            .collect()
-    }
-
-    pub async fn fetch_fee_paid_events(
-        &self,
-        contract_address: Address,
-        block: u64,
-    ) -> Result<Vec<TxHash>, Error> {
-        let filter = Filter::new()
-            .address(contract_address)
-            .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
-            .from_block(block)
-            .to_block(block);
-
-        let event: Event<ProviderType, BridgingPayment::FeePaid, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
-
-        logs.into_iter()
-            .map(|(_, log)| log.transaction_hash.ok_or(Error::ErrorFetchingTransaction))
             .collect()
     }
 

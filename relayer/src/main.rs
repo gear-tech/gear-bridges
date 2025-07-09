@@ -354,7 +354,6 @@ async fn main() -> AnyResult<()> {
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gear_args.suri,
-                        eth_api,
                         eth_api2,
                         beacon_client,
                         bridging_payment_address,

@@ -1,3 +1,4 @@
+use anyhow::{Context, Result as AnyResult};
 use alloy::{
     contract::Event,
     network::{Ethereum, EthereumWallet, TransactionBuilder},
@@ -10,14 +11,14 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     pubsub::Subscription,
-    rpc::types::{BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
+    rpc::types::{BlockId, BlockNumberOrTag, Filter, Log as RpcLog, Block},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{ws::WsConnect, RpcError, TransportErrorKind},
 };
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::str::FromStr;
+use std::{str::FromStr, ops::Deref};
 
 pub use alloy::primitives::TxHash;
 
@@ -81,6 +82,60 @@ pub enum TxStatus {
     Finalized,
     Pending,
     Failed,
+}
+
+#[derive(Clone)]
+pub struct PollingEthApi {
+    provider: RootProvider,
+    url: Url,
+}
+
+impl PollingEthApi {
+    pub async fn new(url: &str) -> AnyResult<Self> {
+        let url = Url::parse(url)
+            .context("Provided url is not valid")?;
+        let ws = WsConnect::new(url.clone());
+        let provider = RootProvider::builder()
+            .connect_ws(ws)
+            .await?;
+
+        Ok(Self {
+            provider,
+            url,
+        })
+    }
+
+    pub async fn reconnect(&self) -> AnyResult<Self> {
+        let ws = WsConnect::new(self.url.clone());
+        let provider = RootProvider::builder()
+            .connect_ws(ws)
+            .await?;
+
+        Ok(Self {
+            provider,
+            url: self.url.clone(),
+        })
+    }
+
+    pub async fn finalized_block(&self) -> AnyResult<Block> {
+        self::finalized_block(&self.provider).await
+    }
+}
+
+impl Deref for PollingEthApi {
+    type Target = RootProvider;
+
+    fn deref(&self) -> &Self::Target {
+        &self.provider
+    }
+}
+
+pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
+    Ok(provider
+        .get_block_by_number(BlockNumberOrTag::Finalized)
+        .await?
+        .context("Finalized block is None")?
+    )
 }
 
 #[derive(Clone)]
@@ -271,8 +326,8 @@ impl EthApi {
         self.contracts.block_number().await
     }
 
-    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
-        self.contracts.finalized_block_number().await
+    pub async fn finalized_block_number(&self) -> AnyResult<u64> {
+        Ok(self::finalized_block(self.raw_provider()).await?.header.number)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -374,17 +429,6 @@ impl Contracts {
 
     pub async fn block_number(&self) -> Result<u64, Error> {
         self.provider.get_block_number().await.map_err(|e| e.into())
-    }
-
-    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
-        Ok(self
-            .provider
-            .get_block_by_number(BlockNumberOrTag::Finalized)
-            .await
-            .map_err(Error::ErrorInHTTPTransport)?
-            .ok_or(Error::ErrorFetchingBlock)?
-            .header
-            .number)
     }
 
     pub async fn fetch_merkle_roots(

@@ -17,7 +17,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
-    api_provider: ApiProviderConnection,
+    mut api_provider: ApiProviderConnection,
     gear_suri: String,
 
     eth_api: EthApi,
@@ -35,6 +35,13 @@ pub async fn relay(
     let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
     let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+
+    let client = api_provider
+        .gclient_client(&gear_suri)
+        .expect("failed to create gclient");
+
+    let latest_checkpoint =
+        super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
 
     let message_sender = MessageSender::new(
         receiver_address,
@@ -60,7 +67,9 @@ pub async fn relay(
         })
         .expect("Failed to send message to channel");
 
-    let checkpoints = checkpoints_extractor.run(gear_blocks).await;
+    let checkpoints = checkpoints_extractor
+        .run(gear_blocks, latest_checkpoint)
+        .await;
 
     let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
 

@@ -20,6 +20,7 @@ use crate::message_relayer::common::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor,
     },
+    EthereumSlotNumber,
 };
 
 use super::api_provider::ApiProviderConnection;
@@ -30,6 +31,7 @@ pub struct Relayer {
 
     message_paid_event_extractor: MessagePaidEventExtractor,
     checkpoints_extractor: CheckpointsExtractor,
+    latest_checkpoint: Option<EthereumSlotNumber>,
 
     message_sender: message_sender::MessageSender,
     proof_composer: proof_composer::ProofComposer,
@@ -61,7 +63,7 @@ impl Relayer {
         checkpoint_light_client_address: H256,
         historical_proxy_address: H256,
         vft_manager_address: H256,
-        api_provider: ApiProviderConnection,
+        mut api_provider: ApiProviderConnection,
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
@@ -82,6 +84,13 @@ impl Relayer {
         );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+
+        let client = api_provider
+            .gclient_client(&suri)
+            .expect("failed to create gclient");
+
+        let latest_checkpoint =
+            super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
 
         let route =
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
@@ -108,6 +117,7 @@ impl Relayer {
 
             message_paid_event_extractor,
             checkpoints_extractor,
+            latest_checkpoint,
 
             message_sender,
             proof_composer,
@@ -125,7 +135,10 @@ impl Relayer {
             log::warn!("Failed to load transaction and block status from storage: {err:?}")
         }
         let message_paid_events = self.message_paid_event_extractor.run(ethereum_blocks).await;
-        let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
+        let checkpoints = self
+            .checkpoints_extractor
+            .run(gear_blocks, self.latest_checkpoint)
+            .await;
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.message_sender.run();
         if let Err(err) = self

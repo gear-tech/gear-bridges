@@ -1,12 +1,13 @@
 use crate::message_relayer::common::{gear::block_listener::GearBlock, EthereumSlotNumber};
 use checkpoint_light_client_client::{
     service_replay_back::events::ServiceReplayBackEvents,
-    service_sync_update::events::ServiceSyncUpdateEvents,
+    service_sync_update::events::ServiceSyncUpdateEvents, traits::ServiceState, Order,
 };
+use gclient::GearApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
 
-use sails_rs::events::EventIo;
+use sails_rs::{calls::Query, events::EventIo, gclient::calls::GClientRemoting};
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -69,13 +70,35 @@ impl CheckpointsExtractor {
         }
     }
 
+    pub async fn get_latest_checkpoint(&self, gear_api: GearApi) -> Option<EthereumSlotNumber> {
+        let remoting = GClientRemoting::new(gear_api);
+        checkpoint_light_client_client::ServiceState::new(remoting)
+            .get(Order::Reverse, 0, 1)
+            .recv(self.checkpoint_light_client_address.into())
+            .await
+            .ok()
+            .map(|state| {
+                state
+                    .checkpoints
+                    .last()
+                    .map(|(checkpoint, _)| EthereumSlotNumber(*checkpoint))
+            })
+            .unwrap_or(None)
+    }
+
     pub async fn run(
         mut self,
         mut blocks: Receiver<GearBlock>,
+        latest_checkpoint: Option<EthereumSlotNumber>,
     ) -> UnboundedReceiver<EthereumSlotNumber> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            if let Some(latest_checkpoint) = latest_checkpoint {
+                if sender.send(latest_checkpoint).is_err() {
+                    return;
+                }
+            }
             let res = self.run_inner(&sender, &mut blocks).await;
             if let Err(err) = res {
                 log::error!("Checkpoints extractor failed: {err}");

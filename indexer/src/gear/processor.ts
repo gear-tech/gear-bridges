@@ -15,7 +15,7 @@ const processor = new SubstrateBatchProcessor()
   .setGateway(config.archiveUrl)
   .setRpcEndpoint({
     url: config.rpcUrl,
-    rateLimit: 10,
+    rateLimit: config.rateLimit,
     headers: {
       'User-Agent': hostname(),
     },

@@ -16,6 +16,8 @@ type Transfer @entity {
   blockNumber: BigInt!
   timestamp: DateTime! @index
   completedAt: DateTime
+  completedAtBlock: BigInt
+  completedAtTxHash: String
   nonce: String! @index
   sourceNetwork: Network!
   source: String! @index
@@ -56,6 +58,8 @@ type CompletedTransfer @entity {
   nonce: String! @index @unique
   destNetwork: Network!
   timestamp: DateTime
+  txHash: String!
+  blockNumber: BigInt!
 }
 
 type VaraBridgeProgram @entity {

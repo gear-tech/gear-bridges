@@ -153,7 +153,7 @@ const handler = async (ctx: ProcessorContext) => {
             const { block_number, transaction_index } = decoder.decodeEvent<Relayed>(service, method, msg.payload);
 
             const nonce = ethNonce(`${block_number}${transaction_index}`);
-            state.setCompletedTransfer(nonce, timestamp);
+            state.setCompletedTransfer(nonce, timestamp, blockNumber, event.extrinsic!.hash);
             break;
           }
           case ProgramName.BridgingPayment: {

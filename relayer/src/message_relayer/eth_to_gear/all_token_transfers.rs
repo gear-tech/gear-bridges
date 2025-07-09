@@ -1,9 +1,5 @@
-use checkpoint_light_client_client::{traits::ServiceState, Order};
 use primitive_types::{H160, H256};
-use sails_rs::{
-    calls::{ActionIo, Query},
-    gclient::calls::GClientRemoting,
-};
+use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
 
 use ethereum_beacon_client::BeaconClient;
@@ -85,24 +81,14 @@ impl Relayer {
             genesis_time,
         );
 
+        let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+
         let client = api_provider
             .gclient_client(&suri)
-            .expect("failed to create gclient");
-        let remoting = GClientRemoting::new(client);
-        let latest_checkpoint = checkpoint_light_client_client::ServiceState::new(remoting)
-            .get(Order::Reverse, 0, 1)
-            .recv(checkpoint_light_client_address.into())
-            .await
-            .ok()
-            .map(|state| {
-                state
-                    .checkpoints
-                    .last()
-                    .map(|(checkpoint, _)| EthereumSlotNumber(*checkpoint))
-            })
-            .unwrap_or(None);
+            .expect("failed to construct gclient");
 
-        let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+        let latest_checkpoint =
+            super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
 
         let route =
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();

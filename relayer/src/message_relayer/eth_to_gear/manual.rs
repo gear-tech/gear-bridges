@@ -9,11 +9,9 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber, TxHashWithSlot,
 };
-use checkpoint_light_client_client::{traits::ServiceState, Order};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, TxHash};
 use primitive_types::H256;
-use sails_rs::{calls::Query, gclient::calls::GClientRemoting};
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -36,23 +34,14 @@ pub async fn relay(
 ) {
     let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
+    let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+
     let client = api_provider
         .gclient_client(&gear_suri)
         .expect("failed to create gclient");
-    let remoting = GClientRemoting::new(client);
-    let latest_checkpoint = checkpoint_light_client_client::ServiceState::new(remoting)
-        .get(Order::Reverse, 0, 1)
-        .recv(checkpoint_light_client_address.into())
-        .await
-        .ok()
-        .map(|state| {
-            state
-                .checkpoints
-                .last()
-                .map(|(checkpoint, _)| EthereumSlotNumber(*checkpoint))
-        })
-        .unwrap_or(None);
-    let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+
+    let latest_checkpoint =
+        super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
 
     let message_sender = MessageSender::new(
         receiver_address,

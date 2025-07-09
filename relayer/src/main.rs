@@ -280,7 +280,7 @@ async fn main() -> AnyResult<()> {
             prometheus_args,
             storage_path,
         }) => {
-            let eth_api2 = PollingEthApi::new(&ethereum_rpc).await?;
+            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -321,7 +321,7 @@ async fn main() -> AnyResult<()> {
 
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                         gear_args.suri,
-                        eth_api2,
+                        eth_api,
                         beacon_client,
                         erc20_manager_address,
                         checkpoint_light_client_address,
@@ -352,7 +352,7 @@ async fn main() -> AnyResult<()> {
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gear_args.suri,
-                        eth_api2,
+                        eth_api,
                         beacon_client,
                         bridging_payment_address,
                         checkpoint_light_client_address,

@@ -54,7 +54,7 @@ impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         suri: String,
-        eth_api2: PollingEthApi,
+        eth_api: PollingEthApi,
         beacon_client: BeaconClient,
         erc20_manager_address: H160,
         checkpoint_light_client_address: H256,
@@ -66,13 +66,13 @@ impl Relayer {
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
-        let from_eth_block = eth_api2.finalized_block().await?.header.number;
-        let ethereum_block_listener = EthereumBlockListener::new(eth_api2.clone(), from_eth_block);
+        let from_eth_block = eth_api.finalized_block().await?.header.number;
+        let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let storage = Arc::new(JSONStorage::new(storage_path));
 
         let deposit_event_extractor = DepositEventExtractor::new(
-            eth_api2.clone(),
+            eth_api.clone(),
             erc20_manager_address,
             storage.clone(),
             genesis_time,
@@ -101,7 +101,7 @@ impl Relayer {
         let proof_composer = ProofComposer::new(
             api_provider,
             beacon_client,
-            eth_api2,
+            eth_api,
             historical_proxy_address,
             suri,
         );

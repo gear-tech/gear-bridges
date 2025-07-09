@@ -21,9 +21,10 @@ use cli::{
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 use crate::cli::FeePayers;
+use anyhow::{anyhow, Result as AnyResult};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> AnyResult<()> {
     let _ = dotenv::dotenv();
 
     pretty_env_logger::formatted_timed_builder()
@@ -168,9 +169,7 @@ async fn main() {
                     };
 
                     if excluded_from_fees.is_empty() {
-                        log::error!("Exiting");
-
-                        return;
+                        return Err(anyhow!("Exiting"));
                     }
                 }
 
@@ -180,17 +179,11 @@ async fn main() {
 
                 Some(FeePayers::ExcludedIds(ids)) => {
                     for id in ids {
-                        match AccountId32::from_str(id.as_str()) {
-                            Ok(account_id) => {
-                                log::debug!("Account {account_id} is excluded from paying fees");
-                                excluded_from_fees.insert(account_id);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to decode address '{id}': {e}");
-
-                                return;
-                            }
-                        }
+                        let account_id = AccountId32::from_str(id.as_str())
+                            .map_err(|e| anyhow!(r#"Failed to decode address "{id}": {e:?}"#))?;
+                        
+                        log::debug!("Account {account_id} is excluded from paying fees");
+                        excluded_from_fees.insert(account_id);
                     }
                 }
             }
@@ -288,7 +281,7 @@ async fn main() {
             storage_path,
         }) => {
             let eth_api = create_eth_client(&ethereum_args).await;
-            let eth_api2 = create_eth_client2(&ethereum_args).await;
+            let eth_api2 = PollingEthApi::new(&ethereum_args.eth_endpoint).await?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -421,7 +414,7 @@ async fn main() {
             receiver_program,
             receiver_route,
             gear_args,
-            ethereum_args,
+            ethereum_rpc,
             beacon_args,
         }) => {
             use sails_rs::calls::ActionIo;
@@ -431,7 +424,8 @@ async fn main() {
                 vara_port: gear_args.common.port,
                 vara_rpc_retries: gear_args.common.retries,
             };
-            let eth_api = create_eth_client(&ethereum_args).await;
+            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
+
             let beacon_client = create_beacon_client(&beacon_args).await;
             let checkpoint_light_client_address = hex_utils::decode_h256(&checkpoint_light_client)
                 .expect("Failed to parse checkpoint light client address");
@@ -478,12 +472,10 @@ async fn main() {
             }
         }
 
-        CliCommands::FetchMerkleRoots(args) => {
-            if let Err(e) = fetch_merkle_roots(args).await {
-                log::error!("{e:?}");
-            }
-        }
+        CliCommands::FetchMerkleRoots(args) => fetch_merkle_roots(args).await?,
     };
+
+    Ok(())
 }
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
@@ -525,17 +517,6 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     } = args;
 
     EthApi::new(eth_endpoint, mq_address, relayer_address, None)
-        .await
-        .expect("Error while creating ethereum client")
-}
-
-async fn create_eth_client2(args: &EthereumArgs) -> PollingEthApi {
-    let EthereumArgs {
-        eth_endpoint,
-        ..
-    } = args;
-
-    PollingEthApi::new(eth_endpoint)
         .await
         .expect("Error while creating ethereum client")
 }
@@ -589,7 +570,7 @@ fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConf
     }
 }
 
-async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> anyhow::Result<()> {
+async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     let eth_api = create_eth_client(&args.ethereum_args).await;
     let block_finalized = eth_api.finalized_block_number().await?;
 

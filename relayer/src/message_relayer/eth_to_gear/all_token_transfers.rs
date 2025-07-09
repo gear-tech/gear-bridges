@@ -102,7 +102,7 @@ impl Relayer {
         let proof_composer = ProofComposer::new(
             api_provider,
             beacon_client,
-            eth_api,
+            eth_api2,
             historical_proxy_address,
             suri,
         );

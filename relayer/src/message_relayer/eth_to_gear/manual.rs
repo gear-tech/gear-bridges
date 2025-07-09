@@ -10,7 +10,7 @@ use crate::message_relayer::common::{
     EthereumSlotNumber, TxHashWithSlot,
 };
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::{PollingEthApi, TxHash};
 use primitive_types::H256;
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
@@ -20,7 +20,7 @@ pub async fn relay(
     mut api_provider: ApiProviderConnection,
     gear_suri: String,
 
-    eth_api: EthApi,
+    eth_api: PollingEthApi,
     beacon_client: BeaconClient,
 
     checkpoint_light_client_address: H256,

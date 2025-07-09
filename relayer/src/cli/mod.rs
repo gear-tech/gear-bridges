@@ -221,8 +221,11 @@ pub struct EthGearManualArgs {
 
     #[clap(flatten)]
     pub gear_args: GearSignerArgs,
-    #[clap(flatten)]
-    pub ethereum_args: EthereumArgs,
+
+    /// Address of the ethereum endpoint
+    #[arg(long, env)]
+    pub ethereum_rpc: String,
+
     #[clap(flatten)]
     pub beacon_args: BeaconRpcArgs,
 }

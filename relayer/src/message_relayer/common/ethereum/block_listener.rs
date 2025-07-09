@@ -10,7 +10,7 @@ use crate::{
     message_relayer::common::EthereumBlockNumber,
 };
 
-const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
+pub const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 
 pub struct BlockListener {
     eth_api: EthApi,

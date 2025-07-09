@@ -1,18 +1,19 @@
-use primitive_types::H256;
-
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, TxHash};
-use tokio::sync::mpsc::unbounded_channel;
-
+use super::{
+    api_provider::ApiProviderConnection, message_sender::MessageSender,
+    proof_composer::ProofComposer, storage::NoStorage, tx_manager::TransactionManager,
+};
 use crate::message_relayer::common::{
     gear::{
         block_listener::BlockListener as GearBlockListener,
-        checkpoints_extractor::CheckpointsExtractor, message_sender::MessageSender,
+        checkpoints_extractor::CheckpointsExtractor,
     },
     EthereumSlotNumber, TxHashWithSlot,
 };
-
-use super::api_provider::ApiProviderConnection;
+use ethereum_beacon_client::BeaconClient;
+use ethereum_client::{EthApi, TxHash};
+use primitive_types::H256;
+use std::sync::Arc;
+use tokio::sync::mpsc::unbounded_channel;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -35,18 +36,20 @@ pub async fn relay(
 
     let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
-    let gear_message_sender = MessageSender::new(
-        api_provider,
-        gear_suri,
-        eth_api,
-        beacon_client,
-        historical_proxy_address,
-        checkpoint_light_client_address,
+    let message_sender = MessageSender::new(
         receiver_address,
         receiver_route,
-        true,
+        historical_proxy_address,
+        api_provider.clone(),
+        gear_suri.clone(),
     );
-
+    let proof_composer = ProofComposer::new(
+        api_provider,
+        beacon_client,
+        eth_api,
+        historical_proxy_address,
+        gear_suri.clone(),
+    );
     let [gear_blocks] = gear_block_listener.run().await;
     let (deposit_events_sender, deposit_events_receiver) = unbounded_channel();
 
@@ -58,7 +61,18 @@ pub async fn relay(
         .expect("Failed to send message to channel");
 
     let checkpoints = checkpoints_extractor.run(gear_blocks).await;
-    gear_message_sender
-        .run(deposit_events_receiver, checkpoints)
-        .await;
+
+    let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
+
+    let message_sender = message_sender.run();
+    let proof_composer = proof_composer.run(checkpoints);
+
+    if let Err(err) = tx_manager
+        .run(deposit_events_receiver, proof_composer, message_sender)
+        .await
+    {
+        log::error!("Transasction manager failed with error: {err:?}");
+    }
+
+    drop(deposit_events_sender);
 }

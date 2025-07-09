@@ -1,6 +1,7 @@
 use std::{collections::HashSet, str::FromStr, time::Duration};
 
 use clap::Parser;
+use relayer::*;
 
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::EthApi;
@@ -16,16 +17,6 @@ use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use utils_prometheus::MetricsBuilder;
-
-mod cli;
-mod common;
-mod ethereum_checkpoints;
-mod hex_utils;
-mod kill_switch;
-mod merkle_roots;
-mod message_relayer;
-mod proof_storage;
-mod prover_interface;
 
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
@@ -301,6 +292,7 @@ async fn main() {
             ethereum_args,
             beacon_rpc,
             prometheus_args,
+            storage_path,
         }) => {
             let eth_api = create_eth_client(&ethereum_args).await;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
@@ -325,6 +317,15 @@ async fn main() {
             let vft_manager_address =
                 hex_utils::decode_h256(&vft_manager_address).expect("Failed to parse address");
 
+            let genesis_time = beacon_client
+                .get_genesis()
+                .await
+                .expect("failed to fetch chain genesis")
+                .data
+                .genesis_time;
+
+            log::debug!("Genesis time: {genesis_time}");
+
             match command {
                 EthGearTokensCommands::AllTokenTransfers {
                     erc20_manager_address,
@@ -341,6 +342,8 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        storage_path,
+                        genesis_time,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -370,6 +373,8 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        storage_path,
+                        genesis_time,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -382,12 +387,6 @@ async fn main() {
                     provider.spawn();
                     relayer.run().await;
                 }
-            }
-
-            loop {
-                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                // TODO(playx): is this necessary now? We switched to full async
-                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
         CliCommands::GearEthManual(args) => {

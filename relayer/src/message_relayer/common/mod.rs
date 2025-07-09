@@ -1,6 +1,7 @@
 use ethereum_client::TxHash;
 use gear_rpc_client::dto::{MerkleProof, Message};
 use primitive_types::H256;
+use serde::{Deserialize, Serialize};
 
 pub mod ethereum;
 pub mod gear;
@@ -12,11 +13,34 @@ pub struct AuthoritySetId(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
 pub struct GearBlockNumber(pub u32);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Debug,
+    derive_more::Display,
+    Serialize,
+    Deserialize,
+)]
 pub struct EthereumBlockNumber(pub u64);
 
 #[derive(
-    Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Default, derive_more::Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Debug,
+    Default,
+    derive_more::Display,
+    Serialize,
+    Deserialize,
 )]
 pub struct EthereumSlotNumber(pub u64);
 
@@ -41,7 +65,7 @@ pub struct RelayedMerkleRoot {
     pub merkle_root: H256,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TxHashWithSlot {
     pub slot_number: EthereumSlotNumber,
     pub tx_hash: TxHash,

@@ -100,8 +100,6 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     const completedToDelete: CompletedTransfer[] = [];
     const transfersToUpdate: Transfer[] = [];
 
-    const operations: Promise<any>[] = [];
-
     if (transfers.length > 0) {
       for (const transfer of transfers) {
         const completed = this._completed.get(transfer.nonce)!;
@@ -113,19 +111,23 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
       }
 
       if (transfersToUpdate.length > 0) {
-        operations.push(this._ctx.store.save(transfersToUpdate));
+        await this._ctx.store.save(transfersToUpdate);
       }
       if (completedToDelete.length > 0) {
-        operations.push(this._ctx.store.remove(completedToDelete));
+        await this._ctx.store.remove(completedToDelete);
       }
     }
 
     if (this._completed.size > 0) {
-      operations.push(this._ctx.store.save(Array.from(this._completed.values())));
+      const savedCompletedTransfers = await this._ctx.store.findBy(CompletedTransfer, {
+        nonce: In(Array.from(this._completed.keys())),
+      });
+      const completedToSave = Array.from(this._completed.values()).filter(
+        ({ nonce }) => !savedCompletedTransfers.some((saved) => saved.nonce === nonce),
+      );
+      await this._ctx.store.save(completedToSave);
       this._ctx.log.debug(`Saved ${this._completed.size} completed transfers`);
     }
-
-    await Promise.all(operations);
   }
 
   protected async _processStatuses() {

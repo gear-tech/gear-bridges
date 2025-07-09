@@ -105,9 +105,10 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
         const completed = this._completed.get(transfer.nonce)!;
         transfer.status = Status.Completed;
         transfer.completedAt = completed.timestamp;
+        transfer.completedAtBlock = completed.blockNumber;
+        transfer.completedAtTxHash = completed.txHash;
         transfersToUpdate.push(transfer);
         completedToDelete.push(completed);
-        this._completed.delete(transfer.nonce);
       }
 
       if (transfersToUpdate.length > 0) {
@@ -115,6 +116,9 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
       }
       if (completedToDelete.length > 0) {
         await this._ctx.store.remove(completedToDelete);
+        for (const c of completedToDelete) {
+          this._completed.delete(c.nonce);
+        }
       }
     }
 
@@ -126,7 +130,9 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
         ({ nonce }) => !savedCompletedTransfers.some((saved) => saved.nonce === nonce),
       );
       await this._ctx.store.save(completedToSave);
-      this._ctx.log.debug(`Saved ${this._completed.size} completed transfers`);
+      if (completedToSave.length > 0) {
+        this._ctx.log.info(`Saved ${completedToSave.length} completed transfers`);
+      }
     }
   }
 
@@ -188,7 +194,7 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     this._ctx.log.info(`${nonce}: Status changed to ${status}`);
   }
 
-  public setCompletedTransfer(nonce: string, timestamp: Date) {
+  public setCompletedTransfer(nonce: string, timestamp: Date, blockNumber: bigint, txHash: string) {
     this._completed.set(
       nonce,
       new CompletedTransfer({
@@ -196,10 +202,12 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
         nonce,
         timestamp,
         destNetwork: this._network,
+        blockNumber,
+        txHash,
       }),
     );
 
-    this._ctx.log.info(`${nonce}: Transfer completed`);
+    this._ctx.log.info(`${nonce}: Transfer completed at block ${blockNumber} with transaction hash ${txHash}`);
   }
 
   protected async _getTransfer(nonce: string): Promise<Transfer | undefined> {

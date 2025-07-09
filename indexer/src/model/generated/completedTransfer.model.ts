@@ -1,4 +1,4 @@
-import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_, Index as Index_, DateTimeColumn as DateTimeColumn_} from "@subsquid/typeorm-store"
+import {Entity as Entity_, Column as Column_, PrimaryColumn as PrimaryColumn_, StringColumn as StringColumn_, Index as Index_, DateTimeColumn as DateTimeColumn_, BigIntColumn as BigIntColumn_} from "@subsquid/typeorm-store"
 import {Network} from "./_network"
 
 @Entity_()
@@ -19,4 +19,10 @@ export class CompletedTransfer {
 
     @DateTimeColumn_({nullable: true})
     timestamp!: Date | undefined | null
+
+    @StringColumn_({nullable: false})
+    txHash!: string
+
+    @BigIntColumn_({nullable: false})
+    blockNumber!: bigint
 }

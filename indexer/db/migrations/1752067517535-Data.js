@@ -1,8 +1,8 @@
-module.exports = class Data1751706294719 {
-    name = 'Data1751706294719'
+module.exports = class Data1752067517535 {
+    name = 'Data1752067517535'
 
     async up(db) {
-        await db.query(`CREATE TABLE "transfer" ("id" character varying NOT NULL, "tx_hash" text NOT NULL, "block_number" numeric NOT NULL, "timestamp" TIMESTAMP WITH TIME ZONE NOT NULL, "completed_at" TIMESTAMP WITH TIME ZONE, "nonce" text NOT NULL, "source_network" character varying(8) NOT NULL, "source" text NOT NULL, "dest_network" character varying(8) NOT NULL, "destination" text NOT NULL, "status" character varying(15) NOT NULL, "sender" text NOT NULL, "receiver" text NOT NULL, "amount" numeric NOT NULL, CONSTRAINT "PK_fd9ddbdd49a17afcbe014401295" PRIMARY KEY ("id"))`)
+        await db.query(`CREATE TABLE "transfer" ("id" character varying NOT NULL, "tx_hash" text NOT NULL, "block_number" numeric NOT NULL, "timestamp" TIMESTAMP WITH TIME ZONE NOT NULL, "completed_at" TIMESTAMP WITH TIME ZONE, "completed_at_block" numeric, "completed_at_tx_hash" text, "nonce" text NOT NULL, "source_network" character varying(8) NOT NULL, "source" text NOT NULL, "dest_network" character varying(8) NOT NULL, "destination" text NOT NULL, "status" character varying(15) NOT NULL, "sender" text NOT NULL, "receiver" text NOT NULL, "amount" numeric NOT NULL, CONSTRAINT "PK_fd9ddbdd49a17afcbe014401295" PRIMARY KEY ("id"))`)
         await db.query(`CREATE INDEX "IDX_70ff8b624c3118ac3a4862d22c" ON "transfer" ("timestamp") `)
         await db.query(`CREATE INDEX "IDX_5662ca6334321160c607988dc2" ON "transfer" ("nonce") `)
         await db.query(`CREATE INDEX "IDX_1aa446c2e82f2abbb358ab5248" ON "transfer" ("source") `)
@@ -13,7 +13,7 @@ module.exports = class Data1751706294719 {
         await db.query(`CREATE TABLE "pair" ("id" character varying NOT NULL, "vara_token" text NOT NULL, "vara_token_symbol" text NOT NULL, "vara_token_decimals" integer NOT NULL, "vara_token_name" text NOT NULL, "eth_token" text NOT NULL, "eth_token_symbol" text NOT NULL, "eth_token_decimals" integer NOT NULL, "eth_token_name" text NOT NULL, "token_supply" character varying(8) NOT NULL, "is_removed" boolean NOT NULL, "active_since_block" numeric NOT NULL, "upgraded_to" text, "active_to_block" numeric, "is_active" boolean NOT NULL, CONSTRAINT "PK_3eaf216329c5c50aedb94fa797e" PRIMARY KEY ("id"))`)
         await db.query(`CREATE INDEX "IDX_a65affac0aae345422a7eb5e5c" ON "pair" ("vara_token") `)
         await db.query(`CREATE INDEX "IDX_82dc9083e8f7bc902171fae231" ON "pair" ("eth_token") `)
-        await db.query(`CREATE TABLE "completed_transfer" ("id" character varying NOT NULL, "nonce" text NOT NULL, "dest_network" character varying(8) NOT NULL, "timestamp" TIMESTAMP WITH TIME ZONE, CONSTRAINT "PK_c966d1eba60d5625faf13b457a4" PRIMARY KEY ("id"))`)
+        await db.query(`CREATE TABLE "completed_transfer" ("id" character varying NOT NULL, "nonce" text NOT NULL, "dest_network" character varying(8) NOT NULL, "timestamp" TIMESTAMP WITH TIME ZONE, "tx_hash" text NOT NULL, "block_number" numeric NOT NULL, CONSTRAINT "PK_c966d1eba60d5625faf13b457a4" PRIMARY KEY ("id"))`)
         await db.query(`CREATE UNIQUE INDEX "IDX_ab14e0c37eabeb5ba0dc3f2f78" ON "completed_transfer" ("nonce") `)
         await db.query(`CREATE TABLE "vara_bridge_program" ("id" character varying NOT NULL, "name" text NOT NULL, CONSTRAINT "PK_488fee026522a1adc6bc6c4b094" PRIMARY KEY ("id"))`)
         await db.query(`CREATE UNIQUE INDEX "IDX_0e96fff460b9d6e3e7c932aa42" ON "vara_bridge_program" ("name") `)

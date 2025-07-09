@@ -24,6 +24,12 @@ export class Transfer {
     @DateTimeColumn_({nullable: true})
     completedAt!: Date | undefined | null
 
+    @BigIntColumn_({nullable: true})
+    completedAtBlock!: bigint | undefined | null
+
+    @StringColumn_({nullable: true})
+    completedAtTxHash!: string | undefined | null
+
     @Index_()
     @StringColumn_({nullable: false})
     nonce!: string

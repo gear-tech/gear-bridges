@@ -1,5 +1,9 @@
+use checkpoint_light_client_client::{traits::ServiceState, Order};
 use primitive_types::{H160, H256};
-use sails_rs::calls::ActionIo;
+use sails_rs::{
+    calls::{ActionIo, Query},
+    gclient::calls::GClientRemoting,
+};
 use std::{iter, sync::Arc};
 
 use ethereum_beacon_client::BeaconClient;
@@ -22,6 +26,7 @@ use crate::message_relayer::common::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor,
     },
+    EthereumSlotNumber,
 };
 
 use super::api_provider::ApiProviderConnection;
@@ -32,6 +37,7 @@ pub struct Relayer {
 
     deposit_event_extractor: DepositEventExtractor,
     checkpoints_extractor: CheckpointsExtractor,
+    latest_checkpoint: Option<EthereumSlotNumber>,
 
     proof_composer: ProofComposer,
     gear_message_sender: MessageSender,
@@ -61,7 +67,7 @@ impl Relayer {
         checkpoint_light_client_address: H256,
         historical_proxy_address: H256,
         vft_manager_address: H256,
-        api_provider: ApiProviderConnection,
+        mut api_provider: ApiProviderConnection,
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
@@ -78,6 +84,23 @@ impl Relayer {
             storage.clone(),
             genesis_time,
         );
+
+        let client = api_provider
+            .gclient_client(&suri)
+            .expect("failed to create gclient");
+        let remoting = GClientRemoting::new(client);
+        let latest_checkpoint = checkpoint_light_client_client::ServiceState::new(remoting)
+            .get(Order::Reverse, 0, 1)
+            .recv(checkpoint_light_client_address.into())
+            .await
+            .ok()
+            .map(|state| {
+                state
+                    .checkpoints
+                    .last()
+                    .map(|(checkpoint, _)| EthereumSlotNumber(*checkpoint))
+            })
+            .unwrap_or(None);
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
@@ -108,6 +131,7 @@ impl Relayer {
 
             deposit_event_extractor,
             checkpoints_extractor,
+            latest_checkpoint,
 
             proof_composer,
             gear_message_sender,
@@ -122,7 +146,11 @@ impl Relayer {
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
         let deposit_events = self.deposit_event_extractor.run(ethereum_blocks).await;
-        let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
+
+        let checkpoints = self
+            .checkpoints_extractor
+            .run(gear_blocks, self.latest_checkpoint)
+            .await;
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.gear_message_sender.run();
 

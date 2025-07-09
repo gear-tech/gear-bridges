@@ -9,15 +9,17 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber, TxHashWithSlot,
 };
+use checkpoint_light_client_client::{traits::ServiceState, Order};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, TxHash};
 use primitive_types::H256;
+use sails_rs::{calls::Query, gclient::calls::GClientRemoting};
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
-    api_provider: ApiProviderConnection,
+    mut api_provider: ApiProviderConnection,
     gear_suri: String,
 
     eth_api: EthApi,
@@ -34,6 +36,22 @@ pub async fn relay(
 ) {
     let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
+    let client = api_provider
+        .gclient_client(&gear_suri)
+        .expect("failed to create gclient");
+    let remoting = GClientRemoting::new(client);
+    let latest_checkpoint = checkpoint_light_client_client::ServiceState::new(remoting)
+        .get(Order::Reverse, 0, 1)
+        .recv(checkpoint_light_client_address.into())
+        .await
+        .ok()
+        .map(|state| {
+            state
+                .checkpoints
+                .last()
+                .map(|(checkpoint, _)| EthereumSlotNumber(*checkpoint))
+        })
+        .unwrap_or(None);
     let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
     let message_sender = MessageSender::new(
@@ -60,7 +78,9 @@ pub async fn relay(
         })
         .expect("Failed to send message to channel");
 
-    let checkpoints = checkpoints_extractor.run(gear_blocks).await;
+    let checkpoints = checkpoints_extractor
+        .run(gear_blocks, latest_checkpoint)
+        .await;
 
     let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
 

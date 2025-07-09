@@ -1,10 +1,8 @@
 use std::{collections::HashSet, str::FromStr, time::Duration};
-
 use clap::Parser;
 use relayer::*;
-
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
+use ethereum_client::{EthApi, PollingEthApi};
 use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use kill_switch::KillSwitchRelayer;
@@ -17,13 +15,11 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use utils_prometheus::MetricsBuilder;
-
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
-
 use crate::cli::FeePayers;
 
 #[tokio::main]
@@ -292,6 +288,7 @@ async fn main() {
             storage_path,
         }) => {
             let eth_api = create_eth_client(&ethereum_args).await;
+            let eth_api2 = create_eth_client2(&ethereum_args).await;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -333,6 +330,7 @@ async fn main() {
                     let relayer = eth_to_gear::all_token_transfers::Relayer::new(
                         gear_args.suri,
                         eth_api,
+                        eth_api2,
                         beacon_client,
                         erc20_manager_address,
                         checkpoint_light_client_address,
@@ -364,6 +362,7 @@ async fn main() {
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gear_args.suri,
                         eth_api,
+                        eth_api2,
                         beacon_client,
                         bridging_payment_address,
                         checkpoint_light_client_address,
@@ -526,6 +525,17 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     } = args;
 
     EthApi::new(eth_endpoint, mq_address, relayer_address, None)
+        .await
+        .expect("Error while creating ethereum client")
+}
+
+async fn create_eth_client2(args: &EthereumArgs) -> PollingEthApi {
+    let EthereumArgs {
+        eth_endpoint,
+        ..
+    } = args;
+
+    PollingEthApi::new(eth_endpoint)
         .await
         .expect("Error while creating ethereum client")
 }

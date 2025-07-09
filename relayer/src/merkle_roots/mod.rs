@@ -1,24 +1,26 @@
+use authority_set_sync::SealedNotFinalizedEra;
 use prometheus::{Gauge, IntGauge};
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use submitter::SubmitterIo;
 
 use crate::{
-    common::{
-        self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
-        BASE_RETRY_DELAY, MAX_RETRIES,
-    },
+    common::{self, sync_authority_set_id, SyncStepCount, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::gear::block_listener::GearBlock, eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
-use ethereum_client::{EthApi, TxHash, TxStatus};
+use ::prover::proving::GenesisConfig;
+use ethereum_client::EthApi;
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
-use prover::proving::GenesisConfig;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
-    mpsc::UnboundedSender,
+    mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -45,8 +47,7 @@ pub struct MerkleRootRelayer {
     api_provider: ApiProviderConnection,
     eth_api: EthApi,
 
-    proof_storage: Box<dyn ProofStorage>,
-    eras: Eras,
+    proof_storage: Arc<dyn ProofStorage>,
 
     genesis_config: GenesisConfig,
 
@@ -58,7 +59,6 @@ impl MeteredService for MerkleRootRelayer {
         self.metrics
             .get_sources()
             .into_iter()
-            .chain(self.eras.get_sources())
             .chain(prover_interface::Metrics.get_sources())
     }
 }
@@ -68,18 +68,8 @@ impl MerkleRootRelayer {
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
-        proof_storage: Box<dyn ProofStorage>,
-        last_sealed: Option<u64>,
+        proof_storage: Arc<dyn ProofStorage>,
     ) -> MerkleRootRelayer {
-        let eras = Eras::new(
-            last_sealed,
-            api_provider.clone(),
-            eth_api.clone(),
-            genesis_config,
-        )
-        .await
-        .unwrap_or_else(|err| panic!("Error while creating era storage: {err}"));
-
         let metrics = Metrics::new();
 
         MerkleRootRelayer {
@@ -87,7 +77,6 @@ impl MerkleRootRelayer {
             eth_api,
             genesis_config,
             proof_storage,
-            eras,
             metrics,
         }
     }
@@ -137,7 +126,6 @@ impl MerkleRootRelayer {
                             log::error!("Failed to reconnect to Ethereum: {err}");
                         })
                         .map_err(|err| anyhow::anyhow!(err))?;
-                    self.eras.update_eth_api(self.eth_api.clone());
                 }
             } else {
                 log::warn!("Gear block listener connection closed, exiting");
@@ -174,11 +162,33 @@ impl MerkleRootRelayer {
         blocks_rx: &mut Receiver<GearBlock>,
         proof_submitter: &mut UnboundedSender<FinalProof>,
     ) -> anyhow::Result<()> {
-        loop {
+        /*loop {
             let balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(balance);
 
             match blocks_rx.recv().await {
+                Ok(block) => {
+                    if let Some(merkle_root) = Self::queue_merkle_root_changed(&block) {
+                        log::info!(
+                            "Queue merkle root changed in block #{}: {:?}",
+                            block.number(),
+                            merkle_root
+                        );
+
+                        if let Some(proof) = self.get_merkle_root_proof(&block, merkle_root) {
+                            proof_submitter.send(proof);
+                        }
+                    }
+                }
+
+                Err(RecvError::Closed) => return Ok(()),
+                Err(RecvError::Lagged(n)) => {
+                    log::error!("Merkle root listener lagged behind {n} Gear blocks");
+                    continue;
+                }
+            }
+
+            /*            match blocks_rx.recv().await {
                 Ok(block) => {
                     if Self::authority_set_hash_changeed(&block).is_some() {
                         log::info!("Authority set hash changed in block #{}", block.number());
@@ -187,7 +197,7 @@ impl MerkleRootRelayer {
                             return Ok(());
                         }
 
-                        self.eras.process(self.proof_storage.as_mut()).await?;
+                        self.eras.process(&self.proof_storage).await?;
                     }
 
                     if let Some(merkle_root) = Self::queue_merkle_root_changed(&block) {
@@ -217,6 +227,74 @@ impl MerkleRootRelayer {
                     );
                     continue;
                 }
+            }*/
+        }*/
+
+        Ok(())
+    }
+
+    async fn process(
+        &mut self,
+        submitter: &mut SubmitterIo,
+        blocks_rx: &mut Receiver<GearBlock>,
+        prover_tx: &mut UnboundedSender<prover::Request>,
+        prover_rx: &mut UnboundedReceiver<prover::Response>,
+        authority_sync_rx: &mut UnboundedReceiver<SealedNotFinalizedEra>,
+    ) -> anyhow::Result<()> {
+        loop {
+            tokio::select! {
+                block = blocks_rx.recv() => {
+                    match block {
+                        Ok(block) => {
+                            if let Some(merkle_root) = Self::queue_merkle_root_changed(&block) {
+                                if prover_tx.send(prover::Request {
+                                    block_number: block.number(),
+                                    block_hash: block.hash(),
+                                    merkle_root
+                                }).is_err() {
+                                    log::warn!("Finality prover connection closed, exiting");
+                                    return Ok(());
+                                }
+
+                            }
+                        }
+
+                        Err(RecvError::Lagged(n)) => {
+                            log::warn!("Merkle root relayer lagged behind {n} blocks");
+                            continue;
+                        }
+
+                        Err(RecvError::Closed) => {
+                            log::warn!("Block listener connection closed, exiting");
+                            return Ok(());
+                        }
+                    }
+                }
+
+                response = prover_rx.recv() => {
+                    let Some(response) = response else {
+                       log::warn!("Finality prover connection closed, exiting");
+                       return Ok(());
+                    };
+
+                    if !submitter.submit_merkle_root(response.block_number, response.proof) {
+                        log::warn!("Proof submitter connection closed, exiting");
+                        return Ok(());
+                    }
+                }
+
+                response = authority_sync_rx.recv() => {
+                    let Some(response) = response else {
+                        log::warn!("Authority set sync connection closed, exiting");
+                        return Ok(());
+                    };
+
+                    log::info!("Submitting merkle-root proof for era #{} at block #{}", response.era, response.merkle_root_block);
+                    if !submitter.submit_era_root(response.era, response.merkle_root_block, response.proof) {
+                        log::warn!("Proof submitter connection closed, exiting");
+                        return Ok(());
+                    }
+                }
             }
         }
     }
@@ -237,7 +315,7 @@ impl MerkleRootRelayer {
                 }
 
                 Err(RecvError::Lagged(n)) => {
-                    log::error!(
+                    log::warn!(
                         "Gear block listener lagged behind {n} blocks, skipping some blocks"
                     );
                     continue;
@@ -266,7 +344,7 @@ impl MerkleRootRelayer {
             .latest_observed_gear_era
             .set(latest_authority_set_id as i64);
 
-        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id();
+        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
 
         if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
             self.metrics.latest_proven_era.set(latest_proven as i64);
@@ -274,7 +352,7 @@ impl MerkleRootRelayer {
 
         sync_authority_set_id(
             &gear_api,
-            self.proof_storage.as_mut(),
+            &self.proof_storage,
             self.genesis_config,
             latest_authority_set_id,
             latest_proven_authority_set_id,
@@ -308,7 +386,8 @@ impl MerkleRootRelayer {
         let authority_set_id = gear_api.signed_by_authority_set_id(finalized_head).await?;
         let inner_proof = self
             .proof_storage
-            .get_proof_for_authority_set_id(authority_set_id)?;
+            .get_proof_for_authority_set_id(authority_set_id)
+            .await?;
 
         let proof = prover_interface::prove_final(
             &gear_api,
@@ -322,210 +401,6 @@ impl MerkleRootRelayer {
     }
 }
 
-struct Eras {
-    last_sealed: u64,
-    sealed_not_finalized: Vec<SealedNotFinalizedEra>,
-
-    api_provider: ApiProviderConnection,
-    eth_api: EthApi,
-
-    genesis_config: GenesisConfig,
-
-    metrics: EraMetrics,
-}
-
-struct SealedNotFinalizedEra {
-    era: u64,
-    merkle_root_block: u32,
-    tx_hash: TxHash,
-    proof: FinalProof,
-}
-
-impl MeteredService for Eras {
-    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics.get_sources()
-    }
-}
-
-impl_metered_service! {
-    struct EraMetrics {
-        sealed_not_finalized_count: IntGauge = IntGauge::new(
-            "sealed_not_finalized_count",
-            "Amount of eras that have been sealed but tx is not yet finalized by ethereum",
-        ),
-        last_sealed_era: IntGauge = IntGauge::new("last_sealed_era", "Latest era that have been sealed"),
-    }
-}
-
-impl Eras {
-    pub async fn new(
-        last_sealed: Option<u64>,
-        api_provider: ApiProviderConnection,
-        eth_api: EthApi,
-        genesis_config: GenesisConfig,
-    ) -> anyhow::Result<Self> {
-        let last_sealed = if let Some(l) = last_sealed {
-            l
-        } else {
-            let gear_api = api_provider.client();
-            let latest = gear_api.latest_finalized_block().await?;
-            let set_id = gear_api.authority_set_id(latest).await?;
-            set_id.max(2) - 1
-        };
-
-        let metrics = EraMetrics::new();
-        metrics.sealed_not_finalized_count.set(0);
-        metrics.last_sealed_era.set(last_sealed as i64);
-
-        Ok(Self {
-            last_sealed,
-            sealed_not_finalized: vec![],
-            api_provider,
-            eth_api,
-
-            genesis_config,
-
-            metrics,
-        })
-    }
-
-    fn update_eth_api(&mut self, eth_api: EthApi) {
-        self.eth_api = eth_api;
-    }
-
-    pub async fn process(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
-        log::info!("Processing eras");
-
-        self.try_seal(proof_storage).await?;
-        self.try_finalize().await?;
-
-        log::info!("Eras processed");
-
-        Ok(())
-    }
-
-    async fn try_seal(&mut self, proof_storage: &dyn ProofStorage) -> anyhow::Result<()> {
-        let gear_api = self.api_provider.client();
-        let latest = gear_api.latest_finalized_block().await?;
-        let current_era = gear_api.signed_by_authority_set_id(latest).await?;
-
-        while self.last_sealed + 2 <= current_era {
-            log::info!("Sealing era #{}", self.last_sealed + 1);
-            self.seal_era(self.last_sealed + 1, proof_storage).await?;
-            log::info!("Sealed era #{}", self.last_sealed + 1);
-
-            self.last_sealed += 1;
-
-            self.metrics.last_sealed_era.inc();
-        }
-
-        Ok(())
-    }
-
-    async fn seal_era(
-        &mut self,
-        authority_set_id: u64,
-        proof_storage: &dyn ProofStorage,
-    ) -> anyhow::Result<()> {
-        let gear_api = self.api_provider.client();
-        let block = gear_api.find_era_first_block(authority_set_id + 1).await?;
-        let block_number = gear_api.block_hash_to_number(block).await?;
-
-        let queue_merkle_root = gear_api.fetch_queue_merkle_root(block).await?;
-        if queue_merkle_root.is_zero() {
-            log::info!("Message queue at block #{block_number} is empty. Skipping sealing",);
-            return Ok(());
-        }
-
-        let root_exists = self
-            .eth_api
-            .read_finalized_merkle_root(block_number)
-            .await?
-            .is_some();
-
-        if root_exists {
-            log::info!("Merkle root for era #{authority_set_id} is already submitted",);
-            return Ok(());
-        }
-
-        let inner_proof = proof_storage.get_proof_for_authority_set_id(authority_set_id)?;
-
-        let instant = Instant::now();
-        let proof =
-            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block)
-                .await?;
-        let elapsed_proof = instant.elapsed();
-        log::info!("prover_interface::prove_final took {elapsed_proof:?} for block_number = #{block_number}, authority_set_id = #{authority_set_id}");
-
-        assert_eq!(
-            proof.block_number, block_number,
-            "It was expected that prover_interface::prove_final 
-            will not change the block number for the proof 
-            in the case of the first block in the era"
-        );
-
-        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
-
-        self.sealed_not_finalized.push(SealedNotFinalizedEra {
-            era: authority_set_id,
-            merkle_root_block: block_number,
-            tx_hash,
-            proof,
-        });
-
-        self.metrics.sealed_not_finalized_count.inc();
-
-        Ok(())
-    }
-
-    async fn try_finalize(&mut self) -> anyhow::Result<()> {
-        for i in (0..self.sealed_not_finalized.len()).rev() {
-            if self.sealed_not_finalized[i]
-                .try_finalize(&self.eth_api)
-                .await?
-            {
-                log::info!("Era #{} finalized", self.sealed_not_finalized[i].era);
-                self.sealed_not_finalized.remove(i);
-
-                self.metrics.sealed_not_finalized_count.dec();
-            } else {
-                log::info!(
-                    "Cannot finalize era #{} yet",
-                    self.sealed_not_finalized[i].era
-                );
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl SealedNotFinalizedEra {
-    pub async fn try_finalize(&mut self, eth_api: &EthApi) -> anyhow::Result<bool> {
-        let tx_status = eth_api.get_tx_status(self.tx_hash).await?;
-
-        match tx_status {
-            TxStatus::Finalized => Ok(true),
-            TxStatus::Pending => Ok(false),
-            TxStatus::Failed => {
-                let root_exists = eth_api
-                    .read_finalized_merkle_root(self.merkle_root_block)
-                    .await?
-                    .is_some();
-
-                // Someone already relayed this merkle root.
-                if root_exists {
-                    log::info!("Era #{} is already finalized", self.era);
-                    return Ok(true);
-                }
-
-                log::warn!("Re-trying era #{} finalization", self.era);
-
-                self.tx_hash = submit_merkle_root_to_ethereum(eth_api, self.proof.clone()).await?;
-                Ok(false)
-            }
-        }
-    }
-}
-
+pub mod authority_set_sync;
+pub mod prover;
 pub mod submitter;

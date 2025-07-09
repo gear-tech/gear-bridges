@@ -57,36 +57,37 @@ impl MeteredService for GearProofStorage {
     }
 }
 
+#[async_trait::async_trait]
 impl ProofStorage for GearProofStorage {
-    fn init(
-        &mut self,
+    async fn init(
+        &self,
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
-        block_on(self.init_inner(proof_with_circuit_data, genesis_validator_set_id))
+        self.init_inner(proof_with_circuit_data, genesis_validator_set_id).await
     }
 
-    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
-        block_on(self.get_circuit_data_inner())
+    async fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
+        self.get_circuit_data_inner().await
     }
 
-    fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId> {
-        block_on(self.get_latest_authority_set_id_inner())
+    async fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId> {
+        self.get_latest_authority_set_id_inner().await
     }
 
-    fn get_proof_for_authority_set_id(
+    async fn get_proof_for_authority_set_id(
         &self,
         authority_set_id: u64,
     ) -> Result<ProofWithCircuitData, ProofStorageError> {
-        block_on(self.get_proof_for_authority_set_id_inner(authority_set_id))
+        self.get_proof_for_authority_set_id_inner(authority_set_id).await
     }
 
-    fn update(
-        &mut self,
+    async fn update(
+        &self,
         proof: Proof,
         new_authority_set_id: AuthoritySetId,
     ) -> Result<(), ProofStorageError> {
-        block_on(self.update_inner(proof, new_authority_set_id))
+        self.update_inner(proof, new_authority_set_id).await
     }
 }
 

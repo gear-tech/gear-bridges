@@ -21,7 +21,7 @@ use cli::{
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 use crate::cli::FeePayers;
-use anyhow::{anyhow, Result as AnyResult};
+use anyhow::{anyhow, Context, Result as AnyResult};
 
 #[tokio::main]
 async fn main() -> AnyResult<()> {
@@ -405,7 +405,6 @@ async fn main() -> AnyResult<()> {
 
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
-            slot,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
@@ -422,8 +421,8 @@ async fn main() -> AnyResult<()> {
                 vara_rpc_retries: gear_args.common.retries,
             };
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
-
             let beacon_client = create_beacon_client(&beacon_args).await;
+
             let checkpoint_light_client_address = hex_utils::decode_h256(&checkpoint_light_client)
                 .expect("Failed to parse checkpoint light client address");
             let historical_proxy_address = hex_utils::decode_h256(&historical_proxy)
@@ -447,10 +446,14 @@ async fn main() -> AnyResult<()> {
                 gear_client_args.vara_rpc_retries,
             )
             .await
-            .expect("Failed to create API provider");
+            .context("Failed to create API provider")?;
+
+            let provider_connection = provider.connection();
+
+            provider.spawn();
 
             eth_to_gear::manual::relay(
-                provider.connection(),
+                provider_connection,
                 gear_args.suri,
                 eth_api,
                 beacon_client,
@@ -459,10 +462,9 @@ async fn main() -> AnyResult<()> {
                 receiver_address,
                 receiver_route,
                 tx_hash,
-                slot,
             )
-            .await;
-            provider.spawn();
+            .await?;
+
             loop {
                 // relay() spawns thread and exits, so we need to add this loop after calling run.
                 tokio::time::sleep(Duration::from_secs(1)).await;

@@ -3,12 +3,13 @@ use prometheus::IntCounter;
 use sails_rs::H160;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use ethereum_client::PollingEthApi;
+use ethereum_common::SECONDS_PER_SLOT;
 use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::{
-            ethereum::block_listener::ETHEREUM_BLOCK_TIME_APPROX, EthereumBlockNumber,
+            EthereumBlockNumber,
             EthereumSlotNumber, TxHashWithSlot,
         },
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
@@ -96,7 +97,7 @@ impl MessagePaidEventExtractor {
     ) -> anyhow::Result<()> {
         let timestamp = self.eth_api.get_block(block.0).await?.header.timestamp;
         let slot_number = EthereumSlotNumber(
-            timestamp.saturating_sub(self.genesis_time) / ETHEREUM_BLOCK_TIME_APPROX.as_secs(),
+            timestamp.saturating_sub(self.genesis_time) / SECONDS_PER_SLOT,
         );
 
         let txs = self

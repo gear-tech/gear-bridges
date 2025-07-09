@@ -153,8 +153,8 @@ pub struct GenesisData {
     pub genesis_time: u64,
     #[serde(deserialize_with = "decode_hex_bytes")]
     pub genesis_validators_root: Vec<u8>,
-    #[serde(deserialize_with = "deserialize_u64")]
-    pub genesis_fork_version: u64,
+    #[serde(deserialize_with = "decode_hex_bytes")]
+    pub genesis_fork_version: Vec<u8>,
 }
 
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#compute_epoch_at_slot).

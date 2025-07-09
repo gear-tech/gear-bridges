@@ -1,6 +1,11 @@
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use crate::cli::FeePayers;
+use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
-use relayer::*;
+use cli::{
+    BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
+    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
+    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
 use ethereum_common::SLOTS_PER_EPOCH;
@@ -14,14 +19,9 @@ use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
+use relayer::*;
+use std::{collections::HashSet, str::FromStr, time::Duration};
 use utils_prometheus::MetricsBuilder;
-use cli::{
-    BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
-};
-use crate::cli::FeePayers;
-use anyhow::{anyhow, Context, Result as AnyResult};
 
 #[tokio::main]
 async fn main() -> AnyResult<()> {
@@ -181,7 +181,7 @@ async fn main() -> AnyResult<()> {
                     for id in ids {
                         let account_id = AccountId32::from_str(id.as_str())
                             .map_err(|e| anyhow!(r#"Failed to decode address "{id}": {e:?}"#))?;
-                        
+
                         log::debug!("Account {account_id} is excluded from paying fees");
                         excluded_from_fees.insert(account_id);
                     }

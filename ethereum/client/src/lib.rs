@@ -1,4 +1,3 @@
-use anyhow::{Context, Result as AnyResult};
 use alloy::{
     contract::Event,
     network::{Ethereum, EthereumWallet, TransactionBuilder},
@@ -11,14 +10,15 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     pubsub::Subscription,
-    rpc::types::{BlockId, BlockNumberOrTag, Filter, Log as RpcLog, Block},
+    rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{ws::WsConnect, RpcError, TransportErrorKind},
 };
+use anyhow::{Context, Result as AnyResult};
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::{str::FromStr, ops::Deref};
+use std::{ops::Deref, str::FromStr};
 
 pub use alloy::primitives::TxHash;
 
@@ -87,24 +87,16 @@ pub struct PollingEthApi {
 
 impl PollingEthApi {
     pub async fn new(url: &str) -> AnyResult<Self> {
-        let url = Url::parse(url)
-            .context("Provided url is not valid")?;
+        let url = Url::parse(url).context("Provided url is not valid")?;
         let ws = WsConnect::new(url.clone());
-        let provider = RootProvider::builder()
-            .connect_ws(ws)
-            .await?;
+        let provider = RootProvider::builder().connect_ws(ws).await?;
 
-        Ok(Self {
-            provider,
-            url,
-        })
+        Ok(Self { provider, url })
     }
 
     pub async fn reconnect(&self) -> AnyResult<Self> {
         let ws = WsConnect::new(self.url.clone());
-        let provider = RootProvider::builder()
-            .connect_ws(ws)
-            .await?;
+        let provider = RootProvider::builder().connect_ws(ws).await?;
 
         Ok(Self {
             provider,
@@ -115,7 +107,7 @@ impl PollingEthApi {
     pub async fn finalized_block(&self) -> AnyResult<Block> {
         self::finalized_block(&self.provider).await
     }
-    
+
     pub async fn get_block(&self, block: u64) -> AnyResult<Block> {
         self::get_block(&self.provider, block).await
     }
@@ -168,16 +160,20 @@ impl PollingEthApi {
                     },
                     log,
                 )| {
-                    let tx_hash = log.transaction_hash.context("Failed to fetch transaction")?;
-                    
+                    let tx_hash = log
+                        .transaction_hash
+                        .context("Failed to fetch transaction")?;
+
                     Ok(DepositEventEntry {
                         from: H160(*from.0),
                         to: H256(to.0),
                         token: H160(*token.0),
-                        amount: primitive_types::U256::from_little_endian(&amount.to_le_bytes_vec()),
+                        amount: primitive_types::U256::from_little_endian(
+                            &amount.to_le_bytes_vec(),
+                        ),
                         tx_hash,
                     })
-                }
+                },
             )
             .collect()
     }
@@ -195,16 +191,14 @@ pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
     Ok(provider
         .get_block_by_number(BlockNumberOrTag::Finalized)
         .await?
-        .context("Finalized block is None")?
-    )
+        .context("Finalized block is None")?)
 }
 
 pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
     Ok(provider
         .get_block_by_number(BlockNumberOrTag::Number(block))
         .await?
-        .context("Block is None")?
-    )
+        .context("Block is None")?)
 }
 
 #[derive(Clone)]
@@ -352,7 +346,10 @@ impl EthApi {
     }
 
     pub async fn finalized_block_number(&self) -> AnyResult<u64> {
-        Ok(self::finalized_block(self.raw_provider()).await?.header.number)
+        Ok(self::finalized_block(self.raw_provider())
+            .await?
+            .header
+            .number)
     }
 
     #[allow(clippy::too_many_arguments)]

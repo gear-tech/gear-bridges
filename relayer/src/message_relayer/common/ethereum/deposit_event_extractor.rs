@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use ethereum_client::{DepositEventEntry, PollingEthApi};
 use prometheus::IntCounter;
 use sails_rs::H160;
+use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use ethereum_client::{DepositEventEntry, PollingEthApi};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{

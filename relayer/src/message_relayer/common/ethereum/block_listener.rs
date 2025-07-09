@@ -1,12 +1,9 @@
-use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use crate::{common, message_relayer::common::EthereumBlockNumber};
 use ethereum_client::PollingEthApi;
 use prometheus::IntGauge;
+use std::time::Duration;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
-use crate::{
-    common,
-    message_relayer::common::EthereumBlockNumber,
-};
 
 pub const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 
@@ -80,10 +77,8 @@ async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumb
             continue;
         };
 
-        log::error!(
-            "Ethereum block listener failed: {e:?}"
-        );
-        
+        log::error!("Ethereum block listener failed: {e:?}");
+
         if common::is_transport_error_recoverable(&e) {
             tokio::time::sleep(Duration::from_secs(30)).await;
 
@@ -94,8 +89,7 @@ async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumb
                     return;
                 }
             }
-        }
-        else {
+        } else {
             return;
         }
     }

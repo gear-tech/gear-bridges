@@ -1,9 +1,3 @@
-use primitive_types::{H160, H256};
-use sails_rs::calls::ActionIo;
-use std::{iter, sync::Arc};
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::PollingEthApi;
-use utils_prometheus::MeteredService;
 use super::{
     message_sender::MessageSender,
     proof_composer::ProofComposer,
@@ -21,6 +15,12 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber,
 };
+use ethereum_beacon_client::BeaconClient;
+use ethereum_client::PollingEthApi;
+use primitive_types::{H160, H256};
+use sails_rs::calls::ActionIo;
+use std::{iter, sync::Arc};
+use utils_prometheus::MeteredService;
 
 use super::api_provider::ApiProviderConnection;
 

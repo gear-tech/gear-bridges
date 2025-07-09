@@ -1,20 +1,17 @@
-use std::sync::Arc;
-use prometheus::IntCounter;
-use sails_rs::H160;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use ethereum_client::PollingEthApi;
-use ethereum_common::SECONDS_PER_SLOT;
-use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
-        common::{
-            EthereumBlockNumber,
-            EthereumSlotNumber, TxHashWithSlot,
-        },
+        common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
     },
 };
+use ethereum_client::PollingEthApi;
+use ethereum_common::SECONDS_PER_SLOT;
+use prometheus::IntCounter;
+use sails_rs::H160;
+use std::sync::Arc;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessagePaidEventExtractor {
     eth_api: PollingEthApi,
@@ -96,9 +93,8 @@ impl MessagePaidEventExtractor {
         sender: &UnboundedSender<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
         let timestamp = self.eth_api.get_block(block.0).await?.header.timestamp;
-        let slot_number = EthereumSlotNumber(
-            timestamp.saturating_sub(self.genesis_time) / SECONDS_PER_SLOT,
-        );
+        let slot_number =
+            EthereumSlotNumber(timestamp.saturating_sub(self.genesis_time) / SECONDS_PER_SLOT);
 
         let txs = self
             .eth_api
@@ -130,7 +126,11 @@ impl MessagePaidEventExtractor {
     }
 }
 
-async fn task(mut this: MessagePaidEventExtractor, mut blocks: UnboundedReceiver<EthereumBlockNumber>, sender: UnboundedSender<TxHashWithSlot>) {
+async fn task(
+    mut this: MessagePaidEventExtractor,
+    mut blocks: UnboundedReceiver<EthereumBlockNumber>,
+    sender: UnboundedSender<TxHashWithSlot>,
+) {
     let UnprocessedBlocks {
         last_block,
         mut unprocessed,
@@ -156,9 +156,7 @@ async fn task(mut this: MessagePaidEventExtractor, mut blocks: UnboundedReceiver
         };
 
         attempts += 1;
-        log::error!(
-            "Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}"
-        );
+        log::error!("Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}");
 
         if attempts >= MAX_RETRIES {
             log::error!("Max attempts reached, exiting...");

@@ -9,17 +9,14 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber, TxHashWithSlot,
 };
+use alloy::{network::TransactionResponse, providers::Provider};
+use anyhow::{Context, Result as AnyResult};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::SECONDS_PER_SLOT;
 use primitive_types::H256;
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
-use anyhow::{Context, Result as AnyResult};
-use alloy::{
-    network::TransactionResponse,
-    providers::Provider,
-};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -52,9 +49,8 @@ pub async fn relay(
         .genesis_time;
 
     log::info!("Genesis time: {genesis_time}");
-    let slot_number = EthereumSlotNumber(
-        block_timestamp.saturating_sub(genesis_time) / SECONDS_PER_SLOT,
-    );
+    let slot_number =
+        EthereumSlotNumber(block_timestamp.saturating_sub(genesis_time) / SECONDS_PER_SLOT);
     log::info!(r#"Slot number of the transaction ("{tx_hash}") block is {slot_number}"#);
 
     let gear_block_listener = GearBlockListener::new(provider_connection.clone());

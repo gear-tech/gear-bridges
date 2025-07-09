@@ -81,7 +81,7 @@ impl Relayer {
     }
 
     pub async fn run(self) {
-        let [gear_blocks] = self.gear_block_listener.run().await;
+        let (_, [gear_blocks]) = self.gear_block_listener.run().await;
 
         let messages = self.message_sent_listener.run(gear_blocks).await;
 

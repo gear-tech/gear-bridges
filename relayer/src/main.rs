@@ -83,7 +83,7 @@ async fn main() {
                 .await;
             api_provider.spawn();
 
-            let [blocks] = block_listener.run().await;
+            let (tx, [blocks]) = block_listener.run().await;
             let proof_submitter = proof_submitter.run();
             relayer
                 .run(blocks, proof_submitter)

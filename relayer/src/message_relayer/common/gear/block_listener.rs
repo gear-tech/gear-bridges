@@ -92,9 +92,14 @@ impl BlockListener {
         }
     }
 
+    /// Run the block listener, returning a broadcast sender for producing new subscriptions
+    /// and a fixed number of receivers for consuming the blocks.
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
-    ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
+    ) -> (
+        broadcast::Sender<GearBlock>,
+        [broadcast::Receiver<GearBlock>; RECEIVER_COUNT],
+    ) {
         let (tx, _) = broadcast::channel(RECEIVER_COUNT);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
@@ -128,11 +133,14 @@ impl BlockListener {
             }
         });
 
-        (0..RECEIVER_COUNT)
-            .map(|_| tx.subscribe())
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("expected Vec of correct length")
+        (
+            tx.clone(),
+            (0..RECEIVER_COUNT)
+                .map(|_| tx.subscribe())
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("expected Vec of correct length"),
+        )
     }
 
     async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {

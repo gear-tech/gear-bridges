@@ -1,13 +1,12 @@
 use crate::message_relayer::common::{gear::block_listener::GearBlock, EthereumSlotNumber};
 use checkpoint_light_client_client::{
     service_replay_back::events::ServiceReplayBackEvents,
-    service_sync_update::events::ServiceSyncUpdateEvents, traits::ServiceState, Order,
+    service_sync_update::events::ServiceSyncUpdateEvents,
 };
-use gclient::GearApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
 
-use sails_rs::{calls::Query, events::EventIo, gclient::calls::GClientRemoting};
+use sails_rs::events::EventIo;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -68,22 +67,6 @@ impl CheckpointsExtractor {
 
             metrics: Metrics::new(),
         }
-    }
-
-    pub async fn get_latest_checkpoint(&self, gear_api: GearApi) -> Option<EthereumSlotNumber> {
-        let remoting = GClientRemoting::new(gear_api);
-        checkpoint_light_client_client::ServiceState::new(remoting)
-            .get(Order::Reverse, 0, 1)
-            .recv(self.checkpoint_light_client_address.into())
-            .await
-            .ok()
-            .map(|state| {
-                state
-                    .checkpoints
-                    .last()
-                    .map(|(checkpoint, _)| EthereumSlotNumber(*checkpoint))
-            })
-            .unwrap_or(None)
     }
 
     pub async fn run(

@@ -165,7 +165,8 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
 
   public async save() {
     await this._processStatuses();
-    await Promise.all([this._saveTransfers(), this._saveCompletedTransfers()]);
+    await this._saveTransfers();
+    await this._saveCompletedTransfers();
   }
 
   public async addTransfer(transfer: Transfer) {

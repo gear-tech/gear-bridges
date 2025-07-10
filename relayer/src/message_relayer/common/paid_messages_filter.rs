@@ -53,11 +53,9 @@ impl PaidMessagesFilter {
         let (sender, receiver) = unbounded_channel();
 
         tokio::spawn(async move {
-            loop {
-                match run_inner(&mut self, &sender, &mut messages, &mut paid_messages).await {
-                    Ok(_) => break,
-                    Err(e) => log::error!("Paid messages filter failed: {e}"),
-                }
+            match run_inner(&mut self, &sender, &mut messages, &mut paid_messages).await {
+                Ok(_) => {}
+                Err(e) => log::error!("Paid messages filter failed: {e}"),
             }
         });
 

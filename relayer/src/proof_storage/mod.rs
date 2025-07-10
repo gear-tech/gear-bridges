@@ -24,7 +24,6 @@ pub enum ProofStorageError {
 
 type AuthoritySetId = u64;
 
-
 #[async_trait::async_trait]
 pub trait ProofStorage: Send + Sync {
     async fn init(

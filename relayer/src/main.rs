@@ -65,8 +65,9 @@ async fn main() {
                 eth_api,
                 proof_storage,
                 genesis_config,
-                args.start_authority_set_id
-            ).await;
+                args.start_authority_set_id,
+            )
+            .await;
 
             metrics
                 .register_service(&relayer)
@@ -75,10 +76,7 @@ async fn main() {
                 .await;
             api_provider.spawn();
 
-            relayer
-                .run()
-                .await
-                .expect("Merkle root relayer failed");
+            relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::KillSwitch(args) => {
             let api_provider = ApiProvider::new(

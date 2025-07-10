@@ -190,7 +190,7 @@ impl GearProofStorage {
                         .expect("Failed to write config to file");
 
                     let _ = self.program.set(program);
-                    break; 
+                    break;
                 }
                 Ok(None) => {}
             }

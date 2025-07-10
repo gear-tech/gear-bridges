@@ -3,7 +3,7 @@ pub mod common;
 pub mod ethereum_checkpoints;
 pub mod hex_utils;
 pub mod kill_switch;
+pub mod merkle_roots;
 pub mod message_relayer;
 pub mod proof_storage;
 pub mod prover_interface;
-pub mod merkle_roots;

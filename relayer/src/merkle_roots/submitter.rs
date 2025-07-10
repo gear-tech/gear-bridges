@@ -27,10 +27,7 @@ pub struct SubmitterIo {
 }
 
 impl SubmitterIo {
-    pub fn new(
-        requests: UnboundedSender<Request>,
-        responses: UnboundedReceiver<Response>,
-    ) -> Self {
+    pub fn new(requests: UnboundedSender<Request>, responses: UnboundedReceiver<Response>) -> Self {
         Self {
             requests,
             responses,
@@ -151,7 +148,9 @@ impl MerkleRootSubmitter {
         loop {
             let balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(balance);
-            self.metrics.pending_submissions.set(pending_transactions.len() as i64);
+            self.metrics
+                .pending_submissions
+                .set(pending_transactions.len() as i64);
 
             tokio::select! {
                 request = proofs.recv() => {
@@ -208,7 +207,7 @@ impl MerkleRootSubmitter {
                                 continue;
 
                             }
-                            
+
                             log::error!("Merkle root submission failed, tx hash: {}", root.tx_hash);
                             if !root.retried {
                                 log::info!("Retrying merkle root submission, tx hash: {}", root.tx_hash);
@@ -238,7 +237,7 @@ impl MerkleRootSubmitter {
         let (response_tx, response_rx) = unbounded_channel();
 
         tokio::task::spawn(task(self, rx, response_tx));
-        
+
         SubmitterIo::new(tx, response_rx)
     }
 }

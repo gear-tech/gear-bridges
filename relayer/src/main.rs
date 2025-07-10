@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
 use clap::Parser;
 use relayer::*;
@@ -8,7 +8,6 @@ use ethereum_client::EthApi;
 use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use kill_switch::KillSwitchRelayer;
-use merkle_roots::{submitter::MerkleRootSubmitter, MerkleRootRelayer};
 use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
     gear_to_eth,
@@ -61,20 +60,13 @@ async fn main() {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
-            let block_listener = message_relayer::common::gear::block_listener::BlockListener::new(
+            let relayer = merkle_roots::Relayer::new(
                 api_provider.connection(),
-            );
-
-            let relayer = MerkleRootRelayer::new(
-                api_provider.connection(),
-                eth_api.clone(),
-                genesis_config,
+                eth_api,
                 proof_storage,
-                args.start_authority_set_id,
-            )
-            .await;
-
-            let proof_submitter = MerkleRootSubmitter::new(eth_api);
+                genesis_config,
+                args.start_authority_set_id
+            ).await;
 
             metrics
                 .register_service(&relayer)
@@ -83,10 +75,8 @@ async fn main() {
                 .await;
             api_provider.spawn();
 
-            let (tx, [blocks]) = block_listener.run().await;
-            let proof_submitter = proof_submitter.run();
             relayer
-                .run(blocks, proof_submitter)
+                .run()
                 .await
                 .expect("Merkle root relayer failed");
         }
@@ -545,8 +535,8 @@ async fn create_proof_storage(
     proof_storage_args: &ProofStorageArgs,
     gear_args: &GearArgs,
     mut metrics: MetricsBuilder,
-) -> (Box<dyn ProofStorage>, MetricsBuilder) {
-    let proof_storage: Box<dyn ProofStorage> =
+) -> (Arc<dyn ProofStorage>, MetricsBuilder) {
+    let proof_storage: Arc<dyn ProofStorage> =
         if let Some(fee_payer) = proof_storage_args.gear_fee_payer.as_ref() {
             let proof_storage = GearProofStorage::new(
                 &gear_args.domain,
@@ -560,10 +550,10 @@ async fn create_proof_storage(
 
             metrics = metrics.register_service(&proof_storage);
 
-            Box::from(proof_storage)
+            Arc::new(proof_storage)
         } else {
             log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-            Box::from(FileSystemProofStorage::new("./proof_storage".into()))
+            Arc::new(FileSystemProofStorage::new("./proof_storage".into()).await)
         };
 
     (proof_storage, metrics)

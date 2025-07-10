@@ -7,6 +7,7 @@ use crate::{
     prover_interface::{self, FinalProof},
 };
 use ethereum_client::EthApi;
+use futures::executor::block_on;
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -14,9 +15,23 @@ use prover::proving::GenesisConfig;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
-    mpsc::UnboundedSender,
+    mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
+
+pub struct AuthoritySetSyncIo {
+    response: UnboundedReceiver<SealedNotFinalizedEra>,
+}
+
+impl AuthoritySetSyncIo {
+    pub fn new(response: UnboundedReceiver<SealedNotFinalizedEra>) -> Self {
+        Self { response }
+    }
+
+    pub async fn recv(&mut self) -> Option<SealedNotFinalizedEra> {
+        self.response.recv().await
+    }
+}
 
 impl_metered_service!(
     struct Metrics {
@@ -37,10 +52,10 @@ impl_metered_service!(
 /// Once proof is generated it is sent to merkle root relayer for further
 /// processing.
 pub struct AuthoritySetSync {
-    pub api_provider: ApiProviderConnection,
-    pub proof_storage: Arc<dyn ProofStorage>,
-    pub genesis_config: GenesisConfig,
-    pub eras: Eras,
+    api_provider: ApiProviderConnection,
+    proof_storage: Arc<dyn ProofStorage>,
+    genesis_config: GenesisConfig,
+    eras: Eras,
 
     metrics: Metrics,
 }
@@ -50,7 +65,7 @@ impl MeteredService for AuthoritySetSync {
         self.metrics
             .get_sources()
             .into_iter()
-            .chain(self.eras.get_sources().into_iter())
+            .chain(self.eras.get_sources())
     }
 }
 
@@ -75,6 +90,35 @@ impl AuthoritySetSync {
         }
     }
 
+    pub fn run(mut self, mut blocks: Receiver<GearBlock>) -> AuthoritySetSyncIo {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let io = AuthoritySetSyncIo::new(rx);
+
+        tokio::task::spawn_blocking(move || {
+            block_on(async move {
+                loop {
+                    if let Err(err) = self.process(&mut blocks, &tx).await {
+                        log::error!("Authority set sync task failed: {err}");
+
+                        match self.api_provider.reconnect().await {
+                            Ok(_) => {
+                                log::info!("Reconnected to Gear API, resuming authority set sync");
+                                continue;
+                            }
+                            Err(err) => {
+                                log::error!("Failed to reconnect to Gear API: {err}");
+                                return;
+                            }
+                        }
+                    }
+                }
+            })
+        });
+
+        io
+    }
+
     fn authority_set_hash_changeed(block: &GearBlock) -> Option<H256> {
         block.events().iter().find_map(|event| match event {
             gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(hash)) => {
@@ -84,7 +128,7 @@ impl AuthoritySetSync {
         })
     }
 
-    pub async fn process(
+    async fn process(
         &mut self,
         blocks: &mut Receiver<GearBlock>,
         sealed_eras: &UnboundedSender<SealedNotFinalizedEra>,
@@ -257,10 +301,6 @@ impl Eras {
         })
     }
 
-    fn update_eth_api(&mut self, eth_api: EthApi) {
-        self.eth_api = eth_api;
-    }
-
     pub async fn process(&mut self, proof_storage: &Arc<dyn ProofStorage>) -> anyhow::Result<()> {
         log::info!("Processing eras");
 
@@ -343,32 +383,3 @@ impl Eras {
         Ok(())
     }
 }
-/*
-impl SealedNotFinalizedEra {
-    pub async fn try_finalize(&mut self, eth_api: &EthApi) -> anyhow::Result<bool> {
-        let tx_status = eth_api.get_tx_status(self.tx_hash).await?;
-
-        match tx_status {
-            TxStatus::Finalized => Ok(true),
-            TxStatus::Pending => Ok(false),
-            TxStatus::Failed => {
-                let root_exists = eth_api
-                    .read_finalized_merkle_root(self.merkle_root_block)
-                    .await?
-                    .is_some();
-
-                // Someone already relayed this merkle root.
-                if root_exists {
-                    log::info!("Era #{} is already finalized", self.era);
-                    return Ok(true);
-                }
-
-                log::warn!("Re-trying era #{} finalization", self.era);
-
-                self.tx_hash = submit_merkle_root_to_ethereum(eth_api, self.proof.clone()).await?;
-                Ok(false)
-            }
-        }
-    }
-}
-*/

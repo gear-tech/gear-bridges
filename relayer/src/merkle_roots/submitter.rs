@@ -1,7 +1,9 @@
 use anyhow::Context;
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use futures::{stream::FuturesUnordered, StreamExt};
+use prometheus::{Gauge, IntCounter, IntGauge};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{submit_merkle_root_to_ethereum, BASE_RETRY_DELAY, MAX_RETRIES},
@@ -25,6 +27,16 @@ pub struct SubmitterIo {
 }
 
 impl SubmitterIo {
+    pub fn new(
+        requests: UnboundedSender<Request>,
+        responses: UnboundedReceiver<Response>,
+    ) -> Self {
+        Self {
+            requests,
+            responses,
+        }
+    }
+
     pub fn submit_era_root(&self, era: u64, merkle_root_block: u32, proof: FinalProof) -> bool {
         self.requests
             .send(Request {
@@ -86,13 +98,48 @@ impl SubmittedMerkleRoot {
     }
 }
 
+impl_metered_service!(
+    struct Metrics {
+        fee_payer_balance: Gauge = Gauge::new(
+            "merkle_root_relayer_fee_payer_balance",
+            "Transaction fee payer balance",
+        ),
+
+        total_submissions: IntCounter = IntCounter::new(
+            "merkle_root_relayer_total_submissions",
+            "Total number of merkle root submissions",
+        ),
+
+        failed_submissions: IntCounter = IntCounter::new(
+            "merkle_root_relayer_failed_submissions",
+            "Total number of failed merkle root submissions",
+        ),
+
+        pending_submissions: IntGauge = IntGauge::new(
+            "merkle_root_relayer_pending_submissions",
+            "Total number of pending merkle root submissions",
+        ),
+    }
+);
+
 pub struct MerkleRootSubmitter {
     eth_api: EthApi,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for MerkleRootSubmitter {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl MerkleRootSubmitter {
     pub fn new(eth_api: EthApi) -> Self {
-        Self { eth_api }
+        Self {
+            eth_api,
+            metrics: Metrics::new(),
+        }
     }
 
     async fn process(
@@ -102,6 +149,10 @@ impl MerkleRootSubmitter {
     ) -> anyhow::Result<()> {
         let mut pending_transactions = FuturesUnordered::new();
         loop {
+            let balance = self.eth_api.get_approx_balance().await?;
+            self.metrics.fee_payer_balance.set(balance);
+            self.metrics.pending_submissions.set(pending_transactions.len() as i64);
+
             tokio::select! {
                 request = proofs.recv() => {
                     let Some(request) = request else {
@@ -110,7 +161,7 @@ impl MerkleRootSubmitter {
                     };
                     let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await?;
                     log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
-
+                    self.metrics.total_submissions.inc();
                     pending_transactions.push(SubmittedMerkleRoot::new(
                         self.eth_api.clone(),
                         tx_hash,
@@ -157,7 +208,7 @@ impl MerkleRootSubmitter {
                                 continue;
 
                             }
-
+                            
                             log::error!("Merkle root submission failed, tx hash: {}", root.tx_hash);
                             if !root.retried {
                                 log::info!("Retrying merkle root submission, tx hash: {}", root.tx_hash);
@@ -171,6 +222,7 @@ impl MerkleRootSubmitter {
                                     true,
                                 ).finalize());
                             } else {
+                                self.metrics.failed_submissions.inc();
                                 log::error!("Merkle root submission failed again, giving up, tx hash: {}", root.tx_hash);
                             }
 
@@ -181,11 +233,13 @@ impl MerkleRootSubmitter {
         }
     }
 
-    pub fn run(self) -> (UnboundedSender<Request>, UnboundedReceiver<Response>) {
+    pub fn run(self) -> SubmitterIo {
         let (tx, rx) = unbounded_channel();
         let (response_tx, response_rx) = unbounded_channel();
+
         tokio::task::spawn(task(self, rx, response_tx));
-        (tx, response_rx)
+        
+        SubmitterIo::new(tx, response_rx)
     }
 }
 async fn task(

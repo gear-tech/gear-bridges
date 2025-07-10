@@ -118,7 +118,7 @@ impl Relayer {
     }
 
     pub async fn run(self) {
-        let (_, [gear_blocks]) = self.gear_block_listener.run().await;
+        let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
         if let Err(err) = self.storage.load(&self.tx_manager).await {

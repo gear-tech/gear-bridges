@@ -16,6 +16,13 @@ use subxt::config::Header as _;
 use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
+/// The size of the buffer for the broadcast channel used in the block listener.
+///
+/// If one of the recievers lags we won't lose the blocks that were sent. At the
+/// moment lagging can happen in authority set sync due to how CPU intensive prover
+/// is.
+const BUFFER_SIZE: usize = 128;
+
 #[derive(Clone)]
 pub struct GearBlock {
     pub header: Header,
@@ -96,11 +103,8 @@ impl BlockListener {
     /// and a fixed number of receivers for consuming the blocks.
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
-    ) -> (
-        broadcast::Sender<GearBlock>,
-        [broadcast::Receiver<GearBlock>; RECEIVER_COUNT],
-    ) {
-        let (tx, _) = broadcast::channel(RECEIVER_COUNT);
+    ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
+        let (tx, _) = broadcast::channel(BUFFER_SIZE);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
             loop {
@@ -133,14 +137,11 @@ impl BlockListener {
             }
         });
 
-        (
-            tx.clone(),
-            (0..RECEIVER_COUNT)
-                .map(|_| tx.subscribe())
-                .collect::<Vec<_>>()
-                .try_into()
-                .expect("expected Vec of correct length"),
-        )
+        (0..RECEIVER_COUNT)
+            .map(|_| tx.subscribe())
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("expected Vec of correct length")
     }
 
     async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {

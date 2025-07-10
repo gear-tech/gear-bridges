@@ -50,7 +50,7 @@ pub async fn relay(
         historical_proxy_address,
         gear_suri.clone(),
     );
-    let (_, [gear_blocks]) = gear_block_listener.run().await;
+    let [gear_blocks] = gear_block_listener.run().await;
     let (deposit_events_sender, deposit_events_receiver) = unbounded_channel();
 
     deposit_events_sender

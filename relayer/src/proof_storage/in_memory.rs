@@ -16,7 +16,7 @@ impl InMemoryProofStorage {
 }
 
 #[derive(Default)]
-struct InMemoryProofStorageInner {
+pub struct InMemoryProofStorageInner {
     pub(super) proofs: BTreeMap<AuthoritySetId, Proof>,
     pub(super) circuit_data: Option<CircuitData>,
 }

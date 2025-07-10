@@ -118,7 +118,7 @@ impl Relayer {
     }
 
     pub async fn run(self) {
-        let (_, [gear_blocks]) = self.gear_block_listener.run().await;
+        let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.run().await;
 
         let deposit_events = self.deposit_event_extractor.run(ethereum_blocks).await;

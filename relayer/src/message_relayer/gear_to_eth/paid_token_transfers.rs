@@ -97,7 +97,7 @@ impl Relayer {
     }
 
     pub async fn run(self) {
-        let (_, [gear_blocks_0, gear_blocks_1]) = self.gear_block_listener.run().await;
+        let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run().await;
 
         let messages = self.message_sent_listener.run(gear_blocks_0).await;
         let paid_messages = self.message_paid_listener.run(gear_blocks_1).await;

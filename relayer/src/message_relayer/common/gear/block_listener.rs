@@ -16,6 +16,13 @@ use subxt::config::Header as _;
 use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
+/// The size of the buffer for the broadcast channel used in the block listener.
+///
+/// If one of the recievers lags we won't lose the blocks that were sent. At the
+/// moment lagging can happen in authority set sync due to how CPU intensive prover
+/// is.
+const BUFFER_SIZE: usize = 128;
+
 #[derive(Clone)]
 pub struct GearBlock {
     pub header: Header,
@@ -92,10 +99,12 @@ impl BlockListener {
         }
     }
 
+    /// Run the block listener, returning a broadcast sender for producing new subscriptions
+    /// and a fixed number of receivers for consuming the blocks.
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
-        let (tx, _) = broadcast::channel(RECEIVER_COUNT);
+        let (tx, _) = broadcast::channel(BUFFER_SIZE);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
             loop {

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use alloy::transports::{RpcError, TransportErrorKind};
 use prover::proving::GenesisConfig;
@@ -15,7 +15,7 @@ pub(crate) type SyncStepCount = usize;
 
 pub(crate) async fn sync_authority_set_id(
     gear_api: &GearApi,
-    proof_storage: &mut dyn ProofStorage,
+    proof_storage: &Arc<dyn ProofStorage>,
     genesis_config: GenesisConfig,
     latest_authority_set_id: u64,
     latest_proven_authority_set_id: Option<u64>,
@@ -34,6 +34,7 @@ pub(crate) async fn sync_authority_set_id(
         let proof = prover_interface::prove_genesis(gear_api, genesis_config).await?;
         proof_storage
             .init(proof, genesis_config.authority_set_id)
+            .await
             .unwrap();
 
         return Ok(1);
@@ -50,11 +51,15 @@ pub(crate) async fn sync_authority_set_id(
     }
 
     if latest_proven < latest_authority_set_id {
-        let mut proof = proof_storage.get_proof_for_authority_set_id(latest_proven)?;
+        let mut proof = proof_storage
+            .get_proof_for_authority_set_id(latest_proven)
+            .await?;
 
         for set_id in latest_proven..latest_authority_set_id {
             proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
-            proof_storage.update(proof.proof.clone(), set_id + 1)?;
+            proof_storage
+                .update(proof.proof.clone(), set_id + 1)
+                .await?;
         }
 
         let step_count = latest_authority_set_id - latest_proven;

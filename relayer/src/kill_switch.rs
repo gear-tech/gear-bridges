@@ -1,5 +1,6 @@
 use std::{
     process,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -68,7 +69,7 @@ pub struct KillSwitchRelayer {
     api_provider: ApiProviderConnection,
     eth_api: EthApi,
     genesis_config: GenesisConfig,
-    proof_storage: Box<dyn ProofStorage>,
+    proof_storage: Arc<dyn ProofStorage>,
 
     start_from_eth_block: Option<u64>,
     state: State,
@@ -93,7 +94,7 @@ impl KillSwitchRelayer {
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
-        proof_storage: Box<dyn ProofStorage>,
+        proof_storage: Arc<dyn ProofStorage>,
         from_eth_block: Option<u64>,
         block_finality_storage: sled::Db,
     ) -> Self {
@@ -287,7 +288,7 @@ impl KillSwitchRelayer {
             .latest_observed_gear_era
             .set(latest_authority_set_id as i64);
 
-        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id();
+        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
 
         if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
             self.metrics.latest_proven_era.set(latest_proven as i64);
@@ -295,7 +296,7 @@ impl KillSwitchRelayer {
 
         sync_authority_set_id(
             &gear_api,
-            self.proof_storage.as_mut(),
+            &self.proof_storage,
             self.genesis_config,
             latest_authority_set_id,
             latest_proven_authority_set_id,
@@ -393,7 +394,8 @@ impl KillSwitchRelayer {
         let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
         let inner_proof = self
             .proof_storage
-            .get_proof_for_authority_set_id(authority_set_id)?;
+            .get_proof_for_authority_set_id(authority_set_id)
+            .await?;
 
         prover_interface::prove_final_with_block_finality(
             &gear_api,

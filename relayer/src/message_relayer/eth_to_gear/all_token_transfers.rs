@@ -1,18 +1,9 @@
-use primitive_types::{H160, H256};
-use sails_rs::calls::ActionIo;
-use std::{iter, sync::Arc};
-
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
-use utils_prometheus::MeteredService;
-
 use super::{
     message_sender::MessageSender,
     proof_composer::ProofComposer,
     storage::{JSONStorage, Storage},
     tx_manager::TransactionManager,
 };
-
 use crate::message_relayer::common::{
     ethereum::{
         block_listener::BlockListener as EthereumBlockListener,
@@ -24,6 +15,12 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber,
 };
+use ethereum_beacon_client::BeaconClient;
+use ethereum_client::PollingEthApi;
+use primitive_types::{H160, H256};
+use sails_rs::calls::ActionIo;
+use std::{iter, sync::Arc};
+use utils_prometheus::MeteredService;
 
 use super::api_provider::ApiProviderConnection;
 
@@ -57,7 +54,7 @@ impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         suri: String,
-        eth_api: EthApi,
+        eth_api: PollingEthApi,
         beacon_client: BeaconClient,
         erc20_manager_address: H160,
         checkpoint_light_client_address: H256,
@@ -69,7 +66,7 @@ impl Relayer {
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
-        let from_eth_block = eth_api.finalized_block_number().await?;
+        let from_eth_block = eth_api.finalized_block().await?.header.number;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let storage = Arc::new(JSONStorage::new(storage_path));
@@ -129,7 +126,7 @@ impl Relayer {
 
     pub async fn run(self) {
         let [gear_blocks] = self.gear_block_listener.run().await;
-        let ethereum_blocks = self.ethereum_block_listener.run().await;
+        let ethereum_blocks = self.ethereum_block_listener.spawn();
 
         let deposit_events = self.deposit_event_extractor.run(ethereum_blocks).await;
 

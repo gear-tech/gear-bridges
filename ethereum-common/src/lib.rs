@@ -44,6 +44,8 @@ pub const SYNC_COMMITTEE_SIZE: usize = 512;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/altair/beacon-chain.md#domain-types)
 pub const DOMAIN_SYNC_COMMITTEE: [u8; 4] = [0x07, 0x00, 0x00, 0x00];
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#time-parameters-1)
+pub const SECONDS_PER_SLOT: u64 = 12;
 
 pub mod electra {
     /// According to Ethereum spec [v1.5.0](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.2/specs/electra/beacon-chain.md#execution).

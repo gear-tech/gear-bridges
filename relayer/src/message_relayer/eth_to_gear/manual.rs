@@ -9,18 +9,21 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber, TxHashWithSlot,
 };
+use alloy::{network::TransactionResponse, providers::Provider};
+use anyhow::{Context, Result as AnyResult};
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::{PollingEthApi, TxHash};
+use ethereum_common::SECONDS_PER_SLOT;
 use primitive_types::H256;
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
-    mut api_provider: ApiProviderConnection,
+    mut provider_connection: ApiProviderConnection,
     gear_suri: String,
 
-    eth_api: EthApi,
+    eth_api: PollingEthApi,
     beacon_client: BeaconClient,
 
     checkpoint_light_client_address: H256,
@@ -30,28 +33,48 @@ pub async fn relay(
     receiver_route: Vec<u8>,
 
     tx_hash: TxHash,
-    slot: u64,
-) {
-    let gear_block_listener = GearBlockListener::new(api_provider.clone());
+) -> AnyResult<()> {
+    let tx = eth_api
+        .get_transaction_by_hash(tx_hash)
+        .await?
+        .context(r#"Transaction "{tx_hash}" is None"#)?;
+    let block_number = tx.block_number().context("Block number is None")?;
+    let block_timestamp = eth_api.get_block(block_number).await?.header.timestamp;
+
+    let genesis_time = beacon_client
+        .get_genesis()
+        .await
+        .context("Failed to fetch chain genesis")?
+        .data
+        .genesis_time;
+
+    log::info!("Genesis time: {genesis_time}");
+    let slot_number =
+        EthereumSlotNumber(block_timestamp.saturating_sub(genesis_time) / SECONDS_PER_SLOT);
+    log::info!(r#"Slot number of the transaction ("{tx_hash}") block is {slot_number}"#);
+
+    let gear_block_listener = GearBlockListener::new(provider_connection.clone());
 
     let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
-    let client = api_provider
+    let client = provider_connection
         .gclient_client(&gear_suri)
-        .expect("failed to create gclient");
+        .context("Failed to create gclient")?;
 
     let latest_checkpoint =
         super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
+
+    log::debug!("latest_checkpoint = {latest_checkpoint:?}");
 
     let message_sender = MessageSender::new(
         receiver_address,
         receiver_route,
         historical_proxy_address,
-        api_provider.clone(),
+        provider_connection.clone(),
         gear_suri.clone(),
     );
     let proof_composer = ProofComposer::new(
-        api_provider,
+        provider_connection,
         beacon_client,
         eth_api,
         historical_proxy_address,
@@ -63,7 +86,7 @@ pub async fn relay(
     deposit_events_sender
         .send(TxHashWithSlot {
             tx_hash,
-            slot_number: EthereumSlotNumber(slot),
+            slot_number,
         })
         .expect("Failed to send message to channel");
 
@@ -84,4 +107,6 @@ pub async fn relay(
     }
 
     drop(deposit_events_sender);
+
+    Ok(())
 }

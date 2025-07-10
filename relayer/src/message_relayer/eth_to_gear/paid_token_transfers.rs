@@ -4,7 +4,7 @@ use super::{
     tx_manager,
 };
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
+use ethereum_client::PollingEthApi;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
@@ -57,7 +57,7 @@ impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         suri: String,
-        eth_api: EthApi,
+        eth_api: PollingEthApi,
         beacon_client: BeaconClient,
         bridging_payment_address: H160,
         checkpoint_light_client_address: H256,
@@ -69,7 +69,7 @@ impl Relayer {
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
-        let from_eth_block = eth_api.finalized_block_number().await?;
+        let from_eth_block = eth_api.finalized_block().await?.header.number;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let storage = Arc::new(JSONStorage::new(storage_path));
@@ -129,12 +129,13 @@ impl Relayer {
 
     pub async fn run(self) {
         let [gear_blocks] = self.gear_block_listener.run().await;
-        let ethereum_blocks = self.ethereum_block_listener.run().await;
+        let ethereum_blocks = self.ethereum_block_listener.spawn();
 
         if let Err(err) = self.storage.load(&self.tx_manager).await {
             log::warn!("Failed to load transaction and block status from storage: {err:?}")
         }
-        let message_paid_events = self.message_paid_event_extractor.run(ethereum_blocks).await;
+
+        let message_paid_events = self.message_paid_event_extractor.spawn(ethereum_blocks);
         let checkpoints = self
             .checkpoints_extractor
             .run(gear_blocks, self.latest_checkpoint)

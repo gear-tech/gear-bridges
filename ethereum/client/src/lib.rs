@@ -188,17 +188,17 @@ impl Deref for PollingEthApi {
 }
 
 pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
-    Ok(provider
+    provider
         .get_block_by_number(BlockNumberOrTag::Finalized)
         .await?
-        .context("Finalized block is None")?)
+        .context("Finalized block is None")
 }
 
 pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
-    Ok(provider
+    provider
         .get_block_by_number(BlockNumberOrTag::Number(block))
         .await?
-        .context("Block is None")?)
+        .context("Block is None")
 }
 
 #[derive(Clone)]

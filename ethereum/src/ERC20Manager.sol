@@ -141,9 +141,9 @@ contract ERC20Manager is
     uint256 internal constant OFFSET6 = 65;
 
     /**
-     * @dev Size of register token message (for `TokenType.Ethereum`).
+     * @dev Size of register token message (for `TokenType.Gear`).
      */
-    uint256 internal constant REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE =
+    uint256 internal constant REGISTER_GEAR_TOKEN_MESSAGE_SIZE =
         DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE + TOKEN_DECIMALS_SIZE;
 
     //////////////////////////////////////////////////////////////////////////////
@@ -154,9 +154,9 @@ contract ERC20Manager is
     uint256 internal constant TOKEN2_SIZE = 20;
 
     /**
-     * @dev Size of register token message (for `TokenType.Gear`).
+     * @dev Size of register token message (for `TokenType.Ethereum`).
      */
-    uint256 internal constant REGISTER_GEAR_TOKEN_MESSAGE_SIZE = DISCRIMINANT_SIZE + TOKEN2_SIZE;
+    uint256 internal constant REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE = DISCRIMINANT_SIZE + TOKEN2_SIZE;
 
     /**
      * @dev `address token` bit shift.
@@ -495,16 +495,16 @@ contract ERC20Manager is
      *          bytes32 vftManager; // 32 bytes
      *          ```
      *
-     *      - `SupplyType.Ethereum = 0x01` - register Ethereum token
+     *      - `TokenType.Ethereum = 0x01` - register Ethereum token
+     *          ```solidity
+     *          address token; // 20 bytes
+     *          ```
+     *
+     *      - `TokenType.Gear = 0x02` - register Gear token
      *          ```solidity
      *          bytes32 tokenName; // 1 byte length + 31 bytes datas
      *          bytes32 tokenSymbol; // 1 byte length + 31 bytes data
      *          uint8 tokenDecimals; // 1 byte
-     *          ```
-     *
-     *      - `SupplyType.Gear = 0x02` - register Gear token
-     *          ```solidity
-     *          address token; // 20 bytes
      *          ```
      *
      * @param payload Payload of the message (message from Vara Network).
@@ -530,59 +530,21 @@ contract ERC20Manager is
                 return false;
             }
 
+            // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
             bytes32 vftManager;
             assembly ("memory-safe") {
-                vftManager := calldataload(payload.offset)
+                vftManager := calldataload(add(payload.offset, OFFSET4))
             }
 
             _vftManagers.add(vftManager);
 
             emit VftManagerAdded(vftManager);
+
+            return true;
         }
 
         if (discriminant == uint256(TokenType.Ethereum)) {
             if (!(payload.length == REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE)) {
-                return false;
-            }
-
-            bytes32 tokenName;
-            bytes32 tokenSymbol;
-            uint8 tokenDecimals;
-
-            // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
-            // we use offset `OFFSET5 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE` to skip `uint8 discriminant` and `bytes32 tokenName`
-            // we use offset `OFFSET6 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE` to skip `uint8 discriminant`, `bytes32 tokenName` and `bytes32 tokenSymbol`
-            assembly ("memory-safe") {
-                tokenName := calldataload(add(payload.offset, OFFSET4))
-                tokenSymbol := calldataload(add(payload.offset, OFFSET5))
-                tokenDecimals := calldataload(add(payload.offset, OFFSET6))
-                // `TOKEN_DECIMALS_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-                tokenDecimals := shr(TOKEN_DECIMALS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET6)))
-            }
-
-            uint8 tokenNameLength = uint8(tokenName[0]);
-            if (!(tokenNameLength >= 1 && tokenNameLength <= 31)) {
-                return false;
-            }
-
-            uint8 tokenSymbolLength = uint8(tokenSymbol[0]);
-            if (!(tokenSymbolLength >= 1 && tokenSymbolLength <= 31)) {
-                return false;
-            }
-
-            string memory tokenNameStr = LibString.unpackOne(tokenName);
-            string memory tokenSymbolStr = LibString.unpackOne(tokenSymbol);
-
-            ERC20GearSupply token = new ERC20GearSupply(address(this), tokenNameStr, tokenSymbolStr, tokenDecimals);
-
-            _tokens.push(address(token));
-            _tokenType[address(token)] = TokenType.Ethereum;
-
-            emit EthereumTokenRegistered(tokenNameStr, tokenSymbolStr, tokenDecimals);
-        }
-
-        if (discriminant == uint256(TokenType.Gear)) {
-            if (!(payload.length == REGISTER_GEAR_TOKEN_MESSAGE_SIZE)) {
                 return false;
             }
 
@@ -594,10 +556,53 @@ contract ERC20Manager is
             }
 
             _tokens.push(token);
-            _tokenType[token] = TokenType.Gear;
+            _tokenType[token] = TokenType.Ethereum;
 
-            emit GearTokenRegistered(token);
+            emit EthereumTokenRegistered(token);
+
+            return true;
         }
+
+        // `discriminant == uint256(TokenType.Gear)` is guaranteed by previous checks
+        if (!(payload.length == REGISTER_GEAR_TOKEN_MESSAGE_SIZE)) {
+            return false;
+        }
+
+        bytes32 tokenName;
+        bytes32 tokenSymbol;
+        uint8 tokenDecimals;
+
+        // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
+        // we use offset `OFFSET5 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE` to skip `uint8 discriminant` and `bytes32 tokenName`
+        // we use offset `OFFSET6 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE` to skip `uint8 discriminant`, `bytes32 tokenName` and `bytes32 tokenSymbol`
+        assembly ("memory-safe") {
+            tokenName := calldataload(add(payload.offset, OFFSET4))
+            tokenSymbol := calldataload(add(payload.offset, OFFSET5))
+            tokenDecimals := calldataload(add(payload.offset, OFFSET6))
+            // `TOKEN_DECIMALS_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            tokenDecimals := shr(TOKEN_DECIMALS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET6)))
+        }
+
+        uint8 tokenNameLength = uint8(tokenName[0]);
+        if (!(tokenNameLength >= 1 && tokenNameLength <= 31)) {
+            return false;
+        }
+
+        uint8 tokenSymbolLength = uint8(tokenSymbol[0]);
+        if (!(tokenSymbolLength >= 1 && tokenSymbolLength <= 31)) {
+            return false;
+        }
+
+        string memory tokenNameStr = LibString.unpackOne(tokenName);
+        string memory tokenSymbolStr = LibString.unpackOne(tokenSymbol);
+
+        ERC20GearSupply gearSupply = new ERC20GearSupply(address(this), tokenNameStr, tokenSymbolStr, tokenDecimals);
+        address tokenAddress = address(gearSupply);
+
+        _tokens.push(tokenAddress);
+        _tokenType[tokenAddress] = TokenType.Gear;
+
+        emit GearTokenRegistered(tokenAddress, tokenNameStr, tokenSymbolStr, tokenDecimals);
 
         return true;
     }

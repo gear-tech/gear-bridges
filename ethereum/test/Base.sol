@@ -234,8 +234,24 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    ERC20Manager:        ", address(erc20Manager));
 
         assertEq(erc20ManagerAddress, address(erc20Manager));
-
-        console.log();
+        assertEq(erc20Manager.governanceAdmin(), address(governanceAdmin));
+        assertEq(erc20Manager.governancePauser(), address(governancePauser));
+        assertEq(erc20Manager.messageQueue(), address(messageQueue));
+        bytes32[] memory vftManagers = erc20Manager.vftManagers();
+        assertEq(vftManagers.length, 1);
+        assertEq(vftManagers[0], deploymentArguments.vftManager);
+        assertEq(erc20Manager.isVftManager(deploymentArguments.vftManager), true);
+        address[] memory tokens_ = erc20Manager.tokens();
+        assertEq(tokens_.length, 4);
+        assertEq(tokens_[0], address(circleToken));
+        assertEq(tokens_[1], address(tetherToken));
+        assertEq(tokens_[2], address(wrappedEther));
+        assertEq(tokens_[3], address(wrappedVara));
+        assertTrue(erc20Manager.getTokenType(address(circleToken)) == IERC20Manager.TokenType.Ethereum);
+        assertTrue(erc20Manager.getTokenType(address(tetherToken)) == IERC20Manager.TokenType.Ethereum);
+        assertTrue(erc20Manager.getTokenType(address(wrappedEther)) == IERC20Manager.TokenType.Ethereum);
+        assertTrue(erc20Manager.getTokenType(address(wrappedVara)) == IERC20Manager.TokenType.Gear);
+        assertTrue(erc20Manager.getTokenType(address(0)) == IERC20Manager.TokenType.Unknown);
 
         //////////////////////////////////////////////////////////////////////////////
 
@@ -243,6 +259,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         bridgingPayment = BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
         console.log("    BridgingPayment:     ", address(bridgingPayment));
+
+        address[] memory bridgingPayments = erc20Manager.bridgingPayments();
+        assertEq(bridgingPayments.length, 1);
+        assertTrue(erc20Manager.isBridgingPayment(address(bridgingPayment)));
+        assertFalse(erc20Manager.isBridgingPayment(address(0)));
 
         //////////////////////////////////////////////////////////////////////////////
 

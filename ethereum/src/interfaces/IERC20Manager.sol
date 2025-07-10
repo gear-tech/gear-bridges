@@ -58,12 +58,12 @@ interface IERC20Manager is IPausable, IMessageHandler {
     /**
      * @dev Event emitted when Ethereum token is registered.
      */
-    event EthereumTokenRegistered(string tokenName, string tokenSymbol, uint8 tokenDecimals);
+    event EthereumTokenRegistered(address token);
 
     /**
      * @dev Event emitted when Gear token is registered.
      */
-    event GearTokenRegistered(address token);
+    event GearTokenRegistered(address token, string tokenName, string tokenSymbol, uint8 tokenDecimals);
 
     /**
      * @dev Enum representing token type.
@@ -240,16 +240,16 @@ struct AddVftManagerMessage {
  * @dev Type representing payload of the message that registers Ethereum token.
  */
 struct RegisterEthereumTokenMessage {
-    string tokenName;
-    string tokenSymbol;
-    uint8 tokenDecimals;
+    address token;
 }
 
 /**
  * @dev Type representing payload of the message that registers Gear token.
  */
 struct RegisterGearTokenMessage {
-    address token;
+    string tokenName;
+    string tokenSymbol;
+    uint8 tokenDecimals;
 }
 
 /**
@@ -280,12 +280,7 @@ library ERC20ManagerPacker {
      * @return packed Packed message.
      */
     function pack(RegisterEthereumTokenMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(
-            uint8(IERC20Manager.TokenType.Ethereum),
-            LibString.packOne(message.tokenName),
-            LibString.packOne(message.tokenSymbol),
-            message.tokenDecimals
-        );
+        return abi.encodePacked(uint8(IERC20Manager.TokenType.Ethereum), message.token);
     }
 
     /**
@@ -294,6 +289,11 @@ library ERC20ManagerPacker {
      * @return packed Packed message.
      */
     function pack(RegisterGearTokenMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint8(IERC20Manager.TokenType.Gear), message.token);
+        return abi.encodePacked(
+            uint8(IERC20Manager.TokenType.Gear),
+            LibString.packOne(message.tokenName),
+            LibString.packOne(message.tokenSymbol),
+            message.tokenDecimals
+        );
     }
 }

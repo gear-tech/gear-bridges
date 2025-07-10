@@ -72,25 +72,24 @@ impl BlockListener {
 async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumber>) {
     loop {
         let result = this.run_inner(&sender).await;
-
         let Err(e) = result else {
             continue;
         };
 
         log::error!("Ethereum block listener failed: {e:?}");
-
-        if common::is_transport_error_recoverable(&e) {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-
-            this.eth_api = match this.eth_api.reconnect().await {
-                Ok(api) => api,
-                Err(e) => {
-                    log::error!("Failed to reconnect to Ethereum API: {e}");
-                    return;
-                }
-            }
-        } else {
+        if !common::is_transport_error_recoverable(&e) {
+            log::error!("Non recoverable error, exiting.");
             return;
+        }
+
+        tokio::time::sleep(Duration::from_secs(30)).await;
+
+        this.eth_api = match this.eth_api.reconnect().await {
+            Ok(api) => api,
+            Err(e) => {
+                log::error!("Failed to reconnect to Ethereum API: {e}");
+                return;
+            }
         }
     }
 }

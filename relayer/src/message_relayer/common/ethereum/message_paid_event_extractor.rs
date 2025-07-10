@@ -156,7 +156,7 @@ async fn task(
         };
 
         attempts += 1;
-        log::error!("Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}");
+        log::error!("Paid event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}");
 
         if attempts >= MAX_RETRIES {
             log::error!("Max attempts reached, exiting...");
@@ -165,19 +165,22 @@ async fn task(
 
         tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
 
-        if common::is_transport_error_recoverable(&err) {
-            this.eth_api = match this.eth_api.reconnect().await {
-                Ok(eth_api) => {
-                    attempts = 0;
-
-                    eth_api
-                }
-
-                Err(err) => {
-                    log::error!("Failed to reconnect to Ethereum API: {err}");
-                    return;
-                }
-            };
+        if !common::is_transport_error_recoverable(&err) {
+            log::error!("Non recoverable error, exiting.");
+            return;
         }
+
+        this.eth_api = match this.eth_api.reconnect().await {
+            Ok(eth_api) => {
+                attempts = 0;
+
+                eth_api
+            }
+
+            Err(err) => {
+                log::error!("Failed to reconnect to Ethereum API: {err}");
+                return;
+            }
+        };
     }
 }

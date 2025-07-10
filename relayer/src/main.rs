@@ -1,9 +1,13 @@
-use std::{collections::HashSet, str::FromStr, time::Duration};
-
+use crate::cli::FeePayers;
+use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
-
+use cli::{
+    BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
+    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
+    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+};
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
+use ethereum_client::{EthApi, PollingEthApi};
 use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use kill_switch::KillSwitchRelayer;
@@ -15,28 +19,12 @@ use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
+use relayer::*;
+use std::{collections::HashSet, str::FromStr, time::Duration};
 use utils_prometheus::MetricsBuilder;
 
-mod cli;
-mod common;
-mod ethereum_checkpoints;
-mod hex_utils;
-mod kill_switch;
-mod message_relayer;
-mod proof_storage;
-mod prover_interface;
-mod relay_merkle_roots;
-
-use cli::{
-    BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
-};
-
-use crate::cli::FeePayers;
-
 #[tokio::main]
-async fn main() {
+async fn main() -> AnyResult<()> {
     let _ = dotenv::dotenv();
 
     pretty_env_logger::formatted_timed_builder()
@@ -181,9 +169,7 @@ async fn main() {
                     };
 
                     if excluded_from_fees.is_empty() {
-                        log::error!("Exiting");
-
-                        return;
+                        return Err(anyhow!("Exiting"));
                     }
                 }
 
@@ -193,17 +179,11 @@ async fn main() {
 
                 Some(FeePayers::ExcludedIds(ids)) => {
                     for id in ids {
-                        match AccountId32::from_str(id.as_str()) {
-                            Ok(account_id) => {
-                                log::debug!("Account {account_id} is excluded from paying fees");
-                                excluded_from_fees.insert(account_id);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to decode address '{id}': {e}");
+                        let account_id = AccountId32::from_str(id.as_str())
+                            .map_err(|e| anyhow!(r#"Failed to decode address "{id}": {e:?}"#))?;
 
-                                return;
-                            }
-                        }
+                        log::debug!("Account {account_id} is excluded from paying fees");
+                        excluded_from_fees.insert(account_id);
                     }
                 }
             }
@@ -295,11 +275,12 @@ async fn main() {
             historical_proxy_address,
             vft_manager_address,
             gear_args,
-            ethereum_args,
+            ethereum_rpc,
             beacon_rpc,
             prometheus_args,
+            storage_path,
         }) => {
-            let eth_api = create_eth_client(&ethereum_args).await;
+            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -322,6 +303,15 @@ async fn main() {
             let vft_manager_address =
                 hex_utils::decode_h256(&vft_manager_address).expect("Failed to parse address");
 
+            let genesis_time = beacon_client
+                .get_genesis()
+                .await
+                .expect("failed to fetch chain genesis")
+                .data
+                .genesis_time;
+
+            log::debug!("Genesis time: {genesis_time}");
+
             match command {
                 EthGearTokensCommands::AllTokenTransfers {
                     erc20_manager_address,
@@ -338,6 +328,8 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        storage_path,
+                        genesis_time,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -367,6 +359,8 @@ async fn main() {
                         historical_proxy_address,
                         vft_manager_address,
                         provider.connection(),
+                        storage_path,
+                        genesis_time,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -379,12 +373,6 @@ async fn main() {
                     provider.spawn();
                     relayer.run().await;
                 }
-            }
-
-            loop {
-                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                // TODO(playx): is this necessary now? We switched to full async
-                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
         CliCommands::GearEthManual(args) => {
@@ -417,13 +405,12 @@ async fn main() {
 
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
-            slot,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
             receiver_route,
             gear_args,
-            ethereum_args,
+            ethereum_rpc,
             beacon_args,
         }) => {
             use sails_rs::calls::ActionIo;
@@ -433,8 +420,9 @@ async fn main() {
                 vara_port: gear_args.common.port,
                 vara_rpc_retries: gear_args.common.retries,
             };
-            let eth_api = create_eth_client(&ethereum_args).await;
+            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_args).await;
+
             let checkpoint_light_client_address = hex_utils::decode_h256(&checkpoint_light_client)
                 .expect("Failed to parse checkpoint light client address");
             let historical_proxy_address = hex_utils::decode_h256(&historical_proxy)
@@ -458,10 +446,14 @@ async fn main() {
                 gear_client_args.vara_rpc_retries,
             )
             .await
-            .expect("Failed to create API provider");
+            .context("Failed to create API provider")?;
+
+            let provider_connection = provider.connection();
+
+            provider.spawn();
 
             eth_to_gear::manual::relay(
-                provider.connection(),
+                provider_connection,
                 gear_args.suri,
                 eth_api,
                 beacon_client,
@@ -470,22 +462,19 @@ async fn main() {
                 receiver_address,
                 receiver_route,
                 tx_hash,
-                slot,
             )
-            .await;
-            provider.spawn();
+            .await?;
+
             loop {
                 // relay() spawns thread and exits, so we need to add this loop after calling run.
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
 
-        CliCommands::FetchMerkleRoots(args) => {
-            if let Err(e) = fetch_merkle_roots(args).await {
-                log::error!("{e:?}");
-            }
-        }
+        CliCommands::FetchMerkleRoots(args) => fetch_merkle_roots(args).await?,
     };
+
+    Ok(())
 }
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
@@ -574,7 +563,7 @@ fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConf
     }
 }
 
-async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> anyhow::Result<()> {
+async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     let eth_api = create_eth_client(&args.ethereum_args).await;
     let block_finalized = eth_api.finalized_block_number().await?;
 

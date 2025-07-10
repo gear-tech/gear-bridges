@@ -72,10 +72,16 @@ impl CheckpointsExtractor {
     pub async fn run(
         mut self,
         mut blocks: Receiver<GearBlock>,
+        latest_checkpoint: Option<EthereumSlotNumber>,
     ) -> UnboundedReceiver<EthereumSlotNumber> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
+            if let Some(latest_checkpoint) = latest_checkpoint {
+                if sender.send(latest_checkpoint).is_err() {
+                    return;
+                }
+            }
             let res = self.run_inner(&sender, &mut blocks).await;
             if let Err(err) = res {
                 log::error!("Checkpoints extractor failed: {err}");

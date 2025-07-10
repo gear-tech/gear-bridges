@@ -100,32 +100,40 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     const completedToDelete: CompletedTransfer[] = [];
     const transfersToUpdate: Transfer[] = [];
 
-    const operations: Promise<any>[] = [];
-
     if (transfers.length > 0) {
       for (const transfer of transfers) {
         const completed = this._completed.get(transfer.nonce)!;
         transfer.status = Status.Completed;
         transfer.completedAt = completed.timestamp;
+        transfer.completedAtBlock = completed.blockNumber;
+        transfer.completedAtTxHash = completed.txHash;
         transfersToUpdate.push(transfer);
         completedToDelete.push(completed);
-        this._completed.delete(transfer.nonce);
       }
 
       if (transfersToUpdate.length > 0) {
-        operations.push(this._ctx.store.save(transfersToUpdate));
+        await this._ctx.store.save(transfersToUpdate);
       }
       if (completedToDelete.length > 0) {
-        operations.push(this._ctx.store.remove(completedToDelete));
+        await this._ctx.store.remove(completedToDelete);
+        for (const c of completedToDelete) {
+          this._completed.delete(c.nonce);
+        }
       }
     }
 
     if (this._completed.size > 0) {
-      operations.push(this._ctx.store.save(Array.from(this._completed.values())));
-      this._ctx.log.debug(`Saved ${this._completed.size} completed transfers`);
+      const savedCompletedTransfers = await this._ctx.store.findBy(CompletedTransfer, {
+        nonce: In(Array.from(this._completed.keys())),
+      });
+      const completedToSave = Array.from(this._completed.values()).filter(
+        ({ nonce }) => !savedCompletedTransfers.some((saved) => saved.nonce === nonce),
+      );
+      await this._ctx.store.save(completedToSave);
+      if (completedToSave.length > 0) {
+        this._ctx.log.info(`Saved ${completedToSave.length} completed transfers`);
+      }
     }
-
-    await Promise.all(operations);
   }
 
   protected async _processStatuses() {
@@ -163,7 +171,8 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
 
   public async save() {
     await this._processStatuses();
-    await Promise.all([this._saveTransfers(), this._saveCompletedTransfers()]);
+    await this._saveTransfers();
+    await this._saveCompletedTransfers();
   }
 
   public async addTransfer(transfer: Transfer) {
@@ -185,7 +194,7 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     this._ctx.log.info(`${nonce}: Status changed to ${status}`);
   }
 
-  public setCompletedTransfer(nonce: string, timestamp: Date) {
+  public setCompletedTransfer(nonce: string, timestamp: Date, blockNumber: bigint, txHash: string) {
     this._completed.set(
       nonce,
       new CompletedTransfer({
@@ -193,10 +202,12 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
         nonce,
         timestamp,
         destNetwork: this._network,
+        blockNumber,
+        txHash,
       }),
     );
 
-    this._ctx.log.info(`${nonce}: Transfer completed`);
+    this._ctx.log.info(`${nonce}: Transfer completed at block ${blockNumber} with transaction hash ${txHash}`);
   }
 
   protected async _getTransfer(nonce: string): Promise<Transfer | undefined> {

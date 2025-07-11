@@ -27,6 +27,14 @@ type Transfer @entity {
   sender: String! @index
   receiver: String! @index
   amount: BigInt!
+  bridgingStartedAtBlock: BigInt
+  bridgingStartedAtMessageId: String
+}
+
+type GearEthBridgeMessage @entity {
+  id: ID!
+  nonce: String! @index @unique
+  blockNumber: BigInt!
 }
 
 type InitiatedTransfer @entity {

@@ -4,13 +4,15 @@ import { DataHandlerContext as SubstrateContext } from '@subsquid/substrate-proc
 import { DataHandlerContext as EthereumContext } from '@subsquid/evm-processor';
 import { In, IsNull, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { randomUUID } from 'node:crypto';
+import { mapKeys, mapValues } from './map';
 
-export class BaseBatchState<Context extends SubstrateContext<Store, any> | EthereumContext<Store, any>> {
+export abstract class BaseBatchState<Context extends SubstrateContext<Store, any> | EthereumContext<Store, any>> {
   protected _transfers: Map<string, Transfer>;
   protected _completed: Map<string, CompletedTransfer>;
   protected _pairs: Map<string, Pair>;
   protected _statuses: Map<string, Status>;
   protected _ctx: Context;
+  private _prevCompletedSizeIsNull: boolean = false;
 
   constructor(private _network: Network) {
     this._transfers = new Map();
@@ -27,7 +29,6 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
     this._statuses.clear();
 
     await this._loadPairs();
-    await this._loadCompleted();
   }
 
   protected async _loadPairs(activeOnBlock: 'latest' | bigint = 'latest') {
@@ -49,18 +50,6 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
       } else {
         this._pairs.set(pair.varaToken, pair);
       }
-    }
-  }
-
-  private async _loadCompleted() {
-    const completed = await this._ctx.store.find(CompletedTransfer, { where: { destNetwork: this._network } });
-
-    for (const transfer of completed) {
-      this._completed.set(transfer.nonce, transfer);
-    }
-
-    if (completed.length > 0) {
-      this._ctx.log.debug(`Loaded ${completed.length} completed transfers`);
     }
   }
 
@@ -94,52 +83,62 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
   }
 
   protected async _saveCompletedTransfers(): Promise<void> {
-    if (this._completed.size === 0) return;
+    const savedCompleted = this._prevCompletedSizeIsNull
+      ? []
+      : await this._ctx.store.find(CompletedTransfer, {
+          where: {
+            destNetwork: this._network,
+          },
+        });
 
-    const transfers = await this._queryTransfers(Array.from(this._completed.keys()));
-    const completedToDelete: CompletedTransfer[] = [];
-    const transfersToUpdate: Transfer[] = [];
+    const completed = new Map(savedCompleted.map((info) => [info.nonce, info]));
 
-    if (transfers.length > 0) {
-      for (const transfer of transfers) {
-        const completed = this._completed.get(transfer.nonce)!;
-        transfer.status = Status.Completed;
-        transfer.completedAt = completed.timestamp;
-        transfer.completedAtBlock = completed.blockNumber;
-        transfer.completedAtTxHash = completed.txHash;
-        transfersToUpdate.push(transfer);
-        completedToDelete.push(completed);
+    if (this._completed.size > 0 || completed.size > 0) {
+      for (const [nonce, info] of this._completed) {
+        completed.set(nonce, info);
       }
 
-      if (transfersToUpdate.length > 0) {
-        await this._ctx.store.save(transfersToUpdate);
-      }
-      if (completedToDelete.length > 0) {
-        await this._ctx.store.remove(completedToDelete);
-        for (const c of completedToDelete) {
-          this._completed.delete(c.nonce);
+      const completedToRemove: CompletedTransfer[] = [];
+
+      const transfers = await this._queryTransfers(mapKeys(this._completed));
+
+      if (transfers.length > 0) {
+        for (const transfer of transfers) {
+          transfer.status = Status.Completed;
+          if (this._completed.has(transfer.nonce)) {
+            this._completed.delete(transfer.nonce);
+          } else {
+            completedToRemove.push(completed.get(transfer.nonce)!);
+          }
         }
+        if (completedToRemove.length > 0) {
+          await this._ctx.store.remove(completedToRemove);
+        }
+        await this._ctx.store.save(transfers);
+        this._ctx.log.info(
+          { nonces: transfers.map(({ nonce }) => nonce) },
+          `${transfers.length} transfers marked as completed`,
+        );
       }
     }
 
     if (this._completed.size > 0) {
-      const savedCompletedTransfers = await this._ctx.store.findBy(CompletedTransfer, {
-        nonce: In(Array.from(this._completed.keys())),
-      });
-      const completedToSave = Array.from(this._completed.values()).filter(
-        ({ nonce }) => !savedCompletedTransfers.some((saved) => saved.nonce === nonce),
+      this._prevCompletedSizeIsNull = false;
+      const completedToSave = mapValues(this._completed).filter(
+        ({ nonce }) => !savedCompleted.some((t) => t.nonce === nonce),
       );
       await this._ctx.store.save(completedToSave);
-      if (completedToSave.length > 0) {
-        this._ctx.log.info(`Saved ${completedToSave.length} completed transfers`);
-      }
+      this._ctx.log.info(
+        { nonces: completedToSave.map(({ nonce }) => nonce) },
+        `Saved ${completedToSave.length} completed transfers`,
+      );
     }
   }
 
   protected async _processStatuses() {
     if (this._statuses.size === 0) return;
 
-    const noncesToUpdate = Array.from(this._statuses.keys());
+    const noncesToUpdate = mapKeys(this._statuses);
     const noncesNotInCache = noncesToUpdate.filter((nonce) => !this._transfers.has(nonce));
 
     if (noncesNotInCache.length > 0) {
@@ -164,16 +163,12 @@ export class BaseBatchState<Context extends SubstrateContext<Store, any> | Ether
   protected async _saveTransfers() {
     if (this._transfers.size === 0) return;
 
-    await this._ctx.store.save(Array.from(this._transfers.values()));
+    await this._ctx.store.save(mapValues(this._transfers));
 
     this._ctx.log.info(`Saved ${this._transfers.size} transfers`);
   }
 
-  public async save() {
-    await this._processStatuses();
-    await this._saveTransfers();
-    await this._saveCompletedTransfers();
-  }
+  public abstract save(): Promise<void>;
 
   public async addTransfer(transfer: Transfer) {
     transfer.txHash = transfer.txHash.toLowerCase();

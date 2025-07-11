@@ -36,7 +36,7 @@ const processor = new SubstrateBatchProcessor()
     from: config.fromBlock,
   })
   .addEvent({ name: ['Gear.ProgramChanged'] })
-  .addEvent({ name: ['Gear.MessageQueued'], extrinsic: true, call: true });
+  .addEvent({ name: ['Gear.MessageQueued', 'GearEthBridge.MessageQueued'], extrinsic: true, call: true });
 
 export type Fields = SubstrateBatchProcessorFields<typeof processor>;
 export type Block = BlockHeader<Fields>;

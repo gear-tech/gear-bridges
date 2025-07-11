@@ -5,10 +5,11 @@ import * as erc20TreasuryAbi from './abi/erc20-manager';
 import * as messageQueueAbi from './abi/message-queue';
 import { Network, Status, Transfer } from '../model';
 import { processor, Context } from './processor';
-import { BaseBatchState, ethNonce, gearNonce } from '../common';
+import { ethNonce, gearNonce } from '../common';
 import { config } from './config';
+import { BatchState } from './batch-state';
 
-const state = new BaseBatchState(Network.Ethereum);
+const state = new BatchState(Network.Ethereum);
 
 const ERC20_MANAGER = config.erc20Manager.toLowerCase();
 const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequested.topic;

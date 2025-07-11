@@ -61,4 +61,10 @@ export class Transfer {
 
     @BigIntColumn_({nullable: false})
     amount!: bigint
+
+    @BigIntColumn_({nullable: true})
+    bridgingStartedAtBlock!: bigint | undefined | null
+
+    @StringColumn_({nullable: true})
+    bridgingStartedAtMessageId!: string | undefined | null
 }

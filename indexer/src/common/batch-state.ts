@@ -100,7 +100,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
       const completedToRemove: CompletedTransfer[] = [];
 
-      const transfers = await this._queryTransfers(mapKeys(this._completed));
+      const transfers = await this._queryTransfers(mapKeys(completed));
 
       if (transfers.length > 0) {
         for (const transfer of transfers) {

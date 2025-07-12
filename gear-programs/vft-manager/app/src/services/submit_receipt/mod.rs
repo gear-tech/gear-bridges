@@ -1,4 +1,4 @@
-use collections::btree_set::BTreeSet;
+use collections::{btree_map::BTreeMap, btree_set::BTreeSet};
 use gstd::{static_mut, static_ref};
 use sails_rs::prelude::*;
 
@@ -15,6 +15,10 @@ static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 /// program can store.
 pub const TX_HISTORY_DEPTH: usize = 50_000_000;
 
+/// A temporary storage for reply statuses. Tracks the status of `handle_reply` hook invocations.
+/// Maps a `(slot, transaction_index)` pair to a `Result<(), Error>`.
+static mut REPLY_STATUSES: Option<BTreeMap<(u64, u64), Result<(), Error>>> = None;
+
 /// Get reference to a transactions storage.
 pub fn transactions() -> &'static BTreeSet<(u64, u64)> {
     unsafe { static_ref!(TRANSACTIONS).as_ref() }.expect("Program should be constructed")
@@ -25,10 +29,21 @@ pub fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe { static_mut!(TRANSACTIONS).as_mut() }.expect("Program should be constructed")
 }
 
+/// Get a reference to the reply statuses global map.
+pub fn reply_statuses() -> &'static BTreeMap<(u64, u64), Result<(), Error>> {
+    unsafe { static_ref!(REPLY_STATUSES).as_ref() }.expect("Program should be constructed")
+}
+
+/// Get a mutable reference to the reply statuses global map.
+pub fn reply_statuses_mut() -> &'static mut BTreeMap<(u64, u64), Result<(), Error>> {
+    unsafe { static_mut!(REPLY_STATUSES).as_mut() }.expect("Program should be constructed")
+}
+
 /// Initialize state that's used by this VFT Manager method.
 pub fn seed() {
     unsafe {
         TRANSACTIONS = Some(BTreeSet::new());
+        REPLY_STATUSES = Some(BTreeMap::new());
     }
 }
 
@@ -105,12 +120,14 @@ pub async fn submit_receipt(
 
     let amount = U256::from_little_endian(event.amount.as_le_slice());
     let receiver = ActorId::from(event.to.0);
+    let erc20_sender = H160::from(event.from.0 .0);
 
     match service.state().token_map.get_supply_type(&vara_token_id)? {
         TokenSupply::Ethereum => {
             token_operations::mint(
                 slot,
                 transaction_index,
+                erc20_sender,
                 vara_token_id,
                 receiver,
                 amount,
@@ -123,6 +140,7 @@ pub async fn submit_receipt(
             token_operations::unlock(
                 slot,
                 transaction_index,
+                erc20_sender,
                 vara_token_id,
                 receiver,
                 amount,

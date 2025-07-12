@@ -70,6 +70,8 @@ type Error = enum {
   ReplyTimeout,
   /// Failed to set reply hook.
   ReplyHook,
+  /// A message does not have a reply code.
+  NoReplyCode: str,
   /// Original `MessageId` wasn't found in message tracker when processing reply.
   MessageNotFound,
   /// Invalid message status was found in the message tracker when processing reply.
@@ -84,6 +86,8 @@ type Error = enum {
   MintTokensDecode,
   /// Failed to decode payload from gear-eth-bridge built-in actor.
   BuiltinDecode,
+  /// Gas reservation for reply is too low.
+  GasForReplyTooLow: str,
   /// `ERC20` address wasn't found in the token mapping.
   NoCorrespondingEthAddress,
   /// `VFT` address wasn't found in the token mapping.
@@ -100,6 +104,10 @@ type Error = enum {
   Paused,
   /// Failed to burn tokens from the receiver in VftVara.
   BurnFromFailed: str,
+  /// Internal unspecified VFT error
+  Internal: str,
+  /// Invalid or unexpected reply received from a VFT program.
+  InvalidReply,
 };
 
 /// State in which message processing can be.
@@ -305,6 +313,17 @@ service VftManager {
     Erc20ManagerAddressChanged: struct {
       old: h160,
       new: h160,
+    };
+    /// Transaction receipt submitted via [VftManager::submit_receipt] processed successfully.
+    BridgingAccepted: struct {
+      /// The recipient
+      to: actor_id,
+      /// The sender on Ethereum side
+      from: h160,
+      /// The amount bridged
+      amount: u256,
+      /// Respective Vara token Id
+      token: actor_id,
     };
   }
 };

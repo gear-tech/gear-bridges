@@ -123,6 +123,17 @@ pub enum Event {
     HistoricalProxyAddressChanged { old: ActorId, new: ActorId },
     /// Address of the `ERC20Manager` contract address on Ethereum was changed.
     Erc20ManagerAddressChanged { old: H160, new: H160 },
+    /// Transaction receipt submitted via [VftManager::submit_receipt] processed successfully.
+    BridgingAccepted {
+        /// The recipient
+        to: ActorId,
+        /// The sender on Ethereum side
+        from: H160,
+        /// The amount bridged
+        amount: U256,
+        /// Respective Vara token Id
+        token: ActorId,
+    },
 }
 
 static mut STATE: Option<State> = None;
@@ -633,11 +644,13 @@ impl VftManager {
             use submit_receipt::token_operations;
 
             let source = Syscall::message_source();
+            let erc20_sender = H160::zero();
             match _supply_type {
                 TokenSupply::Ethereum => {
                     token_operations::mint(
                         _slot,
                         _transaction_index,
+                        erc20_sender,
                         source,
                         source,
                         100u32.into(),
@@ -650,6 +663,7 @@ impl VftManager {
                     token_operations::unlock(
                         _slot,
                         _transaction_index,
+                        erc20_sender,
                         source,
                         source,
                         100u32.into(),

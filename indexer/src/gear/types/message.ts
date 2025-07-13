@@ -2,6 +2,18 @@ import { Event } from '../processor';
 
 export type MessageQueuedEvent = Omit<Event, 'args'> & { args: MessageQueuedArgs };
 
+export type EthBridgeMessageQueuedEvent = Omit<Event, 'args'> & { args: EthBridgeMessageQueuedArgs };
+
+export interface EthBridgeMessageQueuedArgs {
+  readonly message: {
+    readonly nonce: string;
+    readonly source: string;
+    readonly destination: string;
+    readonly payload: string;
+  };
+  readonly hash: string;
+}
+
 export interface MessageQueuedArgs {
   readonly id: string;
   readonly source: string;

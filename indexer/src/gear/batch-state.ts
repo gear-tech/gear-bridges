@@ -1,7 +1,7 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
-import { InitiatedTransfer, Network, Pair, Status, Transfer } from '../model';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model';
 import { Store } from '@subsquid/typeorm-store';
-import { BaseBatchState, hash } from '../common';
+import { BaseBatchState, hash, mapKeys, mapValues, setValues } from '../common';
 import { In } from 'typeorm';
 import {
   getEthTokenDecimals,
@@ -33,6 +33,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   >;
   private _initiatedTransfers: Map<string, InitiatedTransfer>;
   private _transfersToRemove: Set<Transfer>;
+  private _ethBridgeMessages: Map<string, GearEthBridgeMessage>;
 
   constructor() {
     super(NETWORK);
@@ -41,6 +42,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._upgradedPairs = new Map();
     this._initiatedTransfers = new Map();
     this._transfersToRemove = new Set();
+    this._ethBridgeMessages = new Map();
   }
 
   public async new(ctx: DataHandlerContext<Store, any>) {
@@ -49,6 +51,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._removedPairs.clear();
     this._upgradedPairs.clear();
     this._initiatedTransfers.clear();
+    this._ethBridgeMessages.clear();
     const initTransfers = await ctx.store.find(InitiatedTransfer);
     for (const transfer of initTransfers) {
       this._initiatedTransfers.set(transfer.id, transfer);
@@ -59,13 +62,13 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     const pairs: Pair[] = [];
 
     if (this._addedPairs.size > 0) {
-      await this._ctx.store.save(Array.from(this._addedPairs.values()));
+      await this._ctx.store.save(mapValues(this._addedPairs));
       this._ctx.log.info(`Saved ${this._addedPairs.size} new pairs`);
     }
 
     if (this._removedPairs.size > 0) {
       const removed = await this._ctx.store.find(Pair, {
-        where: { isRemoved: false, id: In(Array.from(this._removedPairs.keys())) },
+        where: { isRemoved: false, id: In(mapKeys(this._removedPairs)) },
       });
       for (const pair of removed) {
         pair.isRemoved = true;
@@ -78,7 +81,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
 
     if (this._upgradedPairs.size > 0) {
       const upgraded = await this._ctx.store.find(Pair, {
-        where: { isRemoved: false, id: In(Array.from(this._upgradedPairs.keys())) },
+        where: { isRemoved: false, id: In(mapKeys(this._upgradedPairs)) },
       });
       for (const pair of upgraded) {
         const { newId, activeToBlock } = this._upgradedPairs.get(pair.id)!;
@@ -96,13 +99,13 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   private async _saveInitiatedTransfers() {
-    const transfers = Array.from(this._transfers.values());
+    const transfers = mapValues(this._transfers);
 
-    const initTransfers = Array.from(this._initiatedTransfers.values()).filter(
+    const initTransfers = mapValues(this._initiatedTransfers).filter(
       ({ id }) => !Boolean(transfers.find((t) => t.id === id)),
     );
 
-    const initTransfersToRemove = Array.from(this._initiatedTransfers.values()).filter(({ id }) =>
+    const initTransfersToRemove = mapValues(this._initiatedTransfers).filter(({ id }) =>
       Boolean(transfers.find((t) => t.id === id)),
     );
 
@@ -110,18 +113,63 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._ctx.store.remove(initTransfersToRemove);
   }
 
-  public async save() {
-    if (this._transfersToRemove.size > 0) {
-      await this._ctx.store.remove(Array.from(this._transfersToRemove.values()));
+  private async _saveEthBridgeMessages() {
+    if (this._ethBridgeMessages.size === 0) return;
+
+    for (const [nonce, message] of this._ethBridgeMessages.entries()) {
+      if (this._transfers.has(nonce)) {
+        const transfer = this._transfers.get(nonce)!;
+
+        transfer.bridgingStartedAtBlock = message.blockNumber;
+        transfer.bridgingStartedAtMessageId = message.id;
+      }
+    }
+    await this._ctx.store.save(mapValues(this._ethBridgeMessages));
+
+    this._ctx.log.info(`${this._ethBridgeMessages.size} Gear ETH bridge messages saved`);
+  }
+
+  protected async _saveTransfers(): Promise<void> {
+    const nonces: string[] = [];
+
+    for (const [nonce, transfer] of this._transfers.entries()) {
+      if (transfer.bridgingStartedAtBlock && transfer.bridgingStartedAtMessageId) {
+        continue;
+      }
+
+      nonces.push(nonce);
     }
 
-    await super.save();
+    const ethBridgeMessages = await this._ctx.store.find(GearEthBridgeMessage, {
+      where: { nonce: In(nonces) },
+    });
+
+    for (const { nonce, blockNumber, id } of ethBridgeMessages) {
+      const transfer = this._transfers.get(nonce)!;
+
+      transfer.bridgingStartedAtBlock = blockNumber;
+      transfer.bridgingStartedAtMessageId = id;
+    }
+
+    await super._saveTransfers();
+  }
+
+  public async save() {
+    if (this._transfersToRemove.size > 0) {
+      await this._ctx.store.remove(setValues(this._transfersToRemove));
+    }
+
+    await this._saveEthBridgeMessages();
+
+    await this._processStatuses();
+    await this._saveTransfers();
+    await this._saveCompletedTransfers();
 
     await this._savePairs();
     await this._saveInitiatedTransfers();
   }
 
-  public async handleRequestBridgingReply(id: string, nonce?: string) {
+  public async handleRequestBridgingReply(id: string, nonce: string) {
     const initTransfer = this._initiatedTransfers.get(id);
 
     if (!initTransfer) {
@@ -285,7 +333,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public getActiveVaraTokens(): string[] {
-    const activePairs = Array.from(this._pairs.values())
+    const activePairs = mapValues(this._pairs)
       .filter(({ isRemoved, upgradedTo }) => !isRemoved && !upgradedTo)
       .map(({ varaToken }) => varaToken);
 
@@ -297,5 +345,10 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._initiatedTransfers.set(transfer.id, transfer);
 
     this._ctx.log.info(`${transfer.id}: Transfer requested in block ${transfer.blockNumber}`);
+  }
+
+  public addEthBridgeMessage(message: GearEthBridgeMessage) {
+    this._ethBridgeMessages.set(message.nonce, message);
+    this._ctx.log.info(`Gear ETH bridge message with nonce ${message.nonce} added`);
   }
 }

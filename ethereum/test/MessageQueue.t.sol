@@ -302,6 +302,17 @@ contract MessageQueueTest is Test, Base {
             address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
             address(newImplementationMock)
         );
+
+        // just to get coverage for NewImplementationMock contract
+
+        vm.expectEmit(address(messageQueue));
+        emit IERC1967.Upgraded(address(newImplementationMock));
+
+        messageQueue.upgradeToAndCall(address(newImplementationMock), "");
+        assertEq(
+            address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            address(newImplementationMock)
+        );
     }
 
     function test_UpgradeToAndCallUnauthorized() public {

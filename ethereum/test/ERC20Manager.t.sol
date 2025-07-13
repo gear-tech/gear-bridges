@@ -372,6 +372,22 @@ contract ERC20ManagerTest is Test, Base {
         vm.stopPrank();
     }
 
+    function test_RequestBridgingWithEthereumTokenWithZeroAmount() public {
+        vm.startPrank(deploymentArguments.deployerAddress);
+
+        address token = address(circleToken);
+        uint256 amount = 0;
+        bytes32 to = 0;
+
+        IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, amount);
+        circleToken.approve(address(erc20Manager), amount);
+
+        vm.expectRevert(IERC20Manager.InvalidAmount.selector);
+        erc20Manager.requestBridging(token, amount, to);
+
+        vm.stopPrank();
+    }
+
     function test_RequestBridgingWithGearToken() public {
         vm.startPrank(deploymentArguments.deployerAddress);
 
@@ -427,7 +443,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_RequestBridgingWithInvalidTokenType() public {
         address token = address(0);
-        uint256 amount = 0;
+        uint256 amount = 1;
         bytes32 to = 0;
 
         vm.expectRevert(IERC20Manager.InvalidTokenType.selector);

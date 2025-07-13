@@ -243,6 +243,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(erc20Manager.isVftManager(deploymentArguments.vftManager), true);
         address[] memory tokens_ = erc20Manager.tokens();
         assertEq(tokens_.length, 4);
+        assertEq(erc20Manager.totalTokens(), 4);
         assertEq(tokens_[0], address(circleToken));
         assertEq(tokens_[1], address(tetherToken));
         assertEq(tokens_[2], address(wrappedEther));
@@ -262,6 +263,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         address[] memory bridgingPayments = erc20Manager.bridgingPayments();
         assertEq(bridgingPayments.length, 1);
+        assertEq(erc20Manager.totalBridgingPayments(), 1);
         assertTrue(erc20Manager.isBridgingPayment(address(bridgingPayment)));
         assertFalse(erc20Manager.isBridgingPayment(address(0)));
 

@@ -26,6 +26,11 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidPayload();
 
     /**
+     * @dev Error thrown when the amount is invalid.
+     */
+    error InvalidAmount();
+
+    /**
      * @dev Error thrown when the token type is invalid (`TokenType.Unknown`).
      */
     error InvalidTokenType();
@@ -138,6 +143,12 @@ interface IERC20Manager is IPausable, IMessageHandler {
     function isVftManager(bytes32 vftManager) external view returns (bool);
 
     /**
+     * @dev Returns total number of tokens.
+     * @return totalTokens Total number of tokens.
+     */
+    function totalTokens() external view returns (uint256);
+
+    /**
      * @dev Returns list of tokens.
      * @return tokens List of tokens.
      */
@@ -149,6 +160,12 @@ interface IERC20Manager is IPausable, IMessageHandler {
      * @return tokenType Token type. Returns `TokenType.Unknown` if token is not registered.
      */
     function getTokenType(address token) external view returns (TokenType);
+
+    /**
+     * @dev Returns total number of bridging payments.
+     * @return totalBridgingPayments Total number of bridging payments.
+     */
+    function totalBridgingPayments() external view returns (uint256);
 
     /**
      * @dev Returns list of bridging payments.

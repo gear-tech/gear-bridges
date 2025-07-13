@@ -10,6 +10,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ERC20GearSupply} from "./erc20/managed/ERC20GearSupply.sol";
+import {CustomEnumerableMap} from "./libraries/CustomEnumerableMap.sol";
 import {LibString} from "./libraries/LibString.sol";
 import {BridgingPayment} from "./BridgingPayment.sol";
 import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
@@ -30,8 +31,11 @@ contract ERC20Manager is
     IERC20Manager
 {
     using SafeERC20 for IERC20;
+
     using EnumerableSet for EnumerableSet.Bytes32Set;
     using EnumerableSet for EnumerableSet.AddressSet;
+
+    using CustomEnumerableMap for CustomEnumerableMap.AddressToTokenTypeMap;
 
     /**
      * @dev `bytes32 sender` size.
@@ -44,7 +48,7 @@ contract ERC20Manager is
     /**
      * @dev `address token` size.
      */
-    uint256 internal constant TOKEN1_SIZE = 20;
+    uint256 internal constant TOKEN_SIZE = 20;
     /**
      * @dev `uint256 amount` size.
      */
@@ -53,7 +57,7 @@ contract ERC20Manager is
     /**
      * @dev Size of transfer message.
      */
-    uint256 internal constant TRANSFER_MESSAGE_SIZE = SENDER_SIZE + RECEIVER_SIZE + TOKEN1_SIZE + AMOUNT_SIZE;
+    uint256 internal constant TRANSFER_MESSAGE_SIZE = SENDER_SIZE + RECEIVER_SIZE + TOKEN_SIZE + AMOUNT_SIZE;
 
     /**
      * @dev `address receiver` bit shift.
@@ -62,7 +66,7 @@ contract ERC20Manager is
     /**
      * @dev `address token` bit shift.
      */
-    uint256 internal constant TOKEN1_BIT_SHIFT = 96;
+    uint256 internal constant TOKEN_BIT_SHIFT = 96;
 
     /**
      * @dev `SENDER_SIZE` offset.
@@ -73,7 +77,7 @@ contract ERC20Manager is
      */
     uint256 internal constant OFFSET2 = 52;
     /**
-     * @dev `SENDER_SIZE + RECEIVER_SIZE + TOKEN1_SIZE` offset.
+     * @dev `SENDER_SIZE + RECEIVER_SIZE + TOKEN_SIZE` offset.
      */
     uint256 internal constant OFFSET3 = 72;
 
@@ -151,17 +155,17 @@ contract ERC20Manager is
     /**
      * @dev `address token` size.
      */
-    uint256 internal constant TOKEN2_SIZE = 20;
+    uint256 internal constant ETHEREUM_TOKEN_SIZE = 20;
 
     /**
      * @dev Size of register token message (for `TokenType.Ethereum`).
      */
-    uint256 internal constant REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE = DISCRIMINANT_SIZE + TOKEN2_SIZE;
+    uint256 internal constant REGISTER_ETHEREUM_TOKEN_MESSAGE_SIZE = DISCRIMINANT_SIZE + ETHEREUM_TOKEN_SIZE;
 
     /**
      * @dev `address token` bit shift.
      */
-    uint256 internal constant TOKEN2_BIT_SHIFT = 96;
+    uint256 internal constant ETHEREUM_TOKEN_BIT_SHIFT = 96;
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
@@ -169,8 +173,7 @@ contract ERC20Manager is
     IGovernance private _governancePauser;
     address private _messageQueue;
     EnumerableSet.Bytes32Set private _vftManagers;
-    address[] private _tokens;
-    mapping(address token => TokenType tokenType) private _tokenType;
+    CustomEnumerableMap.AddressToTokenTypeMap private _tokens;
     EnumerableSet.AddressSet private _bridgingPayments;
 
     /**
@@ -217,8 +220,7 @@ contract ERC20Manager is
             if (tokenInfo.tokenType == TokenType.Unknown) {
                 revert InvalidTokenType();
             } else {
-                _tokens.push(tokenInfo.token);
-                _tokenType[tokenInfo.token] = tokenInfo.tokenType;
+                _tokens.set(tokenInfo.token, tokenInfo.tokenType);
             }
         }
     }
@@ -265,11 +267,19 @@ contract ERC20Manager is
     }
 
     /**
+     * @dev Returns total number of tokens.
+     * @return totalTokens Total number of tokens.
+     */
+    function totalTokens() external view returns (uint256) {
+        return _tokens.length();
+    }
+
+    /**
      * @dev Returns list of tokens.
      * @return tokens List of tokens.
      */
     function tokens() external view returns (address[] memory) {
-        return _tokens;
+        return _tokens.keys();
     }
 
     /**
@@ -278,7 +288,16 @@ contract ERC20Manager is
      * @return tokenType Token type. Returns `TokenType.Unknown` if token is not registered.
      */
     function getTokenType(address token) external view returns (TokenType) {
-        return _tokenType[token];
+        (, TokenType tokenType) = _tokens.tryGet(token);
+        return tokenType;
+    }
+
+    /**
+     * @dev Returns total number of bridging payments.
+     * @return totalBridgingPayments Total number of bridging payments.
+     */
+    function totalBridgingPayments() external view returns (uint256) {
+        return _bridgingPayments.length();
     }
 
     /**
@@ -327,7 +346,11 @@ contract ERC20Manager is
      * @dev Reverts if token is not registered with `InvalidTokenType` error.
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public whenNotPaused {
-        TokenType tokenType = _tokenType[token];
+        if (amount == 0) {
+            revert InvalidAmount();
+        }
+
+        (, TokenType tokenType) = _tokens.tryGet(token);
 
         if (tokenType == TokenType.Unknown) {
             revert InvalidTokenType();
@@ -461,12 +484,12 @@ contract ERC20Manager is
             sender := calldataload(payload.offset)
             // `RECEIVER_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             receiver := shr(RECEIVER_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
-            // `TOKEN1_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-            token := shr(TOKEN1_BIT_SHIFT, calldataload(add(payload.offset, OFFSET2)))
+            // `TOKEN_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+            token := shr(TOKEN_BIT_SHIFT, calldataload(add(payload.offset, OFFSET2)))
             amount := calldataload(add(payload.offset, OFFSET3))
         }
 
-        TokenType tokenType = _tokenType[token];
+        (, TokenType tokenType) = _tokens.tryGet(token);
 
         if (tokenType == TokenType.Unknown) {
             revert InvalidTokenType();
@@ -551,12 +574,11 @@ contract ERC20Manager is
             // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
             address token;
             assembly ("memory-safe") {
-                // `TOKEN2_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
-                token := shr(TOKEN2_BIT_SHIFT, calldataload(add(payload.offset, OFFSET4)))
+                // `ETHEREUM_TOKEN_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
+                token := shr(ETHEREUM_TOKEN_BIT_SHIFT, calldataload(add(payload.offset, OFFSET4)))
             }
 
-            _tokens.push(token);
-            _tokenType[token] = TokenType.Ethereum;
+            _tokens.set(token, TokenType.Ethereum);
 
             emit EthereumTokenRegistered(token);
 
@@ -599,8 +621,7 @@ contract ERC20Manager is
         ERC20GearSupply gearSupply = new ERC20GearSupply(address(this), tokenNameStr, tokenSymbolStr, tokenDecimals);
         address tokenAddress = address(gearSupply);
 
-        _tokens.push(tokenAddress);
-        _tokenType[tokenAddress] = TokenType.Gear;
+        _tokens.set(tokenAddress, TokenType.Gear);
 
         emit GearTokenRegistered(tokenAddress, tokenNameStr, tokenSymbolStr, tokenDecimals);
 

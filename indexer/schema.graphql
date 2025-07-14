@@ -65,6 +65,7 @@ type CompletedTransfer @entity {
   id: ID!
   nonce: String! @index @unique
   destNetwork: Network!
+  srcNetwork: Network
   timestamp: DateTime
   txHash: String!
   blockNumber: BigInt!

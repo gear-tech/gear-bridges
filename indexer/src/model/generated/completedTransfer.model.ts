@@ -17,6 +17,9 @@ export class CompletedTransfer {
     @Column_("varchar", {length: 8, nullable: false})
     destNetwork!: Network
 
+    @Column_("varchar", {length: 8, nullable: true})
+    srcNetwork!: Network | undefined | null
+
     @DateTimeColumn_({nullable: true})
     timestamp!: Date | undefined | null
 

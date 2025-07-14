@@ -9,7 +9,7 @@ import { ethNonce, gearNonce } from '../common';
 import { config } from './config';
 import { BatchState } from './batch-state';
 
-const state = new BatchState(Network.Ethereum);
+const state = new BatchState(Network.Ethereum, Network.Vara);
 
 const ERC20_MANAGER = config.erc20Manager.toLowerCase();
 const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequested.topic;

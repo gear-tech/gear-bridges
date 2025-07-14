@@ -7,5 +7,6 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._processStatuses();
     await this._saveTransfers();
     await this._saveCompletedTransfers();
+    await this._processCompletedTransfers();
   }
 }

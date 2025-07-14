@@ -1,17 +1,15 @@
 import { TypeormDatabase } from '@subsquid/typeorm-store';
-import { randomUUID } from 'crypto';
 import {
   BridgingPaidEvent,
   BridgingRequested,
   HistoricalProxyAddressChanged,
   Relayed,
-  RequestBridgingArgs,
   TokenMappingAdded,
   TokenMappingRemoved,
 } from './types';
 import { ethNonce, gearNonce, gearNonceFromNumber, mapKeys } from '../common';
 import { ProcessorContext, getProcessor } from './processor';
-import { EthBridgeProgram, GearEthBridgeMessage, InitiatedTransfer, Network, Status, Transfer } from '../model';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Status, Transfer } from '../model';
 import {
   BridgingPaymentMethods,
   BridgingPaymentServices,

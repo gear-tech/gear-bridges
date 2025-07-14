@@ -130,10 +130,24 @@ interface IERC20Manager is IPausable, IMessageHandler {
     function messageQueue() external view returns (address);
 
     /**
+     * @dev Returns total number of VFT managers.
+     * @return totalVftManagers Total number of VFT managers.
+     */
+    function totalVftManagers() external view returns (uint256);
+
+    /**
      * @dev Returns list of VFT managers.
      * @return vftManagers List of VFT managers.
      */
     function vftManagers() external view returns (bytes32[] memory);
+
+    /**
+     * @dev Returns list of VFT managers.
+     * @param offset Offset of the first VFT manager to return.
+     * @param limit Maximum number of VFT managers to return.
+     * @return vftManagers List of VFT managers.
+     */
+    function vftManagers(uint256 offset, uint256 limit) external view returns (bytes32[] memory);
 
     /**
      * @dev Returns whether the VFT manager is registered.
@@ -155,6 +169,14 @@ interface IERC20Manager is IPausable, IMessageHandler {
     function tokens() external view returns (address[] memory);
 
     /**
+     * @dev Returns list of tokens.
+     * @param offset Offset of the first token to return.
+     * @param limit Maximum number of tokens to return.
+     * @return tokens List of tokens.
+     */
+    function tokens(uint256 offset, uint256 limit) external view returns (address[] memory);
+
+    /**
      * @dev Returns token type.
      * @param token Token address.
      * @return tokenType Token type. Returns `TokenType.Unknown` if token is not registered.
@@ -172,6 +194,14 @@ interface IERC20Manager is IPausable, IMessageHandler {
      * @return bridgingPayments List of bridging payments.
      */
     function bridgingPayments() external view returns (address[] memory);
+
+    /**
+     * @dev Returns list of bridging payments.
+     * @param offset Offset of the first bridging payment to return.
+     * @param limit Maximum number of bridging payments to return.
+     * @return bridgingPayments List of bridging payments.
+     */
+    function bridgingPayments(uint256 offset, uint256 limit) external view returns (address[] memory);
 
     /**
      * @dev Returns whether the bridging payment is registered.

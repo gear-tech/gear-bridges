@@ -250,11 +250,29 @@ contract ERC20Manager is
     }
 
     /**
+     * @dev Returns total number of VFT managers.
+     * @return totalVftManagers Total number of VFT managers.
+     */
+    function totalVftManagers() external view returns (uint256) {
+        return _vftManagers.length();
+    }
+
+    /**
      * @dev Returns list of VFT managers.
      * @return vftManagers List of VFT managers.
      */
     function vftManagers() external view returns (bytes32[] memory) {
         return _vftManagers.values();
+    }
+
+    /**
+     * @dev Returns list of VFT managers.
+     * @param offset Offset of the first VFT manager to return.
+     * @param limit Maximum number of VFT managers to return.
+     * @return vftManagers List of VFT managers.
+     */
+    function vftManagers(uint256 offset, uint256 limit) external view returns (bytes32[] memory) {
+        return paginate(_vftManagers, offset, limit);
     }
 
     /**
@@ -280,6 +298,23 @@ contract ERC20Manager is
      */
     function tokens() external view returns (address[] memory) {
         return _tokens.keys();
+    }
+
+    /**
+     * @dev Returns list of tokens.
+     * @param offset Offset of the first token to return.
+     * @param limit Maximum number of tokens to return.
+     * @return tokens List of tokens.
+     */
+    function tokens(uint256 offset, uint256 limit) external view returns (address[] memory) {
+        bytes32[] memory store = paginate(_tokens._inner._keys, offset, limit);
+        address[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
     }
 
     /**
@@ -309,12 +344,67 @@ contract ERC20Manager is
     }
 
     /**
+     * @dev Returns list of bridging payments.
+     * @param offset Offset of the first bridging payment to return.
+     * @param limit Maximum number of bridging payments to return.
+     * @return bridgingPayments List of bridging payments.
+     */
+    function bridgingPayments(uint256 offset, uint256 limit) external view returns (address[] memory) {
+        EnumerableSet.Bytes32Set storage bytes32Set;
+        assembly ("memory-safe") {
+            bytes32Set.slot := _bridgingPayments.slot
+        }
+
+        bytes32[] memory store = paginate(bytes32Set, offset, limit);
+        address[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    /**
      * @dev Returns whether the bridging payment is registered.
      * @param bridgingPayment Bridging payment address.
      * @return isBridgingPayment `true` if the bridging payment is registered, `false` otherwise.
      */
     function isBridgingPayment(address bridgingPayment) external view returns (bool) {
         return _bridgingPayments.contains(bridgingPayment);
+    }
+
+    /**
+     * @dev Returns list of items from the set.
+     * @param bytes32Set Set of items.
+     * @param offset Offset of the first item to return.
+     * @param limit Maximum number of items to return.
+     * @return items List of items.
+     */
+    function paginate(EnumerableSet.Bytes32Set storage bytes32Set, uint256 offset, uint256 limit)
+        private
+        view
+        returns (bytes32[] memory)
+    {
+        uint256 length = bytes32Set.length();
+
+        if (offset >= length) {
+            return new bytes32[](0);
+        }
+
+        uint256 end = offset + limit;
+        if (end > length) {
+            end = length;
+        }
+
+        uint256 size = end - offset;
+        bytes32[] memory result = new bytes32[](size);
+
+        for (uint256 i = 0; i < size; i++) {
+            result[i] = bytes32Set.at(offset + i);
+        }
+
+        return result;
     }
 
     /**

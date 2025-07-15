@@ -105,7 +105,7 @@ impl BlockListener {
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
-        let (tx, _) = broadcast::channel(RECEIVER_COUNT);
+        let (tx, _) = broadcast::channel(512);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
             let api = self.api_provider.client();

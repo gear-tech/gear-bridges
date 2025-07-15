@@ -1,9 +1,7 @@
 use crate::message_relayer::{
-    common::{gear::block_listener::GearBlock, AuthoritySetId, GearBlockNumber, MessageInBlock},
+    common::{self, GearBlock, AuthoritySetId, GearBlockNumber, MessageInBlock},
     eth_to_gear::api_provider::ApiProviderConnection,
 };
-
-use gsdk::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use prometheus::IntCounter;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
@@ -31,25 +29,6 @@ impl_metered_service! {
             "Total amount of messages discovered",
         ),
     }
-}
-
-fn message_queued_events_of(
-    block: &GearBlock,
-) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
-    block.events().iter().filter_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
-            let mut nonce_le = [0; 32];
-            primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
-
-            Some(gear_rpc_client::dto::Message {
-                nonce_le,
-                source: message.source.0,
-                destination: message.destination.0,
-                payload: message.payload.clone(),
-            })
-        }
-        _ => None,
-    })
 }
 
 impl MessageQueuedEventExtractor {
@@ -120,7 +99,7 @@ impl MessageQueuedEventExtractor {
         block: GearBlock,
         authority_set_id: u64,
     ) -> anyhow::Result<()> {
-        let messages = message_queued_events_of(&block);
+        let messages = common::message_queued_events_of(&block);
         let block_hash = block.hash();
         let mut total = 0;
         for message in messages {

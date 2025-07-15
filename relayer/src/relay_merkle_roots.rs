@@ -7,7 +7,7 @@ use crate::{
         BASE_RETRY_DELAY, MAX_RETRIES,
     },
     message_relayer::{
-        common::gear::block_listener::GearBlock, eth_to_gear::api_provider::ApiProviderConnection,
+        common::GearBlock, eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},

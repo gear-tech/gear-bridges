@@ -1,4 +1,4 @@
-use crate::message_relayer::common::{gear::block_listener::GearBlock, EthereumSlotNumber};
+use crate::message_relayer::common::{GearBlock, EthereumSlotNumber};
 use checkpoint_light_client_client::{
     service_replay_back::events::ServiceReplayBackEvents,
     service_sync_update::events::ServiceSyncUpdateEvents,

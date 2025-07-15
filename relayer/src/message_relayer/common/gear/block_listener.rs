@@ -1,66 +1,12 @@
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
-
-use ethereum_common::Hash256;
-use futures::StreamExt;
-use gsdk::{
-    config::Header,
-    metadata::{
-        gear::Event as GearEvent,
-        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-    },
-    subscription::BlockEvents,
+use crate::message_relayer::{
+    common::GearBlock,
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
-use primitive_types::H256;
+use futures::StreamExt;
+use gsdk::subscription::BlockEvents;
 use prometheus::IntGauge;
-use subxt::config::Header as _;
 use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
-
-#[derive(Clone)]
-pub struct GearBlock {
-    pub header: Header,
-    pub events: Vec<gsdk::Event>,
-}
-
-impl GearBlock {
-    pub fn new(header: Header, events: Vec<gsdk::Event>) -> Self {
-        Self { header, events }
-    }
-
-    pub fn number(&self) -> u32 {
-        self.header.number()
-    }
-
-    pub fn hash(&self) -> Hash256 {
-        self.header.hash()
-    }
-
-    pub fn events(&self) -> &[gsdk::Event] {
-        &self.events
-    }
-
-    pub fn user_message_sent_events(
-        &self,
-        from_program: H256,
-        to_user: H256,
-    ) -> impl Iterator<Item = &[u8]> + use<'_> {
-        self.events.iter().filter_map(move |event| match event {
-            gclient::Event::Gear(GearEvent::UserMessageSent {
-                message:
-                    UserMessage {
-                        source,
-                        destination,
-                        payload,
-                        ..
-                    },
-                ..
-            }) if source == &ActorId(from_program.0) && destination == &ActorId(to_user.0) => {
-                Some(payload.0.as_ref())
-            }
-            _ => None,
-        })
-    }
-}
 
 pub struct BlockListener {
     api_provider: ApiProviderConnection,

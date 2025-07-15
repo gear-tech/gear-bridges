@@ -21,15 +21,23 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct AuthoritySetSyncIo {
     response: UnboundedReceiver<SealedNotFinalizedEra>,
+    requests: UnboundedSender<GearBlock>,
 }
 
 impl AuthoritySetSyncIo {
-    pub fn new(response: UnboundedReceiver<SealedNotFinalizedEra>) -> Self {
-        Self { response }
+    pub fn new(
+        response: UnboundedReceiver<SealedNotFinalizedEra>,
+        requests: UnboundedSender<GearBlock>,
+    ) -> Self {
+        Self { response, requests }
     }
 
     pub async fn recv(&mut self) -> Option<SealedNotFinalizedEra> {
         self.response.recv().await
+    }
+
+    pub fn synchronize(&self, block: GearBlock) -> bool {
+        self.requests.send(block).is_ok()
     }
 }
 
@@ -92,13 +100,14 @@ impl AuthoritySetSync {
 
     pub fn run(mut self, mut blocks: Receiver<GearBlock>) -> AuthoritySetSyncIo {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (req_tx, mut req_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let io = AuthoritySetSyncIo::new(rx);
+        let io = AuthoritySetSyncIo::new(rx, req_tx);
 
         tokio::task::spawn_blocking(move || {
             block_on(async move {
                 loop {
-                    if let Err(err) = self.process(&mut blocks, &tx).await {
+                    if let Err(err) = self.process(&mut blocks, &mut req_rx, &tx).await {
                         log::error!("Authority set sync task failed: {err}");
 
                         match self.api_provider.reconnect().await {
@@ -131,35 +140,61 @@ impl AuthoritySetSync {
     async fn process(
         &mut self,
         blocks: &mut Receiver<GearBlock>,
+        force_sync: &mut UnboundedReceiver<GearBlock>,
         sealed_eras: &UnboundedSender<SealedNotFinalizedEra>,
     ) -> anyhow::Result<()> {
         loop {
-            match blocks.recv().await {
-                Ok(block) => {
-                    if Self::authority_set_hash_changeed(&block).is_some() {
-                        if !self.sync_authority_set_completely(&block, blocks).await? {
-                            return Ok(());
-                        }
+            tokio::select! {
+                sync = force_sync.recv() => {
+                    match sync {
+                        Some(block) => {
+                            log::info!("Force authority set sync for authority set in block #{}", block.number());
 
-                        self.eras.process(&self.proof_storage).await?;
-
-                        while let Some(sealed) = self.eras.sealed_not_finalized.pop() {
-                            if sealed_eras.send(sealed).is_err() {
+                            if !self.sync_authority_set_completely(&block, blocks).await? {
                                 return Ok(());
                             }
+
+                            self.eras.process(&self.proof_storage).await?;
+
+                            while let Some(sealed) = self.eras.sealed_not_finalized.pop() {
+                                if sealed_eras.send(sealed).is_err() {
+                                    return Ok(());
+                                }
+                            }
                         }
+
+                        None => return Ok(())
                     }
                 }
+                block = blocks.recv() => {
+                    match block {
+                        Ok(block) => {
+                            if Self::authority_set_hash_changeed(&block).is_some() {
+                                if !self.sync_authority_set_completely(&block, blocks).await? {
+                                    return Ok(());
+                                }
 
-                Err(RecvError::Lagged(n)) => {
-                    log::error!(
-                        "Gear block listener lagged behind {n} blocks, skipping some blocks"
-                    );
-                    continue;
-                }
+                                self.eras.process(&self.proof_storage).await?;
 
-                Err(RecvError::Closed) => {
-                    return Ok(());
+                                while let Some(sealed) = self.eras.sealed_not_finalized.pop() {
+                                    if sealed_eras.send(sealed).is_err() {
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+
+                        Err(RecvError::Lagged(n)) => {
+                            log::error!(
+                                "Gear block listener lagged behind {n} blocks, skipping some blocks"
+                            );
+                            continue;
+                        }
+
+                        Err(RecvError::Closed) => {
+                            return Ok(());
+                        }
+                    }
                 }
             }
         }

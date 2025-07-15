@@ -215,7 +215,7 @@ impl MerkleRootRelayer {
                 block = blocks_rx.recv() => {
                     match block {
                         Ok(block) => {
-                            if !self.try_proof_merkle_root(prover, block).await? {
+                            if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
                                 return Ok(());
                             }
                         }
@@ -264,6 +264,9 @@ impl MerkleRootRelayer {
                     };
 
                     self.block_storage.merkle_root_processed(response.merkle_root_block).await;
+                    if let Err(err) = self.block_storage.save().await {
+                        log::error!("Failed to save block state: {err:?}");
+                    }
                     let Some(era) = response.era else {
                         continue;
                     };
@@ -277,7 +280,7 @@ impl MerkleRootRelayer {
 
                     log::info!("Era #{era} is synced, submitting {} blocks", to_submit.len());
                     while let Some(block) = to_submit.pop() {
-                        if !self.try_proof_merkle_root(prover, block).await? {
+                        if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
                             return Ok(());
                         }
                     }
@@ -291,6 +294,7 @@ impl MerkleRootRelayer {
     async fn try_proof_merkle_root(
         &mut self,
         prover: &mut FinalityProverIo,
+        authority_set_sync: &AuthoritySetSyncIo,
         block: GearBlock,
     ) -> anyhow::Result<bool> {
         let Some(merkle_root) = Self::queue_merkle_root_changed(&block) else {
@@ -332,7 +336,10 @@ impl MerkleRootRelayer {
                 );
                 self.waiting_for_authority_set_sync
                     .entry(signed_by_authority_set_id)
-                    .or_default()
+                    .or_insert_with(|| {
+                        authority_set_sync.synchronize(block.clone());
+                        Default::default()
+                    })
                     .push(block);
             }
 

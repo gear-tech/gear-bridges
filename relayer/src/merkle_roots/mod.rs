@@ -333,7 +333,7 @@ impl MerkleRootRelayer {
                 }
             }
 
-            Err(ProofStorageError::NotFound(_)) => {
+            Err(ProofStorageError::NotInitialized) | Err(ProofStorageError::NotFound(_)) => {
                 log::info!(
                     "Delaying proof generation for merkle root {} at block #{} until authority set #{} is synced",
                     merkle_root,

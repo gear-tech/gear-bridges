@@ -130,6 +130,7 @@ mod tests {
     use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber};
     use gear_rpc_client::dto::Message;
     use primitive_types::H256;
+    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn fee_payer_filter() {
@@ -165,9 +166,10 @@ mod tests {
             authority_set_id: AuthoritySetId(0),
         };
 
-        let (msg_sender, msg_receiver) = unbounded_channel();
-        let (paid_sender, paid_receiver) = unbounded_channel();
-        let mut msg_receiver = filter.run(msg_receiver, paid_receiver).await;
+        let (msg_sender, filter_msg_receiver) = mpsc::unbounded_channel();
+        let (paid_sender, paid_receiver) = mpsc::unbounded_channel();
+        let (filter_msg_sender, mut msg_receiver) = mpsc::unbounded_channel();
+        filter.spawn(filter_msg_receiver, paid_receiver, filter_msg_sender);
 
         msg_sender.send(message0).unwrap();
         let res = msg_receiver.recv().await.unwrap();

@@ -72,6 +72,19 @@ impl Messages {
     }
 }
 
+/// Represents the successful status of adding a relayed merkle root.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum AddStatus {
+    /// Provided instance is new and added.
+    Ok,
+    /// The same as Ok but returns the popped oldest merkle root (to
+    /// retain the initial capacity).
+    Removed(RelayedMerkleRoot),
+    /// The provided root overwrites existing one with the same authority set id.
+    Overwritten(GearBlockNumber),
+}
+
 pub struct MerkleRoots(Vec<RelayedMerkleRoot>);
 
 impl MerkleRoots {
@@ -129,15 +142,13 @@ impl MerkleRoots {
         self.0.len()
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, i: usize) -> Option<&RelayedMerkleRoot> {
         self.0.get(i)
     }
 
-    // Err(i) -> there is already a root with the same authority_set_id and block_number
-    // Ok(None) -> provided instance is new and added
-    // Ok(Some(_)) -> the same as with None but returns the popped oldest merkle root (to
-    // retain the initial capacity)
-    pub fn add(&mut self, root_new: RelayedMerkleRoot) -> Result<Option<RelayedMerkleRoot>, usize> {
+    // Err(i) -> there is already a root with the same authority_set_id
+    pub fn add(&mut self, root_new: RelayedMerkleRoot) -> Result<AddStatus, usize> {
         let i = match self.0.binary_search_by(|root| {
             Self::compare(
                 root.authority_set_id,
@@ -151,15 +162,40 @@ impl MerkleRoots {
             Err(i) => i,
         };
 
-        let result = if self.0.len() < self.0.capacity() {
-            None
+        if let Some(root) = self.0.get(i - 1) {
+            if root.authority_set_id == root_new.authority_set_id {
+                return Err(i - 1);
+            }
+        }
+
+        if let Some(root_previous) = self.0.get_mut(i) {
+            if root_previous.authority_set_id == root_new.authority_set_id {
+                let block_number = root_previous.block;
+                *root_previous = root_new;
+
+                return Ok(AddStatus::Overwritten(block_number));
+            }
+        }
+
+        let (result, i) = if self.0.len() < self.0.capacity() {
+            (None, i)
         } else {
-            self.0.pop()
+            // adjust insertion index
+            let i = if i >= self.0.len() {
+                i - 1
+            } else {
+                i
+            };
+
+            (self.0.pop(), i)
         };
 
         self.0.insert(i, root_new);
-
-        Ok(result)
+        
+        Ok(match result {
+            Some(root) => AddStatus::Removed(root),
+            None => AddStatus::Ok,
+        })
     }
 }
 
@@ -170,12 +206,14 @@ mod tests {
 
     #[test]
     fn merkle_roots() {
+        const CAPACITY: usize = 2;
+
         let the_newest_root = RelayedMerkleRoot {
-            block: GearBlockNumber(16_888_714),
-            block_hash: hex!("b592a0ec4212c81eccee43cfdce35de08ddd705361dc01c557a615ebd74200a0")
+            block: GearBlockNumber(18_686_058),
+            block_hash: hex!("d52749e67e5e3fae9a4769330af6587dc96465d70af51c85d4706336aab634e5")
                 .into(),
-            authority_set_id: AuthoritySetId(1_183),
-            merkle_root: hex!("1636e359c8f975261880b14abaeb511626bfc80e4cab8446448b12d6ce8275b6")
+            authority_set_id: AuthoritySetId(1_309),
+            merkle_root: hex!("a5c50de3b48386f4159d24f735c067bb2e6f80c0eb3f3ffe862e0aedc19f6e0f")
                 .into(),
         };
         let the_oldest_root = RelayedMerkleRoot {
@@ -187,6 +225,12 @@ mod tests {
                 .into(),
         };
         let data = [
+            RelayedMerkleRoot {
+                block: GearBlockNumber(18_676_002),
+                block_hash: hex!("8d6286038e2ac0bea811e9d99d821084f0271a59b621b4eef52cd85b2fd6c3cb").into(),
+                authority_set_id: AuthoritySetId(1_308),
+                merkle_root: hex!("00c39a437f0331e49a996433f95ca3955a9caf77b8bf6a1f10b2d5214326bd91").into(),
+            },
             RelayedMerkleRoot {
                 block: GearBlockNumber(16_883_172),
                 block_hash: hex!(
@@ -272,6 +316,14 @@ mod tests {
                 )
                 .into(),
             },
+            RelayedMerkleRoot {
+                block: GearBlockNumber(16_888_714),
+                block_hash: hex!("b592a0ec4212c81eccee43cfdce35de08ddd705361dc01c557a615ebd74200a0")
+                    .into(),
+                authority_set_id: AuthoritySetId(1_183),
+                merkle_root: hex!("1636e359c8f975261880b14abaeb511626bfc80e4cab8446448b12d6ce8275b6")
+                    .into(),
+            },
         ];
 
         assert!(!data.is_sorted_by(|a, b| MerkleRoots::compare(
@@ -281,11 +333,19 @@ mod tests {
             b.block,
         ) == Ordering::Less));
 
-        let mut merkle_roots = MerkleRoots::new(data.len());
+        let mut merkle_roots = MerkleRoots::new(CAPACITY);
 
-        for root in data {
+        for i in 0..data.len() {
+            let root = data[i];
             let result = merkle_roots.add(root);
-            assert!(matches!(result, Ok(None)));
+
+            if i < 2 {
+                assert!(matches!(result, Ok(AddStatus::Ok)));
+            } else if i == 2 || i == 4 {
+                assert!(result.is_err());
+            } else {
+                assert!(matches!(result, Ok(AddStatus::Overwritten(_))));
+            }
         }
 
         assert!(merkle_roots.0.is_sorted_by(|a, b| MerkleRoots::compare(
@@ -295,21 +355,57 @@ mod tests {
             b.block,
         ) == Ordering::Less));
         assert!(
-            matches!(merkle_roots.get(merkle_roots.len() - 1), Some(root) if root == &the_oldest_root)
+            matches!(merkle_roots.get(merkle_roots.len() - 1), Some(root) if root == data.last().unwrap())
         );
+
+        // searching for contained roots should be successful
+        for i in 0..merkle_roots.len() {
+            let root = merkle_roots.get(i).unwrap();
+            assert!(
+                matches!(merkle_roots.find(root.authority_set_id, root.block), Some(result) if root == result)
+            );
+        }
 
         // attempt to add a merkle root with the same authority set id and block number
         // should fail
-        let result = merkle_roots.add(*data.last().unwrap());
+        let result = merkle_roots.add(*merkle_roots.get(0).unwrap());
         assert!(matches!(result, Err(0)));
 
-        // attempt to add a newer merkle root should displace the oldest one
-        let result = merkle_roots.add(the_newest_root);
-        assert!(matches!(result, Ok(Some(root)) if root == the_oldest_root));
-        assert!(matches!(merkle_roots.get(0), Some(root) if root == &the_newest_root));
-        assert_eq!(merkle_roots.0.capacity(), data.len());
-        assert_eq!(merkle_roots.0.len(), data.len());
+        let result = merkle_roots
+            .find(the_oldest_root.authority_set_id, the_oldest_root.block)
+            .unwrap();
+        let last = merkle_roots.get(merkle_roots.len() - 1).unwrap();
+        assert_eq!(last, result, "last = {last:?}, result = {result:?}");
+        assert_ne!(
+            last, &the_oldest_root,
+            "last = {last:?}, the_oldest_root = {the_oldest_root:?}"
+        );
 
+        assert!(merkle_roots
+            .find(
+                AuthoritySetId(the_oldest_root.authority_set_id.0 - 1),
+                GearBlockNumber(0)
+            )
+            .is_none());
+        assert!(merkle_roots
+            .find(
+                AuthoritySetId(the_newest_root.authority_set_id.0),
+                GearBlockNumber(0)
+            )
+            .is_none());
+
+        // attempt to add a newer merkle root should displace the oldest one
+        let root_expected_removed = *merkle_roots.get(merkle_roots.len() - 1).unwrap();
+        let result = merkle_roots.add(the_newest_root);
+        let AddStatus::Removed(root_removed) = result.unwrap() else {
+            unreachable!();
+        };
+        assert_eq!(root_expected_removed, root_removed);
+        assert!(matches!(merkle_roots.get(0), Some(root) if root == &the_newest_root));
+        assert_eq!(merkle_roots.0.capacity(), CAPACITY);
+        assert_eq!(merkle_roots.0.len(), CAPACITY);
+
+        // searching for contained roots should be successful
         for i in 0..merkle_roots.len() {
             let root = merkle_roots.get(i).unwrap();
             assert!(
@@ -331,29 +427,6 @@ mod tests {
             .find(
                 the_newest_root.authority_set_id,
                 GearBlockNumber(the_newest_root.block.0 + 1)
-            )
-            .is_none());
-
-        let result = merkle_roots
-            .find(the_oldest_root.authority_set_id, the_oldest_root.block)
-            .unwrap();
-        let last = merkle_roots.get(merkle_roots.len() - 1).unwrap();
-        assert_eq!(last, result, "last = {last:?}, result = {result:?}");
-        assert_ne!(
-            last, &the_oldest_root,
-            "last = {last:?}, the_oldest_root = {the_oldest_root:?}"
-        );
-
-        assert!(merkle_roots
-            .find(
-                AuthoritySetId(the_oldest_root.authority_set_id.0 - 1),
-                GearBlockNumber(0)
-            )
-            .is_none());
-        assert!(merkle_roots
-            .find(
-                AuthoritySetId(the_newest_root.authority_set_id.0 + 1),
-                GearBlockNumber(0)
             )
             .is_none());
     }

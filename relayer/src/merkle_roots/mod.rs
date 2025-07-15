@@ -301,6 +301,10 @@ impl MerkleRootRelayer {
             return Ok(true);
         };
 
+        if let Err(err) = self.block_storage.save().await {
+            log::error!("Failed to save block storage state: {err:?}");
+        }
+
         if self.last_submitted_merkle_root == Some(merkle_root) {
             log::info!(
                 "Skipping merkle root {} for block #{} as there were no new messages",

@@ -118,12 +118,12 @@ impl FinalityProver {
     ) -> anyhow::Result<FinalProof> {
         log::info!("Generating merkle root proof for block #{block_number}");
 
-        log::info!("Proving merkle root({merkle_root}:?) presence in block #{block_number}");
+        log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
         let proof =
             prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
                 .await?;
-
+        log::info!("Proof for {merkle_root} generated (block #{block_number})");
         Ok(proof)
     }
 }

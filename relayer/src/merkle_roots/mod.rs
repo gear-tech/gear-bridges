@@ -326,6 +326,8 @@ impl MerkleRootRelayer {
             .await
         {
             Ok(inner_proof) => {
+                let number = block.number();
+                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{number}");
                 if !prover.prove(block.number(), block.hash(), merkle_root, inner_proof) {
                     return Ok(false);
                 }

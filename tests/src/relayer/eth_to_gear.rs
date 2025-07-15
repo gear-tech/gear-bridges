@@ -331,7 +331,7 @@ async fn test_api_provider() {
 
 #[tokio::test]
 async fn test_tx_manager() {
-    pretty_env_logger::formatted_timed_builder()
+    let _ = pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
         .filter(Some("prover"), log::LevelFilter::Info)
@@ -340,7 +340,7 @@ async fn test_tx_manager() {
         .filter(Some("metrics"), log::LevelFilter::Info)
         .format_timestamp_secs()
         .parse_default_env()
-        .init();
+        .try_init();
     let contracts = super::upload::EthContracts::new().await;
 
     let api_provider = ApiProvider::new("ws://127.0.0.1".to_owned(), 9944, 2)

@@ -16,7 +16,7 @@ use eth_events_electra_client::{
     traits::EthereumEventClient, BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
 };
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
@@ -98,7 +98,7 @@ impl_metered_service!(
 pub struct ProofComposer {
     pub api_provider: ApiProviderConnection,
     pub beacon_client: BeaconClient,
-    pub eth_api: EthApi,
+    pub eth_api: PollingEthApi,
     pub waiting_for_checkpoints: Vec<(Uuid, TxHashWithSlot)>,
     pub last_checkpoint: Option<EthereumSlotNumber>,
     pub historical_proxy_address: H256,
@@ -118,7 +118,7 @@ impl ProofComposer {
     pub fn new(
         api_provider: ApiProviderConnection,
         beacon_client: BeaconClient,
-        eth_api: EthApi,
+        eth_api: PollingEthApi,
         historical_proxy_address: H256,
         suri: String,
     ) -> Self {
@@ -286,24 +286,22 @@ async fn handle_requests(
 pub async fn compose(
     beacon_client: &BeaconClient,
     gear_api: &gclient::GearApi,
-    eth_client: &EthApi,
+    eth_client: &PollingEthApi,
     tx_hash: TxHash,
     historical_proxy_id: ActorId,
 ) -> anyhow::Result<EthToVaraEvent> {
-    let provider = eth_client.raw_provider();
-
-    let receipt = provider
+    let receipt = eth_client
         .get_transaction_receipt(tx_hash)
         .await?
         .ok_or(anyhow::anyhow!("Transaction receipt is missing"))?;
 
     let block = match receipt.block_hash {
-        Some(hash) => provider
+        Some(hash) => eth_client
             .get_block_by_hash(hash)
             .await?
             .ok_or(anyhow::anyhow!("Ethereum block (hash) is missing"))?,
         None => match receipt.block_number {
-            Some(number) => provider
+            Some(number) => eth_client
                 .get_block_by_number(BlockNumberOrTag::Number(number))
                 .await?
                 .ok_or(anyhow::anyhow!("Ethereum block (number) is missing"))?,
@@ -332,7 +330,7 @@ pub async fn compose(
     let tx_index = receipt
         .transaction_index
         .ok_or(anyhow::anyhow!("Unable to determine transaction index"))?;
-    let receipts = provider
+    let receipts = eth_client
         .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
         .await?
         .unwrap_or_default()

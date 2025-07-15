@@ -4,7 +4,7 @@ use super::{
     tx_manager,
 };
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::EthApi;
+use ethereum_client::PollingEthApi;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
@@ -20,6 +20,7 @@ use crate::message_relayer::common::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor,
     },
+    EthereumSlotNumber,
 };
 
 use super::api_provider::ApiProviderConnection;
@@ -30,6 +31,7 @@ pub struct Relayer {
 
     message_paid_event_extractor: MessagePaidEventExtractor,
     checkpoints_extractor: CheckpointsExtractor,
+    latest_checkpoint: Option<EthereumSlotNumber>,
 
     message_sender: message_sender::MessageSender,
     proof_composer: proof_composer::ProofComposer,
@@ -55,13 +57,13 @@ impl Relayer {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         suri: String,
-        eth_api: EthApi,
+        eth_api: PollingEthApi,
         beacon_client: BeaconClient,
         bridging_payment_address: H160,
         checkpoint_light_client_address: H256,
         historical_proxy_address: H256,
         vft_manager_address: H256,
-        api_provider: ApiProviderConnection,
+        mut api_provider: ApiProviderConnection,
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
@@ -70,7 +72,7 @@ impl Relayer {
             Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
         );
 
-        let from_eth_block = eth_api.finalized_block_number().await?;
+        let from_eth_block = eth_api.finalized_block().await?.header.number;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
 
         let storage = Arc::new(JSONStorage::new(storage_path));
@@ -85,6 +87,13 @@ impl Relayer {
         );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
+
+        let client = api_provider
+            .gclient_client(&suri)
+            .expect("failed to create gclient");
+
+        let latest_checkpoint =
+            super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
 
         let route =
             <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec();
@@ -111,6 +120,7 @@ impl Relayer {
 
             message_paid_event_extractor,
             checkpoints_extractor,
+            latest_checkpoint,
 
             message_sender,
             proof_composer,
@@ -122,13 +132,17 @@ impl Relayer {
 
     pub async fn run(self) {
         let [gear_blocks] = self.gear_block_listener.run().await;
-        let ethereum_blocks = self.ethereum_block_listener.run().await;
+        let ethereum_blocks = self.ethereum_block_listener.spawn();
 
         if let Err(err) = self.storage.load(&self.tx_manager).await {
             log::warn!("Failed to load transaction and block status from storage: {err:?}")
         }
-        let message_paid_events = self.message_paid_event_extractor.run(ethereum_blocks).await;
-        let checkpoints = self.checkpoints_extractor.run(gear_blocks).await;
+
+        let message_paid_events = self.message_paid_event_extractor.spawn(ethereum_blocks);
+        let checkpoints = self
+            .checkpoints_extractor
+            .run(gear_blocks, self.latest_checkpoint)
+            .await;
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.message_sender.run();
         if let Err(err) = self

@@ -163,5 +163,5 @@ pub fn create_range(from: Option<u64>, latest: u64) -> BlockRange {
     BlockRange { from, to: block_to }
 }
 
-pub const MAX_RETRIES: u32 = 5;
-pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(1);
+pub const MAX_RETRIES: u32 = 10;
+pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(10);

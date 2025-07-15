@@ -1,25 +1,20 @@
-use std::sync::Arc;
-
-use prometheus::IntCounter;
-use sails_rs::H160;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
-use ethereum_client::{EthApi, FeePaidEntry};
-use utils_prometheus::{impl_metered_service, MeteredService};
-
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
-        common::{
-            ethereum::block_listener::ETHEREUM_BLOCK_TIME_APPROX, EthereumBlockNumber,
-            EthereumSlotNumber, TxHashWithSlot,
-        },
+        common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
     },
 };
+use ethereum_client::PollingEthApi;
+use ethereum_common::SECONDS_PER_SLOT;
+use prometheus::IntCounter;
+use sails_rs::H160;
+use std::sync::Arc;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessagePaidEventExtractor {
-    eth_api: EthApi,
+    eth_api: PollingEthApi,
 
     storage: Arc<dyn Storage>,
 
@@ -47,7 +42,7 @@ impl_metered_service! {
 
 impl MessagePaidEventExtractor {
     pub fn new(
-        eth_api: EthApi,
+        eth_api: PollingEthApi,
         bridging_payment_address: H160,
         storage: Arc<dyn Storage>,
         genesis_time: u64,
@@ -64,64 +59,13 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub async fn run(
-        mut self,
-        mut blocks: UnboundedReceiver<EthereumBlockNumber>,
+    pub fn spawn(
+        self,
+        blocks: UnboundedReceiver<EthereumBlockNumber>,
     ) -> UnboundedReceiver<TxHashWithSlot> {
         let (sender, receiver) = unbounded_channel();
 
-        tokio::task::spawn(async move {
-            let mut attempts = 0;
-
-            let UnprocessedBlocks {
-                last_block,
-                mut unprocessed,
-            } = self.storage.block_storage().unprocessed_blocks().await;
-
-            if let Some(last_block) = last_block {
-                let latest_finalized_block = match blocks.recv().await {
-                    Some(block) => block,
-                    None => {
-                        log::error!("Failed to fetch missing blocks: channel closed");
-                        return;
-                    }
-                };
-
-                for block in last_block.0 + 1..=latest_finalized_block.0 {
-                    unprocessed.push(EthereumBlockNumber(block));
-                }
-            }
-
-            loop {
-                let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
-                if let Err(err) = res {
-                    attempts += 1;
-                    log::error!(
-                        "Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}"
-                    );
-
-                    if attempts >= MAX_RETRIES {
-                        log::error!("Max attempts reached, exiting...");
-                        return;
-                    }
-
-                    tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
-
-                    if common::is_transport_error_recoverable(&err) {
-                        self.eth_api = match self.eth_api.reconnect().await {
-                            Ok(eth_api) => eth_api,
-                            Err(err) => {
-                                log::error!("Failed to reconnect to Ethereum API: {err}");
-                                return;
-                            }
-                        };
-                    }
-                } else {
-                    log::info!("Connection to block listener closed, exiting...");
-                    return;
-                }
-            }
-        });
+        tokio::task::spawn(self::task(self, blocks, sender));
 
         receiver
     }
@@ -148,26 +92,24 @@ impl MessagePaidEventExtractor {
         block: EthereumBlockNumber,
         sender: &UnboundedSender<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
-        let events = self
+        let timestamp = self.eth_api.get_block(block.0).await?.header.timestamp;
+        let slot_number =
+            EthereumSlotNumber(timestamp.saturating_sub(self.genesis_time) / SECONDS_PER_SLOT);
+
+        let txs = self
             .eth_api
-            .fetch_fee_paid_events(self.bridging_payment_address, block.0)
+            .fetch_fee_paid_events_txs(self.bridging_payment_address, block.0)
             .await?;
-
-        let timestamp = self.eth_api.get_block_timestamp(block.0).await?;
-
-        let slot_number = EthereumSlotNumber(
-            timestamp.saturating_sub(self.genesis_time) / ETHEREUM_BLOCK_TIME_APPROX.as_secs(),
-        );
         self.storage
             .block_storage()
-            .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
+            .add_block(slot_number, block, txs.iter().cloned())
             .await;
         self.storage.save_blocks().await?;
         self.metrics
             .total_paid_messages_found
-            .inc_by(events.len() as u64);
+            .inc_by(txs.len() as u64);
 
-        for FeePaidEntry { tx_hash } in events {
+        for tx_hash in txs {
             log::info!(
                 "Found fee paid event: tx_hash={}, slot_number={}",
                 hex::encode(tx_hash.0),
@@ -181,5 +123,64 @@ impl MessagePaidEventExtractor {
         }
 
         Ok(())
+    }
+}
+
+async fn task(
+    mut this: MessagePaidEventExtractor,
+    mut blocks: UnboundedReceiver<EthereumBlockNumber>,
+    sender: UnboundedSender<TxHashWithSlot>,
+) {
+    let UnprocessedBlocks {
+        last_block,
+        mut unprocessed,
+    } = this.storage.block_storage().unprocessed_blocks().await;
+
+    if let Some(last_block) = last_block {
+        let Some(latest_finalized_block) = blocks.recv().await else {
+            log::error!("Failed to get latest finalized block: channel closed");
+            return;
+        };
+
+        for block in last_block.0 + 1..=latest_finalized_block.0 {
+            unprocessed.push(EthereumBlockNumber(block));
+        }
+    }
+
+    let mut attempts = 0;
+    loop {
+        let result = this.run_inner(&sender, &mut blocks, &mut unprocessed).await;
+        let Err(err) = result else {
+            log::info!("Connection to block listener closed, exiting...");
+            return;
+        };
+
+        attempts += 1;
+        log::error!("Paid event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}");
+
+        if attempts >= MAX_RETRIES {
+            log::error!("Max attempts reached, exiting...");
+            return;
+        }
+
+        tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
+
+        if !common::is_transport_error_recoverable(&err) {
+            log::error!("Non recoverable error, exiting.");
+            return;
+        }
+
+        this.eth_api = match this.eth_api.reconnect().await {
+            Ok(eth_api) => {
+                attempts = 0;
+
+                eth_api
+            }
+
+            Err(err) => {
+                log::error!("Failed to reconnect to Ethereum API: {err}");
+                return;
+            }
+        };
     }
 }

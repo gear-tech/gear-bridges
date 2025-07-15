@@ -5,10 +5,11 @@ import * as erc20TreasuryAbi from './abi/erc20-manager';
 import * as messageQueueAbi from './abi/message-queue';
 import { Network, Status, Transfer } from '../model';
 import { processor, Context } from './processor';
-import { BaseBatchState, ethNonce, gearNonce } from '../common';
+import { ethNonce, gearNonce } from '../common';
 import { config } from './config';
+import { BatchState } from './batch-state';
 
-const state = new BaseBatchState(Network.Ethereum);
+const state = new BatchState(Network.Ethereum, Network.Vara);
 
 const ERC20_MANAGER = config.erc20Manager.toLowerCase();
 const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequested.topic;
@@ -23,9 +24,11 @@ const handler = async (ctx: Context) => {
 
   for (let block of ctx.blocks) {
     const timestamp = new Date(block.header.timestamp);
+    const blockNumber = BigInt(block.header.height);
     for (let log of block.logs) {
       const address = log.address.toLowerCase();
       const topic = log.topics[0].toLowerCase();
+      const txHash = log.transactionHash.toLowerCase();
       switch (address) {
         case ERC20_MANAGER: {
           if (topic !== ERC20_MANAGER_BRIDGING_REQUESTED) continue;
@@ -33,8 +36,8 @@ const handler = async (ctx: Context) => {
 
           const transfer = new Transfer({
             id: randomUUID(),
-            txHash: log.transactionHash,
-            blockNumber: BigInt(block.header.height),
+            txHash,
+            blockNumber,
             timestamp,
             nonce: ethNonce(`${block.header.height}${log.transactionIndex}`),
             sourceNetwork: Network.Ethereum,
@@ -52,7 +55,7 @@ const handler = async (ctx: Context) => {
           if (topic !== MSGQ_MESSAGE_PROCESSED) continue;
           const [_, __, nonce, receiver] = messageQueueAbi.events.MessageProcessed.decode(log);
           if (receiver.toLowerCase() !== ERC20_MANAGER) continue;
-          state.setCompletedTransfer(gearNonce(nonce, false), timestamp);
+          state.setCompletedTransfer(gearNonce(nonce, false), timestamp, blockNumber, txHash);
           break;
         }
       }

@@ -145,8 +145,11 @@ pub struct EthGearTokensArgs {
 
     #[clap(flatten)]
     pub gear_args: GearSignerArgs,
-    #[clap(flatten)]
-    pub ethereum_args: EthereumArgs,
+
+    /// Address of the ethereum endpoint
+    #[arg(long, env)]
+    pub ethereum_rpc: String,
+
     #[clap(flatten)]
     pub beacon_rpc: BeaconRpcArgs,
     #[clap(flatten)]
@@ -200,12 +203,8 @@ pub struct GearEthManualArgs {
 #[derive(Args)]
 pub struct EthGearManualArgs {
     /// Transaction hash of the target message
-    #[arg(long = "tx-hash", short = 't')]
+    #[arg(long, short = 't')]
     pub tx_hash: String,
-
-    /// Ethereum slot containing target message
-    #[arg(long = "slot", short = 's')]
-    pub slot: u64,
 
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]
@@ -225,8 +224,11 @@ pub struct EthGearManualArgs {
 
     #[clap(flatten)]
     pub gear_args: GearSignerArgs,
-    #[clap(flatten)]
-    pub ethereum_args: EthereumArgs,
+
+    /// Address of the ethereum endpoint
+    #[arg(long, env)]
+    pub ethereum_rpc: String,
+
     #[clap(flatten)]
     pub beacon_args: BeaconRpcArgs,
 }

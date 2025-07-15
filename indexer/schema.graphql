@@ -16,6 +16,8 @@ type Transfer @entity {
   blockNumber: BigInt!
   timestamp: DateTime! @index
   completedAt: DateTime
+  completedAtBlock: BigInt
+  completedAtTxHash: String
   nonce: String! @index
   sourceNetwork: Network!
   source: String! @index
@@ -25,6 +27,14 @@ type Transfer @entity {
   sender: String! @index
   receiver: String! @index
   amount: BigInt!
+  bridgingStartedAtBlock: BigInt
+  bridgingStartedAtMessageId: String
+}
+
+type GearEthBridgeMessage @entity {
+  id: ID!
+  nonce: String! @index @unique
+  blockNumber: BigInt!
 }
 
 type InitiatedTransfer @entity {
@@ -55,7 +65,10 @@ type CompletedTransfer @entity {
   id: ID!
   nonce: String! @index @unique
   destNetwork: Network!
+  srcNetwork: Network
   timestamp: DateTime
+  txHash: String!
+  blockNumber: BigInt!
 }
 
 type VaraBridgeProgram @entity {

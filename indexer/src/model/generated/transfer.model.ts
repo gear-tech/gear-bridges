@@ -24,6 +24,12 @@ export class Transfer {
     @DateTimeColumn_({nullable: true})
     completedAt!: Date | undefined | null
 
+    @BigIntColumn_({nullable: true})
+    completedAtBlock!: bigint | undefined | null
+
+    @StringColumn_({nullable: true})
+    completedAtTxHash!: string | undefined | null
+
     @Index_()
     @StringColumn_({nullable: false})
     nonce!: string
@@ -55,4 +61,10 @@ export class Transfer {
 
     @BigIntColumn_({nullable: false})
     amount!: bigint
+
+    @BigIntColumn_({nullable: true})
+    bridgingStartedAtBlock!: bigint | undefined | null
+
+    @StringColumn_({nullable: true})
+    bridgingStartedAtMessageId!: string | undefined | null
 }

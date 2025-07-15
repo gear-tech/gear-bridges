@@ -1,5 +1,5 @@
 import { Event } from './processor';
-import { MessageQueuedEvent, UserMessageSentEvent } from './types';
+import { EthBridgeMessageQueuedEvent, MessageQueuedEvent, UserMessageSentEvent } from './types';
 
 export function isMessageQueued(event: Event): event is MessageQueuedEvent {
   return event.name === 'Gear.MessageQueued';
@@ -11,6 +11,10 @@ export function isUserMessageSent(event: Event): event is UserMessageSentEvent {
 
 export function isProgramChanged(event: Event): boolean {
   return event.name === 'Gear.ProgramChanged';
+}
+
+export function isEthBridgeMessageQueued(event: Event): event is EthBridgeMessageQueuedEvent {
+  return event.name === 'GearEthBridge.MessageQueued';
 }
 
 export const enum ProgramName {

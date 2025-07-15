@@ -10,14 +10,15 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     pubsub::Subscription,
-    rpc::types::{BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
+    rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{ws::WsConnect, RpcError, TransportErrorKind},
 };
+use anyhow::{Context, Result as AnyResult};
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::str::FromStr;
+use std::{ops::Deref, str::FromStr};
 
 pub use alloy::primitives::TxHash;
 
@@ -71,16 +72,133 @@ pub struct DepositEventEntry {
     pub tx_hash: TxHash,
 }
 
-#[derive(Debug, Clone)]
-pub struct FeePaidEntry {
-    pub tx_hash: TxHash,
-}
-
 #[derive(Debug)]
 pub enum TxStatus {
     Finalized,
     Pending,
     Failed,
+}
+
+#[derive(Clone)]
+pub struct PollingEthApi {
+    provider: RootProvider,
+    url: Url,
+}
+
+impl PollingEthApi {
+    pub async fn new(url: &str) -> AnyResult<Self> {
+        let url = Url::parse(url).context("Provided url is not valid")?;
+        let ws = WsConnect::new(url.clone());
+        let provider = RootProvider::builder().connect_ws(ws).await?;
+
+        Ok(Self { provider, url })
+    }
+
+    pub async fn reconnect(&self) -> AnyResult<Self> {
+        let ws = WsConnect::new(self.url.clone());
+        let provider = RootProvider::builder().connect_ws(ws).await?;
+
+        Ok(Self {
+            provider,
+            url: self.url.clone(),
+        })
+    }
+
+    pub async fn finalized_block(&self) -> AnyResult<Block> {
+        self::finalized_block(&self.provider).await
+    }
+
+    pub async fn get_block(&self, block: u64) -> AnyResult<Block> {
+        self::get_block(&self.provider, block).await
+    }
+
+    pub async fn fetch_fee_paid_events_txs(
+        &self,
+        contract_address: H160,
+        block: u64,
+    ) -> AnyResult<Vec<TxHash>> {
+        let filter = Filter::new()
+            .address(Address::from_slice(contract_address.as_bytes()))
+            .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
+            .from_block(block)
+            .to_block(block);
+
+        let event: Event<_, BridgingPayment::FeePaid, Ethereum> =
+            Event::new(self.provider.clone(), filter);
+
+        let logs = event.query().await.context("Failed to query event")?;
+
+        logs.into_iter()
+            .map(|(_, log)| log.transaction_hash.context("Failed to fetch transaction"))
+            .collect()
+    }
+
+    pub async fn fetch_deposit_events(
+        &self,
+        contract_address: H160,
+        block: u64,
+    ) -> AnyResult<Vec<DepositEventEntry>> {
+        let filter = Filter::new()
+            .address(Address::from_slice(contract_address.as_bytes()))
+            .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
+            .from_block(block)
+            .to_block(block);
+
+        let event: Event<_, IERC20Manager::BridgingRequested, Ethereum> =
+            Event::new(self.provider.clone(), filter);
+
+        let logs = event.query().await.context("Failed to query event")?;
+
+        logs.into_iter()
+            .map(
+                |(
+                    IERC20Manager::BridgingRequested {
+                        from,
+                        to,
+                        token,
+                        amount,
+                    },
+                    log,
+                )| {
+                    let tx_hash = log
+                        .transaction_hash
+                        .context("Failed to fetch transaction")?;
+
+                    Ok(DepositEventEntry {
+                        from: H160(*from.0),
+                        to: H256(to.0),
+                        token: H160(*token.0),
+                        amount: primitive_types::U256::from_little_endian(
+                            &amount.to_le_bytes_vec(),
+                        ),
+                        tx_hash,
+                    })
+                },
+            )
+            .collect()
+    }
+}
+
+impl Deref for PollingEthApi {
+    type Target = RootProvider;
+
+    fn deref(&self) -> &Self::Target {
+        &self.provider
+    }
+}
+
+pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
+    provider
+        .get_block_by_number(BlockNumberOrTag::Finalized)
+        .await?
+        .context("Finalized block is None")
+}
+
+pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
+    provider
+        .get_block_by_number(BlockNumberOrTag::Number(block))
+        .await?
+        .context("Block is None")
 }
 
 #[derive(Clone)]
@@ -212,36 +330,6 @@ impl EthApi {
         self.contracts.fetch_merkle_roots_in_range(from, to).await
     }
 
-    pub async fn fetch_deposit_events(
-        &self,
-        contract_address: H160,
-        block: u64,
-    ) -> Result<Vec<DepositEventEntry>, Error> {
-        Ok(self
-            .contracts
-            .fetch_deposit_events(Address::from_slice(contract_address.as_bytes()), block)
-            .await?
-            .into_iter()
-            .map(
-                |(
-                    IERC20Manager::BridgingRequested {
-                        from,
-                        to,
-                        token,
-                        amount,
-                    },
-                    tx_hash,
-                )| DepositEventEntry {
-                    from: H160(*from.0),
-                    to: H256(to.0),
-                    token: H160(*token.0),
-                    amount: primitive_types::U256::from_little_endian(&amount.to_le_bytes_vec()),
-                    tx_hash,
-                },
-            )
-            .collect())
-    }
-
     pub async fn get_block_timestamp(&self, block: u64) -> Result<u64, Error> {
         Ok(self
             .raw_provider()
@@ -253,26 +341,15 @@ impl EthApi {
             .timestamp)
     }
 
-    pub async fn fetch_fee_paid_events(
-        &self,
-        contract_address: H160,
-        block: u64,
-    ) -> Result<Vec<FeePaidEntry>, Error> {
-        Ok(self
-            .contracts
-            .fetch_fee_paid_events(Address::from_slice(contract_address.as_bytes()), block)
-            .await?
-            .into_iter()
-            .map(|tx_hash| FeePaidEntry { tx_hash })
-            .collect())
-    }
-
     pub async fn block_number(&self) -> Result<u64, Error> {
         self.contracts.block_number().await
     }
 
-    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
-        self.contracts.finalized_block_number().await
+    pub async fn finalized_block_number(&self) -> AnyResult<u64> {
+        Ok(self::finalized_block(self.raw_provider())
+            .await?
+            .header
+            .number)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -376,17 +453,6 @@ impl Contracts {
         self.provider.get_block_number().await.map_err(|e| e.into())
     }
 
-    pub async fn finalized_block_number(&self) -> Result<u64, Error> {
-        Ok(self
-            .provider
-            .get_block_by_number(BlockNumberOrTag::Finalized)
-            .await
-            .map_err(Error::ErrorInHTTPTransport)?
-            .ok_or(Error::ErrorFetchingBlock)?
-            .header
-            .number)
-    }
-
     pub async fn fetch_merkle_roots(
         &self,
         depth: u64,
@@ -428,54 +494,6 @@ impl Contracts {
                 )
             })
             .collect())
-    }
-
-    pub async fn fetch_deposit_events(
-        &self,
-        contract_address: Address,
-        block: u64,
-    ) -> Result<Vec<(IERC20Manager::BridgingRequested, TxHash)>, Error> {
-        let filter = Filter::new()
-            .address(contract_address)
-            .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
-            .from_block(block)
-            .to_block(block);
-
-        let event: Event<ProviderType, IERC20Manager::BridgingRequested, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
-
-        logs.into_iter()
-            .map(|(event, log)| {
-                Ok((
-                    event,
-                    log.transaction_hash
-                        .ok_or(Error::ErrorFetchingTransaction)?,
-                ))
-            })
-            .collect()
-    }
-
-    pub async fn fetch_fee_paid_events(
-        &self,
-        contract_address: Address,
-        block: u64,
-    ) -> Result<Vec<TxHash>, Error> {
-        let filter = Filter::new()
-            .address(contract_address)
-            .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
-            .from_block(block)
-            .to_block(block);
-
-        let event: Event<ProviderType, BridgingPayment::FeePaid, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
-
-        logs.into_iter()
-            .map(|(_, log)| log.transaction_hash.ok_or(Error::ErrorFetchingTransaction))
-            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]

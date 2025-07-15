@@ -3,6 +3,7 @@
 //! Inspired by <https://github.com/a16z/helios> and <https://github.com/sigp/lighthouse> projects.
 
 use super::*;
+use crate::utils;
 
 pub type Bytes32 = base_types::BytesFixed<32>;
 /// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/bellatrix/beacon-chain.md#custom-types).
@@ -202,8 +203,10 @@ pub mod electra {
     pub struct DepositRequest {
         pubkey: BLSPubKey,
         withdrawal_credentials: Bytes32,
+        #[serde(deserialize_with = "utils::deserialize_u64")]
         amount: u64,
         signature: SignatureBytes,
+        #[serde(deserialize_with = "utils::deserialize_u64")]
         index: u64,
     }
 
@@ -214,6 +217,7 @@ pub mod electra {
     pub struct WithdrawalRequest {
         source_address: Address,
         validator_pubkey: BLSPubKey,
+        #[serde(deserialize_with = "utils::deserialize_u64")]
         amount: u64,
     }
 

@@ -9,12 +9,16 @@ import {
 } from '@subsquid/substrate-processor';
 import { Store } from '@subsquid/typeorm-store';
 import { config } from './config';
+import { hostname } from 'node:os';
 
 const processor = new SubstrateBatchProcessor()
   .setGateway(config.archiveUrl)
   .setRpcEndpoint({
     url: config.rpcUrl,
-    rateLimit: 10,
+    rateLimit: config.rateLimit,
+    headers: {
+      'User-Agent': hostname(),
+    },
   })
   .setFinalityConfirmation(10)
   .setFields({
@@ -32,7 +36,7 @@ const processor = new SubstrateBatchProcessor()
     from: config.fromBlock,
   })
   .addEvent({ name: ['Gear.ProgramChanged'] })
-  .addEvent({ name: ['Gear.MessageQueued'], extrinsic: true, call: true });
+  .addEvent({ name: ['Gear.MessageQueued', 'GearEthBridge.MessageQueued'], extrinsic: true, call: true });
 
 export type Fields = SubstrateBatchProcessorFields<typeof processor>;
 export type Block = BlockHeader<Fields>;

@@ -1,22 +1,21 @@
 import { TypeormDatabase } from '@subsquid/typeorm-store';
-import { randomUUID } from 'crypto';
 import {
   BridgingPaidEvent,
   BridgingRequested,
   HistoricalProxyAddressChanged,
   Relayed,
-  RequestBridgingArgs,
   TokenMappingAdded,
   TokenMappingRemoved,
 } from './types';
-import { ethNonce, gearNonce } from '../common';
+import { ethNonce, gearNonce, gearNonceFromNumber, mapKeys } from '../common';
 import { ProcessorContext, getProcessor } from './processor';
-import { InitiatedTransfer, Network, Status, Transfer } from '../model';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Status, Transfer } from '../model';
 import {
   BridgingPaymentMethods,
   BridgingPaymentServices,
   HistoricalProxyMethods,
   HistoricalProxyServices,
+  isEthBridgeMessageQueued,
   isMessageQueued,
   isProgramChanged,
   isUserMessageSent,
@@ -84,10 +83,9 @@ const handler = async (ctx: ProcessorContext) => {
                   method,
                   msg.payload,
                 );
-                const id = randomUUID();
 
                 const transfer = new Transfer({
-                  id,
+                  id: msg.id,
                   txHash: event.extrinsic!.hash,
                   blockNumber: blockNumber,
                   timestamp,
@@ -153,7 +151,7 @@ const handler = async (ctx: ProcessorContext) => {
             const { block_number, transaction_index } = decoder.decodeEvent<Relayed>(service, method, msg.payload);
 
             const nonce = ethNonce(`${block_number}${transaction_index}`);
-            state.setCompletedTransfer(nonce, timestamp);
+            state.setCompletedTransfer(nonce, timestamp, blockNumber, event.extrinsic!.hash);
             break;
           }
           case ProgramName.BridgingPayment: {
@@ -195,6 +193,21 @@ const handler = async (ctx: ProcessorContext) => {
         await state.addInitiatedTransfer(transfer);
         continue;
       }
+
+      if (isEthBridgeMessageQueued(event)) {
+        const {
+          message: { nonce },
+          hash,
+        } = event.args;
+
+        state.addEthBridgeMessage(
+          new GearEthBridgeMessage({
+            id: hash,
+            nonce: gearNonceFromNumber(nonce),
+            blockNumber,
+          }),
+        );
+      }
     }
   }
 
@@ -215,7 +228,7 @@ const runProcessor = async () => {
     [ProgramName.BridgingPayment]: config.bridgingPayment,
   })) as Map<string, ProgramName>;
 
-  const processor = getProcessor(Array.from(programs.keys()));
+  const processor = getProcessor(mapKeys(programs));
 
   processor.run(db, handler);
 };

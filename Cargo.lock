@@ -3825,6 +3825,7 @@ version = "0.3.0"
 dependencies = [
  "ahash 0.7.8",
  "alloy",
+ "anyhow",
  "binary-merkle-tree",
  "keccak-hash 0.10.0",
  "log",

@@ -83,7 +83,7 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
     proof: FinalProof,
 ) -> anyhow::Result<TxHash> {
     log::info!(
-        "Submitting merkle root {} at gear block {} to ethereum",
+        "Submitting merkle root {} at block #{} to ethereum",
         hex::encode(proof.merkle_root),
         proof.block_number
     );

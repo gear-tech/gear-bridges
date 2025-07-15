@@ -68,6 +68,8 @@ impl FinalityProver {
             block_on(async move {
                 if let Err(e) = self.process(&mut req_rx, &res_tx).await {
                     log::error!("Error processing finality prover requests: {e}");
+                } else {
+                    log::info!("Prover exiting");
                 }
             })
         });

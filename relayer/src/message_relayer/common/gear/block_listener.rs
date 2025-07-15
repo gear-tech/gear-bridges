@@ -193,7 +193,7 @@ impl BlockListener {
         let gear_api = self.api_provider.client();
 
         for (block_hash, block_number) in unprocessed.drain(..) {
-            log::info!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
+            log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
             let block = gear_api.api.blocks().at(block_hash).await?;
 
             let header = block.header().clone();

@@ -19,6 +19,8 @@ pub struct Accumulator {
     metrics: Metrics,
     messages: Messages,
     merkle_roots: MerkleRoots,
+    receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+    receiver_messages: UnboundedReceiver<MessageInBlock>,
 }
 
 impl MeteredService for Accumulator {
@@ -36,33 +38,28 @@ impl_metered_service! {
     }
 }
 
-impl Default for Accumulator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Accumulator {
-    pub fn new() -> Self {
+    pub fn new(
+        receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+        receiver_messages: UnboundedReceiver<MessageInBlock>,
+    ) -> Self {
         Self {
             metrics: Metrics::new(),
             messages: Messages::new(10_000),
-            merkle_roots: MerkleRoots::new(100),
+            merkle_roots: MerkleRoots::new(300),
+            receiver_roots,
+            receiver_messages,
         }
     }
 
-    pub async fn run(
+    pub fn spawn(
         mut self,
-        mut messages: UnboundedReceiver<MessageInBlock>,
-        mut merkle_roots: UnboundedReceiver<RelayedMerkleRoot>,
     ) -> UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)> {
         let (mut messages_out, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
             loop {
                 match run_inner(
                     &mut self,
-                    &mut messages,
-                    &mut merkle_roots,
                     &mut messages_out,
                 )
                 .await
@@ -83,15 +80,13 @@ impl Accumulator {
 
 async fn run_inner(
     this: &mut Accumulator,
-    messages: &mut UnboundedReceiver<MessageInBlock>,
-    merkle_roots: &mut UnboundedReceiver<RelayedMerkleRoot>,
     messages_out: &mut UnboundedSender<(MessageInBlock, RelayedMerkleRoot)>,
 ) -> anyhow::Result<()> {
     loop {
-        let recv_messages = messages.recv();
+        let recv_messages = this.receiver_messages.recv();
         pin_mut!(recv_messages);
 
-        let recv_merkle_roots = merkle_roots.recv();
+        let recv_merkle_roots = this.receiver_roots.recv();
         pin_mut!(recv_merkle_roots);
 
         match future::select(recv_messages, recv_merkle_roots).await {

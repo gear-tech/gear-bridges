@@ -7,12 +7,13 @@ use gsdk::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use prometheus::IntCounter;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::UnboundedSender,
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessageQueuedEventExtractor {
     api_provider: ApiProviderConnection,
+    sender: UnboundedSender<MessageInBlock>,
 
     metrics: Metrics,
 }
@@ -52,27 +53,26 @@ fn message_queued_events_of(
 }
 
 impl MessageQueuedEventExtractor {
-    pub fn new(api_provider: ApiProviderConnection) -> Self {
+    pub fn new(api_provider: ApiProviderConnection, sender: UnboundedSender<MessageInBlock>,) -> Self {
         Self {
             api_provider,
+            sender,
             metrics: Metrics::new(),
         }
     }
 
-    pub async fn run(
+    pub fn spawn(
         mut self,
         mut blocks: Receiver<GearBlock>,
-    ) -> UnboundedReceiver<MessageInBlock> {
-        let (sender, receiver) = unbounded_channel();
-
+    ) {
         tokio::task::spawn(async move {
             loop {
-                let res = self.run_inner(&sender, &mut blocks).await;
+                let res = self.run_inner(&mut blocks).await;
                 if let Err(err) = res {
                     log::error!("Message queued extractor failed: {err}");
 
                     match self.api_provider.reconnect().await {
-                        Ok(()) => {
+                        Ok(_) => {
                             log::info!("Message queued extractor reconnected");
                         }
                         Err(err) => {
@@ -80,16 +80,17 @@ impl MessageQueuedEventExtractor {
                             return;
                         }
                     }
-                }
+                } else {
+                    log::debug!("MessageQueuedEventExtractor exiting...");
+                    return;
+                 }
+
             }
         });
-
-        receiver
     }
 
     async fn run_inner(
         &self,
-        sender: &UnboundedSender<MessageInBlock>,
         blocks: &mut Receiver<GearBlock>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
@@ -99,7 +100,7 @@ impl MessageQueuedEventExtractor {
                     let block_hash = block.hash();
                     let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
-                    self.process_block_events(block, authority_set_id, sender)
+                    self.process_block_events(block, authority_set_id)
                         .await?;
                 }
                 Err(RecvError::Closed) => {
@@ -118,7 +119,6 @@ impl MessageQueuedEventExtractor {
         &self,
         block: GearBlock,
         authority_set_id: u64,
-        sender: &UnboundedSender<MessageInBlock>,
     ) -> anyhow::Result<()> {
         let messages = message_queued_events_of(&block);
         let block_hash = block.hash();
@@ -126,7 +126,7 @@ impl MessageQueuedEventExtractor {
         for message in messages {
             total += 1;
 
-            sender.send(MessageInBlock {
+            self.sender.send(MessageInBlock {
                 message,
                 block: GearBlockNumber(block.number()),
                 block_hash,

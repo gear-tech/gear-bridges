@@ -3,13 +3,10 @@ use futures::{
     pin_mut,
 };
 use gclient::ext::sp_runtime::AccountId32;
-
 use std::collections::{HashMap, HashSet};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
-
 use super::{MessageInBlock, PaidMessage};
 
 pub struct PaidMessagesFilter {
@@ -45,21 +42,18 @@ impl PaidMessagesFilter {
         }
     }
 
-    pub async fn run(
+    pub fn spawn(
         mut self,
         mut messages: UnboundedReceiver<MessageInBlock>,
         mut paid_messages: UnboundedReceiver<PaidMessage>,
-    ) -> UnboundedReceiver<MessageInBlock> {
-        let (sender, receiver) = unbounded_channel();
-
+        sender: UnboundedSender<MessageInBlock>,
+    ) {
         tokio::spawn(async move {
             match run_inner(&mut self, &sender, &mut messages, &mut paid_messages).await {
                 Ok(_) => {}
                 Err(e) => log::error!("Paid messages filter failed: {e}"),
             }
         });
-
-        receiver
     }
 }
 

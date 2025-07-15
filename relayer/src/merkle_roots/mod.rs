@@ -250,10 +250,38 @@ impl MerkleRootRelayer {
                         return Ok(());
                     };
 
-                    log::info!("Submitting merkle-root proof for era #{} at block #{}", response.era, response.merkle_root_block);
-                    if !submitter.submit_era_root(response.era, response.merkle_root_block, response.proof) {
-                        log::warn!("Proof submitter connection closed, exiting");
-                        return Ok(());
+                    match response {
+                        authority_set_sync::Response::AuthoritySetSynced(id, block) => {
+                            self.block_storage.authority_set_processed(block).await;
+                            let Some(mut to_submit) = self.waiting_for_authority_set_sync.remove(&id) else {
+                                log::warn!("No blocks to sync for authority set #{id}");
+                                continue;
+                            };
+
+                            log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
+                            while let Some(block) = to_submit.pop() {
+                                if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
+                                    return Ok(());
+                                }
+                            }
+                        }
+
+                        authority_set_sync::Response::SealedEras(eras) => {
+                             for sealed_era in eras {
+                                log::info!(
+                                    "Submitting merkle-root proof for era #{} at block #{}",
+                                    sealed_era.era,
+                                    sealed_era.merkle_root_block);
+
+                                if !submitter.submit_era_root(
+                                    sealed_era.era,
+                                    sealed_era.merkle_root_block,
+                                    sealed_era.proof) {
+                                    log::warn!("Proof submitter connection closed, exiting");
+                                    return Ok(());
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -267,23 +295,8 @@ impl MerkleRootRelayer {
                     if let Err(err) = self.block_storage.save().await {
                         log::error!("Failed to save block state: {err:?}");
                     }
-                    let Some(era) = response.era else {
-                        continue;
-                    };
 
-                    self.block_storage.authority_set_processed(response.merkle_root_block).await;
 
-                    let Some(mut to_submit) = self.waiting_for_authority_set_sync.remove(&era) else {
-                        log::warn!("No blocks to sync for authority set id {era}");
-                        continue;
-                    };
-
-                    log::info!("Era #{era} is synced, submitting {} blocks", to_submit.len());
-                    while let Some(block) = to_submit.pop() {
-                        if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
-                            return Ok(());
-                        }
-                    }
                 }
             }
         }

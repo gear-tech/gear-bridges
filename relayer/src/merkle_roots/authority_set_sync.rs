@@ -20,19 +20,24 @@ use tokio::sync::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct AuthoritySetSyncIo {
-    response: UnboundedReceiver<SealedNotFinalizedEra>,
+    response: UnboundedReceiver<Response>,
     requests: UnboundedSender<GearBlock>,
+}
+
+pub enum Response {
+    AuthoritySetSynced(u64, u32),
+    SealedEras(Vec<SealedNotFinalizedEra>),
 }
 
 impl AuthoritySetSyncIo {
     pub fn new(
-        response: UnboundedReceiver<SealedNotFinalizedEra>,
+        response: UnboundedReceiver<Response>,
         requests: UnboundedSender<GearBlock>,
     ) -> Self {
         Self { response, requests }
     }
 
-    pub async fn recv(&mut self) -> Option<SealedNotFinalizedEra> {
+    pub async fn recv(&mut self) -> Option<Response> {
         self.response.recv().await
     }
 
@@ -141,7 +146,7 @@ impl AuthoritySetSync {
         &mut self,
         blocks: &mut Receiver<GearBlock>,
         force_sync: &mut UnboundedReceiver<GearBlock>,
-        sealed_eras: &UnboundedSender<SealedNotFinalizedEra>,
+        responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
         loop {
             tokio::select! {
@@ -150,16 +155,20 @@ impl AuthoritySetSync {
                         Some(block) => {
                             log::info!("Force authority set sync for authority set in block #{}", block.number());
 
-                            if !self.sync_authority_set_completely(&block, blocks).await? {
+                            let Some(authority_set_id) = self.sync_authority_set_completely(&block, blocks).await? else {
+                                return Ok(());
+                            };
+
+                            if responses.send(Response::AuthoritySetSynced(authority_set_id, block.number())).is_err() {
                                 return Ok(());
                             }
 
                             self.eras.process(&self.proof_storage).await?;
 
-                            while let Some(sealed) = self.eras.sealed_not_finalized.pop() {
-                                if sealed_eras.send(sealed).is_err() {
-                                    return Ok(());
-                                }
+                            if responses.send(
+                                Response::SealedEras(std::mem::take(&mut self.eras.sealed_not_finalized)))
+                            .is_err() {
+                                return Ok(());
                             }
                         }
 
@@ -169,18 +178,24 @@ impl AuthoritySetSync {
                 block = blocks.recv() => {
                     match block {
                         Ok(block) => {
-                            if Self::authority_set_hash_changeed(&block).is_some() {
-                                if !self.sync_authority_set_completely(&block, blocks).await? {
-                                    return Ok(());
-                                }
+                            if Self::authority_set_hash_changeed(&block).is_none() {
+                                continue;
+                            }
 
-                                self.eras.process(&self.proof_storage).await?;
+                            let Some(authority_set_id) = self.sync_authority_set_completely(&block, blocks).await? else {
+                                return Ok(());
+                            };
 
-                                while let Some(sealed) = self.eras.sealed_not_finalized.pop() {
-                                    if sealed_eras.send(sealed).is_err() {
-                                        return Ok(());
-                                    }
-                                }
+                            if responses.send(Response::AuthoritySetSynced(authority_set_id, block.number())).is_err() {
+                                return Ok(());
+                            }
+
+                            self.eras.process(&self.proof_storage).await?;
+
+                            if responses.send(
+                                    Response::SealedEras(std::mem::take(&mut self.eras.sealed_not_finalized)))
+                                .is_err() {
+                                return Ok(());
                             }
                         }
 
@@ -204,23 +219,24 @@ impl AuthoritySetSync {
         &mut self,
         initial_block: &GearBlock,
         blocks: &mut Receiver<GearBlock>,
-    ) -> anyhow::Result<bool> {
-        if self.sync_authority_set(initial_block).await? == 0 {
+    ) -> anyhow::Result<Option<u64>> {
+        let (sync_steps, authority_set_id) = self.sync_authority_set(initial_block).await?;
+        if sync_steps == 0 {
             log::info!(
-                "Authority set is already in sync at block #{}",
+                "Authority set #{authority_set_id} is already in sync at block #{}",
                 initial_block.number()
             );
-            return Ok(false);
+            return Ok(Some(authority_set_id));
         }
 
-        log::info!("Syncing authority set");
+        log::info!("Syncing authority set #{authority_set_id}");
         loop {
-            let sync_steps = match blocks.recv().await {
+            let (sync_steps, _) = match blocks.recv().await {
                 Ok(block) => self.sync_authority_set(&block).await?,
 
                 Err(RecvError::Closed) => {
                     log::warn!("Gear block listener connection closed");
-                    return Ok(false);
+                    return Ok(None);
                 }
 
                 Err(RecvError::Lagged(n)) => {
@@ -240,10 +256,13 @@ impl AuthoritySetSync {
 
         log::info!("Authority set is in sync");
 
-        Ok(true)
+        Ok(Some(authority_set_id))
     }
 
-    async fn sync_authority_set(&mut self, block: &GearBlock) -> anyhow::Result<SyncStepCount> {
+    async fn sync_authority_set(
+        &mut self,
+        block: &GearBlock,
+    ) -> anyhow::Result<(SyncStepCount, u64)> {
         let gear_api = self.api_provider.client();
 
         let finalized_head = block.hash();
@@ -258,14 +277,17 @@ impl AuthoritySetSync {
             self.metrics.latest_proven_era.set(latest_proven as i64);
         }
 
-        sync_authority_set_id(
-            &gear_api,
-            &self.proof_storage,
-            self.genesis_config,
+        Ok((
+            sync_authority_set_id(
+                &gear_api,
+                &self.proof_storage,
+                self.genesis_config,
+                latest_authority_set_id,
+                latest_proven_authority_set_id,
+            )
+            .await?,
             latest_authority_set_id,
-            latest_proven_authority_set_id,
-        )
-        .await
+        ))
     }
 }
 

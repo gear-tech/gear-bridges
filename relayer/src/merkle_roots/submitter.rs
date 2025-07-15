@@ -177,7 +177,7 @@ impl MerkleRootSubmitter {
                     let root = root.context("Failed to check transaction status")?;
                     match root.status {
                         TxStatus::Pending => {
-                            log::info!("Merkle root submission is still pending, tx hash: {}", root.tx_hash);
+                            log::trace!("Merkle root submission is still pending, tx hash: {}", root.tx_hash);
                             pending_transactions.push(root.finalize());
                         }
                         TxStatus::Finalized => {

@@ -43,7 +43,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        CliCommands::GearEthCore(args) => {
+        CliCommands::GearEthCore(mut args) => {
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -51,6 +51,14 @@ async fn main() {
             )
             .await
             .expect("Failed to connect to Gear API");
+
+            let Some(path) = args.block_storage_args.block_storage_path.take() else {
+                log::error!("No block storage path provided");
+                return;
+            };
+
+            let block_storage = relayer::merkle_roots::storage::MerkleRootBlockStorage::new(path);
+
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
             let metrics = MetricsBuilder::new();
@@ -64,6 +72,7 @@ async fn main() {
                 api_provider.connection(),
                 eth_api,
                 proof_storage,
+                block_storage,
                 genesis_config,
                 args.start_authority_set_id,
             )

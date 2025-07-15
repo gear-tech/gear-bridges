@@ -32,7 +32,10 @@ pub async fn relay(
     tx_hash: TxHash,
     slot: u64,
 ) {
-    let gear_block_listener = GearBlockListener::new(api_provider.clone());
+    let gear_block_listener = GearBlockListener::new(
+        api_provider.clone(),
+        Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
+    );
 
     let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 

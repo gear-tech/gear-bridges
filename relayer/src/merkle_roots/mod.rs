@@ -16,12 +16,14 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use storage::MerkleRootBlockStorage;
 use submitter::SubmitterIo;
 use tokio::sync::broadcast::{error::RecvError, Receiver};
 use utils_prometheus::MeteredService;
 
 pub mod authority_set_sync;
 pub mod prover;
+pub mod storage;
 pub mod submitter;
 
 pub struct Relayer {
@@ -46,13 +48,22 @@ impl Relayer {
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
         proof_storage: Arc<dyn ProofStorage>,
+        block_storage: Arc<MerkleRootBlockStorage>,
         genesis_config: GenesisConfig,
         last_sealed: Option<u64>,
     ) -> Self {
-        let block_listener = BlockListener::new(api_provider.clone());
+        if let Err(err) = block_storage.load().await {
+            log::warn!("Failed to load unprocessed blocks for Merkle-Root relayer: {err:?}");
+        };
 
-        let merkle_roots =
-            MerkleRootRelayer::new(api_provider.clone(), proof_storage.clone()).await;
+        let block_listener = BlockListener::new(api_provider.clone(), block_storage.clone());
+
+        let merkle_roots = MerkleRootRelayer::new(
+            api_provider.clone(),
+            proof_storage.clone(),
+            block_storage.clone(),
+        )
+        .await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
@@ -103,6 +114,7 @@ pub struct MerkleRootRelayer {
     api_provider: ApiProviderConnection,
 
     proof_storage: Arc<dyn ProofStorage>,
+    block_storage: Arc<MerkleRootBlockStorage>,
 
     /// Set of blocks that are waiting for authority set sync.
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
@@ -113,11 +125,14 @@ impl MerkleRootRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         proof_storage: Arc<dyn ProofStorage>,
+        block_storage: Arc<MerkleRootBlockStorage>,
     ) -> MerkleRootRelayer {
         MerkleRootRelayer {
             api_provider,
 
             proof_storage,
+            block_storage,
+
             waiting_for_authority_set_sync: BTreeMap::new(),
             last_submitted_merkle_root: None,
         }
@@ -248,9 +263,12 @@ impl MerkleRootRelayer {
                         return Ok(());
                     };
 
+                    self.block_storage.merkle_root_processed(response.merkle_root_block).await;
                     let Some(era) = response.era else {
                         continue;
                     };
+
+                    self.block_storage.authority_set_processed(response.merkle_root_block).await;
 
                     let Some(mut to_submit) = self.waiting_for_authority_set_sync.remove(&era) else {
                         log::warn!("No blocks to sync for authority set id {era}");

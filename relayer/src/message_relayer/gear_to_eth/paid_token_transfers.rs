@@ -1,4 +1,4 @@
-use std::{collections::HashSet, iter};
+use std::{collections::HashSet, iter, sync::Arc};
 
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
@@ -61,7 +61,10 @@ impl Relayer {
         confirmations_status: u64,
         excluded_from_fees: HashSet<AccountId32>,
     ) -> anyhow::Result<Self> {
-        let gear_block_listener = GearBlockListener::new(api_provider.clone());
+        let gear_block_listener = GearBlockListener::new(
+            api_provider.clone(),
+            Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
+        );
 
         let message_sent_listener = MessageQueuedEventExtractor::new(api_provider.clone());
 

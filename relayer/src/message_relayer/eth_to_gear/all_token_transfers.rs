@@ -19,7 +19,7 @@ use crate::message_relayer::common::{
         deposit_event_extractor::DepositEventExtractor,
     },
     gear::{
-        block_listener::BlockListener as GearBlockListener,
+        block_listener::BlockListener as GearBlockListener, block_storage::NoStorage,
         checkpoints_extractor::CheckpointsExtractor,
     },
 };
@@ -65,7 +65,7 @@ impl Relayer {
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
-        let gear_block_listener = GearBlockListener::new(api_provider.clone());
+        let gear_block_listener = GearBlockListener::new(api_provider.clone(), Arc::new(NoStorage));
 
         let from_eth_block = eth_api.finalized_block_number().await?;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);

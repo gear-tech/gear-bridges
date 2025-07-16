@@ -1,6 +1,6 @@
-use actix_web::{guard, web, middleware, HttpResponse, App, HttpServer, HttpRequest};
-use std::net::TcpListener;
 use crate::message_relayer::common::web_request::{Message, Messages};
+use actix_web::{guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer};
+use std::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 
 const HEADER_TOKEN: &str = "X-Token";
@@ -11,7 +11,9 @@ async fn relay_messages(
     secret: web::Data<String>,
     channel: web::Data<UnboundedSender<Message>>,
 ) -> HttpResponse {
-    if !request.headers().get(HEADER_TOKEN)
+    if !request
+        .headers()
+        .get(HEADER_TOKEN)
         .and_then(|h| h.to_str().ok())
         .map(|t| t == secret.get_ref())
         .unwrap_or(false)
@@ -58,7 +60,7 @@ pub fn create(
             .wrap(middleware::Logger::default())
             .app_data(
                 // 128 KiB
-                web::JsonConfig::default().limit(131_072)
+                web::JsonConfig::default().limit(131_072),
             )
             .service(
                 web::resource("/relay_messages")
@@ -66,9 +68,8 @@ pub fn create(
                     .route(
                         web::route()
                             .guard(guard::Any(guard::Get()).or(guard::Post()))
-                            .to(|| HttpResponse::Unauthorized()),
+                            .to(HttpResponse::Unauthorized),
                     ),
-
             )
     });
 
@@ -79,11 +80,14 @@ pub fn create(
 
 #[cfg(test)]
 mod tests {
-    use reqwest::{ClientBuilder, header::{CONTENT_TYPE, HeaderValue}};
-    use std::{time::Duration, str::FromStr};
-    use ethereum_common::U256;
-    use tokio::{sync::mpsc, task};
     use super::*;
+    use ethereum_common::U256;
+    use reqwest::{
+        header::{HeaderValue, CONTENT_TYPE},
+        ClientBuilder,
+    };
+    use std::{str::FromStr, time::Duration};
+    use tokio::{sync::mpsc, task};
 
     #[tokio::test]
     async fn test_server() {
@@ -109,14 +113,23 @@ mod tests {
             .unwrap();
 
         let url = format!("http://127.0.0.1:{port}/relay_messages");
-        let response = client.post(&url).json(&Messages::default()).send().await.unwrap();
+        let response = client
+            .post(&url)
+            .json(&Messages::default())
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
 
         assert!(receiver.try_recv().is_err());
 
-        let response = client.post(&url).json(&Messages::default())
+        let response = client
+            .post(&url)
+            .json(&Messages::default())
             .header(HEADER_TOKEN, SECRET)
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
 
         assert!(receiver.try_recv().is_err());
@@ -125,19 +138,29 @@ mod tests {
         let nonce_string = "0x0123";
         let block = 2_111_333;
         let body = format!(r#"{{"messages":[{{"block":{block},"nonce":"{nonce_string}"}}]}}"#);
-        let response = client.post(&url).body(body)
+        let response = client
+            .post(&url)
+            .body(body)
             .header(HEADER_TOKEN, SECRET)
             .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
 
         let message_received = receiver.recv().await.unwrap();
         assert_eq!(block, message_received.block);
-        assert_eq!(U256::from_str(nonce_string).unwrap(), message_received.nonce);
+        assert_eq!(
+            U256::from_str(nonce_string).unwrap(),
+            message_received.nonce
+        );
 
         assert!(receiver.try_recv().is_err());
 
-        let message = Message { block: 1_222_333, nonce: 123.into(), };
+        let message = Message {
+            block: 1_222_333,
+            nonce: 123.into(),
+        };
         let messages = {
             let mut messages = Messages::default();
             messages.messages.push(message.clone());
@@ -145,9 +168,13 @@ mod tests {
             messages
         };
 
-        let response = client.post(&url).json(&messages)
+        let response = client
+            .post(&url)
+            .json(&messages)
             .header(HEADER_TOKEN, SECRET)
-            .send().await.unwrap();
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
 
         let message_received = receiver.recv().await.unwrap();
@@ -158,9 +185,16 @@ mod tests {
 
         receiver.close();
 
-        let response = client.post(&url).json(&messages)
+        let response = client
+            .post(&url)
+            .json(&messages)
             .header(HEADER_TOKEN, SECRET)
-            .send().await.unwrap();
-        assert_eq!(response.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

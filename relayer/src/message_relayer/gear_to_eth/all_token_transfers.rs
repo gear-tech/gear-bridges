@@ -1,6 +1,3 @@
-use std::iter;
-use ethereum_client::EthApi;
-use utils_prometheus::MeteredService;
 use crate::{
     common::MAX_RETRIES,
     message_relayer::{
@@ -18,7 +15,10 @@ use crate::{
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use ethereum_client::EthApi;
+use std::iter;
 use tokio::sync::mpsc;
+use utils_prometheus::MeteredService;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
@@ -56,7 +56,8 @@ impl Relayer {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
-        let listener_message_queued = MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender);
+        let listener_message_queued =
+            MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender);
 
         let (roots_sender, roots_receiver) = mpsc::unbounded_channel();
         let merkle_root_extractor = MerkleRootExtractor::new(

@@ -1,5 +1,5 @@
 use crate::message_relayer::{
-    common::{self, GearBlock, AuthoritySetId, GearBlockNumber, MessageInBlock},
+    common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 use prometheus::IntCounter;
@@ -32,7 +32,10 @@ impl_metered_service! {
 }
 
 impl MessageQueuedEventExtractor {
-    pub fn new(api_provider: ApiProviderConnection, sender: UnboundedSender<MessageInBlock>,) -> Self {
+    pub fn new(
+        api_provider: ApiProviderConnection,
+        sender: UnboundedSender<MessageInBlock>,
+    ) -> Self {
         Self {
             api_provider,
             sender,
@@ -40,10 +43,7 @@ impl MessageQueuedEventExtractor {
         }
     }
 
-    pub fn spawn(
-        mut self,
-        mut blocks: Receiver<GearBlock>,
-    ) {
+    pub fn spawn(mut self, mut blocks: Receiver<GearBlock>) {
         tokio::task::spawn(async move {
             loop {
                 let res = self.run_inner(&mut blocks).await;
@@ -62,16 +62,12 @@ impl MessageQueuedEventExtractor {
                 } else {
                     log::debug!("MessageQueuedEventExtractor exiting...");
                     return;
-                 }
-
+                }
             }
         });
     }
 
-    async fn run_inner(
-        &self,
-        blocks: &mut Receiver<GearBlock>,
-    ) -> anyhow::Result<()> {
+    async fn run_inner(&self, blocks: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
         loop {
             match blocks.recv().await {
@@ -79,8 +75,7 @@ impl MessageQueuedEventExtractor {
                     let block_hash = block.hash();
                     let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
-                    self.process_block_events(block, authority_set_id)
-                        .await?;
+                    self.process_block_events(block, authority_set_id).await?;
                 }
                 Err(RecvError::Closed) => {
                     log::warn!("Message queued extractor channel closed, exiting");

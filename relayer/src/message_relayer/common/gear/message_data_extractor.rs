@@ -1,17 +1,17 @@
 use crate::message_relayer::{
-    common::{self, GearBlock, AuthoritySetId, GearBlockNumber, MessageInBlock, web_request::Message},
+    common::{
+        self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
+    },
     eth_to_gear::api_provider::ApiProviderConnection,
 };
+use anyhow::Result as AnyResult;
+use ethereum_common::U256;
 use gsdk::subscription::BlockEvents;
+use std::{cmp::Ordering, ops::Deref};
 use tokio::{
-    sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-},
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task,
 };
-use anyhow::Result as AnyResult;
-use std::{ops::Deref, cmp::Ordering};
-use ethereum_common::U256;
 
 pub type BlockData = (GearBlock, AuthoritySetId);
 
@@ -23,7 +23,11 @@ pub struct MessageDataExtractor {
 }
 
 impl MessageDataExtractor {
-    pub fn new(api_provider: ApiProviderConnection, sender: UnboundedSender<MessageInBlock>, receiver: UnboundedReceiver<Message>,) -> Self {
+    pub fn new(
+        api_provider: ApiProviderConnection,
+        sender: UnboundedSender<MessageInBlock>,
+        receiver: UnboundedReceiver<Message>,
+    ) -> Self {
         Self {
             api_provider,
             sender,
@@ -36,15 +40,11 @@ impl MessageDataExtractor {
         &self.sender
     }
 
-    pub fn spawn(
-        self,
-    ) {
+    pub fn spawn(self) {
         task::spawn(self::task(self));
     }
 
-    async fn run_inner(
-        &mut self,
-    ) -> anyhow::Result<()> {
+    async fn run_inner(&mut self) -> anyhow::Result<()> {
         loop {
             let Some(message) = self.receiver.recv().await else {
                 return Ok(());
@@ -58,7 +58,7 @@ impl MessageDataExtractor {
             };
 
             log::trace!(r#"Found data for the message block: "{block_data:?}""#);
-            
+
             self.process_message_block(message, block_data).await?;
         }
     }
@@ -78,7 +78,10 @@ impl MessageDataExtractor {
         let block_events = BlockEvents::new(block).await?;
         let events = block_events.events()?;
 
-        let block_data = (GearBlock::new(header, events), AuthoritySetId(authority_set_id));
+        let block_data = (
+            GearBlock::new(header, events),
+            AuthoritySetId(authority_set_id),
+        );
         self.blocks.push(block_data.clone());
 
         Ok(block_data)
@@ -118,7 +121,7 @@ async fn task(mut this: MessageDataExtractor) {
             log::trace!("Message data extractor exiting...");
             return;
         };
-        
+
         log::error!("Message data extractor failed: {e}");
 
         match this.api_provider.reconnect().await {
@@ -137,10 +140,7 @@ async fn task(mut this: MessageDataExtractor) {
 struct BlockDataList(Vec<BlockData>);
 
 impl BlockDataList {
-    fn compare(
-        block_data: &BlockData,
-        block_number: u32,
-    ) -> Ordering {
+    fn compare(block_data: &BlockData, block_number: u32) -> Ordering {
         let (block, _authority_set_id) = block_data;
 
         block_number.cmp(&block.number())
@@ -156,12 +156,9 @@ impl BlockDataList {
             self.0.pop();
         }
 
-        let Err(i) = self.binary_search_by(|block_data| {
-            Self::compare(
-                block_data,
-                block_data_new.0.number(),
-            )
-        }) else {
+        let Err(i) = self
+            .binary_search_by(|block_data| Self::compare(block_data, block_data_new.0.number()))
+        else {
             return;
         };
 
@@ -169,13 +166,9 @@ impl BlockDataList {
     }
 
     pub fn find_by_block_number(&self, block_number: u32) -> Option<&BlockData> {
-        let Ok(i) = self.binary_search_by(|block_data| {
-            Self::compare(
-                block_data,
-                block_number,
-            )
-        }) else {
-            return None
+        let Ok(i) = self.binary_search_by(|block_data| Self::compare(block_data, block_number))
+        else {
+            return None;
         };
 
         self.get(i)

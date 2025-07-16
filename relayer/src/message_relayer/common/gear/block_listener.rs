@@ -1,7 +1,4 @@
-use crate::message_relayer::{
-    common::GearBlock,
-    eth_to_gear::api_provider::ApiProviderConnection,
-};
+use crate::message_relayer::{common::GearBlock, eth_to_gear::api_provider::ApiProviderConnection};
 use futures::StreamExt;
 use gsdk::subscription::BlockEvents;
 use prometheus::IntGauge;

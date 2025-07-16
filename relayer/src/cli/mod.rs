@@ -124,7 +124,7 @@ pub enum GearEthTokensCommands {
         web_server_token: String,
 
         /// Socket address for web-server
-        #[arg(long, env, default_value = "127.0.0.1:8443",)]
+        #[arg(long, env, default_value = "127.0.0.1:8443")]
         web_server_address: String,
     },
 }

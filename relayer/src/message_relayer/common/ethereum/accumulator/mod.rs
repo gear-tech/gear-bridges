@@ -11,7 +11,7 @@ use futures::{
 };
 use prometheus::IntGauge;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use utils::{MerkleRoots, Messages, AddStatus};
+use utils::{AddStatus, MerkleRoots, Messages};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 /// Struct accumulates gear-eth messages and required merkle roots.
@@ -52,18 +52,11 @@ impl Accumulator {
         }
     }
 
-    pub fn spawn(
-        mut self,
-    ) -> UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)> {
+    pub fn spawn(mut self) -> UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)> {
         let (mut messages_out, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
             loop {
-                match run_inner(
-                    &mut self,
-                    &mut messages_out,
-                )
-                .await
-                {
+                match run_inner(&mut self, &mut messages_out).await {
                     Ok(_) => break,
                     Err(e) => {
                         log::error!("{e:?}");

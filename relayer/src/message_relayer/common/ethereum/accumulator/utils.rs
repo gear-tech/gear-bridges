@@ -181,17 +181,13 @@ impl MerkleRoots {
             (None, i)
         } else {
             // adjust insertion index
-            let i = if i >= self.0.len() {
-                i - 1
-            } else {
-                i
-            };
+            let i = if i >= self.0.len() { i - 1 } else { i };
 
             (self.0.pop(), i)
         };
 
         self.0.insert(i, root_new);
-        
+
         Ok(match result {
             Some(root) => AddStatus::Removed(root),
             None => AddStatus::Ok,
@@ -227,9 +223,15 @@ mod tests {
         let data = [
             RelayedMerkleRoot {
                 block: GearBlockNumber(18_676_002),
-                block_hash: hex!("8d6286038e2ac0bea811e9d99d821084f0271a59b621b4eef52cd85b2fd6c3cb").into(),
+                block_hash: hex!(
+                    "8d6286038e2ac0bea811e9d99d821084f0271a59b621b4eef52cd85b2fd6c3cb"
+                )
+                .into(),
                 authority_set_id: AuthoritySetId(1_308),
-                merkle_root: hex!("00c39a437f0331e49a996433f95ca3955a9caf77b8bf6a1f10b2d5214326bd91").into(),
+                merkle_root: hex!(
+                    "00c39a437f0331e49a996433f95ca3955a9caf77b8bf6a1f10b2d5214326bd91"
+                )
+                .into(),
             },
             RelayedMerkleRoot {
                 block: GearBlockNumber(16_883_172),
@@ -318,11 +320,15 @@ mod tests {
             },
             RelayedMerkleRoot {
                 block: GearBlockNumber(16_888_714),
-                block_hash: hex!("b592a0ec4212c81eccee43cfdce35de08ddd705361dc01c557a615ebd74200a0")
-                    .into(),
+                block_hash: hex!(
+                    "b592a0ec4212c81eccee43cfdce35de08ddd705361dc01c557a615ebd74200a0"
+                )
+                .into(),
                 authority_set_id: AuthoritySetId(1_183),
-                merkle_root: hex!("1636e359c8f975261880b14abaeb511626bfc80e4cab8446448b12d6ce8275b6")
-                    .into(),
+                merkle_root: hex!(
+                    "1636e359c8f975261880b14abaeb511626bfc80e4cab8446448b12d6ce8275b6"
+                )
+                .into(),
             },
         ];
 
@@ -335,9 +341,8 @@ mod tests {
 
         let mut merkle_roots = MerkleRoots::new(CAPACITY);
 
-        for i in 0..data.len() {
-            let root = data[i];
-            let result = merkle_roots.add(root);
+        for (i, root) in data.iter().enumerate() {
+            let result = merkle_roots.add(*root);
 
             if i < 2 {
                 assert!(matches!(result, Ok(AddStatus::Ok)));

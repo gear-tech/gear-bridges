@@ -1,13 +1,13 @@
+use super::{MessageInBlock, PaidMessage};
 use futures::{
     future::{self, Either},
     pin_mut,
 };
 use gclient::ext::sp_runtime::AccountId32;
+use prometheus::IntGauge;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use prometheus::IntGauge;
 use utils_prometheus::{impl_metered_service, MeteredService};
-use super::{MessageInBlock, PaidMessage};
 
 pub struct PaidMessagesFilter {
     pending_messages: HashMap<[u8; 32], MessageInBlock>,

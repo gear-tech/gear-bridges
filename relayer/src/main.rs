@@ -20,9 +20,9 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use relayer::*;
-use std::{collections::HashSet, str::FromStr, time::Duration, net::TcpListener};
-use utils_prometheus::MetricsBuilder;
+use std::{collections::HashSet, net::TcpListener, str::FromStr, time::Duration};
 use tokio::{sync::mpsc, task, time};
+use utils_prometheus::MetricsBuilder;
 
 #[tokio::main]
 async fn main() -> AnyResult<()> {
@@ -201,7 +201,9 @@ async fn main() -> AnyResult<()> {
                     .await
                     .unwrap();
 
-                    MetricsBuilder::new().register_service(&relayer).build()
+                    MetricsBuilder::new()
+                        .register_service(&relayer)
+                        .build()
                         .run(args.prometheus_args.endpoint)
                         .await;
 
@@ -245,7 +247,9 @@ async fn main() -> AnyResult<()> {
                     .await
                     .unwrap();
 
-                    MetricsBuilder::new().register_service(&relayer).build()
+                    MetricsBuilder::new()
+                        .register_service(&relayer)
+                        .build()
                         .run(args.prometheus_args.endpoint)
                         .await;
 

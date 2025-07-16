@@ -40,7 +40,12 @@ impl_metered_service! {
 }
 
 impl MerkleRootExtractor {
-    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection, confirmations: u64, sender: UnboundedSender<RelayedMerkleRoot>,) -> Self {
+    pub fn new(
+        eth_api: EthApi,
+        api_provider: ApiProviderConnection,
+        confirmations: u64,
+        sender: UnboundedSender<RelayedMerkleRoot>,
+    ) -> Self {
         Self {
             eth_api,
             api_provider,
@@ -111,9 +116,7 @@ async fn task(mut this: MerkleRootExtractor) {
     }
 }
 
-async fn task_inner(
-    this: &MerkleRootExtractor,
-) -> anyhow::Result<()> {
+async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
     let gear_api = this.api_provider.client();
     let subscription = this.eth_api.subscribe_logs().await?;
 

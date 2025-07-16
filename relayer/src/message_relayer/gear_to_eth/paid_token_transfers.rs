@@ -1,13 +1,7 @@
-use std::{collections::HashSet, iter};
-use ethereum_client::EthApi;
-use gclient::ext::sp_runtime::AccountId32;
-use primitive_types::H256;
-use utils_prometheus::MeteredService;
 use crate::{
     common::MAX_RETRIES,
     message_relayer::{
         common::{
-            MessageInBlock, RelayedMerkleRoot, GearBlockNumber, AuthoritySetId,
             ethereum::{
                 accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
                 message_sender::MessageSender, status_fetcher::StatusFetcher,
@@ -15,18 +9,27 @@ use crate::{
             gear::{
                 block_listener::BlockListener as GearBlockListener,
                 merkle_proof_fetcher::MerkleProofFetcher,
+                message_data_extractor::MessageDataExtractor,
                 message_paid_event_extractor::MessagePaidEventExtractor,
                 message_queued_event_extractor::MessageQueuedEventExtractor,
-                message_data_extractor::MessageDataExtractor,
             },
             paid_messages_filter::PaidMessagesFilter,
             web_request::Message,
+            AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
         },
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
-use tokio::{sync::mpsc::{self, UnboundedReceiver, UnboundedSender}, time, task};
 use anyhow::Result as AnyResult;
+use ethereum_client::EthApi;
+use gclient::ext::sp_runtime::AccountId32;
+use primitive_types::H256;
+use std::{collections::HashSet, iter};
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task, time,
+};
+use utils_prometheus::MeteredService;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,
@@ -73,7 +76,8 @@ impl Relayer {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
-        let listener_message_queued = MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender);
+        let listener_message_queued =
+            MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender);
 
         let message_paid_listener = MessagePaidEventExtractor::new(bridging_payment_address);
 
@@ -95,9 +99,14 @@ impl Relayer {
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
         let accumulator = Accumulator::new(roots_receiver, messages_receiver);
 
-        let message_data_extractor = MessageDataExtractor::new(api_provider.clone(), messages_sender, receiver);
+        let message_data_extractor =
+            MessageDataExtractor::new(api_provider.clone(), messages_sender, receiver);
 
-        task::spawn(self::fetch_merkle_roots(eth_api, api_provider, roots_sender));
+        task::spawn(self::fetch_merkle_roots(
+            eth_api,
+            api_provider,
+            roots_sender,
+        ));
 
         Ok(Self {
             gear_block_listener,
@@ -120,11 +129,15 @@ impl Relayer {
 
     pub async fn run(self) {
         let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run().await;
-        
+
         let message_paid_receiver = self.message_paid_listener.run(gear_blocks_1).await;
         self.listener_message_queued.spawn(gear_blocks_0);
 
-        self.paid_messages_filter.spawn(self.message_queued_receiver, message_paid_receiver, self.message_data_extractor.sender().clone());
+        self.paid_messages_filter.spawn(
+            self.message_queued_receiver,
+            message_paid_receiver,
+            self.message_data_extractor.sender().clone(),
+        );
         self.merkle_root_extractor.spawn();
         let channel_messages = self.accumulator.spawn();
 
@@ -159,7 +172,10 @@ async fn fetch_merkle_roots_inner(
     let gear_api = api_provider.client();
 
     for i in 0..50 {
-        let block_range = crate::common::create_range((block_finalized - (i + 1) * COUNT).into(), block_finalized - i * COUNT);
+        let block_range = crate::common::create_range(
+            (block_finalized - (i + 1) * COUNT).into(),
+            block_finalized - i * COUNT,
+        );
         let merkle_roots = eth_api
             .fetch_merkle_roots_in_range(block_range.from, block_range.to)
             .await?;

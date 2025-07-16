@@ -24,13 +24,13 @@ use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::{traits::AppVerify, AccountId32};
 use subxt::{
+    backend::BlockRef,
     blocks::Block as BlockImpl,
     dynamic::DecodedValueThunk,
     rpc_params,
     storage::Address,
     utils::{Yes, H256},
     OnlineClient,
-    backend::BlockRef,
 };
 use trie_db::{node::NodeHandle, ChildReference};
 
@@ -78,7 +78,8 @@ impl GearApi {
 
     /// Get block with the specified hash.
     pub async fn get_block_at(&self, block_hash: H256) -> AnyResult<GearBlock> {
-        Ok(self.api
+        Ok(self
+            .api
             .blocks()
             .at(BlockRef::from_hash(block_hash))
             .await?)
@@ -114,10 +115,7 @@ impl GearApi {
 
     /// Get authority set state for specified block. If block is not specified
     /// the latest finalized block is taken.
-    pub async fn authority_set_state(
-        &self,
-        block: Option<H256>,
-    ) -> AnyResult<AuthoritySetState> {
+    pub async fn authority_set_state(&self, block: Option<H256>) -> AnyResult<AuthoritySetState> {
         let block = match block {
             Some(block) => block,
             None => self.latest_finalized_block().await?,
@@ -328,10 +326,7 @@ impl GearApi {
         self.fetch_authority_set_in_block(block).await
     }
 
-    pub async fn search_for_authority_set_block(
-        &self,
-        authority_set_id: u64,
-    ) -> AnyResult<H256> {
+    pub async fn search_for_authority_set_block(&self, authority_set_id: u64) -> AnyResult<H256> {
         let latest_block = self.latest_finalized_block().await?;
         let latest_vs_id = self.authority_set_id(latest_block).await?;
 

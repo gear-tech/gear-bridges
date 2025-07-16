@@ -1,17 +1,17 @@
 use ethereum_client::TxHash;
+use ethereum_common::Hash256;
 use gear_rpc_client::dto::{MerkleProof, Message};
-use primitive_types::{H256, U256};
-use serde::{Deserialize, Serialize};
 use gsdk::{
     config::Header,
     metadata::{
         gear::Event as GearEvent,
-        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
         gear_eth_bridge::Event as GearEthBridgeEvent,
+        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
     },
 };
+use primitive_types::{H256, U256};
+use serde::{Deserialize, Serialize};
 use subxt::config::Header as _;
-use ethereum_common::Hash256;
 
 pub mod ethereum;
 pub mod gear;

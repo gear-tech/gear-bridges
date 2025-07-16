@@ -341,14 +341,18 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_UpgradeToAndCallUnauthorized() public {
+        vm.startPrank(address(governancePauser));
+
         vm.expectRevert(
             abi.encodeWithSelector(
                 IAccessControl.AccessControlUnauthorizedAccount.selector,
-                address(this),
+                address(governancePauser),
                 erc20Manager.DEFAULT_ADMIN_ROLE()
             )
         );
         erc20Manager.upgradeToAndCall(address(0), "");
+
+        vm.stopPrank();
     }
 
     function test_RequestBridgingWithEthereumToken() public {

@@ -316,14 +316,18 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_UpgradeToAndCallUnauthorized() public {
+        vm.startPrank(address(governancePauser));
+
         vm.expectRevert(
             abi.encodeWithSelector(
                 IAccessControl.AccessControlUnauthorizedAccount.selector,
-                address(this),
+                address(governancePauser),
                 messageQueue.DEFAULT_ADMIN_ROLE()
             )
         );
         messageQueue.upgradeToAndCall(address(0), "");
+
+        vm.stopPrank();
     }
 
     function test_SubmitMerkleRoot() public {

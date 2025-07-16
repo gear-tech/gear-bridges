@@ -17,13 +17,15 @@ use crate::{
                 merkle_proof_fetcher::MerkleProofFetcher,
                 message_paid_event_extractor::MessagePaidEventExtractor,
                 message_queued_event_extractor::MessageQueuedEventExtractor,
+                message_data_extractor::MessageDataExtractor,
             },
             paid_messages_filter::PaidMessagesFilter,
+            web_request::Message,
         },
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
-use tokio::{sync::mpsc::{self, UnboundedSender, UnboundedReceiver}};
+use tokio::{sync::mpsc::{self, UnboundedReceiver}};
 use anyhow::Result as AnyResult;
 
 pub struct Relayer {
@@ -41,7 +43,7 @@ pub struct Relayer {
     status_fetcher: StatusFetcher,
 
     accumulator: Accumulator,
-    messages_sender: UnboundedSender<MessageInBlock>,
+    message_data_extractor: MessageDataExtractor,
     message_queued_receiver: UnboundedReceiver<MessageInBlock>,
 }
 
@@ -66,6 +68,7 @@ impl Relayer {
         confirmations_merkle_root: u64,
         confirmations_status: u64,
         excluded_from_fees: HashSet<AccountId32>,
+        receiver: UnboundedReceiver<Message>,
     ) -> AnyResult<Self> {
         let gear_block_listener = GearBlockListener::new(api_provider.clone());
 
@@ -86,11 +89,13 @@ impl Relayer {
 
         let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
 
-        let proof_fetcher = MerkleProofFetcher::new(api_provider);
+        let proof_fetcher = MerkleProofFetcher::new(api_provider.clone());
         let status_fetcher = StatusFetcher::new(eth_api, confirmations_status);
 
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
         let accumulator = Accumulator::new(roots_receiver, messages_receiver);
+
+        let message_data_extractor = MessageDataExtractor::new(api_provider, messages_sender, receiver);
 
         Ok(Self {
             gear_block_listener,
@@ -106,8 +111,8 @@ impl Relayer {
             proof_fetcher,
             status_fetcher,
             accumulator,
-            messages_sender,
             message_queued_receiver,
+            message_data_extractor,
         })
     }
 
@@ -117,12 +122,14 @@ impl Relayer {
         let message_paid_receiver = self.message_paid_listener.run(gear_blocks_1).await;
         self.listener_message_queued.spawn(gear_blocks_0);
 
-        self.paid_messages_filter.spawn(self.message_queued_receiver, message_paid_receiver, self.messages_sender);
+        self.paid_messages_filter.spawn(self.message_queued_receiver, message_paid_receiver, self.message_data_extractor.sender().clone());
         self.merkle_root_extractor.spawn();
         let channel_messages = self.accumulator.spawn();
 
         let channel_message_data = self.proof_fetcher.spawn(channel_messages);
         let channel_tx_data = self.status_fetcher.spawn();
+
+        self.message_data_extractor.spawn();
 
         self.message_sender
             .spawn(channel_message_data, channel_tx_data);

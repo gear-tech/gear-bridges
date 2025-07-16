@@ -225,7 +225,7 @@ async fn main() -> AnyResult<()> {
 
                     // spawn web-server
                     let tcp_listener = TcpListener::bind(web_server_address)?;
-                    let (sender, _receiver) = mpsc::unbounded_channel();
+                    let (sender, receiver) = mpsc::unbounded_channel();
                     let web_server = server::create(tcp_listener, web_server_token, sender)
                         .context("Failed to create web server")?;
                     let handle_server = web_server.handle();
@@ -240,6 +240,7 @@ async fn main() -> AnyResult<()> {
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         excluded_from_fees,
+                        receiver,
                     )
                     .await
                     .unwrap();

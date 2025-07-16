@@ -94,7 +94,7 @@ pub struct Data {
     pub proof: MerkleProof,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GearBlock {
     pub header: Header,
     pub events: Vec<gsdk::Event>,

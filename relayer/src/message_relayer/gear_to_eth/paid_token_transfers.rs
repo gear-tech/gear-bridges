@@ -7,7 +7,7 @@ use crate::{
     common::MAX_RETRIES,
     message_relayer::{
         common::{
-            MessageInBlock,
+            MessageInBlock, RelayedMerkleRoot, GearBlockNumber, AuthoritySetId,
             ethereum::{
                 accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
                 message_sender::MessageSender, status_fetcher::StatusFetcher,
@@ -25,7 +25,7 @@ use crate::{
         eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
-use tokio::{sync::mpsc::{self, UnboundedReceiver}};
+use tokio::{sync::mpsc::{self, UnboundedReceiver, UnboundedSender}, time, task};
 use anyhow::Result as AnyResult;
 
 pub struct Relayer {
@@ -84,18 +84,20 @@ impl Relayer {
             eth_api.clone(),
             api_provider.clone(),
             confirmations_merkle_root,
-            roots_sender,
+            roots_sender.clone(),
         );
 
         let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
 
         let proof_fetcher = MerkleProofFetcher::new(api_provider.clone());
-        let status_fetcher = StatusFetcher::new(eth_api, confirmations_status);
+        let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);
 
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
         let accumulator = Accumulator::new(roots_receiver, messages_receiver);
 
-        let message_data_extractor = MessageDataExtractor::new(api_provider, messages_sender, receiver);
+        let message_data_extractor = MessageDataExtractor::new(api_provider.clone(), messages_sender, receiver);
+
+        task::spawn(self::fetch_merkle_roots(eth_api, api_provider, roots_sender));
 
         Ok(Self {
             gear_block_listener,
@@ -134,4 +136,54 @@ impl Relayer {
         self.message_sender
             .spawn(channel_message_data, channel_tx_data);
     }
+}
+
+async fn fetch_merkle_roots(
+    eth_api: EthApi,
+    api_provider: ApiProviderConnection,
+    sender: UnboundedSender<RelayedMerkleRoot>,
+) {
+    if let Err(e) = fetch_merkle_roots_inner(eth_api, api_provider, sender).await {
+        log::error!("Task fetch_merkle_roots failed: {e:?}");
+    }
+}
+
+async fn fetch_merkle_roots_inner(
+    eth_api: EthApi,
+    api_provider: ApiProviderConnection,
+    sender: UnboundedSender<RelayedMerkleRoot>,
+) -> AnyResult<()> {
+    const COUNT: u64 = 2_000;
+
+    let block_finalized = eth_api.finalized_block_number().await?;
+    let gear_api = api_provider.client();
+
+    for i in 0..50 {
+        let block_range = crate::common::create_range((block_finalized - (i + 1) * COUNT).into(), block_finalized - i * COUNT);
+        let merkle_roots = eth_api
+            .fetch_merkle_roots_in_range(block_range.from, block_range.to)
+            .await?;
+
+        let len = merkle_roots.len();
+        log::trace!("Found {len} entry(ies) with merkle roots (i = {i})");
+        for (root, _block_number_eth) in merkle_roots {
+            let block_hash = gear_api
+                .block_number_to_hash(root.block_number as u32)
+                .await?;
+            let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+
+            sender.send(RelayedMerkleRoot {
+                block: GearBlockNumber(root.block_number as u32),
+                block_hash,
+                authority_set_id: AuthoritySetId(authority_set_id),
+                merkle_root: root.merkle_root,
+            })?;
+        }
+
+        log::trace!("Successfuly sent {len} merkle root entry(ies) (i = {i})");
+
+        time::sleep(time::Duration::from_secs(5)).await;
+    }
+
+    Ok(())
 }

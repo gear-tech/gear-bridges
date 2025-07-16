@@ -54,6 +54,7 @@ subxt.workspace = true
 gsdk.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+actix-web.workspace = true
 async-trait.workspace = true
 
 [build-dependencies]

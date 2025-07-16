@@ -7,3 +7,4 @@ pub mod message_relayer;
 pub mod proof_storage;
 pub mod prover_interface;
 pub mod relay_merkle_roots;
+pub mod server;

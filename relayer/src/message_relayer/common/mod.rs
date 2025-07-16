@@ -1,6 +1,6 @@
 use ethereum_client::TxHash;
 use gear_rpc_client::dto::{MerkleProof, Message};
-use primitive_types::H256;
+use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
 use gsdk::{
     config::Header,
@@ -157,4 +157,19 @@ fn message_queued_events_of(
         }
         _ => None,
     })
+}
+
+pub mod web_request {
+    use super::*;
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub struct Message {
+        pub block: u32,
+        pub nonce: U256,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+    pub struct Messages {
+        pub messages: Vec<Message>,
+    }
 }

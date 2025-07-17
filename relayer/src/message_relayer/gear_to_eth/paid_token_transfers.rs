@@ -24,7 +24,7 @@ use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
 use primitive_types::H256;
-use std::{collections::HashSet, iter};
+use std::{collections::HashSet, iter, sync::Arc};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task, time,
@@ -73,7 +73,10 @@ impl Relayer {
         excluded_from_fees: HashSet<AccountId32>,
         receiver: UnboundedReceiver<Message>,
     ) -> AnyResult<Self> {
-        let gear_block_listener = GearBlockListener::new(api_provider.clone());
+        let gear_block_listener = GearBlockListener::new(
+            api_provider.clone(),
+            Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
+        );
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
         let listener_message_queued =

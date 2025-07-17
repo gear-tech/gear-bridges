@@ -1,4 +1,16 @@
+use std::path::PathBuf;
+
 use clap::Args;
+
+#[derive(Args)]
+pub struct BlockStorageArgs {
+    /// Path to the block storage. For merkle root relayer this should be
+    /// a path to JSON file where unprocessed blocks will be saved. For
+    /// other relayers, this should be a path to a directory where blocks
+    /// are stored in individual files.
+    #[arg(long = "block-storage", env = "GEAR_BLOCK_STORAGE")]
+    pub block_storage_path: Option<PathBuf>,
+}
 
 #[derive(Args)]
 pub struct ProofStorageArgs {

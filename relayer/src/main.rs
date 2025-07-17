@@ -18,9 +18,8 @@ use message_relayer::{
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
-use relay_merkle_roots::MerkleRootRelayer;
 use relayer::*;
-use std::{collections::HashSet, net::TcpListener, str::FromStr, time::Duration};
+use std::{collections::HashSet, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 
@@ -42,7 +41,7 @@ async fn main() -> AnyResult<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        CliCommands::GearEthCore(args) => {
+        CliCommands::GearEthCore(mut args) => {
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -50,24 +49,27 @@ async fn main() -> AnyResult<()> {
             )
             .await
             .expect("Failed to connect to Gear API");
+
+            let Some(path) = args.block_storage_args.block_storage_path.take() else {
+                return Err(anyhow!("No block storage path provided"));
+            };
+
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
             let metrics = MetricsBuilder::new();
 
             let (proof_storage, metrics) =
                 create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
+            let storage =
+                relayer::merkle_roots::storage::MerkleRootStorage::new(proof_storage, path);
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
-            let block_listener = message_relayer::common::gear::block_listener::BlockListener::new(
-                api_provider.connection(),
-            );
-
-            let relayer = MerkleRootRelayer::new(
+            let relayer = merkle_roots::Relayer::new(
                 api_provider.connection(),
                 eth_api,
+                storage,
                 genesis_config,
-                proof_storage,
                 args.start_authority_set_id,
             )
             .await;
@@ -79,11 +81,7 @@ async fn main() -> AnyResult<()> {
                 .await;
             api_provider.spawn();
 
-            let [blocks] = block_listener.run().await;
-            relayer
-                .run(blocks)
-                .await
-                .expect("Merkle root relayer failed");
+            relayer.run().await.expect("Merkle root relayer failed");
         }
         CliCommands::KillSwitch(args) => {
             let api_provider = ApiProvider::new(
@@ -546,8 +544,8 @@ async fn create_proof_storage(
     proof_storage_args: &ProofStorageArgs,
     gear_args: &GearArgs,
     mut metrics: MetricsBuilder,
-) -> (Box<dyn ProofStorage>, MetricsBuilder) {
-    let proof_storage: Box<dyn ProofStorage> =
+) -> (Arc<dyn ProofStorage>, MetricsBuilder) {
+    let proof_storage: Arc<dyn ProofStorage> =
         if let Some(fee_payer) = proof_storage_args.gear_fee_payer.as_ref() {
             let proof_storage = GearProofStorage::new(
                 &gear_args.domain,
@@ -561,10 +559,10 @@ async fn create_proof_storage(
 
             metrics = metrics.register_service(&proof_storage);
 
-            Box::from(proof_storage)
+            Arc::new(proof_storage)
         } else {
             log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-            Box::from(FileSystemProofStorage::new("./proof_storage".into()))
+            Arc::new(FileSystemProofStorage::new("./proof_storage".into()).await)
         };
 
     (proof_storage, metrics)

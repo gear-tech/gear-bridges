@@ -67,7 +67,10 @@ impl Relayer {
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
-        let gear_block_listener = GearBlockListener::new(api_provider.clone());
+        let gear_block_listener = GearBlockListener::new(
+            api_provider.clone(),
+            Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
+        );
 
         let from_eth_block = eth_api.finalized_block().await?.header.number;
         let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);

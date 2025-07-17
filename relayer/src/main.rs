@@ -512,30 +512,24 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
 async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
-        relayer_address,
+
         mq_address,
         ..
     } = &args.ethereum_args;
 
-    EthApi::new(
-        eth_endpoint,
-        mq_address,
-        relayer_address,
-        Some(&args.fee_payer),
-    )
-    .await
-    .expect("Error while creating ethereum client")
+    EthApi::new(eth_endpoint, mq_address, Some(&args.fee_payer))
+        .await
+        .expect("Error while creating ethereum client")
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
-        relayer_address,
         mq_address,
         ..
     } = args;
 
-    EthApi::new(eth_endpoint, mq_address, relayer_address, None)
+    EthApi::new(eth_endpoint, mq_address, None)
         .await
         .expect("Error while creating ethereum client")
 }

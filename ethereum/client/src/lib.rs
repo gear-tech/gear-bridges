@@ -25,9 +25,7 @@ pub use alloy::primitives::TxHash;
 pub mod abi;
 use abi::{
     BridgingPayment, IERC20Manager, IMessageQueue,
-    IMessageQueue::{IMessageQueueInstance, VaraMessage},
-    IRelayer,
-    IRelayer::{IRelayerInstance, MerkleRoot},
+    IMessageQueue::{IMessageQueueInstance, MerkleRoot, VaraMessage},
 };
 
 pub mod error;
@@ -53,7 +51,6 @@ type ProviderType = FillProvider<
 pub struct Contracts {
     provider: ProviderType,
     message_queue_instance: IMessageQueueInstance<ProviderType, Ethereum>,
-    relayer_instance: IRelayerInstance<ProviderType, Ethereum>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,7 +210,6 @@ impl EthApi {
     pub async fn new(
         url: &str,
         message_queue_address: &str,
-        relayer_address: &str,
         private_key: Option<&str>,
     ) -> Result<EthApi, Error> {
         let signer = match private_key {
@@ -232,7 +228,6 @@ impl EthApi {
         let message_queue_address: Address = message_queue_address
             .parse()
             .map_err(|_| Error::WrongAddress)?;
-        let relayer_address: Address = relayer_address.parse().map_err(|_| Error::WrongAddress)?;
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
         let ws = WsConnect::new(url.clone());
@@ -241,11 +236,7 @@ impl EthApi {
             .connect_ws(ws)
             .await?;
 
-        let contracts = Contracts::new(
-            provider,
-            message_queue_address.into_array(),
-            relayer_address.into_array(),
-        )?;
+        let contracts = Contracts::new(provider, message_queue_address.into_array())?;
 
         Ok(EthApi {
             contracts,
@@ -265,7 +256,6 @@ impl EthApi {
         let contracts = Contracts::new(
             provider,
             self.contracts.message_queue_instance.address().0 .0,
-            self.contracts.relayer_instance.address().0 .0,
         )?;
 
         Ok(EthApi {
@@ -369,7 +359,7 @@ impl EthApi {
                 U256::from(block_number),
                 U256::from(total_leaves),
                 U256::from(leaf_index),
-                B256::from(nonce),
+                U256::from_be_bytes(nonce),
                 B256::from(sender),
                 Address::from(receiver),
                 Bytes::from(payload),
@@ -379,35 +369,29 @@ impl EthApi {
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
-        self.contracts.is_message_processed(B256::from(nonce)).await
+        self.contracts
+            .is_message_processed(U256::from_be_bytes(nonce))
+            .await
     }
 
     pub async fn subscribe_logs(
         &self,
     ) -> Result<Subscription<RpcLog>, RpcError<TransportErrorKind>> {
         let filter = Filter::new()
-            .address(*self.contracts.relayer_instance.address())
-            .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH);
+            .address(*self.contracts.message_queue_instance.address())
+            .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH);
 
         self.raw_provider().clone().subscribe_logs(&filter).await
     }
 }
 
 impl Contracts {
-    pub fn new(
-        provider: ProviderType,
-        message_queue_address: [u8; 20],
-        relayer_address: [u8; 20],
-    ) -> Result<Self, Error> {
-        let relayer_address = Address::from(relayer_address);
+    pub fn new(provider: ProviderType, message_queue_address: [u8; 20]) -> Result<Self, Error> {
         let message_queue_address = Address::from(message_queue_address);
-
-        let relayer_instance = IRelayer::new(relayer_address, provider.clone());
         let message_queue_instance = IMessageQueue::new(message_queue_address, provider.clone());
 
         Ok(Contracts {
             provider,
-            relayer_instance,
             message_queue_instance,
         })
     }
@@ -425,7 +409,7 @@ impl Contracts {
         proof: Bytes,
     ) -> Result<TxHash, Error> {
         match self
-            .relayer_instance
+            .message_queue_instance
             .submitMerkleRoot(block_number, merkle_root, proof.clone())
             .estimate_gas()
             .await
@@ -433,7 +417,7 @@ impl Contracts {
             Ok(gas_used) => {
                 log::info!("Gas used: {gas_used}");
                 match self
-                    .relayer_instance
+                    .message_queue_instance
                     .submitMerkleRoot(block_number, merkle_root, proof.clone())
                     .send()
                     .await
@@ -472,8 +456,8 @@ impl Contracts {
         to: u64,
     ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
         let filter = Filter::new()
-            .address(*self.relayer_instance.address())
-            .event_signature(IRelayer::MerkleRoot::SIGNATURE_HASH)
+            .address(*self.message_queue_instance.address())
+            .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH)
             .from_block(from)
             .to_block(to);
 
@@ -502,14 +486,14 @@ impl Contracts {
         block_number: U256,
         total_leaves: U256,
         leaf_index: U256,
-        nonce: B256,
-        sender: B256,
-        receiver: Address,
-        data: Bytes,
+        nonce: U256,
+        source: B256,
+        destination: Address,
+        payload: Bytes,
         proof: Vec<B256>,
     ) -> Result<TxHash, Error> {
         log::trace!(
-            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, leaf_index = {leaf_index}, nonce = {nonce}, sender = {sender}, receiver = {receiver}, data = {data}, proof = {proof:?}",
+            "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, leaf_index = {leaf_index}, nonce = {nonce}, source = {source}, destination = {destination}, payload = {payload}, proof = {proof:?}",
         );
 
         let call = self.message_queue_instance.processMessage(
@@ -518,9 +502,9 @@ impl Contracts {
             leaf_index,
             VaraMessage {
                 nonce,
-                sender,
-                receiver,
-                data,
+                source,
+                destination,
+                payload,
             },
             proof,
         );
@@ -582,7 +566,7 @@ impl Contracts {
         block_tag: BlockNumberOrTag,
     ) -> Result<Option<[u8; 32]>, Error> {
         let root = self
-            .relayer_instance
+            .message_queue_instance
             .getMerkleRoot(block)
             .block(BlockId::Number(block_tag))
             .call()
@@ -593,7 +577,7 @@ impl Contracts {
         Ok((root != [0; 32]).then_some(root))
     }
 
-    pub async fn is_message_processed(&self, nonce: B256) -> Result<bool, Error> {
+    pub async fn is_message_processed(&self, nonce: U256) -> Result<bool, Error> {
         let processed = self
             .message_queue_instance
             .isProcessed(nonce)

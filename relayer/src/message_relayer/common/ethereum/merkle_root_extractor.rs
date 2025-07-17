@@ -9,7 +9,7 @@ use alloy::{
     providers::{PendingTransactionBuilder, Provider},
     sol_types::SolEvent,
 };
-use ethereum_client::{abi::IRelayer::MerkleRoot, EthApi};
+use ethereum_client::{abi::IMessageQueue::MerkleRoot, EthApi};
 use futures::StreamExt;
 use prometheus::IntGauge;
 use tokio::sync::mpsc::UnboundedSender;

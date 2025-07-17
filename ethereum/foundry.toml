@@ -5,16 +5,16 @@ libs = ["lib"]
 evm_version = "prague"
 solc = "0.8.30"
 optimizer = true
-# Some warnings should be omitted
-ignored_warnings_from = [
-    # Warning (3628): This contract has a payable fallback function, but no receive ether function.
-    "src/ProxyContract.sol",
-]
 extra_output_files = ["irOptimized"]
 via_ir = true
 bytecode_hash = "none"
 cbor_metadata = false
 revert_strings = "strip"
+# Required for OpenZeppelin Foundry Upgrades https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades
+ffi = true
+ast = true
+build_info = true
+extra_output = ["storageLayout"]
 
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}"

@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -36,8 +38,23 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install OpenZeppelin Foundry Upgrades
+        run: |
+          npm cache clean --force
+          # version from ethereum/lib/openzeppelin-foundry-upgrades/src/internal/Versions.sol
+          npx @openzeppelin/upgrades-core@^1.37.0
+
+      - name: Check ethereum smart-contracts formatting
+        run: forge fmt --check
+        working-directory: ./ethereum
+
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force
         working-directory: ./ethereum
 
       - name: Build
@@ -54,7 +71,6 @@ jobs:
             "./api/ethereum/IMessageQueue.json"
             "./api/ethereum/WrappedEther.json"
             "./api/ethereum/ERC20Manager.json"
-            "./api/ethereum/IRelayer.json"
             "./api/ethereum/MessageQueue.json"
             "./api/ethereum/BridgingPayment.json"
 
@@ -71,7 +87,6 @@ jobs:
             "./ethereum/out/IMessageQueue.sol/IMessageQueue.json"
             "./ethereum/out/WrappedEther.sol/WrappedEther.json"
             "./ethereum/out/ERC20Manager.sol/ERC20Manager.json"
-            "./ethereum/out/IRelayer.sol/IRelayer.json"
             "./ethereum/out/MessageQueue.sol/MessageQueue.json"
             "./ethereum/out/BridgingPayment.sol/BridgingPayment.json"
 
@@ -95,6 +110,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -109,8 +126,23 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install OpenZeppelin Foundry Upgrades
+        run: |
+          npm cache clean --force
+          # version from ethereum/lib/openzeppelin-foundry-upgrades/src/internal/Versions.sol
+          npx @openzeppelin/upgrades-core@^1.37.0
+
+      - name: Check ethereum smart-contracts formatting
+        run: forge fmt --check
+        working-directory: ./ethereum
+
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force
         working-directory: ./ethereum
 
       - name: Run clippy
@@ -126,6 +158,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -140,8 +174,23 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install OpenZeppelin Foundry Upgrades
+        run: |
+          npm cache clean --force
+          # version from ethereum/lib/openzeppelin-foundry-upgrades/src/internal/Versions.sol
+          npx @openzeppelin/upgrades-core@^1.37.0
+
+      - name: Check ethereum smart-contracts formatting
+        run: forge fmt --check
+        working-directory: ./ethereum
+
       - name: Build ethereum smart-contracts
-        run: forge build
+        run: forge build --force
         working-directory: ./ethereum
 
       - name: Pull & run Gear node container
@@ -161,7 +210,7 @@ jobs:
       - name: Run solidity tests
         run: |
           cd ethereum
-          forge test
+          forge test --force
 
       - name: Stop Gear node container (if any)
         continue-on-error: true

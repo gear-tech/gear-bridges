@@ -12,13 +12,14 @@ use alloy::{
 use ethereum_client::{abi::IRelayer::MerkleRoot, EthApi};
 use futures::StreamExt;
 use prometheus::IntGauge;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MerkleRootExtractor {
     eth_api: EthApi,
     api_provider: ApiProviderConnection,
     confirmations: u64,
+    sender: UnboundedSender<RelayedMerkleRoot>,
 
     metrics: Metrics,
 }
@@ -39,30 +40,36 @@ impl_metered_service! {
 }
 
 impl MerkleRootExtractor {
-    pub fn new(eth_api: EthApi, api_provider: ApiProviderConnection, confirmations: u64) -> Self {
+    pub fn new(
+        eth_api: EthApi,
+        api_provider: ApiProviderConnection,
+        confirmations: u64,
+        sender: UnboundedSender<RelayedMerkleRoot>,
+    ) -> Self {
         Self {
             eth_api,
             api_provider,
             confirmations,
+            sender,
 
             metrics: Metrics::new(),
         }
     }
 
-    pub fn spawn(self) -> UnboundedReceiver<RelayedMerkleRoot> {
-        let (sender, receiver) = unbounded_channel();
+    pub fn sender(&self) -> &UnboundedSender<RelayedMerkleRoot> {
+        &self.sender
+    }
 
-        tokio::task::spawn(task(self, sender));
-
-        receiver
+    pub fn spawn(self) {
+        tokio::task::spawn(task(self));
     }
 }
 
-async fn task(mut this: MerkleRootExtractor, sender: UnboundedSender<RelayedMerkleRoot>) {
+async fn task(mut this: MerkleRootExtractor) {
     let mut attempts = 0;
 
     loop {
-        let res = task_inner(&this, &sender).await;
+        let res = task_inner(&this).await;
         if let Err(err) = res {
             attempts += 1;
             log::error!(
@@ -109,10 +116,7 @@ async fn task(mut this: MerkleRootExtractor, sender: UnboundedSender<RelayedMerk
     }
 }
 
-async fn task_inner(
-    this: &MerkleRootExtractor,
-    sender: &UnboundedSender<RelayedMerkleRoot>,
-) -> anyhow::Result<()> {
+async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
     let gear_api = this.api_provider.client();
     let subscription = this.eth_api.subscribe_logs().await?;
 
@@ -166,7 +170,7 @@ async fn task_inner(
             (root.blockNumber, root.merkleRoot),
         );
 
-        sender.send(RelayedMerkleRoot {
+        this.sender.send(RelayedMerkleRoot {
             block: GearBlockNumber(block_number_gear),
             block_hash,
             authority_set_id,

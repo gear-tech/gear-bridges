@@ -106,11 +106,9 @@ pub async fn relay(
 
     let message_sender = MessageSender::new(1, eth_api.clone());
 
-    let accumulator = Accumulator::new();
     let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
-    let channel_messages = accumulator
-        .run(queued_messages_receiver, merkle_roots_receiver)
-        .await;
+    let accumulator = Accumulator::new(merkle_roots_receiver, queued_messages_receiver);
+    let channel_messages = accumulator.spawn();
     let channel_message_data = MerkleProofFetcher::new(api_provider).spawn(channel_messages);
 
     let (sender, mut receiver) = mpsc::unbounded_channel();

@@ -6,9 +6,7 @@ use crate::{
         self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
         BASE_RETRY_DELAY, MAX_RETRIES,
     },
-    message_relayer::{
-        common::gear::block_listener::GearBlock, eth_to_gear::api_provider::ApiProviderConnection,
-    },
+    message_relayer::{common::GearBlock, eth_to_gear::api_provider::ApiProviderConnection},
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };

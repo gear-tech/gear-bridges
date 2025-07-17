@@ -46,6 +46,7 @@ version = "0.3.0"
 edition = "2021"
 
 [workspace.dependencies]
+actix-web = "4.11.0"
 mock-contract = { path = "./mock-contract" }
 relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }
@@ -147,7 +148,7 @@ prometheus = { version = "0.13.0", default-features = false }
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rayon = "1.5.3"
-reqwest = "0.11.24"
+reqwest = { version = "0.11.24", features = ["json"] }
 ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = [
     "alloc",
 ] }

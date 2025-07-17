@@ -1,16 +1,13 @@
+use super::{MessageInBlock, PaidMessage};
 use futures::{
     future::{self, Either},
     pin_mut,
 };
 use gclient::ext::sp_runtime::AccountId32;
-
-use std::collections::{HashMap, HashSet};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
 use prometheus::IntGauge;
+use std::collections::{HashMap, HashSet};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
-
-use super::{MessageInBlock, PaidMessage};
 
 pub struct PaidMessagesFilter {
     pending_messages: HashMap<[u8; 32], MessageInBlock>,
@@ -45,21 +42,18 @@ impl PaidMessagesFilter {
         }
     }
 
-    pub async fn run(
+    pub fn spawn(
         mut self,
         mut messages: UnboundedReceiver<MessageInBlock>,
         mut paid_messages: UnboundedReceiver<PaidMessage>,
-    ) -> UnboundedReceiver<MessageInBlock> {
-        let (sender, receiver) = unbounded_channel();
-
+        sender: UnboundedSender<MessageInBlock>,
+    ) {
         tokio::spawn(async move {
             match run_inner(&mut self, &sender, &mut messages, &mut paid_messages).await {
                 Ok(_) => {}
                 Err(e) => log::error!("Paid messages filter failed: {e}"),
             }
         });
-
-        receiver
     }
 }
 
@@ -136,6 +130,7 @@ mod tests {
     use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber};
     use gear_rpc_client::dto::Message;
     use primitive_types::H256;
+    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn fee_payer_filter() {
@@ -171,9 +166,10 @@ mod tests {
             authority_set_id: AuthoritySetId(0),
         };
 
-        let (msg_sender, msg_receiver) = unbounded_channel();
-        let (paid_sender, paid_receiver) = unbounded_channel();
-        let mut msg_receiver = filter.run(msg_receiver, paid_receiver).await;
+        let (msg_sender, filter_msg_receiver) = mpsc::unbounded_channel();
+        let (paid_sender, paid_receiver) = mpsc::unbounded_channel();
+        let (filter_msg_sender, mut msg_receiver) = mpsc::unbounded_channel();
+        filter.spawn(filter_msg_receiver, paid_receiver, filter_msg_sender);
 
         msg_sender.send(message0).unwrap();
         let res = msg_receiver.recv().await.unwrap();

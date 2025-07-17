@@ -20,7 +20,8 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relay_merkle_roots::MerkleRootRelayer;
 use relayer::*;
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::{collections::HashSet, net::TcpListener, str::FromStr, time::Duration};
+use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 
 #[tokio::main]
@@ -123,6 +124,7 @@ async fn main() -> AnyResult<()> {
             api_provider.spawn();
             kill_switch.run().await.expect("Kill switch relayer failed");
         }
+
         CliCommands::GearEthTokens(args) => {
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
@@ -132,15 +134,13 @@ async fn main() -> AnyResult<()> {
                 vara_rpc_retries: args.gear_args.retries,
             };
 
-            let mut metrics_builder = MetricsBuilder::new();
-
             let provider = ApiProvider::new(
                 gsdk_args.vara_domain.clone(),
                 gsdk_args.vara_port,
                 gsdk_args.vara_rpc_retries,
             )
             .await
-            .expect("Failed to create API provider");
+            .context("Failed to create API provider")?;
 
             let api = provider.connection().client();
 
@@ -201,17 +201,37 @@ async fn main() -> AnyResult<()> {
                     .await
                     .unwrap();
 
-                    metrics_builder = metrics_builder.register_service(&relayer);
+                    MetricsBuilder::new()
+                        .register_service(&relayer)
+                        .build()
+                        .run(args.prometheus_args.endpoint)
+                        .await;
 
                     provider.spawn();
                     relayer.run().await;
+
+                    loop {
+                        // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
+                        time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
+
                 GearEthTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
+                    web_server_token,
+                    web_server_address,
                 } => {
                     let bridging_payment_address =
                         hex_utils::decode_h256(&bridging_payment_address)
-                            .expect("Failed to parse address");
+                            .context("Failed to parse address")?;
+
+                    // spawn web-server
+                    let tcp_listener = TcpListener::bind(web_server_address)?;
+                    let (sender, receiver) = mpsc::unbounded_channel();
+                    let web_server = server::create(tcp_listener, web_server_token, sender)
+                        .context("Failed to create web server")?;
+                    let handle_server = web_server.handle();
+                    task::spawn(web_server);
 
                     let relayer = gear_to_eth::paid_token_transfers::Relayer::new(
                         eth_api,
@@ -222,24 +242,24 @@ async fn main() -> AnyResult<()> {
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         excluded_from_fees,
+                        receiver,
                     )
                     .await
                     .unwrap();
 
-                    metrics_builder = metrics_builder.register_service(&relayer);
+                    MetricsBuilder::new()
+                        .register_service(&relayer)
+                        .build()
+                        .run(args.prometheus_args.endpoint)
+                        .await;
+
                     provider.spawn();
                     relayer.run().await;
+
+                    tokio::signal::ctrl_c().await?;
+
+                    handle_server.stop(true).await;
                 }
-            }
-
-            metrics_builder
-                .build()
-                .run(args.prometheus_args.endpoint)
-                .await;
-
-            loop {
-                // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                std::thread::sleep(Duration::from_millis(100));
             }
         }
         CliCommands::EthGearCore(args) => {
@@ -467,7 +487,7 @@ async fn main() -> AnyResult<()> {
 
             loop {
                 // relay() spawns thread and exits, so we need to add this loop after calling run.
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                time::sleep(Duration::from_secs(1)).await;
             }
         }
 

@@ -118,6 +118,14 @@ pub enum GearEthTokensCommands {
         /// Address of the bridging-payment program
         #[arg(long = "bridging-payment-address", env = "BRIDGING_PAYMENT_ADDRESS")]
         bridging_payment_address: String,
+
+        /// Authorization token for web-server
+        #[arg(long, env)]
+        web_server_token: String,
+
+        /// Socket address for web-server
+        #[arg(long, env, default_value = "127.0.0.1:8443")]
+        web_server_address: String,
     },
 }
 

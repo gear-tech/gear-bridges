@@ -6,7 +6,7 @@ use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{btree_map::Entry, BTreeMap, HashSet},
     path::PathBuf,
     sync::Arc,
 };
@@ -17,6 +17,7 @@ use tokio::{
 
 pub struct MerkleRootBlockStorage {
     pub blocks: RwLock<BTreeMap<u32, Block>>,
+    pub submitted_roots: RwLock<HashSet<H256>>,
     pub path: PathBuf,
 }
 
@@ -91,8 +92,17 @@ impl MerkleRootBlockStorage {
     pub fn new(path: PathBuf) -> Arc<Self> {
         Arc::new(Self {
             blocks: RwLock::new(BTreeMap::new()),
+            submitted_roots: RwLock::new(HashSet::new()),
             path,
         })
+    }
+
+    pub async fn is_merkle_root_submitted(&self, merkle_root: H256) -> bool {
+        self.submitted_roots.read().await.contains(&merkle_root)
+    }
+
+    pub async fn submitted_merkle_root(&self, merkle_root: H256) {
+        self.submitted_roots.write().await.insert(merkle_root);
     }
 
     pub async fn merkle_root_processed(&self, block_number: u32) {
@@ -126,6 +136,7 @@ impl MerkleRootBlockStorage {
     /// Save unprocessed blocks to the provided path.
     pub async fn save(&self) -> anyhow::Result<()> {
         let blocks = self.blocks.read().await;
+        let submitted_merkle_roots = self.submitted_roots.read().await;
 
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
@@ -134,7 +145,12 @@ impl MerkleRootBlockStorage {
             .open(&self.path)
             .await?;
 
-        let serialized = serde_json::to_string(&*blocks)?;
+        let storage = SerializedStorage {
+            blocks: &blocks,
+            submitted_merkle_roots: &submitted_merkle_roots,
+        };
+
+        let serialized = serde_json::to_string(&storage)?;
 
         file.write_all(serialized.as_bytes()).await?;
         file.flush().await?;
@@ -151,9 +167,24 @@ impl MerkleRootBlockStorage {
         let mut contents = String::new();
         file.read_to_string(&mut contents).await?;
 
-        let blocks: BTreeMap<u32, Block> = serde_json::from_str(&contents)?;
+        let DeserializedStorage {
+            blocks,
+            submitted_merkle_roots,
+        } = serde_json::from_str(&contents)?;
         *self.blocks.write().await = blocks;
-
+        *self.submitted_roots.write().await = submitted_merkle_roots;
         Ok(())
     }
+}
+
+#[derive(Serialize)]
+struct SerializedStorage<'a> {
+    blocks: &'a BTreeMap<u32, Block>,
+    submitted_merkle_roots: &'a HashSet<H256>,
+}
+
+#[derive(Deserialize)]
+struct DeserializedStorage {
+    blocks: BTreeMap<u32, Block>,
+    submitted_merkle_roots: HashSet<H256>,
 }

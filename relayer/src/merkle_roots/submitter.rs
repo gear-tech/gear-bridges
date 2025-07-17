@@ -1,7 +1,9 @@
 use anyhow::Context;
 use ethereum_client::{EthApi, TxHash, TxStatus};
 use futures::{stream::FuturesUnordered, StreamExt};
+use primitive_types::H256;
 use prometheus::{Gauge, IntCounter, IntGauge};
+use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -9,6 +11,8 @@ use crate::{
     common::{submit_merkle_root_to_ethereum, BASE_RETRY_DELAY, MAX_RETRIES},
     prover_interface::FinalProof,
 };
+
+use super::storage::MerkleRootBlockStorage;
 
 pub struct Request {
     pub era: Option<u64>,
@@ -121,6 +125,7 @@ impl_metered_service!(
 
 pub struct MerkleRootSubmitter {
     eth_api: EthApi,
+    storage: Arc<MerkleRootBlockStorage>,
 
     metrics: Metrics,
 }
@@ -132,9 +137,10 @@ impl MeteredService for MerkleRootSubmitter {
 }
 
 impl MerkleRootSubmitter {
-    pub fn new(eth_api: EthApi) -> Self {
+    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootBlockStorage>) -> Self {
         Self {
             eth_api,
+            storage,
             metrics: Metrics::new(),
         }
     }
@@ -158,6 +164,7 @@ impl MerkleRootSubmitter {
                         log::info!("No more proofs to process, exiting");
                         return Ok(());
                     };
+                    self.storage.submitted_merkle_root(H256::from(request.proof.merkle_root)).await;
                     let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await?;
                     log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
                     self.metrics.total_submissions.inc();
@@ -190,7 +197,6 @@ impl MerkleRootSubmitter {
                             }
                         }
                         TxStatus::Failed => {
-
                             let root_exists = self.eth_api
                                 .read_finalized_merkle_root(root.merkle_root_block)
                                 .await?
@@ -205,7 +211,6 @@ impl MerkleRootSubmitter {
                                     return Ok(());
                                 };
                                 continue;
-
                             }
 
                             log::error!("Merkle root submission failed, tx hash: {}", root.tx_hash);

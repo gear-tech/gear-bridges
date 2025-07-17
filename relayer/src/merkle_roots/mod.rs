@@ -76,7 +76,7 @@ impl Relayer {
 
         let prover = prover::FinalityProver::new(api_provider.clone(), genesis_config);
 
-        let submitter = submitter::MerkleRootSubmitter::new(eth_api.clone());
+        let submitter = submitter::MerkleRootSubmitter::new(eth_api.clone(), block_storage);
 
         Self {
             merkle_roots,
@@ -118,7 +118,6 @@ pub struct MerkleRootRelayer {
 
     /// Set of blocks that are waiting for authority set sync.
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
-    last_submitted_merkle_root: Option<H256>,
 }
 
 impl MerkleRootRelayer {
@@ -134,7 +133,6 @@ impl MerkleRootRelayer {
             block_storage,
 
             waiting_for_authority_set_sync: BTreeMap::new(),
-            last_submitted_merkle_root: None,
         }
     }
 
@@ -268,11 +266,15 @@ impl MerkleRootRelayer {
 
                         authority_set_sync::Response::SealedEras(eras) => {
                              for sealed_era in eras {
+                                let merkle_root = H256::from(sealed_era.proof.merkle_root);
+                                if self.block_storage.is_merkle_root_submitted(merkle_root).await {
+                                    log::info!("Merkle-root {:?} for era #{} is already submitted", sealed_era.era, merkle_root);
+                                    continue;
+                                }
                                 log::info!(
                                     "Submitting merkle-root proof for era #{} at block #{}",
                                     sealed_era.era,
                                     sealed_era.merkle_root_block);
-
                                 if !submitter.submit_era_root(
                                     sealed_era.era,
                                     sealed_era.merkle_root_block,
@@ -318,7 +320,11 @@ impl MerkleRootRelayer {
             log::error!("Failed to save block storage state: {err:?}");
         }
 
-        if self.last_submitted_merkle_root == Some(merkle_root) {
+        if self
+            .block_storage
+            .is_merkle_root_submitted(merkle_root)
+            .await
+        {
             log::info!(
                 "Skipping merkle root {} for block #{} as there were no new messages",
                 merkle_root,

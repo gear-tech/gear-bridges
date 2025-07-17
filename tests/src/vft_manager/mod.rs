@@ -1511,6 +1511,7 @@ async fn deploy_programs(
     create_vft: bool,
     add_roles: bool,
     supply_type: TokenSupply,
+    reply_timeout: Option<u32>,
 ) -> Result<(
     impl Remoting + Clone,
     GearApi,
@@ -1539,6 +1540,8 @@ async fn deploy_programs(
     let remoting = GClientRemoting::new(api.clone());
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
 
+    let reply_timeout = reply_timeout.unwrap_or(100);
+
     let vft_manager_id = factory
         .new(InitConfig {
             gear_bridge_builtin: Default::default(),
@@ -1548,7 +1551,7 @@ async fn deploy_programs(
                 gas_for_reply_deposit: 20_000_000_000,
                 gas_to_send_request_to_builtin: 10_000_000_000,
                 gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 10,
+                reply_timeout,
                 fee_bridge: 0,
                 fee_incoming: 0,
             },
@@ -1633,7 +1636,7 @@ async fn deploy_programs(
 #[tokio::test]
 async fn submit_receipt_works() -> Result<()> {
     let (remoting, api, vft_manager_id, user_id, vft_token_id, erc20_addr) =
-        deploy_programs(true, true, TokenSupply::Ethereum).await?;
+        deploy_programs(true, true, TokenSupply::Ethereum, None).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
     let sender = H160([99_u8; 20]);
@@ -1740,7 +1743,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
     use core::panic;
 
     let (remoting, api, vft_manager_id, user_id, _, erc20_addr) =
-        deploy_programs(true, false, TokenSupply::Ethereum).await?;
+        deploy_programs(true, false, TokenSupply::Ethereum, Some(10)).await?;
 
     let gas_limit = api.block_gas_limit().unwrap();
 
@@ -1855,7 +1858,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
 #[tokio::test]
 async fn illegal_reply_in_handle_reply() -> Result<()> {
     let (remoting, api, vft_manager_id, user_id, extended_vft_id, erc20_addr) =
-        deploy_programs(false, false, TokenSupply::Gear).await?;
+        deploy_programs(false, false, TokenSupply::Gear, None).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
     let sender = H160([99_u8; 20]);
@@ -2011,7 +2014,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
     const REPLY_TIMEOUT: u32 = 10;
 
     let (remoting, api, vft_manager_id, user_id, _, erc20_addr) =
-        deploy_programs(false, false, TokenSupply::Gear).await?;
+        deploy_programs(false, false, TokenSupply::Gear, Some(10)).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
     let sender = H160([99_u8; 20]);

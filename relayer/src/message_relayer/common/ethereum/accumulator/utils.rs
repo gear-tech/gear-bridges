@@ -75,7 +75,7 @@ impl Messages {
 /// Represents the successful status of adding a relayed merkle root.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub enum AddStatus {
+pub enum Added {
     /// Provided instance is new and added.
     Ok,
     /// The same as Ok but returns the popped oldest merkle root (to
@@ -148,7 +148,7 @@ impl MerkleRoots {
     }
 
     // Err(i) -> there is already a root with the same authority_set_id
-    pub fn add(&mut self, root_new: RelayedMerkleRoot) -> Result<AddStatus, usize> {
+    pub fn add(&mut self, root_new: RelayedMerkleRoot) -> Result<Added, usize> {
         let i = match self.0.binary_search_by(|root| {
             Self::compare(
                 root.authority_set_id,
@@ -173,7 +173,7 @@ impl MerkleRoots {
                 let block_number = root_previous.block;
                 *root_previous = root_new;
 
-                return Ok(AddStatus::Overwritten(block_number));
+                return Ok(Added::Overwritten(block_number));
             }
         }
 
@@ -189,8 +189,8 @@ impl MerkleRoots {
         self.0.insert(i, root_new);
 
         Ok(match result {
-            Some(root) => AddStatus::Removed(root),
-            None => AddStatus::Ok,
+            Some(root) => Added::Removed(root),
+            None => Added::Ok,
         })
     }
 }
@@ -345,11 +345,11 @@ mod tests {
             let result = merkle_roots.add(*root);
 
             if i < 2 {
-                assert!(matches!(result, Ok(AddStatus::Ok)));
+                assert!(matches!(result, Ok(Added::Ok)));
             } else if i == 2 || i == 4 {
                 assert!(result.is_err());
             } else {
-                assert!(matches!(result, Ok(AddStatus::Overwritten(_))));
+                assert!(matches!(result, Ok(Added::Overwritten(_))));
             }
         }
 
@@ -402,7 +402,7 @@ mod tests {
         // attempt to add a newer merkle root should displace the oldest one
         let root_expected_removed = *merkle_roots.get(merkle_roots.len() - 1).unwrap();
         let result = merkle_roots.add(the_newest_root);
-        let AddStatus::Removed(root_removed) = result.unwrap() else {
+        let Added::Removed(root_removed) = result.unwrap() else {
             unreachable!();
         };
         assert_eq!(root_expected_removed, root_removed);

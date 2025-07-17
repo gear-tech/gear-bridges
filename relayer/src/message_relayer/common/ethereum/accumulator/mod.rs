@@ -11,7 +11,7 @@ use futures::{
 };
 use prometheus::IntGauge;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use utils::{AddStatus, MerkleRoots, Messages};
+use utils::{Added, MerkleRoots, Messages};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 /// Struct accumulates gear-eth messages and required merkle roots.
@@ -111,9 +111,9 @@ async fn run_inner(
 
             Either::Right((Some(merkle_root), _)) => {
                 match this.merkle_roots.add(merkle_root) {
-                    Ok(AddStatus::Ok | AddStatus::Overwritten(_)) => {}
+                    Ok(Added::Ok | Added::Overwritten(_)) => {}
 
-                    Ok(AddStatus::Removed(merkle_root_old)) => {
+                    Ok(Added::Removed(merkle_root_old)) => {
                         log::warn!("Removing merkle root = {merkle_root_old:?}");
                         let messages = this.messages.drain(&merkle_root_old);
                         for message in messages {
@@ -122,7 +122,7 @@ async fn run_inner(
                     }
 
                     Err(_i) => {
-                        // log::warn!("There is already a merkle root: root_old = {:?}, merkle_root = {merkle_root:?}", this.merkle_roots.get(i));
+                        // There is already a corresponding merkle root at the position.
                         continue;
                     }
                 }

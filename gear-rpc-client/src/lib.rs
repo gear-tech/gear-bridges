@@ -1,7 +1,7 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},
     Blake2bVar,
@@ -24,6 +24,7 @@ use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::{traits::AppVerify, AccountId32};
 use subxt::{
+    backend::BlockRef,
     blocks::Block as BlockImpl,
     dynamic::DecodedValueThunk,
     rpc_params,
@@ -36,6 +37,8 @@ use trie_db::{node::NodeHandle, ChildReference};
 use crate::dto::StorageInclusionProof;
 
 pub mod dto;
+
+pub type GearBlock = BlockImpl<GearConfig, OnlineClient<GearConfig>>;
 
 struct StorageTrieInclusionProof {
     branch_nodes_data: Vec<BranchNodeData>,
@@ -66,14 +69,23 @@ impl From<gsdk::Api> for GearApi {
 }
 
 impl GearApi {
-    pub async fn new(domain: &str, port: u16, retries: u8) -> anyhow::Result<GearApi> {
+    pub async fn new(domain: &str, port: u16, retries: u8) -> AnyResult<GearApi> {
         let uri: &str = &format!("{domain}:{port}");
         Ok(GearApi {
             api: gsdk::Api::builder().retries(retries).build(uri).await?,
         })
     }
 
-    pub async fn block_hash_to_number(&self, block: H256) -> anyhow::Result<u32> {
+    /// Get block with the specified hash.
+    pub async fn get_block_at(&self, block_hash: H256) -> AnyResult<GearBlock> {
+        Ok(self
+            .api
+            .blocks()
+            .at(BlockRef::from_hash(block_hash))
+            .await?)
+    }
+
+    pub async fn block_hash_to_number(&self, block: H256) -> AnyResult<u32> {
         self.api
             .rpc()
             .chain_get_block(Some(block))
@@ -82,7 +94,7 @@ impl GearApi {
             .ok_or_else(|| anyhow!("Block {} not present on RPC node", block))
     }
 
-    pub async fn block_number_to_hash(&self, block: u32) -> anyhow::Result<H256> {
+    pub async fn block_number_to_hash(&self, block: u32) -> AnyResult<H256> {
         self.api
             .rpc()
             .chain_get_block_hash(Some(block.into()))
@@ -90,12 +102,12 @@ impl GearApi {
             .ok_or_else(|| anyhow!("Block #{} not present on RPC node", block))
     }
 
-    pub async fn latest_finalized_block(&self) -> anyhow::Result<H256> {
+    pub async fn latest_finalized_block(&self) -> AnyResult<H256> {
         Ok(self.api.rpc().chain_get_finalized_head().await?)
     }
 
     /// Fetch authority set id for the given block.
-    pub async fn authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
+    pub async fn authority_set_id(&self, block: H256) -> AnyResult<u64> {
         let block = (*self.api).blocks().at(block).await?;
         let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
         Self::fetch_from_storage(&block, &set_id_address).await
@@ -103,10 +115,7 @@ impl GearApi {
 
     /// Get authority set state for specified block. If block is not specified
     /// the latest finalized block is taken.
-    pub async fn authority_set_state(
-        &self,
-        block: Option<H256>,
-    ) -> anyhow::Result<AuthoritySetState> {
+    pub async fn authority_set_state(&self, block: Option<H256>) -> AnyResult<AuthoritySetState> {
         let block = match block {
             Some(block) => block,
             None => self.latest_finalized_block().await?,
@@ -133,7 +142,7 @@ impl GearApi {
     }
 
     /// Find authority set id that have signed given `block`.
-    pub async fn signed_by_authority_set_id(&self, block: H256) -> anyhow::Result<u64> {
+    pub async fn signed_by_authority_set_id(&self, block: H256) -> AnyResult<u64> {
         let stored_set_id = self.authority_set_id(block).await?;
         let previous_block = self.previous_block(block).await?;
         let previous_block_stored_set_id = self.authority_set_id(previous_block).await?;
@@ -145,7 +154,7 @@ impl GearApi {
         })
     }
 
-    pub async fn find_era_first_block(&self, authority_set_id: u64) -> anyhow::Result<H256> {
+    pub async fn find_era_first_block(&self, authority_set_id: u64) -> AnyResult<H256> {
         let current_set_block = self
             .search_for_authority_set_block(authority_set_id)
             .await?;
@@ -185,7 +194,7 @@ impl GearApi {
         }
     }
 
-    async fn previous_block(&self, block: H256) -> anyhow::Result<H256> {
+    async fn previous_block(&self, block: H256) -> AnyResult<H256> {
         let block = self.api.blocks().at(block).await?;
         Ok(block.header().parent_hash)
     }
@@ -193,7 +202,7 @@ impl GearApi {
     pub async fn fetch_finality_proof_for_session(
         &self,
         authority_set_id: u64,
-    ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
+    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let block = self
             .search_for_authority_set_block(authority_set_id)
             .await?;
@@ -204,7 +213,7 @@ impl GearApi {
     /// Subscribes to GRANDPA justifications stream and returns it.
     pub async fn subscribe_grandpa_justifications(
         &self,
-    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<GrandpaJustification<GearHeader>>>> {
+    ) -> AnyResult<impl Stream<Item = AnyResult<GrandpaJustification<GearHeader>>>> {
         let stream = self
             .api
             .rpc()
@@ -216,7 +225,7 @@ impl GearApi {
             )
             .await?;
 
-        let stream = stream.map(|res: Result<String, _>| -> anyhow::Result<_, _> {
+        let stream = stream.map(|res: Result<String, _>| -> AnyResult<_, _> {
             let hex_string = res?;
             let bytes = hex::decode(&hex_string[2..]).context("failed to decoded hex")?;
             let justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..])?;
@@ -240,7 +249,7 @@ impl GearApi {
     pub async fn fetch_finality_proof(
         &self,
         after_block: H256,
-    ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
+    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
             .api
@@ -268,7 +277,7 @@ impl GearApi {
     pub async fn produce_finality_proof(
         &self,
         justification: GrandpaJustification<GearHeader>,
-    ) -> anyhow::Result<(H256, dto::BlockFinalityProof)> {
+    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let block_number = justification.commit.target_number;
         let block_hash = justification.commit.target_hash;
 
@@ -310,17 +319,14 @@ impl GearApi {
         ))
     }
 
-    async fn fetch_authority_set(&self, authority_set_id: u64) -> anyhow::Result<Vec<[u8; 32]>> {
+    async fn fetch_authority_set(&self, authority_set_id: u64) -> AnyResult<Vec<[u8; 32]>> {
         let block = self
             .search_for_authority_set_block(authority_set_id)
             .await?;
         self.fetch_authority_set_in_block(block).await
     }
 
-    pub async fn search_for_authority_set_block(
-        &self,
-        authority_set_id: u64,
-    ) -> anyhow::Result<H256> {
+    pub async fn search_for_authority_set_block(&self, authority_set_id: u64) -> AnyResult<H256> {
         let latest_block = self.latest_finalized_block().await?;
         let latest_vs_id = self.authority_set_id(latest_block).await?;
 
@@ -390,7 +396,7 @@ impl GearApi {
         }
     }
 
-    async fn fetch_authority_set_in_block(&self, block: H256) -> anyhow::Result<Vec<[u8; 32]>> {
+    async fn fetch_authority_set_in_block(&self, block: H256) -> AnyResult<Vec<[u8; 32]>> {
         let block = (*self.api).blocks().at(block).await?;
 
         let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
@@ -406,7 +412,7 @@ impl GearApi {
     pub async fn fetch_sent_message_inclusion_proof(
         &self,
         block: H256,
-    ) -> anyhow::Result<dto::StorageInclusionProof> {
+    ) -> AnyResult<dto::StorageInclusionProof> {
         let address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
         self.fetch_block_inclusion_proof(block, &address).await
     }
@@ -414,7 +420,7 @@ impl GearApi {
     pub async fn fetch_next_session_keys_inclusion_proof(
         &self,
         block: H256,
-    ) -> anyhow::Result<dto::StorageInclusionProof> {
+    ) -> AnyResult<dto::StorageInclusionProof> {
         let address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
         self.fetch_block_inclusion_proof(block, &address).await
     }
@@ -423,7 +429,7 @@ impl GearApi {
         &self,
         block: H256,
         address: &[u8],
-    ) -> anyhow::Result<dto::StorageInclusionProof> {
+    ) -> AnyResult<dto::StorageInclusionProof> {
         let storage_inclusion_proof = self.fetch_storage_inclusion_proof(block, address).await?;
 
         let block = (*self.api).blocks().at(block).await?;
@@ -459,7 +465,7 @@ impl GearApi {
         &self,
         block: H256,
         address: &[u8],
-    ) -> anyhow::Result<StorageTrieInclusionProof> {
+    ) -> AnyResult<StorageTrieInclusionProof> {
         use trie_db::{
             node::{Node, Value},
             NodeCodec, TrieLayout,
@@ -574,7 +580,7 @@ impl GearApi {
     async fn fetch_from_storage<T, A>(
         block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
         address: &A,
-    ) -> anyhow::Result<T>
+    ) -> AnyResult<T>
     where
         A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
         T: Decode,
@@ -593,7 +599,7 @@ impl GearApi {
         &self,
         block: H256,
         message_hash: H256,
-    ) -> anyhow::Result<dto::MerkleProof> {
+    ) -> AnyResult<dto::MerkleProof> {
         use pallet_gear_eth_bridge_rpc_runtime_api::Proof;
 
         let proof: Option<Proof> = self
@@ -622,13 +628,13 @@ impl GearApi {
     }
 
     /// Fetch queue merkle root for the given block.
-    pub async fn fetch_queue_merkle_root(&self, block: H256) -> anyhow::Result<H256> {
+    pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<H256> {
         let block = (*self.api).blocks().at(block).await?;
         let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
         Self::fetch_from_storage(&block, &set_id_address).await
     }
 
-    pub async fn message_queued_events(&self, block: H256) -> anyhow::Result<Vec<dto::Message>> {
+    pub async fn message_queued_events(&self, block: H256) -> AnyResult<Vec<dto::Message>> {
         let events = self.api.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
@@ -657,7 +663,7 @@ impl GearApi {
         from_program: H256,
         to_user: H256,
         block: H256,
-    ) -> anyhow::Result<Vec<dto::UserMessageSent>> {
+    ) -> AnyResult<Vec<dto::UserMessageSent>> {
         let events = self.api.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
@@ -693,7 +699,7 @@ impl GearApi {
         &self,
         pallete: &str,
         constant: &str,
-    ) -> anyhow::Result<DecodedValueThunk> {
+    ) -> AnyResult<DecodedValueThunk> {
         let addr = subxt::dynamic::constant(pallete, constant);
         let res = self
             .api
@@ -704,7 +710,7 @@ impl GearApi {
     }
 
     /* todo(playX18): some version mismatch between relayer and this crate does not allow us to return AccountId32 as is, return raw bytes for now */
-    pub async fn bridge_admin(&self) -> anyhow::Result<[u8; 32]> {
+    pub async fn bridge_admin(&self) -> AnyResult<[u8; 32]> {
         self.get_constant("GearEthBridge", "BridgeAdmin")
             .await
             .and_then(|res| {
@@ -714,7 +720,7 @@ impl GearApi {
             })
     }
 
-    pub async fn bridge_pauser(&self) -> anyhow::Result<[u8; 32]> {
+    pub async fn bridge_pauser(&self) -> AnyResult<[u8; 32]> {
         self.get_constant("GearEthBridge", "BridgePauser")
             .await
             .and_then(|res| {

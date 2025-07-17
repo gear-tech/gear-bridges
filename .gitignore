@@ -13,7 +13,8 @@ out/
 tmp/
 
 ethereum/broadcast
-ethereum/remappings.txt
+ethereum/coverage
+ethereum/lcov.info
 
 .env
 .DS_Store

@@ -9,7 +9,7 @@ use tokio::sync::{
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::message_relayer::common::{gear::block_listener::GearBlock, PaidMessage};
+use crate::message_relayer::common::{GearBlock, PaidMessage};
 
 pub struct MessagePaidEventExtractor {
     bridging_payment_address: H256,

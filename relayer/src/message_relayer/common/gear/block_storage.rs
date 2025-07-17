@@ -1,6 +1,6 @@
 use primitive_types::H256;
 
-use crate::message_relayer::common::gear::block_listener::GearBlock;
+use crate::message_relayer::common::GearBlock;
 
 /// A list of unprocessed blocks and also first/last blocks in the storage.
 ///

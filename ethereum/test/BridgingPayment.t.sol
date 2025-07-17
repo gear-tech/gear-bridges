@@ -1,79 +1,76 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {Test} from "forge-std/Test.sol";
-import {WrappedVara} from "../src/erc20/WrappedVara.sol";
-import {ERC20Manager} from "../src/ERC20Manager.sol";
-import {IBridgingPayment} from "../src/interfaces/IBridgingPayment.sol";
-import {BridgingPayment} from "../src/BridgingPayment.sol";
-import {ProxyContract} from "../src/ProxyContract.sol";
+import {Test, console} from "forge-std/Test.sol";
+import {Base} from "./Base.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
 
-contract BridgingPaymentTest is Test {
-    uint256 constant NOT_ENOUGH_FEE = 99;
-    uint256 constant FEE = 100;
-    uint256 constant USER_BALANCE = 10 ether;
+contract BridgingPaymentOwner {
+    ERC20Manager public erc20Manager;
 
-    address constant ADMIN = address(42);
-    address constant DEPLOYER = address(911);
-    address constant USER = address(69);
+    constructor(ERC20Manager _erc20Manager) {
+        erc20Manager = _erc20Manager;
+    }
 
-    bytes32 constant VFT_MANAGER = bytes32(0x0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A);
+    function createBridgingPayment(uint256 fee) external returns (address) {
+        return erc20Manager.createBridgingPayment(fee);
+    }
+}
 
-    uint256 constant TOKEN_TRANSFER_AMOUNT = 100;
-
-    BridgingPayment public bridging_payment;
-    ERC20Manager public erc20_manager;
-    WrappedVara public wrappedVara;
-
+contract BridgingPaymentTest is Test, Base {
     function setUp() public {
-        vm.startPrank(DEPLOYER, DEPLOYER);
-
-        wrappedVara = new WrappedVara(DEPLOYER);
-        wrappedVara.mint(DEPLOYER, type(uint256).max);
-
-        bool transferred = wrappedVara.transfer(USER, TOKEN_TRANSFER_AMOUNT);
-        assertTrue(transferred);
-
-        ERC20Manager erc20_manager_impl = new ERC20Manager(address(0), VFT_MANAGER);
-        ProxyContract _erc20_manager = new ProxyContract();
-        _erc20_manager.upgradeToAndCall(address(erc20_manager_impl), "");
-        erc20_manager = ERC20Manager(address(_erc20_manager));
-
-        bridging_payment = new BridgingPayment(address(erc20_manager), FEE, ADMIN);
+        deployBridgeFromConstants();
     }
 
-    function test_feeDeducted() public {
-        vm.startPrank(USER, USER);
-        vm.deal(USER, USER_BALANCE);
-        vm.deal(ADMIN, 0);
+    function test_SetFee() public {
+        vm.startPrank(deploymentArguments.deployerAddress);
 
-        approveTransfer();
+        bridgingPayment.setFee(2 wei);
+        assertEq(bridgingPayment.fee(), 2 wei);
 
-        vm.expectEmit(address(bridging_payment));
-        emit IBridgingPayment.FeePaid();
+        vm.stopPrank();
+    }
 
-        erc20_manager.requestBridgingPayingFee{value: FEE}(
-            address(wrappedVara), TOKEN_TRANSFER_AMOUNT, bytes32(0), address(bridging_payment)
+    function test_SetFeeUnauthorized() public {
+        vm.startPrank(address(0x11));
+
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, address(0x11)));
+        bridgingPayment.setFee(2 wei);
+
+        vm.stopPrank();
+    }
+
+    function test_PayFeeUnauthorized() public {
+        vm.startPrank(address(0x11));
+
+        vm.expectRevert(IBridgingPayment.OnlyErc20Manager.selector);
+        bridgingPayment.payFee();
+
+        vm.stopPrank();
+    }
+
+    function test_PayFeeWithInvalidOwner() public {
+        vm.startPrank(deploymentArguments.deployerAddress);
+
+        address token = address(tetherToken);
+        uint256 amount = 100 * (10 ** tetherToken.decimals());
+        bytes32 to = 0;
+
+        IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
+        tetherToken.approve(address(erc20Manager), amount);
+
+        BridgingPaymentOwner bridgingPaymentOwner = new BridgingPaymentOwner(erc20Manager);
+        address bridgingPayment_ = bridgingPaymentOwner.createBridgingPayment(deploymentArguments.bridgingPaymentFee);
+
+        vm.expectRevert(IBridgingPayment.PayFeeFailed.selector);
+        erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
+            token, amount, to, bridgingPayment_
         );
 
-        assertEq(wrappedVara.balanceOf(address(erc20_manager)), TOKEN_TRANSFER_AMOUNT);
-        assertEq(ADMIN.balance, FEE);
-    }
-
-    function test_revertWhenNotEnoughFee() public {
-        vm.startPrank(USER, USER);
-        vm.deal(USER, USER_BALANCE);
-
-        approveTransfer();
-
-        vm.expectRevert();
-        erc20_manager.requestBridgingPayingFee{value: NOT_ENOUGH_FEE}(
-            address(wrappedVara), TOKEN_TRANSFER_AMOUNT, bytes32(0), address(bridging_payment)
-        );
-    }
-
-    function approveTransfer() public {
-        bool approved = wrappedVara.approve(address(erc20_manager), TOKEN_TRANSFER_AMOUNT);
-        assertTrue(approved);
+        vm.stopPrank();
     }
 }

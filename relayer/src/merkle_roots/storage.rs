@@ -1,6 +1,9 @@
-use crate::message_relayer::common::gear::{
-    block_listener::GearBlock,
-    block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
+use crate::{
+    message_relayer::common::{
+        gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
+        GearBlock,
+    },
+    proof_storage::ProofStorage,
 };
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
@@ -15,7 +18,8 @@ use tokio::{
     sync::RwLock,
 };
 
-pub struct MerkleRootBlockStorage {
+pub struct MerkleRootStorage {
+    pub proofs: Arc<dyn ProofStorage>,
     pub blocks: RwLock<BTreeMap<u32, Block>>,
     pub submitted_roots: RwLock<HashSet<H256>>,
     pub path: PathBuf,
@@ -47,7 +51,7 @@ fn authority_set_changed(block: &GearBlock) -> Option<H256> {
 }
 
 #[async_trait::async_trait]
-impl UnprocessedBlocksStorage for MerkleRootBlockStorage {
+impl UnprocessedBlocksStorage for MerkleRootStorage {
     async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
         let blocks = self.blocks.read().await;
         let first_block = blocks.first_key_value().map(|(k, v)| (v.block_hash, *k));
@@ -88,9 +92,10 @@ impl UnprocessedBlocksStorage for MerkleRootBlockStorage {
     }
 }
 
-impl MerkleRootBlockStorage {
-    pub fn new(path: PathBuf) -> Arc<Self> {
+impl MerkleRootStorage {
+    pub fn new(proofs: Arc<dyn ProofStorage>, path: PathBuf) -> Arc<Self> {
         Arc::new(Self {
+            proofs,
             blocks: RwLock::new(BTreeMap::new()),
             submitted_roots: RwLock::new(HashSet::new()),
             path,

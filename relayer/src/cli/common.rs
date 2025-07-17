@@ -81,9 +81,6 @@ pub struct EthereumArgs {
     #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
     pub eth_endpoint: String,
 
-    /// Ethereum address of relayer contract
-    #[arg(long = "relayer-address", env = "ETH_RELAYER_ADDRESS")]
-    pub relayer_address: String,
     /// Ethereum address of message queue contract
     #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     pub mq_address: String,

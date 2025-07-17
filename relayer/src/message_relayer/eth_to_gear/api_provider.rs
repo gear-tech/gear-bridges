@@ -67,6 +67,11 @@ impl ApiProviderConnection {
             .map_err(|e| anyhow::anyhow!("failed to set suri: {}", e))
     }
 
+    /// Request a new API connection from the [`ApiProvider`].
+    pub fn gclient(&mut self) -> gclient::GearApi {
+        gclient::GearApi::from(self.api.clone())
+    }
+
     pub fn client(&self) -> GearApi {
         GearApi::from(self.api.clone())
     }

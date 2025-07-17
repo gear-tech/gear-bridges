@@ -12,7 +12,7 @@ use crate::{
     prover_interface::FinalProof,
 };
 
-use super::storage::MerkleRootBlockStorage;
+use super::storage::MerkleRootStorage;
 
 pub struct Request {
     pub era: Option<u64>,
@@ -125,7 +125,7 @@ impl_metered_service!(
 
 pub struct MerkleRootSubmitter {
     eth_api: EthApi,
-    storage: Arc<MerkleRootBlockStorage>,
+    storage: Arc<MerkleRootStorage>,
 
     metrics: Metrics,
 }
@@ -137,7 +137,7 @@ impl MeteredService for MerkleRootSubmitter {
 }
 
 impl MerkleRootSubmitter {
-    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootBlockStorage>) -> Self {
+    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootStorage>) -> Self {
         Self {
             eth_api,
             storage,

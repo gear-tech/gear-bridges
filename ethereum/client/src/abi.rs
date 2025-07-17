@@ -8,12 +8,7 @@ sol!(
 
 sol!(
     #[sol(rpc)]
-    IRelayer,
-    "../../api/ethereum/IRelayer.json"
-);
-
-sol!(
-    #[sol(rpc)]
+    #[allow(clippy::too_many_arguments)]
     IERC20Manager,
     "../../api/ethereum/IERC20Manager.json"
 );
@@ -26,11 +21,17 @@ sol!(
 
 impl IMessageQueue::VaraMessage {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut ret: Vec<u8> = Vec::with_capacity(32 + 32 + 20 + self.data.len());
-        ret.extend(self.nonce.to_vec());
-        ret.extend(self.sender.to_vec());
-        ret.extend(self.receiver.to_vec());
-        ret.extend(self.data.to_vec());
+        // struct VaraMessage {
+        //     uint256 nonce; // 32 bytes
+        //     bytes32 source; // 32 bytes
+        //     address destination; // 20 bytes
+        //     bytes payload; // variable length
+        // }
+        let mut ret: Vec<u8> = Vec::with_capacity(32 + 32 + 20 + self.payload.len());
+        ret.extend(self.nonce.to_be_bytes_vec());
+        ret.extend(self.source.to_vec());
+        ret.extend(self.destination.to_vec());
+        ret.extend(self.payload.to_vec());
         ret
     }
 }

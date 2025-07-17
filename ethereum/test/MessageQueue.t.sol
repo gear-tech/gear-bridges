@@ -348,14 +348,15 @@ contract MessageQueueTest is Test, Base {
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
-        for (uint256 i = 0; i < 2; i++) {
-            vm.expectEmit(address(messageQueue));
-            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
-            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
-            assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-        }
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootAlreadySet.selector, blockNumber));
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
     }
 
     function test_SubmitMerkleRootWithInvalidProof() public {

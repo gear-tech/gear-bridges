@@ -155,11 +155,15 @@ contract MessageQueue is
 
         // Check if the provided Merkle root is a duplicate.
         // If it is a duplicate, set the emergency stop status, emit `EmergencyStopSet` event.
-        bytes32 originalMerkleRoot = _blockNumbers[blockNumber];
-        if (originalMerkleRoot != 0 && originalMerkleRoot != merkleRoot) {
-            _emergencyStop = true;
+        bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
+        if (previousMerkleRoot != 0) {
+            if (previousMerkleRoot != merkleRoot) {
+                _emergencyStop = true;
 
-            emit EmergencyStopSet();
+                emit EmergencyStopSet();
+            } else {
+                revert MerkleRootAlreadySet(blockNumber);
+            }
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
 

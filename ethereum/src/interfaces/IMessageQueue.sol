@@ -44,6 +44,11 @@ interface IMessageQueue is IPausable {
     error InvalidMerkleProof();
 
     /**
+     * @dev Merkle root is already set.
+     */
+    error MerkleRootAlreadySet(uint256 blockNumber);
+
+    /**
      * @dev Emitted when emergency stop status is set.
      */
     event EmergencyStopSet();

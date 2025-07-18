@@ -97,7 +97,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     const nonces = completed.map((info) => info.nonce);
 
     const transfers = await this._ctx.store.find(Transfer, {
-      where: { nonce: In(nonces), sourceNetwork: this._network, status: Status.Bridging },
+      where: { nonce: In(nonces), sourceNetwork: this._network },
     });
 
     if (transfers.length === 0) return;

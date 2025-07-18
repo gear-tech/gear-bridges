@@ -6,7 +6,7 @@ import { NETWORK_SVG } from './icons';
 import { TRANSACTIONS_LIMIT, TRANSFERS_QUERY } from './queries';
 
 const EXPLORER_URL = {
-  [Network.Vara]: 'https://vara.subscan.io',
+  [Network.Vara]: 'https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Ftestnet-archive.vara.network#/explorer/query',
   [Network.Ethereum]: 'https://hoodi.etherscan.io',
 } as const;
 

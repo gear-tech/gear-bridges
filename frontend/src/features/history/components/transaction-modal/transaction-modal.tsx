@@ -26,6 +26,7 @@ type Props = Pick<
   timestamp?: Transfer['timestamp'];
   status?: Transfer['status'];
   nonce?: Transfer['nonce'];
+  blockNumber?: Transfer['blockNumber'];
   estimatedFees?: bigint;
   close: () => void;
   renderProgressBar?: () => JSX.Element;
@@ -57,6 +58,7 @@ function TransactionModal({
   sender,
   receiver,
   nonce,
+  blockNumber,
   estimatedFees,
   renderProgressBar,
   close,
@@ -73,8 +75,7 @@ function TransactionModal({
   const rawNonce = isVaraNetwork && nonce ? `0x${nonce.padStart(64, '0')}` : nonce;
   const isPayFeeButtonVisible = nonce && account?.decodedAddress === sender && status === Status.AwaitingPayment;
 
-  const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isVaraNetwork ? 'extrinsic' : 'tx'}/${txHash}`;
-
+  const explorerUrl = `${EXPLORER_URL[sourceNetwork]}/${isVaraNetwork ? blockNumber : `tx/${txHash}`}`;
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
 
@@ -110,9 +111,13 @@ function TransactionModal({
           <div className={styles.txHashAndNonce}>
             {txHash && (
               <p className={styles.txHash}>
-                <a href={explorerUrl} target="_blank" rel="noreferrer">
-                  {getTruncatedText(txHash)}
-                </a>
+                {!isVaraNetwork ? (
+                  <a href={explorerUrl} target="_blank" rel="noreferrer">
+                    {getTruncatedText(txHash)}
+                  </a>
+                ) : (
+                  getTruncatedText(txHash)
+                )}
 
                 <CopyButton value={txHash} message="Transaction hash copied" />
               </p>
@@ -184,13 +189,13 @@ function TransactionModal({
       <footer className={styles.footer}>
         {!isUndefined(estimatedFees) && <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} />}
 
-        {(txHash || isPayFeeButtonVisible) && (
+        {((isVaraNetwork ? Boolean(blockNumber) : txHash) || isPayFeeButtonVisible) && (
           <div className={styles.buttons}>
-            {txHash && (
+            {(isVaraNetwork ? Boolean(blockNumber) : txHash) && (
               <LinkButton
                 type="external"
                 to={explorerUrl}
-                text="View in Explorer"
+                text={isVaraNetwork ? 'View Block in Explorer' : 'View in Explorer'}
                 color="contrast"
                 size="small"
                 block

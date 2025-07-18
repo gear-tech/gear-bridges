@@ -1,5 +1,6 @@
 {
-  "name": "squid-evm-template",
+  "name": "gear-bridge-indexer",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "build": "rm -rf lib && tsc",

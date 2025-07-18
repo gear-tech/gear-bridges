@@ -1,6 +1,11 @@
-name: Indexer
+name: Indexer Release
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "indexer/package.json"
   workflow_dispatch:
     inputs:
       environment:
@@ -12,6 +17,10 @@ on:
           - stg
           - prod
           - temp
+      version:
+        description: 'Version to deploy'
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,18 +36,87 @@ env:
   COMMIT_SHA: ${{ github.sha }}
 
 jobs:
-  build-image:
+  check-version:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    outputs:
+      should_build: ${{ steps.version_check.outputs.should_build }}
+      current_version: ${{ steps.version_check.outputs.current_version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version changes
+        id: version_check
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./indexer/package.json').version")
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Get previous version from the last commit that changed package.json
+          PREV_COMMIT=$(git log --oneline -n 2 --pretty=format:"%H" -- indexer/package.json | tail -1)
+
+          # Get previous version
+          PREV_VERSION=$(git show $PREV_COMMIT:indexer/package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8')).version")
+
+          echo "Previous version: $PREV_VERSION"
+          echo "Current version: $CURRENT_VERSION"
+
+          # Compare versions using simple semver logic
+          if [ "$CURRENT_VERSION" != "$PREV_VERSION" ]; then
+            # Use Node.js to compare semantic versions
+            SHOULD_BUILD=$(node -e "
+              const current = '$CURRENT_VERSION';
+              const previous = '$PREV_VERSION';
+
+              function compareVersions(v1, v2) {
+                const parts1 = v1.split('.').map(Number);
+                const parts2 = v2.split('.').map(Number);
+
+                for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+                  const p1 = parts1[i] || 0;
+                  const p2 = parts2[i] || 0;
+
+                  if (p1 > p2) return 1;
+                  if (p1 < p2) return -1;
+                }
+
+                return 0;
+              }
+
+              const result = compareVersions(current, previous);
+              console.log(result > 0);
+            " 2>/dev/null || echo "true")
+
+            if [ "$SHOULD_BUILD" = "true" ]; then
+              echo "Version is newer, building image"
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            else
+              echo "Version is not newer, skipping build"
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Version unchanged, skipping build"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-image:
+    needs: check-version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && needs.check-version.outputs.should_build == 'true'
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Log in to the GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -51,27 +129,90 @@ jobs:
           file: indexer/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.environment }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.environment }}-${{ env.COMMIT_SHA }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ needs.check-version.outputs.current_version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:latest
 
   deploy-to-k8s:
-    needs: build-image
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Version must be in semver format (e.g., 1.0.0)"
+            exit 1
+          fi
+
+      - name: Check if image exists
+        run: |
+          # Check if the specified version exists in the registry using GitHub API
+          VERSION="${{ github.event.inputs.version }}"
+          PACKAGE_NAME="${{ github.repository }}-indexer"
+
+          # Get package versions from GitHub Container Registry
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/user/packages/container/${PACKAGE_NAME}/versions" \
+            2>/dev/null || echo "[]")
+
+          # Check if the version exists in the response
+          VERSION_EXISTS=$(echo "$RESPONSE" | jq -r --arg version "$VERSION" \
+            '.[] | select(.metadata.container.tags[]? == $version) | .metadata.container.tags[]' \
+            2>/dev/null | grep -q "^$VERSION$" && echo "true" || echo "false")
+
+          if [ "$VERSION_EXISTS" = "false" ]; then
+            echo "Error: Image version $VERSION does not exist"
+            echo "Available versions can be found at: https://github.com/${{ github.repository }}/pkgs/container/${{ github.repository }}-indexer"
+            exit 1
+          fi
+
+          echo "Image version $VERSION found, proceeding with deployment"
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Deploy GraphQL
+        uses: sergeyfilyanin/kubectl-aws-eks@master
+        with:
+          args: set image deployment/indexer-bridge-graphql-${{ github.event.inputs.environment }} indexer-bridge-graphql=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.version }} -n gear-bridges
+
+      - name: Deploy Gear Processor
+        uses: sergeyfilyanin/kubectl-aws-eks@master
+        with:
+          args: set image deployment/indexer-bridge-processor-gear-${{ github.event.inputs.environment }} indexer-bridge-processor-gear=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.version }} -n gear-bridges
+
       - name: Deploy to Kubernetes
         uses: sergeyfilyanin/kubectl-aws-eks@master
         with:
-          args: rollout restart deployment indexer-bridge-processor-eth-${{ github.event.inputs.environment }} indexer-bridge-processor-gear-${{ github.event.inputs.environment }} indexer-bridge-graphql-${{ github.event.inputs.environment }} -n gear-bridges
+          args: set image deployment/indexer-bridge-processor-eth-${{ github.event.inputs.environment }} indexer-bridge-processor-eth=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.version }} -n gear-bridges
 
-      - name: Check rollout status
+      - name: Check GraphQL rollout status
         uses: sergeyfilyanin/kubectl-aws-eks@master
         with:
-          args: get deployment -o name -n gear-bridges | xargs -n1 -t kubectl rollout status -n gear-bridges --timeout=120s
+          args: rollout status deployment/indexer-bridge-graphql-${{ github.event.inputs.environment }} -n gear-bridges --timeout=120s
+
+      - name: Check Gear Processor rollout status
+        uses: sergeyfilyanin/kubectl-aws-eks@master
+        with:
+          args: rollout status deployment/indexer-bridge-processor-gear-${{ github.event.inputs.environment }} -n gear-bridges --timeout=120s
+
+      - name: Check ETH Processor rollout status
+        uses: sergeyfilyanin/kubectl-aws-eks@master
+        with:
+          args: rollout status deployment/indexer-bridge-processor-eth-${{ github.event.inputs.environment }} -n gear-bridges --timeout=120s
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployments Updated**:" >> $GITHUB_STEP_SUMMARY
+          echo "  - indexer-bridge-processor-eth-${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "  - indexer-bridge-processor-gear-${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "  - indexer-bridge-graphql-${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY

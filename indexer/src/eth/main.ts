@@ -5,7 +5,7 @@ import * as erc20TreasuryAbi from './abi/erc20-manager';
 import * as messageQueueAbi from './abi/message-queue';
 import { Network, Status, Transfer } from '../model';
 import { processor, Context } from './processor';
-import { ethNonce, gearNonce } from '../common';
+import { ethNonce, gearNonceFromNumber } from '../common';
 import { config } from './config';
 import { BatchState } from './batch-state';
 
@@ -55,7 +55,8 @@ const handler = async (ctx: Context) => {
           if (topic !== MSGQ_MESSAGE_PROCESSED) continue;
           const [_, __, nonce, receiver] = messageQueueAbi.events.MessageProcessed.decode(log);
           if (receiver.toLowerCase() !== ERC20_MANAGER) continue;
-          state.setCompletedTransfer(gearNonce(nonce, false), timestamp, blockNumber, txHash);
+          const _nonce = gearNonceFromNumber(nonce.toString(), false);
+          state.setCompletedTransfer(_nonce, timestamp, blockNumber, txHash);
           break;
         }
       }

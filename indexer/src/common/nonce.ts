@@ -14,7 +14,8 @@ export const gearNonce = (data: string, isLe = true) => {
   return nonce;
 };
 
-export const gearNonceFromNumber = (data: string) => {
-  const nonce = '0x' + BigInt(data).toString(16).padStart(64, '0');
-  return gearNonce(nonce);
+export const gearNonceFromNumber = (data: string, isLe = true) => {
+  let nonce = '0x' + BigInt(data).toString(16);
+  nonce = isLe ? nonce.padStart(64, '0') : nonce.padEnd(64, '0');
+  return gearNonce(nonce, isLe);
 };

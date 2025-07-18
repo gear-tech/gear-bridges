@@ -157,7 +157,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   address={token?.address}
                   symbol={token?.symbol}
                   displaySymbol={token?.displaySymbol}
-                  networkText={network.isVara ? 'Vara Testnet' : 'Ethereum Holesky'}
+                  networkText={network.isVara ? 'Vara Testnet' : 'Ethereum Hoodi'}
                   network={network.name}
                 />
 
@@ -181,7 +181,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
                   address={destinationToken?.address}
                   symbol={destinationToken?.symbol}
                   displaySymbol={destinationToken?.displaySymbol}
-                  networkText={network.isVara ? 'Ethereum Holesky' : 'Vara Testnet'}
+                  networkText={network.isVara ? 'Ethereum Hoodi' : 'Vara Testnet'}
                   network={network.name === NETWORK.VARA ? NETWORK.ETH : NETWORK.VARA}
                 />
 

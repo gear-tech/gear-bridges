@@ -90,7 +90,7 @@ function GetEthTokenBalanceButton({
   const lowerCaseSymbol = symbol.toLowerCase();
 
   if (lowerCaseSymbol.includes('eth'))
-    return <LinkButton type="external" to="https://holesky-faucet.pk910.de/" {...BUTTON_PROPS} />;
+    return <LinkButton type="external" to="https://hoodi-faucet.pk910.de" {...BUTTON_PROPS} />;
 
   if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt')) return;
 

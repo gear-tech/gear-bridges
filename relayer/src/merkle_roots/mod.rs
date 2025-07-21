@@ -9,7 +9,6 @@ use crate::{
 };
 use ::prover::proving::GenesisConfig;
 use ethereum_client::EthApi;
-use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use std::{
     collections::BTreeMap,
@@ -183,15 +182,6 @@ impl MerkleRootRelayer {
         }
     }
 
-    fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
-        block.events().iter().find_map(|event| match event {
-            gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(root)) => {
-                Some(*root)
-            }
-            _ => None,
-        })
-    }
-
     async fn process(
         &mut self,
         submitter: &mut SubmitterIo,
@@ -201,101 +191,100 @@ impl MerkleRootRelayer {
     ) -> anyhow::Result<()> {
         loop {
             tokio::select! {
-                        block = blocks_rx.recv() => {
-                            match block {
-                                Ok(block) => {
-                                    if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
-                                        return Ok(());
-                                    }
-                                }
+                block = blocks_rx.recv() => {
+                    match block {
+                        Ok(block) => {
+                            if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
+                                return Ok(());
+                            }
+                        }
 
-                                Err(RecvError::Lagged(n)) => {
-                                    log::warn!("Merkle root relayer lagged behind {n} blocks");
-                                    continue;
-                                }
+                        Err(RecvError::Lagged(n)) => {
+                            log::warn!("Merkle root relayer lagged behind {n} blocks");
+                            continue;
+                        }
 
-                                Err(RecvError::Closed) => {
-                                    log::warn!("Block listener connection closed, exiting");
+                        Err(RecvError::Closed) => {
+                            log::warn!("Block listener connection closed, exiting");
+                            return Ok(());
+                        }
+                    }
+                }
+
+                response = prover.recv() => {
+                    let Some(response) = response else {
+                        log::warn!("Finality prover connection closed, exiting");
+                        return Ok(());
+                    };
+
+                    if !submitter.submit_merkle_root(response.block_number, response.proof) {
+                        log::warn!("Proof submitter connection closed, exiting");
+                        return Ok(());
+                    }
+                }
+
+                response = authority_set_sync.recv() => {
+                    let Some(response) = response else {
+                        log::warn!("Authority set sync connection closed, exiting");
+                        return Ok(());
+                    };
+
+                    match response {
+                        authority_set_sync::Response::AuthoritySetSynced(id, block) => {
+                            self.storage.authority_set_processed(block).await;
+
+                            let Some(mut to_submit) = self.waiting_for_authority_set_sync.remove(&id) else {
+                                log::warn!("No blocks to sync for authority set #{id}");
+                                continue;
+                            };
+
+                            log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
+                            while let Some(block) = to_submit.pop() {
+                                if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
                                     return Ok(());
                                 }
                             }
                         }
 
-                        response = prover.recv() => {
-                            let Some(response) = response else {
-                               log::warn!("Finality prover connection closed, exiting");
-                               return Ok(());
-                            };
-
-                            if !submitter.submit_merkle_root(response.block_number, response.proof) {
-                                log::warn!("Proof submitter connection closed, exiting");
-                                return Ok(());
-                            }
-                        }
-
-                        response = authority_set_sync.recv() => {
-                            let Some(response) = response else {
-                                log::warn!("Authority set sync connection closed, exiting");
-                                return Ok(());
-                            };
-
-                            match response {
-                                authority_set_sync::Response::AuthoritySetSynced(id, block) => {
-                                    self.storage
-                    .authority_set_processed(block).await;
-                                    let Some(mut to_submit) = self.waiting_for_authority_set_sync.remove(&id) else {
-                                        log::warn!("No blocks to sync for authority set #{id}");
-                                        continue;
-                                    };
-
-                                    log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
-                                    while let Some(block) = to_submit.pop() {
-                                        if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
-                                            return Ok(());
-                                        }
-                                    }
+                        authority_set_sync::Response::SealedEras(eras) => {
+                                for sealed_era in eras {
+                                let merkle_root = H256::from(sealed_era.proof.merkle_root);
+                                if self.storage.is_merkle_root_submitted(merkle_root).await {
+                                    log::info!("Merkle-root {:?} for era #{} is already submitted", sealed_era.era, merkle_root);
+                                    continue;
                                 }
 
-                                authority_set_sync::Response::SealedEras(eras) => {
-                                     for sealed_era in eras {
-                                        let merkle_root = H256::from(sealed_era.proof.merkle_root);
-                                        if self.storage
-                        .is_merkle_root_submitted(merkle_root).await {
-                                            log::info!("Merkle-root {:?} for era #{} is already submitted", sealed_era.era, merkle_root);
-                                            continue;
-                                        }
-                                        log::info!(
-                                            "Submitting merkle-root proof for era #{} at block #{}",
-                                            sealed_era.era,
-                                            sealed_era.merkle_root_block);
-                                        if !submitter.submit_era_root(
-                                            sealed_era.era,
-                                            sealed_era.merkle_root_block,
-                                            sealed_era.proof) {
-                                            log::warn!("Proof submitter connection closed, exiting");
-                                            return Ok(());
-                                        }
-                                    }
+                                log::info!(
+                                    "Submitting merkle-root proof for era #{} at block #{}",
+                                    sealed_era.era,
+                                    sealed_era.merkle_root_block
+                                );
+
+                                if !submitter.submit_era_root(
+                                    sealed_era.era,
+                                    sealed_era.merkle_root_block,
+                                    sealed_era.proof) {
+                                    log::warn!("Proof submitter connection closed, exiting");
+                                    return Ok(());
                                 }
                             }
-                        }
-
-                        response = submitter.recv() => {
-                            let Some(response) = response else {
-                                log::warn!("Proof submitter connection closed, exiting");
-                                return Ok(());
-                            };
-
-                            self.storage
-            .merkle_root_processed(response.merkle_root_block).await;
-                            if let Err(err) = self.storage
-            .save().await {
-                                log::error!("Failed to save block state: {err:?}");
-                            }
-
-
                         }
                     }
+                }
+
+                response = submitter.recv() => {
+                    let Some(response) = response else {
+                        log::warn!("Proof submitter connection closed, exiting");
+                        return Ok(());
+                    };
+
+                    self.storage
+                        .merkle_root_processed(response.merkle_root_block).await;
+                    if let Err(err) = self.storage.save().await {
+                        log::error!("Failed to save block state: {err:?}");
+                    }
+                }
+            }
         }
     }
 
@@ -307,7 +296,7 @@ impl MerkleRootRelayer {
         authority_set_sync: &AuthoritySetSyncIo,
         block: GearBlock,
     ) -> anyhow::Result<bool> {
-        let Some(merkle_root) = Self::queue_merkle_root_changed(&block) else {
+        let Some(merkle_root) = storage::queue_merkle_root_changed(&block) else {
             return Ok(true);
         };
 

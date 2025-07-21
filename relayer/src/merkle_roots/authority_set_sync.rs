@@ -6,8 +6,6 @@ use crate::{
 };
 use ethereum_client::EthApi;
 use futures::executor::block_on;
-use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
-use primitive_types::H256;
 use prometheus::IntGauge;
 use prover::proving::GenesisConfig;
 use std::{sync::Arc, time::Instant};
@@ -107,7 +105,7 @@ impl AuthoritySetSync {
 
         let io = AuthoritySetSyncIo::new(rx, req_tx);
 
-        tokio::task::spawn_blocking(move || {
+        std::thread::spawn(move || {
             block_on(async move {
                 loop {
                     if let Err(err) = self.process(&mut blocks, &mut req_rx, &tx).await {
@@ -131,15 +129,6 @@ impl AuthoritySetSync {
         io
     }
 
-    fn authority_set_hash_changeed(block: &GearBlock) -> Option<H256> {
-        block.events().iter().find_map(|event| match event {
-            gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(hash)) => {
-                Some(*hash)
-            }
-            _ => None,
-        })
-    }
-
     async fn process(
         &mut self,
         blocks: &mut Receiver<GearBlock>,
@@ -153,21 +142,9 @@ impl AuthoritySetSync {
                         Some(block) => {
                             log::info!("Force authority set sync for authority set in block #{}", block.number());
 
-                            let Some(authority_set_id) = self.sync_authority_set_completely(&block, blocks).await? else {
+                            let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                 return Ok(());
                             };
-
-                            if responses.send(Response::AuthoritySetSynced(authority_set_id, block.number())).is_err() {
-                                return Ok(());
-                            }
-
-                            self.eras.process(&self.proof_storage).await?;
-
-                            if responses.send(
-                                Response::SealedEras(std::mem::take(&mut self.eras.sealed_not_finalized)))
-                            .is_err() {
-                                return Ok(());
-                            }
                         }
 
                         None => return Ok(())
@@ -176,25 +153,13 @@ impl AuthoritySetSync {
                 block = blocks.recv() => {
                     match block {
                         Ok(block) => {
-                            if Self::authority_set_hash_changeed(&block).is_none() {
+                            if super::storage::authority_set_hash_changed(&block).is_none() {
                                 continue;
                             }
 
-                            let Some(authority_set_id) = self.sync_authority_set_completely(&block, blocks).await? else {
+                            let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                 return Ok(());
                             };
-
-                            if responses.send(Response::AuthoritySetSynced(authority_set_id, block.number())).is_err() {
-                                return Ok(());
-                            }
-
-                            self.eras.process(&self.proof_storage).await?;
-
-                            if responses.send(
-                                    Response::SealedEras(std::mem::take(&mut self.eras.sealed_not_finalized)))
-                                .is_err() {
-                                return Ok(());
-                            }
                         }
 
                         Err(RecvError::Lagged(n)) => {
@@ -217,6 +182,7 @@ impl AuthoritySetSync {
         &mut self,
         initial_block: &GearBlock,
         blocks: &mut Receiver<GearBlock>,
+        responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<Option<u64>> {
         let (sync_steps, authority_set_id) = self.sync_authority_set(initial_block).await?;
         if sync_steps == 0 {
@@ -252,7 +218,28 @@ impl AuthoritySetSync {
             }
         }
 
-        log::info!("Authority set is in sync");
+        log::info!("Authority set #{authority_set_id} is in sync");
+
+        if responses
+            .send(Response::AuthoritySetSynced(
+                authority_set_id,
+                initial_block.number(),
+            ))
+            .is_err()
+        {
+            return Ok(None);
+        }
+
+        self.eras.process(&self.proof_storage).await?;
+
+        if responses
+            .send(Response::SealedEras(std::mem::take(
+                &mut self.eras.sealed_not_finalized,
+            )))
+            .is_err()
+        {
+            return Ok(None);
+        }
 
         Ok(Some(authority_set_id))
     }
@@ -358,7 +345,6 @@ impl Eras {
 
     pub async fn process(&mut self, proof_storage: &Arc<dyn ProofStorage>) -> anyhow::Result<()> {
         log::info!("Processing eras");
-
         self.try_seal(proof_storage).await?;
         log::info!("Eras processed");
 

@@ -64,7 +64,7 @@ impl FinalityProver {
 
         let io = FinalityProverIo::new(req_tx, res_rx);
 
-        tokio::task::spawn_blocking(move || {
+        std::thread::spawn(move || {
             block_on(async move {
                 if let Err(e) = self.process(&mut req_rx, &res_tx).await {
                     log::error!("Error processing finality prover requests: {e}");

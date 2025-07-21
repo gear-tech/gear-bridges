@@ -32,7 +32,13 @@ pub struct Block {
     pub authority_set_hash_changed: Option<H256>,
 }
 
-fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
+impl Block {
+    pub fn is_processed(&self) -> bool {
+        self.merkle_root_changed.is_none() && self.authority_set_hash_changed.is_none()
+    }
+}
+
+pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
     block.events().iter().find_map(|event| match event {
         gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(hash)) => {
             Some(*hash)
@@ -41,7 +47,7 @@ fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
     })
 }
 
-fn authority_set_changed(block: &GearBlock) -> Option<H256> {
+pub(super) fn authority_set_hash_changed(block: &GearBlock) -> Option<H256> {
     block.events().iter().find_map(|event| match event {
         gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(hash)) => {
             Some(*hash)
@@ -64,7 +70,7 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
 
     async fn add_block(&self, block: &GearBlock) {
         let merkle_root_changed = queue_merkle_root_changed(block);
-        let authority_set_hash_changed = authority_set_changed(block);
+        let authority_set_hash_changed = authority_set_hash_changed(block);
 
         // in case there are no merkle-root related changes we can just skip the block saving.
         if merkle_root_changed.is_none() && authority_set_hash_changed.is_none() {
@@ -140,6 +146,7 @@ impl MerkleRootStorage {
 
     /// Save unprocessed blocks to the provided path.
     pub async fn save(&self) -> anyhow::Result<()> {
+        self.prune_blocks().await;
         let blocks = self.blocks.read().await;
         let submitted_merkle_roots = self.submitted_roots.read().await;
 
@@ -179,6 +186,26 @@ impl MerkleRootStorage {
         *self.blocks.write().await = blocks;
         *self.submitted_roots.write().await = submitted_merkle_roots;
         Ok(())
+    }
+
+    pub async fn prune_blocks(&self) {
+        let mut blocks = self.blocks.write().await;
+        let mut remove_until = None;
+        for (index, (number, block)) in blocks.iter().enumerate() {
+            if index + 100 > blocks.len() {
+                remove_until = Some(*number);
+                break;
+            }
+
+            if !block.is_processed() {
+                remove_until = Some(*number);
+                break;
+            }
+        }
+
+        if let Some(remove_until) = remove_until {
+            *blocks = blocks.split_off(&remove_until);
+        }
     }
 }
 

@@ -7,6 +7,8 @@ pub use common::{
     PrometheusArgs, ProofStorageArgs,
 };
 
+use crate::cli::common::BlockStorageArgs;
+
 pub const DEFAULT_COUNT_CONFIRMATIONS: u64 = 8;
 
 #[derive(Parser)]
@@ -54,6 +56,8 @@ pub struct GearEthCoreArgs {
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]
     pub proof_storage_args: ProofStorageArgs,
+    #[clap(flatten)]
+    pub block_storage_args: BlockStorageArgs,
 
     #[arg(
         long,

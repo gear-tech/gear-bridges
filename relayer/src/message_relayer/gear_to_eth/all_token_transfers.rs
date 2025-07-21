@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use ethereum_client::EthApi;
-use std::iter;
+use std::{iter, sync::Arc};
 use tokio::sync::mpsc;
 use utils_prometheus::MeteredService;
 
@@ -53,7 +53,10 @@ impl Relayer {
 
         confirmations_status: u64,
     ) -> anyhow::Result<Self> {
-        let gear_block_listener = GearBlockListener::new(api_provider.clone());
+        let gear_block_listener = GearBlockListener::new(
+            api_provider.clone(),
+            Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
+        );
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
         let listener_message_queued =

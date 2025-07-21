@@ -1,16 +1,29 @@
-use crate::message_relayer::{common::GearBlock, eth_to_gear::api_provider::ApiProviderConnection};
+use crate::message_relayer::{
+    common::{
+        gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
+        GearBlock,
+    },
+    eth_to_gear::api_provider::ApiProviderConnection,
+};
 use futures::StreamExt;
 <<<<<<< HEAD
 use gsdk::subscription::BlockEvents;
+<<<<<<< HEAD
 =======
 use primitive_types::H256;
 >>>>>>> 4a6b422 (relayer: add GearBlock::from_subxt_block)
+=======
+use primitive_types::H256;
+>>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 use prometheus::IntGauge;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct BlockListener {
     api_provider: ApiProviderConnection,
+
+    block_storage: Arc<dyn UnprocessedBlocksStorage>,
 
     metrics: Metrics,
 }
@@ -31,9 +44,13 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(api_provider: ApiProviderConnection) -> Self {
+    pub fn new(
+        api_provider: ApiProviderConnection,
+        block_storage: Arc<dyn UnprocessedBlocksStorage>,
+    ) -> Self {
         Self {
             api_provider,
+            block_storage,
 
             metrics: Metrics::new(),
         }
@@ -43,14 +60,60 @@ impl BlockListener {
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
+<<<<<<< HEAD
         // during proof generation or era sync, so we need to have enough capacity
         // to not drop any blocks. 14400 is how many blocks are produced in 1 era.
         const CAPACITY: usize = 14_400;
+=======
+        // during proof generation, so we need to ensure that we can queue up
+        // enough blocks to process them later.
+        const CAPACITY: usize = 10000;
+>>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
+            let api = self.api_provider.client();
+            let UnprocessedBlocks {
+                last_block,
+                first_block,
+                blocks: _,
+            } = self.block_storage.unprocessed_blocks().await;
+
+            let mut unprocessed = Vec::new();
+
+            if let Some(from_block) = last_block.or(first_block) {
+                let latest_finalized_block = match api.latest_finalized_block().await {
+                    Ok(block) => block,
+                    Err(err) => {
+                        log::error!("Failed to get latest finalized block: {err}");
+                        return;
+                    }
+                };
+                let Ok(latest_finalized_block_number) =
+                    api.block_hash_to_number(latest_finalized_block).await
+                else {
+                    log::error!("Failed to convert latest finalized block hash to number");
+                    return;
+                };
+
+                for block in from_block.1..=latest_finalized_block_number {
+                    let hash = if block == latest_finalized_block_number {
+                        latest_finalized_block
+                    } else {
+                        match api.block_number_to_hash(block).await {
+                            Ok(hash) => hash,
+                            Err(err) => {
+                                log::error!("Failed to get block hash for number {block}: {err}");
+                                continue;
+                            }
+                        }
+                    };
+                    unprocessed.push((hash, block));
+                }
+            }
+
             loop {
-                let res = self.run_inner(&tx2).await;
+                let res = self.run_inner(&tx2, &mut unprocessed).await;
                 match res {
                     Ok(false) => {
                         log::info!("Gear block listener stopped due to no active receivers");
@@ -86,18 +149,33 @@ impl BlockListener {
             .expect("expected Vec of correct length")
     }
 
-    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {
+    async fn run_inner(
+        &self,
+        tx: &broadcast::Sender<GearBlock>,
+        unprocessed: &mut Vec<(H256, u32)>,
+    ) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         for (block_hash, block_number) in unprocessed.drain(..) {
             log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
             let block = gear_api.api.blocks().at(block_hash).await?;
 
+<<<<<<< HEAD
             let gear_block = GearBlock::from_subxt_block(block).await?;
 
             match tx.send(gear_block) {
+=======
+            let header = block.header().clone();
+            let block_events = BlockEvents::new(block).await?;
+            let events = block_events.events()?;
+
+            match tx.send(GearBlock::new(header, events)) {
+>>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                 Ok(_) => (),
                 Err(broadcast::error::SendError(_)) => {
                     log::error!("No active receivers for Gear block listener, stopping");
@@ -106,7 +184,10 @@ impl BlockListener {
             }
         }
 
+<<<<<<< HEAD
 >>>>>>> 4a6b422 (relayer: add GearBlock::from_subxt_block)
+=======
+>>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         let mut finalized_blocks = gear_api.api.subscribe_finalized_blocks().await?;
         loop {
             match finalized_blocks.next().await {
@@ -119,6 +200,7 @@ impl BlockListener {
                     self.metrics.latest_block.set(block.number() as i64);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
                     match tx.send(GearBlock::new(header, events)) {
 =======
                     let block = GearBlock::from_subxt_block(block).await?;
@@ -126,6 +208,12 @@ impl BlockListener {
 
                     match tx.send(block) {
 >>>>>>> 4a6b422 (relayer: add GearBlock::from_subxt_block)
+=======
+                    let block = GearBlock::new(header, events);
+                    self.block_storage.add_block(&block).await;
+
+                    match tx.send(block) {
+>>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                         Ok(_) => (),
                         Err(broadcast::error::SendError(_)) => {
                             log::error!("No active receivers for Gear block listener, stopping");

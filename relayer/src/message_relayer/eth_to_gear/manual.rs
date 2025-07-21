@@ -53,7 +53,10 @@ pub async fn relay(
         EthereumSlotNumber(block_timestamp.saturating_sub(genesis_time) / SECONDS_PER_SLOT);
     log::info!(r#"Slot number of the transaction ("{tx_hash}") block is {slot_number}"#);
 
-    let gear_block_listener = GearBlockListener::new(provider_connection.clone());
+    let gear_block_listener = GearBlockListener::new(
+        provider_connection.clone(),
+        Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
+    );
 
     let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 

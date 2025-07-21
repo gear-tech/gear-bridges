@@ -24,24 +24,25 @@ pub enum ProofStorageError {
 
 type AuthoritySetId = u64;
 
-pub trait ProofStorage {
-    fn init(
-        &mut self,
+#[async_trait::async_trait]
+pub trait ProofStorage: Send + Sync {
+    async fn init(
+        &self,
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError>;
 
-    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError>;
+    async fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError>;
 
-    fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId>;
+    async fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId>;
 
-    fn get_proof_for_authority_set_id(
+    async fn get_proof_for_authority_set_id(
         &self,
         authority_set_id: AuthoritySetId,
     ) -> Result<ProofWithCircuitData, ProofStorageError>;
 
-    fn update(
-        &mut self,
+    async fn update(
+        &self,
         proof: Proof,
         new_authority_set_id: AuthoritySetId,
     ) -> Result<(), ProofStorageError>;

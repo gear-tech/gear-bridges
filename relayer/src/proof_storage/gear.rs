@@ -1,11 +1,12 @@
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        OnceLock,
+    },
 };
 
-use futures::executor::block_on;
 use gclient::{
     metadata::runtime_types::gear_common::event::DispatchStatus, Event as RuntimeEvent, GearApi,
     GearEvent, WSAddress,
@@ -18,6 +19,7 @@ use prometheus::Gauge;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
+use tokio::sync::RwLock;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use super::{AuthoritySetId, ProofStorage, ProofStorageError};
@@ -28,8 +30,8 @@ const UPLOAD_PROGRAM_RETRIES: usize = 16;
 
 pub struct GearProofStorage {
     gear_api: GearApi,
-    program: Option<ProgramId>,
-    cache: RefCell<Cache>,
+    program: OnceLock<ProgramId>,
+    cache: RwLock<Cache>,
     message_channel: Sender<UpdateStateMessage>,
     config_file_path: PathBuf,
 
@@ -57,36 +59,39 @@ impl MeteredService for GearProofStorage {
     }
 }
 
+#[async_trait::async_trait]
 impl ProofStorage for GearProofStorage {
-    fn init(
-        &mut self,
+    async fn init(
+        &self,
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
-        block_on(self.init_inner(proof_with_circuit_data, genesis_validator_set_id))
+        self.init_inner(proof_with_circuit_data, genesis_validator_set_id)
+            .await
     }
 
-    fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
-        block_on(self.get_circuit_data_inner())
+    async fn get_circuit_data(&self) -> Result<CircuitData, ProofStorageError> {
+        self.get_circuit_data_inner().await
     }
 
-    fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId> {
-        block_on(self.get_latest_authority_set_id_inner())
+    async fn get_latest_authority_set_id(&self) -> Option<AuthoritySetId> {
+        self.get_latest_authority_set_id_inner().await
     }
 
-    fn get_proof_for_authority_set_id(
+    async fn get_proof_for_authority_set_id(
         &self,
         authority_set_id: u64,
     ) -> Result<ProofWithCircuitData, ProofStorageError> {
-        block_on(self.get_proof_for_authority_set_id_inner(authority_set_id))
+        self.get_proof_for_authority_set_id_inner(authority_set_id)
+            .await
     }
 
-    fn update(
-        &mut self,
+    async fn update(
+        &self,
         proof: Proof,
         new_authority_set_id: AuthoritySetId,
     ) -> Result<(), ProofStorageError> {
-        block_on(self.update_inner(proof, new_authority_set_id))
+        self.update_inner(proof, new_authority_set_id).await
     }
 }
 
@@ -117,7 +122,8 @@ impl GearProofStorage {
             .await
             .expect("Failed to run message sender");
 
-        std::fs::create_dir_all(&config_folder_path)
+        tokio::fs::create_dir_all(&config_folder_path)
+            .await
             .expect("Failed to create directory for gear proof storage config");
         if !config_folder_path.is_dir() {
             panic!("Please provide directory as a path");
@@ -125,10 +131,13 @@ impl GearProofStorage {
 
         let config_file_path = config_folder_path.join(CONFIG_FILE_NAME);
 
-        let config: Option<UploadedProgramInfo> = std::fs::read_to_string(&config_file_path)
+        let config: Option<UploadedProgramInfo> = tokio::fs::read_to_string(&config_file_path)
+            .await
             .ok()
             .map(|ser| serde_json::from_str(&ser).expect("Wrong config file format"));
-        let program = config.map(|conf| ActorId::new(conf.address.0));
+        let program = config
+            .map(|conf| OnceLock::from(ActorId::new(conf.address.0)))
+            .unwrap_or_default();
 
         let proof_storage = GearProofStorage {
             gear_api,
@@ -146,11 +155,11 @@ impl GearProofStorage {
     }
 
     async fn init_inner(
-        &mut self,
+        &self,
         proof_with_circuit_data: ProofWithCircuitData,
         genesis_validator_set_id: u64,
     ) -> Result<(), ProofStorageError> {
-        if self.program.is_some() {
+        if self.program.get().is_some() {
             return Ok(());
         }
 
@@ -180,7 +189,7 @@ impl GearProofStorage {
                     std::fs::write(&self.config_file_path, config)
                         .expect("Failed to write config to file");
 
-                    self.program = Some(program);
+                    let _ = self.program.set(program);
                     break;
                 }
                 Ok(None) => {}
@@ -225,14 +234,14 @@ impl GearProofStorage {
     }
 
     async fn get_circuit_data_inner(&self) -> Result<CircuitData, ProofStorageError> {
-        if let Some(circuit_data) = self.cache.borrow().circuit_data.as_ref() {
+        if let Some(circuit_data) = self.cache.read().await.circuit_data.as_ref() {
             return Ok(circuit_data.clone());
         }
 
         let state = self.read_program_state(None).await?;
         let circuit_data = CircuitData::from_bytes(state.latest_proof.circuit_data);
 
-        self.cache.borrow_mut().circuit_data = Some(circuit_data.clone());
+        self.cache.write().await.circuit_data = Some(circuit_data.clone());
 
         Ok(circuit_data)
     }
@@ -244,7 +253,13 @@ impl GearProofStorage {
             .ok()
             .map(|s| s.latest_proof.authority_set_id);
 
-        let cached = self.cache.borrow().proofs.last_key_value().map(|(&k, _)| k);
+        let cached = self
+            .cache
+            .read()
+            .await
+            .proofs
+            .last_key_value()
+            .map(|(&k, _)| k);
 
         match (stored_latest, cached) {
             (Some(stored), Some(cached)) => Some(stored.max(cached)),
@@ -260,7 +275,7 @@ impl GearProofStorage {
     ) -> Result<ProofWithCircuitData, ProofStorageError> {
         let circuit_data = self.get_circuit_data_inner().await?;
 
-        if let Some(proof) = self.cache.borrow().proofs.get(&authority_set_id) {
+        if let Some(proof) = self.cache.read().await.proofs.get(&authority_set_id) {
             return Ok(ProofWithCircuitData {
                 circuit_data,
                 proof: proof.clone(),
@@ -285,7 +300,8 @@ impl GearProofStorage {
 
         let _ = self
             .cache
-            .borrow_mut()
+            .write()
+            .await
             .proofs
             .insert(authority_set_id, proof.clone());
 
@@ -296,7 +312,7 @@ impl GearProofStorage {
     }
 
     async fn update_inner(
-        &mut self,
+        &self,
         proof: Proof,
         new_authority_set_id: AuthoritySetId,
     ) -> Result<(), ProofStorageError> {
@@ -304,7 +320,8 @@ impl GearProofStorage {
 
         let _ = self
             .cache
-            .borrow_mut()
+            .write()
+            .await
             .proofs
             .insert(new_authority_set_id, proof.clone());
 
@@ -313,7 +330,7 @@ impl GearProofStorage {
             authority_set_id: new_authority_set_id,
         };
 
-        let Some(program) = self.program else {
+        let Some(&program) = self.program.get() else {
             return Err(ProofStorageError::NotInitialized);
         };
 
@@ -333,7 +350,7 @@ impl GearProofStorage {
         &self,
         at: Option<H256>,
     ) -> Result<gear_proof_storage::State, ProofStorageError> {
-        let Some(program) = self.program else {
+        let Some(&program) = self.program.get() else {
             return Err(ProofStorageError::NotInitialized);
         };
 

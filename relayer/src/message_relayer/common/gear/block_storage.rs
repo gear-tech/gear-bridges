@@ -14,7 +14,7 @@ pub struct UnprocessedBlocks {
     pub last_block: Option<(H256, u32)>,
 }
 
-/// Trait that defines interface for BlockListener to access unprocessed blocks.
+/// Trait that defines interface for BlockListener to manage unprocessed blocks.
 #[async_trait::async_trait]
 pub trait UnprocessedBlocksStorage: Send + Sync {
     /// Returns unprocessed blocks from the storage.
@@ -28,6 +28,7 @@ pub trait UnprocessedBlocksStorage: Send + Sync {
     async fn add_block(&self, block: &GearBlock);
 }
 
+/// A no-op implementation of `UnprocessedBlocksStorage` that does nothing.
 pub struct NoStorage;
 
 #[async_trait::async_trait]

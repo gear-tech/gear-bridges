@@ -52,7 +52,11 @@ impl BlockListener {
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
-        let (tx, _) = broadcast::channel(512);
+        // Capacity for the channel. At the moment merkle-root relayer might lag behind
+        // during proof generation, so we need to ensure that we can queue up
+        // enough blocks to process them later.
+        const CAPACITY: usize = 10000;
+        let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
             let api = self.api_provider.client();

@@ -246,6 +246,7 @@ impl MerkleRootSubmitter {
         SubmitterIo::new(tx, response_rx)
     }
 }
+
 async fn task(
     mut this: MerkleRootSubmitter,
     mut proofs: UnboundedReceiver<Request>,

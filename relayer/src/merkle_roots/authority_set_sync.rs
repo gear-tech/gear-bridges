@@ -105,7 +105,7 @@ impl AuthoritySetSync {
 
         let io = AuthoritySetSyncIo::new(rx, req_tx);
 
-        std::thread::spawn(move || {
+        tokio::task::spawn_blocking(move || {
             block_on(async move {
                 loop {
                     if let Err(err) = self.process(&mut blocks, &mut req_rx, &tx).await {

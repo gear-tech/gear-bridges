@@ -23,8 +23,16 @@ use std::{collections::HashSet, net::TcpListener, str::FromStr, sync::Arc, time:
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 
-#[tokio::main]
-async fn main() -> AnyResult<()> {
+fn main() -> AnyResult<()> {
+    // we need at least 2 native threads to run some of the blocking tasks like proof composition
+    // so lets set minimum to 4 threads or to available parallelism.
+    tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(std::thread::available_parallelism()?.get().max(4))
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> AnyResult<()> {
     let _ = dotenv::dotenv();
 
     pretty_env_logger::formatted_timed_builder()

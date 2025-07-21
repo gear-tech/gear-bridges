@@ -50,6 +50,10 @@ impl MessageQueuedEventExtractor {
                 if let Err(err) = res {
                     log::error!("Message queued extractor failed: {err}");
 
+                    if blocks.is_closed() {
+                        return;
+                    }
+
                     match self.api_provider.reconnect().await {
                         Ok(_) => {
                             log::info!("Message queued extractor reconnected");

@@ -1,5 +1,6 @@
 use std::{str::FromStr, time::Instant};
 
+use serde::{Deserialize, Serialize};
 use utils_prometheus::MeteredService;
 
 use gear_rpc_client::{dto, GearApi};
@@ -106,7 +107,7 @@ pub async fn prove_validator_set_change(
     Ok(proof)
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalProof {
     pub proof: Vec<u8>,
     pub block_number: u32,

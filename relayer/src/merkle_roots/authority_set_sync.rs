@@ -15,6 +15,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct AuthoritySetSyncIo {
     response: UnboundedReceiver<Response>,
+    requests: UnboundedSender<GearBlock>,
 }
 
 pub enum Response {
@@ -22,12 +23,19 @@ pub enum Response {
 }
 
 impl AuthoritySetSyncIo {
-    pub fn new(response: UnboundedReceiver<Response>) -> Self {
-        Self { response }
+    pub fn new(
+        response: UnboundedReceiver<Response>,
+        requests: UnboundedSender<GearBlock>,
+    ) -> Self {
+        Self { response, requests }
     }
 
     pub async fn recv(&mut self) -> Option<Response> {
         self.response.recv().await
+    }
+
+    pub fn send(&self, block: GearBlock) -> bool {
+        self.requests.send(block).is_ok()
     }
 }
 
@@ -82,13 +90,14 @@ impl AuthoritySetSync {
 
     pub fn run(mut self, mut blocks: Receiver<GearBlock>) -> AuthoritySetSyncIo {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (req_tx, mut req_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let io = AuthoritySetSyncIo::new(rx);
+        let io = AuthoritySetSyncIo::new(rx, req_tx);
 
         tokio::task::spawn_blocking(move || {
             block_on(async move {
                 loop {
-                    if let Err(err) = self.process(&mut blocks, &tx).await {
+                    if let Err(err) = self.process(&mut blocks, &tx, &mut req_rx).await {
                         log::error!("Authority set sync task failed: {err}");
 
                         match self.api_provider.reconnect().await {
@@ -101,6 +110,9 @@ impl AuthoritySetSync {
                                 return;
                             }
                         }
+                    } else {
+                        log::info!("Authority set sync task terminated");
+                        break;
                     }
                 }
             })
@@ -113,16 +125,32 @@ impl AuthoritySetSync {
         &mut self,
         blocks: &mut Receiver<GearBlock>,
         responses: &UnboundedSender<Response>,
+        force_sync: &mut UnboundedReceiver<GearBlock>,
     ) -> anyhow::Result<()> {
         loop {
             tokio::select! {
+                block = force_sync.recv() => {
+                    match block {
+                        Some(block) => {
+                            log::info!("Force syncing authority set for block #{}", block.number());
+                            let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
+                                return Ok(());
+                            };
+                        }
+                        None => {
+                            log::warn!("Force sync channel closed, exiting");
+                            return Ok(());
+                        }
+                    }
+                }
+
                 block = blocks.recv() => {
                     match block {
                         Ok(block) => {
-                            if super::storage::authority_set_hash_changed(&block).is_none() {
+                            if !super::storage::authority_set_changed(&block) {
+
                                 continue;
                             }
-
 
                             let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                 return Ok(());
@@ -137,6 +165,7 @@ impl AuthoritySetSync {
                         }
 
                         Err(RecvError::Closed) => {
+                            log::warn!("Gear block listener connection closed, exiting");
                             return Ok(());
                         }
                     }

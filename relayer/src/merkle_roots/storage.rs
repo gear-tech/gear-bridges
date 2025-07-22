@@ -1,4 +1,5 @@
 use crate::{
+    merkle_roots::MerkleRoot,
     message_relayer::common::{
         gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
         GearBlock,
@@ -9,7 +10,7 @@ use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{btree_map::Entry, BTreeMap, HashSet},
+    collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
 };
@@ -145,7 +146,7 @@ impl MerkleRootStorage {
     }
 
     /// Save unprocessed blocks to the provided path.
-    pub async fn save(&self) -> anyhow::Result<()> {
+    pub async fn save(&self, roots: &HashMap<H256, MerkleRoot>) -> anyhow::Result<()> {
         self.prune_blocks().await;
         let blocks = self.blocks.read().await;
         let submitted_merkle_roots = self.submitted_roots.read().await;
@@ -160,6 +161,7 @@ impl MerkleRootStorage {
         let storage = SerializedStorage {
             blocks: &blocks,
             submitted_merkle_roots: &submitted_merkle_roots,
+            roots,
         };
 
         let serialized = serde_json::to_string(&storage)?;
@@ -170,7 +172,7 @@ impl MerkleRootStorage {
         Ok(())
     }
 
-    pub async fn load(&self) -> anyhow::Result<()> {
+    pub async fn load(&self) -> anyhow::Result<HashMap<H256, MerkleRoot>> {
         let mut file = tokio::fs::OpenOptions::new()
             .read(true)
             .open(&self.path)
@@ -182,10 +184,11 @@ impl MerkleRootStorage {
         let DeserializedStorage {
             blocks,
             submitted_merkle_roots,
+            roots,
         } = serde_json::from_str(&contents)?;
         *self.blocks.write().await = blocks;
         *self.submitted_roots.write().await = submitted_merkle_roots;
-        Ok(())
+        Ok(roots)
     }
 
     pub async fn prune_blocks(&self) {
@@ -213,10 +216,12 @@ impl MerkleRootStorage {
 struct SerializedStorage<'a> {
     blocks: &'a BTreeMap<u32, Block>,
     submitted_merkle_roots: &'a HashSet<H256>,
+    roots: &'a HashMap<H256, MerkleRoot>,
 }
 
 #[derive(Deserialize)]
 struct DeserializedStorage {
     blocks: BTreeMap<u32, Block>,
     submitted_merkle_roots: HashSet<H256>,
+    roots: HashMap<H256, MerkleRoot>,
 }

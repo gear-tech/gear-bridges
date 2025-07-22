@@ -1,5 +1,8 @@
-use anyhow::Context;
-use ethereum_client::{EthApi, TxHash, TxStatus};
+use alloy::{
+    providers::{PendingTransactionBuilder, PendingTransactionError, Provider},
+    rpc::types::TransactionReceipt,
+};
+use ethereum_client::{EthApi, TxHash};
 use futures::{stream::FuturesUnordered, StreamExt};
 use primitive_types::H256;
 use prometheus::{Gauge, IntCounter, IntGauge};
@@ -23,6 +26,14 @@ pub struct Request {
 pub struct Response {
     pub era: Option<u64>,
     pub merkle_root_block: u32,
+    pub merkle_root: H256,
+    pub status: ResponseStatus,
+}
+
+#[derive(Debug)]
+pub enum ResponseStatus {
+    Submitted,
+    Failed(String),
 }
 
 pub struct SubmitterIo {
@@ -64,38 +75,43 @@ impl SubmitterIo {
 }
 
 struct SubmittedMerkleRoot {
-    eth_api: EthApi,
-    tx_hash: TxHash,
     era: Option<u64>,
     merkle_root_block: u32,
-    proof: FinalProof,
-    retried: bool,
-    status: TxStatus,
+    merkle_root: H256,
+    receipt: TransactionReceipt,
+}
+
+struct SubmissionError {
+    era: Option<u64>,
+    merkle_root_block: u32,
+    merkle_root: H256,
+    error: PendingTransactionError,
 }
 
 impl SubmittedMerkleRoot {
-    fn new(
-        eth_api: EthApi,
+    async fn new(
+        eth_api: &EthApi,
         tx_hash: TxHash,
         era: Option<u64>,
         merkle_root_block: u32,
-        proof: FinalProof,
-        retried: bool,
-    ) -> Self {
-        Self {
+        merkle_root: H256,
+        confirmations: u64,
+    ) -> Result<Self, SubmissionError> {
+        Ok(Self {
             merkle_root_block,
-            eth_api,
-            tx_hash,
+            merkle_root,
             era,
-            proof,
-            retried,
-            status: TxStatus::Pending,
-        }
-    }
-
-    async fn finalize(mut self) -> anyhow::Result<Self> {
-        self.status = self.eth_api.get_tx_status(self.tx_hash).await?;
-        Ok(self)
+            receipt: PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash)
+                .with_required_confirmations(confirmations)
+                .get_receipt()
+                .await
+                .map_err(|error| SubmissionError {
+                    era,
+                    merkle_root_block,
+                    merkle_root,
+                    error,
+                })?,
+        })
     }
 }
 
@@ -126,7 +142,7 @@ impl_metered_service!(
 pub struct MerkleRootSubmitter {
     eth_api: EthApi,
     storage: Arc<MerkleRootStorage>,
-
+    confirmations: u64,
     metrics: Metrics,
 }
 
@@ -137,10 +153,11 @@ impl MeteredService for MerkleRootSubmitter {
 }
 
 impl MerkleRootSubmitter {
-    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootStorage>) -> Self {
+    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootStorage>, confirmations: u64) -> Self {
         Self {
             eth_api,
             storage,
+            confirmations,
             metrics: Metrics::new(),
         }
     }
@@ -164,72 +181,123 @@ impl MerkleRootSubmitter {
                         log::info!("No more proofs to process, exiting");
                         return Ok(());
                     };
-                    self.storage.submitted_merkle_root(H256::from(request.proof.merkle_root)).await;
+
+                    let root_exists = self.eth_api
+                        .read_finalized_merkle_root(request.merkle_root_block)
+                        .await?
+                        .is_some();
+
+                    if root_exists {
+                        if responses.send(Response {
+                            era: request.era,
+                            merkle_root_block: request.merkle_root_block,
+                            merkle_root: H256::from(request.proof.merkle_root),
+                            status: ResponseStatus::Submitted,
+                        }).is_err() {
+                            return Ok(());
+                        };
+                        log::info!("Merkle root {} for block #{} is already submitted", H256::from(request.proof.merkle_root), request.merkle_root_block);
+                        continue;
+                    }
+
+
                     let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await?;
                     log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
                     self.metrics.total_submissions.inc();
                     pending_transactions.push(SubmittedMerkleRoot::new(
-                        self.eth_api.clone(),
+                        &self.eth_api,
                         tx_hash,
                         request.era,
                         request.merkle_root_block,
-                        request.proof,
-                        true
-                    ).finalize());
+                        H256::from(request.proof.merkle_root),
+                        self.confirmations,
+                    ));
 
 
                 },
 
-                Some(root) = pending_transactions.next() => {
-                    let root = root.context("Failed to check transaction status")?;
-                    match root.status {
-                        TxStatus::Pending => {
-                            log::trace!("Merkle root submission is still pending, tx hash: {}", root.tx_hash);
-                            pending_transactions.push(root.finalize());
-                        }
-                        TxStatus::Finalized => {
-                            log::info!("Merkle root submission confirmed, tx hash: {}", root.tx_hash);
+                Some(result) = pending_transactions.next() => {
+                    match result {
+                        Ok(submitted) => {
+                            if !submitted.receipt.status() {
+                                let root_exists = self.eth_api
+                                    .read_finalized_merkle_root(submitted.merkle_root_block)
+                                    .await?
+                                    .is_some();
+
+                                if root_exists {
+                                    if responses.send(Response {
+                                        era: submitted.era,
+                                        merkle_root_block: submitted.merkle_root_block,
+                                        merkle_root: submitted.merkle_root,
+                                        status: ResponseStatus::Submitted,
+                                    }).is_err() {
+                                        return Ok(());
+                                    };
+                                    log::info!("Merkle root {} for block #{} is already submitted", submitted.merkle_root, submitted.merkle_root_block);
+                                    continue;
+                                }
+
+                                if responses.send(Response {
+                                    era: submitted.era,
+                                    merkle_root_block: submitted.merkle_root_block,
+                                    merkle_root: submitted.merkle_root,
+                                    status: ResponseStatus::Failed(format!("Transaction {} failed", submitted.receipt.transaction_hash)),
+                                }).is_err() {
+                                    return Ok(());
+                                };
+                            }
+
                             if responses.send(Response {
-                                era: root.era,
-                                merkle_root_block: root.merkle_root_block,
+                                era: submitted.era,
+                                merkle_root_block: submitted.merkle_root_block,
+                                merkle_root: submitted.merkle_root,
+                                status: ResponseStatus::Submitted,
                             }).is_err() {
                                 return Ok(());
-                            }
+                            };
+
+                            self.storage.submitted_merkle_root(submitted.merkle_root).await;
+
+                            log::info!(
+                                "Merkle root {} for block #{} submission confirmed after {} confirmations",
+                                submitted.merkle_root,
+                                submitted.merkle_root_block,
+                                self.confirmations
+                            );
+                            self.metrics.pending_submissions.dec();
                         }
-                        TxStatus::Failed => {
+
+                        Err(err) => {
                             let root_exists = self.eth_api
-                                .read_finalized_merkle_root(root.merkle_root_block)
+                                .read_finalized_merkle_root(err.merkle_root_block)
                                 .await?
                                 .is_some();
 
                             if root_exists {
-                                log::info!("Merkle root at block #{} is already finalized", root.merkle_root_block);
                                 if responses.send(Response {
-                                    era: root.era,
-                                    merkle_root_block: root.merkle_root_block,
+                                    era: err.era,
+                                    merkle_root_block: err.merkle_root_block,
+                                    merkle_root: err.merkle_root,
+                                    status: ResponseStatus::Submitted,
                                 }).is_err() {
                                     return Ok(());
                                 };
+                                log::info!("Merkle root {} for block #{} is already submitted", err.merkle_root, err.merkle_root_block);
                                 continue;
                             }
 
-                            log::error!("Merkle root submission failed, tx hash: {}", root.tx_hash);
-                            if !root.retried {
-                                log::info!("Retrying merkle root submission, tx hash: {}", root.tx_hash);
-                                let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, root.proof.clone()).await?;
-                                pending_transactions.push(SubmittedMerkleRoot::new(
-                                    self.eth_api.clone(),
-                                    tx_hash,
-                                    root.era,
-                                    root.merkle_root_block,
-                                    root.proof,
-                                    true,
-                                ).finalize());
-                            } else {
-                                self.metrics.failed_submissions.inc();
-                                log::error!("Merkle root submission failed again, giving up, tx hash: {}", root.tx_hash);
-                            }
-
+                            log::error!("Failed to submit merkle root {}: {}", err.merkle_root, err.error);
+                            self.metrics.pending_submissions.dec();
+                            self.metrics.failed_submissions.inc();
+                            if responses.send(Response {
+                                era: err.era,
+                                merkle_root_block: err.merkle_root_block,
+                                merkle_root: err.merkle_root,
+                                status: ResponseStatus::Failed(err.error.to_string()),
+                            }).is_err() {
+                                return Ok(());
+                            };
                         }
                     }
                 }

@@ -59,6 +59,11 @@ pub struct GearEthCoreArgs {
     #[clap(flatten)]
     pub block_storage_args: BlockStorageArgs,
 
+    #[arg(
+        long,
+        help = "How many confirmations until merkle-root is considered relayed. Default is: {DEFAULT_COUNT_CONFIRMATIONS}"
+    )]
+    pub confirmations_merkle_root: Option<u64>,
     /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,

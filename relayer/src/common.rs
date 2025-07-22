@@ -76,7 +76,7 @@ pub(crate) async fn sync_authority_set_id(
 pub(crate) async fn submit_merkle_root_to_ethereum(
     eth_api: &EthApi,
     proof: FinalProof,
-) -> anyhow::Result<TxHash> {
+) -> Result<TxHash, ethereum_client::Error> {
     log::info!(
         "Submitting merkle root {} at gear block {} to ethereum",
         hex::encode(proof.merkle_root),

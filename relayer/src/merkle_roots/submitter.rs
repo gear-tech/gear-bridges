@@ -201,19 +201,62 @@ impl MerkleRootSubmitter {
                     }
 
 
-                    let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await?;
-                    log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
-                    self.metrics.total_submissions.inc();
-                    pending_transactions.push(SubmittedMerkleRoot::new(
-                        &self.eth_api,
-                        tx_hash,
-                        request.era,
-                        request.merkle_root_block,
-                        H256::from(request.proof.merkle_root),
-                        self.confirmations,
-                    ));
+                    match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
+                        Ok(tx_hash) => {
+                            log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
+                            self.metrics.total_submissions.inc();
+                            pending_transactions.push(SubmittedMerkleRoot::new(
+                                &self.eth_api,
+                                tx_hash,
+                                request.era,
+                                request.merkle_root_block,
+                                H256::from(request.proof.merkle_root),
+                                self.confirmations,
+                            ));
+                        }
+                        Err(ethereum_client::Error::ErrorDuringContractExecution(err)) => {
+                            let root_exists = self.eth_api
+                                .read_finalized_merkle_root(request.merkle_root_block)
+                                .await?
+                                .is_some();
+                            if root_exists {
+                                log::warn!("Merkle root {} for block #{} is already submitted, contract execution failed: {err:?}", H256::from(request.proof.merkle_root), request.merkle_root_block);
+                                if responses.send(Response {
+                                    era: request.era,
+                                    merkle_root_block: request.merkle_root_block,
+                                    merkle_root: H256::from(request.proof.merkle_root),
+                                    status: ResponseStatus::Submitted,
+                                }).is_err() {
+                                    return Ok(());
+                                };
+                            } else {
+                                log::error!("Failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
+                                self.metrics.failed_submissions.inc();
+                                if responses.send(Response {
+                                    era: request.era,
+                                    merkle_root_block: request.merkle_root_block,
+                                    merkle_root: H256::from(request.proof.merkle_root),
+                                    status: ResponseStatus::Failed("Error during contract execution".to_string()),
+                                }).is_err() {
+                                    return Ok(());
+                                };
+                            }
 
 
+                        }
+                        Err(err) => {
+                            log::error!("Failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
+                            self.metrics.failed_submissions.inc();
+                            if responses.send(Response {
+                                era: request.era,
+                                merkle_root_block: request.merkle_root_block,
+                                merkle_root: H256::from(request.proof.merkle_root),
+                                status: ResponseStatus::Failed(err.to_string()),
+                            }).is_err() {
+                                return Ok(());
+                            };
+                        }
+                    }
                 },
 
                 Some(result) = pending_transactions.next() => {

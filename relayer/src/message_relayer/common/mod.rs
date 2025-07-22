@@ -8,10 +8,12 @@ use gsdk::{
         gear_eth_bridge::Event as GearEthBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
     },
+    subscription::BlockEvents,
+    GearConfig,
 };
 use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
-use subxt::config::Header as _;
+use subxt::{blocks::Block, config::Header as _, OnlineClient};
 
 pub mod ethereum;
 pub mod gear;
@@ -137,6 +139,15 @@ impl GearBlock {
             }
             _ => None,
         })
+    }
+
+    pub async fn from_subxt_block(
+        block: Block<GearConfig, OnlineClient<GearConfig>>,
+    ) -> anyhow::Result<Self> {
+        let header = block.header().clone();
+        let events = BlockEvents::new(block).await?;
+        let events = events.events()?;
+        Ok(Self::new(header, events))
     }
 }
 

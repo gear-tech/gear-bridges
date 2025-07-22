@@ -28,6 +28,7 @@ fn main() -> AnyResult<()> {
     // we need at least 2 native threads to run some of the blocking tasks like proof composition
     // so lets set minimum to 4 threads or to available parallelism.
     tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
         .max_blocking_threads(std::thread::available_parallelism()?.get().max(4))
         .build()?
         .block_on(run())
@@ -77,6 +78,8 @@ async fn run() -> AnyResult<()> {
                 genesis_config,
                 proof_storage,
                 args.start_authority_set_id,
+                args.confirmations_merkle_root
+                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
             )
             .await;
 

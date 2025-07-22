@@ -183,7 +183,10 @@ impl MerkleRootRelayer {
                     let block = GearBlock::from_subxt_block(block).await?;
                     self.waiting_for_authority_set_sync
                         .entry(*id)
-                        .or_default()
+                        .or_insert_with(|| {
+                            authority_set_sync.send(block.clone());
+                            Vec::new()
+                        })
                         .push(block);
                 }
 
@@ -344,7 +347,7 @@ impl MerkleRootRelayer {
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
-                        if !self.try_proof_merkle_root(prover, block).await? {
+                        if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
                             return Ok(false);
                         }
                     }
@@ -420,7 +423,7 @@ impl MerkleRootRelayer {
 
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
-                            if !self.try_proof_merkle_root(prover, block).await? {
+                            if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
                                 return Ok(false);
                             }
                         }
@@ -487,6 +490,7 @@ impl MerkleRootRelayer {
     async fn try_proof_merkle_root(
         &mut self,
         prover: &mut FinalityProverIo,
+        authority_set_sync: &mut AuthoritySetSyncIo,
         block: GearBlock,
     ) -> anyhow::Result<bool> {
         let Some(merkle_root) = storage::queue_merkle_root_changed(&block) else {
@@ -559,7 +563,10 @@ impl MerkleRootRelayer {
                 );
                 self.waiting_for_authority_set_sync
                     .entry(signed_by_authority_set_id)
-                    .or_default()
+                    .or_insert_with(|| {
+                        authority_set_sync.send(block.clone());
+                        Vec::new()
+                    })
                     .push(block);
             }
 

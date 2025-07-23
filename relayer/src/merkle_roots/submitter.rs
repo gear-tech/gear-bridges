@@ -20,6 +20,7 @@ use super::storage::MerkleRootStorage;
 pub struct Request {
     pub era: Option<u64>,
     pub merkle_root_block: u32,
+    pub merkle_root: H256,
     pub proof: FinalProof,
 }
 
@@ -27,6 +28,7 @@ pub struct Response {
     pub era: Option<u64>,
     pub merkle_root_block: u32,
     pub merkle_root: H256,
+    pub proof: FinalProof,
     pub status: ResponseStatus,
 }
 
@@ -54,16 +56,23 @@ impl SubmitterIo {
             .send(Request {
                 era: Some(era),
                 merkle_root_block,
+                merkle_root: H256::from(proof.merkle_root),
                 proof,
             })
             .is_ok()
     }
 
-    pub fn submit_merkle_root(&self, merkle_root_block: u32, proof: FinalProof) -> bool {
+    pub fn submit_merkle_root(
+        &self,
+        merkle_root_block: u32,
+        merkle_root: H256,
+        proof: FinalProof,
+    ) -> bool {
         self.requests
             .send(Request {
                 era: None,
                 merkle_root_block,
+                merkle_root,
                 proof,
             })
             .is_ok()
@@ -78,6 +87,7 @@ struct SubmittedMerkleRoot {
     era: Option<u64>,
     merkle_root_block: u32,
     merkle_root: H256,
+    proof: FinalProof,
     receipt: TransactionReceipt,
 }
 
@@ -85,6 +95,7 @@ struct SubmissionError {
     era: Option<u64>,
     merkle_root_block: u32,
     merkle_root: H256,
+    proof: FinalProof,
     error: PendingTransactionError,
 }
 
@@ -95,12 +106,14 @@ impl SubmittedMerkleRoot {
         era: Option<u64>,
         merkle_root_block: u32,
         merkle_root: H256,
+        proof: FinalProof,
         confirmations: u64,
     ) -> Result<Self, SubmissionError> {
         Ok(Self {
             merkle_root_block,
             merkle_root,
             era,
+            proof: proof.clone(),
             receipt: PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash)
                 .with_required_confirmations(confirmations)
                 .get_receipt()
@@ -110,6 +123,7 @@ impl SubmittedMerkleRoot {
                     merkle_root_block,
                     merkle_root,
                     error,
+                    proof,
                 })?,
         })
     }
@@ -182,24 +196,22 @@ impl MerkleRootSubmitter {
                         return Ok(());
                     };
 
-                    let root_exists = self.eth_api
-                        .read_finalized_merkle_root(request.merkle_root_block)
-                        .await?
-                        .is_some();
-
-                    if root_exists {
+                    if self.storage.is_merkle_root_submitted(H256::from(request.proof.merkle_root)).await {
+                        log::info!(
+                            "Merkle root {} for block #{} is already submitted", H256::from(request.proof.merkle_root), request.merkle_root_block);
                         if responses.send(Response {
                             era: request.era,
                             merkle_root_block: request.merkle_root_block,
-                            merkle_root: H256::from(request.proof.merkle_root),
+                            merkle_root: request.merkle_root,
                             status: ResponseStatus::Submitted,
+                            proof: request.proof,
                         }).is_err() {
                             return Ok(());
                         };
-                        log::info!("Merkle root {} for block #{} is already submitted", H256::from(request.proof.merkle_root), request.merkle_root_block);
                         continue;
                     }
 
+                    self.storage.submitted_merkle_root(H256::from(request.proof.merkle_root)).await;
 
                     match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
                         Ok(tx_hash) => {
@@ -210,15 +222,20 @@ impl MerkleRootSubmitter {
                                 tx_hash,
                                 request.era,
                                 request.merkle_root_block,
-                                H256::from(request.proof.merkle_root),
+                                request.merkle_root,
+                                request.proof,
                                 self.confirmations,
                             ));
                         }
+                        // How do we get here?
+                        // - Relayer crashed and already submitted the merkle root but not yet confirmed it
+                        // - Somebody else submitted the merkle root
                         Err(ethereum_client::Error::ErrorDuringContractExecution(err)) => {
                             let root_exists = self.eth_api
-                                .read_finalized_merkle_root(request.merkle_root_block)
+                                .read_finalized_merkle_root(request.proof.block_number)
                                 .await?
                                 .is_some();
+
                             if root_exists {
                                 log::warn!("Merkle root {} for block #{} is already submitted, contract execution failed: {err:?}", H256::from(request.proof.merkle_root), request.merkle_root_block);
                                 if responses.send(Response {
@@ -226,32 +243,37 @@ impl MerkleRootSubmitter {
                                     merkle_root_block: request.merkle_root_block,
                                     merkle_root: H256::from(request.proof.merkle_root),
                                     status: ResponseStatus::Submitted,
+                                    proof: request.proof,
                                 }).is_err() {
                                     return Ok(());
                                 };
                             } else {
                                 log::error!("Failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
                                 self.metrics.failed_submissions.inc();
+                                self.storage.submission_failed(H256::from(request.proof.merkle_root)).await;
                                 if responses.send(Response {
                                     era: request.era,
                                     merkle_root_block: request.merkle_root_block,
                                     merkle_root: H256::from(request.proof.merkle_root),
                                     status: ResponseStatus::Failed("Error during contract execution".to_string()),
+                                    proof: request.proof,
                                 }).is_err() {
                                     return Ok(());
                                 };
                             }
 
-
                         }
+
                         Err(err) => {
                             log::error!("Failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
                             self.metrics.failed_submissions.inc();
+                            self.storage.submission_failed(H256::from(request.proof.merkle_root)).await;
                             if responses.send(Response {
                                 era: request.era,
                                 merkle_root_block: request.merkle_root_block,
                                 merkle_root: H256::from(request.proof.merkle_root),
                                 status: ResponseStatus::Failed(err.to_string()),
+                                proof: request.proof,
                             }).is_err() {
                                 return Ok(());
                             };
@@ -264,7 +286,7 @@ impl MerkleRootSubmitter {
                         Ok(submitted) => {
                             if !submitted.receipt.status() {
                                 let root_exists = self.eth_api
-                                    .read_finalized_merkle_root(submitted.merkle_root_block)
+                                    .read_finalized_merkle_root(submitted.proof.block_number)
                                     .await?
                                     .is_some();
 
@@ -274,6 +296,7 @@ impl MerkleRootSubmitter {
                                         merkle_root_block: submitted.merkle_root_block,
                                         merkle_root: submitted.merkle_root,
                                         status: ResponseStatus::Submitted,
+                                        proof: submitted.proof.clone(),
                                     }).is_err() {
                                         return Ok(());
                                     };
@@ -286,6 +309,7 @@ impl MerkleRootSubmitter {
                                     merkle_root_block: submitted.merkle_root_block,
                                     merkle_root: submitted.merkle_root,
                                     status: ResponseStatus::Failed(format!("Transaction {} failed", submitted.receipt.transaction_hash)),
+                                    proof: submitted.proof.clone(),
                                 }).is_err() {
                                     return Ok(());
                                 };
@@ -296,11 +320,10 @@ impl MerkleRootSubmitter {
                                 merkle_root_block: submitted.merkle_root_block,
                                 merkle_root: submitted.merkle_root,
                                 status: ResponseStatus::Submitted,
+                                proof: submitted.proof.clone(),
                             }).is_err() {
                                 return Ok(());
                             };
-
-                            self.storage.submitted_merkle_root(submitted.merkle_root).await;
 
                             log::info!(
                                 "Merkle root {} for block #{} submission confirmed after {} confirmations",
@@ -313,7 +336,7 @@ impl MerkleRootSubmitter {
 
                         Err(err) => {
                             let root_exists = self.eth_api
-                                .read_finalized_merkle_root(err.merkle_root_block)
+                                .read_finalized_merkle_root(err.proof.block_number)
                                 .await?
                                 .is_some();
 
@@ -323,6 +346,7 @@ impl MerkleRootSubmitter {
                                     merkle_root_block: err.merkle_root_block,
                                     merkle_root: err.merkle_root,
                                     status: ResponseStatus::Submitted,
+                                    proof: err.proof,
                                 }).is_err() {
                                     return Ok(());
                                 };
@@ -333,11 +357,13 @@ impl MerkleRootSubmitter {
                             log::error!("Failed to submit merkle root {}: {}", err.merkle_root, err.error);
                             self.metrics.pending_submissions.dec();
                             self.metrics.failed_submissions.inc();
+                            self.storage.submission_failed(H256::from(err.proof.merkle_root)).await;
                             if responses.send(Response {
                                 era: err.era,
                                 merkle_root_block: err.merkle_root_block,
                                 merkle_root: err.merkle_root,
                                 status: ResponseStatus::Failed(err.error.to_string()),
+                                proof: err.proof,
                             }).is_err() {
                                 return Ok(());
                             };

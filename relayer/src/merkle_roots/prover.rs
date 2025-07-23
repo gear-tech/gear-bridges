@@ -123,6 +123,7 @@ impl FinalityProver {
         log::info!("Generating merkle root proof for block #{block_number}");
 
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
+
         let start = Instant::now();
         let proof =
             prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
@@ -131,6 +132,12 @@ impl FinalityProver {
             "Proof for {merkle_root} generated (block #{block_number}) in {} seconds",
             start.elapsed().as_secs_f64()
         );
+
+        if proof.merkle_root != merkle_root.0 {
+            log::info!("Merkle root {} at block #{} is valid under the proof with merkle root {} at block #{}",
+                merkle_root, block_number, H256::from(proof.merkle_root), block_number);
+        }
+
         Ok(proof)
     }
 }

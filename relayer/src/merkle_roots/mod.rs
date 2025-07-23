@@ -480,8 +480,8 @@ impl MerkleRootRelayer {
         sealed_eras: &mut UnboundedReceiver<SealedNotFinalizedEra>,
     ) -> anyhow::Result<bool> {
         tokio::select! {
-            instant = self.save_interval.tick() => {
-                log::info!("{:.3} seconds passed, saving current state", instant.elapsed().as_secs_f64());
+            _ = self.save_interval.tick() => {
+                log::trace!("60 seconds passed, saving current state");
                 if let Err(err) = self.storage.save(&self.roots).await {
                     log::error!("Failed to save block state: {err:?}");
                 }

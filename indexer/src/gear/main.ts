@@ -7,7 +7,7 @@ import {
   TokenMappingAdded,
   TokenMappingRemoved,
 } from './types';
-import { ethNonce, gearNonce, gearNonceFromNumber, mapKeys } from '../common';
+import { ethNonce, gearNonce, mapKeys } from '../common';
 import { ProcessorContext, getProcessor } from './processor';
 import { GearEthBridgeMessage, InitiatedTransfer, Network, Status, Transfer } from '../model';
 import {
@@ -89,7 +89,7 @@ const handler = async (ctx: ProcessorContext) => {
                   txHash: event.extrinsic!.hash,
                   blockNumber: blockNumber,
                   timestamp,
-                  nonce: gearNonce(nonce),
+                  nonce: gearNonce(BigInt(nonce)),
                   sourceNetwork: Network.Vara,
                   source: vara_token_id,
                   destNetwork: Network.Ethereum,
@@ -135,7 +135,7 @@ const handler = async (ctx: ProcessorContext) => {
               case VftManagerMethods.RequestBridging: {
                 const data = decoder.decodeOutput<{ ok: [nonce: string] }>(service, method, msg.payload);
                 if (data.ok) {
-                  await state.handleRequestBridgingReply(msg.details.to, gearNonce(data.ok[0]));
+                  await state.handleRequestBridgingReply(msg.details.to, gearNonce(BigInt(data.ok[0])));
                 }
                 continue;
               }
@@ -160,7 +160,7 @@ const handler = async (ctx: ProcessorContext) => {
 
             const { nonce } = decoder.decodeEvent<BridgingPaidEvent>(service, method, msg.payload);
 
-            state.updateTransferStatus(gearNonce(nonce), Status.Bridging);
+            state.updateTransferStatus(gearNonce(BigInt(nonce)), Status.Bridging);
             break;
           }
         }
@@ -203,7 +203,7 @@ const handler = async (ctx: ProcessorContext) => {
         state.addEthBridgeMessage(
           new GearEthBridgeMessage({
             id: hash,
-            nonce: gearNonceFromNumber(nonce),
+            nonce: gearNonce(BigInt(nonce)),
             blockNumber,
           }),
         );

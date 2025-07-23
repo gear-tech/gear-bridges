@@ -6,7 +6,6 @@ use crate::message_relayer::{
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 use futures::StreamExt;
-use gsdk::subscription::BlockEvents;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use std::sync::Arc;
@@ -53,9 +52,9 @@ impl BlockListener {
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
-        // during proof generation, so we need to ensure that we can queue up
-        // enough blocks to process them later.
-        const CAPACITY: usize = 10000;
+        // during proof generation or era sync, so we need to have enough capacity
+        // to not drop any blocks. 14400 is how many blocks are produced in 1 era.
+        const CAPACITY: usize = 14_400;
         let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
@@ -147,11 +146,9 @@ impl BlockListener {
             log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
             let block = gear_api.api.blocks().at(block_hash).await?;
 
-            let header = block.header().clone();
-            let block_events = BlockEvents::new(block).await?;
-            let events = block_events.events()?;
+            let gear_block = GearBlock::from_subxt_block(block).await?;
 
-            match tx.send(GearBlock::new(header, events)) {
+            match tx.send(gear_block) {
                 Ok(_) => (),
                 Err(broadcast::error::SendError(_)) => {
                     log::error!("No active receivers for Gear block listener, stopping");
@@ -170,11 +167,8 @@ impl BlockListener {
 
                 Some(Ok(block)) => {
                     self.metrics.latest_block.set(block.number() as i64);
-                    let header = block.header().clone();
-                    let block_events = BlockEvents::new(block).await?;
-                    let events = block_events.events()?;
 
-                    let block = GearBlock::new(header, events);
+                    let block = GearBlock::from_subxt_block(block).await?;
                     self.block_storage.add_block(&block).await;
 
                     match tx.send(block) {

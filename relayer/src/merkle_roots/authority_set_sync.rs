@@ -148,7 +148,6 @@ impl AuthoritySetSync {
                     match block {
                         Ok(block) => {
                             if !super::storage::authority_set_changed(&block) {
-
                                 continue;
                             }
 

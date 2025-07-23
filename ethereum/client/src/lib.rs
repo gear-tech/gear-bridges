@@ -425,8 +425,10 @@ impl Contracts {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
-                        if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
-                            return Err(Error::MessageQueue(e))
+                        if let Some(e) =
+                            e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                        {
+                            return Err(Error::MessageQueue(e));
                         }
 
                         Err(Error::ErrorSendingTransaction(e))
@@ -435,8 +437,10 @@ impl Contracts {
             }
 
             Err(e) => {
-                if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
-                    return Err(Error::MessageQueue(e))
+                if let Some(e) =
+                    e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                {
+                    return Err(Error::MessageQueue(e));
                 }
 
                 Err(Error::ErrorDuringContractExecution(e))
@@ -523,11 +527,13 @@ impl Contracts {
         let gas_estimated = match call.estimate_gas().await {
             Ok(gas_estimated) => gas_estimated,
             Err(e) => {
-                if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
-                    return Err(Error::MessageQueue(e))
+                if let Some(e) =
+                    e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                {
+                    return Err(Error::MessageQueue(e));
                 }
 
-                return Err(Error::ErrorDuringContractExecution(e))
+                return Err(Error::ErrorDuringContractExecution(e));
             }
         };
 
@@ -572,11 +578,13 @@ impl Contracts {
             Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
             Err(e) => {
                 log::error!("Sending error: {e:?}");
-                if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
-                    return Err(Error::MessageQueue(e))
+                if let Some(e) =
+                    e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                {
+                    return Err(Error::MessageQueue(e));
                 }
 
-                return Err(Error::ErrorDuringContractExecution(e))
+                return Err(Error::ErrorDuringContractExecution(e));
             }
         }
     }

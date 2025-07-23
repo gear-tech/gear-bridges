@@ -38,7 +38,11 @@ impl BlockListener {
     pub async fn run<const RECEIVER_COUNT: usize>(
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
-        let (tx, _) = broadcast::channel(RECEIVER_COUNT);
+        // Capacity for the channel. At the moment merkle-root relayer might lag behind
+        // during proof generation or era sync, so we need to have enough capacity
+        // to not drop any blocks. 14400 is how many blocks are produced in 1 era.
+        const CAPACITY: usize = 14_400;
+        let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
             loop {

@@ -425,11 +425,22 @@ impl Contracts {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
+                        if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
+                            return Err(Error::MessageQueue(e))
+                        }
+
                         Err(Error::ErrorSendingTransaction(e))
                     }
                 }
             }
-            Err(e) => Err(Error::ErrorDuringContractExecution(e)),
+
+            Err(e) => {
+                if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
+                    return Err(Error::MessageQueue(e))
+                }
+
+                Err(Error::ErrorDuringContractExecution(e))
+            }
         }
     }
 

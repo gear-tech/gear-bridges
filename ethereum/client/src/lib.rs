@@ -511,7 +511,13 @@ impl Contracts {
 
         let gas_estimated = match call.estimate_gas().await {
             Ok(gas_estimated) => gas_estimated,
-            Err(e) => return Err(Error::ErrorDuringContractExecution(e)),
+            Err(e) => {
+                if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
+                    return Err(Error::MessageQueue(e))
+                }
+
+                return Err(Error::ErrorDuringContractExecution(e))
+            }
         };
 
         let max_priority_fee_per_gas = self.provider.get_max_priority_fee_per_gas().await;
@@ -555,7 +561,11 @@ impl Contracts {
             Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
             Err(e) => {
                 log::error!("Sending error: {e:?}");
-                Err(Error::ErrorSendingTransaction(e))
+                if let Some(e) = e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>() {
+                    return Err(Error::MessageQueue(e))
+                }
+
+                return Err(Error::ErrorDuringContractExecution(e))
             }
         }
     }

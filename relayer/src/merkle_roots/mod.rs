@@ -259,10 +259,21 @@ impl MerkleRootRelayer {
                             last_sealed = *id - 1;
                         }
 
+                        let force_sync = self
+                            .storage
+                            .proofs
+                            .get_latest_authority_set_id()
+                            .await
+                            .filter(|latest| *id > *latest)
+                            .is_some()
+                            && *id > last_sealed;
+
                         self.waiting_for_authority_set_sync
                             .entry(*id)
                             .or_insert_with(|| {
-                                authority_set_sync.send(block.clone());
+                                if force_sync {
+                                    authority_set_sync.send(block.clone());
+                                }
                                 Vec::new()
                             })
                             .push(block);
@@ -701,10 +712,21 @@ impl MerkleRootRelayer {
                         ),
                     },
                 );
+
+                let force_sync = self
+                    .storage
+                    .proofs
+                    .get_latest_authority_set_id()
+                    .await
+                    .filter(|latest| signed_by_authority_set_id > *latest)
+                    .is_some();
+
                 self.waiting_for_authority_set_sync
                     .entry(signed_by_authority_set_id)
                     .or_insert_with(|| {
-                        authority_set_sync.send(block.clone());
+                        if force_sync {
+                            authority_set_sync.send(block.clone());
+                        }
                         Vec::new()
                     })
                     .push(block);

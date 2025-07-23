@@ -1,4 +1,5 @@
 use crate::{
+    merkle_roots::MerkleRoot,
     message_relayer::common::{
         gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
         GearBlock,
@@ -9,7 +10,7 @@ use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{btree_map::Entry, BTreeMap, HashSet},
+    collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
 };
@@ -29,12 +30,12 @@ pub struct MerkleRootStorage {
 pub struct Block {
     pub block_hash: H256,
     pub merkle_root_changed: Option<H256>,
-    pub authority_set_hash_changed: Option<H256>,
+    pub authority_set_changed: bool,
 }
 
 impl Block {
     pub fn is_processed(&self) -> bool {
-        self.merkle_root_changed.is_none() && self.authority_set_hash_changed.is_none()
+        self.merkle_root_changed.is_none() && !self.authority_set_changed
     }
 }
 
@@ -47,13 +48,18 @@ pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
     })
 }
 
-pub(super) fn authority_set_hash_changed(block: &GearBlock) -> Option<H256> {
-    block.events().iter().find_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(hash)) => {
-            Some(*hash)
-        }
-        _ => None,
-    })
+pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
+    block
+        .events()
+        .iter()
+        .find_map(|event| match event {
+            gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(_))
+            | gclient::Event::Grandpa(gclient::metadata::grandpa::Event::NewAuthorities {
+                ..
+            }) => Some(()),
+            _ => None,
+        })
+        .is_some()
 }
 
 #[async_trait::async_trait]
@@ -70,10 +76,10 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
 
     async fn add_block(&self, block: &GearBlock) {
         let merkle_root_changed = queue_merkle_root_changed(block);
-        let authority_set_hash_changed = authority_set_hash_changed(block);
+        let authority_set_changed = authority_set_changed(block);
 
         // in case there are no merkle-root related changes we can just skip the block saving.
-        if merkle_root_changed.is_none() && authority_set_hash_changed.is_none() {
+        if merkle_root_changed.is_none() && !authority_set_changed {
             return;
         }
 
@@ -91,7 +97,7 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
                 entry.insert(Block {
                     block_hash,
                     merkle_root_changed,
-                    authority_set_hash_changed,
+                    authority_set_changed,
                 });
             }
         }
@@ -116,6 +122,10 @@ impl MerkleRootStorage {
         self.submitted_roots.write().await.insert(merkle_root);
     }
 
+    pub async fn submission_failed(&self, merkle_root: H256) {
+        self.submitted_roots.write().await.remove(&merkle_root);
+    }
+
     pub async fn merkle_root_processed(&self, block_number: u32) {
         let mut blocks = self.blocks.write().await;
 
@@ -125,7 +135,7 @@ impl MerkleRootStorage {
             return;
         };
 
-        if entry.get().authority_set_hash_changed.is_none() {
+        if !entry.get().authority_set_changed {
             entry.remove();
         }
     }
@@ -134,7 +144,7 @@ impl MerkleRootStorage {
         let mut blocks = self.blocks.write().await;
 
         let Entry::Occupied(entry) = blocks.entry(block_number).and_modify(|block| {
-            block.authority_set_hash_changed = None;
+            block.authority_set_changed = false;
         }) else {
             return;
         };
@@ -145,7 +155,7 @@ impl MerkleRootStorage {
     }
 
     /// Save unprocessed blocks to the provided path.
-    pub async fn save(&self) -> anyhow::Result<()> {
+    pub async fn save(&self, roots: &HashMap<H256, MerkleRoot>) -> anyhow::Result<()> {
         self.prune_blocks().await;
         let blocks = self.blocks.read().await;
         let submitted_merkle_roots = self.submitted_roots.read().await;
@@ -160,6 +170,7 @@ impl MerkleRootStorage {
         let storage = SerializedStorage {
             blocks: &blocks,
             submitted_merkle_roots: &submitted_merkle_roots,
+            roots,
         };
 
         let serialized = serde_json::to_string(&storage)?;
@@ -170,7 +181,7 @@ impl MerkleRootStorage {
         Ok(())
     }
 
-    pub async fn load(&self) -> anyhow::Result<()> {
+    pub async fn load(&self) -> anyhow::Result<HashMap<H256, MerkleRoot>> {
         let mut file = tokio::fs::OpenOptions::new()
             .read(true)
             .open(&self.path)
@@ -182,10 +193,11 @@ impl MerkleRootStorage {
         let DeserializedStorage {
             blocks,
             submitted_merkle_roots,
+            roots,
         } = serde_json::from_str(&contents)?;
         *self.blocks.write().await = blocks;
         *self.submitted_roots.write().await = submitted_merkle_roots;
-        Ok(())
+        Ok(roots)
     }
 
     pub async fn prune_blocks(&self) {
@@ -213,10 +225,12 @@ impl MerkleRootStorage {
 struct SerializedStorage<'a> {
     blocks: &'a BTreeMap<u32, Block>,
     submitted_merkle_roots: &'a HashSet<H256>,
+    roots: &'a HashMap<H256, MerkleRoot>,
 }
 
 #[derive(Deserialize)]
 struct DeserializedStorage {
     blocks: BTreeMap<u32, Block>,
     submitted_merkle_roots: HashSet<H256>,
+    roots: HashMap<H256, MerkleRoot>,
 }

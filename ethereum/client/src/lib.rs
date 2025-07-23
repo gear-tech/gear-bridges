@@ -584,7 +584,7 @@ impl Contracts {
                     return Err(Error::MessageQueue(e));
                 }
 
-                return Err(Error::ErrorDuringContractExecution(e));
+                Err(Error::ErrorSendingTransaction(e))
             }
         }
     }

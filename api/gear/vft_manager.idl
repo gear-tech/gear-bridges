@@ -63,13 +63,13 @@ type TokenSupply = enum {
 /// Error types for VFT Manageer service.
 type Error = enum {
   /// Error sending message to the program.
-  SendFailure,
+  SendFailure: str,
   /// Error while waiting for reply from the program.
-  ReplyFailure,
+  ReplyFailure: str,
   /// Failed to set reply timeout.
-  ReplyTimeout,
+  ReplyTimeout: str,
   /// Failed to set reply hook.
-  ReplyHook,
+  ReplyHook: str,
   /// A message does not have a reply code.
   NoReplyCode: str,
   /// Original `MessageId` wasn't found in message tracker when processing reply.
@@ -79,13 +79,13 @@ type Error = enum {
   /// Message sent to the program failed.
   MessageFailed,
   /// Failed to decode Burn reply.
-  BurnTokensDecode,
+  BurnTokensDecode: str,
   /// Failed to decode TransferFrom reply.
-  TransferFromDecode,
+  TransferFromDecode: str,
   /// Failed to decode Mint reply.
-  MintTokensDecode,
+  MintTokensDecode: str,
   /// Failed to decode payload from gear-eth-bridge built-in actor.
-  BuiltinDecode,
+  BuiltinDecode: str,
   /// Gas reservation for reply is too low.
   GasForReplyTooLow: str,
   /// `ERC20` address wasn't found in the token mapping.
@@ -95,7 +95,7 @@ type Error = enum {
   /// `submit_receipt` can only be called by `historical-proxy` program.
   NotHistoricalProxy,
   /// Ethereum transaction receipt is not supported.
-  NotSupportedEvent,
+  UnsupportedEthEvent,
   /// Ethereum transaction is too old and already have been removed from storage.
   TransactionTooOld,
   /// Ethereum transaction was already processed by VFT Manager service.

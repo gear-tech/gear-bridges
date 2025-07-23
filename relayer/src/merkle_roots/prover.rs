@@ -135,7 +135,7 @@ impl FinalityProver {
 
         if proof.merkle_root != merkle_root.0 {
             log::info!("Merkle root {} at block #{} is valid under the proof with merkle root {} at block #{}",
-                merkle_root, block_number, H256::from(proof.merkle_root), block_number);
+                merkle_root, block_number, H256::from(proof.merkle_root), proof.block_number);
         }
 
         Ok(proof)

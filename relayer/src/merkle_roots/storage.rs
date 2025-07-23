@@ -1,8 +1,5 @@
 use crate::{
-<<<<<<< HEAD
     merkle_roots::MerkleRoot,
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     message_relayer::common::{
         gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
         GearBlock,
@@ -13,11 +10,7 @@ use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::H256;
 use serde::{Deserialize, Serialize};
 use std::{
-<<<<<<< HEAD
     collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
-=======
-    collections::{btree_map::Entry, BTreeMap, HashSet},
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     path::PathBuf,
     sync::Arc,
 };
@@ -37,20 +30,12 @@ pub struct MerkleRootStorage {
 pub struct Block {
     pub block_hash: H256,
     pub merkle_root_changed: Option<H256>,
-<<<<<<< HEAD
     pub authority_set_changed: bool,
-=======
-    pub authority_set_hash_changed: Option<H256>,
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 }
 
 impl Block {
     pub fn is_processed(&self) -> bool {
-<<<<<<< HEAD
         self.merkle_root_changed.is_none() && !self.authority_set_changed
-=======
-        self.merkle_root_changed.is_none() && self.authority_set_hash_changed.is_none()
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     }
 }
 
@@ -63,7 +48,6 @@ pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
     })
 }
 
-<<<<<<< HEAD
 pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
     block
         .events()
@@ -76,15 +60,6 @@ pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
             _ => None,
         })
         .is_some()
-=======
-pub(super) fn authority_set_hash_changed(block: &GearBlock) -> Option<H256> {
-    block.events().iter().find_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(hash)) => {
-            Some(*hash)
-        }
-        _ => None,
-    })
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 }
 
 #[async_trait::async_trait]
@@ -101,17 +76,10 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
 
     async fn add_block(&self, block: &GearBlock) {
         let merkle_root_changed = queue_merkle_root_changed(block);
-<<<<<<< HEAD
         let authority_set_changed = authority_set_changed(block);
 
         // in case there are no merkle-root related changes we can just skip the block saving.
         if merkle_root_changed.is_none() && !authority_set_changed {
-=======
-        let authority_set_hash_changed = authority_set_hash_changed(block);
-
-        // in case there are no merkle-root related changes we can just skip the block saving.
-        if merkle_root_changed.is_none() && authority_set_hash_changed.is_none() {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
             return;
         }
 
@@ -129,11 +97,7 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
                 entry.insert(Block {
                     block_hash,
                     merkle_root_changed,
-<<<<<<< HEAD
                     authority_set_changed,
-=======
-                    authority_set_hash_changed,
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                 });
             }
         }
@@ -158,13 +122,10 @@ impl MerkleRootStorage {
         self.submitted_roots.write().await.insert(merkle_root);
     }
 
-<<<<<<< HEAD
     pub async fn submission_failed(&self, merkle_root: H256) {
         self.submitted_roots.write().await.remove(&merkle_root);
     }
 
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     pub async fn merkle_root_processed(&self, block_number: u32) {
         let mut blocks = self.blocks.write().await;
 
@@ -174,11 +135,7 @@ impl MerkleRootStorage {
             return;
         };
 
-<<<<<<< HEAD
         if !entry.get().authority_set_changed {
-=======
-        if entry.get().authority_set_hash_changed.is_none() {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
             entry.remove();
         }
     }
@@ -187,11 +144,7 @@ impl MerkleRootStorage {
         let mut blocks = self.blocks.write().await;
 
         let Entry::Occupied(entry) = blocks.entry(block_number).and_modify(|block| {
-<<<<<<< HEAD
             block.authority_set_changed = false;
-=======
-            block.authority_set_hash_changed = None;
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         }) else {
             return;
         };
@@ -202,11 +155,7 @@ impl MerkleRootStorage {
     }
 
     /// Save unprocessed blocks to the provided path.
-<<<<<<< HEAD
     pub async fn save(&self, roots: &HashMap<H256, MerkleRoot>) -> anyhow::Result<()> {
-=======
-    pub async fn save(&self) -> anyhow::Result<()> {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         self.prune_blocks().await;
         let blocks = self.blocks.read().await;
         let submitted_merkle_roots = self.submitted_roots.read().await;
@@ -221,10 +170,7 @@ impl MerkleRootStorage {
         let storage = SerializedStorage {
             blocks: &blocks,
             submitted_merkle_roots: &submitted_merkle_roots,
-<<<<<<< HEAD
             roots,
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         };
 
         let serialized = serde_json::to_string(&storage)?;
@@ -235,11 +181,7 @@ impl MerkleRootStorage {
         Ok(())
     }
 
-<<<<<<< HEAD
     pub async fn load(&self) -> anyhow::Result<HashMap<H256, MerkleRoot>> {
-=======
-    pub async fn load(&self) -> anyhow::Result<()> {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         let mut file = tokio::fs::OpenOptions::new()
             .read(true)
             .open(&self.path)
@@ -251,18 +193,11 @@ impl MerkleRootStorage {
         let DeserializedStorage {
             blocks,
             submitted_merkle_roots,
-<<<<<<< HEAD
             roots,
         } = serde_json::from_str(&contents)?;
         *self.blocks.write().await = blocks;
         *self.submitted_roots.write().await = submitted_merkle_roots;
         Ok(roots)
-=======
-        } = serde_json::from_str(&contents)?;
-        *self.blocks.write().await = blocks;
-        *self.submitted_roots.write().await = submitted_merkle_roots;
-        Ok(())
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     }
 
     pub async fn prune_blocks(&self) {
@@ -290,18 +225,12 @@ impl MerkleRootStorage {
 struct SerializedStorage<'a> {
     blocks: &'a BTreeMap<u32, Block>,
     submitted_merkle_roots: &'a HashSet<H256>,
-<<<<<<< HEAD
     roots: &'a HashMap<H256, MerkleRoot>,
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 }
 
 #[derive(Deserialize)]
 struct DeserializedStorage {
     blocks: BTreeMap<u32, Block>,
     submitted_merkle_roots: HashSet<H256>,
-<<<<<<< HEAD
     roots: HashMap<H256, MerkleRoot>,
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 }

@@ -1,8 +1,5 @@
-<<<<<<< HEAD
 use std::time::Instant;
 
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 use crate::{
     message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     prover_interface::{self, FinalProof},
@@ -69,11 +66,7 @@ impl FinalityProver {
 
         let io = FinalityProverIo::new(req_tx, res_rx);
 
-<<<<<<< HEAD
         tokio::task::spawn_blocking(move || {
-=======
-        std::thread::spawn(move || {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
             block_on(async move {
                 if let Err(e) = self.process(&mut req_rx, &res_tx).await {
                     log::error!("Error processing finality prover requests: {e}");
@@ -131,7 +124,6 @@ impl FinalityProver {
 
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
-<<<<<<< HEAD
         let start = Instant::now();
         let proof =
             prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
@@ -146,12 +138,6 @@ impl FinalityProver {
                 merkle_root, block_number, H256::from(proof.merkle_root), proof.block_number);
         }
 
-=======
-        let proof =
-            prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
-                .await?;
-        log::info!("Proof for {merkle_root} generated (block #{block_number})");
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         Ok(proof)
     }
 }

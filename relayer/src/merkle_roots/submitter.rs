@@ -1,13 +1,8 @@
-<<<<<<< HEAD
 use alloy::{
     providers::{PendingTransactionBuilder, PendingTransactionError, Provider},
     rpc::types::TransactionReceipt,
 };
 use ethereum_client::{EthApi, TxHash};
-=======
-use anyhow::Context;
-use ethereum_client::{EthApi, TxHash, TxStatus};
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 use futures::{stream::FuturesUnordered, StreamExt};
 use primitive_types::H256;
 use prometheus::{Gauge, IntCounter, IntGauge};
@@ -25,17 +20,13 @@ use super::storage::MerkleRootStorage;
 pub struct Request {
     pub era: Option<u64>,
     pub merkle_root_block: u32,
-<<<<<<< HEAD
     pub merkle_root: H256,
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     pub proof: FinalProof,
 }
 
 pub struct Response {
     pub era: Option<u64>,
     pub merkle_root_block: u32,
-<<<<<<< HEAD
     pub merkle_root: H256,
     pub proof: FinalProof,
     pub status: ResponseStatus,
@@ -45,8 +36,6 @@ pub struct Response {
 pub enum ResponseStatus {
     Submitted,
     Failed(String),
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 }
 
 pub struct SubmitterIo {
@@ -67,33 +56,23 @@ impl SubmitterIo {
             .send(Request {
                 era: Some(era),
                 merkle_root_block,
-<<<<<<< HEAD
                 merkle_root: H256::from(proof.merkle_root),
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                 proof,
             })
             .is_ok()
     }
 
-<<<<<<< HEAD
     pub fn submit_merkle_root(
         &self,
         merkle_root_block: u32,
         merkle_root: H256,
         proof: FinalProof,
     ) -> bool {
-=======
-    pub fn submit_merkle_root(&self, merkle_root_block: u32, proof: FinalProof) -> bool {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         self.requests
             .send(Request {
                 era: None,
                 merkle_root_block,
-<<<<<<< HEAD
                 merkle_root,
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                 proof,
             })
             .is_ok()
@@ -105,7 +84,6 @@ impl SubmitterIo {
 }
 
 struct SubmittedMerkleRoot {
-<<<<<<< HEAD
     era: Option<u64>,
     merkle_root_block: u32,
     merkle_root: H256,
@@ -148,40 +126,6 @@ impl SubmittedMerkleRoot {
                     proof,
                 })?,
         })
-=======
-    eth_api: EthApi,
-    tx_hash: TxHash,
-    era: Option<u64>,
-    merkle_root_block: u32,
-    proof: FinalProof,
-    retried: bool,
-    status: TxStatus,
-}
-
-impl SubmittedMerkleRoot {
-    fn new(
-        eth_api: EthApi,
-        tx_hash: TxHash,
-        era: Option<u64>,
-        merkle_root_block: u32,
-        proof: FinalProof,
-        retried: bool,
-    ) -> Self {
-        Self {
-            merkle_root_block,
-            eth_api,
-            tx_hash,
-            era,
-            proof,
-            retried,
-            status: TxStatus::Pending,
-        }
-    }
-
-    async fn finalize(mut self) -> anyhow::Result<Self> {
-        self.status = self.eth_api.get_tx_status(self.tx_hash).await?;
-        Ok(self)
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     }
 }
 
@@ -212,11 +156,7 @@ impl_metered_service!(
 pub struct MerkleRootSubmitter {
     eth_api: EthApi,
     storage: Arc<MerkleRootStorage>,
-<<<<<<< HEAD
     confirmations: u64,
-=======
-
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
     metrics: Metrics,
 }
 
@@ -227,18 +167,11 @@ impl MeteredService for MerkleRootSubmitter {
 }
 
 impl MerkleRootSubmitter {
-<<<<<<< HEAD
     pub fn new(eth_api: EthApi, storage: Arc<MerkleRootStorage>, confirmations: u64) -> Self {
         Self {
             eth_api,
             storage,
             confirmations,
-=======
-    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootStorage>) -> Self {
-        Self {
-            eth_api,
-            storage,
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
             metrics: Metrics::new(),
         }
     }
@@ -262,7 +195,6 @@ impl MerkleRootSubmitter {
                         log::info!("No more proofs to process, exiting");
                         return Ok(());
                     };
-<<<<<<< HEAD
 
                     if self.storage.is_merkle_root_submitted(H256::from(request.proof.merkle_root)).await {
                         log::info!(
@@ -405,48 +337,10 @@ impl MerkleRootSubmitter {
                         Err(err) => {
                             let root_exists = self.eth_api
                                 .read_finalized_merkle_root(err.proof.block_number)
-=======
-                    self.storage.submitted_merkle_root(H256::from(request.proof.merkle_root)).await;
-                    let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await?;
-                    log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
-                    self.metrics.total_submissions.inc();
-                    pending_transactions.push(SubmittedMerkleRoot::new(
-                        self.eth_api.clone(),
-                        tx_hash,
-                        request.era,
-                        request.merkle_root_block,
-                        request.proof,
-                        true
-                    ).finalize());
-
-
-                },
-
-                Some(root) = pending_transactions.next() => {
-                    let root = root.context("Failed to check transaction status")?;
-                    match root.status {
-                        TxStatus::Pending => {
-                            log::trace!("Merkle root submission is still pending, tx hash: {}", root.tx_hash);
-                            pending_transactions.push(root.finalize());
-                        }
-                        TxStatus::Finalized => {
-                            log::info!("Merkle root submission confirmed, tx hash: {}", root.tx_hash);
-                            if responses.send(Response {
-                                era: root.era,
-                                merkle_root_block: root.merkle_root_block,
-                            }).is_err() {
-                                return Ok(());
-                            }
-                        }
-                        TxStatus::Failed => {
-                            let root_exists = self.eth_api
-                                .read_finalized_merkle_root(root.merkle_root_block)
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                                 .await?
                                 .is_some();
 
                             if root_exists {
-<<<<<<< HEAD
                                 if responses.send(Response {
                                     era: err.era,
                                     merkle_root_block: err.merkle_root_block,
@@ -473,35 +367,6 @@ impl MerkleRootSubmitter {
                             }).is_err() {
                                 return Ok(());
                             };
-=======
-                                log::info!("Merkle root at block #{} is already finalized", root.merkle_root_block);
-                                if responses.send(Response {
-                                    era: root.era,
-                                    merkle_root_block: root.merkle_root_block,
-                                }).is_err() {
-                                    return Ok(());
-                                };
-                                continue;
-                            }
-
-                            log::error!("Merkle root submission failed, tx hash: {}", root.tx_hash);
-                            if !root.retried {
-                                log::info!("Retrying merkle root submission, tx hash: {}", root.tx_hash);
-                                let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, root.proof.clone()).await?;
-                                pending_transactions.push(SubmittedMerkleRoot::new(
-                                    self.eth_api.clone(),
-                                    tx_hash,
-                                    root.era,
-                                    root.merkle_root_block,
-                                    root.proof,
-                                    true,
-                                ).finalize());
-                            } else {
-                                self.metrics.failed_submissions.inc();
-                                log::error!("Merkle root submission failed again, giving up, tx hash: {}", root.tx_hash);
-                            }
-
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                         }
                     }
                 }

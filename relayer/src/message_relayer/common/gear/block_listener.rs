@@ -6,20 +6,11 @@ use crate::message_relayer::{
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 use futures::StreamExt;
-<<<<<<< HEAD
-use gsdk::subscription::BlockEvents;
-<<<<<<< HEAD
-=======
 use primitive_types::H256;
->>>>>>> 4a6b422 (relayer: add GearBlock::from_subxt_block)
-=======
-use primitive_types::H256;
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
 use prometheus::IntGauge;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use utils_prometheus::{impl_metered_service, MeteredService};
-
 pub struct BlockListener {
     api_provider: ApiProviderConnection,
 
@@ -60,15 +51,9 @@ impl BlockListener {
         mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
-<<<<<<< HEAD
         // during proof generation or era sync, so we need to have enough capacity
         // to not drop any blocks. 14400 is how many blocks are produced in 1 era.
         const CAPACITY: usize = 14_400;
-=======
-        // during proof generation, so we need to ensure that we can queue up
-        // enough blocks to process them later.
-        const CAPACITY: usize = 10000;
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
@@ -156,26 +141,13 @@ impl BlockListener {
     ) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         for (block_hash, block_number) in unprocessed.drain(..) {
             log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
             let block = gear_api.api.blocks().at(block_hash).await?;
 
-<<<<<<< HEAD
             let gear_block = GearBlock::from_subxt_block(block).await?;
 
             match tx.send(gear_block) {
-=======
-            let header = block.header().clone();
-            let block_events = BlockEvents::new(block).await?;
-            let events = block_events.events()?;
-
-            match tx.send(GearBlock::new(header, events)) {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
                 Ok(_) => (),
                 Err(broadcast::error::SendError(_)) => {
                     log::error!("No active receivers for Gear block listener, stopping");
@@ -184,10 +156,6 @@ impl BlockListener {
             }
         }
 
-<<<<<<< HEAD
->>>>>>> 4a6b422 (relayer: add GearBlock::from_subxt_block)
-=======
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
         let mut finalized_blocks = gear_api.api.subscribe_finalized_blocks().await?;
         loop {
             match finalized_blocks.next().await {
@@ -199,21 +167,7 @@ impl BlockListener {
                 Some(Ok(block)) => {
                     self.metrics.latest_block.set(block.number() as i64);
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-                    match tx.send(GearBlock::new(header, events)) {
-=======
-                    let block = GearBlock::from_subxt_block(block).await?;
-                    self.block_storage.add_block(&block).await;
-
-                    match tx.send(block) {
->>>>>>> 4a6b422 (relayer: add GearBlock::from_subxt_block)
-=======
-                    let block = GearBlock::new(header, events);
-                    self.block_storage.add_block(&block).await;
-
-                    match tx.send(block) {
->>>>>>> aa0f57a (refactor(relayer): total refactor of merkle root relayer (#506))
+                    match tx.send(GearBlock::from_subxt_block(block).await?) {
                         Ok(_) => (),
                         Err(broadcast::error::SendError(_)) => {
                             log::error!("No active receivers for Gear block listener, stopping");

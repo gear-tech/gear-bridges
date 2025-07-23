@@ -534,6 +534,13 @@ impl MerkleRootRelayer {
                         H256::from(response.proof.merkle_root),
                         response.proof.block_number
                     );
+                    self.finalize_merkle_root(submitter::Response {
+                        merkle_root: H256::from(response.proof.merkle_root),
+                        merkle_root_block: response.proof.block_number,
+                        proof: response.proof,
+                        status: submitter::ResponseStatus::Submitted,
+                        era: None,
+                    }).await?;
                     return Ok(true);
                 }
 

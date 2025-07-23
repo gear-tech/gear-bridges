@@ -149,7 +149,7 @@ impl MerkleRootRelayer {
         storage: Arc<MerkleRootStorage>,
     ) -> MerkleRootRelayer {
         let mut save_interval = tokio::time::interval(Duration::from_secs(60));
-        save_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        save_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         MerkleRootRelayer {
             api_provider,

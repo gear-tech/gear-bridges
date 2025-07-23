@@ -4,13 +4,13 @@ use sails_rs::prelude::*;
 #[derive(Debug, Encode, Decode, TypeInfo, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Error sending message to the program.
-    SendFailure,
+    SendFailure(String),
     /// Error while waiting for reply from the program.
-    ReplyFailure,
+    ReplyFailure(String),
     /// Failed to set reply timeout.
-    ReplyTimeout,
+    ReplyTimeout(String),
     /// Failed to set reply hook.
-    ReplyHook,
+    ReplyHook(String),
     /// A message does not have a reply code.
     NoReplyCode(String),
 
@@ -22,14 +22,14 @@ pub enum Error {
     MessageFailed,
 
     /// Failed to decode Burn reply.
-    BurnTokensDecode,
+    BurnTokensDecode(String),
     /// Failed to decode TransferFrom reply.
-    TransferFromDecode,
+    TransferFromDecode(String),
     /// Failed to decode Mint reply.
-    MintTokensDecode,
+    MintTokensDecode(String),
 
     /// Failed to decode payload from gear-eth-bridge built-in actor.
-    BuiltinDecode,
+    BuiltinDecode(String),
     /// Gas reservation for reply is too low.
     GasForReplyTooLow(String),
 
@@ -42,7 +42,7 @@ pub enum Error {
     NotHistoricalProxy,
 
     /// Ethereum transaction receipt is not supported.
-    NotSupportedEvent,
+    UnsupportedEthEvent,
     /// Ethereum transaction is too old and already have been removed from storage.
     TransactionTooOld,
     /// Ethereum transaction was already processed by VFT Manager service.

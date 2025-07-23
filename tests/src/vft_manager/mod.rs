@@ -2112,7 +2112,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
     assert!(txs.is_empty());
 
     assert!(
-        matches!(result, Err(Error::ReplyTimeout)),
+        matches!(result, Err(Error::ReplyTimeout(..))),
         "Result: {result:?}"
     );
 

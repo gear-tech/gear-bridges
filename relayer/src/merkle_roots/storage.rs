@@ -122,6 +122,10 @@ impl MerkleRootStorage {
         self.submitted_roots.write().await.insert(merkle_root);
     }
 
+    pub async fn submission_failed(&self, merkle_root: H256) {
+        self.submitted_roots.write().await.remove(&merkle_root);
+    }
+
     pub async fn merkle_root_processed(&self, block_number: u32) {
         let mut blocks = self.blocks.write().await;
 

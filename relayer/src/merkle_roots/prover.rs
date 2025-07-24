@@ -1,4 +1,7 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    time::Instant,
+};
 
 use crate::{
     message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
@@ -227,10 +230,14 @@ impl FinalityProver {
 
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
+        let start = Instant::now();
         let proof =
             prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
                 .await?;
-        log::info!("Proof for {merkle_root} generated (block #{block_number})");
+        log::info!(
+            "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",
+            start.elapsed().as_secs_f64()
+        );
         Ok(proof)
     }
 }

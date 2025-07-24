@@ -172,13 +172,13 @@ async fn send_message_with_gas_for_reply(
     msg_id: MessageId,
 ) -> Result<(), Error> {
     gstd::msg::send_bytes_with_gas_for_reply(destination, message, gas_to_send, 0, gas_deposit)
-        .map_err(|_| Error::SendFailure)?
+        .map_err(|e| Error::SendFailure(format!("{e:?}")))?
         .up_to(Some(reply_timeout))
-        .map_err(|_| Error::ReplyTimeout)?
+        .map_err(|e| Error::ReplyTimeout(format!("{e:?}")))?
         .handle_reply(move || handle_reply_hook(msg_id))
-        .map_err(|_| Error::ReplyHook)?
+        .map_err(|e| Error::ReplyHook(format!("{e:?}")))?
         .await
-        .map_err(|_| Error::ReplyFailure)?;
+        .map_err(|e| Error::ReplyFailure(format!("{e:?}")))?;
 
     Ok(())
 }
@@ -220,23 +220,23 @@ fn handle_reply_hook(msg_id: MessageId) {
 /// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
     Burn::decode_reply(bytes)
-        .map_err(|_| Error::BurnTokensDecode)
+        .map_err(|e| Error::BurnTokensDecode(format!("{e:?}")))
         .map(|_| true)
 }
 
 /// Decode reply received from the TransferFrom method.
 fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
+    TransferFrom::decode_reply(bytes).map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
 }
 
 /// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
     Mint::decode_reply(bytes)
-        .map_err(|_| Error::MintTokensDecode)
+        .map_err(|e| Error::MintTokensDecode(format!("{e:?}")))
         .map(|_| true)
 }
 
 /// Decode reply received from the TransferFrom method.
 fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    TransferFrom::decode_reply(bytes).map_err(|_| Error::TransferFromDecode)
+    TransferFrom::decode_reply(bytes).map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
 }

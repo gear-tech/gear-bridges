@@ -264,7 +264,7 @@ impl MessageSender {
                 }
             }
 
-            Err(vft_manager_client::Error::NotSupportedEvent) => {
+            Err(vft_manager_client::Error::UnsupportedEthEvent) => {
                 let message = format!("Dropping message for {tx_hash:?} as it's considered invalid by vft-manager (probably unsupported ERC20 token)");
                 log::warn!("{message}");
                 if responses

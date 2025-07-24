@@ -85,14 +85,14 @@ where
     // the out of gas and hence its state will be reverted. That means that no tokens will be
     // minted/transferred and moreover our reply hook will not get ever executed.
     gstd::msg::send_bytes_for_reply(token_id, payload, 0, config.gas_for_reply_deposit)
-        .map_err(|_| Error::SendFailure)?
+        .map_err(|e| Error::SendFailure(format!("{e:?}")))?
         .up_to(Some(config.reply_timeout))
-        .map_err(|_| Error::ReplyTimeout)?
+        .map_err(|e| Error::ReplyTimeout(format!("{e:?}")))?
         .handle_reply(move || handle_reply::<Action>(tx_details))
-        .map_err(|_| Error::ReplyHook)?
+        .map_err(|e| Error::ReplyHook(format!("{e:?}")))?
         .await
         .map_err(|e| match e {
-            GStdError::Timeout(..) => Error::ReplyTimeout,
+            GStdError::Timeout(..) => Error::ReplyTimeout(format!("{e:?}")),
             _ => Error::Internal(format!("{e:?}")),
         })
         .and_then(|_| {
@@ -130,7 +130,7 @@ where
 
             if let ReplyCode::Error(_reason) = reply_code {
                 // The actual error will be available in the original (awaiting) message.
-                return Err(Error::ReplyFailure);
+                return Err(Error::ReplyFailure("Reply error code received".into()));
             }
             // Under normal circumstances (if the reply hook has been benchmarked correctly) this
             // should never result in an error.

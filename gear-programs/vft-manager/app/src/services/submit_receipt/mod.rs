@@ -75,10 +75,10 @@ pub async fn submit_receipt(
     }
 
     let receipt =
-        ReceiptEnvelope::decode(&mut &receipt_rlp[..]).map_err(|_| Error::NotSupportedEvent)?;
+        ReceiptEnvelope::decode(&mut &receipt_rlp[..]).map_err(|_| Error::UnsupportedEthEvent)?;
 
     if !receipt.is_success() {
-        return Err(Error::NotSupportedEvent);
+        return Err(Error::UnsupportedEthEvent);
     }
 
     // Decode log and check that it is from an allowed address.
@@ -101,7 +101,7 @@ pub async fn submit_receipt(
 
             (erc20_manager_address == address).then_some((vara_token_id, event))
         })
-        .ok_or(Error::NotSupportedEvent)?;
+        .ok_or(Error::UnsupportedEthEvent)?;
 
     let transactions = transactions_mut();
     let key = (slot, transaction_index);

@@ -1,7 +1,7 @@
 use alloy::sol;
 
 sol!(
-    #[sol(rpc)]
+    #![sol(rpc, extra_derives(Debug))]
     IMessageQueue,
     "../../api/ethereum/MessageQueue.json"
 );

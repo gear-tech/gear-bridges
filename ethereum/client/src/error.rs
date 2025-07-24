@@ -27,6 +27,8 @@ pub enum Error {
     ErrorFetchingBlock,
     #[error("Failed to build reqwest client")]
     FailedToBuildClient(alloy::transports::http::reqwest::Error),
+    #[error("MessageQueue error: {0:x?}")]
+    MessageQueue(super::abi::IMessageQueue::IMessageQueueErrors),
 }
 
 impl From<RpcError<TransportErrorKind>> for Error {

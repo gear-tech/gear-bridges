@@ -513,40 +513,54 @@ impl MerkleRootRelayer {
                     return Ok(false);
                 };
 
-                if let Some(merkle_root) = self.roots.get_mut(&response.merkle_root) {
-                    merkle_root.status = MerkleRootStatus::SubmitProof(response.proof.clone());
-                    log::info!(
-                        "Merkle root {} for block #{} is ready for submission",
-                        response.merkle_root,
-                        response.block_number
-                    );
-                } else {
-                    log::warn!(
-                        "Merkle root {} for block #{} not found in storage during SubmitProof phase",
-                        response.merkle_root,
-                        response.block_number
-                    );
+                match response {
+                    prover::Response::Single {
+                        block_number,
+                        merkle_root,
+                        proof,
+                    } => {
+                        log::info!(
+                            "Finality proof for block #{block_number} with merkle root {merkle_root} received"
+                        );
 
-                }
+                        self.roots.entry(merkle_root)
+                            .and_modify(|merkle_root| {
+                                merkle_root.status = MerkleRootStatus::SubmitProof(proof.clone());
+                            });
 
-                if self.storage.is_merkle_root_submitted(H256::from(response.proof.merkle_root)).await {
-                    log::debug!("Merkle root {} for block #{} is already submitted, skipping",
-                        H256::from(response.proof.merkle_root),
-                        response.proof.block_number
-                    );
-                    self.finalize_merkle_root(submitter::Response {
-                        merkle_root: H256::from(response.proof.merkle_root),
-                        merkle_root_block: response.proof.block_number,
-                        proof: response.proof,
-                        status: submitter::ResponseStatus::Submitted,
-                        era: None,
-                    }).await?;
-                    return Ok(true);
-                }
 
-                if !submitter.submit_merkle_root(response.block_number, response.merkle_root, response.proof) {
-                    log::warn!("Proof submitter connection closed, exiting");
-                    return Ok(false);
+                        if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
+                            log::warn!("Proof submitter connection closed, exiting");
+                            return Ok(false);
+                        }
+                    }
+
+                    prover::Response::Batched {
+                        block_number,
+                        merkle_root,
+                        proof,
+                        batch_roots
+                    } => {
+                        log::info!("Finality proof for block #{block_number} with merkle root {merkle_root} received (will apply to {} blocks)", batch_roots.len());
+
+                        for merkle_root in batch_roots {
+                            log::debug!("Merkle-root {merkle_root} finalized as part of batch for block #{block_number}");
+                            self.roots.entry(merkle_root)
+                                .and_modify(|merkle_root| {
+                                    merkle_root.status = MerkleRootStatus::Finalized;
+                            });
+                        }
+
+                        self.roots.entry(merkle_root)
+                            .and_modify(|merkle_root| {
+                                merkle_root.status = MerkleRootStatus::SubmitProof(proof.clone());
+                            });
+
+                        if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
+                            log::warn!("Proof submitter connection closed, exiting");
+                            return Ok(false);
+                        }
+                    }
                 }
             }
 

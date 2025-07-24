@@ -57,7 +57,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
 
   public async new(ctx: DataHandlerContext<Store, any>) {
     await super.new(ctx);
-    const initTransfers = await ctx.store.find(InitiatedTransfer);
+    const initTransfers = await ctx.store.find(InitiatedTransfer, {});
     for (const transfer of initTransfers) {
       this._initiatedTransfers.set(transfer.id, transfer);
     }

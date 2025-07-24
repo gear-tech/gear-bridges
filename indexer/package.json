@@ -3,10 +3,13 @@
   "private": true,
   "scripts": {
     "build": "rm -rf lib && tsc",
-    "migration:generate": "sqd migration generate",
-    "code:generate": "sqd codegen"
+    "migration:generate": "typeorm migration:generate -d lib/model/dataSource.js -o db/migrations/$NAME",
+    "migration:run": "typeorm migration:run -d lib/model/dataSource.js",
+    "serve": "node lib/api.js",
+    "serve:dev": "npx ts-node-dev src/api.ts"
   },
   "dependencies": {
+    "@graphile/pg-pubsub": "^4.14.1",
     "@polkadot/util": "^13.4.4",
     "@subsquid/evm-abi": "^0.3.1",
     "@subsquid/evm-processor": "^1.27.1",
@@ -17,7 +20,11 @@
     "@subsquid/typeorm-store": "^1.5.1",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.4",
+    "express": "^4.21.2",
+    "graphql": "^15.10.1",
     "pg": "^8.12.0",
+    "postgraphile": "^4.14.1",
+    "postgraphile-plugin-connection-filter": "^2.3.0",
     "sails-js": "^0.4.0",
     "sails-js-parser": "^0.4.0",
     "typeorm": "^0.3.20"

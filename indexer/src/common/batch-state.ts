@@ -94,7 +94,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     if (completed.length === 0) return;
 
-    const nonces = completed.map((info) => info.nonce);
+    const nonces = completed.map((info) => info.id);
 
     const transfers = await this._ctx.store.find(Transfer, {
       where: { nonce: In(nonces), sourceNetwork: this._network },
@@ -105,7 +105,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     const completedToRemove: CompletedTransfer[] = [];
 
     for (const transfer of transfers) {
-      const completedInfo = completed.find((info) => info.nonce === transfer.nonce)!;
+      const completedInfo = completed.find((info) => info.id === transfer.nonce)!;
       transfer.status = Status.Completed;
       transfer.completedAt = completedInfo.timestamp;
       transfer.completedAtBlock = completedInfo.blockNumber;
@@ -119,17 +119,17 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     await this._ctx.store.remove(completedToRemove);
     this._log.info(`${completedToRemove.length} completed records removed`);
-    this._log.debug({ nonces: completedToRemove.map((transfer) => transfer.nonce) });
+    this._log.debug({ nonces: completedToRemove.map((transfer) => transfer.id) });
   }
 
   protected async _saveCompletedTransfers(): Promise<void> {
     if (this._completed.size === 0) return;
 
     const duplicates = await this._ctx.store.find(CompletedTransfer, {
-      where: { nonce: In(mapKeys(this._completed)) },
+      where: { id: In(mapKeys(this._completed)) },
     });
 
-    const nonces = duplicates.map((transfer) => transfer.nonce);
+    const nonces = duplicates.map((info) => info.id);
 
     if (duplicates.length > 0) {
       this._log.info(`Found ${duplicates.length} duplicates of completed transfers`);
@@ -137,24 +137,24 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       for (const duplicate of duplicates) {
         this._log.info(
           {
-            nonce: duplicate.nonce,
+            nonce: duplicate.id,
             blockNumber: duplicate.blockNumber,
             txHash: duplicate.txHash,
-            pendingBlockNumber: this._completed.get(duplicate.nonce)!.blockNumber,
-            pendingTxHash: this._completed.get(duplicate.nonce)!.txHash,
+            pendingBlockNumber: this._completed.get(duplicate.id)!.blockNumber,
+            pendingTxHash: this._completed.get(duplicate.id)!.txHash,
           },
           'Duplicate completed transfer found',
         );
       }
     }
 
-    const completedToSave = mapValues(this._completed).filter(({ nonce }) => !nonces.includes(nonce));
+    const completedToSave = mapValues(this._completed).filter(({ id }) => !nonces.includes(id));
 
     if (completedToSave.length === 0) return;
 
     await this._ctx.store.save(completedToSave);
     this._log.info(`Saved ${completedToSave.length} completed records`);
-    this._log.debug({ nonces: completedToSave.map((transfer) => transfer.nonce) });
+    this._log.debug({ nonces: completedToSave.map((info) => info.id) });
   }
 
   protected async _processStatuses() {
@@ -218,7 +218,6 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       nonce,
       new CompletedTransfer({
         id: nonce,
-        nonce,
         timestamp,
         destNetwork: this._network,
         srcNetwork: this._counterpartNetwork,

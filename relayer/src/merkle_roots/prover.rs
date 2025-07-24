@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use crate::{
     message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     prover_interface::{self, FinalProof},
@@ -85,27 +83,114 @@ impl FinalityProver {
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
-        while let Some(request) = requests.recv().await {
-            let proof = self
-                .generate_proof(
-                    &gear_api,
-                    request.block_number,
-                    request.block_hash,
-                    request.merkle_root,
-                    request.inner_proof,
-                )
-                .await?;
 
-            if responses
-                .send(Response {
-                    block_number: request.block_number,
-                    merkle_root: request.merkle_root,
-                    proof,
-                })
-                .is_err()
-            {
-                log::warn!("Proof response channel closed, exiting");
+        // ~13 minutes worth of blocks
+        // Why 13 minutes aka 256 blocks? Under heavy load (many merkle-root changes == many finality proof requests)
+        // we don't want to generate proof for every single request since it would suffice to generate
+        // the proof for the latest block in each authority set and use it for all blocks
+        // in that set.
+        const BATCH_SIZE: usize = 256;
+
+        let mut batch_vec = Vec::with_capacity(BATCH_SIZE);
+        // Group requests by authority set ID, storing all blocks for each set
+        let mut authority_groups: std::collections::HashMap<u64, Vec<Request>> =
+            std::collections::HashMap::new();
+
+        loop {
+            let n = requests.recv_many(&mut batch_vec, BATCH_SIZE).await;
+            if n == 0 {
+                log::info!("Requests channel closed, exiting");
                 break;
+            }
+
+            if n == 1 {
+                log::info!("Only one request received, processing it immediately");
+                let request = batch_vec.pop().unwrap();
+                let proof = self
+                    .generate_proof(
+                        &gear_api,
+                        request.block_number,
+                        request.block_hash,
+                        request.merkle_root,
+                        request.inner_proof,
+                    )
+                    .await?;
+
+                if responses
+                    .send(Response {
+                        block_number: request.block_number,
+                        merkle_root: request.merkle_root,
+                        proof,
+                    })
+                    .is_err()
+                {
+                    log::warn!("Response channel closed, exiting");
+                    return Ok(());
+                }
+
+                continue;
+            }
+
+            log::info!("Received {n} requests, grouping by authority set...");
+
+            for request in batch_vec.drain(..) {
+                let authority_set_id = gear_api.authority_set_id(request.block_hash).await?;
+                authority_groups
+                    .entry(authority_set_id)
+                    .or_default()
+                    .push(request);
+            }
+
+            for (authority_set_id, mut requests) in authority_groups.drain() {
+                // Sort requests by block number to find the latest one
+                requests.sort_by_key(|req| req.block_number);
+                let latest_request = requests.pop().expect("At least one request per group");
+                log::info!(
+                    "Proving finality for latest block #{} with authority set #{} and merkle-root {} (will apply to {} blocks)",
+                    latest_request.block_number,
+                    authority_set_id,
+                    latest_request.merkle_root,
+                    requests.len()
+                );
+
+                // Generate proof for the latest block
+                let proof = self
+                    .generate_proof(
+                        &gear_api,
+                        latest_request.block_number,
+                        latest_request.block_hash,
+                        latest_request.merkle_root,
+                        latest_request.inner_proof,
+                    )
+                    .await?;
+
+                // send response to the latest request first
+                if responses
+                    .send(Response {
+                        block_number: latest_request.block_number,
+                        merkle_root: latest_request.merkle_root,
+                        proof: proof.clone(),
+                    })
+                    .is_err()
+                {
+                    log::warn!("Response channel closed, exiting");
+                    return Ok(());
+                }
+
+                // Send response for all blocks in this authority set using the same proof
+                for req in requests {
+                    if responses
+                        .send(Response {
+                            block_number: req.block_number,
+                            merkle_root: req.merkle_root,
+                            proof: proof.clone(),
+                        })
+                        .is_err()
+                    {
+                        log::warn!("Response channel closed, exiting");
+                        return Ok(());
+                    }
+                }
             }
         }
 
@@ -124,24 +209,15 @@ impl FinalityProver {
 
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
-        let start = Instant::now();
         let proof =
             prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
                 .await?;
-        log::info!(
-            "Proof for {merkle_root} generated (block #{block_number}) in {} seconds",
-            start.elapsed().as_secs_f64()
-        );
-
-        if proof.merkle_root != merkle_root.0 {
-            log::info!("Merkle root {} at block #{} is valid under the proof with merkle root {} at block #{}",
-                merkle_root, block_number, H256::from(proof.merkle_root), proof.block_number);
-        }
-
+        log::info!("Proof for {merkle_root} generated (block #{block_number})");
         Ok(proof)
     }
 }
 
+#[derive(Clone)]
 pub struct Request {
     pub block_number: u32,
     pub block_hash: H256,

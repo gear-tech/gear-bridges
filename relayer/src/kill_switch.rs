@@ -3,20 +3,18 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use block_finality_archiver::{BlockFinalityArchiver, BlockFinalityProofWithHash};
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
 use parity_scale_codec::Decode;
 use prometheus::{Gauge, IntCounter, IntGauge};
 use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
-
+use gear_common::ApiProviderConnection;
 use crate::{
     common::{
         self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
         BASE_RETRY_DELAY, MAX_RETRIES,
     },
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };

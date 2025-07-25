@@ -1,7 +1,8 @@
 use super::{
-    api_provider::ApiProviderConnection, message_sender::MessageSender,
+    message_sender::MessageSender,
     proof_composer::ProofComposer, storage::NoStorage, tx_manager::TransactionManager,
 };
+use gear_common::ApiProviderConnection;
 use crate::message_relayer::common::{
     gear::{
         block_listener::BlockListener as GearBlockListener,

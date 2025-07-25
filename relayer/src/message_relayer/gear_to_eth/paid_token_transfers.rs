@@ -17,9 +17,9 @@ use crate::{
             web_request::Message,
             AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use gear_common::ApiProviderConnection;
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;

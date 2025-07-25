@@ -1,8 +1,8 @@
 use crate::{
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
+use gear_common::ApiProviderConnection;
 use ethereum_client::EthApi;
 use futures::executor::block_on;
 use prover::proving::GenesisConfig;

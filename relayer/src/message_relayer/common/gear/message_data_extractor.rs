@@ -2,8 +2,8 @@ use crate::message_relayer::{
     common::{
         self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
 };
+use gear_common::ApiProviderConnection;
 use anyhow::Result as AnyResult;
 use ethereum_common::U256;
 use gsdk::subscription::BlockEvents;

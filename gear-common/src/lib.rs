@@ -1,8 +1,12 @@
+pub mod api_provider;
+
 use anyhow::anyhow;
 use gclient::Result;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft_client::traits::*;
 use vft_manager_client::{traits::*, Order};
+
+pub use api_provider::{ApiProvider, ApiProviderConnection};
 
 /// Asynchronously migrates balances from an old VFT contract to a new one.
 ///

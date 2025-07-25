@@ -12,9 +12,9 @@ use crate::{
                 message_queued_event_extractor::MessageQueuedEventExtractor,
             },
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use gear_common::ApiProviderConnection;
 use ethereum_client::EthApi;
 use std::{iter, sync::Arc};
 use tokio::sync::mpsc;

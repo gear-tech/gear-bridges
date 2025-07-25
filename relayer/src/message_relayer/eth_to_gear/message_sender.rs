@@ -17,8 +17,7 @@ use tokio::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
-
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
+use gear_common::ApiProviderConnection;
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,

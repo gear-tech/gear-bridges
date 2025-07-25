@@ -5042,8 +5042,11 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "gclient",
+ "gear-rpc-client",
+ "gsdk",
  "log",
  "sails-rs",
+ "tokio",
  "vft-client",
  "vft-manager-client",
 ]
@@ -10913,6 +10916,7 @@ dependencies = [
  "ethereum_beacon_client",
  "futures",
  "gclient",
+ "gear-common 0.3.0",
  "gear-core 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "gear-rpc-client",
  "gear_proof_storage",

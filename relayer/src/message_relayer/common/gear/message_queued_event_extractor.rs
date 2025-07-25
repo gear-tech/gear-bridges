@@ -1,7 +1,7 @@
 use crate::message_relayer::{
     common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
-    eth_to_gear::api_provider::ApiProviderConnection,
 };
+use gear_common::ApiProviderConnection;
 use prometheus::IntCounter;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},

@@ -2,9 +2,9 @@ use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
     message_relayer::{
         common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
-        eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use gear_common::ApiProviderConnection;
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
     sol_types::SolEvent,

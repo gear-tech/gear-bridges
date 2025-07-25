@@ -12,9 +12,10 @@ use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use kill_switch::KillSwitchRelayer;
 use message_relayer::{
-    eth_to_gear::{self, api_provider::ApiProvider},
+    eth_to_gear,
     gear_to_eth,
 };
+use gear_common::ApiProvider;
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;

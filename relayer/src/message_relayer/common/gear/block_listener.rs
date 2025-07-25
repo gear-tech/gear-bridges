@@ -3,8 +3,8 @@ use crate::message_relayer::{
         gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
         GearBlock,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
 };
+use gear_common::ApiProviderConnection;
 use futures::StreamExt;
 use primitive_types::H256;
 use prometheus::IntGauge;

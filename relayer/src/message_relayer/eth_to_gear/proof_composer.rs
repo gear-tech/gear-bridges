@@ -1,12 +1,11 @@
 use std::ops::ControlFlow;
-
 use crate::{
     common,
     message_relayer::{
         common::{EthereumSlotNumber, TxHashWithSlot},
-        eth_to_gear::api_provider::ApiProviderConnection,
     },
 };
+use gear_common::ApiProviderConnection;
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;

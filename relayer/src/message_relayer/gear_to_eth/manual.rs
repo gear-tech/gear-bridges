@@ -2,14 +2,13 @@ use alloy::providers::{PendingTransactionBuilder, Provider};
 use ethereum_client::EthApi;
 use primitive_types::U256;
 use tokio::sync::mpsc;
-
+use gear_common::ApiProviderConnection;
 use crate::message_relayer::{
     common::{
         ethereum::{accumulator::Accumulator, message_sender::MessageSender},
         gear::merkle_proof_fetcher::MerkleProofFetcher,
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
 };
 
 pub async fn relay(

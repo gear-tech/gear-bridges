@@ -2,11 +2,10 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     time::Instant,
 };
-
 use crate::{
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     prover_interface::{self, FinalProof},
 };
+use gear_common::ApiProviderConnection;
 use futures::executor::block_on;
 use gear_rpc_client::GearApi;
 use primitive_types::H256;

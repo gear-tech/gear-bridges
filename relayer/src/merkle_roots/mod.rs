@@ -6,11 +6,11 @@ use crate::{
     },
     message_relayer::{
         common::{gear::block_listener::BlockListener, GearBlock},
-        eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
+use gear_common::ApiProviderConnection;
 use ::prover::proving::GenesisConfig;
 use anyhow::Context;
 use ethereum_client::EthApi;

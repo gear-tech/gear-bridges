@@ -1,11 +1,9 @@
-use crate::message_relayer::{
-    common::{
-        self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
-    },
+use crate::message_relayer::common::{
+    self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
 };
-use gear_common::ApiProviderConnection;
 use anyhow::Result as AnyResult;
 use ethereum_common::U256;
+use gear_common::ApiProviderConnection;
 use gsdk::subscription::BlockEvents;
 use std::{cmp::Ordering, ops::Deref};
 use tokio::{

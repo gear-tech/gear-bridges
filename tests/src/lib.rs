@@ -21,11 +21,11 @@ mod historical_proxy;
 #[cfg(test)]
 mod relayer;
 #[cfg(test)]
+mod transport_errors;
+#[cfg(test)]
 mod vft;
 #[cfg(test)]
 mod vft_manager;
-#[cfg(test)]
-mod transport_errors;
 
 type State = (u32, HashMap<&'static [u8], CodeId>);
 

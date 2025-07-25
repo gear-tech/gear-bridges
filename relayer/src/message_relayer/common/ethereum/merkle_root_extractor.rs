@@ -1,16 +1,14 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::{
-        common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
-    },
+    message_relayer::common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
 };
-use gear_common::ApiProviderConnection;
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
     sol_types::SolEvent,
 };
 use ethereum_client::{abi::IMessageQueue::MerkleRoot, EthApi};
 use futures::StreamExt;
+use gear_common::ApiProviderConnection;
 use prometheus::IntGauge;
 use tokio::sync::mpsc::UnboundedSender;
 use utils_prometheus::{impl_metered_service, MeteredService};

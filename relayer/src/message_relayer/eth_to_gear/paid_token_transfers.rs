@@ -3,13 +3,6 @@ use super::{
     storage::{JSONStorage, Storage},
     tx_manager,
 };
-use ethereum_beacon_client::BeaconClient;
-use ethereum_client::PollingEthApi;
-use primitive_types::{H160, H256};
-use sails_rs::calls::ActionIo;
-use std::{iter, sync::Arc};
-use tx_manager::TransactionManager;
-use utils_prometheus::MeteredService;
 use crate::message_relayer::common::{
     ethereum::{
         block_listener::BlockListener as EthereumBlockListener,
@@ -21,7 +14,14 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber,
 };
+use ethereum_beacon_client::BeaconClient;
+use ethereum_client::PollingEthApi;
 use gear_common::ApiProviderConnection;
+use primitive_types::{H160, H256};
+use sails_rs::calls::ActionIo;
+use std::{iter, sync::Arc};
+use tx_manager::TransactionManager;
+use utils_prometheus::MeteredService;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

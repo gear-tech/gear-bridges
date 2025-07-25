@@ -1,28 +1,25 @@
 use crate::{
     common::MAX_RETRIES,
-    message_relayer::{
-        common::{
-            ethereum::{
-                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
-                message_sender::MessageSender, status_fetcher::StatusFetcher,
-            },
-            gear::{
-                block_listener::BlockListener as GearBlockListener,
-                merkle_proof_fetcher::MerkleProofFetcher,
-                message_data_extractor::MessageDataExtractor,
-                message_paid_event_extractor::MessagePaidEventExtractor,
-                message_queued_event_extractor::MessageQueuedEventExtractor,
-            },
-            paid_messages_filter::PaidMessagesFilter,
-            web_request::Message,
-            AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+    message_relayer::common::{
+        ethereum::{
+            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+            message_sender::MessageSender, status_fetcher::StatusFetcher,
         },
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            merkle_proof_fetcher::MerkleProofFetcher, message_data_extractor::MessageDataExtractor,
+            message_paid_event_extractor::MessagePaidEventExtractor,
+            message_queued_event_extractor::MessageQueuedEventExtractor,
+        },
+        paid_messages_filter::PaidMessagesFilter,
+        web_request::Message,
+        AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
 };
-use gear_common::ApiProviderConnection;
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
+use gear_common::ApiProviderConnection;
 use primitive_types::H256;
 use std::{collections::HashSet, iter, sync::Arc};
 use tokio::{

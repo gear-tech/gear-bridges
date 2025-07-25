@@ -1,8 +1,7 @@
 use super::{
-    message_sender::MessageSender,
-    proof_composer::ProofComposer, storage::NoStorage, tx_manager::TransactionManager,
+    message_sender::MessageSender, proof_composer::ProofComposer, storage::NoStorage,
+    tx_manager::TransactionManager,
 };
-use gear_common::ApiProviderConnection;
 use crate::message_relayer::common::{
     gear::{
         block_listener::BlockListener as GearBlockListener,
@@ -15,6 +14,7 @@ use anyhow::{Context, Result as AnyResult};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::SECONDS_PER_SLOT;
+use gear_common::ApiProviderConnection;
 use primitive_types::H256;
 use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;

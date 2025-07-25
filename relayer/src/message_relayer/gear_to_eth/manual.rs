@@ -1,15 +1,13 @@
+use crate::message_relayer::common::{
+    ethereum::{accumulator::Accumulator, message_sender::MessageSender},
+    gear::merkle_proof_fetcher::MerkleProofFetcher,
+    AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+};
 use alloy::providers::{PendingTransactionBuilder, Provider};
 use ethereum_client::EthApi;
+use gear_common::ApiProviderConnection;
 use primitive_types::U256;
 use tokio::sync::mpsc;
-use gear_common::ApiProviderConnection;
-use crate::message_relayer::{
-    common::{
-        ethereum::{accumulator::Accumulator, message_sender::MessageSender},
-        gear::merkle_proof_fetcher::MerkleProofFetcher,
-        AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
-    },
-};
 
 pub async fn relay(
     api_provider: ApiProviderConnection,

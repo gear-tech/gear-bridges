@@ -1,15 +1,13 @@
+use crate::prover_interface::{self, FinalProof};
+use futures::executor::block_on;
+use gear_common::ApiProviderConnection;
+use gear_rpc_client::GearApi;
+use primitive_types::H256;
+use prover::proving::{GenesisConfig, ProofWithCircuitData};
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::Instant,
 };
-use crate::{
-    prover_interface::{self, FinalProof},
-};
-use gear_common::ApiProviderConnection;
-use futures::executor::block_on;
-use gear_rpc_client::GearApi;
-use primitive_types::H256;
-use prover::proving::{GenesisConfig, ProofWithCircuitData};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 #[derive(Clone)]

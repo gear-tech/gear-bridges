@@ -1,11 +1,7 @@
-use std::ops::ControlFlow;
 use crate::{
     common,
-    message_relayer::{
-        common::{EthereumSlotNumber, TxHashWithSlot},
-    },
+    message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
 };
-use gear_common::ApiProviderConnection;
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
@@ -18,6 +14,7 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
+use gear_common::ApiProviderConnection;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -26,6 +23,7 @@ use sails_rs::{
     gclient::calls::GClientRemoting,
     ActorId,
 };
+use std::ops::ControlFlow;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,

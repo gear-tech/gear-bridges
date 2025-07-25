@@ -2,6 +2,7 @@ use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
 use gclient::GearApi;
+use gear_common::ApiProviderConnection;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -17,7 +18,6 @@ use tokio::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
-use gear_common::ApiProviderConnection;
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,

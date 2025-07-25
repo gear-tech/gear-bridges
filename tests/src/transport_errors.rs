@@ -1,4 +1,4 @@
-use gclient::{GearApi, Error as GClientError, WSAddress};
+use gclient::{Error as GClientError, GearApi, WSAddress};
 use std::{env, process::Command, thread, time::Duration};
 
 const NAME_CONTAINER: &str = "0197d24f-411b-73d2-ac12-727f50c401b2";
@@ -35,11 +35,17 @@ async fn test_inner(port: u16, protocol: &str) {
 
     let result = api.total_balance(api.account_id()).await;
     println!(r#"({protocol}) connection reset error: "{result:?}""#);
-    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(subxt::error::RpcError::ClientError(e)))) = result.err().unwrap() else {
+    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
+        subxt::error::RpcError::ClientError(e),
+    ))) = result.err().unwrap()
+    else {
         panic!("Not a ClientError, expected reset error");
     };
     let error_text = format!("{e:?}");
-    assert!(error_text.starts_with("RestartNeeded(") || error_text.starts_with("Transport("), "{error_text}");
+    assert!(
+        error_text.starts_with("RestartNeeded(") || error_text.starts_with("Transport("),
+        "{error_text}"
+    );
 
     // 2. timeout error
     docker_run(port, &name);
@@ -50,7 +56,10 @@ async fn test_inner(port: u16, protocol: &str) {
     let result = api.total_balance(api.account_id()).await;
     docker_stop(&name);
     println!(r#"({protocol}) timeout error: "{result:?}""#);
-    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(subxt::error::RpcError::ClientError(e)))) = result.err().unwrap() else {
+    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
+        subxt::error::RpcError::ClientError(e),
+    ))) = result.err().unwrap()
+    else {
         panic!("Not a ClientError, expected timeout error");
     };
     let error_text = format!("{e:?}");
@@ -82,20 +91,14 @@ fn docker_run(port: u16, name: &str) {
 
 fn docker_pause(name: &str) {
     Command::new("docker")
-        .args([
-            "pause",
-            name,
-        ])
+        .args(["pause", name])
         .output()
         .expect("failed to pause docker container");
 }
 
 fn docker_stop(name: &str) {
     Command::new("docker")
-        .args([
-            "stop",
-            name,
-        ])
+        .args(["stop", name])
         .output()
         .expect("failed to stop docker container");
 }

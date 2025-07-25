@@ -1,21 +1,19 @@
 use crate::{
     common::MAX_RETRIES,
-    message_relayer::{
-        common::{
-            ethereum::{
-                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
-                message_sender::MessageSender, status_fetcher::StatusFetcher,
-            },
-            gear::{
-                block_listener::BlockListener as GearBlockListener,
-                merkle_proof_fetcher::MerkleProofFetcher,
-                message_queued_event_extractor::MessageQueuedEventExtractor,
-            },
+    message_relayer::common::{
+        ethereum::{
+            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+            message_sender::MessageSender, status_fetcher::StatusFetcher,
+        },
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            merkle_proof_fetcher::MerkleProofFetcher,
+            message_queued_event_extractor::MessageQueuedEventExtractor,
         },
     },
 };
-use gear_common::ApiProviderConnection;
 use ethereum_client::EthApi;
+use gear_common::ApiProviderConnection;
 use std::{iter, sync::Arc};
 use tokio::sync::mpsc;
 use utils_prometheus::MeteredService;

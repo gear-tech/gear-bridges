@@ -17,11 +17,11 @@ use crate::message_relayer::common::{
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::PollingEthApi;
+use gear_common::ApiProviderConnection;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
 use utils_prometheus::MeteredService;
-use gear_common::ApiProviderConnection;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

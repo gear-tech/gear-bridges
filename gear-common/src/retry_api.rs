@@ -25,7 +25,10 @@ impl ErrorTrait for sails_rs::errors::Error {
 
 impl ErrorTrait for GClientError {
     fn is_timeout(&self) -> bool {
-        let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(subxt::error::RpcError::ClientError(e)))) = self else {
+        let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
+            subxt::error::RpcError::ClientError(e),
+        ))) = self
+        else {
             return false;
         };
 
@@ -34,7 +37,10 @@ impl ErrorTrait for GClientError {
     }
 
     fn is_transport(&self) -> bool {
-        let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(subxt::error::RpcError::ClientError(e)))) = self else {
+        let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
+            subxt::error::RpcError::ClientError(e),
+        ))) = self
+        else {
             return false;
         };
 
@@ -66,7 +72,10 @@ where
         let ptr = ptr::from_ref(&api);
 
         Self {
-            future: retry_future(unsafe { ptr.as_ref() }.expect("Pointer has been just create from pinned boxed value; qed")),
+            future: retry_future(
+                unsafe { ptr.as_ref() }
+                    .expect("Pointer has been just create from pinned boxed value; qed"),
+            ),
             api,
         }
     }
@@ -76,7 +85,11 @@ where
     }
 }
 
-pub async fn retry_n<T, F, R, E>(this: &mut Api, mut retry_future: F, retries_max: usize) -> AnyResult<R>
+pub async fn retry_n<T, F, R, E>(
+    this: &mut Api,
+    mut retry_future: F,
+    retries_max: usize,
+) -> AnyResult<R>
 where
     F: FnMut(&'static gclient::GearApi) -> T,
     T: Future<Output = Result<R, E>> + 'static,

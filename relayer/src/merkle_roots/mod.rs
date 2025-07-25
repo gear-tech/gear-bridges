@@ -4,16 +4,14 @@ use crate::{
         authority_set_sync::AuthoritySetSyncIo, eras::SealedNotFinalizedEra,
         prover::FinalityProverIo,
     },
-    message_relayer::{
-        common::{gear::block_listener::BlockListener, GearBlock},
-    },
+    message_relayer::common::{gear::block_listener::BlockListener, GearBlock},
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
-use gear_common::ApiProviderConnection;
 use ::prover::proving::GenesisConfig;
 use anyhow::Context;
 use ethereum_client::EthApi;
+use gear_common::ApiProviderConnection;
 use primitive_types::H256;
 use serde::{Deserialize, Serialize};
 use std::{

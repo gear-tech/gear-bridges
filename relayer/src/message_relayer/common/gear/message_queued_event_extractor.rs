@@ -1,5 +1,5 @@
-use crate::message_relayer::{
-    common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
+use crate::message_relayer::common::{
+    self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
 };
 use gear_common::ApiProviderConnection;
 use prometheus::IntCounter;

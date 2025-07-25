@@ -39,7 +39,7 @@ async function main() {
     ],
   };
 
-  const middleware = postgraphile(database, 'user_view', options);
+  const middleware = postgraphile(database, 'public', options);
 
   const app = express();
 

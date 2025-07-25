@@ -5046,6 +5046,7 @@ dependencies = [
  "gsdk",
  "log",
  "sails-rs",
+ "subxt",
  "tokio",
  "vft-client",
  "vft-manager-client",

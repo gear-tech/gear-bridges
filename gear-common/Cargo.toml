@@ -10,6 +10,7 @@ gear-rpc-client.workspace = true
 gsdk.workspace = true
 log.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
+subxt.workspace = true
 tokio.workspace = true
 vft-client.workspace = true
 vft-manager-client.workspace = true

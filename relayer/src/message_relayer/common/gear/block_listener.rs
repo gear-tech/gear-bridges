@@ -1,11 +1,9 @@
-use crate::message_relayer::{
-    common::{
-        gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
-        GearBlock,
-    },
-    eth_to_gear::api_provider::ApiProviderConnection,
+use crate::message_relayer::common::{
+    gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
+    GearBlock,
 };
 use futures::StreamExt;
+use gear_common::ApiProviderConnection;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use std::sync::Arc;

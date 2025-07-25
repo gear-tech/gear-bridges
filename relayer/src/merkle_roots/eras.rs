@@ -1,10 +1,10 @@
 use crate::{
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
 use ethereum_client::EthApi;
 use futures::executor::block_on;
+use gear_common::ApiProviderConnection;
 use prover::proving::GenesisConfig;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};

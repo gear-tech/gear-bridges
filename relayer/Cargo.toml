@@ -30,6 +30,7 @@ ethereum_beacon_client.workspace = true
 ethereum-common.workspace = true
 futures.workspace = true
 gear-core.workspace = true
+gear-common.workspace = true
 gclient.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true

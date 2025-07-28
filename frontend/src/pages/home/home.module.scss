@@ -3,3 +3,41 @@
   flex-direction: column;
   gap: 16px;
 }
+
+.warning {
+  padding: 8px;
+
+  display: flex;
+  align-items: center;
+  gap: 16px;
+
+  text-align: center;
+  font-size: 11px;
+  // color: #fff;
+
+  background-color: rgba(#fff, 0.1);
+  border: 1px solid #fff;
+  border-radius: 8px;
+
+  .text {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  svg {
+    flex-shrink: 0;
+
+    path {
+      fill: #fff;
+    }
+  }
+
+  a {
+    text-decoration: underline;
+  }
+
+  p {
+    flex: 1;
+  }
+}

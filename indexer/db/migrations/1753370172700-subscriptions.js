@@ -22,9 +22,5 @@ module.exports = class Subscriptions1753370172700 {
   async down(queryRunner) {
     await queryRunner.query(`DROP TRIGGER transfers_notify_trigger ON transfer`);
     await queryRunner.query(`DROP FUNCTION notify_transfers_count()`);
-    await queryRunner.query(`DROP VIEW user_view.gear_eth_bridge_message`);
-    await queryRunner.query(`DROP VIEW user_view.transfer`);
-    await queryRunner.query(`DROP VIEW user_view.pair`);
-    await queryRunner.query(`DROP SCHEMA user_view`);
   }
 };

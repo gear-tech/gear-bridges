@@ -8,18 +8,20 @@ import { Pair, PairsQueryQuery } from '../graphql/graphql';
 
 const PAIRS_QUERY = graphql(`
   query PairsQuery {
-    pairs {
-      ethToken
-      ethTokenDecimals
-      ethTokenName
-      ethTokenSymbol
-      id
-      isActive
-      tokenSupply
-      varaToken
-      varaTokenDecimals
-      varaTokenName
-      varaTokenSymbol
+    allPairs {
+      nodes {
+        ethToken
+        ethTokenDecimals
+        ethTokenName
+        ethTokenSymbol
+        id
+        isActive
+        tokenSupply
+        varaToken
+        varaTokenDecimals
+        varaTokenName
+        varaTokenSymbol
+      }
     }
   }
 `);

@@ -26,7 +26,8 @@ const PAIRS_QUERY = graphql(`
   }
 `);
 
-const derivePairs = ({ pairs }: PairsQueryQuery) => pairs as (Pair & { varaToken: HexString; ethToken: HexString })[];
+const derivePairs = ({ allPairs }: PairsQueryQuery) =>
+  allPairs?.nodes as (Pair & { varaToken: HexString; ethToken: HexString })[];
 
 function usePairs() {
   return useQuery({

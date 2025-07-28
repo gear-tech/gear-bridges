@@ -19,6 +19,7 @@ function PendingTransactionsWarning() {
           status: { equalTo: Status.AwaitingPayment },
         } as TransferFilter)
       : undefined,
+    60000,
   );
 
   if (!account || !txsCount) return;

@@ -13,7 +13,7 @@ const TRANSFERS_COUNT_QUERY = graphql(`
   }
 `);
 
-function useTransactionsCount(filter?: TransferFilter) {
+function useTransactionsCount(filter?: TransferFilter, refetchInterval?: number) {
   return useQuery({
     queryKey: ['transactionsCount', filter],
 
@@ -25,6 +25,7 @@ function useTransactionsCount(filter?: TransferFilter) {
       }),
 
     select: (data) => data?.allTransfers?.totalCount || 0,
+    refetchInterval,
   });
 }
 

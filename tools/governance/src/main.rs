@@ -231,10 +231,12 @@ fn register_gear_token(
     let (source, destination) = (governance_info.governance_admin, deployment.erc20_manager);
 
     let mut token_name_raw = [0; 32];
-    token_name_raw[..token_name.len()].copy_from_slice(token_name.as_bytes());
+    token_name_raw[0] = token_name.len() as u8;
+    token_name_raw[1..(1 + token_name.len())].copy_from_slice(token_name.as_bytes());
 
     let mut token_symbol_raw = [0; 32];
-    token_symbol_raw[..token_name.len()].copy_from_slice(token_symbol.as_bytes());
+    token_symbol_raw[0] = token_symbol.len() as u8;
+    token_symbol_raw[1..(1 + token_symbol.len())].copy_from_slice(token_symbol.as_bytes());
 
     let payload = [
         &[REGISTER_GEAR_TOKEN],

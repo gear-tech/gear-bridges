@@ -1,21 +1,15 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { isUndefined } from '@/utils';
-
 import { INDEXER_ADDRESS, TRANSFERS_QUERY, TRANSACTIONS_LIMIT } from '../consts';
 import { TransferFilter, TransfersQueryQuery } from '../graphql/graphql';
 
-function useTransactions(transactionsCount: number | undefined, filter: TransferFilter | undefined) {
-  const isTransactionsCount = !isUndefined(transactionsCount);
-
+function useTransactions(filter: TransferFilter | undefined) {
   const getNextPageParam = (lastPage: TransfersQueryQuery, allPages: TransfersQueryQuery[]) => {
-    if (!isTransactionsCount) throw new Error('Transactions count is not defined');
-
     const lastPageCount = lastPage.allTransfers?.nodes.length || 0;
     const fetchedCount = (allPages.length - 1) * TRANSACTIONS_LIMIT + lastPageCount;
 
-    return fetchedCount < transactionsCount ? fetchedCount : undefined;
+    return fetchedCount < (lastPage.allTransfers?.totalCount || 0) ? fetchedCount : undefined;
   };
 
   const { data, fetchNextPage, isFetching, hasNextPage } = useInfiniteQuery({
@@ -33,8 +27,10 @@ function useTransactions(transactionsCount: number | undefined, filter: Transfer
 
     initialPageParam: 0,
     getNextPageParam,
-    enabled: isTransactionsCount,
-    select: ({ pages }) => pages.flatMap(({ allTransfers }) => allTransfers?.nodes || []),
+    select: ({ pages }) => ({
+      transactions: pages.flatMap(({ allTransfers }) => allTransfers?.nodes || []),
+      transactionsCount: pages[0]?.allTransfers?.totalCount || 0,
+    }),
   });
 
   return [data, isFetching, hasNextPage, fetchNextPage] as const;

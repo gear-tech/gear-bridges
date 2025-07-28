@@ -1,20 +1,24 @@
-// import { useQuery } from '@tanstack/react-query';
-// import { request } from 'graphql-request';
+import { useQuery } from '@tanstack/react-query';
+import { request } from 'graphql-request';
 
-// import { INDEXER_ADDRESS } from '../consts';
-// import { TRANSFERS_CONNECTION_QUERY } from '../consts/queries';
+import { INDEXER_ADDRESS } from '../consts';
+import { graphql } from '../graphql';
+import { TransferFilter } from '../types';
 
-function useTransactionsCount(_where: object | null = null) {
-  // const { data, isLoading } = useQuery({
-  //   queryKey: ['transactionsCount', where],
-  //   queryFn: () => request(INDEXER_ADDRESS, TRANSFERS_CONNECTION_QUERY, { where }),
-  //   refetchInterval: 10000,
-  // });
+const TRANSFERS_COUNT_QUERY = graphql(`
+  query TransfersCountQuery($filter: TransferFilter) {
+    allTransfers(filter: $filter) {
+      totalCount
+    }
+  }
+`);
 
-  const data = { transfersConnection: { totalCount: 0 } };
-  const isLoading = false;
-
-  return [data?.transfersConnection.totalCount, isLoading] as const;
+function useTransactionsCount(filter?: TransferFilter) {
+  return useQuery({
+    queryKey: ['transactionsCount', filter],
+    queryFn: () => request(INDEXER_ADDRESS, TRANSFERS_COUNT_QUERY, { filter: filter! }),
+    select: (data) => data?.allTransfers?.totalCount || 0,
+  });
 }
 
 export { useTransactionsCount };

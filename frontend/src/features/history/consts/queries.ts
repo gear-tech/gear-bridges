@@ -20,16 +20,10 @@ const TRANSFERS_QUERY = graphql(`
         nonce
         blockNumber
       }
+
+      totalCount
     }
   }
 `);
-
-// const TRANSFERS_CONNECTION_QUERY = graphql(`
-//   query TransfersConnectionQuery($where: TransferWhereInput) {
-//     transfersConnection(orderBy: timestamp_DESC, where: $where) {
-//       totalCount
-//     }
-//   }
-// `);
 
 export { TRANSACTIONS_LIMIT, TRANSFERS_QUERY };

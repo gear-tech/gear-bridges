@@ -1342,6 +1342,7 @@ export type TransfersQueryQuery = {
   __typename?: 'Query';
   allTransfers: {
     __typename?: 'TransfersConnection';
+    totalCount: number;
     nodes: Array<{
       __typename?: 'Transfer';
       amount: string;
@@ -1359,15 +1360,6 @@ export type TransfersQueryQuery = {
       blockNumber: string;
     }>;
   } | null;
-};
-
-export type TransfersConnectionQueryQueryVariables = Exact<{
-  filter: InputMaybe<TransferFilter>;
-}>;
-
-export type TransfersConnectionQueryQuery = {
-  __typename?: 'Query';
-  allTransfers: { __typename?: 'TransfersConnection'; totalCount: number } | null;
 };
 
 export type PairsQueryQueryVariables = Exact<{ [key: string]: never }>;
@@ -1391,6 +1383,15 @@ export type PairsQueryQuery = {
       varaTokenSymbol: string;
     }>;
   } | null;
+};
+
+export type TransfersCountQueryQueryVariables = Exact<{
+  filter: InputMaybe<TransferFilter>;
+}>;
+
+export type TransfersCountQueryQuery = {
+  __typename?: 'Query';
+  allTransfers: { __typename?: 'TransfersConnection'; totalCount: number } | null;
 };
 
 export const TransfersQueryDocument = {
@@ -1470,6 +1471,7 @@ export const TransfersQueryDocument = {
                     ],
                   },
                 },
+                { kind: 'Field', name: { kind: 'Name', value: 'totalCount' } },
               ],
             },
           },
@@ -1478,48 +1480,6 @@ export const TransfersQueryDocument = {
     },
   ],
 } as unknown as DocumentNode<TransfersQueryQuery, TransfersQueryQueryVariables>;
-export const TransfersConnectionQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'TransfersConnectionQuery' },
-      variableDefinitions: [
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
-          type: { kind: 'NamedType', name: { kind: 'Name', value: 'TransferFilter' } },
-        },
-      ],
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'allTransfers' },
-            arguments: [
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'orderBy' },
-                value: { kind: 'EnumValue', value: 'TIMESTAMP_DESC' },
-              },
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'filter' },
-                value: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
-              },
-            ],
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<TransfersConnectionQueryQuery, TransfersConnectionQueryQueryVariables>;
 export const PairsQueryDocument = {
   kind: 'Document',
   definitions: [
@@ -1564,3 +1524,40 @@ export const PairsQueryDocument = {
     },
   ],
 } as unknown as DocumentNode<PairsQueryQuery, PairsQueryQueryVariables>;
+export const TransfersCountQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'TransfersCountQuery' },
+      variableDefinitions: [
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
+          type: { kind: 'NamedType', name: { kind: 'Name', value: 'TransferFilter' } },
+        },
+      ],
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'allTransfers' },
+            arguments: [
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'filter' },
+                value: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
+              },
+            ],
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<TransfersCountQueryQuery, TransfersCountQueryQueryVariables>;

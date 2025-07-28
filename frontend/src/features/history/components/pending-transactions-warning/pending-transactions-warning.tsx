@@ -12,7 +12,7 @@ import styles from './pending-transactions-warning.module.scss';
 function PendingTransactionsWarning() {
   const { account } = useAccount(); // fee payment is a standalone transaction only for vara network
 
-  const { data } = useTransactionsCount(
+  const { data: txsCount } = useTransactionsCount(
     account
       ? ({
           sender: { equalTo: account.decodedAddress },
@@ -21,7 +21,7 @@ function PendingTransactionsWarning() {
       : undefined,
   );
 
-  if (!account || !data) return;
+  if (!account || !txsCount) return;
 
   return (
     <div className={styles.container}>

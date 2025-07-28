@@ -20,9 +20,9 @@ function useTransactions(filter: TransferFilter | undefined) {
         first: TRANSACTIONS_LIMIT,
         offset: pageParam,
 
-        // assertion because postgraphile throws error on null,
+        // assertion because postgraphile throws error on null or empty objects,
         // but we can't use undefined because graphlq-request requires exact arguments
-        filter: filter as TransferFilter,
+        filter: filter!,
       }),
 
     initialPageParam: 0,

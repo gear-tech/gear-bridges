@@ -105,6 +105,8 @@ function useTransactionFilters() {
       filter.sender = { includesInsensitive: accountAddress } as TransferFilter['sender'];
     }
 
+    if (Object.keys(filter).length === 0) return;
+
     return filter;
   }, [timestamp, status, asset, searchError, debouncedSearch, owner, accountAddress]);
 

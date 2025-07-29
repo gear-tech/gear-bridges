@@ -17,7 +17,6 @@ WORKDIR /squid
 COPY indexer/package.json .
 COPY indexer/package-lock.json .
 COPY indexer/db db
-COPY indexer/schema.graphql .
 RUN npm i -g @subsquid/cli && npm ci
 COPY indexer/tsconfig.json .
 COPY indexer/src src
@@ -38,9 +37,7 @@ COPY --from=deps /squid/package-lock.json .
 COPY --from=deps /squid/node_modules node_modules
 COPY --from=builder /squid/lib lib
 COPY --from=builder /squid/db db
-COPY --from=builder /squid/schema.graphql schema.graphql
 COPY --from=api /assets assets
-COPY indexer/commands.json .
 RUN echo -e "loglevel=silent\\nupdate-notifier=false" >/squid/.npmrc
 RUN npm i -g @subsquid/commands && mv $(which squid-commands) /usr/local/bin/sqd
 ENV PROCESSOR_PROMETHEUS_PORT=3000

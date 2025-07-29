@@ -13,13 +13,13 @@ const TRANSFERS_COUNT_SUBSCRIPTION = `
   }
 `;
 
+const wsClient = createClient({ url: INDEXER_ADDRESS });
+
 function useTransactionsCountSubscription() {
   const alert = useAlert();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const wsClient = createClient({ url: INDEXER_ADDRESS });
-
     const unsubscribe = wsClient.subscribe(
       { query: TRANSFERS_COUNT_SUBSCRIPTION },
       {

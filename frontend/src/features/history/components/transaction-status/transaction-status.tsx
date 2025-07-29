@@ -15,13 +15,27 @@ const STATUS_SVG = {
   [StatusType.Bridging]: ClockSVG,
 } as const;
 
+const STATUS_CLASSNAME = {
+  [StatusType.Completed]: styles.completed,
+  [StatusType.AwaitingPayment]: styles.awaitingPayment,
+  [StatusType.Failed]: styles.failed,
+  [StatusType.Bridging]: styles.bridging,
+};
+
+const STATUS_TEXT = {
+  [StatusType.Completed]: 'Completed',
+  [StatusType.AwaitingPayment]: 'Awaiting Payment',
+  [StatusType.Failed]: 'Failed',
+  [StatusType.Bridging]: 'Bridging',
+} as const;
+
 function TransactionStatus({ status }: Pick<Transfer, 'status'>) {
   const StatusSVG = STATUS_SVG[status];
 
   return (
-    <div className={cx(styles.status, styles[status])}>
+    <div className={cx(styles.status, STATUS_CLASSNAME[status])}>
       <StatusSVG />
-      {status.split(/(?=[A-Z])/).join(' ')}
+      {STATUS_TEXT[status] || status}
     </div>
   );
 }

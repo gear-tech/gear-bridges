@@ -7,7 +7,7 @@ module.exports = class Comments1753370188946 {
     await queryRunner.query(`COMMENT ON TABLE completed_transfer IS E'@omit'`);
     await queryRunner.query(`COMMENT ON TABLE vara_bridge_program IS E'@omit'`);
     await queryRunner.query(`COMMENT ON TABLE eth_bridge_program IS E'@omit'`);
-    await queryRunner.query(`COMMENT ON TABLE migration IS E'@omit'`);
+    await queryRunner.query(`COMMENT ON TABLE migrations IS E'@omit'`);
   }
 
   async down() {}

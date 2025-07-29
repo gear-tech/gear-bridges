@@ -13,8 +13,6 @@ const isDev = process.env.NODE_ENV === 'development';
 async function main() {
   const dbPool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgres://bridge' });
 
-  const database = process.env.DATABASE_URL || 'bridge';
-
   const options: PostGraphileOptions = {
     watchPg: isDev,
     graphiql: true,
@@ -39,7 +37,7 @@ async function main() {
     ],
   };
 
-  const middleware = postgraphile(database, 'public', options);
+  const middleware = postgraphile(dbPool, 'public', options);
 
   const app = express();
 

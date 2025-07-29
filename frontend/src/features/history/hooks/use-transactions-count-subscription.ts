@@ -23,7 +23,11 @@ function useTransactionsCountSubscription() {
     const unsubscribe = wsClient.subscribe(
       { query: TRANSFERS_COUNT_SUBSCRIPTION },
       {
-        next: (result) => queryClient.setQueryData(['transactionsCount', undefined], result.data?.transferCount || 0),
+        next: (result) => {
+          queryClient.setQueryData(['transactionsCount', undefined], {
+            allTransfers: { totalCount: result.data?.transferCount },
+          });
+        },
         error: (error: Error) => {
           logger.error('Transaction count subscription', error);
           alert.error('Failed to subscribe to transaction count updates');

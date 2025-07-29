@@ -10,7 +10,7 @@ const config: CodegenConfig = {
       plugins: [],
       config: {
         scalars: {
-          DateTime: 'string', // custom subsquid scalars
+          Datetime: 'string', // custom subsquid scalars
           BigInt: 'string',
         },
         avoidOptionals: true,

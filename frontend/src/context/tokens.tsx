@@ -2,7 +2,7 @@ import { HexString } from '@gear-js/api';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
-import { Network, Pair } from '@/features/history/graphql/graphql';
+import { NetworkEnum, Pair } from '@/features/history/graphql/graphql';
 import { NETWORK } from '@/features/swap/consts';
 import { useVaraSymbol } from '@/hooks';
 
@@ -56,10 +56,10 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
 
   pairs.forEach((pair) => {
     const varaAddress = pair.varaToken as HexString;
-    const isVaraNative = pair.tokenSupply === Network.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara');
+    const isVaraNative = pair.tokenSupply === NetworkEnum.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara');
 
     const ethAddress = pair.ethToken as HexString;
-    const isEthNative = pair.tokenSupply === Network.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth');
+    const isEthNative = pair.tokenSupply === NetworkEnum.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth');
 
     // changing wrapped native symbol to native symbol
     const varaDisplaySymbol = isVaraNative ? varaSymbol : pair.varaTokenSymbol;

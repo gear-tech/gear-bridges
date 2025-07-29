@@ -7,7 +7,6 @@ import { Container, Input, Select, Skeleton, Checkbox } from '@/components';
 import { useTokens } from '@/context';
 import {
   useTransactions,
-  useTransactionsCount,
   List,
   FIELD_NAME,
   getAssetOptions,
@@ -28,8 +27,8 @@ function Transactions() {
   const isAccountConnected = Boolean(account || ethAccount.address);
 
   const { form, filters } = useTransactionFilters();
-  const [transactionsCount, isTransactionsCountLoading] = useTransactionsCount(filters);
-  const [transactions, isFetching, hasNextPage, fetchNextPage] = useTransactions(transactionsCount, filters);
+  const [txsData, isFetching, hasNextPage, fetchNextPage] = useTransactions(filters);
+  const { transactions, transactionsCount } = txsData || {};
 
   const { data: pairs, isLoading } = usePairs();
   const assetOptions = useMemo(() => getAssetOptions(pairs || []), [pairs]);
@@ -49,7 +48,7 @@ function Transactions() {
             </div>
 
             <p className={styles.counter}>
-              {isTransactionsCountLoading ? <Skeleton width="100px" /> : `${transactionsCount} results`}
+              {isFetching ? <Skeleton width="100px" /> : `${transactionsCount} results`}
 
               {isAccountConnected && (
                 <Checkbox name={FIELD_NAME.OWNER} type="switch" label="My Transactions" className={styles.switch} />
@@ -66,7 +65,7 @@ function Transactions() {
         fetchMore={fetchNextPage}
         skeleton={{
           rowsCount: TRANSACTIONS_LIMIT,
-          isVisible: isTransactionsCountLoading || isFetching || isLoading,
+          isVisible: isFetching || isLoading,
           renderItem: () => <TransactionCard.Skeleton />,
         }}
       />

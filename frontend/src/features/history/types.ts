@@ -1,4 +1,4 @@
-import { Transfer, Network, Status, TransferWhereInput } from './graphql/graphql';
+import { Transfer, NetworkEnum, StatusEnum, TransferFilter } from './graphql/graphql';
 
-export { Network, Status };
-export type { Transfer, TransferWhereInput };
+export { NetworkEnum as Network, StatusEnum as Status };
+export type { Transfer, TransferFilter };

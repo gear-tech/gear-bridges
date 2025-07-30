@@ -175,22 +175,22 @@ contract PlonkVerifier is IPlonkVerifier {
     /// Verify a Plonk proof.
     /// Reverts if the proof or the public inputs are malformed.
     /// @param proof serialised plonk proof (using gnark's MarshalSolidity)
-    /// @param public_inputs (must be reduced)
+    /// @param publicInputs (must be reduced)
     /// @return success true if the proof passes false otherwise
-    function verifyProof(bytes calldata proof, uint256[] calldata public_inputs) public view returns (bool success) {
+    function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) public view returns (bool success) {
         assembly {
             let mem := mload(0x40)
             let freeMem := add(mem, STATE_LAST_MEM)
 
             // sanity checks
-            check_number_of_public_inputs(public_inputs.length)
-            check_inputs_size(public_inputs.length, public_inputs.offset)
+            check_number_of_public_inputs(publicInputs.length)
+            check_inputs_size(publicInputs.length, publicInputs.offset)
             check_proof_size(proof.length)
             check_proof_openings_size(proof.offset)
 
             // compute the challenges
             let prev_challenge_non_reduced
-            prev_challenge_non_reduced := derive_gamma(proof.offset, public_inputs.length, public_inputs.offset)
+            prev_challenge_non_reduced := derive_gamma(proof.offset, publicInputs.length, publicInputs.offset)
             prev_challenge_non_reduced := derive_beta(prev_challenge_non_reduced)
             prev_challenge_non_reduced := derive_alpha(proof.offset, prev_challenge_non_reduced)
             derive_zeta(proof.offset, prev_challenge_non_reduced)
@@ -201,8 +201,8 @@ contract PlonkVerifier is IPlonkVerifier {
             mstore(add(mem, STATE_ZETA_POWER_N_MINUS_ONE), zeta_power_n_minus_one)
 
             // public inputs contribution
-            let l_pi := sum_pi_wo_api_commit(public_inputs.offset, public_inputs.length, freeMem)
-            let l_wocommit := sum_pi_commit(proof.offset, public_inputs.length, freeMem)
+            let l_pi := sum_pi_wo_api_commit(publicInputs.offset, publicInputs.length, freeMem)
+            let l_wocommit := sum_pi_commit(proof.offset, publicInputs.length, freeMem)
             l_pi := addmod(l_wocommit, l_pi, R_MOD)
             mstore(add(mem, STATE_PI), l_pi)
 

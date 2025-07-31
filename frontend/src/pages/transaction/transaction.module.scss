@@ -17,6 +17,12 @@
   }
 }
 
+.cards {
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr;
+  gap: 32px;
+}
+
 .content {
   display: flex;
   flex-direction: column;
@@ -25,7 +31,7 @@
 
 .section {
   .sectionTitle {
-    margin-bottom: 20px;
+    margin-bottom: 32px;
 
     font-size: 18px;
     font-weight: 600;
@@ -35,7 +41,8 @@
 
   .body {
     display: flex;
-    gap: 64px;
+    flex-direction: column;
+    gap: 16px;
   }
 }
 
@@ -53,7 +60,6 @@
   .label {
     font-size: 14px;
     font-weight: 500;
-    line-height: 20px;
     color: #9cacb1;
   }
 
@@ -117,39 +123,64 @@
   flex-wrap: wrap;
 }
 
-// Token Information
-.tokenPair {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: start;
-  gap: 32px;
-  margin-top: 8px;
-}
-
-.tokenInfo {
+.overview {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+}
+
+.transactionFlow {
+  display: flex;
+  justify-content: space-between;
+  gap: 64px;
+}
+
+.transactionSide {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .tokenHeader {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.tokenDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .tokenSymbol {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
-  line-height: 28px;
+  line-height: 32px;
   color: #f6f6f6e5;
-  margin: 0 0 4px 0;
+  margin: 0;
 }
 
-.tokenAddress {
+.transactionInfo {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
+}
+
+.amountSection {
+  padding: 12px 16px;
+  background-color: #ffffff05;
+  border: 1px solid #00ffc433;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.transactionAmount {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: #f6f6f6e5;
+  text-align: center;
 }
 
 .arrowContainer {
@@ -162,6 +193,10 @@
   font-size: 24px;
   color: #00ffc4;
   font-weight: 600;
+  padding: 6px 12px;
+  background-color: #ffffff05;
+  border-radius: 50%;
+  border: 1px solid #00ffc433;
 }
 
 // Network and Participant Information
@@ -169,36 +204,23 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   background-color: #ffffff0a;
   border: 1px solid #ffffff0f;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 6px;
+  font-size: 13px;
   font-weight: 500;
   color: #f6f6f6cc;
 
   svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
   }
 }
 
-.participantInfo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-// Amount
-.amount {
-  display: flex;
-  align-items: center;
-}
-
-.amountValue {
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
-  color: #00ffc4;
+.readableDate {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: #f6f6f6e5;
 }

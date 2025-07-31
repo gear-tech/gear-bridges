@@ -1,7 +1,6 @@
-import { PropsWithChildren, ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { PropsWithChildren } from 'react';
+import { useParams } from 'react-router-dom';
 
-import ClockSVG from '@/assets/clock.svg?react';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, LinkButton } from '@/components';
@@ -77,80 +76,6 @@ function Transaction() {
   const { id } = useParams() as Params;
   const { data } = useTransaction(id);
 
-  const formatDate = (date: Date) => {
-    return {
-      readable: date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      utc: date.toISOString(),
-    };
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'Completed':
-        return <div className={styles.statusCompleted}>✓</div>;
-      case 'Bridging':
-        return <ClockSVG className={styles.statusIcon} />;
-      case 'Awaiting Payment':
-        return <ClockSVG className={styles.statusIcon} />;
-      default:
-        return <ClockSVG className={styles.statusIcon} />;
-    }
-  };
-
-  const getStatusClass = (status: string) => {
-    switch (status) {
-      case 'Completed':
-        return styles.completed;
-      case 'Bridging':
-        return styles.bridging;
-      case 'Awaiting Payment':
-        return styles.awaitingPayment;
-      default:
-        return styles.bridging;
-    }
-  };
-
-  const getNetworkIcon = (network: string) => {
-    return network === 'Ethereum' ? <EthSVG /> : <VaraSVG />;
-  };
-
-  const getExplorerUrl = (type: 'tx' | 'block' | 'address', value: string, network: string) => {
-    const baseUrl = network === 'Ethereum' ? 'https://holesky.etherscan.io' : 'https://idea.gear-tech.io';
-
-    if (network === 'Ethereum') {
-      switch (type) {
-        case 'tx':
-          return `${baseUrl}/tx/${value}`;
-        case 'block':
-          return `${baseUrl}/block/${value}`;
-        case 'address':
-          return `${baseUrl}/address/${value}`;
-        default:
-          return baseUrl;
-      }
-    } else {
-      switch (type) {
-        case 'tx':
-          return `${baseUrl}/message/${value}`;
-        case 'block':
-          return `${baseUrl}/block/${value}`;
-        case 'address':
-          return `${baseUrl}/account/${value}`;
-        default:
-          return baseUrl;
-      }
-    }
-  };
-
-  const initTimestamp = formatDate(mockTransactionData.timestamp);
-  const completedTimestamp = formatDate(mockTransactionData.completedAt.timestamp);
-
   if (!data) return;
 
   return (
@@ -162,211 +87,154 @@ function Transaction() {
           <TransactionStatus status={data.status} />
         </header>
 
-        {/* Token Information */}
-        <Card className={styles.section}>
-          <h2 className={styles.sectionTitle}>Tokens</h2>
-          <div className={styles.tokenPair}>
-            <div className={styles.tokenInfo}>
-              <div className={styles.tokenHeader}>
-                <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[32, 20]} />
-                <div>
-                  <h3 className={styles.tokenSymbol}>{mockTransactionData.sourceToken.symbol}</h3>
-                  <span className={styles.networkBadge}>
-                    {getNetworkIcon(mockTransactionData.sourceNetwork)}
-                    {mockTransactionData.sourceNetwork}
-                  </span>
-                </div>
-              </div>
+        <div className={styles.cards}>
+          <Card className={cx(styles.section, styles.ids)}>
+            <h2 className={styles.sectionTitle}>Identifiers</h2>
 
-              <Field label="Contract Address">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address value={mockTransactionData.sourceToken.address} />
+            <div className={styles.body}>
+              <Field label="Transaction Hash">
+                <a href="/" className={styles.link} target="_blank" rel="noreferrer">
+                  <Address value={mockTransactionData.txHash} />
                 </a>
 
-                <CopyButton
-                  value={mockTransactionData.sourceToken.address}
-                  message="Source token address copied to clipboard"
-                />
+                <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
               </Field>
-            </div>
 
-            <div className={styles.arrowContainer}>
-              <div className={styles.arrow}>→</div>
-            </div>
+              <Field label="Transaction Nonce">
+                <Address value={mockTransactionData.nonce} />
+                <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
+              </Field>
 
-            <div className={styles.tokenInfo}>
-              <div className={styles.tokenHeader}>
-                <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[32, 20]} />
-                <div>
-                  <h3 className={styles.tokenSymbol}>{mockTransactionData.destinationToken.symbol}</h3>
-                  <span className={styles.networkBadge}>
-                    {getNetworkIcon(mockTransactionData.destNetwork)}
-                    {mockTransactionData.destNetwork}
-                  </span>
-                </div>
-              </div>
-
-              <Field label="Contract Address">
+              <Field label="Block Number">
                 <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address value={mockTransactionData.destinationToken.address} />
+                  #{mockTransactionData.blockNumber.toLocaleString()}
+                </a>
+              </Field>
+
+              <Field label="Vara Block Number">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  #{mockTransactionData.varaBlockNumber.toLocaleString()}
+                </a>
+              </Field>
+
+              <Field label="Vara Message ID">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address value={mockTransactionData.messageId} />
                 </a>
 
-                <CopyButton
-                  value={mockTransactionData.destinationToken.address}
-                  message="Destination token address copied to clipboard"
-                />
+                <CopyButton value={mockTransactionData.messageId} message="Message ID copied to clipboard" />
               </Field>
             </div>
-          </div>
-        </Card>
+          </Card>
 
-        <Card className={cx(styles.section, styles.ids)}>
-          <h2 className={styles.sectionTitle}>Identifiers</h2>
+          <Card className={cx(styles.section, styles.overview)}>
+            <h2 className={styles.sectionTitle}>Overview</h2>
 
-          <div className={styles.body}>
-            <Field label="Transaction Hash">
-              <a href="/" className={styles.link} target="_blank" rel="noreferrer">
-                <Address value={mockTransactionData.txHash} />
-              </a>
+            <div className={styles.transactionFlow}>
+              <div className={styles.transactionSide}>
+                <div className={styles.tokenHeader}>
+                  <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[48, 28]} />
 
-              <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
-            </Field>
-
-            <Field label="Transaction Nonce">
-              <Address value={mockTransactionData.nonce} />
-              <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
-            </Field>
-
-            <Field label="Block Number">
-              <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                #{mockTransactionData.blockNumber.toLocaleString()}
-              </a>
-            </Field>
-          </div>
-        </Card>
-
-        <Card className={styles.section}>
-          <h2 className={styles.sectionTitle}>Timings</h2>
-
-          <div className={styles.body}>
-            <Field label="Initiated At">
-              <span className={styles.readableDate}>{initTimestamp.readable}</span>
-            </Field>
-
-            {data.status === StatusEnum.Completed && (
-              <>
-                <Field label="Completed At">
-                  <span className={styles.readableDate}>{completedTimestamp.readable}</span>
-                </Field>
-
-                <Field label="Completed At Block">
-                  <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                    #{mockTransactionData.completedAt.blockNumber.toLocaleString()}
-                  </a>
-                </Field>
-
-                <Field label="Completed At Transaction Hash">
-                  <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                    <Address value={mockTransactionData.completedAt.txHash} />
-                  </a>
-
-                  <CopyButton
-                    value={mockTransactionData.completedAt.txHash}
-                    message="Completion transaction hash copied to clipboard"
+                  <FormattedBalance
+                    value={BigInt(mockTransactionData.amount)}
+                    decimals={mockTransactionData.sourceToken.decimals}
+                    symbol={mockTransactionData.sourceToken.symbol}
                   />
-                </Field>
-              </>
-            )}
-          </div>
-        </Card>
+                </div>
 
-        <div className={styles.content}>
-          {/* Transaction Participants */}
-          <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Participants</h2>
-            <div className={styles.fields}>
-              <div className={styles.field}>
-                <span className={styles.label}>Sender</span>
-                <div className={styles.fieldContent}>
-                  <div className={styles.participantInfo}>
-                    <span className={styles.networkBadge}>
-                      {getNetworkIcon(mockTransactionData.sourceNetwork)}
-                      {mockTransactionData.sourceNetwork}
-                    </span>
-                    <LinkButton
-                      type="external"
-                      to={getExplorerUrl('address', mockTransactionData.sender, mockTransactionData.sourceNetwork)}
-                      className={styles.link}>
+                <div className={styles.transactionInfo}>
+                  <Field label="From">
+                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
                       <Address value={mockTransactionData.sender} />
-                    </LinkButton>
+                    </a>
+
                     <CopyButton value={mockTransactionData.sender} message="Sender address copied to clipboard" />
-                  </div>
-                </div>
-              </div>
+                  </Field>
 
-              <div className={styles.field}>
-                <span className={styles.label}>Receiver</span>
-                <div className={styles.fieldContent}>
-                  <div className={styles.participantInfo}>
-                    <span className={styles.networkBadge}>
-                      {getNetworkIcon(mockTransactionData.destNetwork)}
-                      {mockTransactionData.destNetwork}
-                    </span>
-                    <LinkButton
-                      type="external"
-                      to={getExplorerUrl('address', mockTransactionData.receiver, mockTransactionData.destNetwork)}
-                      className={styles.link}>
-                      <Address value={mockTransactionData.receiver} />
-                    </LinkButton>
-                    <CopyButton value={mockTransactionData.receiver} message="Receiver address copied to clipboard" />
-                  </div>
-                </div>
-              </div>
+                  <Field label="Contract Address">
+                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                      <Address value={mockTransactionData.sourceToken.address} />
+                    </a>
 
-              <div className={styles.field}>
-                <span className={styles.label}>Amount</span>
-                <div className={styles.fieldContent}>
-                  <div className={styles.amount}>
-                    <FormattedBalance
-                      value={BigInt(mockTransactionData.amount)}
-                      decimals={mockTransactionData.sourceToken.decimals}
-                      symbol={mockTransactionData.sourceToken.symbol}
-                      className={styles.amountValue}
+                    <CopyButton
+                      value={mockTransactionData.sourceToken.address}
+                      message="Source token address copied to clipboard"
                     />
-                  </div>
+                  </Field>
+                </div>
+              </div>
+
+              <div className={styles.arrowContainer}>
+                <div className={styles.arrow}>→</div>
+              </div>
+
+              <div className={styles.transactionSide}>
+                <div className={styles.tokenHeader}>
+                  <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[48, 28]} />
+
+                  <FormattedBalance
+                    value={BigInt(mockTransactionData.amount)}
+                    decimals={mockTransactionData.sourceToken.decimals}
+                    symbol={mockTransactionData.sourceToken.symbol}
+                  />
+                </div>
+
+                <div className={styles.transactionInfo}>
+                  <Field label="To">
+                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                      <Address value={mockTransactionData.receiver} />
+                    </a>
+
+                    <CopyButton value={mockTransactionData.receiver} message="Receiver address copied to clipboard" />
+                  </Field>
+
+                  <Field label="Contract Address">
+                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                      <Address value={mockTransactionData.destinationToken.address} />
+                    </a>
+
+                    <CopyButton
+                      value={mockTransactionData.destinationToken.address}
+                      message="Destination token address copied to clipboard"
+                    />
+                  </Field>
                 </div>
               </div>
             </div>
           </Card>
 
-          {/* Vara-Specific Information - Show for demo purposes */}
           <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Vara Network</h2>
-            <div className={styles.fields}>
-              <div className={styles.field}>
-                <span className={styles.label}>Vara Block Number</span>
-                <div className={styles.fieldContent}>
-                  <LinkButton
-                    type="external"
-                    to={getExplorerUrl('block', mockTransactionData.varaBlockNumber.toString(), 'Vara')}
-                    className={styles.link}>
-                    #{mockTransactionData.varaBlockNumber.toLocaleString()}
-                  </LinkButton>
-                </div>
-              </div>
+            <h2 className={styles.sectionTitle}>Timings</h2>
 
-              <div className={styles.field}>
-                <span className={styles.label}>Message ID</span>
-                <div className={styles.fieldContent}>
-                  <LinkButton
-                    type="external"
-                    to={getExplorerUrl('tx', mockTransactionData.messageId, 'Vara')}
-                    className={styles.link}>
-                    <Address value={mockTransactionData.messageId} />
-                  </LinkButton>
-                  <CopyButton value={mockTransactionData.messageId} message="Message ID copied to clipboard" />
-                </div>
-              </div>
+            <div className={styles.body}>
+              <Field label="Initiated At">
+                <span className={styles.readableDate}>{new Date(data.timestamp).toLocaleString()}</span>
+              </Field>
+
+              {data.completedAt && (
+                <>
+                  <Field label="Completed At">
+                    <span className={styles.readableDate}>{new Date(data.completedAt).toLocaleString()}</span>
+                  </Field>
+
+                  <Field label="Completed At Block">
+                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                      #{mockTransactionData.completedAt.blockNumber.toLocaleString()}
+                    </a>
+                  </Field>
+
+                  <Field label="Completed At Transaction Hash">
+                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                      <Address value={mockTransactionData.completedAt.txHash} />
+                    </a>
+
+                    <CopyButton
+                      value={mockTransactionData.completedAt.txHash}
+                      message="Completion transaction hash copied to clipboard"
+                    />
+                  </Field>
+                </>
+              )}
             </div>
           </Card>
         </div>

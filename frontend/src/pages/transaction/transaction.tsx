@@ -1,7 +1,10 @@
+import { useParams } from 'react-router-dom';
+
 import ClockSVG from '@/assets/clock.svg?react';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, LinkButton } from '@/components';
+import { useTransaction } from '@/features/history';
 
 import styles from './transaction.module.scss';
 
@@ -49,7 +52,15 @@ const mockTransactionData = {
   destNetwork: 'Vara' as const,
 };
 
+type Params = {
+  id: string;
+};
+
 function Transaction() {
+  const { id } = useParams() as Params;
+  const { data } = useTransaction(id);
+  console.log('data: ', data);
+
   const formatDate = (date: Date) => {
     return {
       readable: date.toLocaleDateString('en-US', {

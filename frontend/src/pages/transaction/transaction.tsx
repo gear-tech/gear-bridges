@@ -1,10 +1,12 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 
 import ClockSVG from '@/assets/clock.svg?react';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, LinkButton } from '@/components';
 import { useTransaction } from '@/features/history';
+import { TransactionStatus } from '@/features/history/components/transaction-status';
+import { cx } from '@/utils';
 
 import styles from './transaction.module.scss';
 
@@ -59,7 +61,6 @@ type Params = {
 function Transaction() {
   const { id } = useParams() as Params;
   const { data } = useTransaction(id);
-  console.log('data: ', data);
 
   const formatDate = (date: Date) => {
     return {
@@ -135,64 +136,133 @@ function Transaction() {
   const initTimestamp = formatDate(mockTransactionData.timestamp);
   const completedTimestamp = formatDate(mockTransactionData.completedAt.timestamp);
 
+  if (!data) return;
+
   return (
     <Container>
       <div className={styles.container}>
         <header className={styles.header}>
-          <h1 className={styles.title}>Transaction Details</h1>
-          <div className={`${styles.status} ${getStatusClass(mockTransactionData.status)}`}>
-            {getStatusIcon(mockTransactionData.status)}
-            <span>{mockTransactionData.status}</span>
-          </div>
+          <h1 className={styles.heading}>Transaction</h1>
+
+          <TransactionStatus status={data.status} />
         </header>
 
-        <div className={styles.content}>
-          {/* Transaction Identifiers */}
-          <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Transaction Identifiers</h2>
-            <div className={styles.fields}>
-              <div className={styles.field}>
-                <span className={styles.label}>Transaction Hash</span>
-                <div className={styles.fieldContent}>
-                  <LinkButton
-                    type="external"
-                    to={getExplorerUrl('tx', mockTransactionData.txHash, mockTransactionData.sourceNetwork)}
-                    className={styles.link}>
-                    <Address value={mockTransactionData.txHash} />
-                  </LinkButton>
-                  <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
+        {/* Token Information */}
+        <Card className={styles.section}>
+          <h2 className={styles.sectionTitle}>Tokens</h2>
+          <div className={styles.tokenPair}>
+            <div className={styles.tokenInfo}>
+              <div className={styles.tokenHeader}>
+                <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[32, 20]} />
+                <div>
+                  <h3 className={styles.tokenSymbol}>{mockTransactionData.sourceToken.symbol}</h3>
+                  <span className={styles.networkBadge}>
+                    {getNetworkIcon(mockTransactionData.sourceNetwork)}
+                    {mockTransactionData.sourceNetwork}
+                  </span>
                 </div>
               </div>
-
-              <div className={styles.field}>
-                <span className={styles.label}>Transaction Nonce</span>
-                <div className={styles.fieldContent}>
-                  <Address value={mockTransactionData.nonce} />
-                  <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
-                </div>
-              </div>
-
-              <div className={styles.field}>
-                <span className={styles.label}>Block Number</span>
+              <div className={styles.tokenAddress}>
+                <span className={styles.label}>Contract Address</span>
                 <div className={styles.fieldContent}>
                   <LinkButton
                     type="external"
                     to={getExplorerUrl(
-                      'block',
-                      mockTransactionData.blockNumber.toString(),
+                      'address',
+                      mockTransactionData.sourceToken.address,
                       mockTransactionData.sourceNetwork,
                     )}
                     className={styles.link}>
-                    #{mockTransactionData.blockNumber.toLocaleString()}
+                    <Address value={mockTransactionData.sourceToken.address} />
                   </LinkButton>
+                  <CopyButton
+                    value={mockTransactionData.sourceToken.address}
+                    message="Source token address copied to clipboard"
+                  />
                 </div>
               </div>
             </div>
-          </Card>
 
+            <div className={styles.arrowContainer}>
+              <div className={styles.arrow}>→</div>
+            </div>
+
+            <div className={styles.tokenInfo}>
+              <div className={styles.tokenHeader}>
+                <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[32, 20]} />
+                <div>
+                  <h3 className={styles.tokenSymbol}>{mockTransactionData.destinationToken.symbol}</h3>
+                  <span className={styles.networkBadge}>
+                    {getNetworkIcon(mockTransactionData.destNetwork)}
+                    {mockTransactionData.destNetwork}
+                  </span>
+                </div>
+              </div>
+              <div className={styles.tokenAddress}>
+                <span className={styles.label}>Contract Address</span>
+                <div className={styles.fieldContent}>
+                  <LinkButton
+                    type="external"
+                    to={getExplorerUrl(
+                      'address',
+                      mockTransactionData.destinationToken.address,
+                      mockTransactionData.destNetwork,
+                    )}
+                    className={styles.link}>
+                    <Address value={mockTransactionData.destinationToken.address} />
+                  </LinkButton>
+                  <CopyButton
+                    value={mockTransactionData.destinationToken.address}
+                    message="Destination token address copied to clipboard"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Transaction Identifiers */}
+        <Card className={cx(styles.section, styles.ids)}>
+          <h2 className={styles.sectionTitle}>Identifiers</h2>
+
+          <div className={styles.body}>
+            <div className={styles.field}>
+              <span className={styles.label}>Transaction Hash</span>
+
+              <div className={styles.fieldContent}>
+                <a href="/" className={styles.link} target="_blank" rel="noreferrer">
+                  <Address value={mockTransactionData.txHash} />
+                </a>
+
+                <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Transaction Nonce</span>
+
+              <div className={styles.fieldContent}>
+                <Address value={mockTransactionData.nonce} />
+                <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Block Number</span>
+
+              <div className={styles.fieldContent}>
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  #{mockTransactionData.blockNumber.toLocaleString()}
+                </a>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <div className={styles.content}>
           {/* Timing Information */}
           <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Timing Information</h2>
+            <h2 className={styles.sectionTitle}>Timings</h2>
             <div className={styles.fields}>
               <div className={styles.field}>
                 <span className={styles.label}>Initiated At</span>
@@ -246,83 +316,9 @@ function Transaction() {
             </div>
           </Card>
 
-          {/* Token Information */}
-          <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Token Information</h2>
-            <div className={styles.tokenPair}>
-              <div className={styles.tokenInfo}>
-                <div className={styles.tokenHeader}>
-                  <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[32, 20]} />
-                  <div>
-                    <h3 className={styles.tokenSymbol}>{mockTransactionData.sourceToken.symbol}</h3>
-                    <span className={styles.networkBadge}>
-                      {getNetworkIcon(mockTransactionData.sourceNetwork)}
-                      {mockTransactionData.sourceNetwork}
-                    </span>
-                  </div>
-                </div>
-                <div className={styles.tokenAddress}>
-                  <span className={styles.label}>Contract Address</span>
-                  <div className={styles.fieldContent}>
-                    <LinkButton
-                      type="external"
-                      to={getExplorerUrl(
-                        'address',
-                        mockTransactionData.sourceToken.address,
-                        mockTransactionData.sourceNetwork,
-                      )}
-                      className={styles.link}>
-                      <Address value={mockTransactionData.sourceToken.address} />
-                    </LinkButton>
-                    <CopyButton
-                      value={mockTransactionData.sourceToken.address}
-                      message="Source token address copied to clipboard"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className={styles.arrowContainer}>
-                <div className={styles.arrow}>→</div>
-              </div>
-
-              <div className={styles.tokenInfo}>
-                <div className={styles.tokenHeader}>
-                  <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[32, 20]} />
-                  <div>
-                    <h3 className={styles.tokenSymbol}>{mockTransactionData.destinationToken.symbol}</h3>
-                    <span className={styles.networkBadge}>
-                      {getNetworkIcon(mockTransactionData.destNetwork)}
-                      {mockTransactionData.destNetwork}
-                    </span>
-                  </div>
-                </div>
-                <div className={styles.tokenAddress}>
-                  <span className={styles.label}>Contract Address</span>
-                  <div className={styles.fieldContent}>
-                    <LinkButton
-                      type="external"
-                      to={getExplorerUrl(
-                        'address',
-                        mockTransactionData.destinationToken.address,
-                        mockTransactionData.destNetwork,
-                      )}
-                      className={styles.link}>
-                      <Address value={mockTransactionData.destinationToken.address} />
-                    </LinkButton>
-                    <CopyButton
-                      value={mockTransactionData.destinationToken.address}
-                      message="Destination token address copied to clipboard"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Card>
-
           {/* Transaction Participants */}
           <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Transaction Participants</h2>
+            <h2 className={styles.sectionTitle}>Participants</h2>
             <div className={styles.fields}>
               <div className={styles.field}>
                 <span className={styles.label}>Sender</span>
@@ -380,7 +376,7 @@ function Transaction() {
 
           {/* Vara-Specific Information - Show for demo purposes */}
           <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Vara Network Information</h2>
+            <h2 className={styles.sectionTitle}>Vara Network</h2>
             <div className={styles.fields}>
               <div className={styles.field}>
                 <span className={styles.label}>Vara Block Number</span>

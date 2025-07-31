@@ -2,68 +2,18 @@
   display: flex;
   flex-direction: column;
   gap: 32px;
-  max-width: 1200px;
-  margin: 0 auto;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-}
 
-.title {
-  font-size: 32px;
-  font-weight: 600;
-  line-height: 40px;
-  color: #f6f6f6e5;
-  margin: 0;
-}
-
-.status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  line-height: 18px;
-
-  &.completed {
-    color: #00ffc4;
-    background-color: #00ffc40f;
-    border: 1px solid #00ffc433;
-
-    .statusCompleted {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background-color: #00ffc4;
-      color: #0e1217;
-      font-size: 12px;
-      font-weight: 700;
-    }
-  }
-
-  &.bridging,
-  &.awaitingPayment {
-    color: #f6f6f6cc;
-    background-color: #ffffff3d;
-    border: 1px solid #ffffff3d;
-
-    .statusIcon {
-      width: 16px;
-      height: 16px;
-
-      path {
-        fill: #f6f6f6cc;
-      }
-    }
+  .heading {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 40px;
+    color: #f6f6f6e5;
   }
 }
 
@@ -73,11 +23,10 @@
   gap: 24px;
 }
 
-.section {
-  padding: 24px;
-
-  &:last-child {
-    margin-bottom: 0;
+.ids {
+  .body {
+    display: flex;
+    gap: 64px;
   }
 }
 
@@ -167,11 +116,6 @@
   align-items: start;
   gap: 32px;
   margin-top: 8px;
-
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
 }
 
 .tokenInfo {
@@ -204,10 +148,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-
-  @media (max-width: 768px) {
-    display: none;
-  }
 }
 
 .arrow {
@@ -253,75 +193,4 @@
   font-weight: 600;
   line-height: 28px;
   color: #00ffc4;
-}
-
-// Responsive Design
-@media (max-width: 768px) {
-  .container {
-    gap: 24px;
-  }
-
-  .header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
-  }
-
-  .title {
-    font-size: 24px;
-    line-height: 32px;
-  }
-
-  .section {
-    padding: 20px;
-  }
-
-  .sectionTitle {
-    font-size: 16px;
-    margin-bottom: 16px;
-  }
-
-  .fields {
-    gap: 16px;
-  }
-
-  .fieldContent {
-    gap: 8px;
-  }
-
-  .completedDetails {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  .participantInfo {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-}
-
-@media (max-width: 480px) {
-  .container {
-    gap: 20px;
-  }
-
-  .section {
-    padding: 16px;
-  }
-
-  .tokenHeader {
-    gap: 8px;
-  }
-
-  .tokenSymbol {
-    font-size: 18px;
-    line-height: 24px;
-  }
-
-  .amountValue {
-    font-size: 18px;
-    line-height: 24px;
-  }
 }

@@ -8,7 +8,7 @@ import { Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { App } from './app';
 import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, ROUTE, VARA_NODE_ADDRESS, GTM_ID } from './consts';
 import { useEthAccount } from './hooks';
-import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet } from './pages';
+import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction } from './pages';
 import { logger } from './utils';
 
 import './index.scss';
@@ -35,6 +35,7 @@ const PUBLIC_ROUTES = [
   { path: ROUTE.HOME, element: <Home /> },
   { path: ROUTE.TRANSACTIONS, element: <Transactions /> },
   { path: ROUTE.FAQ, element: <FAQ /> },
+  { path: ROUTE.TRANSACTION, element: <Transaction /> },
   { path: '*', element: <NotFound /> },
 ];
 

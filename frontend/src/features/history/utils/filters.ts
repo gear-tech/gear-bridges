@@ -5,7 +5,7 @@ const getLastDaysISOTimestamp = (daysCount: number) =>
 
 const getAssetOptions = (pairs: Pair[]) => {
   const options = pairs
-    .filter(({ isRemoved }) => !isRemoved)
+    .filter(({ isActive }) => isActive)
     .flatMap(({ varaToken, varaTokenSymbol, ethToken, ethTokenSymbol }) => [
       { label: `${varaTokenSymbol} → ${ethTokenSymbol}`, value: `${varaToken}.${ethToken}` as const },
       { label: `${ethTokenSymbol} → ${varaTokenSymbol}`, value: `${ethToken}.${varaToken}` as const },

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import request from 'graphql-request';
+import { request } from 'graphql-request';
 
 import { INDEXER_ADDRESS } from '../consts';
 import { graphql } from '../graphql';

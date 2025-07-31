@@ -23,19 +23,20 @@
   gap: 24px;
 }
 
-.ids {
+.section {
+  .sectionTitle {
+    margin-bottom: 20px;
+
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 24px;
+    color: #f6f6f6e5;
+  }
+
   .body {
     display: flex;
     gap: 64px;
   }
-}
-
-.sectionTitle {
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 24px;
-  color: #f6f6f6e5;
-  margin: 0 0 20px 0;
 }
 
 .fields {
@@ -48,13 +49,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
 
-.label {
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  color: #9cacb1;
+  .label {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    color: #9cacb1;
+  }
+
+  .value {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
 }
 
 .fieldContent {

@@ -27,11 +27,11 @@ function TransactionPair(props: Props) {
 
   const sourceHex = source as HexString;
   const sourceToken = addressToToken[sourceHex];
-  const sourceSymbol = sourceToken?.symbol ?? 'Unit';
+  const sourceSymbol = sourceToken?.displaySymbol ?? 'Unit';
 
   const destinationHex = destination as HexString;
   const destinationToken = addressToToken[destinationHex];
-  const destinationSymbol = destinationToken?.symbol ?? 'Unit';
+  const destinationSymbol = destinationToken?.displaySymbol ?? 'Unit';
 
   const isVaraNetwork = sourceNetwork === Network.Vara;
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;

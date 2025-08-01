@@ -17,7 +17,7 @@ import {
   TRANSACTIONS_LIMIT,
   usePairs,
 } from '@/features/history';
-import { useEthAccount } from '@/hooks';
+import { useEthAccount, useVaraSymbol } from '@/hooks';
 
 import styles from './transactions.module.scss';
 
@@ -30,8 +30,9 @@ function Transactions() {
   const [txsData, isFetching, hasNextPage, fetchNextPage] = useTransactions(filters);
   const { transactions, transactionsCount } = txsData || {};
 
+  const varaSymbol = useVaraSymbol();
   const { data: pairs, isLoading } = usePairs();
-  const assetOptions = useMemo(() => getAssetOptions(pairs || []), [pairs]);
+  const assetOptions = useMemo(() => getAssetOptions(pairs || [], varaSymbol || 'TVARA'), [pairs, varaSymbol]);
 
   const { addressToToken } = useTokens();
 
@@ -43,7 +44,14 @@ function Transactions() {
             <div className={styles.filters}>
               <Select name={FIELD_NAME.TIMESTAMP} label="Date" options={TIMESTAMP_OPTIONS} />
               <Select name={FIELD_NAME.STATUS} label="Status" options={STATUS_OPTIONS} />
-              <Select name={FIELD_NAME.ASSET} label="Asset" options={assetOptions} disabled={isLoading} />
+
+              <Select
+                name={FIELD_NAME.ASSET}
+                label="Asset"
+                options={assetOptions}
+                disabled={isLoading || !varaSymbol}
+              />
+
               <Input name={FIELD_NAME.SEARCH} label="Search (Block Number)" icon={SearchSVG} />
             </div>
 

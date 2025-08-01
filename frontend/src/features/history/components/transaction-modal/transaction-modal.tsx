@@ -141,7 +141,7 @@ function TransactionModal({
           <FormattedBalance
             value={BigInt(amount)}
             decimals={sourceToken?.decimals ?? 0}
-            symbol={sourceToken?.symbol || 'Unit'}
+            symbol={sourceToken?.displaySymbol || 'Unit'}
             className={styles.amount}
           />
 
@@ -159,7 +159,7 @@ function TransactionModal({
           <FormattedBalance
             value={BigInt(amount)}
             decimals={destinationToken?.decimals ?? 0}
-            symbol={destinationToken?.symbol || 'Unit'}
+            symbol={destinationToken?.displaySymbol || 'Unit'}
             className={styles.amount}
           />
 

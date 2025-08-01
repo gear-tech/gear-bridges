@@ -17,6 +17,7 @@ contract DeploymentTest is Test {
         vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
         vm.setEnv("GOVERNANCE_PAUSER", vm.toString(BaseConstants.GOVERNANCE_PAUSER));
+        vm.setEnv("EMERGENCY_STOP_ADMIN", vm.toString(BaseConstants.EMERGENCY_STOP_ADMIN));
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.setUp();
@@ -29,6 +30,7 @@ contract DeploymentTest is Test {
         vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
         vm.setEnv("GOVERNANCE_PAUSER", vm.toString(BaseConstants.GOVERNANCE_PAUSER));
+        vm.setEnv("EMERGENCY_STOP_ADMIN", vm.toString(BaseConstants.EMERGENCY_STOP_ADMIN));
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.setUp();

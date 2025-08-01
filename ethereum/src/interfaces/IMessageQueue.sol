@@ -19,7 +19,7 @@ struct VaraMessage {
  */
 interface IMessageQueue is IPausable {
     /**
-     * @dev Emergency stop status is active.
+     * @dev Emergency stop status is enabled.
      */
     error EmergencyStop();
 
@@ -39,6 +39,11 @@ interface IMessageQueue is IPausable {
     error MerkleRootNotFound(uint256 blockNumber);
 
     /**
+     * @dev Merkle root delay is not passed.
+     */
+    error MerkleRootDelayNotPassed();
+
+    /**
      * @dev Merkle proof is invalid.
      */
     error InvalidMerkleProof();
@@ -49,9 +54,24 @@ interface IMessageQueue is IPausable {
     error MerkleRootAlreadySet(uint256 blockNumber);
 
     /**
-     * @dev Emitted when emergency stop status is set.
+     * @dev Emergency stop is not enabled.
      */
-    event EmergencyStopSet();
+    error EmergencyStopNotEnabled();
+
+    /**
+     * @dev Caller is not emergency stop admin.
+     */
+    error NotEmergencyStopAdmin();
+
+    /**
+     * @dev Emitted when emergency stop status is enabled.
+     */
+    event EmergencyStopEnabled();
+
+    /**
+     * @dev Emitted when emergency stop status is disabled.
+     */
+    event EmergencyStopDisabled();
 
     /**
      * @dev Emitted when block number and merkle root are stored.
@@ -74,6 +94,12 @@ interface IMessageQueue is IPausable {
      * @return governancePauser Governance pauser address.
      */
     function governancePauser() external view returns (address);
+
+    /**
+     * @dev Returns emergency stop admin address.
+     * @return emergencyStopAdmin Emergency stop admin address.
+     */
+    function emergencyStopAdmin() external view returns (address);
 
     /**
      * @dev Returns verifier address.
@@ -101,7 +127,7 @@ interface IMessageQueue is IPausable {
      * @param blockNumber Block number on Vara Network
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number
      * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
-     * @dev Reverts if emergency stop status is set with `EmergencyStop` error.
+     * @dev Reverts if emergency stop status is enabled with `EmergencyStop` error.
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external;
@@ -113,6 +139,14 @@ interface IMessageQueue is IPausable {
      * @return merkleRoot Merkle root for specified block number.
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32);
+
+    /**
+     * @dev Returns timestamp when merkle root was set.
+     *      Returns `0` if merkle root was not provided for specified block number.
+     * @param merkleRoot Target merkle root.
+     * @return timestamp Timestamp when merkle root was set.
+     */
+    function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256);
 
     /**
      * @dev Verifies and processes message originated from Vara Network.
@@ -137,7 +171,7 @@ interface IMessageQueue is IPausable {
      *
      * @dev Reverts if:
      *      - MessageQueue is paused and message source is not any governance address.
-     *      - MessageQueue emergency stop status is set.
+     *      - MessageQueue emergency stop status is enabled and caller is not emergency stop admin.
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in MessageQueue smart contract.
      *      - Merkle proof is invalid.
@@ -150,6 +184,17 @@ interface IMessageQueue is IPausable {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external;
+
+    /**
+     * @dev Disables emergency stop status and sets new verifier.
+     *      This function can only be called by emergency stop admin.
+     * @param newVerifier New verifier address.
+     *
+     * @dev Reverts if:
+     *      - Emergency stop status is not enabled.
+     *      - Caller is not emergency stop admin.
+     */
+    function disableEmergencyStop(address newVerifier) external;
 
     /**
      * @dev Checks if message was already processed.

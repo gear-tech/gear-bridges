@@ -31,12 +31,15 @@ contract MessageQueue is
     using Hasher for VaraMessage;
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
+    uint256 public constant PROCESS_MESSAGE_DELAY = 5 minutes;
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
+    address private _emergencyStopAdmin;
     IVerifier private _verifier;
     bool private _emergencyStop;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
+    mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
     /**
@@ -52,12 +55,17 @@ contract MessageQueue is
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
+     * @param emergencyStopAdmin_ The address of EOA (multi-sig) that will control `submitMerkleRoot` and `processMessage`
+     *                            in case of an emergency stop. This EOA will be able to disable the emergency stop at
+     *                            the same time along with the verifier change.
      * @param verifier_ The address of the Verifier contract that will verify merkle roots.
      */
-    function initialize(IGovernance governanceAdmin_, IGovernance governancePauser_, IVerifier verifier_)
-        public
-        initializer
-    {
+    function initialize(
+        IGovernance governanceAdmin_,
+        IGovernance governancePauser_,
+        address emergencyStopAdmin_,
+        IVerifier verifier_
+    ) public initializer {
         __AccessControl_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
@@ -69,6 +77,7 @@ contract MessageQueue is
 
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
+        _emergencyStopAdmin = emergencyStopAdmin_;
         _verifier = verifier_;
     }
 
@@ -86,6 +95,14 @@ contract MessageQueue is
      */
     function governancePauser() external view returns (address) {
         return address(_governancePauser);
+    }
+
+    /**
+     * @dev Returns emergency stop admin address.
+     * @return emergencyStopAdmin Emergency stop admin address.
+     */
+    function emergencyStopAdmin() external view returns (address) {
+        return _emergencyStopAdmin;
     }
 
     /**
@@ -140,7 +157,8 @@ contract MessageQueue is
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
-        if (_emergencyStop) {
+        bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
             revert EmergencyStop();
         }
 
@@ -153,19 +171,21 @@ contract MessageQueue is
             revert InvalidPlonkProof();
         }
 
-        // Check if the provided Merkle root is a duplicate.
-        // If it is a duplicate, set the emergency stop status, emit `EmergencyStopSet` event.
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
         if (previousMerkleRoot != 0) {
             if (previousMerkleRoot != merkleRoot) {
                 _emergencyStop = true;
 
-                emit EmergencyStopSet();
+                delete _blockNumbers[blockNumber];
+                delete _merkleRootTimestamps[previousMerkleRoot];
+
+                emit EmergencyStopEnabled();
             } else {
                 revert MerkleRootAlreadySet(blockNumber);
             }
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
+            _merkleRootTimestamps[merkleRoot] = block.timestamp;
 
             emit MerkleRoot(blockNumber, merkleRoot);
         }
@@ -179,6 +199,16 @@ contract MessageQueue is
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32) {
         return _blockNumbers[blockNumber];
+    }
+
+    /**
+     * @dev Returns timestamp when merkle root was set.
+     *      Returns `0` if merkle root was not provided for specified block number.
+     * @param merkleRoot Target merkle root.
+     * @return timestamp Timestamp when merkle root was set.
+     */
+    function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256) {
+        return _merkleRootTimestamps[merkleRoot];
     }
 
     /**
@@ -223,7 +253,8 @@ contract MessageQueue is
             revert EnforcedPause();
         }
 
-        if (_emergencyStop) {
+        bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
             revert EmergencyStop();
         }
 
@@ -236,6 +267,11 @@ contract MessageQueue is
             revert MerkleRootNotFound(blockNumber);
         }
 
+        uint256 timestamp = _merkleRootTimestamps[merkleRoot];
+        if (block.timestamp < timestamp + PROCESS_MESSAGE_DELAY) {
+            revert MerkleRootDelayNotPassed();
+        }
+
         bytes32 messageHash = message.hashCalldata();
         if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {
             revert InvalidMerkleProof();
@@ -246,6 +282,30 @@ contract MessageQueue is
         IMessageHandler(message.destination).handleMessage(message.source, message.payload);
 
         emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);
+    }
+
+    /**
+     * @dev Disables emergency stop status and sets new verifier.
+     *      This function can only be called by emergency stop admin.
+     * @param newVerifier New verifier address.
+     *
+     * @dev Reverts if:
+     *      - Emergency stop status is not enabled.
+     *      - Caller is not emergency stop admin.
+     */
+    function disableEmergencyStop(address newVerifier) external {
+        if (!_emergencyStop) {
+            revert EmergencyStopNotEnabled();
+        }
+
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        _emergencyStop = false;
+        _verifier = IVerifier(newVerifier);
+
+        emit EmergencyStopDisabled();
     }
 
     /**

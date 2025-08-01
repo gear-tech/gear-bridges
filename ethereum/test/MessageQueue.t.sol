@@ -48,6 +48,8 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -90,6 +92,8 @@ contract MessageQueueTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -143,6 +147,8 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -183,6 +189,8 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         vm.expectEmit(address(messageQueue));
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
 
@@ -209,6 +217,8 @@ contract MessageQueueTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -250,6 +260,8 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         vm.expectEmit(address(messageQueue));
         emit PausableUpgradeable.Unpaused(address(governancePauser));
 
@@ -289,6 +301,8 @@ contract MessageQueueTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -341,6 +355,7 @@ contract MessageQueueTest is Test, Base {
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
     }
 
     function test_SubmitMerkleRootTwice() public {
@@ -354,6 +369,7 @@ contract MessageQueueTest is Test, Base {
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootAlreadySet.selector, blockNumber));
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -373,24 +389,76 @@ contract MessageQueueTest is Test, Base {
     function test_SubmitMerkleRootWithEmergencyStop() public {
         uint256 blockNumber = 0x11;
         bytes32 merkleRoot = bytes32(uint256(0x22));
-        bytes memory proof = "";
+        bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
-        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStopNotEnabled.selector));
+        messageQueue.disableEmergencyStop(address(verifier));
+
+        bytes32 previousMerkleRoot = merkleRoot;
         merkleRoot = bytes32(uint256(0x33));
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.EmergencyStopSet();
+        emit IMessageQueue.EmergencyStopEnabled();
 
-        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.isEmergencyStopped(), true);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), bytes32(0));
+        assertEq(messageQueue.getMerkleRootTimestamp(previousMerkleRoot), 0);
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStop.selector));
-        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopAdmin.selector));
+        messageQueue.disableEmergencyStop(address(verifier));
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        VaraMessage memory message = VaraMessage({
+            nonce: 0x11,
+            source: bytes32(uint256(0x22)),
+            destination: address(messageHandlerMock),
+            payload: hex"33"
+        });
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+
+        bytes32 messageHash = message.hash();
+        merkleRoot = messageHash;
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof2 = new bytes32[](0);
+
+        vm.expectEmit(address(messageHandlerMock));
+        emit IMessageHandlerMock.MessageHandled(message.source, message.payload);
+
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
+        assertEq(messageQueue.isProcessed(message.nonce), true);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.EmergencyStopDisabled();
+
+        messageQueue.disableEmergencyStop(address(verifier));
+
+        assertEq(messageQueue.isEmergencyStopped(), false);
+
+        vm.stopPrank();
     }
 
     function test_ProcessMessage() public {
@@ -412,6 +480,8 @@ contract MessageQueueTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -435,16 +505,19 @@ contract MessageQueueTest is Test, Base {
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
         merkleRoot = bytes32(uint256(0x33));
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.EmergencyStopSet();
+        emit IMessageQueue.EmergencyStopEnabled();
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStop.selector));
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         VaraMessage memory message = VaraMessage({
             nonce: 0x11,
@@ -483,6 +556,8 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -517,6 +592,35 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
 
+    function test_ProcessMessageWithMerkleRootDelayNotPassed() public {
+        VaraMessage memory message = VaraMessage({
+            nonce: 0x11,
+            source: bytes32(uint256(0x22)),
+            destination: address(messageHandlerMock),
+            payload: hex"33"
+        });
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+
+        bytes32 messageHash = message.hash();
+
+        uint256 blockNumber = 0x44;
+        bytes32 merkleRoot = messageHash;
+        bytes memory proof1 = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof = new bytes32[](0);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootDelayNotPassed.selector, blockNumber));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof);
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+    }
+
     function test_ProcessMessageWithInvalidMerkleProof() public {
         VaraMessage memory message = VaraMessage({
             nonce: 0x11,
@@ -536,6 +640,8 @@ contract MessageQueueTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;

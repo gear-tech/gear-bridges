@@ -6,6 +6,7 @@ import { JSX } from 'react';
 
 import { Address, CopyButton, FeeAndTimeFooter, FormattedBalance, LinkButton } from '@/components';
 import { useTokens } from '@/context';
+import { getAddressToTokenKey } from '@/context/tokens';
 import { BridgingPaymentProgram, CONTRACT_ADDRESS } from '@/features/swap/consts';
 import { useVaraFee } from '@/features/swap/hooks';
 import { cx, getErrorMessage, isUndefined, getTruncatedText } from '@/utils';
@@ -79,8 +80,8 @@ function TransactionModal({
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
 
-  const sourceToken = addressToToken?.[source as HexString];
-  const destinationToken = addressToToken?.[destination as HexString];
+  const sourceToken = addressToToken?.[getAddressToTokenKey(source as HexString, destination as HexString)];
+  const destinationToken = addressToToken?.[getAddressToTokenKey(destination as HexString, source as HexString)];
 
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
@@ -141,7 +142,7 @@ function TransactionModal({
           <FormattedBalance
             value={BigInt(amount)}
             decimals={sourceToken?.decimals ?? 0}
-            symbol={sourceToken?.symbol || 'Unit'}
+            symbol={sourceToken?.displaySymbol || 'Unit'}
             className={styles.amount}
           />
 
@@ -159,7 +160,7 @@ function TransactionModal({
           <FormattedBalance
             value={BigInt(amount)}
             decimals={destinationToken?.decimals ?? 0}
-            symbol={destinationToken?.symbol || 'Unit'}
+            symbol={destinationToken?.displaySymbol || 'Unit'}
             className={styles.amount}
           />
 

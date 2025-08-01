@@ -7,6 +7,7 @@ import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { useTokens } from '@/context';
+import { getAddressToTokenKey } from '@/context/tokens';
 import { useEthFTBalances, useVaraFTBalances, useModal, useVaraAccountBalance, useEthAccountBalance } from '@/hooks';
 import { cx, isUndefined } from '@/utils';
 
@@ -39,7 +40,7 @@ function SelectTokenModal({ close }: ModalProps) {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const renderTokenBalance = (address: HexString, isNative: boolean) => {
+  const renderTokenBalance = (address: HexString, destAddress: HexString, isNative: boolean) => {
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
@@ -53,7 +54,7 @@ function SelectTokenModal({ close }: ModalProps) {
       <FormattedBalance
         value={balance.data}
         symbol=""
-        decimals={addressToToken[address]?.decimals ?? 0}
+        decimals={addressToToken[getAddressToTokenKey(address, destAddress)]?.decimals ?? 0}
         className={styles.balance}
       />
     );
@@ -69,12 +70,12 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!filteredTokens) return;
 
-    return filteredTokens.map(({ address, symbol, displaySymbol, isNative }, index) => {
+    return filteredTokens.map(({ address, destinationAddress, symbol, displaySymbol, isNative }, index) => {
       const isActive = address === token?.address;
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
-        token?.set(address);
+        token?.set(getAddressToTokenKey(address, destinationAddress));
         close();
       };
 
@@ -94,7 +95,7 @@ function SelectTokenModal({ close }: ModalProps) {
               </span>
             </span>
 
-            {renderTokenBalance(address, isNative)}
+            {renderTokenBalance(address, destinationAddress, isNative)}
           </button>
         </li>
       );

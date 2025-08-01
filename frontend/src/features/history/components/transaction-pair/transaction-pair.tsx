@@ -3,6 +3,7 @@ import { getVaraAddress } from '@gear-js/react-hooks';
 
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { Token } from '@/context';
+import { getAddressToTokenKey } from '@/context/tokens';
 import { NETWORK } from '@/features/swap/consts';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -19,18 +20,19 @@ type Props = Pick<
   Transfer,
   'sourceNetwork' | 'destNetwork' | 'source' | 'destination' | 'amount' | 'sender' | 'receiver'
 > & {
-  addressToToken: Record<HexString, Token>;
+  addressToToken: Record<`${HexString}-${HexString}`, Token>;
 };
 
 function TransactionPair(props: Props) {
   const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, addressToToken } = props;
 
   const sourceHex = source as HexString;
-  const sourceToken = addressToToken[sourceHex];
+  const destinationHex = destination as HexString;
+
+  const sourceToken = addressToToken[getAddressToTokenKey(sourceHex, destinationHex)];
   const sourceSymbol = sourceToken?.displaySymbol ?? 'Unit';
 
-  const destinationHex = destination as HexString;
-  const destinationToken = addressToToken[destinationHex];
+  const destinationToken = addressToToken[getAddressToTokenKey(destinationHex, sourceHex)];
   const destinationSymbol = destinationToken?.displaySymbol ?? 'Unit';
 
   const isVaraNetwork = sourceNetwork === Network.Vara;

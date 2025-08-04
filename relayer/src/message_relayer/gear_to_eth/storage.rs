@@ -236,9 +236,12 @@ impl Storage for JSONStorage {
                     let contents = tokio::fs::read_to_string(entry.path())
                         .await
                         .context("Failed to read 'merkle_roots' file")?;
-                    let merkle: MerkleRoots = serde_json::from_str(&contents)
+                    let merkle_roots: MerkleRoots = serde_json::from_str(&contents)
                         .context("Failed to parse 'merkle_roots'")?;
-                    *tx_manager.merkle_roots.write().await = merkle;
+                    for i in 0..merkle_roots.len() {
+                        let root = merkle_roots.get(i).expect("Root should exist");
+                        let _ = tx_manager.merkle_roots.write().await.add(root.clone());
+                    }
                 } else if entry.file_name().to_str() == Some("blocks") {
                 } else {
                     let tx = self.read_tx(entry.path(), entry.file_name()).await?;

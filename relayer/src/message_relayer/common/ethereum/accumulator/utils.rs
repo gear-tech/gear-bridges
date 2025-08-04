@@ -95,6 +95,12 @@ impl MerkleRoots {
         Self(Vec::with_capacity(capacity))
     }
 
+    pub fn extend(mut self, roots: impl IntoIterator<Item = RelayedMerkleRoot>) -> Self {
+        self.0.extend(roots);
+        self.0.sort_by(|a, b| Self::compare(a.authority_set_id, a.block, b.authority_set_id, b.block));
+        self
+    }
+
     fn compare(
         authority_set_id: AuthoritySetId,
         block_number: GearBlockNumber,

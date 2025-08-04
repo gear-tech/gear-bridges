@@ -105,6 +105,9 @@ impl Relayer {
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);
 
         let tx_manager = TransactionManager::new(Arc::new(JSONStorage::new(storage_path)));
+        if let Err(e) = tx_manager.load_from_storage().await {
+            log::warn!("Failed to load transaction manager state: {e}");
+        }
 
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
         let accumulator = Accumulator::new(roots_receiver, tx_manager.merkle_roots.clone());

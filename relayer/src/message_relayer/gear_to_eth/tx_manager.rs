@@ -123,6 +123,10 @@ impl TransactionManager {
         }
     }
 
+    pub async fn load_from_storage(&self) -> anyhow::Result<()> {
+        self.storage.load(self).await
+    }
+
     async fn resume(
         &self,
         accumulator: &mut AccumulatorIo,
@@ -218,10 +222,6 @@ impl TransactionManager {
         mut message_sender: MessageSenderIo,
         mut status_fetcher: StatusFetcherIo,
     ) -> anyhow::Result<()> {
-        if let Err(err) = self.storage.load(&self).await {
-            log::warn!("Failed to load transaction manager state: {err}");
-        }
-
         if !self
             .resume(
                 &mut accumulator,

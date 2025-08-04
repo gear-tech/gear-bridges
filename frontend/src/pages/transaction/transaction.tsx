@@ -60,6 +60,52 @@ const INDEXED_NETWORK_TO_NETWORK_NAME = {
   [NetworkEnum.Ethereum]: 'Ethereum',
 } as const;
 
+const CONTRACT_URL = {
+  [NetworkEnum.Vara]: (programId: string) =>
+    `https://idea.gear-tech.io/programs/${programId}?node=wss://testnet.vara.network`,
+  [NetworkEnum.Ethereum]: (programId: string) => `https://hoodi.etherscan.io/address/${programId}`,
+} as const;
+
+const ACCOUNT_URL = {
+  [NetworkEnum.Vara]: () => undefined,
+  [NetworkEnum.Ethereum]: (address: string) => `https://hoodi.etherscan.io/address/${address}`,
+} as const;
+
+const TX_URL = {
+  [NetworkEnum.Vara]: 'https://polkadot.js.org/apps/?rpc=wss://testnet-archive.vara.network#/explorer/query',
+  [NetworkEnum.Ethereum]: `https://hoodi.etherscan.io/tx`,
+} as const;
+
+const BLOCK_URL = {
+  [NetworkEnum.Vara]: (blockNumber: string) =>
+    `https://idea.gear-tech.io/explorer/${blockNumber}?node=wss://testnet-archive.vara.network`,
+  [NetworkEnum.Ethereum]: (blockNumber: string) => `https://hoodi.etherscan.io/block/${blockNumber}`,
+} as const;
+
+const MESSAGE_URL = {
+  [NetworkEnum.Vara]: (id: string) => `https://idea.gear-tech.io/messages/${id}?node=wss://testnet.vara.network`,
+  [NetworkEnum.Ethereum]: () => undefined,
+} as const;
+
+type ExplorerLinkProps = PropsWithChildren & {
+  network: NetworkEnum;
+  id: string;
+  urls: typeof TX_URL | typeof BLOCK_URL | typeof ACCOUNT_URL | typeof MESSAGE_URL;
+};
+
+function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
+  const urlOrGetUrl = urls[network];
+  const url = typeof urlOrGetUrl === 'string' ? `${urlOrGetUrl}/${id}` : urlOrGetUrl(id);
+
+  if (!url) return <span>{children}</span>;
+
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className={styles.link}>
+      {children}
+    </a>
+  );
+}
+
 function Transaction() {
   const { account } = useAccount();
   const { id } = useParams() as Params;
@@ -162,33 +208,33 @@ function Transaction() {
 
         <SectionCard heading="Addresses">
           <Field label="From Address">
-            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+            <ExplorerLink network={sourceNetwork} id={sender} urls={ACCOUNT_URL}>
               <Address value={sender} />
-            </a>
+            </ExplorerLink>
 
             <CopyButton value={sender} message="Sender address copied to clipboard" />
           </Field>
 
           <Field label="To Address">
-            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+            <ExplorerLink network={destNetwork} id={receiver} urls={ACCOUNT_URL}>
               <Address value={receiver} />
-            </a>
+            </ExplorerLink>
 
             <CopyButton value={receiver} message="Receiver address copied to clipboard" />
           </Field>
 
           <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[sourceNetwork]} Contract Address`}>
-            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+            <ExplorerLink network={sourceNetwork} id={sourceHex} urls={CONTRACT_URL}>
               <Address value={sourceHex} />
-            </a>
+            </ExplorerLink>
 
             <CopyButton value={sourceHex} message="Source token address copied to clipboard" />
           </Field>
 
           <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[destNetwork]} Contract Address`}>
-            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+            <ExplorerLink network={destNetwork} id={destinationHex} urls={CONTRACT_URL}>
               <Address value={destinationHex} />
-            </a>
+            </ExplorerLink>
 
             <CopyButton value={destinationHex} message="Destination token address copied to clipboard" />
           </Field>
@@ -196,9 +242,9 @@ function Transaction() {
 
         <SectionCard heading="Identifiers">
           <Field label="Transaction Hash">
-            <a href="/" className={styles.link} target="_blank" rel="noreferrer">
+            <ExplorerLink network={sourceNetwork} id={txHash} urls={TX_URL}>
               <Address value={txHash} />
-            </a>
+            </ExplorerLink>
 
             <CopyButton value={txHash} message="Transaction hash copied to clipboard" />
           </Field>
@@ -209,16 +255,16 @@ function Transaction() {
           </Field>
 
           <Field label="Block Number">
-            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-              #{blockNumber.toLocaleString()}
-            </a>
+            <ExplorerLink network={sourceNetwork} id={blockNumber.toString()} urls={BLOCK_URL}>
+              #{blockNumber}
+            </ExplorerLink>
           </Field>
 
           <Field label="Vara Block Number">
             {bridgingStartedAtBlock ? (
-              <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                #{bridgingStartedAtBlock.toLocaleString()}
-              </a>
+              <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtBlock.toString()} urls={BLOCK_URL}>
+                #{bridgingStartedAtBlock}
+              </ExplorerLink>
             ) : (
               <Skeleton width="5rem" disabled />
             )}
@@ -227,9 +273,9 @@ function Transaction() {
           <Field label="Vara Message ID">
             {bridgingStartedAtMessageId ? (
               <>
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtMessageId} urls={MESSAGE_URL}>
                   <Address value={bridgingStartedAtMessageId} />
-                </a>
+                </ExplorerLink>
 
                 <CopyButton value={bridgingStartedAtMessageId} message="Message ID copied to clipboard" />
               </>
@@ -250,9 +296,9 @@ function Transaction() {
 
           <Field label="Completed At Block">
             {completedAtBlock ? (
-              <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <ExplorerLink network={sourceNetwork} id={completedAtBlock} urls={BLOCK_URL}>
                 #{completedAtBlock.toLocaleString()}
-              </a>
+              </ExplorerLink>
             ) : (
               <Skeleton width="5rem" disabled />
             )}
@@ -261,9 +307,10 @@ function Transaction() {
           <Field label="Completed At Transaction Hash">
             {completedAtTxHash ? (
               <>
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                <ExplorerLink network={sourceNetwork} id={completedAtTxHash} urls={TX_URL}>
                   <Address value={completedAtTxHash} />
-                </a>
+                </ExplorerLink>
+
                 <CopyButton value={completedAtTxHash} message="Completion transaction hash copied to clipboard" />
               </>
             ) : (

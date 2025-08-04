@@ -1,4 +1,3 @@
-import { Swap } from './components';
-import {} from './hooks';
+import { Swap, PayVaraFeeButton } from './components';
 
-export { Swap };
+export { Swap, PayVaraFeeButton };

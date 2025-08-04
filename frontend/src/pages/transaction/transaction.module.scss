@@ -19,6 +19,12 @@
   .subheading {
     color: #f6f6f6e5;
   }
+
+  .sidebar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
 }
 
 .cards {

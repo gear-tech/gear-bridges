@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { useAccount } from '@gear-js/react-hooks';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -7,7 +8,8 @@ import { useTokens } from '@/context';
 import { useTransaction } from '@/features/history';
 import ArrowSVG from '@/features/history/assets/arrow.svg?react';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
-import { NetworkEnum } from '@/features/history/graphql/graphql';
+import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
+import { PayVaraFeeButton } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
 import styles from './transaction.module.scss';
@@ -59,7 +61,9 @@ const INDEXED_NETWORK_TO_NETWORK_NAME = {
 } as const;
 
 function Transaction() {
+  const { account } = useAccount();
   const { id } = useParams() as Params;
+
   const { addressToToken } = useTokens();
   const { data } = useTransaction(id);
 
@@ -91,6 +95,9 @@ function Transaction() {
   const sourceToken = addressToToken[sourceHex];
   const destinationToken = addressToToken[destinationHex];
 
+  const isPayFeeButtonVisible = account?.decodedAddress === sender && status === StatusEnum.AwaitingPayment;
+  const varaNonce = sourceNetwork === NetworkEnum.Vara ? `0x${nonce.padStart(64, '0')}` : undefined;
+
   return (
     <Container className={styles.container}>
       <header className={styles.header}>
@@ -99,7 +106,11 @@ function Transaction() {
           <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
 
-        <TransactionStatus status={status} />
+        <div className={styles.sidebar}>
+          <TransactionStatus status={status} />
+
+          {isPayFeeButtonVisible && varaNonce && <PayVaraFeeButton transactionId={id} nonce={varaNonce} />}
+        </div>
       </header>
 
       <div className={styles.cards}>

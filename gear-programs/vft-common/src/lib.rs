@@ -37,7 +37,9 @@ impl<'a, A, B, M> Service<'a, A, B, M> {
             metadata,
         }
     }
+}
 
+impl<'a, A, B, M> Service<'a, A, B, M> {
     fn vft(&self) -> vft::Service<'_, A, B> {
         vft::Service::new(self.allowances, self.balances)
     }

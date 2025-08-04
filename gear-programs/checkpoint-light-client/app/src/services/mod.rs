@@ -10,6 +10,7 @@ use sails_rs::{Encode, TypeInfo};
 pub use state::State;
 pub use sync_update::SyncUpdate;
 
+#[sails_rs::event]
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]

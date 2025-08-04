@@ -2,7 +2,7 @@ import { HexString } from '@gear-js/api';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG } from '@/components';
+import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
 import { useTokens } from '@/context';
 import { useTransaction } from '@/features/history';
 import ArrowSVG from '@/features/history/assets/arrow.svg?react';
@@ -48,9 +48,14 @@ const INDEXED_NETWORK_TO_NETWORK = {
   [NetworkEnum.Ethereum]: NETWORK.ETH,
 } as const;
 
-const INDEXED_NETWORK_TO_NETWORK_NAME = {
+const INDEXED_NETWORK_TO_FULL_NETWORK_NAME = {
   [NetworkEnum.Vara]: 'Vara Testnet',
   [NetworkEnum.Ethereum]: 'Ethereum Hoodi',
+} as const;
+
+const INDEXED_NETWORK_TO_NETWORK_NAME = {
+  [NetworkEnum.Vara]: 'Vara',
+  [NetworkEnum.Ethereum]: 'Ethereum',
 } as const;
 
 function Transaction() {
@@ -115,7 +120,7 @@ function Transaction() {
                   className={styles.amount}
                 />
 
-                <span className={styles.network}>{INDEXED_NETWORK_TO_NETWORK_NAME[sourceNetwork]}</span>
+                <span className={styles.network}>{INDEXED_NETWORK_TO_FULL_NETWORK_NAME[sourceNetwork]}</span>
               </div>
             </div>
 
@@ -138,14 +143,14 @@ function Transaction() {
                   className={styles.amount}
                 />
 
-                <span className={styles.network}>{INDEXED_NETWORK_TO_NETWORK_NAME[destNetwork]}</span>
+                <span className={styles.network}>{INDEXED_NETWORK_TO_FULL_NETWORK_NAME[destNetwork]}</span>
               </div>
             </div>
           </Card>
         </SectionCard>
 
         <SectionCard heading="Addresses">
-          <Field label="From">
+          <Field label="From Address">
             <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
               <Address value={sender} />
             </a>
@@ -153,15 +158,7 @@ function Transaction() {
             <CopyButton value={sender} message="Sender address copied to clipboard" />
           </Field>
 
-          <Field label="Contract Address">
-            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-              <Address value={sourceHex} />
-            </a>
-
-            <CopyButton value={sourceHex} message="Source token address copied to clipboard" />
-          </Field>
-
-          <Field label="To">
+          <Field label="To Address">
             <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
               <Address value={receiver} />
             </a>
@@ -169,7 +166,15 @@ function Transaction() {
             <CopyButton value={receiver} message="Receiver address copied to clipboard" />
           </Field>
 
-          <Field label="Contract Address">
+          <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[sourceNetwork]} Contract Address`}>
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <Address value={sourceHex} />
+            </a>
+
+            <CopyButton value={sourceHex} message="Source token address copied to clipboard" />
+          </Field>
+
+          <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[destNetwork]} Contract Address`}>
             <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
               <Address value={destinationHex} />
             </a>
@@ -204,7 +209,7 @@ function Transaction() {
                 #{bridgingStartedAtBlock.toLocaleString()}
               </a>
             ) : (
-              'N/A'
+              <Skeleton width="5rem" disabled />
             )}
           </Field>
 
@@ -218,7 +223,7 @@ function Transaction() {
                 <CopyButton value={bridgingStartedAtMessageId} message="Message ID copied to clipboard" />
               </>
             ) : (
-              'N/A'
+              <Skeleton width="5rem" disabled />
             )}
           </Field>
         </SectionCard>
@@ -228,27 +233,32 @@ function Transaction() {
             <span>{new Date(timestamp).toLocaleString()}</span>
           </Field>
 
-          {completedAt && completedAtBlock && completedAtTxHash && (
-            <>
-              <Field label="Completed At">
-                <span>{new Date(completedAt).toLocaleString()}</span>
-              </Field>
+          <Field label="Completed At">
+            {completedAt ? <span>{new Date(completedAt).toLocaleString()}</span> : <Skeleton width="5rem" disabled />}
+          </Field>
 
-              <Field label="Completed At Block">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  #{completedAtBlock.toLocaleString()}
-                </a>
-              </Field>
+          <Field label="Completed At Block">
+            {completedAtBlock ? (
+              <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                #{completedAtBlock.toLocaleString()}
+              </a>
+            ) : (
+              <Skeleton width="5rem" disabled />
+            )}
+          </Field>
 
-              <Field label="Completed At Transaction Hash">
+          <Field label="Completed At Transaction Hash">
+            {completedAtTxHash ? (
+              <>
                 <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
                   <Address value={completedAtTxHash} />
                 </a>
-
                 <CopyButton value={completedAtTxHash} message="Completion transaction hash copied to clipboard" />
-              </Field>
-            </>
-          )}
+              </>
+            ) : (
+              <Skeleton width="5rem" disabled />
+            )}
+          </Field>
         </SectionCard>
       </div>
     </Container>

@@ -1,14 +1,14 @@
 import { HexString } from '@gear-js/api';
+import { generatePath, Link } from 'react-router-dom';
 
 import { Card, CopyButton, Skeleton } from '@/components';
+import { ROUTE } from '@/consts';
 import { Token } from '@/context';
-import { useModal } from '@/hooks';
 import { getTruncatedText } from '@/utils';
 
 import { Transfer } from '../../types';
 import { BlockNumberLink } from '../block-number-link';
 import { TransactionDate } from '../transaction-date';
-import { TransactionModal } from '../transaction-modal';
 import { TransactionPair } from '../transaction-pair';
 import { TransactionStatus } from '../transaction-status';
 
@@ -16,6 +16,7 @@ import styles from './transaction-card.module.scss';
 
 type Props = Pick<
   Transfer,
+  | 'id'
   | 'amount'
   | 'destination'
   | 'source'
@@ -33,32 +34,23 @@ type Props = Pick<
 };
 
 function TransactionCard(props: Props) {
-  const { timestamp, blockNumber, txHash, status, sourceNetwork } = props;
-
-  const [isModalOpen, openModal, closeModal] = useModal();
+  const { id, timestamp, blockNumber, txHash, status, sourceNetwork } = props;
 
   return (
-    <>
-      <Card className={styles.card}>
-        <div className={styles.dateContainer}>
-          <TransactionDate timestamp={timestamp} className={styles.date} />
-          <BlockNumberLink blockNumber={blockNumber} sourceNetwork={sourceNetwork} />
-        </div>
+    <Card className={styles.card}>
+      <div className={styles.dateContainer}>
+        <TransactionDate timestamp={timestamp} className={styles.date} />
+        <BlockNumberLink blockNumber={blockNumber} sourceNetwork={sourceNetwork} />
+      </div>
 
-        <p className={styles.transactionHash}>
-          <button type="button" onClick={openModal}>
-            {getTruncatedText(txHash)}
-          </button>
+      <p className={styles.transactionHash}>
+        <Link to={generatePath(ROUTE.TRANSACTION, { id })}>{getTruncatedText(txHash)}</Link>
+        <CopyButton value={txHash} />
+      </p>
 
-          <CopyButton value={txHash} />
-        </p>
-
-        <TransactionPair {...props} />
-        <TransactionStatus status={status} />
-      </Card>
-
-      {isModalOpen && <TransactionModal close={closeModal} {...props} />}
-    </>
+      <TransactionPair {...props} />
+      <TransactionStatus status={status} />
+    </Card>
   );
 }
 

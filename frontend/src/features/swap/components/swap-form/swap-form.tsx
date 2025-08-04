@@ -66,6 +66,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;
     const destNetwork = network.isVara ? TransferNetwork.Ethereum : TransferNetwork.Vara;
     const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
+    const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
     const close = () => setTransactionModal(undefined);
 
     setTransactionModal({
@@ -77,6 +78,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
       sender,
       receiver,
       estimatedFees,
+      renderProgressBar,
       close,
     });
   };
@@ -138,7 +140,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} />;
-  const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
 
   return (
     <>
@@ -228,7 +229,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
       </FormProvider>
 
       {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
-      {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
+      {transactionModal && <TransactionModal {...transactionModal} />}
     </>
   );
 }

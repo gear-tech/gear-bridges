@@ -173,9 +173,6 @@ impl Relayer {
         {
             log::error!("Transaction manager exited with error: {err:?}");
         }
-
-        /*self.message_sender
-        .spawn(channel_message_data, channel_tx_data);*/
     }
 }
 

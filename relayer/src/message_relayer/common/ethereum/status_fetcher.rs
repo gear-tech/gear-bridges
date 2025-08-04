@@ -124,47 +124,42 @@ async fn task_inner(
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
     let mut txs = FuturesUnordered::new();
+    loop {
+        tokio::select! {
+            message = channel.recv() => {
+                let Some(request) = message else {
+                    log::info!("No more messages to process, exiting");
+                    return Ok(());
+                };
 
-    tokio::select! {
-        message = channel.recv() => {
-            let Some(request) = message else {
-                log::info!("No more messages to process, exiting");
-                return Ok(());
-            };
+                let Request { tx_uuid, tx_hash, .. } = request;
 
-            let Request { tx_uuid, tx_hash, .. } = request;
+                this.metrics.pending_tx_count.inc();
 
-            this.metrics.pending_tx_count.inc();
+                let pending = PendingTransactionBuilder::new(
+                    this.eth_api.raw_provider().root().clone(),
+                    tx_hash,
+                );
 
-            let pending = PendingTransactionBuilder::new(
-                this.eth_api.raw_provider().root().clone(),
-                tx_hash,
-            );
+                let confirmations = this.confirmations;
+                txs.push(async move {
+                    Ok((tx_uuid, pending.with_required_confirmations(confirmations).watch().await.map_err(|e| (tx_uuid, e))?))
+                });
+            }
 
-            txs.push(async move {
-                Ok((tx_uuid, pending.with_required_confirmations(this.confirmations).watch().await.map_err(|e| (tx_uuid, e))?))
-            });
-        }
-
-        tx = txs.next() => {
-            let Some(tx) = tx else {
-                log::info!("No more transactions to process, exiting");
-                return Ok(());
-            };
-
-            match tx {
-                Ok((uuid, tx_hash)) => {
-                    this.metrics.pending_tx_count.dec();
-                    responses.send(Response::Success(uuid, tx_hash))?;
-                }
-                Err((uuid, e)) => {
-                    this.metrics.total_failed_txs.inc();
-                    log::error!("Failed to get transaction {uuid} status: {e}");
-                    responses.send(Response::Failed(uuid, e))?;
+            Some(tx) = txs.next(), if !txs.is_empty() => {
+                match tx {
+                    Ok((uuid, tx_hash)) => {
+                        this.metrics.pending_tx_count.dec();
+                        responses.send(Response::Success(uuid, tx_hash))?;
+                    }
+                    Err((uuid, e)) => {
+                        this.metrics.total_failed_txs.inc();
+                        log::error!("Failed to get transaction {uuid} status: {e}");
+                        responses.send(Response::Failed(uuid, e))?;
+                    }
                 }
             }
         }
     }
-
-    Ok(())
 }

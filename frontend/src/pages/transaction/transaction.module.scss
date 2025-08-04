@@ -31,7 +31,7 @@
 
 .section {
   .sectionTitle {
-    margin-bottom: 32px;
+    margin-bottom: 24px;
 
     font-size: 18px;
     font-weight: 600;
@@ -64,7 +64,10 @@
   }
 
   .value {
+    padding: 12px;
+
     display: flex;
+    justify-content: space-between;
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;

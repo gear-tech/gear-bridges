@@ -67,8 +67,23 @@ function Field({ label, children }: FieldProps) {
   return (
     <div className={styles.field}>
       <span className={styles.label}>{label}:</span>
-      <div className={styles.value}>{children}</div>
+      <Card className={styles.value}>{children}</Card>
     </div>
+  );
+}
+
+type SectionCardProps = PropsWithChildren & {
+  heading: string;
+  gridContent?: boolean;
+};
+
+function SectionCard({ heading, children, gridContent = true }: SectionCardProps) {
+  return (
+    <Card className={cx(styles.section, styles.ids)}>
+      <h2 className={styles.sectionTitle}>{heading}</h2>
+
+      <div className={gridContent ? styles.body : undefined}>{children}</div>
+    </Card>
   );
 }
 
@@ -80,166 +95,150 @@ function Transaction() {
 
   return (
     <Container className={styles.container}>
-      <div className={styles.container}>
-        <header className={styles.header}>
-          <h1 className={styles.heading}>Transaction</h1>
+      <header className={styles.header}>
+        <h1 className={styles.heading}>Transaction</h1>
 
-          <TransactionStatus status={data.status} />
-        </header>
+        <TransactionStatus status={data.status} />
+      </header>
 
-        <div className={styles.cards}>
-          <Card className={cx(styles.section, styles.overview)}>
-            <h2 className={styles.sectionTitle}>Overview</h2>
+      <div className={styles.cards}>
+        <SectionCard heading="Overview" gridContent={false}>
+          <Card className={styles.transactionFlow}>
+            <div className={styles.transactionSide}>
+              <div className={styles.tokenHeader}>
+                <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[48, 28]} />
 
-            <div className={styles.transactionFlow}>
-              <div className={styles.transactionSide}>
-                <div className={styles.tokenHeader}>
-                  <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[48, 28]} />
-
-                  <FormattedBalance
-                    value={BigInt(mockTransactionData.amount)}
-                    decimals={mockTransactionData.sourceToken.decimals}
-                    symbol={mockTransactionData.sourceToken.symbol}
-                  />
-                </div>
+                <FormattedBalance
+                  value={BigInt(mockTransactionData.amount)}
+                  decimals={mockTransactionData.sourceToken.decimals}
+                  symbol={mockTransactionData.sourceToken.symbol}
+                />
               </div>
+            </div>
 
-              <div className={styles.arrowContainer}>
-                <div className={styles.arrow}>→</div>
-              </div>
+            <div className={styles.arrowContainer}>
+              <div className={styles.arrow}>→</div>
+            </div>
 
-              <div className={styles.transactionSide}>
-                <div className={styles.tokenHeader}>
-                  <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[48, 28]} />
+            <div className={styles.transactionSide}>
+              <div className={styles.tokenHeader}>
+                <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[48, 28]} />
 
-                  <FormattedBalance
-                    value={BigInt(mockTransactionData.amount)}
-                    decimals={mockTransactionData.sourceToken.decimals}
-                    symbol={mockTransactionData.sourceToken.symbol}
-                  />
-                </div>
+                <FormattedBalance
+                  value={BigInt(mockTransactionData.amount)}
+                  decimals={mockTransactionData.sourceToken.decimals}
+                  symbol={mockTransactionData.sourceToken.symbol}
+                />
               </div>
             </div>
           </Card>
+        </SectionCard>
 
-          <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Addresses</h2>
+        <SectionCard heading="Addresses">
+          <Field label="From">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <Address value={mockTransactionData.sender} />
+            </a>
 
-            <div className={styles.body}>
-              <Field label="From">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address prefixLength={12} value={mockTransactionData.sender} />
-                </a>
+            <CopyButton value={mockTransactionData.sender} message="Sender address copied to clipboard" />
+          </Field>
 
-                <CopyButton value={mockTransactionData.sender} message="Sender address copied to clipboard" />
+          <Field label="Contract Address">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <Address value={mockTransactionData.sourceToken.address} />
+            </a>
+
+            <CopyButton
+              value={mockTransactionData.sourceToken.address}
+              message="Source token address copied to clipboard"
+            />
+          </Field>
+
+          <Field label="To">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <Address value={mockTransactionData.receiver} />
+            </a>
+
+            <CopyButton value={mockTransactionData.receiver} message="Receiver address copied to clipboard" />
+          </Field>
+
+          <Field label="Contract Address">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <Address value={mockTransactionData.destinationToken.address} />
+            </a>
+
+            <CopyButton
+              value={mockTransactionData.destinationToken.address}
+              message="Destination token address copied to clipboard"
+            />
+          </Field>
+        </SectionCard>
+
+        <SectionCard heading="Identifiers">
+          <Field label="Transaction Hash">
+            <a href="/" className={styles.link} target="_blank" rel="noreferrer">
+              <Address value={mockTransactionData.txHash} />
+            </a>
+
+            <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
+          </Field>
+
+          <Field label="Transaction Nonce">
+            <Address value={mockTransactionData.nonce} />
+            <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
+          </Field>
+
+          <Field label="Block Number">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              #{mockTransactionData.blockNumber.toLocaleString()}
+            </a>
+          </Field>
+
+          <Field label="Vara Block Number">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              #{mockTransactionData.varaBlockNumber.toLocaleString()}
+            </a>
+          </Field>
+
+          <Field label="Vara Message ID">
+            <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+              <Address value={mockTransactionData.messageId} />
+            </a>
+
+            <CopyButton value={mockTransactionData.messageId} message="Message ID copied to clipboard" />
+          </Field>
+        </SectionCard>
+
+        <SectionCard heading="Timings">
+          <Field label="Initiated At">
+            <span className={styles.readableDate}>{new Date(data.timestamp).toLocaleString()}</span>
+          </Field>
+
+          {data.completedAt && (
+            <>
+              <Field label="Completed At">
+                <span className={styles.readableDate}>{new Date(data.completedAt).toLocaleString()}</span>
               </Field>
 
-              <Field label="Contract Address">
+              <Field label="Completed At Block">
                 <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address prefixLength={12} value={mockTransactionData.sourceToken.address} />
+                  #{mockTransactionData.completedAt.blockNumber.toLocaleString()}
+                </a>
+              </Field>
+
+              <Field label="Completed At Transaction Hash">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address value={mockTransactionData.completedAt.txHash} />
                 </a>
 
                 <CopyButton
-                  value={mockTransactionData.sourceToken.address}
-                  message="Source token address copied to clipboard"
+                  value={mockTransactionData.completedAt.txHash}
+                  message="Completion transaction hash copied to clipboard"
                 />
               </Field>
-
-              <Field label="To">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address prefixLength={12} value={mockTransactionData.receiver} />
-                </a>
-
-                <CopyButton value={mockTransactionData.receiver} message="Receiver address copied to clipboard" />
-              </Field>
-
-              <Field label="Contract Address">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address prefixLength={12} value={mockTransactionData.destinationToken.address} />
-                </a>
-
-                <CopyButton
-                  value={mockTransactionData.destinationToken.address}
-                  message="Destination token address copied to clipboard"
-                />
-              </Field>
-            </div>
-          </Card>
-
-          <Card className={cx(styles.section, styles.ids)}>
-            <h2 className={styles.sectionTitle}>Identifiers</h2>
-
-            <div className={styles.body}>
-              <Field label="Transaction Hash">
-                <a href="/" className={styles.link} target="_blank" rel="noreferrer">
-                  <Address prefixLength={12} value={mockTransactionData.txHash} />
-                </a>
-
-                <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
-              </Field>
-
-              <Field label="Transaction Nonce">
-                <Address prefixLength={12} value={mockTransactionData.nonce} />
-                <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
-              </Field>
-
-              <Field label="Block Number">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  #{mockTransactionData.blockNumber.toLocaleString()}
-                </a>
-              </Field>
-
-              <Field label="Vara Block Number">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  #{mockTransactionData.varaBlockNumber.toLocaleString()}
-                </a>
-              </Field>
-
-              <Field label="Vara Message ID">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address prefixLength={12} value={mockTransactionData.messageId} />
-                </a>
-
-                <CopyButton value={mockTransactionData.messageId} message="Message ID copied to clipboard" />
-              </Field>
-            </div>
-          </Card>
-
-          <Card className={styles.section}>
-            <h2 className={styles.sectionTitle}>Timings</h2>
-
-            <div className={styles.body}>
-              <Field label="Initiated At">
-                <span className={styles.readableDate}>{new Date(data.timestamp).toLocaleString()}</span>
-              </Field>
-
-              {data.completedAt && (
-                <>
-                  <Field label="Completed At">
-                    <span className={styles.readableDate}>{new Date(data.completedAt).toLocaleString()}</span>
-                  </Field>
-
-                  <Field label="Completed At Block">
-                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      #{mockTransactionData.completedAt.blockNumber.toLocaleString()}
-                    </a>
-                  </Field>
-
-                  <Field label="Completed At Transaction Hash">
-                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      <Address prefixLength={12} value={mockTransactionData.completedAt.txHash} />
-                    </a>
-
-                    <CopyButton
-                      value={mockTransactionData.completedAt.txHash}
-                      message="Completion transaction hash copied to clipboard"
-                    />
-                  </Field>
-                </>
-              )}
-            </div>
-          </Card>
-        </div>
+            </>
+          )}
+        </SectionCard>
       </div>
     </Container>
   );

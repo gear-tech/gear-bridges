@@ -5,9 +5,8 @@ import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, LinkButton } from '@/components';
 import { useTransaction } from '@/features/history';
+import ArrowSVG from '@/features/history/assets/arrow.svg?react';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
-import { StatusEnum } from '@/features/history/graphql/graphql';
-import { cx } from '@/utils';
 
 import styles from './transaction.module.scss';
 
@@ -79,10 +78,9 @@ type SectionCardProps = PropsWithChildren & {
 
 function SectionCard({ heading, children, gridContent = true }: SectionCardProps) {
   return (
-    <Card className={cx(styles.section, styles.ids)}>
-      <h2 className={styles.sectionTitle}>{heading}</h2>
-
-      <div className={gridContent ? styles.body : undefined}>{children}</div>
+    <Card className={styles.section}>
+      <h2 className={styles.heading}>{heading}</h2>
+      <div className={gridContent ? styles.content : undefined}>{children}</div>
     </Card>
   );
 }
@@ -96,39 +94,48 @@ function Transaction() {
   return (
     <Container className={styles.container}>
       <header className={styles.header}>
-        <h1 className={styles.heading}>Transaction</h1>
+        <div>
+          <h1 className={styles.heading}>Transaction</h1>
+          <p className={styles.subheading}>Cross-chain swap transaction information</p>
+        </div>
 
         <TransactionStatus status={data.status} />
       </header>
 
       <div className={styles.cards}>
         <SectionCard heading="Overview" gridContent={false}>
-          <Card className={styles.transactionFlow}>
-            <div className={styles.transactionSide}>
-              <div className={styles.tokenHeader}>
-                <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[48, 28]} />
+          <Card className={styles.transaction}>
+            <div className={styles.token}>
+              <TokenSVG symbol={mockTransactionData.sourceToken.symbol} network="eth" sizes={[48, 28]} />
 
+              <div>
                 <FormattedBalance
                   value={BigInt(mockTransactionData.amount)}
                   decimals={mockTransactionData.sourceToken.decimals}
                   symbol={mockTransactionData.sourceToken.symbol}
+                  className={styles.amount}
                 />
+
+                <span className={styles.network}>{mockTransactionData.sourceNetwork}</span>
               </div>
             </div>
 
-            <div className={styles.arrowContainer}>
-              <div className={styles.arrow}>→</div>
+            <div className={styles.arrow}>
+              <ArrowSVG />
             </div>
 
-            <div className={styles.transactionSide}>
-              <div className={styles.tokenHeader}>
-                <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[48, 28]} />
+            <div className={styles.token}>
+              <TokenSVG symbol={mockTransactionData.destinationToken.symbol} network="vara" sizes={[48, 28]} />
 
+              <div>
                 <FormattedBalance
                   value={BigInt(mockTransactionData.amount)}
                   decimals={mockTransactionData.sourceToken.decimals}
                   symbol={mockTransactionData.sourceToken.symbol}
+                  className={styles.amount}
                 />
+
+                <span className={styles.network}>{mockTransactionData.destNetwork}</span>
               </div>
             </div>
           </Card>
@@ -211,13 +218,13 @@ function Transaction() {
 
         <SectionCard heading="Timings">
           <Field label="Initiated At">
-            <span className={styles.readableDate}>{new Date(data.timestamp).toLocaleString()}</span>
+            <span>{new Date(data.timestamp).toLocaleString()}</span>
           </Field>
 
           {data.completedAt && (
             <>
               <Field label="Completed At">
-                <span className={styles.readableDate}>{new Date(data.completedAt).toLocaleString()}</span>
+                <span>{new Date(data.completedAt).toLocaleString()}</span>
               </Field>
 
               <Field label="Completed At Block">

@@ -6,13 +6,17 @@
   margin-bottom: 32px;
 
   display: flex;
-  align-items: center;
   justify-content: space-between;
 
   .heading {
-    font-size: 24px;
-    font-weight: 600;
+    margin-bottom: 4px;
+
+    font-size: 30px;
+    font-weight: 700;
     line-height: 40px;
+  }
+
+  .subheading {
     color: #f6f6f6e5;
   }
 }
@@ -23,33 +27,64 @@
   gap: 24px;
 }
 
-.content {
+.transaction {
   display: flex;
-  flex-direction: column;
-  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 64px;
+
+  .token {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    text-align: right;
+
+    .amount {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .network {
+      font-size: 14px;
+      font-weight: 500;
+      color: #9cacb1;
+    }
+  }
+
+  .arrow {
+    width: 32px;
+    height: 32px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background-color: #ffffff05;
+    border-radius: 50%;
+    border: 1px solid #00ffc433;
+
+    svg {
+      flex-shrink: 0;
+    }
+  }
 }
 
 .section {
-  .sectionTitle {
+  .heading {
     margin-bottom: 24px;
 
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 600;
     line-height: 24px;
     color: #f6f6f6e5;
   }
 
-  .body {
+  .content {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px 32px;
+    gap: 12px 16px;
   }
-}
-
-.fields {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
 }
 
 .field {
@@ -57,9 +92,9 @@
   flex-direction: column;
   gap: 8px;
 
+  font-size: 14px;
+
   .label {
-    font-size: 14px;
-    font-weight: 500;
     color: #9cacb1;
   }
 
@@ -69,155 +104,9 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
   }
-}
-
-.fieldContent {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 
 .link {
-  color: #00ffc4;
-  text-decoration: none;
-  transition: color 0.25s;
-
-  &:hover {
-    color: #00b8a0;
-    text-decoration: underline;
-  }
-}
-
-// Timing Information
-.dateTime {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.readableDate {
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 24px;
-  color: #f6f6f6e5;
-}
-
-.utcDate {
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 16px;
-  color: #9cacb1;
-}
-
-.completedInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.completedDetails {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.overview {
-  display: flex;
-  flex-direction: column;
-}
-
-.transactionFlow {
-  display: flex;
-  justify-content: space-between;
-  gap: 64px;
-}
-
-.transactionSide {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.tokenHeader {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.tokenDetails {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tokenSymbol {
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 32px;
-  color: #f6f6f6e5;
-  margin: 0;
-}
-
-.amountSection {
-  padding: 12px 16px;
-  background-color: #ffffff05;
-  border: 1px solid #00ffc433;
-  border-radius: 8px;
-  margin-bottom: 8px;
-}
-
-.transactionAmount {
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  color: #f6f6f6e5;
-  text-align: center;
-}
-
-.arrowContainer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.arrow {
-  font-size: 24px;
-  color: #00ffc4;
-  font-weight: 600;
-  padding: 6px 12px;
-  background-color: #ffffff05;
-  border-radius: 50%;
-  border: 1px solid #00ffc433;
-}
-
-// Network and Participant Information
-.networkBadge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background-color: #ffffff0a;
-  border: 1px solid #ffffff0f;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #f6f6f6cc;
-
-  svg {
-    width: 18px;
-    height: 18px;
-  }
-}
-
-.readableDate {
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 24px;
-  color: #f6f6f6e5;
+  text-decoration: underline;
 }

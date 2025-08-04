@@ -79,7 +79,7 @@ function Transaction() {
   if (!data) return;
 
   return (
-    <Container>
+    <Container className={styles.container}>
       <div className={styles.container}>
         <header className={styles.header}>
           <h1 className={styles.heading}>Transaction</h1>
@@ -88,45 +88,6 @@ function Transaction() {
         </header>
 
         <div className={styles.cards}>
-          <Card className={cx(styles.section, styles.ids)}>
-            <h2 className={styles.sectionTitle}>Identifiers</h2>
-
-            <div className={styles.body}>
-              <Field label="Transaction Hash">
-                <a href="/" className={styles.link} target="_blank" rel="noreferrer">
-                  <Address value={mockTransactionData.txHash} />
-                </a>
-
-                <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
-              </Field>
-
-              <Field label="Transaction Nonce">
-                <Address value={mockTransactionData.nonce} />
-                <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
-              </Field>
-
-              <Field label="Block Number">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  #{mockTransactionData.blockNumber.toLocaleString()}
-                </a>
-              </Field>
-
-              <Field label="Vara Block Number">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  #{mockTransactionData.varaBlockNumber.toLocaleString()}
-                </a>
-              </Field>
-
-              <Field label="Vara Message ID">
-                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                  <Address value={mockTransactionData.messageId} />
-                </a>
-
-                <CopyButton value={mockTransactionData.messageId} message="Message ID copied to clipboard" />
-              </Field>
-            </div>
-          </Card>
-
           <Card className={cx(styles.section, styles.overview)}>
             <h2 className={styles.sectionTitle}>Overview</h2>
 
@@ -140,27 +101,6 @@ function Transaction() {
                     decimals={mockTransactionData.sourceToken.decimals}
                     symbol={mockTransactionData.sourceToken.symbol}
                   />
-                </div>
-
-                <div className={styles.transactionInfo}>
-                  <Field label="From">
-                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      <Address value={mockTransactionData.sender} />
-                    </a>
-
-                    <CopyButton value={mockTransactionData.sender} message="Sender address copied to clipboard" />
-                  </Field>
-
-                  <Field label="Contract Address">
-                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      <Address value={mockTransactionData.sourceToken.address} />
-                    </a>
-
-                    <CopyButton
-                      value={mockTransactionData.sourceToken.address}
-                      message="Source token address copied to clipboard"
-                    />
-                  </Field>
                 </div>
               </div>
 
@@ -178,28 +118,90 @@ function Transaction() {
                     symbol={mockTransactionData.sourceToken.symbol}
                   />
                 </div>
-
-                <div className={styles.transactionInfo}>
-                  <Field label="To">
-                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      <Address value={mockTransactionData.receiver} />
-                    </a>
-
-                    <CopyButton value={mockTransactionData.receiver} message="Receiver address copied to clipboard" />
-                  </Field>
-
-                  <Field label="Contract Address">
-                    <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      <Address value={mockTransactionData.destinationToken.address} />
-                    </a>
-
-                    <CopyButton
-                      value={mockTransactionData.destinationToken.address}
-                      message="Destination token address copied to clipboard"
-                    />
-                  </Field>
-                </div>
               </div>
+            </div>
+          </Card>
+
+          <Card className={styles.section}>
+            <h2 className={styles.sectionTitle}>Addresses</h2>
+
+            <div className={styles.body}>
+              <Field label="From">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address prefixLength={12} value={mockTransactionData.sender} />
+                </a>
+
+                <CopyButton value={mockTransactionData.sender} message="Sender address copied to clipboard" />
+              </Field>
+
+              <Field label="Contract Address">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address prefixLength={12} value={mockTransactionData.sourceToken.address} />
+                </a>
+
+                <CopyButton
+                  value={mockTransactionData.sourceToken.address}
+                  message="Source token address copied to clipboard"
+                />
+              </Field>
+
+              <Field label="To">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address prefixLength={12} value={mockTransactionData.receiver} />
+                </a>
+
+                <CopyButton value={mockTransactionData.receiver} message="Receiver address copied to clipboard" />
+              </Field>
+
+              <Field label="Contract Address">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address prefixLength={12} value={mockTransactionData.destinationToken.address} />
+                </a>
+
+                <CopyButton
+                  value={mockTransactionData.destinationToken.address}
+                  message="Destination token address copied to clipboard"
+                />
+              </Field>
+            </div>
+          </Card>
+
+          <Card className={cx(styles.section, styles.ids)}>
+            <h2 className={styles.sectionTitle}>Identifiers</h2>
+
+            <div className={styles.body}>
+              <Field label="Transaction Hash">
+                <a href="/" className={styles.link} target="_blank" rel="noreferrer">
+                  <Address prefixLength={12} value={mockTransactionData.txHash} />
+                </a>
+
+                <CopyButton value={mockTransactionData.txHash} message="Transaction hash copied to clipboard" />
+              </Field>
+
+              <Field label="Transaction Nonce">
+                <Address prefixLength={12} value={mockTransactionData.nonce} />
+                <CopyButton value={mockTransactionData.nonce} message="Transaction nonce copied to clipboard" />
+              </Field>
+
+              <Field label="Block Number">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  #{mockTransactionData.blockNumber.toLocaleString()}
+                </a>
+              </Field>
+
+              <Field label="Vara Block Number">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  #{mockTransactionData.varaBlockNumber.toLocaleString()}
+                </a>
+              </Field>
+
+              <Field label="Vara Message ID">
+                <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
+                  <Address prefixLength={12} value={mockTransactionData.messageId} />
+                </a>
+
+                <CopyButton value={mockTransactionData.messageId} message="Message ID copied to clipboard" />
+              </Field>
             </div>
           </Card>
 
@@ -225,7 +227,7 @@ function Transaction() {
 
                   <Field label="Completed At Transaction Hash">
                     <a href="/" target="_blank" rel="noreferrer" className={styles.link}>
-                      <Address value={mockTransactionData.completedAt.txHash} />
+                      <Address prefixLength={12} value={mockTransactionData.completedAt.txHash} />
                     </a>
 
                     <CopyButton

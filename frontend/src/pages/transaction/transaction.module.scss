@@ -1,10 +1,10 @@
 .container {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
+  max-width: 860px;
 }
 
 .header {
+  margin-bottom: 32px;
+
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -18,9 +18,9 @@
 }
 
 .cards {
-  display: grid;
-  grid-template-columns: 1fr 2fr 1fr;
-  gap: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .content {
@@ -40,9 +40,9 @@
   }
 
   .body {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px 32px;
   }
 }
 
@@ -159,12 +159,6 @@
   line-height: 32px;
   color: #f6f6f6e5;
   margin: 0;
-}
-
-.transactionInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 .amountSection {

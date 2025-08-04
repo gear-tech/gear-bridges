@@ -118,7 +118,7 @@ impl JSONStorage {
 
         let mut contents = String::new();
 
-        let mut file = tokio::fs::File::open(path.join(&tx_file))
+        let mut file = tokio::fs::File::open(path)
             .await
             .with_context(|| format!("Failed to open transaction file: {tx_file:?}"))?;
 

@@ -15,7 +15,7 @@ use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
     gear_to_eth,
 };
-use primitive_types::U256;
+
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
 use relayer::*;
@@ -199,7 +199,7 @@ async fn run() -> AnyResult<()> {
 
             match args.command {
                 GearEthTokensCommands::AllTokenTransfers => {
-                    let relayer = gear_to_eth::all_token_transfers::Relayer::new(
+                    /*let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         eth_api,
                         provider.connection(),
                         args.confirmations_merkle_root
@@ -222,7 +222,7 @@ async fn run() -> AnyResult<()> {
                     loop {
                         // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
                         time::sleep(Duration::from_secs(1)).await;
-                    }
+                    }*/
                 }
 
                 GearEthTokensCommands::PaidTokenTransfers {
@@ -252,6 +252,7 @@ async fn run() -> AnyResult<()> {
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         excluded_from_fees,
                         receiver,
+                        args.storage_path.clone(),
                     )
                     .await
                     .unwrap();
@@ -264,8 +265,6 @@ async fn run() -> AnyResult<()> {
 
                     provider.spawn();
                     relayer.run().await;
-
-                    tokio::signal::ctrl_c().await?;
 
                     handle_server.stop(true).await;
                 }
@@ -404,8 +403,8 @@ async fn run() -> AnyResult<()> {
                 }
             }
         }
-        CliCommands::GearEthManual(args) => {
-            let nonce =
+        CliCommands::GearEthManual(_args) => {
+            /*let nonce =
                 hex_utils::decode_byte_vec(&args.nonce).expect("Failed to parse message nonce");
             let nonce = U256::from_big_endian(&nonce[..]);
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
@@ -429,7 +428,7 @@ async fn run() -> AnyResult<()> {
                 args.confirmations_status
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
             )
-            .await;
+            .await;*/
         }
 
         CliCommands::EthGearManual(EthGearManualArgs {

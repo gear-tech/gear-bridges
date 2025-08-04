@@ -18,13 +18,14 @@ use crate::{
             AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
         },
         eth_to_gear::api_provider::ApiProviderConnection,
+        gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
     },
 };
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
 use primitive_types::H256;
-use std::{collections::HashSet, iter, sync::Arc};
+use std::{collections::HashSet, iter, path::PathBuf, sync::Arc};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task, time,
@@ -48,6 +49,9 @@ pub struct Relayer {
     accumulator: Accumulator,
     message_data_extractor: MessageDataExtractor,
     message_queued_receiver: UnboundedReceiver<MessageInBlock>,
+    message_receiver: UnboundedReceiver<MessageInBlock>,
+
+    tx_manager: TransactionManager,
 }
 
 impl MeteredService for Relayer {
@@ -72,6 +76,7 @@ impl Relayer {
         confirmations_status: u64,
         excluded_from_fees: HashSet<AccountId32>,
         receiver: UnboundedReceiver<Message>,
+        storage_path: PathBuf,
     ) -> AnyResult<Self> {
         let gear_block_listener = GearBlockListener::new(
             api_provider.clone(),
@@ -99,8 +104,10 @@ impl Relayer {
         let proof_fetcher = MerkleProofFetcher::new(api_provider.clone());
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);
 
+        let tx_manager = TransactionManager::new(Arc::new(JSONStorage::new(storage_path)));
+
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
-        let accumulator = Accumulator::new(roots_receiver, messages_receiver);
+        let accumulator = Accumulator::new(roots_receiver, tx_manager.merkle_roots.clone());
 
         let message_data_extractor =
             MessageDataExtractor::new(api_provider.clone(), messages_sender, receiver);
@@ -127,6 +134,9 @@ impl Relayer {
             accumulator,
             message_queued_receiver,
             message_data_extractor,
+            message_receiver: messages_receiver,
+
+            tx_manager,
         })
     }
 
@@ -142,15 +152,30 @@ impl Relayer {
             self.message_data_extractor.sender().clone(),
         );
         self.merkle_root_extractor.spawn();
-        let channel_messages = self.accumulator.spawn();
+        let accumulator_io = self.accumulator.spawn();
 
-        let channel_message_data = self.proof_fetcher.spawn(channel_messages);
-        let channel_tx_data = self.status_fetcher.spawn();
+        let proof_fetcher_io = self.proof_fetcher.spawn();
+        let status_fetcher_io = self.status_fetcher.spawn();
 
         self.message_data_extractor.spawn();
+        let message_sender_io = self.message_sender.spawn();
 
-        self.message_sender
-            .spawn(channel_message_data, channel_tx_data);
+        if let Err(err) = self
+            .tx_manager
+            .run(
+                accumulator_io,
+                self.message_receiver,
+                proof_fetcher_io,
+                message_sender_io,
+                status_fetcher_io,
+            )
+            .await
+        {
+            log::error!("Transaction manager exited with error: {err:?}");
+        }
+
+        /*self.message_sender
+        .spawn(channel_message_data, channel_tx_data);*/
     }
 }
 

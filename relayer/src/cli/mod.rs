@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 
 mod common;
@@ -116,6 +118,9 @@ pub struct GearEthTokensArgs {
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,
+
+    #[arg(long = "storage-path", env = "ETH_GEAR_TX_STORAGE_PATH")]
+    pub storage_path: PathBuf,
 }
 
 #[derive(Subcommand)]

@@ -8,6 +8,7 @@ use sails_rs::{gstd::msg, prelude::*};
 pub struct BridgingPayment;
 
 /// Events emitted by Bridging Payment service.
+#[event]
 #[derive(Encode, Decode, TypeInfo)]
 pub enum BridgingPaymentEvents {
     /// Fee for the message processing by relayer was paid.

@@ -94,7 +94,7 @@ impl<'a> ReplayBack<'a> {
 }
 
 fn process_headers(
-    service: &mut ReplayBack,
+    service: &mut ReplayBackExposure<ReplayBack<'_>>,
     state: &mut State,
     mut headers: Vec<BeaconBlockHeader>,
 ) -> bool {

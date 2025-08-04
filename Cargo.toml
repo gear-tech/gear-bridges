@@ -185,6 +185,7 @@ gear-core = "=1.9.0"
 gbuiltin-bls381 = "=1.9.0"
 gbuiltin-eth-bridge = "=1.9.0"
 pallet-gear-eth-bridge-primitives = "=1.9.0"
+# TODO: remove idl-gen and client-gen
 sails-idl-gen = "0.9.0"
 sails-client-gen = "0.9.0"
 sails-rs = "0.9.0"
@@ -199,17 +200,17 @@ awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", r
 ] }
 
 subxt = "0.37.0"
-sc-consensus-grandpa = { version = "0.30.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
-sp-runtime = { version = "39.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
-sp-consensus-grandpa = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
-parity-scale-codec = { version = "3.7.4", default-features = false, features = [
+sc-consensus-grandpa = { version = "0.30.0", default-features = false }
+sp-runtime = { version = "39.0.1", default-features = false }
+sp-consensus-grandpa = { version = "21.0.0", default-features = false }
+parity-scale-codec = { version = "3.7.5", default-features = false, features = [
     "derive",
 ] }
 trie-db = { version = "0.29.0", default-features = false }
-sp-trie = { version = "37.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
-sp-core = { version = "34.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-trie = { version = "37.0.0", default-features = false }
+sp-core = { version = "34.0.0", default-features = false }
 primitive-types = { version = "0.12.2", default-features = false }
-binary-merkle-tree = { version = "15.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+wat = "1.236.0"
 
 # Alloy deps
 alloy-consensus = { version = "=1.0.9", default-features = false }

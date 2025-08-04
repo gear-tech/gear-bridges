@@ -6,7 +6,7 @@ pub mod sync_update;
 pub use checkpoint::CheckpointFor;
 use ethereum_common::Hash256;
 pub use replay_back::ReplayBack;
-use sails_rs::{Encode, TypeInfo};
+use sails_rs::prelude::*;
 pub use state::State;
 pub use sync_update::SyncUpdate;
 

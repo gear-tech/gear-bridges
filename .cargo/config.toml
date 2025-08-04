@@ -1,0 +1,2 @@
+[env]
+GEAR_WORKSPACE_DIR = { value = "", relative = true }

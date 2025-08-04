@@ -1,11 +1,60 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY},
-    message_relayer::common::{Data, MessageInBlock},
+    message_relayer::common::RelayedMerkleRoot,
 };
 use ethereum_client::{EthApi, TxHash};
+use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::Gauge;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
+use uuid::Uuid;
+
+pub struct Request {
+    pub message: Message,
+    pub relayed_root: RelayedMerkleRoot,
+    pub proof: MerkleProof,
+    pub tx_uuid: Uuid,
+}
+
+pub struct Response {
+    pub tx_hash: TxHash,
+    pub tx_uuid: Uuid,
+}
+
+pub struct MessageSenderIo {
+    requests: UnboundedSender<Request>,
+    responses: UnboundedReceiver<Response>,
+}
+
+impl MessageSenderIo {
+    pub fn new(requests: UnboundedSender<Request>, responses: UnboundedReceiver<Response>) -> Self {
+        Self {
+            requests,
+            responses,
+        }
+    }
+
+    pub async fn recv(&mut self) -> Option<Response> {
+        self.responses.recv().await
+    }
+
+    pub fn send(
+        &mut self,
+        message: Message,
+        relayed_root: RelayedMerkleRoot,
+        proof: MerkleProof,
+        tx_uuid: Uuid,
+    ) -> bool {
+        self.requests
+            .send(Request {
+                message,
+                relayed_root,
+                proof,
+                tx_uuid,
+            })
+            .is_ok()
+    }
+}
 
 pub struct MessageSender {
     max_retries: u32,
@@ -39,19 +88,23 @@ impl MessageSender {
         }
     }
 
-    pub fn spawn(
-        self,
-        channel_message_data: UnboundedReceiver<Data>,
-        channel_tx_data: UnboundedSender<(TxHash, MessageInBlock)>,
-    ) {
-        tokio::task::spawn(task(self, channel_message_data, channel_tx_data));
+    pub fn spawn(self) -> MessageSenderIo {
+        let (req_tx, req_rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = mpsc::unbounded_channel();
+
+        tokio::task::spawn(task(self, req_rx, resp_tx));
+
+        MessageSenderIo {
+            requests: req_tx,
+            responses: resp_rx,
+        }
     }
 }
 
 async fn task(
     mut this: MessageSender,
-    mut channel_message_data: UnboundedReceiver<Data>,
-    channel_tx_data: UnboundedSender<(TxHash, MessageInBlock)>,
+    mut channel_message_data: UnboundedReceiver<Request>,
+    channel_tx_data: UnboundedSender<Response>,
 ) {
     if let Ok(fee_payer_balance) = this.eth_api.get_approx_balance().await {
         this.metrics.fee_payer_balance.set(fee_payer_balance);
@@ -66,9 +119,9 @@ async fn task(
                 attempts += 1;
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                 log::error!(
-                "Ethereum message sender failed (attempt: {attempts}/{}): {e}. Retrying in {delay:?}",
-                this.max_retries,
-            );
+                    "Ethereum message sender failed (attempt: {attempts}/{}): {e}. Retrying in {delay:?}",
+                    this.max_retries,
+                );
                 if attempts >= this.max_retries {
                     log::error!("Maximum attempts reached, exiting...");
                     break;
@@ -93,15 +146,16 @@ async fn task(
 
 async fn task_inner(
     this: &mut MessageSender,
-    channel_message_data: &mut UnboundedReceiver<Data>,
-    channel_tx_data: &UnboundedSender<(TxHash, MessageInBlock)>,
+    requests: &mut UnboundedReceiver<Request>,
+    responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
-    while let Some(data) = channel_message_data.recv().await {
-        let Data {
+    while let Some(request) = requests.recv().await {
+        let Request {
             message,
             relayed_root,
             proof,
-        } = data;
+            tx_uuid,
+        } = request;
 
         let tx_hash = this
             .eth_api
@@ -109,20 +163,20 @@ async fn task_inner(
                 relayed_root.block.0,
                 proof.num_leaves as u32,
                 proof.leaf_index as u32,
-                message.message.nonce_le,
-                message.message.source,
-                message.message.destination,
-                message.message.payload.to_vec(),
+                message.nonce_le,
+                message.source,
+                message.destination,
+                message.payload.to_vec(),
                 proof.proof,
             )
             .await?;
 
         log::info!(
             "Message with nonce {} relaying started: tx_hash = {tx_hash}",
-            hex::encode(message.message.nonce_le)
+            hex::encode(message.nonce_le)
         );
 
-        channel_tx_data.send((tx_hash, message))?;
+        responses.send(Response { tx_hash, tx_uuid })?;
 
         let fee_payer_balance = this.eth_api.get_approx_balance().await?;
         this.metrics.fee_payer_balance.set(fee_payer_balance);

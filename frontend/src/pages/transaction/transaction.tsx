@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
 import { useTokens } from '@/context';
+import { getAddressToTokenKey } from '@/context/tokens';
 import { useTransaction } from '@/features/history';
 import ArrowSVG from '@/features/history/assets/arrow.svg?react';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
@@ -114,8 +115,8 @@ function Transaction() {
   const sourceHex = source as HexString;
   const destinationHex = destination as HexString;
 
-  const sourceToken = addressToToken[sourceHex];
-  const destinationToken = addressToToken[destinationHex];
+  const sourceToken = addressToToken[getAddressToTokenKey(sourceHex, destinationHex)];
+  const destinationToken = addressToToken[getAddressToTokenKey(destinationHex, sourceHex)];
 
   const isPayFeeButtonVisible = account?.decodedAddress === sender && status === StatusEnum.AwaitingPayment;
   const varaNonce = sourceNetwork === NetworkEnum.Vara ? `0x${nonce.padStart(64, '0')}` : undefined;

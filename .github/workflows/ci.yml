@@ -199,7 +199,7 @@ jobs:
           docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.9.0 gear --dev --tmp --rpc-external
 
       - name: Run tests
-        run: cargo test --release --workspace
+        run: cargo test --release --package tests vft_manager::vft_burn_from -- --ignored && cargo test --release --workspace
           --exclude prover
           --exclude plonky2_blake2b256
           --exclude plonky2_ecdsa

@@ -1,0 +1,65 @@
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.button {
+  --border-color: #00ffc433;
+
+  width: 52px;
+  height: 52px;
+  margin: 0 auto;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  position: absolute;
+  bottom: -26px;
+  left: 0;
+  right: 0;
+  z-index: 1; /* To be above the swap form during its animation */
+
+  background:
+    linear-gradient(#13191e, #13191e) padding-box,
+    linear-gradient(
+        to bottom,
+        var(--border-color) 0%,
+        var(--border-color) 50%,
+        transparent 50%,
+        transparent 65%,
+        var(--border-color) 65%,
+        var(--border-color) 100%
+      )
+      border-box;
+  border: 1px solid transparent;
+  border-radius: 50%;
+
+  // Using animation instead of transition,
+  // because swap form is rendering different components based on network
+  animation: rotate 0.5s ease-in-out;
+
+  transition:
+    border-color 0.25s,
+    background-color 0.25s;
+
+  &:hover {
+    border-color: #00ffc4;
+
+    .icon {
+      opacity: 1;
+    }
+  }
+}
+
+.icon {
+  flex-shrink: 0;
+
+  opacity: 0.8;
+  transition: opacity 0.25s;
+}

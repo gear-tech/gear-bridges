@@ -1,0 +1,32 @@
+.container {
+  flex: 1;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+// same as in faq
+.heading,
+.subheading {
+  text-align: center;
+}
+
+.heading {
+  margin-bottom: 16px;
+
+  text-align: center;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 120%;
+}
+
+.subheading {
+  max-width: 465px;
+  margin-bottom: 64px;
+
+  font-size: 16px;
+  line-height: 140%;
+  color: #f6f6f6e5;
+}

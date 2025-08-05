@@ -1,0 +1,148 @@
+.networks {
+  margin-bottom: 24px;
+
+  font-size: 14px;
+  line-height: 20px;
+
+  .heading {
+    margin-bottom: 8px;
+
+    color: #9cacb1;
+  }
+
+  .list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+
+    .network {
+      padding: 12px;
+
+      text-align: center;
+      color: #fff;
+
+      background-color: #ffffff03;
+      border: 1px solid #ffffff0a;
+      border-radius: 4px;
+
+      transition:
+        background-color 0.25s,
+        border-color 0.25s;
+
+      &:hover {
+        background-color: #13191e;
+        border-color: #0abe92;
+      }
+
+      &.active {
+        background-color: #00ffc30f;
+        border-color: #00ffc30d;
+      }
+
+      svg {
+        margin-bottom: 4px;
+
+        width: 32px;
+        height: 32px;
+      }
+    }
+  }
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 24px;
+  color: #fff;
+
+  transition: color 0.25s;
+
+  svg path {
+    transition: fill 0.25s;
+  }
+
+  &:hover {
+    color: #00ffc4;
+
+    svg path {
+      fill: #00ffc4;
+    }
+  }
+}
+
+.input {
+  margin-bottom: 12px;
+}
+
+.tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tokenButton {
+  width: 100%;
+  padding: 8px 14px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  font-size: 14px;
+
+  background-color: #ffffff03;
+  border: 1px solid #ffffff0a;
+  border-radius: 4px;
+
+  transition:
+    background-color 0.25s,
+    border-color 0.25s;
+
+  &:hover {
+    background-color: #13191e;
+    border-color: #0abe92;
+  }
+
+  &.active {
+    background-color: #00ffc30f;
+    border-color: #00ffc30d;
+  }
+}
+
+.wallet {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+
+  .token {
+    display: flex;
+    flex-direction: column;
+
+    line-height: 20px;
+
+    .symbol {
+      color: #f6f6f6e5;
+    }
+
+    .network {
+      font-size: 12px;
+      color: #9cacb1;
+    }
+  }
+}
+
+.balance {
+  line-height: 20px;
+  color: #fff;
+}
+
+.notFound {
+  margin-top: 32px;
+
+  text-align: center;
+  color: #9cacb1;
+}

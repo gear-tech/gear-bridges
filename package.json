@@ -1,0 +1,33 @@
+{
+  "name": "gear-bridges",
+  "private": true,
+  "author": "Gear Technologies",
+  "license": "GPL-3.0",
+  "repository": "git@github.com:gear-tech/gear-bridges.git",
+  "engines": {
+    "node": ">=20"
+  },
+  "bugs": {
+    "url": "https://github.com/gear-tech/gear-bridges/issues"
+  },
+  "homepage": "https://github.com/gear-tech/gear-bridges",
+  "packageManager": "yarn@4.9.2",
+  "version": "0.0.1",
+  "workspaces": [
+    "js/indexer",
+    "js/frontend"
+  ],
+  "devDependencies": {
+    "eslint": "9.28.0",
+    "lerna": "^8.2.3",
+    "prettier": "3.5.3",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "build:frontend": "lerna run build --scope frontend --verbose",
+    "build:indexer": "lerna run build --scope indexer --verbose"
+  },
+  "dependencies": {
+    "reflect-metadata": "^0.2.2"
+  }
+}

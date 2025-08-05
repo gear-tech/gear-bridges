@@ -1,0 +1,36 @@
+.balance {
+  display: flex;
+  align-items: center;
+
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: #828b8e;
+}
+
+.heading {
+  margin-right: 16px;
+}
+
+.button {
+  margin-left: 8px;
+  padding: 0 8px;
+
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 24px;
+  color: #56b99f;
+
+  background-color: rgba(#00ffc4, 0.1);
+  border-radius: 4px;
+
+  transition: opacity 0.25s;
+
+  &:hover {
+    opacity: 0.5;
+  }
+
+  &:disabled {
+    opacity: 0.25;
+  }
+}

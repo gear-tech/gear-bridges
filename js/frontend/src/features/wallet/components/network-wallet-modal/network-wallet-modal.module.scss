@@ -1,0 +1,35 @@
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 12px 14px;
+
+  font-size: 14px;
+  line-height: 20px;
+  color: #f6f6f6;
+
+  background-color: #ffffff03;
+  border: 1px solid #ffffff0a;
+  border-radius: 4px;
+
+  transition:
+    background-color 0.25s,
+    border-color 0.25s;
+
+  &:hover {
+    background-color: #13191e;
+    border-color: #0abe92;
+  }
+
+  svg {
+    width: 32px;
+    height: 32px;
+  }
+}

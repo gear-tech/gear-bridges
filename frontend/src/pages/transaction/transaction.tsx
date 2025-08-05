@@ -12,34 +12,10 @@ import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
 import { PayVaraFeeButton } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
+import { Field } from './field';
+import { SectionCard } from './section-card';
+import { TransactionSkeleton } from './transaction-skeleton';
 import styles from './transaction.module.scss';
-
-type FieldProps = PropsWithChildren & {
-  label: string;
-};
-
-function Field({ label, children }: FieldProps) {
-  return (
-    <div className={styles.field}>
-      <span className={styles.label}>{label}:</span>
-      <Card className={styles.value}>{children}</Card>
-    </div>
-  );
-}
-
-type SectionCardProps = PropsWithChildren & {
-  heading: string;
-  gridContent?: boolean;
-};
-
-function SectionCard({ heading, children, gridContent = true }: SectionCardProps) {
-  return (
-    <Card className={styles.section}>
-      <h2 className={styles.heading}>{heading}</h2>
-      <div className={gridContent ? styles.content : undefined}>{children}</div>
-    </Card>
-  );
-}
 
 type Params = {
   id: string;
@@ -113,7 +89,7 @@ function Transaction() {
   const { addressToToken } = useTokens();
   const { data } = useTransaction(id);
 
-  if (!data || !addressToToken) return;
+  if (!data || !addressToToken) return <TransactionSkeleton />;
 
   const {
     status,
@@ -296,7 +272,7 @@ function Transaction() {
 
           <Field label="Completed At Block">
             {completedAtBlock ? (
-              <ExplorerLink network={sourceNetwork} id={completedAtBlock} urls={BLOCK_URL}>
+              <ExplorerLink network={destNetwork} id={completedAtBlock} urls={BLOCK_URL}>
                 #{completedAtBlock.toLocaleString()}
               </ExplorerLink>
             ) : (
@@ -307,7 +283,7 @@ function Transaction() {
           <Field label="Completed At Transaction Hash">
             {completedAtTxHash ? (
               <>
-                <ExplorerLink network={sourceNetwork} id={completedAtTxHash} urls={TX_URL}>
+                <ExplorerLink network={destNetwork} id={completedAtTxHash} urls={TX_URL}>
                   <Address value={completedAtTxHash} />
                 </ExplorerLink>
 

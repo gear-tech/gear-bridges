@@ -66,9 +66,12 @@
     align-items: center;
     justify-content: center;
 
-    background-color: #ffffff05;
     border-radius: 50%;
-    border: 1px solid #00ffc433;
+
+    &:not(.skeleton) {
+      background-color: #ffffff05;
+      border: 1px solid #00ffc433;
+    }
 
     svg {
       flex-shrink: 0;

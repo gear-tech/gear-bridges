@@ -16,6 +16,7 @@ use crate::{
 };
 
 /// Events enmitted by the Historical Proxy service.
+#[event]
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
@@ -54,13 +55,16 @@ pub struct HistoricalProxyService<'a> {
     state: &'a RefCell<ProxyState>,
 }
 
-#[sails_rs::service(events = Event)]
 impl<'a> HistoricalProxyService<'a> {
     pub fn new(state: &'a RefCell<ProxyState>) -> Self {
         Self { state }
     }
+}
 
+#[sails_rs::service(events = Event)]
+impl<'a> HistoricalProxyService<'a> {
     /// Get current service admin.
+    #[export]
     pub fn admin(&self) -> ActorId {
         self.state.borrow().admin
     }
@@ -68,6 +72,7 @@ impl<'a> HistoricalProxyService<'a> {
     /// Update the current service admin to `admin_new`.
     ///
     /// This function can be called only by the admin.
+    #[export]
     pub fn update_admin(&mut self, admin_new: ActorId) {
         let source = Syscall::message_source();
 
@@ -80,6 +85,7 @@ impl<'a> HistoricalProxyService<'a> {
     }
 
     /// Get endpoint for the specified `slot`.
+    #[export]
     pub fn endpoint_for(&self, slot: Slot) -> Result<ActorId, ProxyError> {
         self.state.borrow().endpoints.endpoint_for(slot)
     }
@@ -88,6 +94,7 @@ impl<'a> HistoricalProxyService<'a> {
     /// requests with slots starting from `slot`.
     ///
     /// This function can be called only by an admin.
+    #[export]
     pub fn add_endpoint(&mut self, slot: Slot, endpoint: ActorId) {
         let source = Syscall::message_source();
 
@@ -100,6 +107,7 @@ impl<'a> HistoricalProxyService<'a> {
     }
 
     /// Get endpoint map stored in this service.
+    #[export]
     pub fn endpoints(&self) -> Vec<(Slot, ActorId)> {
         self.state.borrow().endpoints.endpoints()
     }
@@ -120,6 +128,7 @@ impl<'a> HistoricalProxyService<'a> {
     /// - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
     /// - `ProxyError`: if redirect failed
     #[allow(clippy::await_holding_refcell_ref)]
+    #[export]
     pub async fn redirect(
         &mut self,
         slot: Slot,

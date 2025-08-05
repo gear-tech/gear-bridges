@@ -235,14 +235,13 @@ fn emit_event(to: ActorId, from: H160, amount: U256, token: ActorId) {
         const ROUTE: [u8; 11usize] = [
             40u8, 86u8, 102u8, 116u8, 77u8, 97u8, 110u8, 97u8, 103u8, 101u8, 114u8,
         ];
-        sails_rs::gstd::__emit_event_with_route(
-            &ROUTE,
-            crate::services::Event::BridgingAccepted {
+        EventEmitter::<crate::services::Event>::new(&ROUTE)
+            .emit_event(crate::services::Event::BridgingAccepted {
                 to,
                 from,
                 amount,
                 token,
-            },
-        );
+            })
+            .expect("Failed to emit event");
     }
 }

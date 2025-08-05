@@ -113,12 +113,15 @@ pub struct SyncUpdate<'a> {
     state: &'a RefCell<State>,
 }
 
-#[sails_rs::service(events = Event)]
 impl<'a> SyncUpdate<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
     }
+}
 
+#[sails_rs::service(events = Event)]
+impl<'a> SyncUpdate<'a> {
+    #[export]
     pub async fn process(
         &mut self,
         sync_update: SyncCommitteeUpdate,

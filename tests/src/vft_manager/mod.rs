@@ -1,7 +1,7 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, Result};
-use gear_core::gas::GasInfo;
+use gear_core::rpc::GasInfo;
 use sails_rs::{calls::*, events::EventIo, gclient::calls::*, prelude::*};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
@@ -1261,7 +1261,7 @@ async fn migrate_transactions() -> Result<()> {
 }
 
 #[tokio::test]
-async fn vft_burn_from() -> Result<()> {
+async fn avft_burn_from() -> Result<()> {
     use vft_vara_client::{
         traits::{Vft, VftAdmin, VftExtension, VftVaraFactory},
         vft_2::events::Vft2Events,

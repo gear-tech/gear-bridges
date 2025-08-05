@@ -1,14 +1,10 @@
-@keyframes pulse {
-  0% {
-    opacity: 1;
+@keyframes shimmer {
+  from {
+    background-position: -200px 0;
   }
 
-  50% {
-    opacity: 0.4;
-  }
-
-  100% {
-    opacity: 1;
+  to {
+    background-position: calc(200px + 100%) 0;
   }
 }
 
@@ -19,7 +15,9 @@
   border-radius: 8px;
 
   &.loading {
-    animation: pulse 2s ease-in-out 0.5s infinite;
+    background: linear-gradient(90deg, rgba(#fff, 0.01) 25%, rgba(#fff, 0.1) 50%, rgba(#fff, 0.01) 75%);
+    background-size: 200px 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
   }
 
   &:empty {

@@ -59,15 +59,10 @@ const BLOCK_URL = {
   [NetworkEnum.Ethereum]: (blockNumber: string) => `https://hoodi.etherscan.io/block/${blockNumber}`,
 } as const;
 
-const MESSAGE_URL = {
-  [NetworkEnum.Vara]: (id: string) => `https://idea.gear-tech.io/messages/${id}?node=wss://testnet.vara.network`,
-  [NetworkEnum.Ethereum]: () => undefined,
-} as const;
-
 type ExplorerLinkProps = PropsWithChildren & {
   network: NetworkEnum;
   id: string;
-  urls: typeof TX_URL | typeof BLOCK_URL | typeof ACCOUNT_URL | typeof MESSAGE_URL;
+  urls: typeof TX_URL | typeof BLOCK_URL | typeof ACCOUNT_URL;
 };
 
 function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
@@ -250,10 +245,7 @@ function Transaction() {
           <Field label="Vara Message ID">
             {bridgingStartedAtMessageId ? (
               <>
-                <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtMessageId} urls={MESSAGE_URL}>
-                  <Address value={bridgingStartedAtMessageId} />
-                </ExplorerLink>
-
+                <Address value={bridgingStartedAtMessageId} />
                 <CopyButton value={bridgingStartedAtMessageId} message="Message ID copied to clipboard" />
               </>
             ) : (

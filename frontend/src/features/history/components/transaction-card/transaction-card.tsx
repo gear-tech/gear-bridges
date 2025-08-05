@@ -29,7 +29,7 @@ type Props = Pick<
   | 'nonce'
   | 'blockNumber'
 > & {
-  addressToToken: Record<HexString, Token>;
+  addressToToken: Record<`${HexString}-${HexString}`, Token>;
 };
 
 function TransactionCard(props: Props) {

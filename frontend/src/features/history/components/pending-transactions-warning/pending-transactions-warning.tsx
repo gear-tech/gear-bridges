@@ -5,17 +5,21 @@ import WarningSVG from '@/assets/warning.svg?react';
 import { ROUTE } from '@/consts';
 
 import { useTransactionsCount } from '../../hooks';
-import { Status, TransferWhereInput } from '../../types';
+import { Status, TransferFilter } from '../../types';
 
 import styles from './pending-transactions-warning.module.scss';
 
 function PendingTransactionsWarning() {
   const { account } = useAccount(); // fee payment is a standalone transaction only for vara network
 
-  const [txsCount] = useTransactionsCount(
+  const { data: txsCount } = useTransactionsCount(
     account
-      ? ({ sender_eq: account.decodedAddress, status_eq: Status.AwaitingPayment } as TransferWhereInput)
+      ? ({
+          sender: { equalTo: account.decodedAddress },
+          status: { equalTo: Status.AwaitingPayment },
+        } as TransferFilter)
       : undefined,
+    60000,
   );
 
   if (!account || !txsCount) return;

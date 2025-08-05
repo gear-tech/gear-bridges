@@ -10,7 +10,7 @@ import { useDebounce, useEthAccount } from '@/hooks';
 import { asOptionalField, isNumeric } from '@/utils';
 
 import { DEFAULT_VALUES, FIELD_NAME } from '../consts';
-import { Status, TransferWhereInput } from '../types';
+import { Status, TransferFilter } from '../types';
 
 const SCHEMA = z.object({
   [FIELD_NAME.TIMESTAMP]: z.string(),
@@ -80,22 +80,34 @@ function useTransactionFilters() {
   const [debouncedSearch] = useDebounce(search, 300);
 
   const filters = useMemo(() => {
-    const where = {} as TransferWhereInput;
+    const filter = {} as TransferFilter;
 
-    if (timestamp) where.timestamp_gt = timestamp;
-    if (status) where.status_eq = status;
+    if (timestamp) {
+      filter.timestamp = { greaterThan: timestamp } as TransferFilter['timestamp'];
+    }
+
+    if (status) {
+      filter.status = { equalTo: status } as TransferFilter['status'];
+    }
 
     if (asset) {
       const [source, destination] = asset.split('.') as [HexString, HexString];
 
-      where.source_eq = source;
-      where.destination_eq = destination;
+      filter.source = { equalTo: source } as TransferFilter['source'];
+      filter.destination = { equalTo: destination } as TransferFilter['destination'];
     }
 
-    if (debouncedSearch && !searchError) where.blockNumber_eq = debouncedSearch;
-    if (owner && accountAddress) where.sender_containsInsensitive = accountAddress;
+    if (debouncedSearch && !searchError) {
+      filter.blockNumber = { equalTo: debouncedSearch } as TransferFilter['blockNumber'];
+    }
 
-    return where;
+    if (owner && accountAddress) {
+      filter.sender = { includesInsensitive: accountAddress } as TransferFilter['sender'];
+    }
+
+    if (Object.keys(filter).length === 0) return;
+
+    return filter;
   }, [timestamp, status, asset, searchError, debouncedSearch, owner, accountAddress]);
 
   return { form, filters };

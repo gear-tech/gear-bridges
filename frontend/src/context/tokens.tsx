@@ -2,12 +2,14 @@ import { HexString } from '@gear-js/api';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
-import { Network, Pair } from '@/features/history/graphql/graphql';
+import { NetworkEnum, Pair } from '@/features/history/graphql/graphql';
 import { NETWORK } from '@/features/swap/consts';
 import { useVaraSymbol } from '@/hooks';
 
+type AddressToTokenKey = `${HexString}-${HexString}`;
+
 type Value = {
-  addressToToken: Record<HexString, Token> | undefined;
+  addressToToken: Record<AddressToTokenKey, Token> | undefined;
 
   tokens: {
     active: Token[] | undefined;
@@ -42,6 +44,7 @@ const useTokens = () => useContext(TokensContext);
 
 type Token = {
   address: HexString;
+  destinationAddress: HexString;
   name: string;
   symbol: string;
   displaySymbol: string;
@@ -51,15 +54,19 @@ type Token = {
   isActive: boolean;
 };
 
+// TODO: refactor
+const getAddressToTokenKey = (sourceAddress: HexString, destinationAddress: HexString): AddressToTokenKey =>
+  `${sourceAddress}-${destinationAddress}`;
+
 const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
-  const addressToToken: Record<HexString, Token> = {};
+  const addressToToken: Record<AddressToTokenKey, Token> = {};
 
   pairs.forEach((pair) => {
     const varaAddress = pair.varaToken as HexString;
-    const isVaraNative = pair.tokenSupply === Network.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara');
+    const isVaraNative = pair.tokenSupply === NetworkEnum.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara');
 
     const ethAddress = pair.ethToken as HexString;
-    const isEthNative = pair.tokenSupply === Network.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth');
+    const isEthNative = pair.tokenSupply === NetworkEnum.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth');
 
     // changing wrapped native symbol to native symbol
     const varaDisplaySymbol = isVaraNative ? varaSymbol : pair.varaTokenSymbol;
@@ -67,6 +74,7 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
 
     const varaToken: Token = {
       address: varaAddress,
+      destinationAddress: ethAddress,
       name: pair.varaTokenName,
       symbol: pair.varaTokenSymbol,
       displaySymbol: varaDisplaySymbol,
@@ -78,6 +86,7 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
 
     const ethToken: Token = {
       address: ethAddress,
+      destinationAddress: varaAddress,
       name: pair.ethTokenName,
       symbol: pair.ethTokenSymbol,
       displaySymbol: ethDisplaySymbol,
@@ -87,8 +96,8 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isActive: pair.isActive,
     };
 
-    addressToToken[varaAddress] = varaToken;
-    addressToToken[ethAddress] = ethToken;
+    addressToToken[getAddressToTokenKey(varaAddress, ethAddress)] = varaToken;
+    addressToToken[getAddressToTokenKey(ethAddress, varaAddress)] = ethToken;
   });
 
   return addressToToken;
@@ -134,5 +143,5 @@ function TokensProvider({ children }: PropsWithChildren) {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export { TokensProvider, useTokens };
+export { TokensProvider, useTokens, getAddressToTokenKey };
 export type { Token };

@@ -11,32 +11,27 @@ type Props = {
   type: 'select' | 'text';
   address: HexString | undefined;
   symbol: string | undefined;
-  displaySymbol: string | undefined;
   network: 'vara' | 'eth';
   networkText: string;
 };
 
-function Token({ type, address, symbol, displaySymbol, network, networkText }: Props) {
+function Token({ type, address, symbol, network, networkText }: Props) {
   return (
     <div className={cx(styles.container, styles[type])}>
       <TokenSVG symbol={symbol} network={network} sizes={[48, 28]} />
 
       <div className={styles.token}>
         <div className={styles.info}>
-          {(!address || !displaySymbol) && (
+          {(!address || !symbol) && (
             <>
               <Skeleton width="6rem" height="24px" />
               <Skeleton width="4rem" height="12px" />
             </>
           )}
 
-          {address && displaySymbol && (
+          {address && symbol && (
             <>
-              {type === 'text' ? (
-                <p className={styles.symbol}>{displaySymbol}</p>
-              ) : (
-                <SelectToken symbol={displaySymbol} />
-              )}
+              {type === 'text' ? <p className={styles.symbol}>{symbol}</p> : <SelectToken symbol={symbol} />}
 
               <div className={styles.addressContainer}>
                 <Address value={address} tooltip={{ side: 'bottom' }} className={styles.address} />

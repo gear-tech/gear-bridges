@@ -11,7 +11,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  *      setting `ERC20Manager` smart contract that will handle bridging requests.
  */
 contract BridgingPayment is IBridgingPayment, Ownable {
-    address public immutable erc20Manager;
+    address private immutable ERC20_MANAGER;
+
     uint256 public fee;
 
     /**
@@ -21,15 +22,22 @@ contract BridgingPayment is IBridgingPayment, Ownable {
      * @param initialOwner The address that will receive the bridging fees.
      */
     constructor(address _erc20Manager, uint256 _fee, address initialOwner) Ownable(initialOwner) {
-        erc20Manager = _erc20Manager;
+        ERC20_MANAGER = _erc20Manager;
         fee = _fee;
+    }
+
+    /**
+     * @dev Returns the address of the ERC20Manager.
+     */
+    function erc20Manager() external view returns (address) {
+        return ERC20_MANAGER;
     }
 
     /**
      * @dev Modifier to check if the caller is the ERC20Manager.
      */
     modifier onlyErc20Manager() {
-        if (msg.sender != erc20Manager) {
+        if (msg.sender != ERC20_MANAGER) {
             revert OnlyErc20Manager();
         }
         _;

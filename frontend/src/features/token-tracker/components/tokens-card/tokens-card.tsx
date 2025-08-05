@@ -26,6 +26,7 @@ function TokensCard() {
   const network = isVaraNetwork ? NETWORK.VARA : NETWORK.ETH;
 
   const varaSymbol = useVaraSymbol();
+  const networkSymbol = isVaraNetwork ? varaSymbol : 'ETH';
   const alert = useAlert();
 
   const { tokens, nativeToken: _nativeToken } = useTokens();
@@ -58,7 +59,7 @@ function TokensCard() {
   };
 
   const renderBalances = () => {
-    if (!networkTokens || !ftBalances)
+    if (!networkTokens || !ftBalances || !networkSymbol)
       return new Array(4).fill(null).map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
     return networkTokens.map(({ address, decimals, symbol, isNative }) => {
@@ -70,7 +71,7 @@ function TokensCard() {
             {isNative ? (
               Boolean(balance) && (
                 <Button
-                  text={`Convert To ${symbol}`}
+                  text={`Convert To ${networkSymbol}`}
                   size="small"
                   onClick={() => handleBurnClick(balance)}
                   isLoading={burn.isPending}
@@ -98,12 +99,12 @@ function TokensCard() {
       </header>
 
       <ul className={styles.list}>
-        {!isUndefined(accountBalance.data) && varaSymbol && nativeToken && (
+        {!isUndefined(accountBalance.data) && networkSymbol && nativeToken && (
           <li>
             <BalanceCard
               value={accountBalance.data}
               decimals={isVaraNetwork ? 12 : 18}
-              symbol={isVaraNetwork ? varaSymbol : 'ETH'}
+              symbol={networkSymbol}
               network={network}>
               {isVaraNetwork ? (
                 <GetBalanceButton.VaraAccount />

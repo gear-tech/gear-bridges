@@ -119,7 +119,7 @@ function Transaction() {
   const destinationToken = addressToToken[getAddressToTokenKey(destinationHex, sourceHex)];
 
   const isPayFeeButtonVisible = account?.decodedAddress === sender && status === StatusEnum.AwaitingPayment;
-  const varaNonce = sourceNetwork === NetworkEnum.Vara ? `0x${nonce.padStart(64, '0')}` : undefined;
+  const rawNonce = sourceNetwork === NetworkEnum.Vara ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
     <Container className={styles.container}>
@@ -132,7 +132,7 @@ function Transaction() {
         <div className={styles.sidebar}>
           <TransactionStatus status={status} />
 
-          {isPayFeeButtonVisible && varaNonce && <PayVaraFeeButton transactionId={id} nonce={varaNonce} />}
+          {isPayFeeButtonVisible && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
         </div>
       </header>
 
@@ -227,8 +227,8 @@ function Transaction() {
           </Field>
 
           <Field label="Transaction Nonce">
-            <Address value={nonce} />
-            <CopyButton value={nonce} message="Transaction nonce copied to clipboard" />
+            <Address value={rawNonce} />
+            <CopyButton value={rawNonce} message="Transaction nonce copied to clipboard" />
           </Field>
 
           <Field label="Block Number">

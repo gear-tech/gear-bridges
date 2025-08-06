@@ -181,7 +181,8 @@ async fn task_inner(
                     tx_uuid
                 );
                 if responses
-                    .send(Response::MessageAlreadyProcessed(tx_uuid)).is_err()
+                    .send(Response::MessageAlreadyProcessed(tx_uuid))
+                    .is_err()
                 {
                     log::info!("Response channel closed, exiting");
                     return Ok(());
@@ -197,7 +198,8 @@ async fn task_inner(
         );
 
         if responses
-            .send(Response::ProcessingStarted(tx_hash, tx_uuid)).is_err()
+            .send(Response::ProcessingStarted(tx_hash, tx_uuid))
+            .is_err()
         {
             log::info!("Response channel closed, exiting");
             return Ok(());

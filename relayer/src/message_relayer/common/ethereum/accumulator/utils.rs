@@ -149,6 +149,10 @@ impl MerkleRoots {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     #[allow(dead_code)]
     pub fn get(&self, i: usize) -> Option<&RelayedMerkleRoot> {
         self.0.get(i)

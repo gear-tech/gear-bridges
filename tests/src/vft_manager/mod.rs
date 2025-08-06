@@ -1261,7 +1261,7 @@ async fn migrate_transactions() -> Result<()> {
 }
 
 #[tokio::test]
-async fn avft_burn_from() -> Result<()> {
+async fn vft_burn_from() -> Result<()> {
     use vft_vara_client::{
         traits::{Vft, VftAdmin, VftExtension, VftVaraFactory},
         vft_2::events::Vft2Events,

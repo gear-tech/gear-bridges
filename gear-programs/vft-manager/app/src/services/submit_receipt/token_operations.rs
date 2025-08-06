@@ -2,7 +2,7 @@ use crate::services::{Config, Error};
 use gstd::{errors::Error as GStdError, msg};
 use sails_rs::{
     calls::{ActionIo, Call},
-    gstd::calls::GStdRemoting,
+    gstd::calls::{GStdRemoting, WithArgs},
     prelude::*,
 };
 use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
@@ -209,6 +209,7 @@ pub async fn unlock(
 ) -> Result<(), Error> {
     let sender = Syscall::program_id();
 
+    // TODO: replace with just `Transfer`?
     send::<TransferFrom>(
         slot,
         transaction_index,
@@ -219,10 +220,12 @@ pub async fn unlock(
     )
     .await?;
 
+    // TODO: add check if it's WVARA!
     let remoting = GStdRemoting;
     let mut service = vft_vara_client::VftNativeExchangeAdmin::new(remoting);
     service
         .burn_from(receiver, amount)
+        .with_reply_deposit(Some(config.gas_for_reply_deposit))
         .send_recv(token_id)
         .await
         .map_err(|e| Error::BurnFromFailed(format!("{e:?}")))

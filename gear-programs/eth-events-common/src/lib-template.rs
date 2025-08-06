@@ -13,7 +13,7 @@ impl Program {
         }))
     }
 
-    pub fn ethereum_event_client(&self) -> Service {
+    pub fn ethereum_event_client(&self) -> Service<'_> {
         Service::new(&self.0)
     }
 }

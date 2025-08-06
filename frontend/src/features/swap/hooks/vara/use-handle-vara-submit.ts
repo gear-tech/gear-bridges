@@ -9,7 +9,7 @@ import { SUBMIT_STATUS, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
-import { usePayFee } from './use-pay-fee';
+import { usePayFeeWithAwait } from './use-pay-fee-with-await';
 import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
@@ -36,7 +36,7 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
-  const payFee = usePayFee(bridgingFee);
+  const payFee = usePayFeeWithAwait(bridgingFee);
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {

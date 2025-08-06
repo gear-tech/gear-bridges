@@ -50,7 +50,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const { open: openEthWalletModal } = useAppKit();
   const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
-  const [transactionModal, setTransactionModal] = useState<ComponentProps<typeof TransactionModal> | undefined>();
+
+  const [transactionModal, setTransactionModal] = useState<
+    Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
+  >();
 
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
@@ -226,8 +229,9 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
           )}
         </form>
       </FormProvider>
-
       {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
+
+      {/* passing renderProgressBar explicitly to avoid state closure */}
       {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
     </>
   );

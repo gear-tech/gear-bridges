@@ -180,8 +180,14 @@ async fn task_inner(
                     hex::encode(message.nonce_le),
                     tx_uuid
                 );
-                responses.send(Response::MessageAlreadyProcessed(tx_uuid))?;
-                return Ok(());
+                if !responses
+                    .send(Response::MessageAlreadyProcessed(tx_uuid))
+                    .is_ok()
+                {
+                    log::info!("Response channel closed, exiting");
+                    return Ok(());
+                }
+                continue;
             }
             Err(e) => return Err(anyhow::anyhow!("Failed to provide content message: {e}")),
         };
@@ -191,7 +197,13 @@ async fn task_inner(
             hex::encode(message.nonce_le)
         );
 
-        responses.send(Response::ProcessingStarted(tx_hash, tx_uuid))?;
+        if !responses
+            .send(Response::ProcessingStarted(tx_hash, tx_uuid))
+            .is_ok()
+        {
+            log::info!("Response channel closed, exiting");
+            return Ok(());
+        }
 
         let fee_payer_balance = this.eth_api.get_approx_balance().await?;
         this.metrics.fee_payer_balance.set(fee_payer_balance);

@@ -4,13 +4,9 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'js/**'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - 'js/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

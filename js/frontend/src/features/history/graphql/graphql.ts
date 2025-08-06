@@ -81,100 +81,6 @@ export type BooleanFilter = {
   notIn: InputMaybe<Array<Scalars['Boolean']['input']>>;
 };
 
-export type CompletedTransfer = Node & {
-  __typename?: 'CompletedTransfer';
-  blockNumber: Scalars['BigInt']['output'];
-  destNetwork: NetworkEnum;
-  id: Scalars['String']['output'];
-  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
-  nodeId: Scalars['ID']['output'];
-  srcNetwork: NetworkEnum;
-  timestamp: Maybe<Scalars['Datetime']['output']>;
-  txHash: Scalars['String']['output'];
-};
-
-/**
- * A condition to be used against `CompletedTransfer` object types. All fields are
- * tested for equality and combined with a logical ‘and.’
- */
-export type CompletedTransferCondition = {
-  /** Checks for equality with the object’s `blockNumber` field. */
-  blockNumber: InputMaybe<Scalars['BigInt']['input']>;
-  /** Checks for equality with the object’s `destNetwork` field. */
-  destNetwork: InputMaybe<NetworkEnum>;
-  /** Checks for equality with the object’s `id` field. */
-  id: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `srcNetwork` field. */
-  srcNetwork: InputMaybe<NetworkEnum>;
-  /** Checks for equality with the object’s `timestamp` field. */
-  timestamp: InputMaybe<Scalars['Datetime']['input']>;
-  /** Checks for equality with the object’s `txHash` field. */
-  txHash: InputMaybe<Scalars['String']['input']>;
-};
-
-/** A filter to be used against `CompletedTransfer` object types. All fields are combined with a logical ‘and.’ */
-export type CompletedTransferFilter = {
-  /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<CompletedTransferFilter>>;
-  /** Filter by the object’s `blockNumber` field. */
-  blockNumber: InputMaybe<BigIntFilter>;
-  /** Filter by the object’s `destNetwork` field. */
-  destNetwork: InputMaybe<NetworkEnumFilter>;
-  /** Filter by the object’s `id` field. */
-  id: InputMaybe<StringFilter>;
-  /** Negates the expression. */
-  not: InputMaybe<CompletedTransferFilter>;
-  /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<CompletedTransferFilter>>;
-  /** Filter by the object’s `srcNetwork` field. */
-  srcNetwork: InputMaybe<NetworkEnumFilter>;
-  /** Filter by the object’s `timestamp` field. */
-  timestamp: InputMaybe<DatetimeFilter>;
-  /** Filter by the object’s `txHash` field. */
-  txHash: InputMaybe<StringFilter>;
-};
-
-/** A connection to a list of `CompletedTransfer` values. */
-export type CompletedTransfersConnection = {
-  __typename?: 'CompletedTransfersConnection';
-  /** A list of edges which contains the `CompletedTransfer` and cursor to aid in pagination. */
-  edges: Array<CompletedTransfersEdge>;
-  /** A list of `CompletedTransfer` objects. */
-  nodes: Array<CompletedTransfer>;
-  /** Information to aid in pagination. */
-  pageInfo: PageInfo;
-  /** The count of *all* `CompletedTransfer` you could get from the connection. */
-  totalCount: Scalars['Int']['output'];
-};
-
-/** A `CompletedTransfer` edge in the connection. */
-export type CompletedTransfersEdge = {
-  __typename?: 'CompletedTransfersEdge';
-  /** A cursor for use in pagination. */
-  cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `CompletedTransfer` at the end of the edge. */
-  node: CompletedTransfer;
-};
-
-/** Methods to use when ordering `CompletedTransfer`. */
-export enum CompletedTransfersOrderBy {
-  BlockNumberAsc = 'BLOCK_NUMBER_ASC',
-  BlockNumberDesc = 'BLOCK_NUMBER_DESC',
-  DestNetworkAsc = 'DEST_NETWORK_ASC',
-  DestNetworkDesc = 'DEST_NETWORK_DESC',
-  IdAsc = 'ID_ASC',
-  IdDesc = 'ID_DESC',
-  Natural = 'NATURAL',
-  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-  SrcNetworkAsc = 'SRC_NETWORK_ASC',
-  SrcNetworkDesc = 'SRC_NETWORK_DESC',
-  TimestampAsc = 'TIMESTAMP_ASC',
-  TimestampDesc = 'TIMESTAMP_DESC',
-  TxHashAsc = 'TX_HASH_ASC',
-  TxHashDesc = 'TX_HASH_DESC',
-}
-
 /** A filter to be used against Datetime fields. All fields are combined with a logical ‘and.’ */
 export type DatetimeFilter = {
   /** Not equal to the specified value, treating null like an ordinary value. */
@@ -200,72 +106,6 @@ export type DatetimeFilter = {
   /** Not included in the specified list. */
   notIn: InputMaybe<Array<Scalars['Datetime']['input']>>;
 };
-
-export type EthBridgeProgram = Node & {
-  __typename?: 'EthBridgeProgram';
-  id: Scalars['String']['output'];
-  name: Scalars['String']['output'];
-  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
-  nodeId: Scalars['ID']['output'];
-};
-
-/**
- * A condition to be used against `EthBridgeProgram` object types. All fields are
- * tested for equality and combined with a logical ‘and.’
- */
-export type EthBridgeProgramCondition = {
-  /** Checks for equality with the object’s `id` field. */
-  id: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `name` field. */
-  name: InputMaybe<Scalars['String']['input']>;
-};
-
-/** A filter to be used against `EthBridgeProgram` object types. All fields are combined with a logical ‘and.’ */
-export type EthBridgeProgramFilter = {
-  /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<EthBridgeProgramFilter>>;
-  /** Filter by the object’s `id` field. */
-  id: InputMaybe<StringFilter>;
-  /** Filter by the object’s `name` field. */
-  name: InputMaybe<StringFilter>;
-  /** Negates the expression. */
-  not: InputMaybe<EthBridgeProgramFilter>;
-  /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<EthBridgeProgramFilter>>;
-};
-
-/** A connection to a list of `EthBridgeProgram` values. */
-export type EthBridgeProgramsConnection = {
-  __typename?: 'EthBridgeProgramsConnection';
-  /** A list of edges which contains the `EthBridgeProgram` and cursor to aid in pagination. */
-  edges: Array<EthBridgeProgramsEdge>;
-  /** A list of `EthBridgeProgram` objects. */
-  nodes: Array<EthBridgeProgram>;
-  /** Information to aid in pagination. */
-  pageInfo: PageInfo;
-  /** The count of *all* `EthBridgeProgram` you could get from the connection. */
-  totalCount: Scalars['Int']['output'];
-};
-
-/** A `EthBridgeProgram` edge in the connection. */
-export type EthBridgeProgramsEdge = {
-  __typename?: 'EthBridgeProgramsEdge';
-  /** A cursor for use in pagination. */
-  cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `EthBridgeProgram` at the end of the edge. */
-  node: EthBridgeProgram;
-};
-
-/** Methods to use when ordering `EthBridgeProgram`. */
-export enum EthBridgeProgramsOrderBy {
-  IdAsc = 'ID_ASC',
-  IdDesc = 'ID_DESC',
-  NameAsc = 'NAME_ASC',
-  NameDesc = 'NAME_DESC',
-  Natural = 'NATURAL',
-  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-}
 
 export type GearEthBridgeMessage = Node & {
   __typename?: 'GearEthBridgeMessage';
@@ -340,77 +180,77 @@ export enum GearEthBridgeMessagesOrderBy {
   PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
 }
 
-export type InitiatedTransfer = Node & {
-  __typename?: 'InitiatedTransfer';
-  blockNumber: Scalars['BigInt']['output'];
-  id: Scalars['String']['output'];
+export type GearProgram = Node & {
+  __typename?: 'GearProgram';
+  createdAt: Maybe<Scalars['Datetime']['output']>;
+  name: Scalars['String']['output'];
   /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
   nodeId: Scalars['ID']['output'];
-  txHash: Scalars['String']['output'];
+  programId: Scalars['String']['output'];
 };
 
 /**
- * A condition to be used against `InitiatedTransfer` object types. All fields are
- * tested for equality and combined with a logical ‘and.’
+ * A condition to be used against `GearProgram` object types. All fields are tested
+ * for equality and combined with a logical ‘and.’
  */
-export type InitiatedTransferCondition = {
-  /** Checks for equality with the object’s `blockNumber` field. */
-  blockNumber: InputMaybe<Scalars['BigInt']['input']>;
-  /** Checks for equality with the object’s `id` field. */
-  id: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `txHash` field. */
-  txHash: InputMaybe<Scalars['String']['input']>;
+export type GearProgramCondition = {
+  /** Checks for equality with the object’s `createdAt` field. */
+  createdAt: InputMaybe<Scalars['Datetime']['input']>;
+  /** Checks for equality with the object’s `name` field. */
+  name: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `programId` field. */
+  programId: InputMaybe<Scalars['String']['input']>;
 };
 
-/** A filter to be used against `InitiatedTransfer` object types. All fields are combined with a logical ‘and.’ */
-export type InitiatedTransferFilter = {
+/** A filter to be used against `GearProgram` object types. All fields are combined with a logical ‘and.’ */
+export type GearProgramFilter = {
   /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<InitiatedTransferFilter>>;
-  /** Filter by the object’s `blockNumber` field. */
-  blockNumber: InputMaybe<BigIntFilter>;
-  /** Filter by the object’s `id` field. */
-  id: InputMaybe<StringFilter>;
+  and: InputMaybe<Array<GearProgramFilter>>;
+  /** Filter by the object’s `createdAt` field. */
+  createdAt: InputMaybe<DatetimeFilter>;
+  /** Filter by the object’s `name` field. */
+  name: InputMaybe<StringFilter>;
   /** Negates the expression. */
-  not: InputMaybe<InitiatedTransferFilter>;
+  not: InputMaybe<GearProgramFilter>;
   /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<InitiatedTransferFilter>>;
-  /** Filter by the object’s `txHash` field. */
-  txHash: InputMaybe<StringFilter>;
+  or: InputMaybe<Array<GearProgramFilter>>;
+  /** Filter by the object’s `programId` field. */
+  programId: InputMaybe<StringFilter>;
 };
 
-/** A connection to a list of `InitiatedTransfer` values. */
-export type InitiatedTransfersConnection = {
-  __typename?: 'InitiatedTransfersConnection';
-  /** A list of edges which contains the `InitiatedTransfer` and cursor to aid in pagination. */
-  edges: Array<InitiatedTransfersEdge>;
-  /** A list of `InitiatedTransfer` objects. */
-  nodes: Array<InitiatedTransfer>;
+/** A connection to a list of `GearProgram` values. */
+export type GearProgramsConnection = {
+  __typename?: 'GearProgramsConnection';
+  /** A list of edges which contains the `GearProgram` and cursor to aid in pagination. */
+  edges: Array<GearProgramsEdge>;
+  /** A list of `GearProgram` objects. */
+  nodes: Array<GearProgram>;
   /** Information to aid in pagination. */
   pageInfo: PageInfo;
-  /** The count of *all* `InitiatedTransfer` you could get from the connection. */
+  /** The count of *all* `GearProgram` you could get from the connection. */
   totalCount: Scalars['Int']['output'];
 };
 
-/** A `InitiatedTransfer` edge in the connection. */
-export type InitiatedTransfersEdge = {
-  __typename?: 'InitiatedTransfersEdge';
+/** A `GearProgram` edge in the connection. */
+export type GearProgramsEdge = {
+  __typename?: 'GearProgramsEdge';
   /** A cursor for use in pagination. */
   cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `InitiatedTransfer` at the end of the edge. */
-  node: InitiatedTransfer;
+  /** The `GearProgram` at the end of the edge. */
+  node: GearProgram;
 };
 
-/** Methods to use when ordering `InitiatedTransfer`. */
-export enum InitiatedTransfersOrderBy {
-  BlockNumberAsc = 'BLOCK_NUMBER_ASC',
-  BlockNumberDesc = 'BLOCK_NUMBER_DESC',
-  IdAsc = 'ID_ASC',
-  IdDesc = 'ID_DESC',
+/** Methods to use when ordering `GearProgram`. */
+export enum GearProgramsOrderBy {
+  CreatedAtAsc = 'CREATED_AT_ASC',
+  CreatedAtDesc = 'CREATED_AT_DESC',
+  NameAsc = 'NAME_ASC',
+  NameDesc = 'NAME_DESC',
   Natural = 'NATURAL',
   PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
   PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-  TxHashAsc = 'TX_HASH_ASC',
-  TxHashDesc = 'TX_HASH_DESC',
+  ProgramIdAsc = 'PROGRAM_ID_ASC',
+  ProgramIdDesc = 'PROGRAM_ID_DESC',
 }
 
 /** A filter to be used against Int fields. All fields are combined with a logical ‘and.’ */
@@ -438,79 +278,6 @@ export type IntFilter = {
   /** Not included in the specified list. */
   notIn: InputMaybe<Array<Scalars['Int']['input']>>;
 };
-
-export type Migration = Node & {
-  __typename?: 'Migration';
-  id: Scalars['Int']['output'];
-  name: Scalars['String']['output'];
-  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
-  nodeId: Scalars['ID']['output'];
-  timestamp: Scalars['BigInt']['output'];
-};
-
-/**
- * A condition to be used against `Migration` object types. All fields are tested
- * for equality and combined with a logical ‘and.’
- */
-export type MigrationCondition = {
-  /** Checks for equality with the object’s `id` field. */
-  id: InputMaybe<Scalars['Int']['input']>;
-  /** Checks for equality with the object’s `name` field. */
-  name: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `timestamp` field. */
-  timestamp: InputMaybe<Scalars['BigInt']['input']>;
-};
-
-/** A filter to be used against `Migration` object types. All fields are combined with a logical ‘and.’ */
-export type MigrationFilter = {
-  /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<MigrationFilter>>;
-  /** Filter by the object’s `id` field. */
-  id: InputMaybe<IntFilter>;
-  /** Filter by the object’s `name` field. */
-  name: InputMaybe<StringFilter>;
-  /** Negates the expression. */
-  not: InputMaybe<MigrationFilter>;
-  /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<MigrationFilter>>;
-  /** Filter by the object’s `timestamp` field. */
-  timestamp: InputMaybe<BigIntFilter>;
-};
-
-/** A connection to a list of `Migration` values. */
-export type MigrationsConnection = {
-  __typename?: 'MigrationsConnection';
-  /** A list of edges which contains the `Migration` and cursor to aid in pagination. */
-  edges: Array<MigrationsEdge>;
-  /** A list of `Migration` objects. */
-  nodes: Array<Migration>;
-  /** Information to aid in pagination. */
-  pageInfo: PageInfo;
-  /** The count of *all* `Migration` you could get from the connection. */
-  totalCount: Scalars['Int']['output'];
-};
-
-/** A `Migration` edge in the connection. */
-export type MigrationsEdge = {
-  __typename?: 'MigrationsEdge';
-  /** A cursor for use in pagination. */
-  cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `Migration` at the end of the edge. */
-  node: Migration;
-};
-
-/** Methods to use when ordering `Migration`. */
-export enum MigrationsOrderBy {
-  IdAsc = 'ID_ASC',
-  IdDesc = 'ID_DESC',
-  NameAsc = 'NAME_ASC',
-  NameDesc = 'NAME_DESC',
-  Natural = 'NATURAL',
-  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-  TimestampAsc = 'TIMESTAMP_ASC',
-  TimestampDesc = 'TIMESTAMP_DESC',
-}
 
 export enum NetworkEnum {
   Ethereum = 'ETHEREUM',
@@ -719,37 +486,20 @@ export enum PairsOrderBy {
 /** The root query type which gives access points into the data universe. */
 export type Query = Node & {
   __typename?: 'Query';
-  /** Reads and enables pagination through a set of `CompletedTransfer`. */
-  allCompletedTransfers: Maybe<CompletedTransfersConnection>;
-  /** Reads and enables pagination through a set of `EthBridgeProgram`. */
-  allEthBridgePrograms: Maybe<EthBridgeProgramsConnection>;
   /** Reads and enables pagination through a set of `GearEthBridgeMessage`. */
   allGearEthBridgeMessages: Maybe<GearEthBridgeMessagesConnection>;
-  /** Reads and enables pagination through a set of `InitiatedTransfer`. */
-  allInitiatedTransfers: Maybe<InitiatedTransfersConnection>;
-  /** Reads and enables pagination through a set of `Migration`. */
-  allMigrations: Maybe<MigrationsConnection>;
+  /** Reads and enables pagination through a set of `GearProgram`. */
+  allGearPrograms: Maybe<GearProgramsConnection>;
   /** Reads and enables pagination through a set of `Pair`. */
   allPairs: Maybe<PairsConnection>;
   /** Reads and enables pagination through a set of `Transfer`. */
   allTransfers: Maybe<TransfersConnection>;
-  /** Reads and enables pagination through a set of `VaraBridgeProgram`. */
-  allVaraBridgePrograms: Maybe<VaraBridgeProgramsConnection>;
-  /** Reads a single `CompletedTransfer` using its globally unique `ID`. */
-  completedTransfer: Maybe<CompletedTransfer>;
-  completedTransferById: Maybe<CompletedTransfer>;
-  /** Reads a single `EthBridgeProgram` using its globally unique `ID`. */
-  ethBridgeProgram: Maybe<EthBridgeProgram>;
-  ethBridgeProgramById: Maybe<EthBridgeProgram>;
   /** Reads a single `GearEthBridgeMessage` using its globally unique `ID`. */
   gearEthBridgeMessage: Maybe<GearEthBridgeMessage>;
   gearEthBridgeMessageById: Maybe<GearEthBridgeMessage>;
-  /** Reads a single `InitiatedTransfer` using its globally unique `ID`. */
-  initiatedTransfer: Maybe<InitiatedTransfer>;
-  initiatedTransferById: Maybe<InitiatedTransfer>;
-  /** Reads a single `Migration` using its globally unique `ID`. */
-  migration: Maybe<Migration>;
-  migrationById: Maybe<Migration>;
+  /** Reads a single `GearProgram` using its globally unique `ID`. */
+  gearProgram: Maybe<GearProgram>;
+  gearProgramByName: Maybe<GearProgram>;
   /** Fetches an object given its globally unique `ID`. */
   node: Maybe<Node>;
   /** The root query type must be a `Node` to work well with Relay 1 mutations. This just resolves to `query`. */
@@ -767,33 +517,6 @@ export type Query = Node & {
   transfer: Maybe<Transfer>;
   transferById: Maybe<Transfer>;
   transfers: Array<Maybe<Transfer>>;
-  /** Reads a single `VaraBridgeProgram` using its globally unique `ID`. */
-  varaBridgeProgram: Maybe<VaraBridgeProgram>;
-  varaBridgeProgramById: Maybe<VaraBridgeProgram>;
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryAllCompletedTransfersArgs = {
-  after: InputMaybe<Scalars['Cursor']['input']>;
-  before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<CompletedTransferCondition>;
-  filter: InputMaybe<CompletedTransferFilter>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  last: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<CompletedTransfersOrderBy>>;
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryAllEthBridgeProgramsArgs = {
-  after: InputMaybe<Scalars['Cursor']['input']>;
-  before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<EthBridgeProgramCondition>;
-  filter: InputMaybe<EthBridgeProgramFilter>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  last: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<EthBridgeProgramsOrderBy>>;
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -809,27 +532,15 @@ export type QueryAllGearEthBridgeMessagesArgs = {
 };
 
 /** The root query type which gives access points into the data universe. */
-export type QueryAllInitiatedTransfersArgs = {
+export type QueryAllGearProgramsArgs = {
   after: InputMaybe<Scalars['Cursor']['input']>;
   before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<InitiatedTransferCondition>;
-  filter: InputMaybe<InitiatedTransferFilter>;
+  condition: InputMaybe<GearProgramCondition>;
+  filter: InputMaybe<GearProgramFilter>;
   first: InputMaybe<Scalars['Int']['input']>;
   last: InputMaybe<Scalars['Int']['input']>;
   offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<InitiatedTransfersOrderBy>>;
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryAllMigrationsArgs = {
-  after: InputMaybe<Scalars['Cursor']['input']>;
-  before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<MigrationCondition>;
-  filter: InputMaybe<MigrationFilter>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  last: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<MigrationsOrderBy>>;
+  orderBy?: InputMaybe<Array<GearProgramsOrderBy>>;
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -857,38 +568,6 @@ export type QueryAllTransfersArgs = {
 };
 
 /** The root query type which gives access points into the data universe. */
-export type QueryAllVaraBridgeProgramsArgs = {
-  after: InputMaybe<Scalars['Cursor']['input']>;
-  before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<VaraBridgeProgramCondition>;
-  filter: InputMaybe<VaraBridgeProgramFilter>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  last: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<VaraBridgeProgramsOrderBy>>;
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryCompletedTransferArgs = {
-  nodeId: Scalars['ID']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryCompletedTransferByIdArgs = {
-  id: Scalars['String']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryEthBridgeProgramArgs = {
-  nodeId: Scalars['ID']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryEthBridgeProgramByIdArgs = {
-  id: Scalars['String']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
 export type QueryGearEthBridgeMessageArgs = {
   nodeId: Scalars['ID']['input'];
 };
@@ -899,23 +578,13 @@ export type QueryGearEthBridgeMessageByIdArgs = {
 };
 
 /** The root query type which gives access points into the data universe. */
-export type QueryInitiatedTransferArgs = {
+export type QueryGearProgramArgs = {
   nodeId: Scalars['ID']['input'];
 };
 
 /** The root query type which gives access points into the data universe. */
-export type QueryInitiatedTransferByIdArgs = {
-  id: Scalars['String']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryMigrationArgs = {
-  nodeId: Scalars['ID']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryMigrationByIdArgs = {
-  id: Scalars['Int']['input'];
+export type QueryGearProgramByNameArgs = {
+  name: Scalars['String']['input'];
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -959,16 +628,6 @@ export type QueryTransfersArgs = {
   last: InputMaybe<Scalars['Int']['input']>;
   offset: InputMaybe<Scalars['Int']['input']>;
   orderBy: InputMaybe<Array<TransfersOrderBy>>;
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryVaraBridgeProgramArgs = {
-  nodeId: Scalars['ID']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryVaraBridgeProgramByIdArgs = {
-  id: Scalars['String']['input'];
 };
 
 export enum StatusEnum {
@@ -1266,72 +925,6 @@ export enum TransfersOrderBy {
   TxHashDesc = 'TX_HASH_DESC',
 }
 
-export type VaraBridgeProgram = Node & {
-  __typename?: 'VaraBridgeProgram';
-  id: Scalars['String']['output'];
-  name: Scalars['String']['output'];
-  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
-  nodeId: Scalars['ID']['output'];
-};
-
-/**
- * A condition to be used against `VaraBridgeProgram` object types. All fields are
- * tested for equality and combined with a logical ‘and.’
- */
-export type VaraBridgeProgramCondition = {
-  /** Checks for equality with the object’s `id` field. */
-  id: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `name` field. */
-  name: InputMaybe<Scalars['String']['input']>;
-};
-
-/** A filter to be used against `VaraBridgeProgram` object types. All fields are combined with a logical ‘and.’ */
-export type VaraBridgeProgramFilter = {
-  /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<VaraBridgeProgramFilter>>;
-  /** Filter by the object’s `id` field. */
-  id: InputMaybe<StringFilter>;
-  /** Filter by the object’s `name` field. */
-  name: InputMaybe<StringFilter>;
-  /** Negates the expression. */
-  not: InputMaybe<VaraBridgeProgramFilter>;
-  /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<VaraBridgeProgramFilter>>;
-};
-
-/** A connection to a list of `VaraBridgeProgram` values. */
-export type VaraBridgeProgramsConnection = {
-  __typename?: 'VaraBridgeProgramsConnection';
-  /** A list of edges which contains the `VaraBridgeProgram` and cursor to aid in pagination. */
-  edges: Array<VaraBridgeProgramsEdge>;
-  /** A list of `VaraBridgeProgram` objects. */
-  nodes: Array<VaraBridgeProgram>;
-  /** Information to aid in pagination. */
-  pageInfo: PageInfo;
-  /** The count of *all* `VaraBridgeProgram` you could get from the connection. */
-  totalCount: Scalars['Int']['output'];
-};
-
-/** A `VaraBridgeProgram` edge in the connection. */
-export type VaraBridgeProgramsEdge = {
-  __typename?: 'VaraBridgeProgramsEdge';
-  /** A cursor for use in pagination. */
-  cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `VaraBridgeProgram` at the end of the edge. */
-  node: VaraBridgeProgram;
-};
-
-/** Methods to use when ordering `VaraBridgeProgram`. */
-export enum VaraBridgeProgramsOrderBy {
-  IdAsc = 'ID_ASC',
-  IdDesc = 'ID_DESC',
-  NameAsc = 'NAME_ASC',
-  NameDesc = 'NAME_DESC',
-  Natural = 'NATURAL',
-  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-}
-
 export type TransfersQueryQueryVariables = Exact<{
   first: Scalars['Int']['input'];
   offset: Scalars['Int']['input'];
@@ -1382,6 +975,35 @@ export type PairsQueryQuery = {
       varaTokenName: string;
       varaTokenSymbol: string;
     }>;
+  } | null;
+};
+
+export type TransferQueryQueryVariables = Exact<{
+  id: Scalars['String']['input'];
+}>;
+
+export type TransferQueryQuery = {
+  __typename?: 'Query';
+  transferById: {
+    __typename?: 'Transfer';
+    id: string;
+    txHash: string;
+    blockNumber: string;
+    timestamp: string;
+    completedAt: string | null;
+    completedAtBlock: string | null;
+    completedAtTxHash: string | null;
+    nonce: string;
+    sourceNetwork: NetworkEnum;
+    source: string;
+    destNetwork: NetworkEnum;
+    destination: string;
+    status: StatusEnum;
+    sender: string;
+    receiver: string;
+    amount: string;
+    bridgingStartedAtBlock: string | null;
+    bridgingStartedAtMessageId: string | null;
   } | null;
 };
 
@@ -1524,6 +1146,62 @@ export const PairsQueryDocument = {
     },
   ],
 } as unknown as DocumentNode<PairsQueryQuery, PairsQueryQueryVariables>;
+export const TransferQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'TransferQuery' },
+      variableDefinitions: [
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'id' } },
+          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'String' } } },
+        },
+      ],
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'transferById' },
+            arguments: [
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'id' },
+                value: { kind: 'Variable', name: { kind: 'Name', value: 'id' } },
+              },
+            ],
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [
+                { kind: 'Field', name: { kind: 'Name', value: 'id' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'txHash' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'blockNumber' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'timestamp' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'completedAt' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'completedAtBlock' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'completedAtTxHash' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'nonce' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'sourceNetwork' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'source' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'destNetwork' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'destination' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'status' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'sender' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'receiver' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'amount' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'bridgingStartedAtBlock' } },
+                { kind: 'Field', name: { kind: 'Name', value: 'bridgingStartedAtMessageId' } },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<TransferQueryQuery, TransferQueryQueryVariables>;
 export const TransfersCountQueryDocument = {
   kind: 'Document',
   definitions: [

@@ -25,7 +25,8 @@
   },
   "scripts": {
     "build:frontend": "lerna run build --scope frontend --verbose",
-    "build:indexer": "lerna run build --scope indexer --verbose"
+    "build:indexer": "lerna run build --scope indexer --verbose",
+    "clean": "lerna clean --yes"
   },
   "dependencies": {
     "reflect-metadata": "^0.2.2"

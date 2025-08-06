@@ -1,1 +1,0 @@
-# Vara Network Bridge

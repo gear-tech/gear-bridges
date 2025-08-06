@@ -21,4 +21,5 @@ RUN yarn workspaces focus gear-bridges indexer --production
 FROM deps
 COPY --from=builder /app/js/indexer/lib /app/js/indexer/lib
 COPY --from=builder /app/js/indexer/db /app/js/indexer/db
+COPY --from=builder /app/api /app/api
 WORKDIR /app

@@ -8,12 +8,15 @@ pub struct CheckpointFor<'a> {
     state: &'a RefCell<State>,
 }
 
-#[sails_rs::service]
 impl<'a> CheckpointFor<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
     }
+}
 
+#[sails_rs::service]
+impl<'a> CheckpointFor<'a> {
+    #[export]
     pub fn get(&self, slot: Slot) -> Result<(Slot, Hash256), CheckpointError> {
         let state = self.state.borrow();
 

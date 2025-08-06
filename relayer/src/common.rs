@@ -126,7 +126,7 @@ pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
         if err.is_disconnected_will_reconnect() {
             return true;
         }
-        if let subxt::Error::Rpc(rpc) = err {
+        if let subxt::Error::Rpc(rpc) = &**err {
             match rpc {
                 subxt::error::RpcError::SubscriptionDropped => return true,
                 subxt::error::RpcError::DisconnectedWillReconnect(_) => return true,

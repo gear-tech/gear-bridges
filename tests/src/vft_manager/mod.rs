@@ -1,7 +1,7 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
 use gclient::{DispatchStatus, Event, EventProcessor, GearApi, GearEvent, Result};
-use gear_core::gas::GasInfo;
+use gear_core::rpc::GasInfo;
 use sails_rs::{calls::*, events::EventIo, gclient::calls::*, prelude::*};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};

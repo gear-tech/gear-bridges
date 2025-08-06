@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use checkpoint_light_client_client::service_checkpoint_for;
-use gstd::{debug, exec, msg, prelude::*, ActorId};
+use gstd::{debug, msg, prelude::*};
 use hex_literal::hex;
 use primitive_types::H256;
 use sails_rs::{
@@ -101,7 +101,6 @@ extern "C" fn init() {}
 
 #[unsafe(no_mangle)]
 extern "C" fn handle() {
-    let id = msg::source();
     let payload = msg::load_bytes().expect("unable to load payload");
 
     if !payload.starts_with(GET_CHECKPOINT) {

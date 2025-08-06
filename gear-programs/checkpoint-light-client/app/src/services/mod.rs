@@ -6,10 +6,11 @@ pub mod sync_update;
 pub use checkpoint::CheckpointFor;
 use ethereum_common::Hash256;
 pub use replay_back::ReplayBack;
-use sails_rs::{Encode, TypeInfo};
+use sails_rs::prelude::*;
 pub use state::State;
 pub use sync_update::SyncUpdate;
 
+#[sails_rs::event]
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]

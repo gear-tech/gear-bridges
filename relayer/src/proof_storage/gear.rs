@@ -11,7 +11,7 @@ use gclient::{
     metadata::runtime_types::gear_common::event::DispatchStatus, Event as RuntimeEvent, GearApi,
     GearEvent, WSAddress,
 };
-use gear_core::ids::{ActorId, MessageId, ProgramId};
+use gear_core::ids::{ActorId, MessageId};
 use gear_rpc_client::GearApi as WrappedGearApi;
 use parity_scale_codec::Encode;
 use primitive_types::H256;
@@ -30,7 +30,7 @@ const UPLOAD_PROGRAM_RETRIES: usize = 16;
 
 pub struct GearProofStorage {
     gear_api: GearApi,
-    program: OnceLock<ProgramId>,
+    program: OnceLock<ActorId>,
     cache: RwLock<Cache>,
     message_channel: Sender<UpdateStateMessage>,
     config_file_path: PathBuf,
@@ -379,7 +379,7 @@ impl GearProofStorage {
 
 struct UpdateStateMessage {
     payload: gear_proof_storage::HandleMessage,
-    destination: ProgramId,
+    destination: ActorId,
 }
 
 enum MessageState {

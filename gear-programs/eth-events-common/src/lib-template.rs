@@ -13,7 +13,7 @@ impl Program {
         }))
     }
 
-    pub fn ethereum_event_client(&self) -> Service {
+    pub fn ethereum_event_client(&self) -> Service<'_> {
         Service::new(&self.0)
     }
 }
@@ -40,16 +40,20 @@ pub struct Service<'a> {
     state: &'a RefCell<State>,
 }
 
-#[sails_rs::service]
 impl<'a> Service<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
     }
+}
 
+#[sails_rs::service]
+impl<'a> Service<'a> {
+    #[export]
     pub fn checkpoint_light_client_address(&self) -> ActorId {
         self.state.borrow().checkpoint_light_client_address
     }
 
+    #[export]
     pub async fn check_proofs(&mut self, message: EthToVaraEvent) -> Result<CheckedProofs, Error> {
         let EthToVaraEvent {
             proof_block: BlockInclusionProof { block, headers },

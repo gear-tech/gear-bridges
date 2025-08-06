@@ -13,7 +13,7 @@ use awesome_sails_services::{
     vft_metadata::{self, Metadata},
 };
 use core::cell::RefCell;
-use sails_rs::prelude::*;
+use sails_rs::{gstd::services::Service as _, prelude::*};
 
 pub struct Service<
     'a,
@@ -37,15 +37,9 @@ impl<'a, A, B, M> Service<'a, A, B, M> {
             metadata,
         }
     }
-
-    fn vft(&self) -> vft::Service<'_, A, B> {
-        vft::Service::new(self.allowances, self.balances)
-    }
-
-    fn metadata(&self) -> vft_metadata::Service<'_, M> {
-        vft_metadata::Service::new(self.metadata)
-    }
 }
+
+impl<'a, A, B, M> Service<'a, A, B, M> {}
 
 #[service(events = vft::Event)]
 impl<
@@ -54,16 +48,27 @@ impl<
         M: InfallibleStorage<Item = Metadata>,
     > Service<'_, A, B, M>
 {
+    fn vft(&self) -> vft::ServiceExposure<vft::Service<'_, A, B>> {
+        vft::Service::new(self.allowances, self.balances).expose(self.route())
+    }
+
+    fn metadata(&self) -> vft_metadata::ServiceExposure<vft_metadata::Service<'_, M>> {
+        vft_metadata::Service::new(self.metadata).expose(self.route())
+    }
+
+    #[export]
     pub fn name(&self) -> String {
         self.metadata().name()
     }
 
     /// Returns the symbol of the VFT.
+    #[export]
     pub fn symbol(&self) -> String {
         self.metadata().symbol()
     }
 
     /// Returns the number of decimals of the VFT.
+    #[export]
     pub fn decimals(&self) -> u8 {
         self.metadata().decimals()
     }

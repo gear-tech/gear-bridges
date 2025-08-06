@@ -1,13 +1,14 @@
-FROM node:18-alpine
-MAINTAINER gear
-
-WORKDIR /app
-
-COPY ./frontend .
-
+FROM node:20-alpine AS node
 RUN apk update
-
 RUN apk add xsel
+RUN npm install --global serve
+
+FROM node
+COPY package.json yarn.lock lerna.json .yarnrc.yml /app/
+COPY .yarn /app/.yarn
+COPY js/frontend /app/js/frontend
+WORKDIR /app
+RUN yarn workspaces focus frontend gear-bridges
 
 ARG VITE_VARA_NODE_ADDRESS \
     VITE_ETH_NODE_ADDRESS \
@@ -37,10 +38,8 @@ ENV VITE_VARA_NODE_ADDRESS=${VITE_VARA_NODE_ADDRESS} \
     VITE_HCAPTCHA_SITEKEY=${VITE_HCAPTCHA_SITEKEY} \
     VITE_GTM_ID=${VITE_GTM_ID}
 
-RUN npm install
 
-RUN npm run build
+WORKDIR /app/js/frontend
+RUN yarn build
 
-RUN npm install --global serve
-
-CMD ["serve", "-s", "/app/dist"]
+CMD ["serve", "-s", "/app/js/frontend/dist"]

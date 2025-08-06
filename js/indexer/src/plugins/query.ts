@@ -1,4 +1,4 @@
-import { makeExtendSchemaPlugin, gql } from 'graphile-utils';
+import { makeExtendSchemaPlugin, gql } from 'postgraphile';
 
 export const PairsAliasPlugin = makeExtendSchemaPlugin(() => ({
   typeDefs: gql`

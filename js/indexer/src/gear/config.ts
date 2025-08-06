@@ -9,4 +9,5 @@ export const config = {
   fromBlock: Number(getEnv('GEAR_FROM_BLOCK', '11000000')),
   ethRpcUrl: getEnv('GEAR_ETH_RPC_URL'),
   rateLimit: Number(getEnv('GEAR_RATE_LIMIT', '100')),
+  apiPath: getEnv('GEAR_API_PATH', './api/gear'),
 };

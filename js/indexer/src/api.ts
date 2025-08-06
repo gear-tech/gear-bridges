@@ -1,10 +1,10 @@
-import express from 'express';
-import { postgraphile, PostGraphileOptions } from 'postgraphile';
-import dotenv from 'dotenv';
-import { DefaultLimitPlugin, PairsAliasPlugin, TransferAliasPlugin, TransferCountSubscriptionPlugin } from './plugins';
+import { Plugin, postgraphile, PostGraphileOptions } from 'postgraphile';
 import ConnectionFilterPlugin from 'postgraphile-plugin-connection-filter';
 import { createServer } from 'node:http';
+import express from 'express';
+import dotenv from 'dotenv';
 import { Pool } from 'pg';
+import { DefaultLimitPlugin, PairsAliasPlugin, TransferAliasPlugin, TransferCountSubscriptionPlugin } from './plugins';
 
 dotenv.config();
 
@@ -33,7 +33,8 @@ async function main() {
       DefaultLimitPlugin(50, 100),
       PairsAliasPlugin,
       TransferAliasPlugin,
-      ConnectionFilterPlugin,
+      // TODO: get rid of this plugin
+      ConnectionFilterPlugin as unknown as Plugin,
     ],
   };
 

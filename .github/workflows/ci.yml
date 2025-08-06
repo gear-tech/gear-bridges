@@ -5,12 +5,12 @@ on:
     branches:
       - main
     paths-ignore:
-      - 'frontend/**'
+      - 'js/**'
   pull_request:
     branches:
       - main
     paths-ignore:
-      - 'frontend/**'
+      - 'js/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

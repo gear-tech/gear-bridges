@@ -1,16 +1,17 @@
 import { Decoder } from './codec';
+import { config } from './config';
 import { ProgramName } from './util';
 
 let vftManagerDecoder: Decoder;
-let hisotricalProxyDecoder: Decoder;
+let historicalProxyDecoder: Decoder;
 let bridgingPaymentDecoder: Decoder;
 let vftDecoder: Decoder;
 
 export async function initDecoders() {
-  vftManagerDecoder = await Decoder.create('./assets/vft_manager.idl');
-  hisotricalProxyDecoder = await Decoder.create('./assets/historical_proxy.idl');
-  bridgingPaymentDecoder = await Decoder.create('./assets/bridging_payment.idl');
-  vftDecoder = await Decoder.create('./assets/vft.idl');
+  vftManagerDecoder = await Decoder.create(`${config.apiPath}/vft_manager.idl`);
+  historicalProxyDecoder = await Decoder.create(`${config.apiPath}/historical_proxy.idl`);
+  bridgingPaymentDecoder = await Decoder.create(`${config.apiPath}/bridging_payment.idl`);
+  vftDecoder = await Decoder.create(`${config.apiPath}/vft.idl`);
 }
 
 export function getDecoder(name: ProgramName | 'vft') {
@@ -18,7 +19,7 @@ export function getDecoder(name: ProgramName | 'vft') {
     case 'vft_manager':
       return vftManagerDecoder;
     case 'historical_proxy':
-      return hisotricalProxyDecoder;
+      return historicalProxyDecoder;
     case 'bridging_payment':
       return bridgingPaymentDecoder;
     case 'vft':

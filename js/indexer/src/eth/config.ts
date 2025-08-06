@@ -7,4 +7,5 @@ export const config = {
   msgQ: getEnv('ETH_MSQ_QUEUE').toLowerCase(),
   bridgingPayment: getEnv('ETH_BRIDGING_PAYMENT').toLowerCase(),
   fromBlock: Number(getEnv('ETH_FROM_BLOCK', '2636000')),
+  apiPath: getEnv('ETH_API_PATH', './api/ethereum'),
 };

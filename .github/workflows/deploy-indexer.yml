@@ -1,4 +1,4 @@
-name: Indexer
+name: Deploy Indexer to k8s
 
 on:
   workflow_dispatch:
@@ -45,14 +45,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: indexer/Dockerfile
+          file: js/indexer/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.environment }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.environment }}-${{ env.COMMIT_SHA }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer-hoodi:${{ github.event.inputs.environment }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer-hoodi:${{ github.event.inputs.environment }}-${{ env.COMMIT_SHA }}
 
   deploy-to-k8s:
     needs: build-image
@@ -69,7 +69,7 @@ jobs:
       - name: Deploy to Kubernetes
         uses: sergeyfilyanin/kubectl-aws-eks@master
         with:
-          args: rollout restart deployment indexer-bridge-processor-eth-${{ github.event.inputs.environment }} indexer-bridge-processor-gear-${{ github.event.inputs.environment }} indexer-bridge-graphql-${{ github.event.inputs.environment }} -n gear-bridges
+          args: rollout restart deployment hoodi-eth-${{ github.event.inputs.environment }} hoodi-gear-${{ github.event.inputs.environment }} hoodi-graphql-${{ github.event.inputs.environment }} -n gear-bridges
 
       - name: Check rollout status
         uses: sergeyfilyanin/kubectl-aws-eks@master

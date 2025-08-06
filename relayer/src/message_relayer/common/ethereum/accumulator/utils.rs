@@ -26,6 +26,10 @@ impl Messages {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     // None -> the inner vector is full so the message is rejected
     pub fn add(&mut self, message_new: accumulator::Request) -> Option<()> {
         if self.0.len() >= self.0.capacity() {

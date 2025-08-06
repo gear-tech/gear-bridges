@@ -1260,7 +1260,6 @@ async fn migrate_transactions() -> Result<()> {
     Ok(())
 }
 
-#[ignore = "Unstable after 1.9.0 update"]
 #[tokio::test]
 async fn vft_burn_from() -> Result<()> {
     use vft_vara_client::{

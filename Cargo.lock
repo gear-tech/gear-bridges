@@ -5376,6 +5376,7 @@ dependencies = [
  "parity-scale-codec",
  "primitive-types 0.12.2",
  "sc-consensus-grandpa",
+ "serde",
  "sp-consensus-grandpa",
  "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
  "sp-runtime 39.0.1",

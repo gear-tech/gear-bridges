@@ -180,9 +180,8 @@ async fn task_inner(
                     hex::encode(message.nonce_le),
                     tx_uuid
                 );
-                if !responses
-                    .send(Response::MessageAlreadyProcessed(tx_uuid))
-                    .is_ok()
+                if responses
+                    .send(Response::MessageAlreadyProcessed(tx_uuid)).is_err()
                 {
                     log::info!("Response channel closed, exiting");
                     return Ok(());
@@ -197,9 +196,8 @@ async fn task_inner(
             hex::encode(message.nonce_le)
         );
 
-        if !responses
-            .send(Response::ProcessingStarted(tx_hash, tx_uuid))
-            .is_ok()
+        if responses
+            .send(Response::ProcessingStarted(tx_hash, tx_uuid)).is_err()
         {
             log::info!("Response channel closed, exiting");
             return Ok(());

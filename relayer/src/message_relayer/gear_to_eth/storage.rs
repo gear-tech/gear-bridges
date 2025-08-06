@@ -20,6 +20,12 @@ pub struct BlockStorage {
     n_to_keep: usize,
 }
 
+impl Default for BlockStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockStorage {
     pub fn new() -> Self {
         Self {
@@ -240,7 +246,7 @@ impl Storage for JSONStorage {
                         .context("Failed to parse 'merkle_roots'")?;
                     for i in 0..merkle_roots.len() {
                         let root = merkle_roots.get(i).expect("Root should exist");
-                        let _ = tx_manager.merkle_roots.write().await.add(root.clone());
+                        let _ = tx_manager.merkle_roots.write().await.add(*root);
                     }
                 } else if entry.file_name().to_str() == Some("blocks") {
                 } else {

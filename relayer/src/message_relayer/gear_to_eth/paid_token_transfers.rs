@@ -68,6 +68,7 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         eth_api: EthApi,
         bridging_payment_address: H256,

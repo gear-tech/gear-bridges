@@ -172,7 +172,7 @@ async fn run_inner(
                         authority_set_id: message.authority_set_id,
                         block: message.block,
                         tx_uuid: message.tx_uuid,
-                        merkle_root: merkle_root.clone(),
+                        merkle_root: *merkle_root,
                     })?;
                     continue;
                 }
@@ -200,7 +200,7 @@ async fn run_inner(
                                 authority_set_id: message.authority_set_id,
                                 block: message.block,
                                 tx_uuid: message.tx_uuid,
-                                merkle_root: merkle_root_old.clone(),
+                                merkle_root: merkle_root_old,
                             })?;
                         }
                     }
@@ -216,7 +216,7 @@ async fn run_inner(
                         authority_set_id: message.authority_set_id,
                         block: message.block,
                         tx_uuid: message.tx_uuid,
-                        merkle_root: merkle_root.clone(),
+                        merkle_root,
                     })?;
                 }
             }

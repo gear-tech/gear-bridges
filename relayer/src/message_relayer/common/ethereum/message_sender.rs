@@ -2,7 +2,7 @@ use crate::{
     common::{self, BASE_RETRY_DELAY},
     message_relayer::common::RelayedMerkleRoot,
 };
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, TxHash};
 use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::Gauge;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -16,9 +16,9 @@ pub struct Request {
     pub tx_uuid: Uuid,
 }
 
-pub struct Response {
-    pub tx_hash: TxHash,
-    pub tx_uuid: Uuid,
+pub enum Response {
+    MessageAlreadyProcessed(Uuid),
+    ProcessingStarted(TxHash, Uuid),
 }
 
 pub struct MessageSenderIo {
@@ -157,7 +157,7 @@ async fn task_inner(
             tx_uuid,
         } = request;
 
-        let tx_hash = this
+        let tx_hash = match this
             .eth_api
             .provide_content_message(
                 relayed_root.block.0,
@@ -169,14 +169,29 @@ async fn task_inner(
                 message.payload.to_vec(),
                 proof.proof,
             )
-            .await?;
+            .await
+        {
+            Ok(tx_hash) => tx_hash,
+            Err(ethereum_client::Error::MessageQueue(
+                IMessageQueueErrors::MessageAlreadyProcessed(_),
+            )) => {
+                log::info!(
+                    "Message with nonce {} already processed, skipping: tx_uuid = {}",
+                    hex::encode(message.nonce_le),
+                    tx_uuid
+                );
+                responses.send(Response::MessageAlreadyProcessed(tx_uuid))?;
+                return Ok(());
+            }
+            Err(e) => return Err(anyhow::anyhow!("Failed to provide content message: {e}")),
+        };
 
         log::info!(
             "Message with nonce {} relaying started: tx_hash = {tx_hash}",
             hex::encode(message.nonce_le)
         );
 
-        responses.send(Response { tx_hash, tx_uuid })?;
+        responses.send(Response::ProcessingStarted(tx_hash, tx_uuid))?;
 
         let fee_payer_balance = this.eth_api.get_approx_balance().await?;
         this.metrics.fee_payer_balance.set(fee_payer_balance);

@@ -12,7 +12,7 @@ use crate::message_relayer::{
     common::{
         ethereum::{
             accumulator::{self, utils::MerkleRoots, AccumulatorIo},
-            message_sender::MessageSenderIo,
+            message_sender::{self, MessageSenderIo},
             status_fetcher::{self, StatusFetcherIo},
         },
         gear::merkle_proof_fetcher::MerkleRootFetcherIo,
@@ -366,15 +366,32 @@ impl TransactionManager {
                     return Ok(false);
                 };
 
-                if let Some(tx) = self.transactions.write().await.get_mut(&message.tx_uuid) {
-                    tx.status = TxStatus::WaitConfirmations(message.tx_hash);
-                } else {
-                    log::warn!("Received message for unknown transaction: {}", message.tx_uuid);
-                }
+                match message {
+                    message_sender::Response::MessageAlreadyProcessed(tx_uuid) => {
+                        log::info!(
+                            "Message already processed, skipping: tx_uuid = {}",
+                            tx_uuid
+                        );
+                        if let Some(tx) = self.transactions.write().await.get_mut(&tx_uuid) {
+                            tx.status = TxStatus::Completed;
+                        } else {
+                            log::warn!("Received message for unknown transaction: {}", tx_uuid);
+                        }
 
-                if !status_fetcher.send_request(message.tx_uuid, message.tx_hash) {
-                    log::warn!("Status fetcher stopped accepting requests, exiting");
-                    return Ok(false);
+                    }
+
+                    message_sender::Response::ProcessingStarted(tx_hash, tx_uuid) => {
+                        if let Some(tx) = self.transactions.write().await.get_mut(&tx_uuid) {
+                            tx.status = TxStatus::WaitConfirmations(tx_hash);
+                        } else {
+                            log::warn!("Received message for unknown transaction: {}", tx_uuid);
+                        }
+
+                        if !status_fetcher.send_request(tx_uuid, tx_hash) {
+                            log::warn!("Status fetcher stopped accepting requests, exiting");
+                            return Ok(false);
+                        }
+                    }
                 }
             }
 

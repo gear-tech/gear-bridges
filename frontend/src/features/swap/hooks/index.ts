@@ -1,6 +1,6 @@
 import { useHandleEthSubmit, useEthFee, useEthFTAllowance } from './eth';
 import { useSwapForm } from './use-swap-form';
-import { useVaraFee, useHandleVaraSubmit, useVaraFTAllowance } from './vara';
+import { useVaraFee, useHandleVaraSubmit, useVaraFTAllowance, usePayVaraFee } from './vara';
 
 export {
   useHandleEthSubmit,
@@ -10,4 +10,5 @@ export {
   useVaraFee,
   useHandleVaraSubmit,
   useVaraFTAllowance,
+  usePayVaraFee,
 };

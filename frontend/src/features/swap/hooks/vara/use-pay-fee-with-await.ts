@@ -1,30 +1,23 @@
-import { useApi, useProgram, useAccount, useSendProgramTransaction } from '@gear-js/react-hooks';
+import { useApi, useAccount } from '@gear-js/react-hooks';
 
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, VftManagerProgram, CONTRACT_ADDRESS } from '../../consts';
+import { VftManagerProgram, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
+
+import { usePayVaraFee } from './use-pay-vara-fee';
 
 type BridgingRequestedEventData = Parameters<
   Parameters<VftManagerProgram['vftManager']['subscribeToBridgingRequestedEvent']>[0]
 >[0];
 
-function usePayFee(feeValue: bigint | undefined) {
+function usePayFeeWithAwait(feeValue: bigint | undefined) {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
   const { token } = useBridgeContext();
 
-  const { data: program } = useProgram({
-    library: BridgingPaymentProgram,
-    id: CONTRACT_ADDRESS.BRIDGING_PAYMENT,
-  });
-
-  const { sendTransactionAsync, reset, error, isPending } = useSendProgramTransaction({
-    program,
-    serviceName: 'bridgingPayment',
-    functionName: 'payFees',
-  });
+  const { sendTransactionAsync, reset, error, isPending } = usePayVaraFee();
 
   const payFees = ({ amount, accountAddress }: FormattedValues) => {
     if (!token?.address) throw new Error('Fungible token address is not found');
@@ -63,4 +56,4 @@ function usePayFee(feeValue: bigint | undefined) {
   return { awaitBridgingRequest: payFees, error, isPending, reset };
 }
 
-export { usePayFee };
+export { usePayFeeWithAwait };

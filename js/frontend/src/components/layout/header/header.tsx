@@ -11,14 +11,9 @@ import { useEthAccount } from '@/hooks';
 
 import { Container } from '../container';
 
+import { LINKS } from './consts';
 import styles from './header.module.scss';
-
-const LINKS = {
-  [ROUTE.HOME]: 'Bridge',
-  [ROUTE.TRANSACTIONS]: 'Transactions',
-  [ROUTE.TOKEN_TRACKER]: 'My Tokens',
-  [ROUTE.FAQ]: 'FAQ',
-} as const;
+import { MobileMenu } from './mobile-menu';
 
 function Header() {
   const { account } = useAccount();
@@ -87,6 +82,7 @@ function Header() {
             {renderLinks()}
           </ul>
 
+          <MobileMenu />
           <TransactionsCounter />
         </Container>
       </nav>

@@ -39,14 +39,14 @@ function Wallet() {
   if (!isAccountReady || ethAccount.isReconnecting || !api || !varaSymbol)
     return <Skeleton width="11rem" height="2rem" />;
 
-  const isConnected = Boolean(account || ethAccount.address);
+  const address = account?.address || ethAccount.address;
   const balance = account ? varaAccountBalance : ethAccountBalance;
   const decimals = account ? api.registry.chainDecimals[0] : 18;
   const symbol = account ? varaSymbol : 'ETH';
 
   return (
     <>
-      {isConnected ? (
+      {address ? (
         <div className={styles.wallet}>
           {!isUndefined(balance.data) ? (
             <div className={styles.balance}>
@@ -63,8 +63,7 @@ function Wallet() {
             {/* icon from useWalletInfo only exists on initial wallet connection */}
             {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : ethAccount.address && <EthSVG />}
 
-            {account && getTruncatedText(account.address)}
-            {ethAccount.address && getTruncatedText(ethAccount.address)}
+            <span className={styles.address}>{getTruncatedText(address)}</span>
           </button>
         </div>
       ) : (

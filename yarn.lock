@@ -208,7 +208,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/runtime@npm:^7.0.0, @babel/runtime@npm:^7.17.9, @babel/runtime@npm:^7.21.0, @babel/runtime@npm:^7.26.0, @babel/runtime@npm:^7.26.10, @babel/runtime@npm:^7.27.0, @babel/runtime@npm:^7.5.5, @babel/runtime@npm:^7.8.7":
+"@babel/runtime@npm:^7.0.0, @babel/runtime@npm:^7.17.9, @babel/runtime@npm:^7.21.0, @babel/runtime@npm:^7.26.0, @babel/runtime@npm:^7.26.10, @babel/runtime@npm:^7.27.6, @babel/runtime@npm:^7.5.5, @babel/runtime@npm:^7.8.7":
   version: 7.28.2
   resolution: "@babel/runtime@npm:7.28.2"
   checksum: 10c0/c20afe253629d53a405a610b12a62ac74d341a2c1e0fb202bbef0c118f6b5c84f94bf16039f58fd0483dd256901259930a43976845bdeb180cab1f882c21b6e0
@@ -267,13 +267,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@base-ui-components/react@npm:1.0.0-beta.0":
-  version: 1.0.0-beta.0
-  resolution: "@base-ui-components/react@npm:1.0.0-beta.0"
+"@base-ui-components/react@npm:1.0.0-beta.2":
+  version: 1.0.0-beta.2
+  resolution: "@base-ui-components/react@npm:1.0.0-beta.2"
   dependencies:
-    "@babel/runtime": "npm:^7.27.0"
-    "@floating-ui/react": "npm:^0.27.9"
-    "@floating-ui/utils": "npm:^0.2.9"
+    "@babel/runtime": "npm:^7.27.6"
+    "@base-ui-components/utils": "npm:0.1.0"
+    "@floating-ui/react-dom": "npm:^2.1.5"
+    "@floating-ui/utils": "npm:^0.2.10"
+    reselect: "npm:^5.1.1"
+    tabbable: "npm:^6.2.0"
     use-sync-external-store: "npm:^1.5.0"
   peerDependencies:
     "@types/react": ^17 || ^18 || ^19
@@ -282,7 +285,26 @@ __metadata:
   peerDependenciesMeta:
     "@types/react":
       optional: true
-  checksum: 10c0/de77d0455d9722f483b60a37b8cc4d26bccd6728f887d1ac5c384207fe79414acaec03541df0d1a80a569404e248c72c8ecbbb8e88530d3c8398ba7ed3629a10
+  checksum: 10c0/dc1a7dd54c87a985646787607ec175eef77488152508883bf26434ac26eeebe1561c1098f0126d5b4c9370d78aa49971fa1fa19a4d11e630f2a1e63569d08c4a
+  languageName: node
+  linkType: hard
+
+"@base-ui-components/utils@npm:0.1.0":
+  version: 0.1.0
+  resolution: "@base-ui-components/utils@npm:0.1.0"
+  dependencies:
+    "@babel/runtime": "npm:^7.27.6"
+    "@floating-ui/utils": "npm:^0.2.10"
+    reselect: "npm:^5.1.1"
+    use-sync-external-store: "npm:^1.5.0"
+  peerDependencies:
+    "@types/react": ^17 || ^18 || ^19
+    react: ^17 || ^18 || ^19
+    react-dom: ^17 || ^18 || ^19
+  peerDependenciesMeta:
+    "@types/react":
+      optional: true
+  checksum: 10c0/a9eef2706922d66da35dab27b2221fbf774a275454bc1978af044d3abc971e0a19bddb80822e0bb9354327910216e4e97db99732317f105f665bd324cf8bddd1
   languageName: node
   linkType: hard
 
@@ -904,21 +926,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@floating-ui/react@npm:^0.27.9":
-  version: 0.27.15
-  resolution: "@floating-ui/react@npm:0.27.15"
-  dependencies:
-    "@floating-ui/react-dom": "npm:^2.1.5"
-    "@floating-ui/utils": "npm:^0.2.10"
-    tabbable: "npm:^6.0.0"
-  peerDependencies:
-    react: ">=17.0.0"
-    react-dom: ">=17.0.0"
-  checksum: 10c0/682893e4305d7ee12e9d8e5844496242a068fb619a84c92d80c272175c66a5b77cc88a7fff639b505efa8a0491bf63c81e48b4427bb07e1a6ddb8a0a6618d5b1
-  languageName: node
-  linkType: hard
-
-"@floating-ui/utils@npm:^0.2.10, @floating-ui/utils@npm:^0.2.9":
+"@floating-ui/utils@npm:^0.2.10":
   version: 0.2.10
   resolution: "@floating-ui/utils@npm:0.2.10"
   checksum: 10c0/e9bc2a1730ede1ee25843937e911ab6e846a733a4488623cd353f94721b05ec2c9ec6437613a2ac9379a94c2fd40c797a2ba6fa1df2716f5ce4aa6ddb1cf9ea4
@@ -11217,7 +11225,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "frontend@workspace:js/frontend"
   dependencies:
-    "@base-ui-components/react": "npm:1.0.0-beta.0"
+    "@base-ui-components/react": "npm:1.0.0-beta.2"
     "@gear-js/api": "npm:0.42.0"
     "@gear-js/frontend-configs": "npm:0.1.2"
     "@gear-js/react-hooks": "npm:0.16.3"
@@ -16876,6 +16884,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"reselect@npm:^5.1.1":
+  version: 5.1.1
+  resolution: "reselect@npm:5.1.1"
+  checksum: 10c0/219c30da122980f61853db3aebd173524a2accd4b3baec770e3d51941426c87648a125ca08d8c57daa6b8b086f2fdd2703cb035dd6231db98cdbe1176a71f489
+  languageName: node
+  linkType: hard
+
 "resolve-alpn@npm:^1.2.0":
   version: 1.2.1
   resolution: "resolve-alpn@npm:1.2.1"
@@ -18442,7 +18457,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tabbable@npm:^6.0.0":
+"tabbable@npm:^6.2.0":
   version: 6.2.0
   resolution: "tabbable@npm:6.2.0"
   checksum: 10c0/ced8b38f05f2de62cd46836d77c2646c42b8c9713f5bd265daf0e78ff5ac73d3ba48a7ca45f348bafeef29b23da7187c72250742d37627883ef89cbd7fa76898

@@ -75,7 +75,7 @@ export class HistoricalProxyClient {
 }
 
 export class HistoricalProxy {
-  constructor(private _program: CheckpointClient) {}
+  constructor(private _program: HistoricalProxyClient) {}
 
   /**
    * Redirect message to `eth-events-*` program which is valid for `slot`.

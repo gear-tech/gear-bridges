@@ -14,7 +14,7 @@
     "url": "git+https://github.com/gear-tech/gear-bridges.git"
   },
   "scripts": {
-    "test": "node ./__tests__/bridge-js.test.js"
+    "test": "vitest"
   },
   "bugs": {
     "url": "https://github.com/gear-tech/gear-bridges/issues"
@@ -33,6 +33,10 @@
     "viem": "^2.33.2"
   },
   "devDependencies": {
-    "sails-js-cli": "^0.4.3"
+    "@vitest/coverage-v8": "^3.2.4",
+    "dotenv": "^17.2.1",
+    "sails-js-cli": "^0.4.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }

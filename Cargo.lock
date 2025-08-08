@@ -7086,10 +7086,14 @@ dependencies = [
 name = "js-proof-test"
 version = "0.3.0"
 dependencies = [
+ "dotenv",
  "ethereum-client",
  "ethereum_beacon_client",
  "gclient",
+ "gsdk",
+ "hex",
  "relayer",
+ "sails-rs",
  "tokio",
 ]
 

@@ -9,3 +9,7 @@ ethereum_beacon_client.workspace = true
 ethereum-client.workspace = true
 gclient.workspace = true
 tokio.workspace = true
+hex.workspace = true
+gsdk.workspace = true
+sails-rs.workspace = true
+dotenv.workspace = true

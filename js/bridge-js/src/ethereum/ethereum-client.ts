@@ -1,11 +1,6 @@
-import {
-  Chain,
-  GetBlockReturnType,
-  PublicClient,
-  TransactionReceipt,
-} from "viem";
-import {} from "@ethereumjs/trie";
-import { BeaconClient } from "./beacon-client";
+import { Chain, GetBlockReturnType, PublicClient, TransactionReceipt } from 'viem';
+import {} from '@ethereumjs/trie';
+import { BeaconClient } from './beacon-client';
 
 const BLOCK_TIME = 12;
 
@@ -24,8 +19,7 @@ class _EthereumClient implements EthereumClient {
   public async getSlot(blockNumber: bigint | number) {
     const block = await this.rpc.getBlock({ blockNumber: BigInt(blockNumber) });
 
-    const slot =
-      (Number(block.timestamp) - this.beaconGenesisTime) / BLOCK_TIME;
+    const slot = (Number(block.timestamp) - this.beaconGenesisTime) / BLOCK_TIME;
 
     return slot;
   }
@@ -41,9 +35,6 @@ class _EthereumClient implements EthereumClient {
   public getReceipts() {}
 }
 
-export async function getEthClient(
-  client: PublicClient,
-  beaconClient: BeaconClient,
-): Promise<EthereumClient> {
+export async function createEthereumClient(client: PublicClient, beaconClient: BeaconClient): Promise<EthereumClient> {
   return new _EthereumClient(client, beaconClient.genesisBlockTime);
 }

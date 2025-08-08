@@ -1,12 +1,12 @@
 import { createPublicClient, http } from 'viem';
 import { TypeRegistry } from '@polkadot/types';
+import { Keyring } from '@polkadot/api';
+import { GearApi } from '@gear-js/api';
 import { hoodi } from 'viem/chains';
 
-import { composeProof, createBeaconClient, getEthClient } from './index';
-import { HistoricalProxyTypes } from './ethEvents';
-import { GearApi } from '@gear-js/api';
-import { CheckpointClient, HistoricalProxyClient } from './vara';
-import { Keyring } from '@polkadot/api';
+import { composeProof, createBeaconClient, createEthereumClient } from './index.js';
+import { HistoricalProxyTypes } from './ethEvents.js';
+import { CheckpointClient, HistoricalProxyClient } from './vara/index.js';
 
 const CHECKPOINT_CLIENT_ID = '0xdb7bbcaff8caa131a94d73f63c8f0dd1fec60e0d263e551d138a9dfb500134ca';
 const HISTORICAL_PROXY_ID = '0x5d2a0dcfc30301ad5eda002481e6d0b283f81a1221bef8ba2a3fa65fd56c8e0f';
@@ -25,7 +25,7 @@ const main = async () => {
 
   const beaconClient = await createBeaconClient(BEACON_RPC);
 
-  const ethClient = await getEthClient(publicClient, beaconClient);
+  const ethClient = await createEthereumClient(publicClient, beaconClient);
 
   const result = await composeProof(beaconClient, ethClient, TX_HASH);
   const slot = result.proof_block.block.slot;

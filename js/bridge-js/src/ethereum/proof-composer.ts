@@ -1,5 +1,5 @@
 import { ByteVectorType, ContainerType, UintNumberType, ListCompositeType } from '@chainsafe/ssz';
-import { MapDB, hexToBytes, bigIntToBytes } from '@ethereumjs/util';
+import { MapDB, hexToBytes, bigIntToBytes, bytesToHex } from '@ethereumjs/util';
 import { Trie, bytesToNibbles } from '@ethereumjs/trie';
 import { TransactionReceipt, keccak256 } from 'viem';
 import { encode } from '@ethereumjs/rlp';
@@ -33,9 +33,9 @@ const BlsToExecutionChanges = new ListCompositeType(
 );
 
 export async function composeProof(beaconClient: BeaconClient, ethClient: EthereumClient, txHash: `0x${string}`) {
-  const receipt = await ethClient.getTransactionReceipt(txHash);
+  const _receipt = await ethClient.getTransactionReceipt(txHash);
 
-  const block = await ethClient.getBlockByHash(receipt.blockHash);
+  const block = await ethClient.getBlockByHash(_receipt.blockHash);
 
   const blockNumber = Number(block.number);
 
@@ -43,15 +43,15 @@ export async function composeProof(beaconClient: BeaconClient, ethClient: Ethere
 
   const slot = await ethClient.getSlot(blockNumber);
 
-  const { proof } = await generateMerkleProof(receipt.transactionIndex, receipts);
+  const { proof, receipt } = await generateMerkleProof(_receipt.transactionIndex, receipts);
 
   const proofBlock = await buildInclusionProof(beaconClient, slot);
 
   return {
     proof_block: proofBlock,
-    proof,
-    transaction_index: receipt.transactionIndex,
-    receipt_rlp: proof,
+    proof: bytesToHex(proof[0]),
+    transaction_index: _receipt.transactionIndex,
+    receipt_rlp: bytesToHex(receipt),
   };
 }
 
@@ -114,7 +114,9 @@ function rlpEncodeReceipt(receipt: TransactionReceipt): Uint8Array {
 }
 
 function rlpEncodeTransactionIndex(index: number): Uint8Array {
-  return encode(index);
+  const rlp_encoded = encode(index);
+  const hash = hexToBytes(keccak256(rlp_encoded));
+  return bytesToNibbles(hash);
 }
 
 function rlpEncodeIndexAndReceipt(

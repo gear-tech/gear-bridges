@@ -1,2 +1,2 @@
-export * from './checkpoint-client';
-export * from './historical-proxy';
+export * from './checkpoint-client.js';
+export * from './historical-proxy.js';

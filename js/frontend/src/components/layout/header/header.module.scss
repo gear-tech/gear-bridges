@@ -54,6 +54,10 @@
 
     position: relative;
   }
+
+  @include sm {
+    display: none;
+  }
 }
 
 .link {

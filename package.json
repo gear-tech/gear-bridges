@@ -15,7 +15,8 @@
   "version": "0.0.1",
   "workspaces": [
     "js/indexer",
-    "js/frontend"
+    "js/frontend",
+    "js/bridge-js"
   ],
   "devDependencies": {
     "eslint": "9.28.0",

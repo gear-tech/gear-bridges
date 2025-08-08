@@ -7083,6 +7083,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "js-proof-test"
+version = "0.3.0"
+dependencies = [
+ "ethereum-client",
+ "ethereum_beacon_client",
+ "gclient",
+ "relayer",
+ "tokio",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"

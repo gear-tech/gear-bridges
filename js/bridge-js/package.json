@@ -1,0 +1,38 @@
+{
+  "name": "gear-bridge-js",
+  "version": "0.0.1",
+  "description": "> TODO: description",
+  "author": "Dmitri Osipov <dmith.osipov@gmail.com>",
+  "homepage": "https://github.com/gear-tech/gear-bridges/tree/main/js/bridge-js#readme",
+  "license": "GPL-3.0",
+  "main": "lib/index.js",
+  "files": [
+    "lib"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gear-tech/gear-bridges.git"
+  },
+  "scripts": {
+    "test": "node ./__tests__/bridge-js.test.js"
+  },
+  "bugs": {
+    "url": "https://github.com/gear-tech/gear-bridges/issues"
+  },
+  "dependencies": {
+    "@chainsafe/ssz": "^1.2.1",
+    "@ethereumjs/rlp": "^10.0.0",
+    "@ethereumjs/trie": "^6.2.1",
+    "@ethereumjs/util": "^10.0.0",
+    "@gear-js/api": "^0.43.0",
+    "@lodestar/types": "^1.33.0",
+    "@polkadot/api": "^16.4.3",
+    "merkletreejs": "^0.5.2",
+    "sails-js": "^0.4.3",
+    "sails-js-parser": "^0.4.3",
+    "viem": "^2.33.2"
+  },
+  "devDependencies": {
+    "sails-js-cli": "^0.4.3"
+  }
+}

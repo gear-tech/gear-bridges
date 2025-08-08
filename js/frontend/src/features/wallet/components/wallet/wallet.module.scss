@@ -40,7 +40,13 @@
     flex-shrink: 0;
   }
 
-  &:hover {
-    background-color: #d4d4d4;
+  @include sm {
+    padding: 4px;
+  }
+}
+
+.address {
+  @include sm {
+    display: none;
   }
 }

@@ -44,6 +44,10 @@
   @include sm {
     padding: 4px;
   }
+
+  @include breakpoint(380px) {
+    display: none;
+  }
 }
 
 .address {

@@ -7,6 +7,7 @@
 .prop {
   display: grid;
   grid-template-columns: 2.3fr 7.7fr;
+  gap: 16px;
 
   font-size: 14px;
   line-height: 20px;
@@ -14,6 +15,7 @@
 
 .key {
   color: #9cacb1;
+  white-space: nowrap;
 
   svg {
     margin-right: 8px;
@@ -23,6 +25,8 @@
 .value {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px;
 
   color: #f6f6f6e5;
 }

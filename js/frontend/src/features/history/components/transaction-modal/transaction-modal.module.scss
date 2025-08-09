@@ -56,6 +56,13 @@
   align-items: center;
   gap: 20px 24px;
 
+  @include sm {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 15px 1fr;
+    justify-items: center;
+    gap: 8px;
+  }
+
   &.loading {
     padding-bottom: 0;
   }

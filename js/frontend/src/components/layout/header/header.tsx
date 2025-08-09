@@ -13,7 +13,6 @@ import { Container } from '../container';
 
 import { LINKS } from './consts';
 import styles from './header.module.scss';
-import { MobileMenu } from './mobile-menu';
 
 function Header() {
   const { account } = useAccount();
@@ -69,7 +68,7 @@ function Header() {
   return (
     <header className={styles.header}>
       <Container className={styles.mainContainer}>
-        <Link to={ROUTE.HOME}>
+        <Link to={ROUTE.HOME} className={styles.logo}>
           <LogoSVG />
         </Link>
 
@@ -82,7 +81,6 @@ function Header() {
             {renderLinks()}
           </ul>
 
-          <MobileMenu />
           <TransactionsCounter />
         </Container>
       </nav>

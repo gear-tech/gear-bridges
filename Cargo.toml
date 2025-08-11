@@ -33,7 +33,7 @@ members = [
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
     "tools/genesis-config",
-    "tools/governance", 
+    "tools/governance",
     "tests",
     "gear-common",
     "tools/vft-manager-tool",
@@ -116,6 +116,7 @@ cgo_oligami = "0.3"
 circular-buffer = { version = "0.1.7", default-features = false, features = [
     "alloc",
 ] }
+humantime = "2.2.0"
 clap = { version = "4.4.13", features = ["derive", "env"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
@@ -241,4 +242,3 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
 
 [patch."https://github.com/gear-tech/gear"]
 gsys = "=1.8.1"
-

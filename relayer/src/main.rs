@@ -18,7 +18,7 @@ use message_relayer::{
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::proving::GenesisConfig;
-use relayer::*;
+use relayer::{merkle_roots::SpikeConfig, *};
 use std::{collections::HashSet, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
@@ -82,6 +82,11 @@ async fn run() -> AnyResult<()> {
                 args.start_authority_set_id,
                 args.confirmations_merkle_root
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                SpikeConfig {
+                    threshold: args.spike_threshold,
+                    timeout: args.spike_timeout,
+                    window: args.spike_window,
+                },
             )
             .await;
 

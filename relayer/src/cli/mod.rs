@@ -85,6 +85,8 @@ pub struct GearEthCoreArgs {
         default_value = "8"
     )]
     pub spike_threshold: usize,
+    #[arg(help = "Priority bridging payment programs to generate proofs without waiting")]
+    pub priority_bridging_payments: Vec<String>,
 }
 
 #[derive(Args)]

@@ -523,10 +523,11 @@ impl MerkleRootRelayer {
 
                 let is_spike = self.queued_root_timestamps.len() >= self.spike.threshold;
                 let is_timeout = self.first_pending_timestamp
-                    .map_or(false, |t| t.elapsed() >= self.spike.timeout);
+                    .is_some_and(|t| t.elapsed() >= self.spike.timeout);
 
                 if is_spike || is_timeout {
-                    log::info!("Triggering proof generation. Reason: Spike={is_spike}, Timeout={is_timeout}");
+                    let batch_size = self.merkle_root_batch.len();
+                    log::info!("Triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}");
                     // do not group blocks by authority set id, prover will do this for us.
                     for pending in self.merkle_root_batch.drain(..) {
                         if !prover.prove(
@@ -755,11 +756,13 @@ impl MerkleRootRelayer {
             .await
         {
             Ok(inner_proof) => {
+                let block_number = block.number();
+                let block_hash = block.hash();
                 self.roots.insert(
                     merkle_root,
                     MerkleRoot {
-                        block_number: block.number(),
-                        block_hash: block.hash(),
+                        block_number,
+                        block_hash,
                         status: MerkleRootStatus::GenerateProof,
                     },
                 );
@@ -769,18 +772,20 @@ impl MerkleRootRelayer {
                     if self.merkle_root_batch.is_empty() {
                         self.first_pending_timestamp = Some(now);
                     }
+                    log::info!("Merkle-root #{merkle_root} at block #{block_number} is enqueued for batch processing");
 
                     self.queued_root_timestamps.push_back(now);
                     self.merkle_root_batch.push(PendingMerkleRoot {
-                        block_hash: block.hash(),
-                        block_number: block.number(),
+                        block_hash,
+                        block_number,
                         merkle_root,
                         inner_proof,
                     });
                     return Ok(true);
                 }
 
-                if !prover.prove(block.number(), block.hash(), merkle_root, inner_proof) {
+                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{block_number}");
+                if !prover.prove(block_number, block_hash, merkle_root, inner_proof) {
                     return Ok(false);
                 }
             }

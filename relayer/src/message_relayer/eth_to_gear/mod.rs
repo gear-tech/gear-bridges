@@ -6,7 +6,6 @@ use sails_rs::{calls::Query, gclient::calls::GClientRemoting};
 use super::common::EthereumSlotNumber;
 
 pub mod all_token_transfers;
-pub mod api_provider;
 pub mod manual;
 pub mod paid_token_transfers;
 

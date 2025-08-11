@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_variables)]
 use anyhow::Context;
-use primitive_types::H256;
+use primitive_types::{H256, U256};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
     ffi::OsString,
@@ -41,17 +42,13 @@ impl BlockStorage {
         }
     }
 
-    pub async fn save(&self, path: &Path) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     pub async fn complete_transaction(&self, message: &MessageInBlock) {
         let mut blocks = self.blocks.write().await;
         let Some(block) = blocks.get_mut(&message.block) else {
             return;
         };
 
-        block.messages.remove(&message.message.nonce_le);
+        block.messages.remove(&U256::from(message.message.nonce_le));
     }
 
     pub async fn add_block(
@@ -66,7 +63,7 @@ impl BlockStorage {
             block,
             Block {
                 block_hash,
-                messages: txs.collect(),
+                messages: txs.map(U256::from).collect(),
             },
         );
     }
@@ -115,11 +112,68 @@ impl BlockStorage {
             first_block: None,
         }
     }
+
+    pub async fn save(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let path = path.as_ref();
+
+        let blocks_new = path.join("blocks.json.new");
+        let blocks_old = path.join("blocks.json");
+
+        let mut blocks_file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&blocks_new)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to open or create blocks file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
+
+        self.prune().await;
+
+        let blocks = self.blocks.read().await;
+        let blocks_json = serde_json::to_string::<BTreeMap<GearBlockNumber, Block>>(&*blocks)?;
+
+        blocks_file
+            .write_all(blocks_json.as_bytes())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to write blocks to file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
+
+        blocks_file.flush().await?;
+
+        if blocks_old.exists() {
+            tokio::fs::remove_file(&blocks_old).await.with_context(|| {
+                format!(
+                    "Failed to remove old blocks file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
+        }
+
+        tokio::fs::rename(blocks_new, blocks_old)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to rename new blocks file in storage path: '{}'",
+                    path.display()
+                )
+            })?;
+        Ok(())
+    }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Block {
     pub block_hash: H256,
-    pub messages: HashSet<[u8; 32]>,
+    pub messages: HashSet<U256>,
 }
 
 impl Block {
@@ -344,7 +398,18 @@ impl Storage for JSONStorage {
                         let root = merkle_roots.get(i).expect("Root should exist");
                         let _ = tx_manager.merkle_roots.write().await.add(*root);
                     }
-                } else if entry.file_name().to_str() == Some("blocks") {
+                } else if entry.file_name().to_str() == Some("blocks.json") {
+                    let contents =
+                        tokio::fs::read_to_string(entry.path())
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "Failed to read blocks file in storage path: '{}'",
+                                    self.path.display()
+                                )
+                            })?;
+                    let map: BTreeMap<GearBlockNumber, Block> = serde_json::from_str(&contents)?;
+                    *self.block_storage.blocks.write().await = map;
                 } else {
                     let tx = self.read_tx(entry.path(), entry.file_name()).await?;
 

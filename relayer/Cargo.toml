@@ -56,6 +56,7 @@ uuid.workspace = true
 chrono.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true
+humantime.workspace = true
 
 [build-dependencies]
 cgo_oligami.workspace = true

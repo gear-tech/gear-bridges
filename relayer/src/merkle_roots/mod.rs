@@ -11,13 +11,13 @@ use crate::{
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
-use ::prover::proving::GenesisConfig;
+use ::prover::proving::{GenesisConfig, ProofWithCircuitData};
 use anyhow::Context;
 use ethereum_client::EthApi;
 use primitive_types::H256;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -66,10 +66,12 @@ impl Relayer {
         genesis_config: GenesisConfig,
         last_sealed: Option<u64>,
         confirmations: u64,
+        spike_config: SpikeConfig,
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
-        let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone()).await;
+        let merkle_roots =
+            MerkleRootRelayer::new(api_provider.clone(), storage.clone(), spike_config).await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
@@ -141,15 +143,24 @@ pub struct MerkleRootRelayer {
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
     save_interval: Interval,
+    main_interval: Interval,
+    spike: SpikeConfig,
+    first_pending_timestamp: Option<Instant>,
+
+    queued_root_timestamps: VecDeque<Instant>,
+    merkle_root_batch: Vec<PendingMerkleRoot>,
 }
 
 impl MerkleRootRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         storage: Arc<MerkleRootStorage>,
+        spike_config: SpikeConfig,
     ) -> MerkleRootRelayer {
         let mut save_interval = tokio::time::interval(Duration::from_secs(60));
         save_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut main_interval = tokio::time::interval(Duration::from_secs(15));
+        main_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         MerkleRootRelayer {
             api_provider,
@@ -160,6 +171,13 @@ impl MerkleRootRelayer {
             waiting_for_authority_set_sync: BTreeMap::new(),
 
             save_interval,
+            main_interval,
+
+            spike: spike_config,
+            first_pending_timestamp: None,
+
+            queued_root_timestamps: VecDeque::with_capacity(8),
+            merkle_root_batch: Vec::with_capacity(8),
         }
     }
 
@@ -471,6 +489,18 @@ impl MerkleRootRelayer {
         }
     }
 
+    fn prune_old_timestamps(&mut self) {
+        let cutoff_time = Instant::now() - self.spike.window;
+
+        while let Some(&timestamp) = self.queued_root_timestamps.front() {
+            if timestamp < cutoff_time {
+                self.queued_root_timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
     async fn process(
         &mut self,
         submitter: &mut SubmitterIo,
@@ -487,10 +517,35 @@ impl MerkleRootRelayer {
                 }
             }
 
+            _ = self.main_interval.tick() => {
+                // prune old timestamps to not trigger spike when not necessary
+                self.prune_old_timestamps();
+
+                let is_spike = self.queued_root_timestamps.len() >= self.spike.threshold;
+                let is_timeout = self.first_pending_timestamp
+                    .map_or(false, |t| t.elapsed() >= self.spike.timeout);
+
+                if is_spike || is_timeout {
+                    log::info!("Triggering proof generation. Reason: Spike={is_spike}, Timeout={is_timeout}");
+                    // do not group blocks by authority set id, prover will do this for us.
+                    for pending in self.merkle_root_batch.drain(..) {
+                        if !prover.prove(
+                            pending.block_number,
+                            pending.block_hash,
+                            pending.merkle_root,
+                            pending.inner_proof,
+                        ) {
+                            log::warn!("Prover connection closed, exiting");
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
-                        if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
+                        if !self.try_proof_merkle_root(prover, authority_set_sync, block, true).await? {
                             return Ok(false);
                         }
                     }
@@ -595,7 +650,7 @@ impl MerkleRootRelayer {
 
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
-                            if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
+                            if !self.try_proof_merkle_root(prover, authority_set_sync, block, false).await? {
                                 return Ok(false);
                             }
                         }
@@ -664,6 +719,7 @@ impl MerkleRootRelayer {
         prover: &mut FinalityProverIo,
         authority_set_sync: &mut AuthoritySetSyncIo,
         block: GearBlock,
+        batch: bool,
     ) -> anyhow::Result<bool> {
         let Some(merkle_root) = storage::queue_merkle_root_changed(&block) else {
             return Ok(true);
@@ -699,18 +755,32 @@ impl MerkleRootRelayer {
             .await
         {
             Ok(inner_proof) => {
-                let number = block.number();
                 self.roots.insert(
                     merkle_root,
                     MerkleRoot {
-                        block_number: number,
+                        block_number: block.number(),
                         block_hash: block.hash(),
                         status: MerkleRootStatus::GenerateProof,
                     },
                 );
-                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{number}");
+                if batch {
+                    let now = Instant::now();
+
+                    if self.merkle_root_batch.is_empty() {
+                        self.first_pending_timestamp = Some(now);
+                    }
+
+                    self.queued_root_timestamps.push_back(now);
+                    self.merkle_root_batch.push(PendingMerkleRoot {
+                        block_hash: block.hash(),
+                        block_number: block.number(),
+                        merkle_root,
+                        inner_proof,
+                    });
+                    return Ok(true);
+                }
+
                 if !prover.prove(block.number(), block.hash(), merkle_root, inner_proof) {
-                    log::error!("Prover connection closed, exiting...");
                     return Ok(false);
                 }
             }
@@ -787,4 +857,31 @@ pub enum MerkleRootStatus {
     SubmitProof(FinalProof),
     Finalized,
     Failed(String),
+}
+
+pub struct SpikeConfig {
+    /// Timeout after which we start relaying merkle-root
+    pub timeout: Duration,
+    /// Spike window, used to cutoff old merkle-roots
+    pub window: Duration,
+    /// Spike threshold: after threshold is reached we enter "spike"
+    /// mode where proofs are generated immediately.
+    pub threshold: usize,
+}
+
+impl Default for SpikeConfig {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(30 * 60),
+            window: Duration::from_secs(15 * 60),
+            threshold: 8,
+        }
+    }
+}
+
+pub struct PendingMerkleRoot {
+    pub block_hash: H256,
+    pub block_number: u32,
+    pub merkle_root: H256,
+    pub inner_proof: ProofWithCircuitData,
 }

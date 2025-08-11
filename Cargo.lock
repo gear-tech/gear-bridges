@@ -10920,6 +10920,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "historical-proxy-client",
+ "humantime",
  "keccak-hash 0.10.0",
  "lazy_static",
  "libc",

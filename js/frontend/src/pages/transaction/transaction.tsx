@@ -150,6 +150,7 @@ function Transaction() {
                   value={BigInt(amount)}
                   decimals={sourceToken.decimals}
                   symbol={sourceToken.displaySymbol}
+                  truncated={false}
                   className={styles.amount}
                 />
 
@@ -173,6 +174,7 @@ function Transaction() {
                   value={BigInt(amount)}
                   decimals={destinationToken.decimals}
                   symbol={destinationToken.displaySymbol}
+                  truncated={false}
                   className={styles.amount}
                 />
 

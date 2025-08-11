@@ -1,22 +1,29 @@
 #![allow(dead_code, unused_variables)]
+use anyhow::Context;
+use primitive_types::H256;
 use std::{
     collections::{BTreeMap, HashSet},
     ffi::OsString,
     path::{Path, PathBuf},
     str::FromStr,
 };
-
-use anyhow::Context;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::RwLock,
+};
 use uuid::Uuid;
 
 use crate::message_relayer::{
-    common::{ethereum::accumulator::utils::MerkleRoots, GearBlock},
+    common::{
+        ethereum::accumulator::utils::MerkleRoots,
+        gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
+        GearBlock, GearBlockNumber, MessageInBlock,
+    },
     gear_to_eth::tx_manager::{Transaction, TransactionManager},
 };
 
 pub struct BlockStorage {
-    blocks: BTreeMap<u32, GearBlock>,
+    blocks: RwLock<BTreeMap<GearBlockNumber, Block>>,
     n_to_keep: usize,
 }
 
@@ -29,7 +36,7 @@ impl Default for BlockStorage {
 impl BlockStorage {
     pub fn new() -> Self {
         Self {
-            blocks: BTreeMap::new(),
+            blocks: RwLock::new(BTreeMap::new()),
             n_to_keep: 100,
         }
     }
@@ -37,10 +44,88 @@ impl BlockStorage {
     pub async fn save(&self, path: &Path) -> anyhow::Result<()> {
         Ok(())
     }
+
+    pub async fn complete_transaction(&self, message: &MessageInBlock) {
+        let mut blocks = self.blocks.write().await;
+        let Some(block) = blocks.get_mut(&message.block) else {
+            return;
+        };
+
+        block.messages.remove(&message.message.nonce_le);
+    }
+
+    pub async fn add_block(
+        &self,
+        block: GearBlockNumber,
+        block_hash: H256,
+        txs: impl Iterator<Item = [u8; 32]>,
+    ) {
+        let mut blocks = self.blocks.write().await;
+
+        blocks.insert(
+            block,
+            Block {
+                block_hash,
+                messages: txs.collect(),
+            },
+        );
+    }
+
+    pub async fn prune(&self) {
+        let mut blocks = self.blocks.write().await;
+
+        let mut remove_until = None;
+
+        for (index, (block_number, block)) in blocks.iter().enumerate() {
+            if index + self.n_to_keep > blocks.len() {
+                remove_until = Some(*block_number);
+                break;
+            }
+
+            if !block.is_processed() {
+                remove_until = Some(*block_number);
+                break;
+            }
+        }
+
+        let Some(remove_until) = remove_until else {
+            return;
+        };
+
+        *blocks = blocks.split_off(&remove_until);
+    }
+
+    pub async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
+        let blocks = self.blocks.read().await;
+
+        let unprocessed = blocks
+            .iter()
+            .filter_map(|(block_number, block)| {
+                (!block.is_processed()).then_some((block.block_hash, block_number.0))
+            })
+            .collect::<Vec<_>>();
+
+        let last_block = blocks
+            .last_key_value()
+            .map(|(k, block)| (block.block_hash, k.0));
+
+        UnprocessedBlocks {
+            blocks: unprocessed,
+            last_block,
+            first_block: None,
+        }
+    }
 }
 
 pub struct Block {
-    pub messages: HashSet<u64>,
+    pub block_hash: H256,
+    pub messages: HashSet<[u8; 32]>,
+}
+
+impl Block {
+    pub fn is_processed(&self) -> bool {
+        self.messages.is_empty()
+    }
 }
 
 #[async_trait::async_trait]
@@ -52,12 +137,23 @@ pub trait Storage: Send + Sync {
     async fn save_blocks(&self) -> anyhow::Result<()>;
 }
 
+#[async_trait::async_trait]
+impl<T: Storage> UnprocessedBlocksStorage for T {
+    async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
+        self.block_storage().unprocessed_blocks().await
+    }
+
+    async fn add_block(&self, block: &GearBlock) {
+        let _ = block;
+    }
+}
+
 pub struct NoStorage(BlockStorage);
 
 impl Default for NoStorage {
     fn default() -> Self {
         Self(BlockStorage {
-            blocks: BTreeMap::new(),
+            blocks: RwLock::new(BTreeMap::new()),
             n_to_keep: 0,
         })
     }

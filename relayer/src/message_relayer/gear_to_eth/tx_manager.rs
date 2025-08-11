@@ -139,6 +139,10 @@ impl TransactionManager {
         for (_, tx) in transactions.iter() {
             match tx.status {
                 TxStatus::WaitForMerkleRoot => {
+                    self.storage
+                        .block_storage()
+                        .complete_transaction(&tx.message)
+                        .await;
                     log::info!(
                         "Transaction {}, nonce={} is waiting for merkle root",
                         tx.uuid,
@@ -283,6 +287,8 @@ impl TransactionManager {
                     log::info!("No more messages to process, exiting");
                     return Ok(false);
                 };
+
+                self.storage.block_storage().complete_transaction(&message).await;
 
                 let tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
 

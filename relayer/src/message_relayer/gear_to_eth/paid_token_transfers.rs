@@ -79,14 +79,17 @@ impl Relayer {
         receiver: UnboundedReceiver<Message>,
         storage_path: PathBuf,
     ) -> AnyResult<Self> {
-        let gear_block_listener = GearBlockListener::new(
-            api_provider.clone(),
-            Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
-        );
+        let storage = Arc::new(JSONStorage::new(storage_path));
+        let tx_manager = TransactionManager::new(storage.clone());
+        if let Err(e) = tx_manager.load_from_storage().await {
+            log::warn!("Failed to load transaction manager state: {e}");
+        }
+
+        let gear_block_listener = GearBlockListener::new(api_provider.clone(), storage.clone());
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
         let listener_message_queued =
-            MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender);
+            MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender, storage);
 
         let message_paid_listener = MessagePaidEventExtractor::new(bridging_payment_address);
 
@@ -104,11 +107,6 @@ impl Relayer {
 
         let proof_fetcher = MerkleProofFetcher::new(api_provider.clone());
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);
-
-        let tx_manager = TransactionManager::new(Arc::new(JSONStorage::new(storage_path)));
-        if let Err(e) = tx_manager.load_from_storage().await {
-            log::warn!("Failed to load transaction manager state: {e}");
-        }
 
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
         let accumulator = Accumulator::new(roots_receiver, tx_manager.merkle_roots.clone());

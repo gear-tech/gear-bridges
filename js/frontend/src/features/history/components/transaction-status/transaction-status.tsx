@@ -41,7 +41,11 @@ function TransactionStatus({ status }: Pick<Transfer, 'status'>) {
 }
 
 function TransactionStatusSkeleton() {
-  return <Skeleton className={styles.status} />;
+  return (
+    <Skeleton className={styles.status}>
+      <span>Complete</span>
+    </Skeleton>
+  );
 }
 
 TransactionStatus.Skeleton = TransactionStatusSkeleton;

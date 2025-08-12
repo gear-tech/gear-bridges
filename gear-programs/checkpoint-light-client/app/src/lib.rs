@@ -83,22 +83,22 @@ impl CheckpointLightClientProgram {
     }
 
     #[export(route = "service_checkpoint_for")]
-    pub fn checkpoint_for(&self) -> services::CheckpointFor {
+    pub fn checkpoint_for(&self) -> services::CheckpointFor<'_> {
         services::CheckpointFor::new(&self.0)
     }
 
     #[export(route = "service_replay_back")]
-    pub fn replay_back(&self) -> services::ReplayBack {
+    pub fn replay_back(&self) -> services::ReplayBack<'_> {
         services::ReplayBack::new(&self.0)
     }
 
     #[export(route = "service_state")]
-    pub fn state(&self) -> services::State {
+    pub fn state(&self) -> services::State<'_> {
         services::State::new(&self.0)
     }
 
     #[export(route = "service_sync_update")]
-    pub fn sync_update(&self) -> services::SyncUpdate {
+    pub fn sync_update(&self) -> services::SyncUpdate<'_> {
         services::SyncUpdate::new(&self.0)
     }
 }

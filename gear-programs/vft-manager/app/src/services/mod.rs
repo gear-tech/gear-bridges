@@ -66,6 +66,7 @@ pub enum TokenSupply {
 }
 
 /// Events emitted by VFT Manager service.
+#[event]
 #[derive(Encode, TypeInfo)]
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
@@ -220,6 +221,7 @@ pub struct Config {
 #[service(events = Event)]
 impl VftManager {
     /// Change [State::erc20_manager_address]. Can be called only by a [State::admin].
+    #[export]
     pub fn update_erc20_manager_address(&mut self, erc20_manager_address_new: H160) {
         self.ensure_admin();
 
@@ -237,6 +239,7 @@ impl VftManager {
     }
 
     /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
+    #[export]
     pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
 
@@ -250,6 +253,7 @@ impl VftManager {
     }
 
     /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
+    #[export]
     pub fn map_vara_to_eth_address(
         &mut self,
         vara_token_id: ActorId,
@@ -271,6 +275,7 @@ impl VftManager {
     }
 
     /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
+    #[export]
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
 
@@ -287,6 +292,7 @@ impl VftManager {
     /// Change [Config]. Can be called only by a [State::admin].
     ///
     /// For more info see [Config] docs.
+    #[export]
     pub fn update_config(&mut self, config: Config) {
         self.ensure_admin();
 
@@ -296,6 +302,7 @@ impl VftManager {
     }
 
     /// Change [State::admin]. Can be called only by a [State::admin].
+    #[export]
     pub fn set_admin(&mut self, new_admin: ActorId) {
         self.ensure_admin();
 
@@ -303,6 +310,7 @@ impl VftManager {
     }
 
     /// Change [State::pause_admin]. Can be called only by a [State::admin].
+    #[export]
     pub fn set_pause_admin(&mut self, new_pause_admin: ActorId) {
         self.ensure_admin();
 
@@ -323,6 +331,7 @@ impl VftManager {
     /// will be rejected.
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
+    #[export]
     pub fn pause(&mut self) {
         let sender = Syscall::message_source();
         let state = &self.state();
@@ -346,6 +355,7 @@ impl VftManager {
     /// It will effectively cancel effect of the [VftManager::pause].
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
+    #[export]
     pub fn unpause(&mut self) {
         let sender = Syscall::message_source();
         let state = &self.state();
@@ -382,6 +392,7 @@ impl VftManager {
     /// sent to `ERC20Manager` contract.
     ///
     /// This method can be called only by [State::historical_proxy_address] program.
+    #[export]
     pub async fn submit_receipt(
         &mut self,
         slot: u64,
@@ -397,6 +408,7 @@ impl VftManager {
     ///
     /// Allowance should be granted to the current program to spend `amount` tokens
     /// from the source address.
+    #[export]
     pub async fn request_bridging(
         &mut self,
         vara_token_id: ActorId,
@@ -424,6 +436,7 @@ impl VftManager {
     /// There can be several reasons for `request_bridging` to fail:
     /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
     /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
+    #[export]
     pub async fn handle_request_bridging_interrupted_transfer(
         &mut self,
         msg_id: MessageId,
@@ -433,6 +446,7 @@ impl VftManager {
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
+    #[export]
     pub async fn upgrade(&mut self, vft_manager_new: ActorId) {
         self.ensure_admin();
 
@@ -485,6 +499,7 @@ impl VftManager {
         exec::exit(vft_manager_new);
     }
 
+    #[export]
     pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
         self.ensure_admin();
 
@@ -496,6 +511,7 @@ impl VftManager {
     }
 
     /// Get state of a `request_bridging` message tracker.
+    #[export]
     pub fn request_briding_msg_tracker_state(
         &self,
         start: u32,
@@ -511,45 +527,54 @@ impl VftManager {
     }
 
     /// Get current [token mapping](State::token_map).
+    #[export]
     pub fn vara_to_eth_addresses(&self) -> Vec<(ActorId, H160, TokenSupply)> {
         self.state().token_map.read_state()
     }
 
     /// Get current [State::erc20_manager_address] address.
+    #[export]
     pub fn erc20_manager_address(&self) -> Option<H160> {
         self.state().erc20_manager_address
     }
 
     /// Get current [State::gear_bridge_builtin] address.
+    #[export]
     pub fn gear_bridge_builtin(&self) -> ActorId {
         self.state().gear_bridge_builtin
     }
 
     /// Get current [State::admin] address.
+    #[export]
     pub fn admin(&self) -> ActorId {
         self.state().admin
     }
 
     /// Get current [State::pause_admin] address.
+    #[export]
     pub fn pause_admin(&self) -> ActorId {
         self.state().pause_admin
     }
 
     /// Check if `vft-manager` is currently paused.
+    #[export]
     pub fn is_paused(&self) -> bool {
         self.state().is_paused
     }
 
     /// Get current [Config].
+    #[export]
     pub fn get_config(&self) -> Config {
         self.config().clone()
     }
 
     /// Get current [State::historical_proxy_address].
+    #[export]
     pub fn historical_proxy_address(&self) -> ActorId {
         self.state().historical_proxy_address
     }
 
+    #[export]
     pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
         fn collect<'a, T: 'a + Copy>(
             start: u32,
@@ -568,6 +593,7 @@ impl VftManager {
         }
     }
 
+    #[export]
     pub async fn insert_transactions(&mut self, data: Vec<(u64, u64)>) {
         self.ensure_admin();
 
@@ -601,6 +627,7 @@ impl VftManager {
     /// is enabled. Populates the collection with processed transactions.
     ///
     /// Returns false when the collection is populated.
+    #[export]
     pub fn fill_transactions(&mut self) -> bool {
         #[cfg(feature = "mocks")]
         {
@@ -613,6 +640,7 @@ impl VftManager {
 
     /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Inserts the message info into the corresponding collection.
+    #[export]
     pub fn insert_message_info(
         &mut self,
         _msg_id: MessageId,
@@ -633,6 +661,7 @@ impl VftManager {
     /// on the `_supply_type`.
     ///
     /// Designed for benchmarking gas consumption by the VFT-response processing function.
+    #[export]
     pub async fn calculate_gas_for_reply(
         &mut self,
         _slot: u64,
@@ -682,6 +711,7 @@ impl VftManager {
     /// is enabled.
     ///
     /// Swaps internal hash maps of the TokenMap instance.
+    #[export]
     pub async fn calculate_gas_for_token_map_swap(&mut self) {
         #[cfg(feature = "mocks")]
         {

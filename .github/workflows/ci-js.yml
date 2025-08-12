@@ -1,0 +1,56 @@
+name: CI(js)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - js/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-indexer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: yarn workspaces focus gear-bridges indexer
+
+      - name: Copy api files
+        run: |
+          mkdir -p js/indexer/assets
+          cp api/ethereum/IERC20Manager.json js/indexer/assets/
+          cp api/ethereum/IMessageQueue.json js/indexer/assets/
+          cp api/ethereum/IBridgingPayment.json js/indexer/assets/
+
+      - name: Build
+        run: yarn build:indexer
+
+  build-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: yarn workspaces focus gear-bridges frontend
+
+      - name: Build
+        run: yarn build:frontend

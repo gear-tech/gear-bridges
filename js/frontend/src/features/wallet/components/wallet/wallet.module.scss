@@ -15,9 +15,14 @@
   background-color: #13191e;
   border: 1px solid #00ffc466;
   border-radius: 4px;
+  transition: background-color 0.25s;
+
+  &:hover {
+    background-color: #00473766;
+  }
 }
 
-.button {
+.account {
   padding: 4px 16px;
 
   display: flex;
@@ -39,6 +44,10 @@
 
   svg {
     flex-shrink: 0;
+  }
+
+  &:hover {
+    background-color: #d4d4d4;
   }
 
   @include sm {

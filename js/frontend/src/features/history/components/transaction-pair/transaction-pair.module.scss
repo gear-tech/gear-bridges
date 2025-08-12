@@ -5,6 +5,7 @@
 
   @include breakpoint(400px) {
     flex-direction: column;
+    gap: 8px;
   }
 }
 

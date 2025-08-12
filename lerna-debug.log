@@ -1,0 +1,18 @@
+0 silly argv {
+0 silly argv   _: [ 'clean' ],
+0 silly argv   lernaVersion: '8.2.3',
+0 silly argv   '$0': '/Users/dmitriiosipov/gear/bridges/gear-bridges/node_modules/.bin/lerna'
+0 silly argv }
+1 notice cli v8.2.3
+2 verbose packageConfigs Explicit "packages" configuration found in lerna.json. Resolving packages using the configured glob(s): ["js/frontend","js/indexer"]
+3 verbose rootPath /Users/dmitriiosipov/gear/bridges/gear-bridges
+4 info versioning independent
+5 info Removing the following directories:
+6 info clean js/frontend/node_modules
+6 info clean js/indexer/node_modules
+7 info clean removing /Users/dmitriiosipov/gear/bridges/gear-bridges/js/frontend/node_modules
+8 silly rimrafDir /Users/dmitriiosipov/gear/bridges/gear-bridges/js/frontend/node_modules
+9 info clean removing /Users/dmitriiosipov/gear/bridges/gear-bridges/js/indexer/node_modules
+10 silly rimrafDir /Users/dmitriiosipov/gear/bridges/gear-bridges/js/indexer/node_modules
+11 verbose rimrafDir removed /Users/dmitriiosipov/gear/bridges/gear-bridges/js/indexer/node_modules
+12 error

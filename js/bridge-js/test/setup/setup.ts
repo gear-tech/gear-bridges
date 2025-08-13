@@ -25,7 +25,7 @@ const getTxHash = async () => {
 
 export default async () => {
   if (!fs.existsSync(PATH_TO_BIN)) {
-    execSync(`cargo build -p js-proof-test`, { stdio: 'inherit' });
+    execSync(`cargo build -p js-proof-test --release`, { stdio: 'inherit' });
   }
 
   const txHash = await getTxHash();

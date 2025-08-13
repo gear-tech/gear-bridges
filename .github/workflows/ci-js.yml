@@ -4,8 +4,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - js/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -52,6 +52,12 @@ jobs:
       - name: 'Run tests'
         working-directory: js/bridge-js
         run: yarn test
+        env:
+          HISTORICAL_PROXY_ID: ${{ secrets.HISTORICAL_PROXY_ID }}
+          CHECKPOINT_CLIENT_ID: ${{ secrets.CHECKPOINT_CLIENT_ID }}
+          BEACON_RPC_URL: ${{ secrets.BEACON_RPC_URL }}
+          VARA_WS_RPC: ${{ secrets.VARA_WS_RPC }}
+          ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
 
       - name: 'Lint'
         run: yarn lint:bridge-js

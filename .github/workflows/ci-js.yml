@@ -24,8 +24,8 @@ jobs:
 
       - name: 'Install: binaryen'
         run: |
-          wget -c https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-123-x86_64-linux.tar.gz -O - | tar -xz -C .
-          sudo cp binaryen-123/bin/wasm-opt /usr/bin/
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
 
       - name: Install golang
         uses: actions/setup-go@v5
@@ -65,7 +65,7 @@ jobs:
 
       - name: Check changed files
         id: changed
-        uses: dorny/path-filter@v3
+        uses: dorny/paths-filter@v3
         with:
           filters: |
             frontend:

@@ -79,12 +79,12 @@ impl Program {
             &self.allowances,
             &self.balances,
             &self.pause,
-            self.vft2(),
+            self.vft2().emitter(),
         )
     }
 
     pub fn vft_extension(&self) -> vft_extension::Service<'_> {
-        vft_extension::Service::new(&self.allowances, &self.balances, self.vft2())
+        vft_extension::Service::new(&self.allowances, &self.balances, self.vft2().emitter())
     }
 
     pub fn vft_metadata(&self) -> vft_metadata::Service<'_> {
@@ -92,7 +92,7 @@ impl Program {
     }
 
     pub fn vft_native_exchange(&self) -> vft_native_exchange::Service<'_> {
-        vft_native_exchange::Service::new(&self.balances, self.vft2())
+        vft_native_exchange::Service::new(&self.balances, self.vft2().emitter())
     }
 
     pub fn vft_native_exchange_admin(&self) -> vft_native_exchange_admin::Service<'_> {

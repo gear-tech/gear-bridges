@@ -58,3 +58,4 @@ vft-manager-app.workspace = true
 vft-manager-client.workspace = true
 vft-vara = { workspace = true, features = ["wasm-binary"] }
 vft-vara-client.workspace = true
+wat.workspace = true

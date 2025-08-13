@@ -24,7 +24,7 @@ jobs:
 
       - name: 'Install: binaryen'
         run: |
-          wget -c https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
           sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
 
       - name: Install golang
@@ -76,7 +76,7 @@ jobs:
   build-indexer:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changes.outputs.indexer_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -106,7 +106,7 @@ jobs:
   build-frontend:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changes.outputs.frontend_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' }}
 
     steps:
       - name: Checkout repository

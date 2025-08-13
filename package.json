@@ -15,13 +15,15 @@
   "version": "0.0.1",
   "workspaces": [
     "js/indexer",
-    "js/frontend"
+    "js/frontend",
+    "js/bridge-js"
   ],
   "devDependencies": {
     "eslint": "9.28.0",
     "lerna": "^8.2.3",
     "prettier": "3.5.3",
-    "typescript": "^5.8.3"
+    "rimraf": "^6.0.1",
+    "typescript": "^5.9.2"
   },
   "scripts": {
     "build:frontend": "lerna run build --scope frontend --verbose",

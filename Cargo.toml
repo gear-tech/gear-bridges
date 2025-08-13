@@ -33,10 +33,11 @@ members = [
     "tools/deploy-checkpoints",
     "tools/deploy-to-gear",
     "tools/genesis-config",
-    "tools/governance", 
+    "tools/governance",
     "tests",
     "gear-common",
     "tools/vft-manager-tool",
+    "js/bridge-js/js-proof-test", "js/bridge-js/ping",
 ]
 
 resolver = "2"
@@ -241,4 +242,3 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
 
 [patch."https://github.com/gear-tech/gear"]
 gsys = "=1.8.1"
-

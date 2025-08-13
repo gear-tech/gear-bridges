@@ -1,0 +1,15 @@
+constructor {
+  New : ();
+};
+
+service Ping {
+  SubmitReceipt : (slot: u64, transaction_index: u32, _receipt_rlp: vec u8) -> null;
+
+  events {
+    ReceiptSubmitted: struct {
+      u64,
+      u32,
+    };
+  }
+};
+

@@ -12,8 +12,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  bridge-js:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt, llvm-tools, rust-src
+
+      - name: 'Install: binaryen'
+        run: |
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-123-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-123/bin/wasm-opt /usr/bin/
+
+      - name: Install golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20.1'
+
+      - name: 'Install: NodeJS 20.x'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: 'Install dependencies'
+        run: yarn workspaces focus gear-bridge-js gear-bridges
+
+      - name: 'Build gear-bridge-js lib'
+        run: yarn build:bridge-js
+
+      - name: 'Build test packages'
+        run: cargo build -p js-proof-test --release
+
+      - name: 'Run tests'
+        working-directory: js/bridge-js
+        run: yarn test
+
+  check-files-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.changed.outputs.frontend }}
+      indexer_changed: ${{ steps.changed.outputs.indexer }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check changed files
+        id: changed
+        uses: dorny/path-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'js/frontend/**'
+            indexer:
+              - 'js/indexer/**'
+
   build-indexer:
     runs-on: ubuntu-latest
+    needs: check-files-changed
+    if: ${{ needs.check-files-changes.outputs.indexer_changed == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -39,6 +101,8 @@ jobs:
 
   build-frontend:
     runs-on: ubuntu-latest
+    needs: check-files-changed
+    if: ${{ needs.check-files-changes.outputs.frontend_changed == 'true' }}
 
     steps:
       - name: Checkout repository

@@ -6,7 +6,7 @@ use sails_rs::Encode;
 use std::env;
 
 fn get_var(name: &str) -> String {
-    env::var(name).expect(&format!("{} env variable should be set", name))
+    env::var(name).expect("{name} env variable should be set")
 }
 
 #[tokio::main]
@@ -66,7 +66,7 @@ async fn main() {
     let proof_hex = compose_result
         .proof
         .iter()
-        .map(|p| hex::encode(p))
+        .map(hex::encode)
         .collect::<Vec<String>>()
         .join("");
 

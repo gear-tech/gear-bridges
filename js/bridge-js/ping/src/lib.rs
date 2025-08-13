@@ -30,3 +30,9 @@ impl PingProgram {
         PingService
     }
 }
+
+impl Default for PingProgram {
+    fn default() -> Self {
+        Self::new()
+    }
+}

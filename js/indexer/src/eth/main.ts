@@ -22,10 +22,10 @@ console.log(`MessageQueue address: ${MSGQ}`);
 const handler = async (ctx: Context) => {
   await state.new(ctx);
 
-  for (let block of ctx.blocks) {
+  for (const block of ctx.blocks) {
     const timestamp = new Date(block.header.timestamp);
     const blockNumber = BigInt(block.header.height);
-    for (let log of block.logs) {
+    for (const log of block.logs) {
       const address = log.address.toLowerCase();
       const topic = log.topics[0].toLowerCase();
       const txHash = log.transactionHash.toLowerCase();

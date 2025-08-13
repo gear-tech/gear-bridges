@@ -50,6 +50,9 @@ jobs:
         working-directory: js/bridge-js
         run: yarn test
 
+      - name: 'Lint'
+        run: yarn lint:bridge-js
+
   check-files-changed:
     runs-on: ubuntu-latest
     outputs:
@@ -96,6 +99,9 @@ jobs:
 
       - name: Build
         run: yarn build:indexer
+
+      - name: 'Lint'
+        run: yarn lint:indexer
 
   build-frontend:
     runs-on: ubuntu-latest

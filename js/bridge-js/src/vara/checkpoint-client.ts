@@ -1,4 +1,4 @@
-import { GearApi, BaseGearProgram, decodeAddress } from '@gear-js/api';
+import { GearApi, BaseGearProgram } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
 import { H256, throwOnErrorReply, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 import { logger } from '../util';

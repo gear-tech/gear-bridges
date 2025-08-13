@@ -13,7 +13,7 @@ export class LogEvent<Args> {
     private abi: ethers.Interface,
     public readonly topic: string,
   ) {
-    let fragment = abi.getEvent(topic);
+    const fragment = abi.getEvent(topic);
     assert(fragment != null, 'Missing fragment');
     this.fragment = fragment;
   }

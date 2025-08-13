@@ -4,5 +4,6 @@
     "declaration": true,
     "emitDeclarationOnly": true,
     "outDir": "lib/types"
-  }
+  },
+  "include": ["src"]
 }

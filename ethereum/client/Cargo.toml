@@ -7,7 +7,6 @@ edition.workspace = true
 ahash.workspace = true
 alloy.workspace = true
 anyhow.workspace = true
-binary-merkle-tree.workspace = true
 keccak-hash.workspace = true
 log.workspace = true
 primitive-types.workspace = true

@@ -11,12 +11,15 @@ pub struct ReplayBack<'a> {
     state: &'a RefCell<State>,
 }
 
-#[sails_rs::service(events = Event)]
 impl<'a> ReplayBack<'a> {
     pub fn new(state: &'a RefCell<State>) -> Self {
         Self { state }
     }
+}
 
+#[sails_rs::service(events = Event)]
+impl<'a> ReplayBack<'a> {
+    #[export]
     pub async fn start(
         &mut self,
         sync_update: Update,
@@ -73,6 +76,7 @@ impl<'a> ReplayBack<'a> {
         })
     }
 
+    #[export]
     pub async fn process(
         &mut self,
         headers: Vec<BeaconBlockHeader>,
@@ -90,7 +94,7 @@ impl<'a> ReplayBack<'a> {
 }
 
 fn process_headers(
-    service: &mut ReplayBack,
+    service: &mut ReplayBackExposure<ReplayBack<'_>>,
     state: &mut State,
     mut headers: Vec<BeaconBlockHeader>,
 ) -> bool {

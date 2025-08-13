@@ -12,6 +12,7 @@ concurrency:
 jobs:
   bridge-js:
     runs-on: ubuntu-latest
+    environment: bridge-js-test
 
     steps:
       - name: Checkout

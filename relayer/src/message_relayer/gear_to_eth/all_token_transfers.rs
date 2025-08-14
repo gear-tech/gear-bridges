@@ -11,13 +11,15 @@ use crate::{
                 merkle_proof_fetcher::MerkleProofFetcher,
                 message_queued_event_extractor::MessageQueuedEventExtractor,
             },
+            MessageInBlock,
         },
         eth_to_gear::api_provider::ApiProviderConnection,
+        gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
     },
 };
 use ethereum_client::EthApi;
-use std::{iter, sync::Arc};
-use tokio::sync::mpsc;
+use std::{iter, path::PathBuf, sync::Arc};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 use utils_prometheus::MeteredService;
 
 pub struct Relayer {
@@ -31,6 +33,10 @@ pub struct Relayer {
     proof_fetcher: MerkleProofFetcher,
     status_fetcher: StatusFetcher,
     accumulator: Accumulator,
+
+    message_queued_receiver: UnboundedReceiver<MessageInBlock>,
+
+    tx_manager: TransactionManager,
 }
 
 impl MeteredService for Relayer {
@@ -52,15 +58,23 @@ impl Relayer {
         confirmations_merkle_root: u64,
 
         confirmations_status: u64,
+
+        storage_path: PathBuf,
     ) -> anyhow::Result<Self> {
-        let gear_block_listener = GearBlockListener::new(
-            api_provider.clone(),
-            Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
-        );
+        let storage = Arc::new(JSONStorage::new(storage_path));
+        let tx_manager = TransactionManager::new(storage.clone());
+        if let Err(e) = tx_manager.load_from_storage().await {
+            log::warn!("Failed to load transaction manager state: {e}");
+        }
+
+        let gear_block_listener = GearBlockListener::new(api_provider.clone(), storage.clone());
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
-        let listener_message_queued =
-            MessageQueuedEventExtractor::new(api_provider.clone(), message_queued_sender);
+        let listener_message_queued = MessageQueuedEventExtractor::new(
+            api_provider.clone(),
+            message_queued_sender,
+            storage.clone(),
+        );
 
         let (roots_sender, roots_receiver) = mpsc::unbounded_channel();
         let merkle_root_extractor = MerkleRootExtractor::new(
@@ -70,7 +84,7 @@ impl Relayer {
             roots_sender,
         );
 
-        let accumulator = Accumulator::new(roots_receiver, message_queued_receiver);
+        let accumulator = Accumulator::new(roots_receiver, tx_manager.merkle_roots.clone());
 
         let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
 
@@ -88,6 +102,10 @@ impl Relayer {
             proof_fetcher,
             status_fetcher,
             accumulator,
+
+            message_queued_receiver,
+
+            tx_manager,
         })
     }
 
@@ -96,12 +114,25 @@ impl Relayer {
 
         self.listener_message_queued.spawn(gear_blocks);
         self.merkle_root_extractor.spawn();
-        let channel_messages = self.accumulator.spawn();
 
-        let channel_message_data = self.proof_fetcher.spawn(channel_messages);
-        let channel_tx_data = self.status_fetcher.spawn();
+        let accumulator_io = self.accumulator.spawn();
+        let proof_fetcher_io = self.proof_fetcher.spawn();
+        let status_fetcher_io = self.status_fetcher.spawn();
 
-        self.message_sender
-            .spawn(channel_message_data, channel_tx_data);
+        let message_sender_io = self.message_sender.spawn();
+
+        if let Err(err) = self
+            .tx_manager
+            .run(
+                accumulator_io,
+                self.message_queued_receiver,
+                proof_fetcher_io,
+                message_sender_io,
+                status_fetcher_io,
+            )
+            .await
+        {
+            log::error!("Transaction manager exited with error: {err:?}");
+        }
     }
 }

@@ -1,26 +1,94 @@
-mod utils;
+pub mod utils;
 
 use super::*;
-use crate::{
-    common::BASE_RETRY_DELAY,
-    message_relayer::common::{AuthoritySetId, MessageInBlock},
-};
+use crate::{common::BASE_RETRY_DELAY, message_relayer::common::AuthoritySetId};
 use futures::{
     future::{self, Either},
     pin_mut,
 };
+use primitive_types::H256;
 use prometheus::IntGauge;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use std::sync::Arc;
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    RwLock,
+};
 use utils::{Added, MerkleRoots, Messages};
 use utils_prometheus::{impl_metered_service, MeteredService};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    pub authority_set_id: AuthoritySetId,
+    pub block: GearBlockNumber,
+    pub block_hash: H256,
+    pub tx_uuid: Uuid,
+}
+
+pub enum Response {
+    /// Merkle-root was relayed and the message can be processed further.
+    Success {
+        authority_set_id: AuthoritySetId,
+        block: GearBlockNumber,
+        tx_uuid: Uuid,
+        merkle_root: RelayedMerkleRoot,
+    },
+
+    /// Accumulator buffer is full and the message cannot be processed.
+    Overflowed(Request),
+
+    /// Message is stuck and cannot be processed.
+    Stuck {
+        authority_set_id: AuthoritySetId,
+        block: GearBlockNumber,
+        tx_uuid: Uuid,
+        merkle_root: RelayedMerkleRoot,
+    },
+}
+
+pub struct AccumulatorIo {
+    messages_with_roots: UnboundedReceiver<Response>,
+    messages: UnboundedSender<Request>,
+}
+
+impl AccumulatorIo {
+    pub fn new(
+        messages_with_roots: UnboundedReceiver<Response>,
+        messages: UnboundedSender<Request>,
+    ) -> Self {
+        Self {
+            messages_with_roots,
+            messages,
+        }
+    }
+
+    pub fn send_message(
+        &self,
+        tx_uuid: Uuid,
+        authority_set_id: AuthoritySetId,
+        block: GearBlockNumber,
+        block_hash: H256,
+    ) -> bool {
+        let request = Request {
+            authority_set_id,
+            block,
+            block_hash,
+            tx_uuid,
+        };
+        self.messages.send(request).is_ok()
+    }
+
+    pub async fn recv_message(&mut self) -> Option<Response> {
+        self.messages_with_roots.recv().await
+    }
+}
 
 /// Struct accumulates gear-eth messages and required merkle roots.
 pub struct Accumulator {
     metrics: Metrics,
     messages: Messages,
-    merkle_roots: MerkleRoots,
+    merkle_roots: Arc<RwLock<MerkleRoots>>,
     receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
-    receiver_messages: UnboundedReceiver<MessageInBlock>,
 }
 
 impl MeteredService for Accumulator {
@@ -41,22 +109,23 @@ impl_metered_service! {
 impl Accumulator {
     pub fn new(
         receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
-        receiver_messages: UnboundedReceiver<MessageInBlock>,
+
+        merkle_roots: Arc<RwLock<MerkleRoots>>,
     ) -> Self {
         Self {
             metrics: Metrics::new(),
             messages: Messages::new(10_000),
-            merkle_roots: MerkleRoots::new(300),
+            merkle_roots,
             receiver_roots,
-            receiver_messages,
         }
     }
 
-    pub fn spawn(mut self) -> UnboundedReceiver<(MessageInBlock, RelayedMerkleRoot)> {
+    pub fn spawn(mut self) -> AccumulatorIo {
+        let (requests_in, mut requests_out) = mpsc::unbounded_channel();
         let (mut messages_out, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
             loop {
-                match run_inner(&mut self, &mut messages_out).await {
+                match run_inner(&mut self, &mut messages_out, &mut requests_out).await {
                     Ok(_) => break,
                     Err(e) => {
                         log::error!("{e:?}");
@@ -67,16 +136,17 @@ impl Accumulator {
             }
         });
 
-        receiver
+        AccumulatorIo::new(receiver, requests_in)
     }
 }
 
 async fn run_inner(
     this: &mut Accumulator,
-    messages_out: &mut UnboundedSender<(MessageInBlock, RelayedMerkleRoot)>,
+    messages_out: &mut UnboundedSender<Response>,
+    requests: &mut UnboundedReceiver<Request>,
 ) -> anyhow::Result<()> {
     loop {
-        let recv_messages = this.receiver_messages.recv();
+        let recv_messages = requests.recv();
         pin_mut!(recv_messages);
 
         let recv_merkle_roots = this.receiver_roots.recv();
@@ -94,11 +164,16 @@ async fn run_inner(
             }
 
             Either::Left((Some(message), _)) => {
-                if let Some(merkle_root) = this
-                    .merkle_roots
-                    .find(message.authority_set_id, message.block)
+                let merkle_roots = this.merkle_roots.read().await;
+                if let Some(merkle_root) =
+                    merkle_roots.find(message.authority_set_id, message.block)
                 {
-                    messages_out.send((message, *merkle_root))?;
+                    messages_out.send(Response::Success {
+                        authority_set_id: message.authority_set_id,
+                        block: message.block,
+                        tx_uuid: message.tx_uuid,
+                        merkle_root: *merkle_root,
+                    })?;
                     continue;
                 }
 
@@ -106,11 +181,14 @@ async fn run_inner(
                     log::error!(
                         "Unable to add the message '{message:?}' since the capacity is full"
                     );
+
+                    messages_out.send(Response::Overflowed(message))?;
                 }
             }
 
             Either::Right((Some(merkle_root), _)) => {
-                match this.merkle_roots.add(merkle_root) {
+                let mut merkle_roots = this.merkle_roots.write().await;
+                match merkle_roots.add(merkle_root) {
                     Ok(Added::Ok | Added::Overwritten(_)) => {}
 
                     Ok(Added::Removed(merkle_root_old)) => {
@@ -118,6 +196,12 @@ async fn run_inner(
                         let messages = this.messages.drain(&merkle_root_old);
                         for message in messages {
                             log::error!("Remove stuck message = {message:?}");
+                            messages_out.send(Response::Stuck {
+                                authority_set_id: message.authority_set_id,
+                                block: message.block,
+                                tx_uuid: message.tx_uuid,
+                                merkle_root: merkle_root_old,
+                            })?;
                         }
                     }
 
@@ -128,7 +212,12 @@ async fn run_inner(
                 }
 
                 for message in this.messages.drain(&merkle_root) {
-                    messages_out.send((message, merkle_root))?;
+                    messages_out.send(Response::Success {
+                        authority_set_id: message.authority_set_id,
+                        block: message.block,
+                        tx_uuid: message.tx_uuid,
+                        merkle_root,
+                    })?;
                 }
             }
         }

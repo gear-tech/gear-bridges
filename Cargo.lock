@@ -4825,6 +4825,7 @@ dependencies = [
  "parity-scale-codec",
  "primitive-types 0.12.2",
  "sc-consensus-grandpa",
+ "serde",
  "sp-consensus-grandpa",
  "sp-core",
  "sp-runtime",

@@ -1,6 +1,6 @@
 use ethereum_client::TxHash;
 use ethereum_common::Hash256;
-use gear_rpc_client::dto::{MerkleProof, Message};
+use gear_rpc_client::dto::Message;
 use gsdk::{
     config::Header,
     metadata::{
@@ -19,10 +19,34 @@ pub mod ethereum;
 pub mod gear;
 pub mod paid_messages_filter;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Debug,
+    derive_more::Display,
+    Serialize,
+    Deserialize,
+)]
 pub struct AuthoritySetId(pub u64);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, derive_more::Display)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Debug,
+    derive_more::Display,
+    Serialize,
+    Deserialize,
+)]
 pub struct GearBlockNumber(pub u32);
 
 #[derive(
@@ -56,7 +80,7 @@ pub struct EthereumBlockNumber(pub u64);
 )]
 pub struct EthereumSlotNumber(pub u64);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MessageInBlock {
     pub message: Message,
     pub block: GearBlockNumber,
@@ -69,7 +93,7 @@ pub struct PaidMessage {
     pub nonce: [u8; 32],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub block_hash: H256,
@@ -88,12 +112,6 @@ pub struct GSdkArgs {
     pub vara_domain: String,
     pub vara_port: u16,
     pub vara_rpc_retries: u8,
-}
-
-pub struct Data {
-    pub message: MessageInBlock,
-    pub relayed_root: RelayedMerkleRoot,
-    pub proof: MerkleProof,
 }
 
 #[derive(Clone, Debug)]

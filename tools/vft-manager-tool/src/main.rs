@@ -2,9 +2,13 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::{Args, Parser, Subcommand};
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
-use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
+use sails_rs::{
+    calls::*,
+    gclient::calls::{GClientRemoting, QueryExt},
+    prelude::*,
+};
 use vft_manager::WASM_BINARY;
-use vft_manager_client::{traits::*, InitConfig};
+use vft_manager_client::{traits::*, InitConfig, Order};
 
 const SIZE_MIGRATE_BATCH: u32 = 100;
 
@@ -42,6 +46,7 @@ struct Cli {
 enum CliCommands {
     DeployUpgraded(DeployUpgraded),
     MigrateTransactions(MigrateTransactions),
+    ReadTransactions(ReadTransactions),
 }
 
 #[derive(Args)]
@@ -71,6 +76,19 @@ struct MigrateTransactions {
     /// with admin priveleges
     #[arg(long)]
     new_vft_manager: String,
+}
+
+#[derive(Args)]
+struct ReadTransactions {
+    #[arg(long, help = format!("Size of batch. Default: {SIZE_MIGRATE_BATCH}"))]
+    size_batch: Option<u32>,
+
+    #[arg(long)]
+    block_number: u32,
+
+    /// ActorId of the VFT-manager contract
+    #[arg(long)]
+    vft_manager: String,
 }
 
 fn str_to_actorid(s: String) -> AnyResult<ActorId> {
@@ -127,6 +145,48 @@ async fn main() -> AnyResult<()> {
         }
 
         CliCommands::DeployUpgraded(args) => deploy_upgraded(gear_api, args).await?,
+
+        CliCommands::ReadTransactions(args) => {
+            let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
+            let vft_manager = str_to_actorid(args.vft_manager)
+                .context("Unable to parse address of the VftManager")?;
+
+            let gas_limit = gear_api
+                .block_gas_limit()
+                .context("Unable to get block gas limit")?;
+
+            let signer: gsdk::signer::Signer = gear_api.into();
+
+            let block_hash = signer
+                .api()
+                .rpc()
+                .chain_get_block_hash(Some(args.block_number.into()))
+                .await?
+                .ok_or_else(|| anyhow!("Block #{} not present on RPC node", args.block_number))?;
+
+            let gear_api = GearApi::from(signer);
+            let remoting = GClientRemoting::new(gear_api);
+            let service = vft_manager_client::VftManager::new(remoting);
+            let mut cursor = 0;
+            loop {
+                let transactions = service
+                    .transactions(Order::Direct, cursor, size_batch)
+                    .with_gas_limit(gas_limit)
+                    .at_block(block_hash)
+                    .recv(vft_manager)
+                    .await
+                    .map_err(|e| anyhow!("{e:?}"))?;
+                let len = transactions.len();
+
+                log::info!("transactions (from {cursor}): {transactions:?}");
+
+                cursor += size_batch;
+
+                if (len as u32) < size_batch {
+                    break;
+                }
+            }
+        }
     }
 
     Ok(())

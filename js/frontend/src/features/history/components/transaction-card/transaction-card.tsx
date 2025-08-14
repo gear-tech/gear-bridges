@@ -44,7 +44,9 @@ function TransactionCard(props: Props) {
       </div>
 
       <p className={styles.transactionHash}>
-        <Link to={generatePath(ROUTE.TRANSACTION, { id })}>{getTruncatedText(txHash)}</Link>
+        <Link to={generatePath(ROUTE.TRANSACTION, { id })} className={styles.link}>
+          {getTruncatedText(txHash)}
+        </Link>
         <CopyButton value={txHash} />
       </p>
 
@@ -61,7 +63,7 @@ function TransactionCardSkeleton() {
 
       <p className={styles.transactionHash}>
         <Skeleton>
-          <span>0x000000000</span>
+          <span className={styles.link}>0x000000000</span>
         </Skeleton>
 
         <Skeleton width="18px" height="18px" />

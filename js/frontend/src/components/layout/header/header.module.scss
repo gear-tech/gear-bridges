@@ -3,7 +3,16 @@
   padding-bottom: 20px;
 
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
+}
+
+.logo {
+  svg {
+    width: 100%;
+    height: auto;
+  }
 }
 
 .nav {
@@ -17,6 +26,17 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+
+    @include sm {
+      flex-direction: column;
+      gap: 8px;
+
+      text-align: center;
+
+      > *:nth-child(1) {
+        order: 1;
+      }
+    }
   }
 }
 
@@ -28,6 +48,13 @@
   gap: 32px;
 
   position: relative;
+
+  @include breakpoint(400px) {
+    width: 100%;
+
+    justify-content: space-between;
+    gap: 0;
+  }
 
   &::before {
     content: '';

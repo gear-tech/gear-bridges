@@ -2,6 +2,11 @@
   display: flex;
   align-items: center;
   gap: 16px;
+
+  @include breakpoint(400px) {
+    flex-direction: column;
+    gap: 8px;
+  }
 }
 
 .tx {
@@ -11,9 +16,17 @@
   align-items: center;
   gap: 8px;
 
+  @include md {
+    width: 100%;
+  }
+
   > div {
     overflow: hidden;
   }
+}
+
+.arrow {
+  flex-shrink: 0;
 }
 
 .amount {
@@ -25,5 +38,6 @@
 .address {
   font-size: 11px;
   line-height: 180%;
+  word-break: break-all;
   color: #9cacb1;
 }

@@ -16,6 +16,7 @@ type BaseProps = {
 type SymbolProps = BaseProps & { symbol: string | undefined };
 type IdProps = BaseProps & { id: TokenId };
 type Props = SymbolProps | IdProps;
+
 function TokenPrice({ amount, className, fraction = 2, ...props }: Props) {
   const { data, isLoading } = useTokenPrices();
 

@@ -13,6 +13,17 @@ body {
   flex-direction: column;
 }
 
+// TODO: remove after @gear-js/vara-ui update
+#alert-root {
+  width: 100%;
+  max-width: 480px;
+
+  padding: 5px 22px;
+
+  bottom: 0;
+  right: 0;
+}
+
 #modal-root {
   > div > div {
     background-color: #0e1217;
@@ -63,6 +74,7 @@ a {
 button {
   padding: 0;
   text-align: left;
+  color: inherit;
   border: none;
   outline: none;
   background-color: transparent;

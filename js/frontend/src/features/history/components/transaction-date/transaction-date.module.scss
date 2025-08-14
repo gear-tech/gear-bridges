@@ -3,5 +3,7 @@
   align-items: center;
   gap: 4px;
 
-  white-space: nowrap;
+  svg {
+    flex-shrink: 0;
+  }
 }

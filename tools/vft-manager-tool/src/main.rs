@@ -2,7 +2,11 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::{Args, Parser, Subcommand};
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
-use sails_rs::{calls::*, gclient::calls::{GClientRemoting, QueryExt}, prelude::*};
+use sails_rs::{
+    calls::*,
+    gclient::calls::{GClientRemoting, QueryExt},
+    prelude::*,
+};
 use vft_manager::WASM_BINARY;
 use vft_manager_client::{traits::*, InitConfig, Order};
 
@@ -153,7 +157,9 @@ async fn main() -> AnyResult<()> {
 
             let signer: gsdk::signer::Signer = gear_api.into();
 
-            let block_hash = signer.api().rpc()
+            let block_hash = signer
+                .api()
+                .rpc()
                 .chain_get_block_hash(Some(args.block_number.into()))
                 .await?
                 .ok_or_else(|| anyhow!("Block #{} not present on RPC node", args.block_number))?;
@@ -171,7 +177,7 @@ async fn main() -> AnyResult<()> {
                     .await
                     .map_err(|e| anyhow!("{e:?}"))?;
                 let len = transactions.len();
-                
+
                 log::info!("transactions (from {cursor}): {transactions:?}");
 
                 cursor += size_batch;

@@ -23,6 +23,7 @@ ethereum/lcov.info
 
 # js
 node_modules/
+js/bridge-js/lib/
 js/indexer/lib/
 js/frontend/dist/
 js/indexer/assets/

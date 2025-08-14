@@ -106,9 +106,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private async _saveInitiatedTransfers() {
     const transfers = mapValues(this._transfers);
 
-    const initTransfers = mapValues(this._initiatedTransfers).filter(
-      ({ id }) => !Boolean(transfers.find((t) => t.id === id)),
-    );
+    const initTransfers = mapValues(this._initiatedTransfers).filter(({ id }) => !transfers.find((t) => t.id === id));
 
     const initTransfersToRemove = mapValues(this._initiatedTransfers).filter(({ id }) =>
       Boolean(transfers.find((t) => t.id === id)),

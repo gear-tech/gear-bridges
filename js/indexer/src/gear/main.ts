@@ -130,7 +130,7 @@ const handler = async (ctx: ProcessorContext) => {
                 ctx.log.info(`Historical proxy program changed to ${data.new}`);
                 await updateId(ProgramName.HistoricalProxy, data.new);
                 await state.save();
-                process.exit(0);
+                return process.exit(0);
               }
               case VftManagerMethods.RequestBridging: {
                 const data = decoder.decodeOutput<{ ok: [nonce: string] }>(service, method, msg.payload);
@@ -143,6 +143,7 @@ const handler = async (ctx: ProcessorContext) => {
                 continue;
               }
             }
+            break;
           }
           case ProgramName.HistoricalProxy: {
             if (service !== HistoricalProxyServices.HistoricalProxy) continue;
@@ -177,7 +178,12 @@ const handler = async (ctx: ProcessorContext) => {
 
         if (event.call!.name !== `Gear.send_message`) continue;
 
-        const { payload } = event.call?.args;
+        if (!event.call) {
+          ctx.log.error({ event }, 'Event call is undefined');
+          continue;
+        }
+
+        const { payload } = event.call.args;
 
         const service = decoder.service(payload);
         if (service !== VftManagerServices.VftManager) continue;

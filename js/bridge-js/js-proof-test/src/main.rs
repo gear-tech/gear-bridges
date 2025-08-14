@@ -3,7 +3,7 @@ use ethereum_client::PollingEthApi;
 use gclient::GearApi;
 use relayer::message_relayer::eth_to_gear::proof_composer::compose;
 use sails_rs::Encode;
-use std::env;
+use std::{env, path::PathBuf};
 
 fn get_var(name: &str) -> String {
     env::var(name).expect("{name} env variable should be set")
@@ -70,10 +70,18 @@ async fn main() {
         .collect::<Vec<String>>()
         .join("");
 
-    println!("proof: {receipt_rlp_hex}");
-    println!("receipt_rlp: {proof_hex}");
+    println!("proof: {proof_hex}");
+    println!("receipt_rlp: {receipt_rlp_hex}");
 
-    std::fs::write("test/tmp/receipt_rlp", receipt_rlp_hex).expect("Failed to write receipt_rlp");
-    std::fs::write("test/tmp/proof", proof_hex).expect("Failed to write proof");
-    std::fs::write("test/tmp/eth_to_vara_scale", payload).expect("Failed to write eth_to_vara");
+    let target_dir = PathBuf::from("test/tmp");
+
+    if !target_dir.exists() {
+        std::fs::create_dir_all(&target_dir).expect("Failed to create target directory");
+    }
+
+    std::fs::write(target_dir.join("receipt_rlp"), receipt_rlp_hex)
+        .expect("Failed to write receipt_rlp");
+    std::fs::write(target_dir.join("proof"), proof_hex).expect("Failed to write proof");
+    std::fs::write(target_dir.join("eth_to_vara_scale"), payload)
+        .expect("Failed to write eth_to_vara");
 }

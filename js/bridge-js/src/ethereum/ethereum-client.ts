@@ -30,8 +30,6 @@ class _EthereumClient implements EthereumClient {
   public getBlockByHash(hash: `0x${string}`) {
     return this.rpc.getBlock({ blockHash: hash });
   }
-
-  public getReceipts() {}
 }
 
 export function createEthereumClient(client: PublicClient, beaconClient: BeaconClient): EthereumClient {

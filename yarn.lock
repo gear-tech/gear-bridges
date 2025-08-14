@@ -5575,6 +5575,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tsconfig/recommended@npm:1.0.10":
+  version: 1.0.10
+  resolution: "@tsconfig/recommended@npm:1.0.10"
+  checksum: 10c0/402ef03da7300ea0f9f9d6e0507dcb8782c6b764c1f45b946a6c34f2bd3153571a1a85f10659606c24d1052aed699c3e32dd0da876e8f7eea577374eeeb80d17
+  languageName: node
+  linkType: hard
+
 "@tufjs/canonical-json@npm:2.0.0":
   version: 2.0.0
   resolution: "@tufjs/canonical-json@npm:2.0.0"
@@ -8772,6 +8779,14 @@ __metadata:
   checksum: 10c0/23efe47ff0a1a7c91489271b3a1e1d2a171c12ec7f9b35b29b2fce51270124aff0ec890087e2bc2182c1cb746e232ab7561aaafe05f1e7452aea733d2bfe3f63
   languageName: node
   linkType: hard
+
+"common@workspace:js/common":
+  version: 0.0.0-use.local
+  resolution: "common@workspace:js/common"
+  dependencies:
+    "@tsconfig/recommended": "npm:1.0.10"
+  languageName: unknown
+  linkType: soft
 
 "compare-func@npm:^2.0.0":
   version: 2.0.0

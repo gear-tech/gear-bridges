@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import { useAccount } from '@gear-js/react-hooks';
+import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -49,7 +49,7 @@ const ACCOUNT_URL = {
 } as const;
 
 const TX_URL = {
-  [NetworkEnum.Vara]: 'https://polkadot.js.org/apps/?rpc=wss://testnet-archive.vara.network#/explorer/query',
+  [NetworkEnum.Vara]: () => undefined,
   [NetworkEnum.Ethereum]: `https://hoodi.etherscan.io/tx`,
 } as const;
 
@@ -113,8 +113,12 @@ function Transaction() {
   const sourceToken = addressToToken[getAddressToTokenKey(sourceHex, destinationHex)];
   const destinationToken = addressToToken[getAddressToTokenKey(destinationHex, sourceHex)];
 
+  const isVaraNetwork = sourceNetwork === NetworkEnum.Vara;
+  const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
+  const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
+
   const isPayFeeButtonVisible = account?.decodedAddress === sender && status === StatusEnum.AwaitingPayment;
-  const rawNonce = sourceNetwork === NetworkEnum.Vara ? `0x${nonce.padStart(64, '0')}` : nonce;
+  const rawNonce = isVaraNetwork ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
     <Container className={styles.container}>
@@ -181,18 +185,18 @@ function Transaction() {
         <SectionCard heading="Addresses">
           <Field label="From Address">
             <ExplorerLink network={sourceNetwork} id={sender} urls={ACCOUNT_URL}>
-              <Address value={sender} />
+              <Address value={formattedSenderAddress} />
             </ExplorerLink>
 
-            <CopyButton value={sender} message="Sender address copied to clipboard" />
+            <CopyButton value={formattedSenderAddress} message="Sender address copied to clipboard" />
           </Field>
 
           <Field label="To Address">
             <ExplorerLink network={destNetwork} id={receiver} urls={ACCOUNT_URL}>
-              <Address value={receiver} />
+              <Address value={formattedReceiverAddress} />
             </ExplorerLink>
 
-            <CopyButton value={receiver} message="Receiver address copied to clipboard" />
+            <CopyButton value={formattedReceiverAddress} message="Receiver address copied to clipboard" />
           </Field>
 
           <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[sourceNetwork]} Contract Address`}>

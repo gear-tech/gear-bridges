@@ -1,11 +1,11 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
+import { getPairHash } from 'common';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
 import { useTokens } from '@/context';
-import { getAddressToTokenKey } from '@/context/tokens';
 import { useTransaction } from '@/features/history';
 import ArrowSVG from '@/features/history/assets/arrow.svg?react';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
@@ -82,10 +82,10 @@ function Transaction() {
   const { account } = useAccount();
   const { id } = useParams() as Params;
 
-  const { addressToToken } = useTokens();
+  const { pairHashToToken } = useTokens();
   const { data } = useTransaction(id);
 
-  if (!data || !addressToToken) return <TransactionSkeleton />;
+  if (!data || !pairHashToToken) return <TransactionSkeleton />;
 
   const {
     status,
@@ -110,8 +110,8 @@ function Transaction() {
   const sourceHex = source as HexString;
   const destinationHex = destination as HexString;
 
-  const sourceToken = addressToToken[getAddressToTokenKey(sourceHex, destinationHex)];
-  const destinationToken = addressToToken[getAddressToTokenKey(destinationHex, sourceHex)];
+  const sourceToken = pairHashToToken[getPairHash(sourceHex, destinationHex)];
+  const destinationToken = pairHashToToken[getPairHash(destinationHex, sourceHex)];
 
   const isVaraNetwork = sourceNetwork === NetworkEnum.Vara;
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;

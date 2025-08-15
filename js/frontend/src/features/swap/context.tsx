@@ -1,8 +1,7 @@
-import { HexString } from '@gear-js/api';
+import { getPairHash } from 'common';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Token, useTokens } from '@/context';
-import { getAddressToTokenKey } from '@/context/tokens';
 import { useEthAccount } from '@/hooks';
 
 // import { usePairs } from '../history';
@@ -16,7 +15,7 @@ type Context = {
     switch: () => void;
   };
 
-  token: (Token & { set: (address: `${HexString}-${HexString}`) => void }) | undefined;
+  token: (Token & { set: (address: string) => void }) | undefined;
   destinationToken: Token | undefined;
 };
 
@@ -41,27 +40,27 @@ function BridgeProvider({ children }: PropsWithChildren) {
 
   // token
   // const { data: pairs } = usePairs();
-  const { addressToToken, nativeToken } = useTokens();
+  const { pairHashToToken, nativeToken } = useTokens();
 
   const defaultNetwork = ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
   const defaultTokenAddress = nativeToken[defaultNetwork]?.address;
   const defaultTokenDestAddress = nativeToken[defaultNetwork]?.destinationAddress;
-  const [tokenAddress, setTokenAddress] = useState<`${HexString}-${HexString}` | undefined>(undefined);
+  const [tokenAddress, setTokenAddress] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!defaultTokenAddress || !defaultTokenDestAddress) return;
 
-    setTokenAddress(getAddressToTokenKey(defaultTokenAddress, defaultTokenDestAddress));
+    setTokenAddress(getPairHash(defaultTokenAddress, defaultTokenDestAddress));
   }, [defaultTokenAddress, defaultTokenDestAddress]);
 
-  const token = tokenAddress ? addressToToken?.[tokenAddress] : undefined;
+  const token = tokenAddress ? pairHashToToken?.[tokenAddress] : undefined;
   const isVaraNetwork = token ? token.network === NETWORK.VARA : true;
 
   // const pair = pairs?.find(({ varaToken, ethToken }) => varaToken === tokenAddress || ethToken === tokenAddress);
   // const destinationTokenAddress = isVaraNetwork ? pair?.ethToken : pair?.varaToken;
 
   const destinationToken = token?.destinationAddress
-    ? addressToToken?.[getAddressToTokenKey(token.destinationAddress, token.address)]
+    ? pairHashToToken?.[getPairHash(token.destinationAddress, token.address)]
     : undefined;
 
   const value = useMemo(
@@ -72,7 +71,7 @@ function BridgeProvider({ children }: PropsWithChildren) {
         switch: () => {
           if (!destinationToken?.address || !token?.address) return;
 
-          return setTokenAddress(getAddressToTokenKey(destinationToken.address, token.address));
+          return setTokenAddress(getPairHash(destinationToken.address, token.address));
         },
       },
 

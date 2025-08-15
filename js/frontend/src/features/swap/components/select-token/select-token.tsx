@@ -1,5 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { Input, Modal } from '@gear-js/vara-ui';
+import { getPairHash } from 'common';
 import { useState } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -7,7 +8,6 @@ import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { useTokens } from '@/context';
-import { getAddressToTokenKey } from '@/context/tokens';
 import { useEthFTBalances, useVaraFTBalances, useModal, useVaraAccountBalance, useEthAccountBalance } from '@/hooks';
 import { cx, isUndefined } from '@/utils';
 
@@ -26,7 +26,7 @@ type ModalProps = {
 };
 
 function SelectTokenModal({ close }: ModalProps) {
-  const { tokens, addressToToken } = useTokens();
+  const { tokens, pairHashToToken } = useTokens();
   const { token, network } = useBridgeContext();
 
   const varaFtBalances = useVaraFTBalances();
@@ -47,14 +47,14 @@ function SelectTokenModal({ close }: ModalProps) {
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
     const balance = isNative ? accountBalance : ftBalance;
 
-    if (!addressToToken || balance.isLoading) return <Skeleton width="5rem" />;
+    if (!pairHashToToken || balance.isLoading) return <Skeleton width="5rem" />;
     if (isUndefined(balance.data)) return;
 
     return (
       <FormattedBalance
         value={balance.data}
         symbol=""
-        decimals={addressToToken[getAddressToTokenKey(address, destAddress)]?.decimals ?? 0}
+        decimals={pairHashToToken[getPairHash(address, destAddress)]?.decimals ?? 0}
         className={styles.balance}
       />
     );
@@ -75,7 +75,7 @@ function SelectTokenModal({ close }: ModalProps) {
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
-        token?.set(getAddressToTokenKey(address, destinationAddress));
+        token?.set(getPairHash(address, destinationAddress));
         close();
       };
 

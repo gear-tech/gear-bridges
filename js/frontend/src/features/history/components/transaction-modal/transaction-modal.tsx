@@ -1,11 +1,10 @@
-import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
+import { getPairHash } from 'common';
 import { JSX } from 'react';
 
 import { Address, FeeAndTimeFooter, FormattedBalance } from '@/components';
 import { useTokens } from '@/context';
-import { getAddressToTokenKey } from '@/context/tokens';
 import { cx, isUndefined } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -35,14 +34,14 @@ function TransactionModal({
   renderProgressBar,
   close,
 }: Props) {
-  const { addressToToken } = useTokens();
+  const { pairHashToToken } = useTokens();
   const isVaraNetwork = sourceNetwork === Network.Vara;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
 
-  const sourceToken = addressToToken?.[getAddressToTokenKey(source as HexString, destination as HexString)];
-  const destinationToken = addressToToken?.[getAddressToTokenKey(destination as HexString, source as HexString)];
+  const sourceToken = pairHashToToken?.[getPairHash(source, destination)];
+  const destinationToken = pairHashToToken?.[getPairHash(destination, source)];
 
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);

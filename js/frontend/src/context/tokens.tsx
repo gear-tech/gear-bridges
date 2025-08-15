@@ -19,8 +19,8 @@ type Value = {
     eth: Token | undefined;
   };
 
-  getHistoryToken: ((sourceAddress: HexString, destinationAddress: HexString) => Token | undefined) | undefined;
-  getActiveToken: ((address: HexString) => Token | undefined) | undefined;
+  getHistoryToken: ((sourceAddress: HexString, destinationAddress: HexString) => Token) | undefined;
+  getActiveToken: ((address: HexString) => Token) | undefined;
 };
 
 const DEFAULT_VALUE = {
@@ -53,6 +53,18 @@ type Token = {
   isNative: boolean;
   network: 'vara' | 'eth';
   isActive: boolean;
+};
+
+const TOKEN_PLACEHOLDER: Token = {
+  address: '0x00',
+  destinationAddress: '0x00',
+  name: 'Token',
+  symbol: 'Unit',
+  displaySymbol: 'Unit',
+  decimals: 0,
+  isNative: false,
+  network: 'vara',
+  isActive: false,
 };
 
 const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
@@ -143,11 +155,13 @@ function TokensProvider({ children }: PropsWithChildren) {
         eth: nativeEthToken,
       },
 
-      getActiveToken: addressToActiveToken ? (address: HexString) => addressToActiveToken[address] : undefined,
+      getActiveToken: addressToActiveToken
+        ? (address: HexString) => addressToActiveToken[address] || TOKEN_PLACEHOLDER
+        : undefined,
 
       getHistoryToken: pairHashToHistoryToken
         ? (sourceAddress: HexString, destinationAddress: HexString) =>
-            pairHashToHistoryToken[getPairHash(sourceAddress, destinationAddress)]
+            pairHashToHistoryToken[getPairHash(sourceAddress, destinationAddress)] || TOKEN_PLACEHOLDER
         : undefined,
     }),
     [

@@ -40,18 +40,23 @@ function SelectTokenModal({ close }: ModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const renderTokenBalance = (address: HexString, isNative: boolean) => {
-    const _token = getActiveToken?.(address);
-
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
     const balance = isNative ? accountBalance : ftBalance;
 
-    if (!_token || balance.isLoading) return <Skeleton width="5rem" />;
+    if (!getActiveToken || balance.isLoading) return <Skeleton width="5rem" />;
     if (isUndefined(balance.data)) return;
 
-    return <FormattedBalance value={balance.data} symbol="" decimals={_token.decimals} className={styles.balance} />;
+    return (
+      <FormattedBalance
+        value={balance.data}
+        symbol=""
+        decimals={getActiveToken(address).decimals}
+        className={styles.balance}
+      />
+    );
   };
 
   const filteredTokens = tokens[networkName]?.filter(({ displaySymbol }) => {

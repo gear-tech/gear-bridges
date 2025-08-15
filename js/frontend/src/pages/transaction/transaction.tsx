@@ -112,8 +112,6 @@ function Transaction() {
   const sourceToken = getHistoryToken(sourceHex, destinationHex);
   const destinationToken = getHistoryToken(destinationHex, sourceHex);
 
-  if (!sourceToken || !destinationToken) return;
-
   const isVaraNetwork = sourceNetwork === NetworkEnum.Vara;
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);

@@ -1,6 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
-import { getPairHash } from 'common';
+import { getPairHash } from '@workspace/common';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 

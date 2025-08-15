@@ -1,6 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
-import { getPairHash } from 'common';
+import { getPairHash } from '@workspace/common';
 
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { Token } from '@/context';

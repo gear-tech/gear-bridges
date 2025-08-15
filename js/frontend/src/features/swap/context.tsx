@@ -1,4 +1,4 @@
-import { getPairHash } from 'common';
+import { getPairHash } from '@workspace/common';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Token, useTokens } from '@/context';

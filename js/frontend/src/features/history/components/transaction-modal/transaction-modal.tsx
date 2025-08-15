@@ -1,6 +1,6 @@
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
-import { getPairHash } from 'common';
+import { getPairHash } from '@workspace/common';
 import { JSX } from 'react';
 
 import { Address, FeeAndTimeFooter, FormattedBalance } from '@/components';

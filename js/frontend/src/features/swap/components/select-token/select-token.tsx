@@ -1,6 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { Input, Modal } from '@gear-js/vara-ui';
-import { getPairHash } from 'common';
+import { getPairHash } from '@workspace/common';
 import { useState } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';

@@ -7047,6 +7047,14 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@workspace/common@workspace:*, @workspace/common@workspace:js/common":
+  version: 0.0.0-use.local
+  resolution: "@workspace/common@workspace:js/common"
+  dependencies:
+    "@tsconfig/recommended": "npm:1.0.10"
+  languageName: unknown
+  linkType: soft
+
 "@xhmikosr/archive-type@npm:^7.1.0":
   version: 7.1.0
   resolution: "@xhmikosr/archive-type@npm:7.1.0"
@@ -8779,14 +8787,6 @@ __metadata:
   checksum: 10c0/23efe47ff0a1a7c91489271b3a1e1d2a171c12ec7f9b35b29b2fce51270124aff0ec890087e2bc2182c1cb746e232ab7561aaafe05f1e7452aea733d2bfe3f63
   languageName: node
   linkType: hard
-
-"common@workspace:*, common@workspace:js/common":
-  version: 0.0.0-use.local
-  resolution: "common@workspace:js/common"
-  dependencies:
-    "@tsconfig/recommended": "npm:1.0.10"
-  languageName: unknown
-  linkType: soft
 
 "compare-func@npm:^2.0.0":
   version: 2.0.0
@@ -11359,7 +11359,7 @@ __metadata:
     "@types/react": "npm:19.1.7"
     "@types/react-dom": "npm:19.1.6"
     "@types/react-gtm-module": "npm:2.0.4"
-    common: "workspace:*"
+    "@workspace/common": "workspace:*"
     graphql: "npm:16.11.0"
     graphql-request: "npm:7.2.0"
     graphql-ws: "npm:6.0.6"
@@ -12401,7 +12401,7 @@ __metadata:
     "@subsquid/typeorm-store": "npm:^1.5.1"
     "@types/express": "npm:^5.0.3"
     "@types/node": "npm:^24.2.0"
-    common: "workspace:*"
+    "@workspace/common": "workspace:*"
     dotenv: "npm:^16.4.5"
     ethers: "npm:^6.13.4"
     express: "npm:^4.21.2"

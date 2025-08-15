@@ -20,7 +20,7 @@
     "@subsquid/substrate-processor": "^8.6.0",
     "@subsquid/substrate-runtime": "^2.0.1",
     "@subsquid/typeorm-store": "^1.5.1",
-    "common": "workspace:*",
+    "@workspace/common": "workspace:*",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.4",
     "express": "^4.21.2",

@@ -5482,6 +5482,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tsconfig/recommended@npm:1.0.10":
+  version: 1.0.10
+  resolution: "@tsconfig/recommended@npm:1.0.10"
+  checksum: 10c0/402ef03da7300ea0f9f9d6e0507dcb8782c6b764c1f45b946a6c34f2bd3153571a1a85f10659606c24d1052aed699c3e32dd0da876e8f7eea577374eeeb80d17
+  languageName: node
+  linkType: hard
+
 "@tufjs/canonical-json@npm:2.0.0":
   version: 2.0.0
   resolution: "@tufjs/canonical-json@npm:2.0.0"
@@ -6945,6 +6952,14 @@ __metadata:
   checksum: 10c0/d20e8d740cfa1f0eac7dce11e8a7a84f1567513a8ff0bd1772724b581a8ca77df3f9600a95047c0d2628335626113fa98367517abd01c1ff49817fccf225a29a
   languageName: node
   linkType: hard
+
+"@workspace/common@workspace:*, @workspace/common@workspace:js/common":
+  version: 0.0.0-use.local
+  resolution: "@workspace/common@workspace:js/common"
+  dependencies:
+    "@tsconfig/recommended": "npm:1.0.10"
+  languageName: unknown
+  linkType: soft
 
 "@xhmikosr/archive-type@npm:^7.1.0":
   version: 7.1.0
@@ -11246,6 +11261,7 @@ __metadata:
     "@types/react": "npm:19.1.7"
     "@types/react-dom": "npm:19.1.6"
     "@types/react-gtm-module": "npm:2.0.4"
+    "@workspace/common": "workspace:*"
     graphql: "npm:16.11.0"
     graphql-request: "npm:7.2.0"
     graphql-ws: "npm:6.0.6"
@@ -12310,6 +12326,7 @@ __metadata:
     "@subsquid/typeorm-store": "npm:^1.5.1"
     "@types/express": "npm:^5.0.3"
     "@types/node": "npm:^24.2.0"
+    "@workspace/common": "workspace:*"
     dotenv: "npm:^16.4.5"
     ethers: "npm:^6.13.4"
     express: "npm:^4.21.2"

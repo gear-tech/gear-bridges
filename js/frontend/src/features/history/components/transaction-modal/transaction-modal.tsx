@@ -5,7 +5,6 @@ import { JSX } from 'react';
 
 import { Address, FeeAndTimeFooter, FormattedBalance } from '@/components';
 import { useTokens } from '@/context';
-import { getAddressToTokenKey } from '@/context/tokens';
 import { cx, isUndefined } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
@@ -35,14 +34,14 @@ function TransactionModal({
   renderProgressBar,
   close,
 }: Props) {
-  const { addressToToken } = useTokens();
+  const { getActiveToken } = useTokens();
   const isVaraNetwork = sourceNetwork === Network.Vara;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
 
-  const sourceToken = addressToToken?.[getAddressToTokenKey(source as HexString, destination as HexString)];
-  const destinationToken = addressToToken?.[getAddressToTokenKey(destination as HexString, source as HexString)];
+  const sourceToken = getActiveToken?.(source as HexString);
+  const destinationToken = getActiveToken?.(destination as HexString);
 
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);

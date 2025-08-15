@@ -1,6 +1,6 @@
+import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
-import { getPairHash } from '@workspace/common';
 import { JSX } from 'react';
 
 import { Address, FeeAndTimeFooter, FormattedBalance } from '@/components';
@@ -34,14 +34,14 @@ function TransactionModal({
   renderProgressBar,
   close,
 }: Props) {
-  const { pairHashToToken } = useTokens();
+  const { getActiveToken } = useTokens();
   const isVaraNetwork = sourceNetwork === Network.Vara;
 
   const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
   const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
 
-  const sourceToken = pairHashToToken?.[getPairHash(source, destination)];
-  const destinationToken = pairHashToToken?.[getPairHash(destination, source)];
+  const sourceToken = getActiveToken?.(source as HexString);
+  const destinationToken = getActiveToken?.(destination as HexString);
 
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);

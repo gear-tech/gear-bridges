@@ -1,6 +1,5 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
-import { getPairHash } from '@workspace/common';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -82,10 +81,10 @@ function Transaction() {
   const { account } = useAccount();
   const { id } = useParams() as Params;
 
-  const { pairHashToToken } = useTokens();
+  const { getHistoryToken } = useTokens();
   const { data } = useTransaction(id);
 
-  if (!data || !pairHashToToken) return <TransactionSkeleton />;
+  if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
   const {
     status,
@@ -110,8 +109,10 @@ function Transaction() {
   const sourceHex = source as HexString;
   const destinationHex = destination as HexString;
 
-  const sourceToken = pairHashToToken[getPairHash(sourceHex, destinationHex)];
-  const destinationToken = pairHashToToken[getPairHash(destinationHex, sourceHex)];
+  const sourceToken = getHistoryToken(sourceHex, destinationHex);
+  const destinationToken = getHistoryToken(destinationHex, sourceHex);
+
+  if (!sourceToken || !destinationToken) return;
 
   const isVaraNetwork = sourceNetwork === NetworkEnum.Vara;
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;

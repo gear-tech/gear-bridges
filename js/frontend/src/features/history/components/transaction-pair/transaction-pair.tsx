@@ -1,6 +1,5 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
-import { getPairHash } from '@workspace/common';
 
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { Token } from '@/context';
@@ -20,19 +19,19 @@ type Props = Pick<
   Transfer,
   'sourceNetwork' | 'destNetwork' | 'source' | 'destination' | 'amount' | 'sender' | 'receiver'
 > & {
-  pairHashToToken: Record<string, Token>;
+  getHistoryToken: (sourceAddress: HexString, destinationAddress: HexString) => Token | undefined;
 };
 
 function TransactionPair(props: Props) {
-  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, pairHashToToken } = props;
+  const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, getHistoryToken } = props;
 
   const sourceHex = source as HexString;
   const destinationHex = destination as HexString;
 
-  const sourceToken = pairHashToToken[getPairHash(sourceHex, destinationHex)];
+  const sourceToken = getHistoryToken(sourceHex, destinationHex);
   const sourceSymbol = sourceToken?.displaySymbol ?? 'Unit';
 
-  const destinationToken = pairHashToToken[getPairHash(destinationHex, sourceHex)];
+  const destinationToken = getHistoryToken(destinationHex, sourceHex);
   const destinationSymbol = destinationToken?.displaySymbol ?? 'Unit';
 
   const isVaraNetwork = sourceNetwork === Network.Vara;

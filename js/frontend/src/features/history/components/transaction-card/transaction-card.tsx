@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { generatePath, Link } from 'react-router-dom';
 
 import { Card, CopyButton, Skeleton } from '@/components';
@@ -29,7 +30,7 @@ type Props = Pick<
   | 'nonce'
   | 'blockNumber'
 > & {
-  pairHashToToken: Record<string, Token>;
+  getHistoryToken: (sourceAddress: HexString, destinationAddress: HexString) => Token | undefined;
 };
 
 function TransactionCard(props: Props) {

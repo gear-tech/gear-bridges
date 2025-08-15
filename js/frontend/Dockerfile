@@ -7,6 +7,7 @@ FROM node
 COPY package.json yarn.lock lerna.json .yarnrc.yml /app/
 COPY .yarn /app/.yarn
 COPY js/frontend /app/js/frontend
+COPY js/common /app/js/common
 WORKDIR /app
 RUN yarn workspaces focus frontend gear-bridges
 

@@ -36,6 +36,11 @@ body {
       line-height: 24px;
       color: #f6f6f6e5;
     }
+
+    // no wallets text
+    > div > p {
+      color: #f6f6f6e5;
+    }
   }
 }
 

@@ -19,7 +19,7 @@ type Props = Pick<
   Transfer,
   'sourceNetwork' | 'destNetwork' | 'source' | 'destination' | 'amount' | 'sender' | 'receiver'
 > & {
-  getHistoryToken: (sourceAddress: HexString, destinationAddress: HexString) => Token | undefined;
+  getHistoryToken: (sourceAddress: HexString, destinationAddress: HexString) => Token;
 };
 
 function TransactionPair(props: Props) {

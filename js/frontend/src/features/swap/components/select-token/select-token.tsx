@@ -1,6 +1,5 @@
 import { HexString } from '@gear-js/api';
 import { Input, Modal } from '@gear-js/vara-ui';
-import { getPairHash } from '@workspace/common';
 import { useState } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -26,7 +25,7 @@ type ModalProps = {
 };
 
 function SelectTokenModal({ close }: ModalProps) {
-  const { tokens, pairHashToToken } = useTokens();
+  const { tokens, getActiveToken } = useTokens();
   const { token, network } = useBridgeContext();
 
   const varaFtBalances = useVaraFTBalances();
@@ -40,24 +39,19 @@ function SelectTokenModal({ close }: ModalProps) {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const renderTokenBalance = (address: HexString, destAddress: HexString, isNative: boolean) => {
+  const renderTokenBalance = (address: HexString, isNative: boolean) => {
+    const _token = getActiveToken?.(address);
+
     const ftBalances = isVaraNetwork ? varaFtBalances : ethFtBalances;
     const accountBalance = isVaraNetwork ? varaAccountBalance : ethAccountBalance;
 
     const ftBalance = { data: ftBalances.data?.[address], isLoading: ftBalances.isLoading };
     const balance = isNative ? accountBalance : ftBalance;
 
-    if (!pairHashToToken || balance.isLoading) return <Skeleton width="5rem" />;
+    if (!_token || balance.isLoading) return <Skeleton width="5rem" />;
     if (isUndefined(balance.data)) return;
 
-    return (
-      <FormattedBalance
-        value={balance.data}
-        symbol=""
-        decimals={pairHashToToken[getPairHash(address, destAddress)]?.decimals ?? 0}
-        className={styles.balance}
-      />
-    );
+    return <FormattedBalance value={balance.data} symbol="" decimals={_token.decimals} className={styles.balance} />;
   };
 
   const filteredTokens = tokens[networkName]?.filter(({ displaySymbol }) => {
@@ -70,12 +64,12 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!filteredTokens) return;
 
-    return filteredTokens.map(({ address, destinationAddress, symbol, displaySymbol, isNative }, index) => {
+    return filteredTokens.map(({ address, symbol, displaySymbol, isNative }, index) => {
       const isActive = address === token?.address;
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
-        token?.set(getPairHash(address, destinationAddress));
+        token?.set(address);
         close();
       };
 
@@ -95,7 +89,7 @@ function SelectTokenModal({ close }: ModalProps) {
               </span>
             </span>
 
-            {renderTokenBalance(address, destinationAddress, isNative)}
+            {renderTokenBalance(address, isNative)}
           </button>
         </li>
       );

@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { getPairHash } from 'common';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
@@ -6,10 +7,8 @@ import { NetworkEnum, Pair } from '@/features/history/graphql/graphql';
 import { NETWORK } from '@/features/swap/consts';
 import { useVaraSymbol } from '@/hooks';
 
-type AddressToTokenKey = `${HexString}-${HexString}`;
-
 type Value = {
-  addressToToken: Record<AddressToTokenKey, Token> | undefined;
+  pairHashToToken: Record<string, Token> | undefined;
 
   tokens: {
     active: Token[] | undefined;
@@ -24,7 +23,7 @@ type Value = {
 };
 
 const DEFAULT_VALUE = {
-  addressToToken: undefined,
+  pairHashToToken: undefined,
 
   tokens: {
     active: undefined,
@@ -54,12 +53,8 @@ type Token = {
   isActive: boolean;
 };
 
-// TODO: refactor
-const getAddressToTokenKey = (sourceAddress: HexString, destinationAddress: HexString): AddressToTokenKey =>
-  `${sourceAddress}-${destinationAddress}`;
-
 const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
-  const addressToToken: Record<AddressToTokenKey, Token> = {};
+  const pairHashToToken: Record<string, Token> = {};
 
   pairs.forEach((pair) => {
     const varaAddress = pair.varaToken as HexString;
@@ -96,23 +91,25 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isActive: pair.isActive,
     };
 
-    addressToToken[getAddressToTokenKey(varaAddress, ethAddress)] = varaToken;
-    addressToToken[getAddressToTokenKey(ethAddress, varaAddress)] = ethToken;
+    pairHashToToken[getPairHash(varaAddress, ethAddress)] = varaToken;
+    pairHashToToken[getPairHash(ethAddress, varaAddress)] = ethToken;
   });
 
-  return addressToToken;
+  return pairHashToToken;
 };
 
 function TokensProvider({ children }: PropsWithChildren) {
   const { data: pairs } = usePairs();
   const varaSymbol = useVaraSymbol();
 
-  const addressToToken = useMemo(
+  const pairHashToToken = useMemo(
     () => (pairs && varaSymbol ? deriveTokens(pairs, varaSymbol) : undefined),
     [pairs, varaSymbol],
   );
 
-  const tokens = useMemo(() => (addressToToken ? Object.values(addressToToken) : undefined), [addressToToken]);
+  console.log('pairHashToToken: ', pairHashToToken);
+
+  const tokens = useMemo(() => (pairHashToToken ? Object.values(pairHashToToken) : undefined), [pairHashToToken]);
 
   const activeTokens = useMemo(() => tokens?.filter(({ isActive }) => isActive), [tokens]);
   const varaTokens = useMemo(() => activeTokens?.filter(({ network }) => network === NETWORK.VARA), [activeTokens]);
@@ -123,7 +120,7 @@ function TokensProvider({ children }: PropsWithChildren) {
 
   const value = useMemo(
     () => ({
-      addressToToken,
+      pairHashToToken,
 
       tokens: {
         active: activeTokens,
@@ -136,12 +133,12 @@ function TokensProvider({ children }: PropsWithChildren) {
         eth: nativeEthToken,
       },
     }),
-    [addressToToken, activeTokens, varaTokens, ethTokens, nativeVaraToken, nativeEthToken],
+    [pairHashToToken, activeTokens, varaTokens, ethTokens, nativeVaraToken, nativeEthToken],
   );
 
   return <Provider value={value}>{children}</Provider>;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export { TokensProvider, useTokens, getAddressToTokenKey };
+export { TokensProvider, useTokens };
 export type { Token };

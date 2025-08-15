@@ -23,6 +23,7 @@
     "@reown/appkit": "1.7.8",
     "@reown/appkit-adapter-wagmi": "1.7.8",
     "@tanstack/react-query": "5.80.6",
+    "common": "workspace:*",
     "graphql": "16.11.0",
     "graphql-request": "7.2.0",
     "graphql-ws": "6.0.6",

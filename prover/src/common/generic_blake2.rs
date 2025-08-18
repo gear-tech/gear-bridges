@@ -28,7 +28,7 @@ use crate::{
 use super::pad_byte_vec;
 
 /// Maximum amount of blake2 blocks.
-const MAX_BLOCK_COUNT: usize = 32;
+const MAX_BLOCK_COUNT: usize = 48;
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 

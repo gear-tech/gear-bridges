@@ -30,7 +30,7 @@ const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
 // This estimation is used to check that `GenericBlake2` will be able to accept
 // entire encoded header data. Most probably 1KiB will be sufficient to store any
 // possible block header.
-const MAX_ENCODED_HEADER_LENGTH: usize = 1024;
+const MAX_ENCODED_HEADER_LENGTH: usize = 4_096;
 
 impl_parsable_target_set! {
     /// Public inputs for `BlockHeaderParser` circuit.
@@ -49,7 +49,11 @@ pub struct BlockHeaderParser {
 
 impl BlockHeaderParser {
     pub fn prove(self) -> ProofWithCircuitData<BlockHeaderParserTarget> {
-        assert!(self.header_data.len() <= MAX_ENCODED_HEADER_LENGTH);
+        assert!(
+            self.header_data.len() <= MAX_ENCODED_HEADER_LENGTH,
+            "self.header_data.len() = {}",
+            self.header_data.len()
+        );
 
         let hasher_proof =
             GenericBlake2::new::<MAX_ENCODED_HEADER_LENGTH>(self.header_data).prove();

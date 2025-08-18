@@ -46,7 +46,7 @@ pub mod consts {
 
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
-    pub const MAX_VALIDATOR_COUNT: usize = 6;
+    pub const MAX_VALIDATOR_COUNT: usize = 60;
 }
 
 pub mod proving {

@@ -188,6 +188,21 @@ fn message_queued_events_of(
     })
 }
 
+pub fn message_hash(message: &Message) -> [u8; 32] {
+    let data = [
+        message.nonce_le.as_ref(),
+        message.source.as_ref(),
+        message.destination.as_ref(),
+        message.payload.as_ref(),
+    ]
+    .concat();
+
+    let mut hash = [0; 32];
+    keccak_hash::keccak_256(&data, &mut hash);
+
+    hash
+}
+
 pub mod web_request {
     use super::*;
 

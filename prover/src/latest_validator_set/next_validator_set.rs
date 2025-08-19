@@ -72,6 +72,8 @@ impl NextValidatorSet {
         let storage_data_bits = array_to_bits(&self.next_validator_set_storage_data);
 
         let inclusion_proof = self.next_validator_set_inclusion_proof.prove();
+        log::trace!("NextValidatorSet; inclusion_proof is ready");
+
         let block_finality_proof = self.current_epoch_block_finality.prove();
 
         let config = CircuitConfig::standard_recursion_config();

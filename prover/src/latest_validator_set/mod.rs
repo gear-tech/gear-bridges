@@ -110,7 +110,11 @@ impl LatestValidatorSet {
         self,
         config: GenesisConfig,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        log::trace!("LatestValidatorSet pub fn prove_genesis(");
+
         let circuit = self.build_circuit();
+
+        log::trace!("LatestValidatorSet start to prove genesis");
         circuit.prove_genesis(config)
     }
 
@@ -124,7 +128,11 @@ impl LatestValidatorSet {
     }
 
     fn build_circuit(self) -> Circuit {
+        log::trace!("LatestValidatorSet fn build_circuit(self) -> Circuit ");
+
         let next_validator_set_proof = self.change_proof.prove();
+
+        log::trace!("LatestValidatorSet fn build_circuit(self) -> Circuit ; next_validator_set_proof is ready");
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let one = builder.one();

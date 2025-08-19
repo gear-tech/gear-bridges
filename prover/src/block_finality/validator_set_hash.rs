@@ -56,12 +56,15 @@ impl ValidatorSetHash {
         log::debug!("Proving correct hashing of validator set...");
 
         let validator_count = self.validator_set.len();
+        log::trace!("ValidatorSetHash; validator_count = {validator_count}");
 
         const MAX_DATA_LENGTH_ESTIMATION: usize = ED25519_PUBLIC_KEY_SIZE * MAX_VALIDATOR_COUNT;
         let hasher_proof = GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(
             self.validator_set.into_iter().flatten().collect(),
         )
         .prove();
+
+        log::trace!("ValidatorSetHash; hasher_proof is ready");
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();

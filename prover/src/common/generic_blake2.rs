@@ -74,10 +74,13 @@ impl<const DATA_LENGTH: usize> AssertDataLengthValid<DATA_LENGTH> {
 
 impl GenericBlake2 {
     pub fn prove(self) -> ProofWithCircuitData<GenericBlake2Target> {
+        log::trace!("GenericBlake2; prove");
+
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
-        assert!(block_count <= MAX_BLOCK_COUNT);
+        assert!(block_count <= MAX_BLOCK_COUNT, "block_count = {block_count}, MAX_BLOCK_COUNT = {MAX_BLOCK_COUNT}");
 
         let variative_proof = VariativeBlake2 { data: self.data }.prove();
+        log::trace!("GenericBlake2; variative_proof is ready");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -93,6 +96,8 @@ impl GenericBlake2 {
             .iter()
             .map(|verifier_data| builder.constant_verifier_data(verifier_data))
             .collect::<Vec<_>>();
+        
+        log::trace!("GenericBlake2; push data targets");
         for _ in verifier_data_targets.len()..verifier_data_targets.len().next_power_of_two() {
             verifier_data_targets.push(
                 verifier_data_targets
@@ -102,6 +107,8 @@ impl GenericBlake2 {
             );
         }
 
+
+        log::trace!("GenericBlake2; verify_proof");
         // It's ok not to check `verifier_data_idx` range as `GenericBlake2` just exposes all the
         // public inputs of `VariativeBlake2`, so we need to check just that it's contained in
         // pre-computed verifier data array. All the other assertions must be performed in
@@ -117,6 +124,7 @@ impl GenericBlake2 {
             &variative_proof.circuit_data().common,
         );
 
+        log::trace!("GenericBlake2; VariativeBlake2Target::parse_exact(");
         let inner_pis = VariativeBlake2Target::parse_exact(
             &mut proof_with_pis_target.public_inputs.into_iter(),
         );
@@ -128,6 +136,7 @@ impl GenericBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
+        log::trace!("GenericBlake2; ProofWithCircuitData::prove_from_builder(builder, witness)");
         ProofWithCircuitData::prove_from_builder(builder, witness)
     }
 }

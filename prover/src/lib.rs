@@ -167,7 +167,7 @@ pub mod proving {
 
     /// Genesis config of a bridge. Note that any change in genesis config renders all the subsequent
     /// proofs invalid(they will NOT get verified on ethereum) as circuit digest will change.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     pub struct GenesisConfig {
         pub authority_set_id: u64,
         pub authority_set_hash: [u8; BLAKE2_DIGEST_SIZE],

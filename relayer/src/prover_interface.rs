@@ -49,8 +49,9 @@ pub async fn prove_genesis(
     let next_validator_set_inclusion_proof =
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
-    let now = Instant::now();
+    log::trace!("Start to prove genesis");
 
+    let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["genesis"]).start_timer();
 
     let proof = prover::proving::prove_genesis(

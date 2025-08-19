@@ -20,7 +20,11 @@ pub(crate) async fn sync_authority_set_id(
     latest_authority_set_id: u64,
     latest_proven_authority_set_id: Option<u64>,
 ) -> anyhow::Result<SyncStepCount> {
+    log::trace!("pub(crate) async fn sync_authority_set_id( genesis_config = {genesis_config:?}");
+
     let Some(latest_proven) = latest_proven_authority_set_id else {
+        log::trace!("pub(crate) async fn sync_authority_set_id( latest_authority_set_id = {latest_authority_set_id}");
+
         if latest_authority_set_id <= genesis_config.authority_set_id {
             log::warn!(
                 "Network haven't reached authority set id #(GENESIS + 1). \
@@ -32,6 +36,8 @@ pub(crate) async fn sync_authority_set_id(
         }
 
         let proof = prover_interface::prove_genesis(gear_api, genesis_config).await?;
+
+        log::trace!("Init storage with proofs");
         proof_storage
             .init(proof, genesis_config.authority_set_id)
             .await
@@ -39,6 +45,8 @@ pub(crate) async fn sync_authority_set_id(
 
         return Ok(1);
     };
+
+    log::trace!("pub(crate) async fn sync_authority_set_id( latest_proven = {latest_proven}");
 
     if latest_proven < genesis_config.authority_set_id + 1 {
         panic!(

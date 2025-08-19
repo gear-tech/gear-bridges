@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.30;
 
-import {IBridgingPayment} from "./IBridgingPayment.sol";
 import {IMessageHandler} from "./IMessageHandler.sol";
 import {IPausable} from "./IPausable.sol";
 import {LibString} from "src/libraries/LibString.sol";

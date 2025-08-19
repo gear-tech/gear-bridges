@@ -1,0 +1,97 @@
+.mainContainer {
+  padding-top: 20px;
+  padding-bottom: 20px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.logo {
+  svg {
+    width: 100%;
+    height: auto;
+  }
+}
+
+.nav {
+  padding: 8px 0;
+
+  background-color: #0e1217;
+  border-top: 1px solid #ffffff0a;
+  border-bottom: 1px solid #ffffff0a;
+
+  &Container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    @include sm {
+      flex-direction: column;
+      gap: 8px;
+
+      text-align: center;
+
+      > *:nth-child(1) {
+        order: 1;
+      }
+    }
+  }
+}
+
+.links {
+  --active-link-width: 0;
+  --active-link-offset: 0;
+
+  display: flex;
+  gap: 32px;
+
+  position: relative;
+
+  @include breakpoint(400px) {
+    width: 100%;
+
+    justify-content: space-between;
+    gap: 0;
+  }
+
+  &::before {
+    content: '';
+
+    position: absolute;
+    bottom: 0;
+
+    width: var(--active-link-width);
+    height: 2px;
+    background-color: #00ffc4;
+
+    transform: translateX(var(--active-link-offset));
+    transition:
+      width 0.25s,
+      transform 0.25s;
+  }
+
+  li {
+    // for locked balance tooltip
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+
+    position: relative;
+  }
+}
+
+.link {
+  padding: 6px 0;
+
+  font-weight: 500;
+  color: #9cacb1;
+
+  &:global(.active) {
+    font-weight: 600;
+    color: #f6f6f6e5;
+
+    pointer-events: none;
+  }
+}

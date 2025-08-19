@@ -23,7 +23,7 @@ impl HistoricalProxyProgram {
         }))
     }
 
-    pub fn historical_proxy(&self) -> service::HistoricalProxyService {
+    pub fn historical_proxy(&self) -> service::HistoricalProxyService<'_> {
         service::HistoricalProxyService::new(&self.0)
     }
 }

@@ -1,0 +1,100 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  padding: 24px 24px 32px;
+
+  background-color: #0e1217;
+  border-radius: 16px;
+  border: 1px solid #00ffc433;
+
+  position: relative; // for swap network button
+
+  &:first-child {
+    margin-bottom: 8px;
+
+    .row {
+      margin-bottom: 24px;
+    }
+  }
+
+  &:last-child {
+    .row {
+      margin-bottom: 12px;
+    }
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.heading {
+  margin-bottom: 12px;
+
+  font-size: 14px;
+  line-height: 20px;
+  color: #f6f6f6cc;
+}
+
+.row {
+  display: flex;
+  gap: 32px;
+  justify-content: space-between;
+}
+
+.balanceFooter,
+.priceFooter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.priceFooter {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+
+  border-bottom: 1px solid #00ffc433;
+}
+
+// TODO: remove fixes after @gear-js/vara-ui update
+.input {
+  --input-line-height: 16px;
+
+  > span:nth-child(2) {
+    align-items: center;
+    gap: 8px;
+
+    background-color: #13191e;
+    transition: border-color 0.25s;
+
+    &:not(:has([aria-invalid='true'])):focus-within {
+      border-color: #00ffc433;
+    }
+  }
+
+  // disable autofill styles:
+  // https://stackoverflow.com/questions/2781549/removing-input-background-colour-for-chrome-autocomplete
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: #fff;
+    caret-color: #fff;
+    transition: background-color 5000s ease-in-out 0s;
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+
+  // disable spellcheck styles
+  input::spelling-error,
+  input::grammar-error {
+    color: #fff;
+  }
+}

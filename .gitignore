@@ -19,8 +19,18 @@ ethereum/lcov.info
 .env
 .DS_Store
 
-node_modules/
-indexer/lib/
-indexer/assets/
-
 .direnv/
+
+# js
+node_modules/
+js/bridge-js/lib/
+js/indexer/lib/
+js/frontend/dist/
+js/indexer/assets/
+js/**/*.log
+**/.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions

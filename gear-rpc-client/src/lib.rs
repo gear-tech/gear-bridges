@@ -600,7 +600,7 @@ impl GearApi {
         block: H256,
         message_hash: H256,
     ) -> AnyResult<dto::MerkleProof> {
-        use pallet_gear_eth_bridge_rpc_runtime_api::Proof;
+        use pallet_gear_eth_bridge_primitives::Proof;
 
         let proof: Option<Proof> = self
             .api

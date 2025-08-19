@@ -1,6 +1,5 @@
 use ethereum_client::TxHash;
-use gear_rpc_client::dto::{MerkleProof, Message};
-use keccak_hash::keccak_256;
+use gear_rpc_client::dto::MerkleProof;
 use prometheus::IntCounter;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
@@ -16,7 +15,7 @@ use crate::message_relayer::{
             status_fetcher::{self, StatusFetcherIo},
         },
         gear::merkle_proof_fetcher::MerkleRootFetcherIo,
-        MessageInBlock, RelayedMerkleRoot,
+        message_hash, MessageInBlock, RelayedMerkleRoot,
     },
     gear_to_eth::storage::Storage,
 };
@@ -440,19 +439,4 @@ impl TransactionManager {
         }
         Ok(true)
     }
-}
-
-fn message_hash(message: &Message) -> [u8; 32] {
-    let data = [
-        message.nonce_le.as_ref(),
-        message.source.as_ref(),
-        message.destination.as_ref(),
-        message.payload.as_ref(),
-    ]
-    .concat();
-
-    let mut hash = [0; 32];
-    keccak_256(&data, &mut hash);
-
-    hash
 }

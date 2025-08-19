@@ -112,30 +112,51 @@ pub async fn relay(
 
     let message_sender = MessageSender::new(1, eth_api.clone());
 
-    let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
+    let (queued_messages_sender, mut queued_messages_receiver) = mpsc::unbounded_channel();
     let accumulator = Accumulator::new(merkle_roots_receiver, tx_manager.merkle_roots.clone());
-    let accumulator_io = accumulator.spawn();
-    let proof_fetcher_io = MerkleProofFetcher::new(api_provider).spawn();
+    let mut accumulator_io = accumulator.spawn();
+    let mut proof_fetcher_io = MerkleProofFetcher::new(api_provider).spawn();
 
-    let message_sender_io = message_sender.spawn();
+    let mut message_sender_io = message_sender.spawn();
 
     queued_messages_sender
         .send(message_in_block)
         .expect("Failed to send message to channel");
 
     let status_fetcher = StatusFetcher::new(eth_api, confirmations);
-    let status_fetcher_io = status_fetcher.spawn();
+    let mut status_fetcher_io = status_fetcher.spawn();
 
-    if let Err(err) = tx_manager
-        .run(
-            accumulator_io,
-            queued_messages_receiver,
-            proof_fetcher_io,
-            message_sender_io,
-            status_fetcher_io,
-        )
-        .await
-    {
-        log::error!("Error occurred while running transaction manager: {err}");
+    loop {
+        match tx_manager
+            .process(
+                &mut accumulator_io,
+                &mut queued_messages_receiver,
+                &mut proof_fetcher_io,
+                &mut message_sender_io,
+                &mut status_fetcher_io,
+            )
+            .await
+        {
+            Ok(res) => {
+                if !res {
+                    log::warn!("Trasaction manager exiting");
+                    return;
+                }
+
+                if !tx_manager.completed.read().await.is_empty() {
+                    log::info!("Transaction nonce={message_nonce}, block={gear_block} successfully relayed");
+                } else if !tx_manager.failed.read().await.is_empty() {
+                    log::error!(
+                        "Failed to relay transaction nonce={message_nonce}, block={gear_block}: {}",
+                        tx_manager.failed.read().await.first_key_value().unwrap().1
+                    );
+                }
+            }
+
+            Err(err) => {
+                log::error!("Error occurred while processing transaction manager: {err}");
+                return;
+            }
+        }
     }
 }

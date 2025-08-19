@@ -25,7 +25,7 @@ use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
 use primitive_types::H256;
-use std::{collections::HashSet, iter, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, iter, path::Path, sync::Arc};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task, time,
@@ -77,7 +77,7 @@ impl Relayer {
         confirmations_status: u64,
         excluded_from_fees: HashSet<AccountId32>,
         receiver: UnboundedReceiver<Message>,
-        storage_path: PathBuf,
+        storage_path: impl AsRef<Path>,
     ) -> AnyResult<Self> {
         let storage = Arc::new(JSONStorage::new(storage_path));
         let tx_manager = TransactionManager::new(storage.clone());

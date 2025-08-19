@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use ethereum_client::EthApi;
-use std::{iter, path::PathBuf, sync::Arc};
+use std::{iter, path::Path, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use utils_prometheus::MeteredService;
 
@@ -59,7 +59,7 @@ impl Relayer {
 
         confirmations_status: u64,
 
-        storage_path: PathBuf,
+        storage_path: impl AsRef<Path>,
     ) -> anyhow::Result<Self> {
         let storage = Arc::new(JSONStorage::new(storage_path));
         let tx_manager = TransactionManager::new(storage.clone());

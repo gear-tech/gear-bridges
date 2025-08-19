@@ -89,14 +89,14 @@ impl MessageSender {
     }
 
     pub fn spawn(self) -> MessageSenderIo {
-        let (req_tx, req_rx) = mpsc::unbounded_channel();
-        let (resp_tx, resp_rx) = mpsc::unbounded_channel();
+        let (requests_tx, requests_rx) = mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = mpsc::unbounded_channel();
 
-        tokio::task::spawn(task(self, req_rx, resp_tx));
+        tokio::task::spawn(task(self, requests_rx, responses_tx));
 
         MessageSenderIo {
-            requests: req_tx,
-            responses: resp_rx,
+            requests: requests_tx,
+            responses: responses_rx,
         }
     }
 }

@@ -70,12 +70,13 @@ impl StatusFetcher {
     }
 
     pub fn spawn(self) -> StatusFetcherIo {
-        let (requests, responses) = (mpsc::unbounded_channel(), mpsc::unbounded_channel());
-        tokio::task::spawn(task(self, requests.1, responses.0));
+        let (requests_tx, requests_rx) = mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = mpsc::unbounded_channel();
+        tokio::task::spawn(task(self, requests_rx, responses_tx));
 
         StatusFetcherIo {
-            requests: requests.0,
-            responses: responses.1,
+            requests: requests_tx,
+            responses: responses_rx,
         }
     }
 }

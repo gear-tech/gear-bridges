@@ -177,20 +177,28 @@ struct VariativeBlake2 {
 
 impl VariativeBlake2 {
     pub fn prove(self) -> ProofWithCircuitData<VariativeBlake2Target> {
+        log::trace!("VariativeBlake2; prove");
+
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
+
+        log::trace!("VariativeBlake2; 111");
 
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
 
         let length_target = builder.add_virtual_target();
         witness.set_target(length_target, F::from_canonical_usize(self.data.len()));
 
+        log::trace!("VariativeBlake2; 222");
+
         let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec(self.data).map(|byte| {
             let target = builder.add_virtual_target();
             witness.set_target(target, F::from_canonical_u8(byte));
             ByteTarget::from_target_safe(target, &mut builder)
         });
+
+        log::trace!("VariativeBlake2; 333");
 
         // Assert that padding is zeroed.
         let mut data_end = builder._false();
@@ -209,10 +217,14 @@ impl VariativeBlake2 {
             current_idx = builder.add_const(current_idx, F::ONE);
         }
 
+        log::trace!("VariativeBlake2; 444");
+
         // Assert upper bound for length.
         let length_is_max = builder.is_equal(current_idx, length_target);
         let length_valid = builder.or(length_is_max, data_end);
         builder.assert_one(length_valid.target);
+
+        log::trace!("VariativeBlake2; 555");
 
         // Assert lower bound for length.
         let max_length = builder.constant(F::from_canonical_usize(block_count * BLOCK_BYTES));
@@ -221,15 +233,21 @@ impl VariativeBlake2 {
         let compare_with_zero = builder.sub(block_bytes_target, padded_length);
         builder.range_check(compare_with_zero, 32);
 
+        log::trace!("VariativeBlake2; 666");
+
         let data_target = ArrayTarget(data_target);
         let data_target_bits = data_target
             .0
             .iter()
             .flat_map(|t| t.as_bit_targets(&mut builder).0.into_iter().rev());
 
+        log::trace!("VariativeBlake2; 777");
+
         let hasher_input = data_target_bits
             .take(BLOCK_BITS * block_count)
             .collect::<Vec<_>>();
+
+        log::trace!("VariativeBlake2; 888");
 
         let hash = blake2_circuit_from_message_targets_and_length_target(
             &mut builder,
@@ -238,6 +256,8 @@ impl VariativeBlake2 {
         );
         let hash = Blake2Target::parse_exact(&mut hash.into_iter().map(|t| t.target));
 
+        log::trace!("VariativeBlake2; 999");
+
         VariativeBlake2Target {
             data: data_target,
             length: length_target,
@@ -245,12 +265,20 @@ impl VariativeBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
+        log::trace!("VariativeBlake2; 10");
+
         // Standardize degree.
         while builder.num_gates() < 1 << 16 {
             builder.add_gate(NoopGate, vec![]);
         }
 
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        log::trace!("VariativeBlake2; 11");
+
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
+
+        log::trace!("VariativeBlake2; 12");
+
+        result
     }
 }
 

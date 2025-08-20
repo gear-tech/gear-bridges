@@ -1,6 +1,7 @@
 use std::{str::FromStr, time::Instant};
 
 use serde::{Deserialize, Serialize};
+use parity_scale_codec::Encode;
 use utils_prometheus::MeteredService;
 
 use gear_rpc_client::{dto, GearApi};
@@ -45,6 +46,15 @@ pub async fn prove_genesis(
     let next_validator_set_inclusion_proof = gear_api
         .fetch_next_session_keys_inclusion_proof(block)
         .await?;
+
+    log::info!("block = {}, current_epoch_block_finality = {}, next_validator_set_inclusion_proof = {}",
+        hex::encode(block.encode()),
+        hex::encode(current_epoch_block_finality.encode()),
+        hex::encode(next_validator_set_inclusion_proof.encode()),
+    );
+    log::info!("==================================================================================");
+    std::process::exit(100);
+
     let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
     let next_validator_set_inclusion_proof =
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);

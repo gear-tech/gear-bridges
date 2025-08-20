@@ -17,11 +17,14 @@ pub struct BlockFinalityProof {
     pub pre_commits: Vec<PreCommit>,
     pub message: Vec<u8>,
 }
+
+#[derive(Encode, Decode)]
 pub struct BranchNodeData {
     pub data: Vec<u8>,
     pub target_child: u8,
 }
 
+#[derive(Encode, Decode)]
 pub struct StorageInclusionProof {
     pub address: Vec<u8>,
 

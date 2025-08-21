@@ -20,6 +20,7 @@ import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowanc
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { DetailsAccordion } from '../details-accordion';
+import { Settings } from '../settings';
 import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
@@ -201,6 +202,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
               />
             </div>
           </div>
+
+          <Settings />
 
           <DetailsAccordion
             isOpen={isDetailsOpen}

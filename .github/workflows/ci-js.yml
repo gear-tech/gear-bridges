@@ -49,7 +49,7 @@ jobs:
         run: yarn build:bridge-js
 
       - name: 'Build test packages'
-        run: cargo build -p js-proof-test --release
+        run: cargo build -p js-test --release
 
       - name: 'Run tests'
         working-directory: js/bridge-js

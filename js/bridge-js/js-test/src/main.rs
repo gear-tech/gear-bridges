@@ -2,7 +2,6 @@ use crate::{eth_to_vara::eth_to_vara, vara_to_eth::vara_to_eth};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::PollingEthApi;
 use gear_rpc_client::GearApi;
-use gsdk;
 use primitive_types::U256;
 use std::env;
 
@@ -25,14 +24,14 @@ async fn main() {
         .expect("Failed to create Gear API");
 
     let mut args = std::env::args().skip(1);
-    let scope = args.nth(0).expect("Scope should be provided");
+    let scope = args.next().expect("Scope should be provided");
 
     match scope.as_str() {
         "vara-to-eth" => {
             let gear_api = GearApi::from(api);
 
             let nonce: U256 = get_var("VARA_TO_ETH_NONCE").parse().expect("Invalid nonce");
-            println!("{:?}", nonce);
+            println!("{nonce:?}");
 
             let block_number: u32 = get_var("VARA_TO_ETH_BLOCK_NUMBER")
                 .parse()
@@ -53,7 +52,7 @@ async fn main() {
                 .unwrap()
                 .to_string();
             let tx_hash_str = args
-                .nth(0)
+                .next()
                 .expect("Missing transaction hash in the args")
                 .strip_prefix("0x")
                 .unwrap()

@@ -5,7 +5,6 @@ use alloy::{
 };
 use gear_rpc_client::{dto::Message, GearApi};
 use keccak_hash::keccak_256;
-use primitive_types;
 use std::path::PathBuf;
 
 sol!(
@@ -55,7 +54,7 @@ pub async fn vara_to_eth(gear_api: GearApi, message_nonce: primitive_types::U256
         .expect("Unable to fetch message inclusion proof");
 
     let vara_message = IMessageQueue::VaraMessage {
-        nonce: U256::from_be_bytes(message.nonce_le.clone()),
+        nonce: U256::from_be_bytes(message.nonce_le),
         source: FixedBytes::from_slice(&message.source),
         destination: Address::from_slice(&message.destination),
         payload: Bytes::from(message.payload.clone()),

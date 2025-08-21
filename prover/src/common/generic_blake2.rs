@@ -177,7 +177,7 @@ struct VariativeBlake2 {
 
 impl VariativeBlake2 {
     pub fn prove(self) -> ProofWithCircuitData<VariativeBlake2Target> {
-        log::trace!("VariativeBlake2; prove");
+        log::trace!("VariativeBlake2; fn prove; self.data.len = {}", self.data.len());
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);

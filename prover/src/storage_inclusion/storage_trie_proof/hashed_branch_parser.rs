@@ -41,6 +41,8 @@ pub struct HashedBranchParser {
 
 impl HashedBranchParser {
     pub fn prove(self) -> ProofWithCircuitData<HashedBranchParserTarget> {
+        log::trace!("HashedBranchParser; fn prove");
+
         const MAX_DATA_LENGTH_ESTIMATION: usize =
             MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
         let hasher_proof =

@@ -65,6 +65,8 @@ impl BranchNodeChain {
 
         let inner = self.inner_proof();
 
+        log::trace!("BranchNodeChain; inner proof is ready");
+
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
         let mut witness = PartialWitness::new();
@@ -86,9 +88,13 @@ impl BranchNodeChain {
     }
 
     fn inner_proof(self) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
+        log::trace!("BranchNodeChain; fn inner_proof");
+
         let root_hash = Blake2Hasher::hash(&self.nodes[0].data).0;
 
         let mut composed_proof: Option<ProofWithCircuitData<_>> = None;
+
+        log::trace!("BranchNodeChain; self.nodes.len = {}", self.nodes.len());
         for node in self.nodes {
             let partial_address_nibbles = if let Some(composed_proof) = &composed_proof {
                 let address = BranchNodeChainParserTarget::parse_public_inputs(
@@ -100,6 +106,7 @@ impl BranchNodeChain {
                 vec![]
             };
 
+            log::trace!("BranchNodeChain; partial_address_nibbles is ready");
             let inner_circuit = HashedBranchParser {
                 branch_parser: BranchParser {
                     node_data: node.data,
@@ -108,6 +115,7 @@ impl BranchNodeChain {
                 },
             };
 
+            log::trace!("BranchNodeChain; inner_circuit is ready");
             let circuit = Circuit::build(inner_circuit);
 
             let new_proof = if let Some(composed_proof) = composed_proof {

@@ -7,7 +7,7 @@ use crate::{
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
-
+use parity_scale_codec::Encode;
 use ethereum_client::{EthApi, TxHash};
 use gear_rpc_client::GearApi;
 
@@ -35,13 +35,27 @@ pub(crate) async fn sync_authority_set_id(
             return Ok(0);
         }
 
-        let proof = prover_interface::prove_genesis(gear_api, genesis_config).await?;
+        // let proof = prover_interface::prove_genesis(gear_api, genesis_config).await?;
 
-        log::trace!("Init storage with proofs");
-        proof_storage
-            .init(proof, genesis_config.authority_set_id)
-            .await
-            .unwrap();
+        // log::trace!("Init storage with proofs");
+        // proof_storage
+        //     .init(proof, genesis_config.authority_set_id)
+        //     .await
+        //     .unwrap();
+        let (block, current_epoch_block_finality) = gear_api
+            .fetch_finality_proof_for_session(genesis_config.authority_set_id)
+            .await?;
+
+        let next_validator_set_inclusion_proof = gear_api
+            .fetch_next_session_keys_inclusion_proof(block)
+            .await?;
+
+        log::info!("genesis block = {}, current_epoch_block_finality = {}, next_validator_set_inclusion_proof = {}",
+            hex::encode(block.encode()),
+            hex::encode(current_epoch_block_finality.encode()),
+            hex::encode(next_validator_set_inclusion_proof.encode()),
+        );
+        log::info!("==================================================================================");
 
         return Ok(1);
     };
@@ -59,15 +73,34 @@ pub(crate) async fn sync_authority_set_id(
     }
 
     if latest_proven < latest_authority_set_id {
-        let mut proof = proof_storage
-            .get_proof_for_authority_set_id(latest_proven)
-            .await?;
+        // let mut proof = proof_storage
+        //     .get_proof_for_authority_set_id(latest_proven)
+        //     .await?;
 
         for set_id in latest_proven..latest_authority_set_id {
-            proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
-            proof_storage
-                .update(proof.proof.clone(), set_id + 1)
+            log::info!(
+                "Proving authority set change {} -> {}",
+                set_id,
+                set_id + 1
+            );
+            let (block, current_epoch_block_finality) = gear_api
+                .fetch_finality_proof_for_session(set_id)
                 .await?;
+
+            let next_validator_set_inclusion_proof = gear_api
+                .fetch_next_session_keys_inclusion_proof(block)
+                .await?;
+
+            log::info!("genesis block = {}, current_epoch_block_finality = {}, next_validator_set_inclusion_proof = {}",
+                hex::encode(block.encode()),
+                hex::encode(current_epoch_block_finality.encode()),
+                hex::encode(next_validator_set_inclusion_proof.encode()),
+            );
+            log::info!("==================================================================================");
+            // proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
+            // proof_storage
+            //     .update(proof.proof.clone(), set_id + 1)
+            //     .await?;
         }
 
         let step_count = latest_authority_set_id - latest_proven;

@@ -25,12 +25,12 @@
   },
   "scripts": {
     "clean": "npx rimraf lib",
-    "test": "npx vitest",
+    "test": "npx vitest run",
     "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:types",
-    "build:esm": "swc ./src -d lib/esm --strip-leading-paths",
-    "build:cjs": "swc ./src -d lib/cjs -C module.type=commonjs --out-file-extension cjs --strip-leading-paths",
-    "build:types": "tsc -p tsconfig.types.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build:esm": "npx swc ./src -d lib/esm --strip-leading-paths",
+    "build:cjs": "npx swc ./src -d lib/cjs -C module.type=commonjs --out-file-extension cjs --strip-leading-paths",
+    "build:types": "npx tsc -p tsconfig.types.json",
+    "typecheck": "npx tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@chainsafe/ssz": "^1.2.1",
@@ -39,7 +39,7 @@
     "@ethereumjs/util": "^10.0.0",
     "@gear-js/api": "^0.43.0",
     "@lodestar/types": "^1.33.0",
-    "@polkadot/api": "^16.4.3",
+    "@polkadot/api": "^16.4.1",
     "sails-js": "^0.4.3",
     "sails-js-parser": "^0.4.3",
     "viem": "^2.33.2"

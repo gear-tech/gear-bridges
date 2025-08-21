@@ -34,7 +34,7 @@ interface RelayResult {
  * @param signerOptions - Optional signing configuration parameters
  * @returns Promise resolving to transaction details with either success data or error information
  */
-export async function relayEthToVaraTransaction(
+export async function relayEthToVara(
   transactionHash: `0x${string}`,
   beaconRpcUrl: string,
   ethereumPublicClient: PublicClient,

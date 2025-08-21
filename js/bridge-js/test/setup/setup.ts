@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const TARGET_DIR = '../../target';
-const PATH_TO_BIN = path.join(TARGET_DIR, 'release/js-proof-test');
+const PATH_TO_BIN = path.join(TARGET_DIR, 'release/js-test');
 
 const getTxHash = async () => {
   const publicClient = createPublicClient({ transport: webSocket(process.env.ETH_RPC_URL!) });
@@ -25,12 +25,13 @@ const getTxHash = async () => {
 
 export default async () => {
   if (!fs.existsSync(PATH_TO_BIN)) {
-    execSync(`cargo build -p js-proof-test --release`, { stdio: 'inherit' });
+    execSync(`cargo build -p js-test --release`, { stdio: 'inherit' });
   }
 
   const txHash = await getTxHash();
 
-  execSync(`${PATH_TO_BIN} ${txHash}`);
+  // execSync(`${PATH_TO_BIN} eth-to-vara ${txHash}`);
+  execSync(`${PATH_TO_BIN} vara-to-eth`, { stdio: 'inherit' });
 
   process.env['TX_HASH'] = txHash;
 };

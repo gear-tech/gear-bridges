@@ -5,7 +5,7 @@ import tsPlugin from '@typescript-eslint/eslint-plugin';
 import importPlugin from 'eslint-plugin-import';
 import prettierConfig from 'eslint-config-prettier';
 
-const files = ['js/bridge-js/{src,test}/**/*.ts', 'js/indexer/src/**/*.ts'];
+const files = ['js/bridge-js/{src,test,example}/**/*.ts', 'js/indexer/src/**/*.ts'];
 const noUnusedVars = [
   'error',
   {

@@ -43,6 +43,7 @@
     "lint:bridge-js:fix": "eslint js/bridge-js --fix",
     "lint:indexer": "eslint js/indexer",
     "lint:indexer:fix": "eslint js/indexer --fix",
-    "fmt": "prettier js/bridge-js/**/*.{ts,js,json} js/indexer/**/*.{ts,js,json} -w"
+    "fmt": "prettier js/bridge-js/**/*.{ts,js,json} js/indexer/**/*.{ts,js,json} -w",
+    "test": "lerna run test --scope gear-bridge-js --verbose"
   }
 }

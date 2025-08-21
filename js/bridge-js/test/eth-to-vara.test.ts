@@ -35,7 +35,7 @@ afterAll(async () => {
   await gearApi.disconnect();
 });
 
-describe('eth to vara proof', () => {
+describe('EthToVara', () => {
   let proof: ProofResult;
 
   test('generate proof', async () => {

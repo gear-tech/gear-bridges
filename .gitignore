@@ -34,3 +34,4 @@ js/**/*.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+js/bridge-js/js-test/contracts/broadcast/

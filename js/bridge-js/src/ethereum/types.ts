@@ -94,3 +94,18 @@ export interface IBeaconBlock {
   readonly body: IBeaconBlockBody;
   readonly signatures: string[];
 }
+
+export interface MerkleRootLogArgs {
+  blockNumber: bigint;
+  merkleRoot: `0x${string}`;
+}
+
+export interface MessageProcessResult {
+  success: boolean;
+  transactionHash: `0x${string}`;
+  blockNumber?: bigint;
+  messageHash?: `0x${string}`;
+  messageNonce?: bigint;
+  messageDestination?: `0x${string}`;
+  error?: string;
+}

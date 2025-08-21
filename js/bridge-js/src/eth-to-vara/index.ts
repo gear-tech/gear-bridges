@@ -1,1 +1,1 @@
-export { relayEthToVaraTransaction } from './relayer';
+export { relayEthToVara } from './relayer';

@@ -326,6 +326,14 @@ export function getMessageQueueClient(
   return new MessageQueueClient(address, publicClient, walletClient, account);
 }
 
+/**
+ * Waits for a Merkle root to appear in the message queue contract for the specified block number or greater.
+ *
+ * @param blockNumber - The block number to wait for the Merkle root
+ * @param publicClient - Ethereum public client for reading blockchain state
+ * @param messageQueueAddress - The message queue contract address
+ * @returns Promise that resolves to true when the Merkle root appears for the specified block or a block greater than specified
+ */
 export async function waitForMerkleRootAppearedInMessageQueue(
   blockNumber: bigint,
   publicClient: PublicClient,

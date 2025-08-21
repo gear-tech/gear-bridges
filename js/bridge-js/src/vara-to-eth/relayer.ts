@@ -6,8 +6,22 @@ import { initLogger, logger } from '../util.js';
 import { GearClient } from '../vara/index.js';
 import { messageHash } from './util.js';
 
+/**
+ * Relays a message from Vara network to Ethereum by finding the queued message,
+ * fetching merkle proof, and processing it through the message queue contract.
+ *
+ * @param nonce - The message nonce to relay (little endian encoded if hex string)
+ * @param blockNumber - The Vara block number containing the message sent by EthBridge builtin
+ * @param ethereumPublicClient - Ethereum public client for reading blockchain state
+ * @param ethereumWalletClient - Ethereum wallet client for sending transactions
+ * @param ethereumAccount - Ethereum account to use for transactions
+ * @param gearApi - Gear API instance for interacting with Vara network
+ * @param messageQueueuAddress - Ethereum message queue contract address
+ * @param silent - Whether to suppress logging output
+ * @returns Promise that resolves when the message is successfully processed
+ */
 export async function relayVaraToEth(
-  nonce: bigint | HexString, // Should be little endian encoded in case of hex string
+  nonce: bigint | HexString,
   blockNumber: bigint,
   ethereumPublicClient: PublicClient,
   ethereumWalletClient: WalletClient,

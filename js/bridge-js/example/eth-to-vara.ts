@@ -1,6 +1,6 @@
 import { createPublicClient, createWalletClient, http, webSocket, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { exec, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import { Keyring } from '@polkadot/api';
 import { GearApi } from '@gear-js/api';
 import { hoodi } from 'viem/chains';
@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import assert from 'assert';
 import * as fs from 'fs';
 
-import { relayEthToVaraTransaction } from '../src';
+import { relayEthToVara } from '../src';
 import { PingClient } from './lib';
 
 dotenv.config();
@@ -77,7 +77,7 @@ const main = async () => {
 
   console.log(`Ethereum transaction confirmed. Starting relayer...`);
 
-  const { error, ok } = await relayEthToVaraTransaction(
+  const { error, ok } = await relayEthToVara(
     ethTxHash,
     BEACON_RPC,
     publicClient,

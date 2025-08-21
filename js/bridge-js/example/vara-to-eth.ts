@@ -1,14 +1,14 @@
 import { bytesToHex, createPublicClient, createWalletClient, webSocket } from 'viem';
-import { concatBytes, hexToBytes } from '@ethereumjs/util';
-import { Keyring } from '@polkadot/api';
-import { compactAddLength } from '@polkadot/util';
 import { GearApi, HexString, MessageQueued } from '@gear-js/api';
+import { concatBytes, hexToBytes } from '@ethereumjs/util';
+import { privateKeyToAccount } from 'viem/accounts';
+import { compactAddLength } from '@polkadot/util';
+import { Keyring } from '@polkadot/api';
 import dotenv from 'dotenv';
 import assert from 'assert';
 
 import { decodeEthBridgeMessageResponse, relayVaraToEth, waitForMerkleRootAppearedInMessageQueue } from '../src';
 import { initLogger, logger } from '../src/util';
-import { privateKeyToAccount } from 'viem/accounts';
 
 dotenv.config({ quiet: true });
 

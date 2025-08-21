@@ -30,7 +30,9 @@
     "build:esm": "npx swc ./src -d lib/esm --strip-leading-paths",
     "build:cjs": "npx swc ./src -d lib/cjs -C module.type=commonjs --out-file-extension cjs --strip-leading-paths",
     "build:types": "npx tsc -p tsconfig.types.json",
-    "typecheck": "npx tsc -p tsconfig.json --noEmit"
+    "typecheck": "npx tsc -p tsconfig.json --noEmit",
+    "example:vara-to-eth": "npx ts-node example/vara-to-eth.ts",
+    "example:eth-to-vara": "npx ts-node example/eth-to-vara.ts"
   },
   "dependencies": {
     "@chainsafe/ssz": "^1.2.1",

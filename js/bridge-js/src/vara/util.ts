@@ -7,6 +7,12 @@ export const getPrefix = (service: string, method: string): `0x${string}` => {
   return registry.createType('(String, String)', [service, method]).toHex();
 };
 
+/**
+ * Decodes a response from EthBridge builtin
+ *
+ * @param data - The raw data bytes containing the encoded message response
+ * @returns Object containing the decoded nonce, hash, and nonce in little endian format
+ */
 export const decodeEthBridgeMessageResponse = (
   data: Uint8Array,
 ): { nonce: bigint; hash: HexString; nonceLe: HexString } => {

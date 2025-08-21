@@ -28,6 +28,11 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
+
+  @include sm {
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 .buttons {

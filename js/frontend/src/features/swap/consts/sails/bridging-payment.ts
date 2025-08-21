@@ -230,6 +230,41 @@ export class BridgingPayment {
   }
 
   /**
+   * Set fee that this program will take for processing priority
+   * requests.
+   *
+   * This method can be called only by admin.
+   */
+  public setPriorityFee(priority_fee: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      ['BridgingPayment', 'SetPriorityFee', priority_fee],
+      '(String, String, u128)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Upgrades the program to the provided new address.
+   */
+  public upgrade(value: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      ['BridgingPayment', 'Upgrade', value],
+      '(String, String, [u8;32])',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
    * Get current service [State].
    */
   public async getState(

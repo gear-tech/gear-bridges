@@ -95,6 +95,10 @@ export interface IBeaconBlock {
   readonly signatures: string[];
 }
 
+export interface MerkleRootLog {
+  args: MerkleRootLogArgs;
+}
+
 export interface MerkleRootLogArgs {
   blockNumber: bigint;
   merkleRoot: `0x${string}`;

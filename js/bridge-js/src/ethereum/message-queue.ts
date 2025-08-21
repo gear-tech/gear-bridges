@@ -1,8 +1,8 @@
-import { Account, PublicClient, WalletClient, WatchContractEventReturnType, zeroHash, decodeEventLog } from 'viem';
+import { Account, PublicClient, WalletClient, zeroHash, parseEventLogs } from 'viem';
 import { bytesToHex } from '@ethereumjs/util';
 import { bnToU8a } from '@polkadot/util';
 
-import { MerkleRootLogArgs, MessageProcessResult } from './types.js';
+import { MerkleRootLog, MerkleRootLogArgs, MessageProcessResult } from './types.js';
 import { Proof, VaraMessage } from '../vara/types.js';
 import { logger } from '../util.js';
 import { bytesToBigint } from 'viem/utils';
@@ -139,11 +139,9 @@ export class MessageQueueClient {
     }
   }
 
-  public async waitForMekleRoot(bn: bigint): Promise<MerkleRootLogArgs> {
-    let unwatch: WatchContractEventReturnType;
-
+  public async waitForMerkleRoot(bn: bigint): Promise<MerkleRootLogArgs> {
     const result = await new Promise<MerkleRootLogArgs>((resolve, reject) => {
-      unwatch = this._client.watchContractEvent({
+      const unwatch = this._client.watchContractEvent({
         address: this._address,
         abi: MerkleRootEventAbi,
         eventName: 'MerkleRoot',
@@ -153,20 +151,20 @@ export class MessageQueueClient {
               const { blockNumber, merkleRoot } = log.args as MerkleRootLogArgs;
               logger.info(`Received merkle root ${merkleRoot} for block ${blockNumber}`);
               if (blockNumber >= bn) {
+                unwatch();
                 return resolve({ blockNumber, merkleRoot });
               }
             }
           }
         },
         onError: (error) => {
+          if (unwatch) {
+            unwatch();
+          }
           reject(error);
         },
       });
     });
-
-    if (unwatch! !== undefined) {
-      unwatch();
-    }
 
     return result;
   }
@@ -197,13 +195,15 @@ export class MessageQueueClient {
       throw new Error(`No merkle root logs found in range ${fromBlock} to ${toBlock}`);
     }
 
-    const log = logs.find(({ args: { blockNumber } }) => blockNumber === targetBlockNumber);
+    const log = logs.find(({ args: { blockNumber } }) => blockNumber === targetBlockNumber) as MerkleRootLog;
 
     if (log) {
-      return log.args as MerkleRootLogArgs;
+      return log.args;
     }
 
-    const eligibleLogs = logs.filter(({ args: { blockNumber } }) => blockNumber! > targetBlockNumber);
+    const eligibleLogs = logs.filter(
+      ({ args: { blockNumber } }) => blockNumber! > targetBlockNumber,
+    ) as MerkleRootLog[];
 
     if (eligibleLogs.length === 0) {
       throw new Error(`No merkle root logs found with blockNumber greater than or equal to ${targetBlockNumber}`);
@@ -259,29 +259,16 @@ export class MessageQueueClient {
 
       logger.info(`Transaction receipt received ${hash}`);
 
-      const messageProcessedLog = receipt.logs.find((log) => {
-        try {
-          const decodedLog = decodeEventLog({
-            abi: MessageQueueAbi,
-            eventName: 'MessageProcessed',
-            data: log.data,
-            topics: log.topics,
-          });
-          return decodedLog.eventName === 'MessageProcessed';
-        } catch {
-          return false;
-        }
+      const [messageProcessed] = parseEventLogs({
+        abi: MessageQueueAbi,
+        eventName: 'MessageProcessed',
+        logs: receipt.logs,
       });
 
-      if (messageProcessedLog) {
-        const { args } = decodeEventLog({
-          abi: MessageQueueAbi,
-          eventName: 'MessageProcessed',
-          data: messageProcessedLog.data,
-          topics: messageProcessedLog.topics,
-        });
-
+      if (messageProcessed) {
         logger.info(`Message processed event received ${hash}`);
+
+        const { args } = messageProcessed;
 
         return {
           success: true,
@@ -340,6 +327,6 @@ export async function waitForMerkleRootAppearedInMessageQueue(
   messageQueueAddress: `0x${string}`,
 ): Promise<boolean> {
   const client = getMessageQueueClient(messageQueueAddress, publicClient);
-  await client.waitForMekleRoot(blockNumber);
+  await client.waitForMerkleRoot(blockNumber);
   return true;
 }

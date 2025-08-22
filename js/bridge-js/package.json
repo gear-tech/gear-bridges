@@ -1,8 +1,8 @@
 {
-  "name": "gear-bridge-js",
+  "name": "@gear-js/bridge",
   "version": "0.0.1",
-  "description": "> TODO: description",
-  "author": "Dmitri Osipov <dmith.osipov@gmail.com>",
+  "description": "A TypeScript library for relaying transactions between Ethereum and Vara networks",
+  "author": "Gear Technologies",
   "homepage": "https://github.com/gear-tech/gear-bridges/tree/main/js/bridge-js#readme",
   "license": "GPL-3.0",
   "type": "module",

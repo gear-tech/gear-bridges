@@ -22,7 +22,8 @@ pub(crate) async fn sync_authority_set_id(
 ) -> anyhow::Result<SyncStepCount> {
     log::trace!("pub(crate) async fn sync_authority_set_id( genesis_config = {genesis_config:?}");
 
-    let Some(latest_proven) = latest_proven_authority_set_id else {
+    let latest_proven = genesis_config.authority_set_id + 1;
+    // let Some(latest_proven) = latest_proven_authority_set_id else {
         log::trace!("pub(crate) async fn sync_authority_set_id( latest_authority_set_id = {latest_authority_set_id}");
 
         if latest_authority_set_id <= genesis_config.authority_set_id {
@@ -57,8 +58,8 @@ pub(crate) async fn sync_authority_set_id(
         );
         log::info!("==================================================================================");
 
-        return Ok(1);
-    };
+    //     return Ok(1);
+    // };
 
     log::trace!("pub(crate) async fn sync_authority_set_id( latest_proven = {latest_proven}");
 

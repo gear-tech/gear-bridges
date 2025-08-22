@@ -37,7 +37,8 @@ members = [
     "tests",
     "gear-common",
     "tools/vft-manager-tool",
-    "js/bridge-js/js-proof-test", "js/bridge-js/ping",
+    "js/bridge-js/js-test",
+    "js/bridge-js/ping",
 ]
 
 resolver = "2"

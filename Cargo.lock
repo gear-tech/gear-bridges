@@ -6333,21 +6333,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "js-proof-test"
-version = "0.3.0"
-dependencies = [
- "dotenv",
- "ethereum-client",
- "ethereum_beacon_client",
- "gclient",
- "gsdk",
- "hex",
- "relayer",
- "sails-rs",
- "tokio",
-]
-
-[[package]]
 name = "js-sys"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6355,6 +6340,26 @@ checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "js-test"
+version = "0.3.0"
+dependencies = [
+ "alloy",
+ "dotenv",
+ "ethereum-client",
+ "ethereum_beacon_client",
+ "gclient",
+ "gear-rpc-client",
+ "gsdk",
+ "hex",
+ "keccak-hash 0.10.0",
+ "primitive-types 0.12.2",
+ "relayer",
+ "reqwest 0.11.27",
+ "sails-rs",
+ "tokio",
 ]
 
 [[package]]

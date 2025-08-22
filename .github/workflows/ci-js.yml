@@ -49,7 +49,7 @@ jobs:
         run: yarn build:bridge-js
 
       - name: 'Build test packages'
-        run: cargo build -p js-proof-test --release
+        run: cargo build -p js-test --release
 
       - name: 'Run tests'
         working-directory: js/bridge-js
@@ -60,6 +60,8 @@ jobs:
           BEACON_RPC_URL: ${{ secrets.BEACON_RPC_URL }}
           VARA_WS_RPC: ${{ secrets.VARA_WS_RPC }}
           ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+          VARA_TO_ETH_BLOCK_NUMBER: ${{ secrets.VARA_TO_ETH_BLOCK_NUMBER }}
+          VARA_TO_ETH_NONCE: ${{ secrets.VARA_TO_ETH_NONCE }}
 
       - name: 'Lint'
         run: yarn lint:bridge-js

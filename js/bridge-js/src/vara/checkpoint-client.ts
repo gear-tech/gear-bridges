@@ -5,6 +5,22 @@ import { logger } from '../util';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
 
+export type Order = 'Direct' | 'Reverse';
+
+export interface ReplayBack {
+  finalized_header: number | string | bigint;
+  last_header: number | string | bigint;
+}
+
+export interface StateData {
+  checkpoints: Array<[number | string | bigint, H256]>;
+  /**
+   * The field contains the data if the program is
+   * replaying checkpoints back.
+   */
+  replay_back: ReplayBack | null;
+}
+
 interface NewCheckpointEventData extends Struct {
   slot: u64;
   tree_hash_root: Bytes;
@@ -14,6 +30,7 @@ export class CheckpointClient {
   public readonly registry: TypeRegistry;
   public readonly serviceCheckpointFor: ServiceCheckpointFor;
   public readonly serviceSyncUpdate: ServiceSyncUpdate;
+  public readonly serviceState: ServiceState;
   private _program: BaseGearProgram;
 
   constructor(
@@ -22,6 +39,9 @@ export class CheckpointClient {
   ) {
     const types: Record<string, any> = {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
+      ReplayBack: { finalized_header: 'u64', last_header: 'u64' },
+      Order: { _enum: ['Direct', 'Reverse'] },
+      StateData: { checkpoints: 'Vec<(u64, H256)>', replay_back: 'Option<ReplayBack>' },
     };
 
     this.registry = new TypeRegistry();
@@ -33,6 +53,7 @@ export class CheckpointClient {
 
     this.serviceCheckpointFor = new ServiceCheckpointFor(this);
     this.serviceSyncUpdate = new ServiceSyncUpdate(this);
+    this.serviceState = new ServiceState(this);
   }
 
   public get programId(): `0x${string}` {
@@ -113,5 +134,25 @@ export class ServiceSyncUpdate {
         callback({ slot: payload['slot'].toNumber(), tree_hash_root: payload['tree_hash_root'].toHex() });
       }
     });
+  }
+}
+
+export class ServiceState {
+  constructor(private _program: CheckpointClient) {}
+
+  public async getLatestSlot(): Promise<StateData> {
+    const payload = this._program.registry
+      .createType('(String, String, Order, u32, u32)', ['ServiceState', 'Get', 'Reverse', 0, 1])
+      .toHex();
+    const reply = await this._program.api.message.calculateReply({
+      destination: this._program.programId,
+      origin: ZERO_ADDRESS,
+      payload,
+      value: 0,
+      gasLimit: this._program.api.blockGasLimit.toBigInt(),
+    });
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
+    const result = this._program.registry.createType('(String, String, StateData)', reply.payload);
+    return result[2].toJSON() as unknown as StateData;
   }
 }

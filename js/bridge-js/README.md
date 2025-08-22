@@ -4,7 +4,7 @@ A TypeScript library for relaying transactions between Ethereum and Vara network
 
 ## Overview
 
-The `gear-bridge-js` library provides a seamless way to create cross-chain bridges between Ethereum and Vara networks. It enables developers to relay transactions between Ethereum and Vara networks by generating cryptographic proofs of transaction inclusion and submitting them to the network.
+The `gear-bridge-js` library provides a seamless way to create bidirectional cross-chain bridges between Ethereum and Vara networks. It enables developers to relay transactions in both directions by generating cryptographic proofs of transaction inclusion and submitting them to the target network.
 
 ## Installation
 
@@ -26,8 +26,8 @@ Before using this library, ensure you have:
 ## Quick Start
 
 ```typescript
-import { relayEthToVaraTransaction } from 'gear-bridge-js';
-import { createPublicClient, http } from 'viem';
+import { relayEthToVara, relayVaraToEth } from 'gear-bridge-js';
+import { createPublicClient, createWalletClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { GearApi } from '@gear-js/api';
 
@@ -43,7 +43,7 @@ const gearApi = await GearApi.create({
 });
 
 // Relay transaction
-const result = await relayEthToVaraTransaction(
+const result = await relayEthToVara(
   '0x1234...', // Ethereum transaction hash
   'https://beacon-node.example.com', // Beacon chain RPC URL
   ethereumClient,
@@ -57,11 +57,25 @@ const result = await relayEthToVaraTransaction(
 );
 
 console.log('Transaction relayed:', result.txHash);
+
+// Or relay from Vara to Ethereum
+const varaToEthResult = await relayVaraToEth(
+  123n, // Message nonce
+  12345n, // Vara block number
+  ethereumClient, // Public client
+  walletClient, // Wallet client
+  account, // Ethereum account
+  gearApi, // Gear API instance
+  '0x1234...', // Message queue contract address
+  false, // Enable logging
+);
+
+console.log('Vara to Ethereum transaction processed');
 ```
 
 ## API Reference
 
-### `relayEthToVaraTransaction`
+### `relayEthToVara`
 
 Relays an Ethereum transaction to the Vara network by creating a proof and submitting it through the historical proxy program.
 
@@ -95,6 +109,82 @@ interface RelayResult {
 }
 ```
 
+### `relayVaraToEth`
+
+Relays a queued message from Vara network to Ethereum by finding the message, generating merkle proof, and processing it through the message queue contract.
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `nonce` | `bigint \| HexString` | The message nonce to relay (little endian encoded if hex string) |
+| `blockNumber` | `bigint` | The Vara block number containing the message |
+| `ethereumPublicClient` | `PublicClient` | Ethereum public client for reading blockchain state |
+| `ethereumWalletClient` | `WalletClient` | Ethereum wallet client for sending transactions |
+| `ethereumAccount` | `Account` | Ethereum account to use for transactions |
+| `gearApi` | `GearApi` | Gear API instance for interacting with Vara network |
+| `messageQueueAddress` | `0x${string}` | Ethereum message queue contract address |
+| `silent?` | `boolean` | Whether to suppress logging output (default: `true`) |
+
+#### Returns
+
+```typescript
+Promise<void> // Resolves when the message is successfully processed
+```
+
+#### Throws
+
+- **Error**: If the message with the given nonce is not found in the specified block
+
+#### Example
+
+```typescript
+import { relayVaraToEth } from 'gear-bridge-js';
+import { createPublicClient, createWalletClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http(),
+});
+
+const account = privateKeyToAccount('0x...');
+const walletClient = createWalletClient({
+  account,
+  chain: mainnet,
+  transport: http(),
+});
+
+await relayVaraToEth(
+  42n, // Message nonce
+  1000000n, // Block number
+  publicClient,
+  walletClient,
+  account,
+  gearApi,
+  '0x1234567890123456789012345678901234567890',
+);
+```
+
+### `waitForMerkleRootAppearedInMessageQueue`
+
+Waits for a Merkle root to appear in the message queue contract for the specified block number or greater.
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `blockNumber` | `bigint` | The block number to wait for the Merkle root |
+| `publicClient` | `PublicClient` | Ethereum public client for reading blockchain state |
+| `messageQueueAddress` | `0x${string}` | The message queue contract address |
+
+#### Returns
+
+```typescript
+Promise<boolean> // Resolves to true when the Merkle root appears for the specified block or a block greater than specified
+```
+
 ## Advanced Usage
 
 ### Error Handling
@@ -102,7 +192,7 @@ interface RelayResult {
 The library provides detailed error information through the `RelayResult` interface:
 
 ```typescript
-const result = await relayEthToVaraTransaction(/* ... */);
+const result = await relayEthToVara(/* ... */);
 
 if (result.error) {
   console.error('Transaction failed:', result.error);
@@ -134,7 +224,9 @@ const gearApi = await GearApi.create({
 
 ## How It Works
 
-The relay process involves several key steps:
+The library supports bidirectional relaying with different processes for each direction:
+
+### Ethereum to Vara Relay Process
 
 1. **Transaction Receipt Retrieval**: Fetches the target transaction receipt from Ethereum
 2. **Block Analysis**: Retrieves the block containing the transaction and all its receipts
@@ -142,6 +234,14 @@ The relay process involves several key steps:
 4. **Merkle Proof Generation**: Creates a cryptographic proof of transaction inclusion
 5. **Inclusion Proof Building**: Constructs a proof linking the block to the beacon chain
 6. **Vara Submission**: Submits the proof to Vara through the historical proxy program
+
+### Vara to Ethereum Relay Process
+
+1. **Message Retrieval**: Finds the queued message in the specified Vara block using the nonce
+2. **Authority Set Verification**: Retrieves the authority set ID for the block to ensure validity
+3. **Merkle Root Resolution**: Obtains the Merkle root from Ethereum message queue or searches in recent blocks
+4. **Proof Generation**: Creates a Merkle proof for the message inclusion in the Vara block
+5. **Ethereum Submission**: Processes the message through the Ethereum message queue contract
 
 ## Dependencies
 

@@ -5,6 +5,10 @@
   line-height: 120%;
   color: #9cacb1;
 
+  @include sm {
+    font-size: 14px;
+  }
+
   &:not([aria-invalid='true']).active {
     color: #fff;
   }

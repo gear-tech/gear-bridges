@@ -1,15 +1,15 @@
-# @gear-tech/bridge-js
+# @gear-js/bridge
 
 A TypeScript library for relaying transactions between Ethereum and Vara networks.
 
 ## Overview
 
-The `gear-bridge-js` library provides a seamless way to create bidirectional cross-chain bridges between Ethereum and Vara networks. It enables developers to relay transactions in both directions by generating cryptographic proofs of transaction inclusion and submitting them to the target network.
+The `@gear-js/bridge` library provides a seamless way to create bidirectional cross-chain bridges between Ethereum and Vara networks. It enables developers to relay transactions in both directions by generating cryptographic proofs of transaction inclusion and submitting them to the target network.
 
 ## Installation
 
 ```bash
-npm install gear-bridge-js
+npm install @gear-js/bridge
 ```
 
 ## Prerequisites
@@ -26,7 +26,7 @@ Before using this library, ensure you have:
 ## Quick Start
 
 ```typescript
-import { relayEthToVara, relayVaraToEth } from 'gear-bridge-js';
+import { relayEthToVara, relayVaraToEth } from '@gear-js/bridge';
 import { createPublicClient, createWalletClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { GearApi } from '@gear-js/api';
@@ -139,7 +139,7 @@ Promise<void> // Resolves when the message is successfully processed
 #### Example
 
 ```typescript
-import { relayVaraToEth } from 'gear-bridge-js';
+import { relayVaraToEth } from '@gear-js/bridge';
 import { createPublicClient, createWalletClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';

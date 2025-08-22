@@ -962,6 +962,34 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@gear-js/bridge@workspace:js/bridge-js":
+  version: 0.0.0-use.local
+  resolution: "@gear-js/bridge@workspace:js/bridge-js"
+  dependencies:
+    "@chainsafe/ssz": "npm:^1.2.1"
+    "@ethereumjs/rlp": "npm:^10.0.0"
+    "@ethereumjs/trie": "npm:^6.2.1"
+    "@ethereumjs/util": "npm:^10.0.0"
+    "@gear-js/api": "npm:^0.43.0"
+    "@lodestar/types": "npm:^1.33.0"
+    "@polkadot/api": "npm:^16.4.1"
+    "@swc/cli": "npm:^0.7.8"
+    "@swc/core": "npm:^1.13.3"
+    "@vitest/coverage-v8": "npm:^3.2.4"
+    dotenv: "npm:^17.2.1"
+    sails-js: "npm:^0.4.3"
+    sails-js-cli: "npm:^0.4.3"
+    sails-js-parser: "npm:^0.4.3"
+    viem: "npm:^2.33.2"
+    vitest: "npm:^3.2.4"
+  peerDependencies:
+    "@gear-js/api": ^0.43.0
+    "@polkadot/api": ^16.4.1
+    sails-js: ^0.4.3
+    viem: ^2.33.2
+  languageName: unknown
+  linkType: soft
+
 "@gear-js/frontend-configs@npm:0.1.2":
   version: 0.1.2
   resolution: "@gear-js/frontend-configs@npm:0.1.2"
@@ -11423,34 +11451,6 @@ __metadata:
   checksum: 10c0/33e77fd29bddc2d9bb78ab3eb854c165909201f88c75faa8272e35899e2d35a8a642a15e7420ef945e1f64a9670d6aa3ec744106b2aa42be68ca5114025954ca
   languageName: node
   linkType: hard
-
-"gear-bridge-js@workspace:js/bridge-js":
-  version: 0.0.0-use.local
-  resolution: "gear-bridge-js@workspace:js/bridge-js"
-  dependencies:
-    "@chainsafe/ssz": "npm:^1.2.1"
-    "@ethereumjs/rlp": "npm:^10.0.0"
-    "@ethereumjs/trie": "npm:^6.2.1"
-    "@ethereumjs/util": "npm:^10.0.0"
-    "@gear-js/api": "npm:^0.43.0"
-    "@lodestar/types": "npm:^1.33.0"
-    "@polkadot/api": "npm:^16.4.1"
-    "@swc/cli": "npm:^0.7.8"
-    "@swc/core": "npm:^1.13.3"
-    "@vitest/coverage-v8": "npm:^3.2.4"
-    dotenv: "npm:^17.2.1"
-    sails-js: "npm:^0.4.3"
-    sails-js-cli: "npm:^0.4.3"
-    sails-js-parser: "npm:^0.4.3"
-    viem: "npm:^2.33.2"
-    vitest: "npm:^3.2.4"
-  peerDependencies:
-    "@gear-js/api": ^0.43.0
-    "@polkadot/api": ^16.4.1
-    sails-js: ^0.4.3
-    viem: ^2.33.2
-  languageName: unknown
-  linkType: soft
 
 "gear-bridges@workspace:.":
   version: 0.0.0-use.local

@@ -43,9 +43,9 @@ jobs:
           node-version: 20.x
 
       - name: 'Install dependencies'
-        run: yarn workspaces focus gear-bridge-js gear-bridges
+        run: yarn workspaces focus @gear-js/bridge gear-bridges
 
-      - name: 'Build gear-bridge-js lib'
+      - name: 'Build @gear-js/bridge lib'
         run: yarn build:bridge-js
 
       - name: 'Build test packages'

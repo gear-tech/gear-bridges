@@ -139,11 +139,7 @@ function Transaction() {
         <SectionCard heading="Overview" gridContent={false}>
           <Card className={styles.transaction}>
             <div className={styles.token}>
-              <TokenSVG
-                symbol={sourceToken.symbol}
-                network={INDEXED_NETWORK_TO_NETWORK[sourceNetwork]}
-                sizes={[48, 28]}
-              />
+              <TokenSVG symbol={sourceToken.symbol} network={INDEXED_NETWORK_TO_NETWORK[sourceNetwork]} />
 
               <div>
                 <FormattedBalance
@@ -163,11 +159,7 @@ function Transaction() {
             </div>
 
             <div className={styles.token}>
-              <TokenSVG
-                symbol={destinationToken.symbol}
-                network={INDEXED_NETWORK_TO_NETWORK[destNetwork]}
-                sizes={[48, 28]}
-              />
+              <TokenSVG symbol={destinationToken.symbol} network={INDEXED_NETWORK_TO_NETWORK[destNetwork]} />
 
               <div>
                 <FormattedBalance

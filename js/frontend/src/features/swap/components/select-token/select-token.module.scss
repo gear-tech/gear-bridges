@@ -63,6 +63,10 @@
 
   transition: color 0.25s;
 
+  @include sm {
+    font-size: 16px;
+  }
+
   svg path {
     transition: fill 0.25s;
   }
@@ -116,6 +120,9 @@
 }
 
 .wallet {
+  --token-icon-size: 32px;
+  --network-icon-size: 20px;
+
   display: flex;
   align-items: center;
   gap: 20px;

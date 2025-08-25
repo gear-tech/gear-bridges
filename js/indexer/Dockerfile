@@ -7,6 +7,7 @@ COPY package.json yarn.lock lerna.json .yarnrc.yml /app/
 COPY .yarn /app/.yarn
 COPY api /app/api
 COPY js/indexer /app/js/indexer
+COPY js/common /app/js/common
 WORKDIR /app
 RUN yarn workspaces focus indexer gear-bridges
 RUN yarn build:indexer
@@ -16,6 +17,7 @@ WORKDIR /app
 COPY package.json yarn.lock lerna.json .yarnrc.yml /app/
 COPY .yarn /app/.yarn
 COPY js/indexer /app/js/indexer
+COPY js/common /app/js/common
 RUN yarn workspaces focus gear-bridges indexer --production
 
 FROM deps

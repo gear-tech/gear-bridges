@@ -19,6 +19,7 @@ type UseFee = () => {
   bridgingFee: BalanceValues;
   isLoading: boolean;
   vftManagerFee?: BalanceValues;
+  priorityFee?: BalanceValues;
 };
 
 type UseFTAllowance = (address: HexString | undefined) => {

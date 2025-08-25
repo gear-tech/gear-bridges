@@ -45,7 +45,7 @@ function useSignAndSend({ programs }: Parameters) {
   };
 
   const signAndSend = ({ extrinsic, ...parameters }: SignAndSendParameters) =>
-    new Promise<void>((resolve, reject) => {
+    new Promise<{ blockHash: HexString }>((resolve, reject) => {
       if (!api) throw new Error('API is not initialized');
       if (!account) throw new Error('Account is not found');
       if (programs.includes(undefined)) throw new Error('Each program is not found');
@@ -75,7 +75,7 @@ function useSignAndSend({ programs }: Parameters) {
             const blockHash = status.asInBlock.toHex();
 
             checkErrorReplies(blockHash, queuedMessages)
-              .then(() => resolve())
+              .then(() => resolve({ blockHash }))
               .catch((error: Error) => reject(error));
           }
         });

@@ -42,7 +42,7 @@ function TransactionPair(props: Props) {
   return (
     <div className={styles.pair}>
       <div className={styles.tx}>
-        <TokenSVG symbol={sourceSymbol} network={INDEXED_NETWORK_TO_NETWORK[sourceNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={sourceSymbol} network={INDEXED_NETWORK_TO_NETWORK[sourceNetwork]} />
 
         <div>
           <FormattedBalance
@@ -56,10 +56,10 @@ function TransactionPair(props: Props) {
         </div>
       </div>
 
-      <ArrowSVG />
+      <ArrowSVG className={styles.arrow} />
 
       <div className={styles.tx}>
-        <TokenSVG symbol={destinationSymbol} network={INDEXED_NETWORK_TO_NETWORK[destNetwork]} sizes={[32, 20]} />
+        <TokenSVG symbol={destinationSymbol} network={INDEXED_NETWORK_TO_NETWORK[destNetwork]} />
 
         <div>
           <FormattedBalance
@@ -80,7 +80,7 @@ function TransactionPairSkeleton() {
   return (
     <div className={styles.pair}>
       <div className={styles.tx}>
-        <TokenSVG.Skeleton sizes={[32, 20]} />
+        <TokenSVG.Skeleton />
 
         <div>
           <p className={styles.amount}>
@@ -88,17 +88,17 @@ function TransactionPairSkeleton() {
           </p>
 
           <Skeleton>
-            <span>0x000000000000</span>
+            <span className={styles.address}>0x000000000000</span>
           </Skeleton>
         </div>
       </div>
 
       <Skeleton>
-        <ArrowSVG />
+        <ArrowSVG className={styles.arrow} />
       </Skeleton>
 
       <div className={styles.tx}>
-        <TokenSVG.Skeleton sizes={[32, 20]} />
+        <TokenSVG.Skeleton />
 
         <div>
           <p className={styles.amount}>
@@ -106,7 +106,7 @@ function TransactionPairSkeleton() {
           </p>
 
           <Skeleton>
-            <span>0x000000000000</span>
+            <span className={styles.address}>0x000000000000</span>
           </Skeleton>
         </div>
       </div>

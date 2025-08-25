@@ -19,11 +19,21 @@
 }
 
 .container {
+  --token-icon-size: 48px;
+  --network-icon-size: 28px;
+
   display: flex;
   align-items: center;
   gap: 16px;
 
   z-index: 1; // for transform animation
+
+  @include sm {
+    --token-icon-size: 24px;
+    --network-icon-size: 14px;
+
+    gap: 8px;
+  }
 
   &.select {
     animation: toTop 0.25s ease;
@@ -51,6 +61,10 @@
     line-height: 1;
     color: #828b8e;
 
+    @include sm {
+      font-size: 9px;
+    }
+
     &Container {
       display: flex;
       align-items: center;
@@ -69,6 +83,10 @@
     font-weight: 600;
     font-size: 18px;
     line-height: 24px;
+
+    @include sm {
+      font-size: 16px;
+    }
   }
 }
 
@@ -77,4 +95,8 @@
   line-height: 1;
   color: #828b8e;
   white-space: nowrap;
+
+  @include sm {
+    font-size: 12px;
+  }
 }

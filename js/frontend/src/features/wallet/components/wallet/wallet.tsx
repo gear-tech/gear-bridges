@@ -39,34 +39,33 @@ function Wallet() {
   if (!isAccountReady || ethAccount.isReconnecting || !api || !varaSymbol)
     return <Skeleton width="11rem" height="2rem" />;
 
-  const isConnected = Boolean(account || ethAccount.address);
+  const address = account?.address || ethAccount.address;
   const balance = account ? varaAccountBalance : ethAccountBalance;
   const decimals = account ? api.registry.chainDecimals[0] : 18;
   const symbol = account ? varaSymbol : 'ETH';
 
   return (
     <>
-      {isConnected ? (
-        <div className={styles.wallet}>
+      {address ? (
+        <button type="button" className={styles.wallet} onClick={handleButtonClick}>
           {!isUndefined(balance.data) ? (
-            <div className={styles.balance}>
+            <span className={styles.balance}>
               <WalletSVG />
               <FormattedBalance value={balance.data} decimals={decimals} symbol={symbol} />
-            </div>
+            </span>
           ) : (
             <Skeleton width="9rem" />
           )}
 
-          <button type="button" className={styles.button} onClick={handleButtonClick}>
+          <span className={styles.account}>
             {SVG && <SVG />}
 
             {/* icon from useWalletInfo only exists on initial wallet connection */}
             {ethWallet?.icon ? <img src={ethWallet.icon} alt="wallet" /> : ethAccount.address && <EthSVG />}
 
-            {account && getTruncatedText(account.address)}
-            {ethAccount.address && getTruncatedText(ethAccount.address)}
-          </button>
-        </div>
+            <span className={styles.address}>{getTruncatedText(address)}</span>
+          </span>
+        </button>
       ) : (
         <Button text="Connect Wallet" size="x-small" onClick={openModal} />
       )}

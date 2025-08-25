@@ -1,18 +1,43 @@
-use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::common::MessageInBlock,
-};
-use alloy::providers::{PendingTransactionBuilder, Provider};
+use crate::common::{self, BASE_RETRY_DELAY, MAX_RETRIES};
+use alloy::providers::{PendingTransactionBuilder, PendingTransactionError, Provider};
 use ethereum_client::{EthApi, TxHash};
+use futures::{stream::FuturesUnordered, StreamExt};
 use prometheus::{IntCounter, IntGauge};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
+use uuid::Uuid;
 
 pub struct StatusFetcher {
     eth_api: EthApi,
     confirmations: u64,
 
     metrics: Metrics,
+}
+
+pub struct Request {
+    pub tx_uuid: Uuid,
+    pub tx_hash: TxHash,
+}
+
+pub enum Response {
+    Success(Uuid, TxHash),
+    Failed(Uuid, PendingTransactionError),
+}
+
+pub struct StatusFetcherIo {
+    requests: UnboundedSender<Request>,
+    responses: UnboundedReceiver<Response>,
+}
+
+impl StatusFetcherIo {
+    pub fn send_request(&self, tx_uuid: Uuid, tx_hash: TxHash) -> bool {
+        let request = Request { tx_uuid, tx_hash };
+        self.requests.send(request).is_ok()
+    }
+
+    pub async fn recv_message(&mut self) -> Option<Response> {
+        self.responses.recv().await
+    }
 }
 
 impl MeteredService for StatusFetcher {
@@ -44,19 +69,27 @@ impl StatusFetcher {
         }
     }
 
-    pub fn spawn(self) -> UnboundedSender<(TxHash, MessageInBlock)> {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        tokio::task::spawn(task(self, receiver));
+    pub fn spawn(self) -> StatusFetcherIo {
+        let (requests_tx, requests_rx) = mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = mpsc::unbounded_channel();
+        tokio::task::spawn(task(self, requests_rx, responses_tx));
 
-        sender
+        StatusFetcherIo {
+            requests: requests_tx,
+            responses: responses_rx,
+        }
     }
 }
 
-async fn task(mut this: StatusFetcher, mut channel: UnboundedReceiver<(TxHash, MessageInBlock)>) {
+async fn task(
+    mut this: StatusFetcher,
+    mut channel: UnboundedReceiver<Request>,
+    responses: UnboundedSender<Response>,
+) {
     let mut attempts = 0;
 
     loop {
-        match task_inner(&mut this, &mut channel).await {
+        match task_inner(&mut this, &mut channel, &responses).await {
             Ok(_) => break,
             Err(e) => {
                 attempts += 1;
@@ -88,36 +121,46 @@ async fn task(mut this: StatusFetcher, mut channel: UnboundedReceiver<(TxHash, M
 
 async fn task_inner(
     this: &mut StatusFetcher,
-    channel: &mut UnboundedReceiver<(TxHash, MessageInBlock)>,
+    channel: &mut UnboundedReceiver<Request>,
+    responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
-    while let Some((tx_hash, _message)) = channel.recv().await {
-        this.metrics.pending_tx_count.inc();
+    let mut txs = FuturesUnordered::new();
+    loop {
+        tokio::select! {
+            message = channel.recv() => {
+                let Some(request) = message else {
+                    log::info!("No more messages to process, exiting");
+                    return Ok(());
+                };
 
-        let metrics = this.metrics.clone();
+                let Request { tx_uuid, tx_hash, .. } = request;
 
-        tokio::spawn(get_tx_status(
-            this.eth_api.clone(),
-            metrics,
-            tx_hash,
-            this.confirmations,
-        ));
-    }
+                this.metrics.pending_tx_count.inc();
 
-    Ok(())
-}
+                let pending = PendingTransactionBuilder::new(
+                    this.eth_api.raw_provider().root().clone(),
+                    tx_hash,
+                );
 
-async fn get_tx_status(eth_api: EthApi, metrics: Metrics, tx_hash: TxHash, confirmations: u64) {
-    let pending = PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash);
+                let confirmations = this.confirmations;
+                txs.push(async move {
+                    Ok((tx_uuid, pending.with_required_confirmations(confirmations).watch().await.map_err(|e| (tx_uuid, e))?))
+                });
+            }
 
-    if let Err(e) = pending
-        .with_required_confirmations(confirmations)
-        .watch()
-        .await
-    {
-        metrics.total_failed_txs.inc();
-        log::error!("Failed to finalize transaction {tx_hash}: {e:?}");
-    } else {
-        metrics.pending_tx_count.dec();
-        log::info!("Transaction {tx_hash} has {confirmations} confirmation(s)");
+            Some(tx) = txs.next(), if !txs.is_empty() => {
+                match tx {
+                    Ok((uuid, tx_hash)) => {
+                        this.metrics.pending_tx_count.dec();
+                        responses.send(Response::Success(uuid, tx_hash))?;
+                    }
+                    Err((uuid, e)) => {
+                        this.metrics.total_failed_txs.inc();
+                        log::error!("Failed to get transaction {uuid} status: {e}");
+                        responses.send(Response::Failed(uuid, e))?;
+                    }
+                }
+            }
+        }
     }
 }

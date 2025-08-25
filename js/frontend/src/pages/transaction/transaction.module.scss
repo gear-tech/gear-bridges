@@ -7,6 +7,11 @@
 
   display: flex;
   justify-content: space-between;
+  gap: 16px;
+
+  @include breakpoint(400px) {
+    flex-direction: column;
+  }
 
   .heading {
     margin-bottom: 4px;
@@ -37,9 +42,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 64px;
+  gap: 32px;
+
+  @include md {
+    flex-direction: column;
+  }
 
   .token {
+    --token-icon-size: 48px;
+    --network-icon-size: 28px;
+
     display: flex;
     align-items: center;
     gap: 16px;
@@ -61,6 +73,8 @@
   .arrow {
     width: 32px;
     height: 32px;
+
+    flex-shrink: 0;
 
     display: flex;
     align-items: center;
@@ -93,6 +107,12 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px 16px;
+
+    @include sm {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
   }
 }
 

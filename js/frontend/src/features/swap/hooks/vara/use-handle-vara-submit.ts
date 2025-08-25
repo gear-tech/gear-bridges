@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
@@ -9,7 +10,7 @@ import { SUBMIT_STATUS, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues, UseHandleSubmitParameters } from '../../types';
 
-import { usePayFeeWithAwait } from './use-pay-fee-with-await';
+import { usePayFeesWithAwait } from './use-pay-fees-with-await';
 import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
@@ -29,20 +30,28 @@ const GAS_LIMIT = {
   APPROXIMATE_PAY_FEE: 10_000_000_000n,
 } as const;
 
-function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransactionStart }: UseHandleSubmitParameters) {
+function useHandleVaraSubmit({
+  bridgingFee,
+  vftManagerFee,
+  priorityFee,
+  shouldPayPriorityFee,
+  allowance,
+  onTransactionStart,
+}: UseHandleSubmitParameters) {
   const { api } = useApi();
   const { token } = useBridgeContext();
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
-  const payFee = usePayFeeWithAwait(bridgingFee);
+  const payFees = usePayFeesWithAwait({ fee: bridgingFee, priorityFee, shouldPayPriorityFee });
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
     definedAssert(bridgingFee, 'Bridging fee value');
     definedAssert(vftManagerFee, 'VFT Manager fee value');
+    definedAssert(priorityFee, 'Priority fee value');
     definedAssert(token, 'Fungible token');
 
     const txs: Transaction[] = [];
@@ -85,19 +94,22 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
       value: vftManagerFee,
     });
 
-    txs.push({
+    // using approximate values, cuz we don't know the exact gas limit yet
+    const feesTx = {
       extrinsic: undefined,
       gasLimit: GAS_LIMIT.APPROXIMATE_PAY_FEE,
-      estimatedFee: fee, // cuz we don't know payFees gas limit yet
-      value: bridgingFee,
-    });
+      estimatedFee: fee,
+    };
+
+    txs.push({ ...feesTx, value: bridgingFee });
+    if (shouldPayPriorityFee) txs.push({ ...feesTx, value: priorityFee });
 
     return txs;
   };
 
   const resetState = () => {
     signAndSend.reset();
-    payFee.reset();
+    payFees.reset();
   };
 
   const sendTransactions = async (values: FormattedValues) => {
@@ -112,7 +124,8 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
     // event subscription to get nonce from bridging request reply, and send pay fee transaction.
     // since we're already checking replies in useSignAndSend,
     // would be nice to have the ability to decode it's payload there. perhaps some api in sails-js can be implemented?
-    const { result, unsubscribe } = payFee.awaitBridgingRequest(values);
+    const { result, unsubscribe } = payFees.awaitBridgingRequest(values);
+    let blockHash: HexString | undefined;
 
     try {
       const extrinsics = txs
@@ -121,13 +134,17 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
 
       const extrinsic = api.tx.utility.batchAll(extrinsics);
 
-      await signAndSend.mutateAsync({ extrinsic });
+      const batchResult = await signAndSend.mutateAsync({ extrinsic });
+
+      blockHash = batchResult.blockHash;
     } catch (error) {
       unsubscribe();
       throw error;
     }
 
-    return result;
+    if (!blockHash) throw new Error('Block hash from request bridging message is not found');
+
+    return result(blockHash);
   };
 
   const getRequiredBalance = async (values: FormattedValues) => {
@@ -151,7 +168,7 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
 
   const getStatus = () => {
     if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;
-    if (payFee.isPending || payFee.error) return SUBMIT_STATUS.FEE;
+    if (payFees.isPending || payFees.error) return SUBMIT_STATUS.FEE;
 
     return SUBMIT_STATUS.SUCCESS;
   };

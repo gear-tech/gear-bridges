@@ -81,7 +81,9 @@
   border: 1px solid #00ffc466;
   border-radius: 4px;
 
-  transition: 0.25s color;
+  transition:
+    0.25s background-color,
+    0.25s color;
 
   span,
   svg {
@@ -102,6 +104,10 @@
       fill: none;
       stroke: #00ffc4;
     }
+  }
+
+  &:hover {
+    background-color: #14191f;
   }
 
   &:disabled {

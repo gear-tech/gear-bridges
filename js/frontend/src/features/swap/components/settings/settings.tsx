@@ -1,78 +1,24 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-
 import ClockSVG from '@/assets/clock.svg?react';
 import { Tooltip } from '@/components';
-import { ROUTE } from '@/consts';
 import { cx } from '@/utils';
 
 import CircleCheckSVG from '../../assets/circle-check.svg?react';
 import HandSVG from '../../assets/hand.svg?react';
 import LightningSVG from '../../assets/lightning.svg?react';
 import OutlineWarningSVG from '../../assets/outline-warning.svg?react';
+import { CLAIM_TYPE, PRIORITY } from '../../consts';
 
 import styles from './settings.module.scss';
+import { TooltipContent } from './tooltip-content';
 
-const PRIORITY = {
-  COMMON: 'common',
-  FAST: 'fast',
-} as const;
+type Props = {
+  priority: (typeof PRIORITY)[keyof typeof PRIORITY];
+  claimType: (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE];
+  onPriorityChange: (priority: (typeof PRIORITY)[keyof typeof PRIORITY]) => void;
+  onClaimTypeChange: (claimType: (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]) => void;
+};
 
-const CLAIM_TYPE = {
-  MANUAL: 'manual',
-  AUTO: 'auto',
-} as const;
-
-function PriorityTooltipContent() {
-  return (
-    <>
-      <p>
-        <span className={styles.bold}>Transfer Speed</span> defines how quickly your transfer will be processed:
-      </p>
-
-      <ul className={styles.list}>
-        <li>
-          <span className={styles.bold}>Common</span> - standard speed (~1 hour) with a lower fee.
-        </li>
-
-        <li>
-          <span className={styles.bold}>Fast</span> - accelerated processing (~20 minutes) with a higher fee.
-        </li>
-      </ul>
-    </>
-  );
-}
-
-function ClaimTypeTooltipContent() {
-  return (
-    <>
-      <p>
-        <span className={styles.bold}>Claim Type</span> determines how you receive your tokens:
-      </p>
-
-      <ul className={styles.list}>
-        <li>
-          <span className={styles.bold}>Manual</span> - after the transfer is completed, you need to manually claim your
-          tokens from the{' '}
-          <Link to={ROUTE.TOKEN_TRACKER} className={styles.link}>
-            My Tokens
-          </Link>{' '}
-          page.
-        </li>
-
-        <li>
-          <span className={styles.bold}>Automatic</span> - tokens are delivered to your wallet automatically, for an
-          additional fee.
-        </li>
-      </ul>
-    </>
-  );
-}
-
-function Settings() {
-  const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.COMMON);
-  const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.MANUAL);
-
+function Settings({ priority, claimType, onPriorityChange, onClaimTypeChange }: Props) {
   return (
     <div className={styles.settings}>
       <h3 className={styles.heading}>Transfer Settings</h3>
@@ -81,17 +27,17 @@ function Settings() {
         <div>
           <h4 className={styles.settingHeading}>
             Transfer Speed
-            <Tooltip value={<PriorityTooltipContent />}>
+            <Tooltip value={<TooltipContent.Priority />}>
               <OutlineWarningSVG className={styles.tooltip} />
             </Tooltip>
           </h4>
 
-          <div className={cx(styles.buttons, priority === PRIORITY.COMMON && styles.active)}>
+          <div className={cx(styles.buttons, priority === PRIORITY.DEFAULT && styles.active)}>
             <button
               type="button"
               className={styles.button}
-              onClick={() => setPriority(PRIORITY.COMMON)}
-              disabled={priority === PRIORITY.COMMON}>
+              onClick={() => onPriorityChange(PRIORITY.DEFAULT)}
+              disabled={priority === PRIORITY.DEFAULT}>
               <ClockSVG />
               <span>Common</span>
             </button>
@@ -99,8 +45,8 @@ function Settings() {
             <button
               type="button"
               className={styles.button}
-              onClick={() => setPriority(PRIORITY.FAST)}
-              disabled={priority === PRIORITY.FAST}>
+              onClick={() => onPriorityChange(PRIORITY.HIGH)}
+              disabled={priority === PRIORITY.HIGH}>
               <LightningSVG />
               <span>Fast</span>
             </button>
@@ -110,7 +56,7 @@ function Settings() {
         <div>
           <h4 className={styles.settingHeading}>
             Claim Type
-            <Tooltip value={<ClaimTypeTooltipContent />}>
+            <Tooltip value={<TooltipContent.ClaimType />}>
               <OutlineWarningSVG className={styles.tooltip} />
             </Tooltip>
           </h4>
@@ -119,7 +65,7 @@ function Settings() {
             <button
               type="button"
               className={styles.button}
-              onClick={() => setClaimType(CLAIM_TYPE.MANUAL)}
+              onClick={() => onClaimTypeChange(CLAIM_TYPE.MANUAL)}
               disabled={claimType === CLAIM_TYPE.MANUAL}>
               <HandSVG className={styles.handIcon} />
               <span>Manual</span>
@@ -128,7 +74,7 @@ function Settings() {
             <button
               type="button"
               className={styles.button}
-              onClick={() => setClaimType(CLAIM_TYPE.AUTO)}
+              onClick={() => onClaimTypeChange(CLAIM_TYPE.AUTO)}
               disabled={claimType === CLAIM_TYPE.AUTO}>
               <CircleCheckSVG />
               <span>Automatic</span>

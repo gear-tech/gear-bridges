@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import ClockSVG from '@/assets/clock.svg?react';
 import { Tooltip } from '@/components';
+import { ROUTE } from '@/consts';
 import { cx } from '@/utils';
 
 import CircleCheckSVG from '../../assets/circle-check.svg?react';
@@ -21,6 +23,52 @@ const CLAIM_TYPE = {
   AUTO: 'auto',
 } as const;
 
+function PriorityTooltipContent() {
+  return (
+    <>
+      <p>
+        <span className={styles.bold}>Transfer Speed</span> defines how quickly your transfer will be processed:
+      </p>
+
+      <ul className={styles.list}>
+        <li>
+          <span className={styles.bold}>Common</span> - standard speed (~1 hour) with a lower fee.
+        </li>
+
+        <li>
+          <span className={styles.bold}>Fast</span> - accelerated processing (~20 minutes) with a higher fee.
+        </li>
+      </ul>
+    </>
+  );
+}
+
+function ClaimTypeTooltipContent() {
+  return (
+    <>
+      <p>
+        <span className={styles.bold}>Claim Type</span> determines how you receive your tokens:
+      </p>
+
+      <ul className={styles.list}>
+        <li>
+          <span className={styles.bold}>Manual</span> - after the transfer is completed, you need to manually claim your
+          tokens from the{' '}
+          <Link to={ROUTE.TOKEN_TRACKER} className={styles.link}>
+            My Tokens
+          </Link>{' '}
+          page.
+        </li>
+
+        <li>
+          <span className={styles.bold}>Automatic</span> - tokens are delivered to your wallet automatically, for an
+          additional fee.
+        </li>
+      </ul>
+    </>
+  );
+}
+
 function Settings() {
   const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.COMMON);
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.MANUAL);
@@ -33,7 +81,7 @@ function Settings() {
         <div>
           <h4 className={styles.settingHeading}>
             Transfer Speed
-            <Tooltip value="Transfer Speed tooltip">
+            <Tooltip value={<PriorityTooltipContent />}>
               <OutlineWarningSVG className={styles.tooltip} />
             </Tooltip>
           </h4>
@@ -62,7 +110,7 @@ function Settings() {
         <div>
           <h4 className={styles.settingHeading}>
             Claim Type
-            <Tooltip value="Claim Type tooltip">
+            <Tooltip value={<ClaimTypeTooltipContent />}>
               <OutlineWarningSVG className={styles.tooltip} />
             </Tooltip>
           </h4>

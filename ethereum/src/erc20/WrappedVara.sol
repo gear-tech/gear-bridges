@@ -13,13 +13,18 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  */
 contract WrappedVara is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     string private constant TOKEN_NAME = "Wrapped Vara";
-    string private constant TOKEN_SYMBOL = "WVARA";
+    string private constant TOKEN_SYMBOL_MAINNET = "WVARA";
+    string private constant TOKEN_SYMBOL_TESTNET = "WTVARA";
 
     /**
      * @dev Initializes the WrappedVara contract with the token name and symbol.
      * @param initialOwner The address of the initial owner of the contract.
      */
-    constructor(address initialOwner) ERC20(TOKEN_NAME, TOKEN_SYMBOL) Ownable(initialOwner) ERC20Permit(TOKEN_NAME) {}
+    constructor(address initialOwner)
+        ERC20(TOKEN_NAME, block.chainid == 1 ? TOKEN_SYMBOL_MAINNET : TOKEN_SYMBOL_TESTNET)
+        Ownable(initialOwner)
+        ERC20Permit(TOKEN_NAME)
+    {}
 
     /**
      * @dev Returns the number of decimals used to get its user representation.

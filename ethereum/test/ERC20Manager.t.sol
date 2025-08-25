@@ -82,6 +82,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -130,6 +132,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -189,6 +193,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -224,6 +230,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         vm.expectEmit(address(erc20Manager));
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
 
@@ -250,6 +258,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -285,6 +295,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         vm.expectEmit(address(erc20Manager));
         emit PausableUpgradeable.Unpaused(address(governancePauser));
@@ -325,6 +337,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -422,6 +436,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -590,6 +606,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -618,6 +636,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -661,6 +681,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -692,6 +714,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -716,6 +740,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -745,6 +771,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -776,6 +804,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -806,6 +836,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -839,6 +871,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -893,6 +927,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -928,6 +964,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -967,6 +1005,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
         assertEq(messageQueue.isProcessed(message2.nonce), true);
 
@@ -1005,6 +1045,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -1034,6 +1076,8 @@ contract ERC20ManagerTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
@@ -1062,6 +1106,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;

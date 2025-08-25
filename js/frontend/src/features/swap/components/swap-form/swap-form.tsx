@@ -13,7 +13,7 @@ import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
-import { FIELD_NAME, NETWORK } from '../../consts';
+import { CLAIM_TYPE, FIELD_NAME, NETWORK, PRIORITY } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance, FormattedValues } from '../../types';
@@ -56,6 +56,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
   >();
 
+  const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.HIGH);
+  const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.MANUAL);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   const varaSymbol = useVaraSymbol();
@@ -203,7 +205,12 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <Settings />
+          <Settings
+            priority={priority}
+            claimType={claimType}
+            onPriorityChange={setPriority}
+            onClaimTypeChange={setClaimType}
+          />
 
           <DetailsAccordion
             isOpen={isDetailsOpen}

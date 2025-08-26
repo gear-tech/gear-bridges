@@ -1,48 +1,52 @@
 import { HexString } from '@gear-js/api';
-import { getVaraAddress } from '@gear-js/react-hooks';
+import { useAccount, getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
 import { JSX } from 'react';
 
-import { Address, FeeAndTimeFooter, FormattedBalance } from '@/components';
+import EthSVG from '@/assets/eth.svg?react';
+import VaraSVG from '@/assets/vara.svg?react';
+import { Address, FormattedBalance } from '@/components';
 import { useTokens } from '@/context';
-import { cx, isUndefined } from '@/utils';
+import { useEthAccount } from '@/hooks';
+import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
-import { NETWORK_SVG } from '../../consts';
-import { Network, Transfer } from '../../types';
+import { FeeAndTimeFooter } from '../fee-and-time-footer';
 
 import styles from './transaction-modal.module.scss';
 
-type Props = Pick<
-  Transfer,
-  'amount' | 'destination' | 'source' | 'sourceNetwork' | 'destNetwork' | 'sender' | 'receiver'
-> & {
+type Props = {
+  isVaraNetwork: boolean;
+  amount: bigint;
+  source: HexString;
+  destination: HexString;
+  receiver: string;
   estimatedFees: bigint;
   close: () => void;
   renderProgressBar: () => JSX.Element;
 };
 
 function TransactionModal({
-  sourceNetwork,
-  destNetwork,
+  isVaraNetwork,
   amount,
   source,
   destination,
-  sender,
   receiver,
   estimatedFees,
   renderProgressBar,
   close,
 }: Props) {
   const { getActiveToken } = useTokens();
-  const isVaraNetwork = sourceNetwork === Network.Vara;
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
 
-  const SourceNetworkSVG = NETWORK_SVG[sourceNetwork];
-  const DestinationNetworkSVG = NETWORK_SVG[destNetwork];
+  const SourceNetworkSVG = isVaraNetwork ? VaraSVG : EthSVG;
+  const DestinationNetworkSVG = isVaraNetwork ? EthSVG : VaraSVG;
 
-  const sourceToken = getActiveToken?.(source as HexString);
-  const destinationToken = getActiveToken?.(destination as HexString);
+  const sourceToken = getActiveToken?.(source);
+  const destinationToken = getActiveToken?.(destination);
 
+  const sender = isVaraNetwork ? account!.decodedAddress : ethAccount.address!;
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
@@ -61,7 +65,7 @@ function TransactionModal({
 
           <span className={styles.network}>
             <SourceNetworkSVG />
-            {isVaraNetwork ? 'Vara' : sourceNetwork}
+            {isVaraNetwork ? 'Vara' : 'Ethereum'}
           </span>
         </span>
 
@@ -79,7 +83,7 @@ function TransactionModal({
 
           <span className={styles.network}>
             <DestinationNetworkSVG className={styles.networkSvg} />
-            {isVaraNetwork ? destNetwork : 'Vara'}
+            {isVaraNetwork ? 'Ethereum' : 'Vara'}
           </span>
         </span>
 
@@ -96,11 +100,9 @@ function TransactionModal({
         </span>
       </div>
 
-      {renderProgressBar?.()}
+      {renderProgressBar()}
 
-      <footer className={styles.footer}>
-        {!isUndefined(estimatedFees) && <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} />}
-      </footer>
+      <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} />
     </Modal>
   );
 }

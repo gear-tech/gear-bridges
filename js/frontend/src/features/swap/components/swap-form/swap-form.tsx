@@ -6,8 +6,6 @@ import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
-import { TransactionModal } from '@/features/history/components/transaction-modal';
-import { Network as TransferNetwork } from '@/features/history/types';
 import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { isUndefined } from '@/utils';
@@ -24,6 +22,7 @@ import { Settings } from '../settings';
 import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
+import { TransactionModal } from '../transaction-modal';
 
 import styles from './swap-form.module.scss';
 
@@ -67,26 +66,14 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const openTransactionModal = (values: FormattedValues, estimatedFees: bigint) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
-    const amount = values.amount.toString();
+    const amount = values.amount;
     const receiver = values.accountAddress;
+    const isVaraNetwork = network.isVara;
     const source = token.address;
     const destination = destinationToken.address;
-    const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;
-    const destNetwork = network.isVara ? TransferNetwork.Ethereum : TransferNetwork.Vara;
-    const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
     const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({
-      amount,
-      source,
-      destination,
-      sourceNetwork,
-      destNetwork,
-      sender,
-      receiver,
-      estimatedFees,
-      close,
-    });
+    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, close });
   };
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({

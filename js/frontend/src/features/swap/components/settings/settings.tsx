@@ -18,7 +18,7 @@ const PRIORITY_BUTTONS = [
 ];
 
 const CLAIM_TYPE_BUTTONS = [
-  { value: CLAIM_TYPE.MANUAL, text: 'Manual', SVG: <HandSVG className={styles.handIcon} /> },
+  { value: CLAIM_TYPE.MANUAL, text: 'Manual', SVG: HandSVG, SVGColorType: 'stroke' as const },
   { value: CLAIM_TYPE.AUTO, text: 'Automatic', SVG: CircleCheckSVG },
 ];
 

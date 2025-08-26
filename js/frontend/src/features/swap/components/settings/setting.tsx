@@ -11,7 +11,7 @@ import styles from './setting.module.scss';
 type Props<T extends string> = {
   value: T;
   heading: string;
-  buttons: { value: T; text: string; SVG: SVGComponent | JSX.Element }[];
+  buttons: { value: T; text: string; SVG: SVGComponent; SVGColorType?: 'fill' | 'stroke' }[];
   tooltip: () => JSX.Element;
   onChange: (value: T) => void;
 };
@@ -20,14 +20,14 @@ function Setting<T extends string>({ value, heading, tooltip: TooltipComponent, 
   const isFirstSelected = value === buttons[0].value;
 
   const renderButtons = () =>
-    buttons.map(({ text, SVG, ...button }) => (
+    buttons.map(({ text, SVG, SVGColorType = 'fill', ...button }) => (
       <button
         key={button.value}
         type="button"
         className={styles.button}
         disabled={value === button.value}
         onClick={() => onChange(button.value)}>
-        {typeof SVG === 'function' ? <SVG /> : SVG}
+        <SVG className={styles[SVGColorType]} />
         <span>{text}</span>
       </button>
     ));

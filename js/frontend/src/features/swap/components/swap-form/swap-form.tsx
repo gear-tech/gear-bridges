@@ -58,7 +58,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const shouldPayPriorityFee = priority === PRIORITY.HIGH;
   const time = shouldPayPriorityFee ? '20 mins' : '1 hour';
 
-  const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.MANUAL);
+  const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
 
   const varaSymbol = useVaraSymbol();
 

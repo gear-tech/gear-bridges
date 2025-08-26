@@ -1,9 +1,9 @@
 import { ComponentProps } from 'react';
 
-import { FeeAndTimeFooter } from '@/components';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
+import { FeeAndTimeFooter } from '../fee-and-time-footer';
 
 import styles from './details-accordion.module.scss';
 

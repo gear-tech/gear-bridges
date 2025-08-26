@@ -1,14 +1,14 @@
 import { formatUnits } from 'viem';
 
 import ClockSVG from '@/assets/clock.svg?react';
+import { Skeleton } from '@/components';
 import { TOKEN_ID, TokenPrice } from '@/features/token-price';
 import { useVaraSymbol } from '@/hooks';
 import { cx } from '@/utils';
 
-import { Skeleton } from '../layout';
+import GasSVG from '../../assets/gas.svg?react';
 
 import styles from './fee-and-time-footer.module.scss';
-import GasSVG from './gas.svg?react';
 
 type Props = {
   feeValue: bigint | undefined;

@@ -135,6 +135,16 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     void openWalletModal();
   };
 
+  const handlePriorityChange = (value: typeof priority) => {
+    requiredBalance.reset();
+    setPriority(value);
+  };
+
+  const handleClaimTypeChange = (value: typeof claimType) => {
+    requiredBalance.reset();
+    setClaimType(value);
+  };
+
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
 
@@ -200,8 +210,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
           <Settings
             priority={priority}
             claimType={claimType}
-            onPriorityChange={setPriority}
-            onClaimTypeChange={setClaimType}
+            onPriorityChange={handlePriorityChange}
+            onClaimTypeChange={handleClaimTypeChange}
             isVaraNetwork={network.isVara}
             feeValue={requiredBalance?.data?.fees}
             isLoading={requiredBalance?.isPending}

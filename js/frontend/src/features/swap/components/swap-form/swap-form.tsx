@@ -17,7 +17,6 @@ import { useSwapForm } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance, FormattedValues } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
-import { DetailsAccordion } from '../details-accordion';
 import { Settings } from '../settings';
 import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
@@ -59,7 +58,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const shouldPayPriorityFee = priority === PRIORITY.HIGH;
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.MANUAL);
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   const varaSymbol = useVaraSymbol();
 
@@ -91,7 +89,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     ftBalance: ftBalance.data,
     onSubmit,
     requiredBalance,
-    onValidation: () => setIsDetailsOpen(true),
   });
 
   const renderFromBalance = () => {
@@ -202,11 +199,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             claimType={claimType}
             onPriorityChange={setPriority}
             onClaimTypeChange={setClaimType}
-          />
-
-          <DetailsAccordion
-            isOpen={isDetailsOpen}
-            onToggle={() => setIsDetailsOpen((prevValue) => !prevValue)}
             isVaraNetwork={network.isVara}
             feeValue={requiredBalance?.data?.fees}
             isLoading={requiredBalance?.isPending}

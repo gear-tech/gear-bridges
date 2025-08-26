@@ -1,87 +1,61 @@
+import { ComponentProps } from 'react';
+
 import ClockSVG from '@/assets/clock.svg?react';
-import { Tooltip } from '@/components';
-import { cx } from '@/utils';
 
 import CircleCheckSVG from '../../assets/circle-check.svg?react';
 import HandSVG from '../../assets/hand.svg?react';
 import LightningSVG from '../../assets/lightning.svg?react';
-import OutlineWarningSVG from '../../assets/outline-warning.svg?react';
 import { CLAIM_TYPE, PRIORITY } from '../../consts';
+import { FeeAndTimeFooter } from '../fee-and-time-footer';
 
+import { Setting } from './setting';
 import styles from './settings.module.scss';
 import { TooltipContent } from './tooltip-content';
 
-type Props = {
-  priority: (typeof PRIORITY)[keyof typeof PRIORITY];
-  claimType: (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE];
-  onPriorityChange: (priority: (typeof PRIORITY)[keyof typeof PRIORITY]) => void;
-  onClaimTypeChange: (claimType: (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]) => void;
+const PRIORITY_BUTTONS = [
+  { value: PRIORITY.DEFAULT, text: 'Common', SVG: ClockSVG },
+  { value: PRIORITY.HIGH, text: 'Fast', SVG: LightningSVG },
+];
+
+const CLAIM_TYPE_BUTTONS = [
+  { value: CLAIM_TYPE.MANUAL, text: 'Manual', SVG: <HandSVG className={styles.handIcon} /> },
+  { value: CLAIM_TYPE.AUTO, text: 'Automatic', SVG: CircleCheckSVG },
+];
+
+type Priority = (typeof PRIORITY)[keyof typeof PRIORITY];
+type ClaimType = (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE];
+
+type Props = ComponentProps<typeof FeeAndTimeFooter> & {
+  priority: Priority;
+  claimType: ClaimType;
+  onPriorityChange: (priority: Priority) => void;
+  onClaimTypeChange: (claimType: ClaimType) => void;
 };
 
-function Settings({ priority, claimType, onPriorityChange, onClaimTypeChange }: Props) {
+function Settings({ priority, claimType, onPriorityChange, onClaimTypeChange, ...props }: Props) {
   return (
     <div className={styles.settings}>
       <h3 className={styles.heading}>Transfer Settings</h3>
 
       <div className={styles.body}>
-        <div>
-          <h4 className={styles.settingHeading}>
-            Transfer Speed
-            <Tooltip value={<TooltipContent.Priority />}>
-              <OutlineWarningSVG className={styles.tooltip} />
-            </Tooltip>
-          </h4>
+        <Setting
+          value={priority}
+          onChange={onPriorityChange}
+          heading="Transfer Speed"
+          tooltip={TooltipContent.Priority}
+          buttons={PRIORITY_BUTTONS}
+        />
 
-          <div className={cx(styles.buttons, priority === PRIORITY.DEFAULT && styles.active)}>
-            <button
-              type="button"
-              className={styles.button}
-              onClick={() => onPriorityChange(PRIORITY.DEFAULT)}
-              disabled={priority === PRIORITY.DEFAULT}>
-              <ClockSVG />
-              <span>Common</span>
-            </button>
-
-            <button
-              type="button"
-              className={styles.button}
-              onClick={() => onPriorityChange(PRIORITY.HIGH)}
-              disabled={priority === PRIORITY.HIGH}>
-              <LightningSVG />
-              <span>Fast</span>
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <h4 className={styles.settingHeading}>
-            Claim Type
-            <Tooltip value={<TooltipContent.ClaimType />}>
-              <OutlineWarningSVG className={styles.tooltip} />
-            </Tooltip>
-          </h4>
-
-          <div className={cx(styles.buttons, claimType === CLAIM_TYPE.MANUAL && styles.active)}>
-            <button
-              type="button"
-              className={styles.button}
-              onClick={() => onClaimTypeChange(CLAIM_TYPE.MANUAL)}
-              disabled={claimType === CLAIM_TYPE.MANUAL}>
-              <HandSVG className={styles.handIcon} />
-              <span>Manual</span>
-            </button>
-
-            <button
-              type="button"
-              className={styles.button}
-              onClick={() => onClaimTypeChange(CLAIM_TYPE.AUTO)}
-              disabled={claimType === CLAIM_TYPE.AUTO}>
-              <CircleCheckSVG />
-              <span>Automatic</span>
-            </button>
-          </div>
-        </div>
+        <Setting
+          value={claimType}
+          onChange={onClaimTypeChange}
+          heading="Claim Type"
+          tooltip={TooltipContent.ClaimType}
+          buttons={CLAIM_TYPE_BUTTONS}
+        />
       </div>
+
+      <FeeAndTimeFooter {...props} />
     </div>
   );
 }

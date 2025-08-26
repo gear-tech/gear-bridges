@@ -1,27 +1,17 @@
 .settings {
   padding: 20px 24px;
 
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+
   background-color: #0e1217;
   border-radius: 12px;
 }
 
 .heading {
-  margin-bottom: 20px;
-
   font-weight: 600;
   color: #f6f6f6cc;
-}
-
-.settingHeading {
-  margin-bottom: 12px;
-
-  font-size: 14px;
-  color: #f6f6f6e5;
-
-  .tooltip {
-    margin-left: 4px;
-    margin-top: -12px;
-  }
 }
 
 .body {
@@ -32,94 +22,5 @@
   @include sm {
     display: flex;
     flex-direction: column;
-  }
-}
-
-.buttons {
-  display: flex;
-  align-items: center;
-
-  position: relative;
-
-  &::before {
-    content: '';
-
-    width: 50%;
-    height: 100%;
-
-    position: absolute;
-    top: 0;
-    left: 0;
-
-    background-color: #00ffc4;
-    border-radius: 4px;
-
-    transform: translateX(100%);
-    transition: 0.25s transform ease-in-out;
-  }
-
-  &.active {
-    &::before {
-      transform: translateX(0);
-    }
-  }
-}
-
-.button {
-  flex: 1;
-  padding: 8px;
-
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-
-  font-size: 14px;
-  color: #f6f6f6e5;
-
-  background-color: #13191e4d;
-  border: 1px solid #00ffc466;
-  border-radius: 4px;
-
-  transition:
-    0.25s background-color,
-    0.25s color;
-
-  span,
-  svg {
-    position: relative;
-    z-index: 1;
-  }
-
-  svg {
-    path {
-      transition:
-        0.25s fill,
-        0.25s stroke;
-
-      fill: #00ffc4;
-    }
-
-    &.handIcon path {
-      fill: none;
-      stroke: #00ffc4;
-    }
-  }
-
-  &:hover {
-    background-color: #14191f;
-  }
-
-  &:disabled {
-    color: #000;
-
-    svg path {
-      fill: #0e1217;
-    }
-
-    .handIcon path {
-      fill: none;
-      stroke: #0e1217;
-    }
   }
 }

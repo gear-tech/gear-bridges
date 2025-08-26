@@ -12,11 +12,12 @@ type Props<T extends string> = {
   value: T;
   heading: string;
   buttons: { value: T; text: string; SVG: SVGComponent; SVGColorType?: 'fill' | 'stroke' }[];
+  disabled: boolean;
   tooltip: () => JSX.Element;
   onChange: (value: T) => void;
 };
 
-function Setting<T extends string>({ value, heading, tooltip: TooltipComponent, buttons, onChange }: Props<T>) {
+function Setting<T extends string>({ value, heading, tooltip: TooltipContent, buttons, disabled, onChange }: Props<T>) {
   const isFirstSelected = value === buttons[0].value;
 
   const renderButtons = () =>
@@ -37,12 +38,14 @@ function Setting<T extends string>({ value, heading, tooltip: TooltipComponent, 
       <h4 className={styles.heading}>
         {heading}
 
-        <Tooltip value={<TooltipComponent />}>
+        <Tooltip value={<TooltipContent />}>
           <OutlineWarningSVG className={styles.tooltip} />
         </Tooltip>
       </h4>
 
-      <div className={cx(styles.buttons, isFirstSelected && styles.active)}>{renderButtons()}</div>
+      <div className={cx(styles.buttons, isFirstSelected && styles.active, disabled && styles.disabled)}>
+        {renderButtons()}
+      </div>
     </div>
   );
 }

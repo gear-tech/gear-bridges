@@ -71,12 +71,13 @@
       transition:
         0.25s fill,
         0.25s stroke;
+    }
 
+    &.fill path {
       fill: #00ffc4;
     }
 
-    &.handIcon path {
-      fill: none;
+    &.stroke path {
       stroke: #00ffc4;
     }
   }
@@ -88,12 +89,11 @@
   &:disabled {
     color: #000;
 
-    svg path {
+    .fill path {
       fill: #0e1217;
     }
 
-    .handIcon path {
-      fill: none;
+    .stroke path {
       stroke: #0e1217;
     }
   }

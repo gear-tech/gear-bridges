@@ -12,12 +12,13 @@ import styles from './fee-and-time-footer.module.scss';
 
 type Props = {
   feeValue: bigint | undefined;
+  time: string;
   isVaraNetwork: boolean;
   isLoading?: boolean;
   className?: string;
 };
 
-function FeeAndTimeFooter({ feeValue, isVaraNetwork, isLoading, className }: Props) {
+function FeeAndTimeFooter({ feeValue, time, isVaraNetwork, isLoading, className }: Props) {
   const varaSymbol = useVaraSymbol();
 
   const tokenId = isVaraNetwork ? TOKEN_ID.VARA : TOKEN_ID.ETH;
@@ -51,7 +52,7 @@ function FeeAndTimeFooter({ feeValue, isVaraNetwork, isLoading, className }: Pro
           <ClockSVG /> Bridge Time:
         </span>
 
-        <span className={styles.value}>~20 mins</span>
+        <span className={styles.value}>~{time}</span>
       </p>
     </footer>
   );

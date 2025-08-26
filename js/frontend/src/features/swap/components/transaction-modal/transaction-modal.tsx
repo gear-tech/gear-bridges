@@ -22,6 +22,7 @@ type Props = {
   destination: HexString;
   receiver: string;
   estimatedFees: bigint;
+  time: string;
   close: () => void;
   renderProgressBar: () => JSX.Element;
 };
@@ -33,6 +34,7 @@ function TransactionModal({
   destination,
   receiver,
   estimatedFees,
+  time,
   renderProgressBar,
   close,
 }: Props) {
@@ -102,7 +104,7 @@ function TransactionModal({
 
       {renderProgressBar()}
 
-      <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} />
+      <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={estimatedFees} time={time} />
     </Modal>
   );
 }

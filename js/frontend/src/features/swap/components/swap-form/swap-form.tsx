@@ -56,6 +56,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.HIGH);
   const shouldPayPriorityFee = priority === PRIORITY.HIGH;
+  const time = shouldPayPriorityFee ? '20 mins' : '1 hour';
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.MANUAL);
 
@@ -71,7 +72,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     const destination = destinationToken.address;
     const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, close });
+    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, time, close });
   };
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
@@ -202,6 +203,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             isVaraNetwork={network.isVara}
             feeValue={requiredBalance?.data?.fees}
             isLoading={requiredBalance?.isPending}
+            time={time}
           />
 
           {isNetworkAccountConnected ? (
@@ -223,6 +225,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
           )}
         </form>
       </FormProvider>
+
       {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
 
       {/* passing renderProgressBar explicitly to avoid state closure */}

@@ -143,12 +143,33 @@ impl GenericBlake2 {
 
 lazy_static! {
     /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
-    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
-        ..=MAX_BLOCK_COUNT)
-        .map(blake2_circuit_verifier_data)
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("Correct max block count");
+    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
+        // let verifier_data: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
+        // ..=MAX_BLOCK_COUNT)
+        // .map(blake2_circuit_verifier_data)
+        // .collect::<Vec<_>>()
+        // .try_into()
+        // .expect("Correct max block count");
+
+        // for (i, data) in verifier_data.iter().enumerate() {
+        //     let serialized = data.to_bytes()
+        //         .expect("Successfully serialized");
+        //     std::fs::write(format!("verifier_only_circuit_data-{i}"), serialized).expect("Successfully written to file");
+        // }
+
+        // verifier_data
+
+        let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
+
+        for i in 0..MAX_BLOCK_COUNT {
+            let serialized = std::fs::read(format!("verifier_only_circuit_data-{i}")).expect("Good file with serialized data");
+            verifier_data.push(VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data"));
+        }
+
+        verifier_data
+            .try_into()
+            .expect("Correct max block count")
+    };
 }
 
 fn blake2_circuit_verifier_data(num_blocks: usize) -> VerifierOnlyCircuitData<C, D> {
@@ -265,10 +286,11 @@ impl VariativeBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
-        log::trace!("VariativeBlake2; 10");
+        log::trace!("VariativeBlake2; 10 builder.num_gates() = {}", builder.num_gates());
 
         // Standardize degree.
-        while builder.num_gates() < 1 << 16 {
+        // (2^19 + 2^17)
+        while builder.num_gates() < 655_360 {
             builder.add_gate(NoopGate, vec![]);
         }
 
@@ -295,6 +317,14 @@ mod tests {
 
     #[test]
     fn test_generic_blake2_hasher() {
+
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .filter_level(log::LevelFilter::Info)
+            .format_target(false)
+            .format_timestamp_secs()
+            .parse_default_env()
+            .try_init();
+
         let test_data = vec![
             vec![0],
             vec![],

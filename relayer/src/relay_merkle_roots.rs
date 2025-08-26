@@ -292,15 +292,15 @@ impl MerkleRootRelayer {
         )
         .await?;
 
-        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
+        // let _tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
 
         log::info!("Merkle root submitted to ethereum");
 
-        self.latest_submitted_merkle_root = Some(SubmittedMerkleRoot {
-            tx_hash,
-            proof,
-            finalized: false,
-        });
+        // self.latest_submitted_merkle_root = Some(SubmittedMerkleRoot {
+        //     tx_hash,
+        //     proof,
+        //     finalized: false,
+        // });
 
         Ok(())
     }
@@ -513,14 +513,14 @@ impl Eras {
             in the case of the first block in the era"
         );
 
-        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
+        // let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
 
-        self.sealed_not_finalized.push(SealedNotFinalizedEra {
-            era: authority_set_id,
-            merkle_root_block: block_number,
-            tx_hash,
-            proof,
-        });
+        // self.sealed_not_finalized.push(SealedNotFinalizedEra {
+        //     era: authority_set_id,
+        //     merkle_root_block: block_number,
+        //     tx_hash,
+        //     proof,
+        // });
 
         self.metrics.sealed_not_finalized_count.inc();
 
@@ -551,28 +551,28 @@ impl Eras {
 
 impl SealedNotFinalizedEra {
     pub async fn try_finalize(&mut self, eth_api: &EthApi) -> anyhow::Result<bool> {
-        let tx_status = eth_api.get_tx_status(self.tx_hash).await?;
+        // let tx_status = eth_api.get_tx_status(self.tx_hash).await?;
 
-        match tx_status {
-            TxStatus::Finalized => Ok(true),
-            TxStatus::Pending => Ok(false),
-            TxStatus::Failed => {
-                let root_exists = eth_api
-                    .read_finalized_merkle_root(self.merkle_root_block)
-                    .await?
-                    .is_some();
+        // match tx_status {
+        //     TxStatus::Finalized => Ok(true),
+        //     TxStatus::Pending => Ok(false),
+        //     TxStatus::Failed => {
+        //         let root_exists = eth_api
+        //             .read_finalized_merkle_root(self.merkle_root_block)
+        //             .await?
+        //             .is_some();
 
-                // Someone already relayed this merkle root.
-                if root_exists {
-                    log::info!("Era #{} is already finalized", self.era);
-                    return Ok(true);
-                }
+        //         // Someone already relayed this merkle root.
+        //         if root_exists {
+        //             log::info!("Era #{} is already finalized", self.era);
+        //             return Ok(true);
+        //         }
 
-                log::warn!("Re-trying era #{} finalization", self.era);
+        //         log::warn!("Re-trying era #{} finalization", self.era);
 
-                self.tx_hash = submit_merkle_root_to_ethereum(eth_api, self.proof.clone()).await?;
-                Ok(false)
-            }
-        }
+        //         self.tx_hash = submit_merkle_root_to_ethereum(eth_api, self.proof.clone()).await?;
+        //         Ok(false)
+        //     }
+        // }
     }
 }

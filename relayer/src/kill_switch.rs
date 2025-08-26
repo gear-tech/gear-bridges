@@ -254,14 +254,14 @@ impl KillSwitchRelayer {
                 log::info!("Proven merkle root presence");
 
                 log::info!("Submitting new proof to ethereum");
-                let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
-                log::info!("New proof submitted to ethereum, tx hash: {:X?}", &tx_hash);
+                // let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
+                // log::info!("New proof submitted to ethereum, tx hash: {:X?}", &tx_hash);
 
-                // Resubmitting the correct proof instead of the incorrect one
-                // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.
-                // After that, there's no point in continuing because the relayer will be stopped/in emergency mode.
-                // Though, we need to wait for the kill switch transaction to be finalized.
-                self.state = State::WaitingForKillSwitchTxFin { tx_hash, proof };
+                // // Resubmitting the correct proof instead of the incorrect one
+                // // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.
+                // // After that, there's no point in continuing because the relayer will be stopped/in emergency mode.
+                // // Though, we need to wait for the kill switch transaction to be finalized.
+                // self.state = State::WaitingForKillSwitchTxFin { tx_hash, proof };
                 return Ok(());
             }
         }
@@ -307,27 +307,27 @@ impl KillSwitchRelayer {
     async fn check_kill_switch_tx_finalized(&mut self, tx_hash: TxHash) -> anyhow::Result<()> {
         log::info!("Checking for kill switch tx to be finalized");
 
-        let tx_status = self.eth_api.get_tx_status(tx_hash).await?;
+        // let tx_status = self.eth_api.get_tx_status(tx_hash).await?;
 
-        match tx_status {
-            TxStatus::Finalized => {
-                log::info!("Kill switch tx finalized, exiting ..");
-                process::exit(0);
-            }
-            TxStatus::Pending => (),
-            TxStatus::Failed => {
-                log::warn!("Re-trying kill switch tx #{tx_hash} finalization");
+        // match tx_status {
+        //     TxStatus::Finalized => {
+        //         log::info!("Kill switch tx finalized, exiting ..");
+        //         process::exit(0);
+        //     }
+        //     TxStatus::Pending => (),
+        //     TxStatus::Failed => {
+        //         log::warn!("Re-trying kill switch tx #{tx_hash} finalization");
 
-                let State::WaitingForKillSwitchTxFin { tx_hash, proof } = &mut self.state else {
-                    unreachable!("Invalid state");
-                };
+        //         let State::WaitingForKillSwitchTxFin { tx_hash, proof } = &mut self.state else {
+        //             unreachable!("Invalid state");
+        //         };
 
-                let new_tx_hash =
-                    submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
-                // Update hash of the new kill switch transaction
-                *tx_hash = new_tx_hash;
-            }
-        }
+        //         let new_tx_hash =
+        //             submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
+        //         // Update hash of the new kill switch transaction
+        //         *tx_hash = new_tx_hash;
+        //     }
+        // }
 
         Ok(())
     }

@@ -183,6 +183,8 @@ pub async fn prove_final_with_block_finality(
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
     let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
+    
+    let now = Instant::now();
 
     let proof = proving::prove_message_sent(
         previous_proof,
@@ -193,6 +195,8 @@ pub async fn prove_final_with_block_finality(
     );
 
     let proof = gnark::prove_circuit(&proof);
+
+    log::info!("prove_final_with_block_finality prove time: {}ms", now.elapsed().as_millis());
 
     timer.stop_and_record();
 

@@ -181,13 +181,13 @@ impl MerkleRootSubmitter {
         proofs: &mut UnboundedReceiver<Request>,
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
-        let mut pending_transactions = FuturesUnordered::new();
+        // let mut pending_transactions = FuturesUnordered::new();
         loop {
             let balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(balance);
-            self.metrics
-                .pending_submissions
-                .set(pending_transactions.len() as i64);
+            // self.metrics
+            //     .pending_submissions
+            //     .set(pending_transactions.len() as i64);
 
             tokio::select! {
                 request = proofs.recv() => {
@@ -216,16 +216,16 @@ impl MerkleRootSubmitter {
                     match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
                         Ok(tx_hash) => {
                             log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
-                            self.metrics.total_submissions.inc();
-                            pending_transactions.push(SubmittedMerkleRoot::new(
-                                &self.eth_api,
-                                tx_hash,
-                                request.era,
-                                request.merkle_root_block,
-                                request.merkle_root,
-                                request.proof,
-                                self.confirmations,
-                            ));
+                            // self.metrics.total_submissions.inc();
+                            // pending_transactions.push(SubmittedMerkleRoot::new(
+                            //     &self.eth_api,
+                            //     tx_hash,
+                            //     request.era,
+                            //     request.merkle_root_block,
+                            //     request.merkle_root,
+                            //     request.proof,
+                            //     self.confirmations,
+                            // ));
                         }
                         // How do we get here?
                         // - Relayer crashed and already submitted the merkle root but not yet confirmed it
@@ -281,95 +281,95 @@ impl MerkleRootSubmitter {
                     }
                 },
 
-                Some(result) = pending_transactions.next() => {
-                    match result {
-                        Ok(submitted) => {
-                            if !submitted.receipt.status() {
-                                let root_exists = self.eth_api
-                                    .read_finalized_merkle_root(submitted.proof.block_number)
-                                    .await?
-                                    .is_some();
+                // Some(result) = pending_transactions.next() => {
+                //     match result {
+                //         Ok(submitted) => {
+                //             if !submitted.receipt.status() {
+                //                 let root_exists = self.eth_api
+                //                     .read_finalized_merkle_root(submitted.proof.block_number)
+                //                     .await?
+                //                     .is_some();
 
-                                if root_exists {
-                                    if responses.send(Response {
-                                        era: submitted.era,
-                                        merkle_root_block: submitted.merkle_root_block,
-                                        merkle_root: submitted.merkle_root,
-                                        status: ResponseStatus::Submitted,
-                                        proof: submitted.proof.clone(),
-                                    }).is_err() {
-                                        return Ok(());
-                                    };
-                                    log::info!("Merkle root {} for block #{} is already submitted", submitted.merkle_root, submitted.merkle_root_block);
-                                    continue;
-                                }
+                //                 if root_exists {
+                //                     if responses.send(Response {
+                //                         era: submitted.era,
+                //                         merkle_root_block: submitted.merkle_root_block,
+                //                         merkle_root: submitted.merkle_root,
+                //                         status: ResponseStatus::Submitted,
+                //                         proof: submitted.proof.clone(),
+                //                     }).is_err() {
+                //                         return Ok(());
+                //                     };
+                //                     log::info!("Merkle root {} for block #{} is already submitted", submitted.merkle_root, submitted.merkle_root_block);
+                //                     continue;
+                //                 }
 
-                                if responses.send(Response {
-                                    era: submitted.era,
-                                    merkle_root_block: submitted.merkle_root_block,
-                                    merkle_root: submitted.merkle_root,
-                                    status: ResponseStatus::Failed(format!("Transaction {} failed", submitted.receipt.transaction_hash)),
-                                    proof: submitted.proof.clone(),
-                                }).is_err() {
-                                    return Ok(());
-                                };
-                            }
+                //                 if responses.send(Response {
+                //                     era: submitted.era,
+                //                     merkle_root_block: submitted.merkle_root_block,
+                //                     merkle_root: submitted.merkle_root,
+                //                     status: ResponseStatus::Failed(format!("Transaction {} failed", submitted.receipt.transaction_hash)),
+                //                     proof: submitted.proof.clone(),
+                //                 }).is_err() {
+                //                     return Ok(());
+                //                 };
+                //             }
 
-                            if responses.send(Response {
-                                era: submitted.era,
-                                merkle_root_block: submitted.merkle_root_block,
-                                merkle_root: submitted.merkle_root,
-                                status: ResponseStatus::Submitted,
-                                proof: submitted.proof.clone(),
-                            }).is_err() {
-                                return Ok(());
-                            };
+                //             if responses.send(Response {
+                //                 era: submitted.era,
+                //                 merkle_root_block: submitted.merkle_root_block,
+                //                 merkle_root: submitted.merkle_root,
+                //                 status: ResponseStatus::Submitted,
+                //                 proof: submitted.proof.clone(),
+                //             }).is_err() {
+                //                 return Ok(());
+                //             };
 
-                            log::info!(
-                                "Merkle root {} for block #{} submission confirmed after {} confirmations",
-                                submitted.merkle_root,
-                                submitted.merkle_root_block,
-                                self.confirmations
-                            );
-                            self.metrics.pending_submissions.dec();
-                        }
+                //             log::info!(
+                //                 "Merkle root {} for block #{} submission confirmed after {} confirmations",
+                //                 submitted.merkle_root,
+                //                 submitted.merkle_root_block,
+                //                 self.confirmations
+                //             );
+                //             self.metrics.pending_submissions.dec();
+                //         }
 
-                        Err(err) => {
-                            let root_exists = self.eth_api
-                                .read_finalized_merkle_root(err.proof.block_number)
-                                .await?
-                                .is_some();
+                //         Err(err) => {
+                //             let root_exists = self.eth_api
+                //                 .read_finalized_merkle_root(err.proof.block_number)
+                //                 .await?
+                //                 .is_some();
 
-                            if root_exists {
-                                if responses.send(Response {
-                                    era: err.era,
-                                    merkle_root_block: err.merkle_root_block,
-                                    merkle_root: err.merkle_root,
-                                    status: ResponseStatus::Submitted,
-                                    proof: err.proof,
-                                }).is_err() {
-                                    return Ok(());
-                                };
-                                log::info!("Merkle root {} for block #{} is already submitted", err.merkle_root, err.merkle_root_block);
-                                continue;
-                            }
+                //             if root_exists {
+                //                 if responses.send(Response {
+                //                     era: err.era,
+                //                     merkle_root_block: err.merkle_root_block,
+                //                     merkle_root: err.merkle_root,
+                //                     status: ResponseStatus::Submitted,
+                //                     proof: err.proof,
+                //                 }).is_err() {
+                //                     return Ok(());
+                //                 };
+                //                 log::info!("Merkle root {} for block #{} is already submitted", err.merkle_root, err.merkle_root_block);
+                //                 continue;
+                //             }
 
-                            log::error!("Failed to submit merkle root {}: {}", err.merkle_root, err.error);
-                            self.metrics.pending_submissions.dec();
-                            self.metrics.failed_submissions.inc();
-                            self.storage.submission_failed(H256::from(err.proof.merkle_root)).await;
-                            if responses.send(Response {
-                                era: err.era,
-                                merkle_root_block: err.merkle_root_block,
-                                merkle_root: err.merkle_root,
-                                status: ResponseStatus::Failed(err.error.to_string()),
-                                proof: err.proof,
-                            }).is_err() {
-                                return Ok(());
-                            };
-                        }
-                    }
-                }
+                //             log::error!("Failed to submit merkle root {}: {}", err.merkle_root, err.error);
+                //             self.metrics.pending_submissions.dec();
+                //             self.metrics.failed_submissions.inc();
+                //             self.storage.submission_failed(H256::from(err.proof.merkle_root)).await;
+                //             if responses.send(Response {
+                //                 era: err.era,
+                //                 merkle_root_block: err.merkle_root_block,
+                //                 merkle_root: err.merkle_root,
+                //                 status: ResponseStatus::Failed(err.error.to_string()),
+                //                 proof: err.proof,
+                //             }).is_err() {
+                //                 return Ok(());
+                //             };
+                //         }
+                //     }
+                // }
             }
         }
     }

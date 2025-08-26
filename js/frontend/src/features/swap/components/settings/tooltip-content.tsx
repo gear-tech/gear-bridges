@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 
 import { ROUTE } from '@/consts';
+import { Status } from '@/features/history/types';
 
 import styles from './tooltip-content.module.scss';
 
@@ -35,8 +36,8 @@ function ClaimTypeTooltipContent() {
         <li>
           <span className={styles.bold}>Manual</span> - after the transfer is completed, you need to manually claim your
           tokens from the{' '}
-          <Link to={ROUTE.TOKEN_TRACKER} className={styles.link}>
-            My Tokens
+          <Link to={`${ROUTE.TRANSACTIONS}?owner=true&status=${Status.AwaitingPayment}`} className={styles.link}>
+            Transactions
           </Link>{' '}
           page.
         </li>

@@ -32,19 +32,21 @@ type Props = ComponentProps<typeof FeeAndTimeFooter> & {
   onClaimTypeChange: (claimType: ClaimType) => void;
 };
 
-function Settings({ priority, claimType, onPriorityChange, onClaimTypeChange, ...props }: Props) {
+function Settings({ isVaraNetwork, priority, claimType, onPriorityChange, onClaimTypeChange, ...props }: Props) {
   return (
     <div className={styles.settings}>
       <h3 className={styles.heading}>Transfer Settings</h3>
 
       <div className={styles.body}>
-        <Setting
-          value={priority}
-          onChange={onPriorityChange}
-          heading="Transfer Speed"
-          tooltip={TooltipContent.Priority}
-          buttons={PRIORITY_BUTTONS}
-        />
+        {isVaraNetwork && (
+          <Setting
+            value={priority}
+            onChange={onPriorityChange}
+            heading="Transfer Speed"
+            tooltip={TooltipContent.Priority}
+            buttons={PRIORITY_BUTTONS}
+          />
+        )}
 
         <Setting
           value={claimType}
@@ -55,7 +57,7 @@ function Settings({ priority, claimType, onPriorityChange, onClaimTypeChange, ..
         />
       </div>
 
-      <FeeAndTimeFooter {...props} />
+      <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} {...props} />
     </div>
   );
 }

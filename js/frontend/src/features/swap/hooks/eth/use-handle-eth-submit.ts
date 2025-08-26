@@ -21,7 +21,13 @@ type Transaction = {
   value?: bigint;
 };
 
-function useHandleEthSubmit({ bridgingFee, allowance, accountBalance, onTransactionStart }: UseHandleSubmitParameters) {
+function useHandleEthSubmit({
+  bridgingFee,
+  shouldPayBridgingFee,
+  allowance,
+  accountBalance,
+  onTransactionStart,
+}: UseHandleSubmitParameters) {
   const { token } = useBridgeContext();
   const isUSDC = token?.symbol.toLowerCase().includes('usdc');
 
@@ -62,7 +68,7 @@ function useHandleEthSubmit({ bridgingFee, allowance, accountBalance, onTransact
       value: bridgingFee,
     };
 
-    if (shouldApprove && isUSDC) {
+    if (shouldApprove && isUSDC && shouldPayBridgingFee) {
       const call = () =>
         permitUSDC.mutateAsync(amount).then((permit) => transfer.mutateAsync({ amount, accountAddress, permit }));
 
@@ -78,8 +84,10 @@ function useHandleEthSubmit({ bridgingFee, allowance, accountBalance, onTransact
       txs.push({ call, gasLimit });
     }
 
-    const call = () => transfer.mutateAsync({ amount, accountAddress });
-    txs.push({ call, ...bridgeTx });
+    if (shouldPayBridgingFee) {
+      const call = () => transfer.mutateAsync({ amount, accountAddress });
+      txs.push({ call, ...bridgeTx });
+    }
 
     return txs;
   };

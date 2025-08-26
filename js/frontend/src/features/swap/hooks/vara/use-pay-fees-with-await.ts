@@ -5,7 +5,7 @@ import { isUndefined } from '@/utils';
 
 import { VftManagerProgram, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { FormattedValues } from '../../types';
+import { Extrinsic, FormattedValues } from '../../types';
 
 import { usePreparePayPriorityFee } from './use-prepare-pay-priority-fee';
 import { usePreparePayVaraFee } from './use-prepare-pay-vara-fee';
@@ -18,10 +18,11 @@ type BridgingRequestedEventData = Parameters<
 type Params = {
   fee: bigint | undefined;
   priorityFee: bigint | undefined;
+  shouldPayBridgingFee: boolean;
   shouldPayPriorityFee: boolean;
 };
 
-function usePayFeesWithAwait({ fee, priorityFee, shouldPayPriorityFee }: Params) {
+function usePayFeesWithAwait({ fee, priorityFee, shouldPayBridgingFee, shouldPayPriorityFee }: Params) {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
   const { token } = useBridgeContext();
@@ -46,6 +47,9 @@ function usePayFeesWithAwait({ fee, priorityFee, shouldPayPriorityFee }: Params)
     if (!account) throw new Error('Account is not found');
     if (!isApiReady) throw new Error('API is not initialized');
 
+    if (!shouldPayBridgingFee && !shouldPayPriorityFee)
+      return { result: () => Promise.resolve(undefined), unsubscribe: () => {} };
+
     const vftManagerProgram = new VftManagerProgram(api, CONTRACT_ADDRESS.VFT_MANAGER);
     let unsubscribe: () => void | undefined;
 
@@ -61,21 +65,25 @@ function usePayFeesWithAwait({ fee, priorityFee, shouldPayPriorityFee }: Params)
             return;
 
           try {
-            const payFeeTx = await payFee.prepareTransactionAsync({
-              args: [nonce],
-              value: fee,
-            });
+            const extrinsics: Extrinsic[] = [];
 
-            const payPriorityFeeTx = shouldPayPriorityFee
-              ? await payPriorityFees.prepareTransactionAsync({
-                  args: [requestBridgingBlockHash, nonce],
-                  value: priorityFee,
-                })
-              : undefined;
+            if (shouldPayBridgingFee) {
+              const { transaction } = await payFee.prepareTransactionAsync({
+                args: [nonce],
+                value: fee,
+              });
 
-            const extrinsics = payPriorityFeeTx
-              ? [payFeeTx.transaction.extrinsic, payPriorityFeeTx.transaction.extrinsic]
-              : [payFeeTx.transaction.extrinsic];
+              extrinsics.push(transaction.extrinsic);
+            }
+
+            if (shouldPayPriorityFee) {
+              const { transaction } = await payPriorityFees.prepareTransactionAsync({
+                args: [requestBridgingBlockHash, nonce],
+                value: priorityFee,
+              });
+
+              extrinsics.push(transaction.extrinsic);
+            }
 
             const extrinsic = api.tx.utility.batchAll(extrinsics);
 

@@ -1,22 +1,18 @@
 import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
-import { SubmittableExtrinsic } from '@polkadot/api/types';
-import { ISubmittableResult } from '@polkadot/types/types';
 import { useMutation } from '@tanstack/react-query';
 
 import { definedAssert } from '@/utils';
 
 import { SUBMIT_STATUS, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
-import { FormattedValues, UseHandleSubmitParameters } from '../../types';
+import { Extrinsic, FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { usePayFeesWithAwait } from './use-pay-fees-with-await';
 import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
-
-type Extrinsic = SubmittableExtrinsic<'promise', ISubmittableResult>;
 
 type Transaction = {
   extrinsic: Extrinsic | undefined;
@@ -32,6 +28,7 @@ const GAS_LIMIT = {
 
 function useHandleVaraSubmit({
   bridgingFee,
+  shouldPayBridgingFee,
   vftManagerFee,
   priorityFee,
   shouldPayPriorityFee,
@@ -44,7 +41,7 @@ function useHandleVaraSubmit({
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
-  const payFees = usePayFeesWithAwait({ fee: bridgingFee, priorityFee, shouldPayPriorityFee });
+  const payFees = usePayFeesWithAwait({ fee: bridgingFee, priorityFee, shouldPayBridgingFee, shouldPayPriorityFee });
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
@@ -101,7 +98,7 @@ function useHandleVaraSubmit({
       estimatedFee: fee,
     };
 
-    txs.push({ ...feesTx, value: bridgingFee });
+    if (shouldPayBridgingFee) txs.push({ ...feesTx, value: bridgingFee });
     if (shouldPayPriorityFee) txs.push({ ...feesTx, value: priorityFee });
 
     return txs;
@@ -133,7 +130,6 @@ function useHandleVaraSubmit({
         .filter((extrinsic): extrinsic is Extrinsic => Boolean(extrinsic));
 
       const extrinsic = api.tx.utility.batchAll(extrinsics);
-
       const batchResult = await signAndSend.mutateAsync({ extrinsic });
 
       blockHash = batchResult.blockHash;

@@ -59,6 +59,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const time = shouldPayPriorityFee ? '20 mins' : '1 hour';
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
+  const shouldPayBridgingFee = claimType === CLAIM_TYPE.AUTO;
 
   const varaSymbol = useVaraSymbol();
 
@@ -77,9 +78,10 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
     bridgingFee: bridgingFee.value,
+    shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
     priorityFee: priorityFee?.value,
-    shouldPayPriorityFee: shouldPayPriorityFee,
+    shouldPayPriorityFee,
     allowance: allowance.data,
     accountBalance: accountBalance.data,
     onTransactionStart: openTransactionModal,
@@ -109,7 +111,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const isEnoughBalance = () => {
     if (!api || isUndefined(bridgingFee.value) || !accountBalance.data) return false;
 
-    let minBalance = bridgingFee.value;
+    let minBalance = shouldPayBridgingFee ? bridgingFee.value : 0n;
 
     if (network.isVara) {
       if (isUndefined(vftManagerFee?.value) || isUndefined(priorityFee?.value)) return false;

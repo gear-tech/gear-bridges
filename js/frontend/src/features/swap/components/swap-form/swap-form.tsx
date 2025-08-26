@@ -87,6 +87,9 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     onTransactionStart: openTransactionModal,
   });
 
+  const isLoading =
+    submit.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || allowance.isLoading;
+
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm({
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
@@ -213,25 +216,14 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             onPriorityChange={handlePriorityChange}
             onClaimTypeChange={handleClaimTypeChange}
             isVaraNetwork={network.isVara}
-            feeValue={requiredBalance?.data?.fees}
-            isLoading={requiredBalance?.isPending}
+            fee={requiredBalance?.data?.fees}
+            isFeeLoading={requiredBalance?.isPending}
+            disabled={isLoading}
             time={time}
           />
 
           {isNetworkAccountConnected ? (
-            <Button
-              type="submit"
-              text={getButtonText()}
-              disabled={!isEnoughBalance()}
-              isLoading={
-                submit.isPending ||
-                accountBalance.isLoading ||
-                ftBalance.isLoading ||
-                config.isLoading ||
-                allowance.isLoading
-              }
-              block
-            />
+            <Button type="submit" text={getButtonText()} disabled={!isEnoughBalance()} isLoading={isLoading} block />
           ) : (
             <Button text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
           )}

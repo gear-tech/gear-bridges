@@ -1,5 +1,3 @@
-import { ComponentProps } from 'react';
-
 import ClockSVG from '@/assets/clock.svg?react';
 
 import CircleCheckSVG from '../../assets/circle-check.svg?react';
@@ -25,14 +23,29 @@ const CLAIM_TYPE_BUTTONS = [
 type Priority = (typeof PRIORITY)[keyof typeof PRIORITY];
 type ClaimType = (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE];
 
-type Props = ComponentProps<typeof FeeAndTimeFooter> & {
+type Props = {
+  isVaraNetwork: boolean;
   priority: Priority;
   claimType: ClaimType;
+  disabled: boolean;
+  fee: bigint | undefined;
+  time: string;
+  isFeeLoading: boolean;
   onPriorityChange: (priority: Priority) => void;
   onClaimTypeChange: (claimType: ClaimType) => void;
 };
 
-function Settings({ isVaraNetwork, priority, claimType, onPriorityChange, onClaimTypeChange, ...props }: Props) {
+function Settings({
+  isVaraNetwork,
+  priority,
+  claimType,
+  disabled,
+  fee,
+  time,
+  isFeeLoading,
+  onPriorityChange,
+  onClaimTypeChange,
+}: Props) {
   return (
     <div className={styles.settings}>
       <h3 className={styles.heading}>Transfer Settings</h3>
@@ -40,24 +53,26 @@ function Settings({ isVaraNetwork, priority, claimType, onPriorityChange, onClai
       <div className={styles.body}>
         {isVaraNetwork && (
           <Setting
-            value={priority}
-            onChange={onPriorityChange}
             heading="Transfer Speed"
             tooltip={TooltipContent.Priority}
             buttons={PRIORITY_BUTTONS}
+            value={priority}
+            onChange={onPriorityChange}
+            disabled={disabled}
           />
         )}
 
         <Setting
-          value={claimType}
-          onChange={onClaimTypeChange}
           heading="Claim Type"
           tooltip={TooltipContent.ClaimType}
           buttons={CLAIM_TYPE_BUTTONS}
+          value={claimType}
+          onChange={onClaimTypeChange}
+          disabled={disabled}
         />
       </div>
 
-      <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} {...props} />
+      <FeeAndTimeFooter isVaraNetwork={isVaraNetwork} feeValue={fee} time={time} isLoading={isFeeLoading} />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import * as erc20TreasuryAbi from './abi/erc20-manager';
 import * as messageQueueAbi from './abi/message-queue';
+import * as bridgingPayment from './abi/bridging-payment';
 import { Network, Status, Transfer } from '../model';
 import { processor, Context } from './processor';
 import { ethNonce, gearNonce } from '../common';
@@ -15,8 +16,11 @@ const ERC20_MANAGER = config.erc20Manager.toLowerCase();
 const ERC20_MANAGER_BRIDGING_REQUESTED = erc20TreasuryAbi.events.BridgingRequested.topic;
 const MSGQ = config.msgQ.toLowerCase();
 const MSGQ_MESSAGE_PROCESSED = messageQueueAbi.events.MessageProcessed.topic;
+const BRIDGING_PAYMENT = config.bridgingPayment.toLowerCase();
+const BRIDGING_PAYMENT_FEE_PAID = bridgingPayment.events.FeePaid.topic;
 
 console.log(`Erc20Manager address: ${ERC20_MANAGER}`);
+console.log(`BridginPayment address: ${BRIDGING_PAYMENT}`);
 console.log(`MessageQueue address: ${MSGQ}`);
 
 const handler = async (ctx: Context) => {
@@ -43,7 +47,7 @@ const handler = async (ctx: Context) => {
             sourceNetwork: Network.Ethereum,
             source: token,
             destNetwork: Network.Vara,
-            status: Status.Bridging,
+            status: Status.AwaitingPayment,
             sender: from,
             receiver: to,
             amount,
@@ -58,6 +62,11 @@ const handler = async (ctx: Context) => {
           const _nonce = gearNonce(nonce, false);
           state.setCompletedTransfer(_nonce, timestamp, blockNumber, txHash);
           break;
+        }
+        case BRIDGING_PAYMENT: {
+          if (topic !== BRIDGING_PAYMENT_FEE_PAID) continue;
+
+          state.bridgingPaid(txHash);
         }
       }
     }

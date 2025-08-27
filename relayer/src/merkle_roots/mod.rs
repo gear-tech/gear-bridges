@@ -5,7 +5,7 @@ use crate::{
         prover::FinalityProverIo,
     },
     message_relayer::{
-        common::{gear::block_listener::BlockListener, GearBlock},
+        common::{gear::block_listener::BlockListener, gear::block_listener2::BlockListener as BlockListener2, GearBlock},
         eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorageError,
@@ -44,6 +44,7 @@ pub struct Relayer {
     prover: prover::FinalityProver,
     submitter: submitter::MerkleRootSubmitter,
     block_listener: BlockListener,
+    block_listener2: BlockListener2,
     last_sealed: Option<u64>,
     genesis_config: GenesisConfig,
     eth_api: EthApi,
@@ -68,6 +69,7 @@ impl Relayer {
         confirmations: u64,
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
+        let block_listener2 = BlockListener2::new(api_provider.clone());
 
         let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone()).await;
 
@@ -89,6 +91,7 @@ impl Relayer {
             prover,
             submitter,
             block_listener,
+            block_listener2,
             last_sealed,
             genesis_config,
             eth_api,
@@ -102,12 +105,14 @@ impl Relayer {
             prover,
             submitter,
             block_listener,
+            block_listener2,
             genesis_config,
             last_sealed,
             eth_api,
         } = self;
 
-        let [blocks0, blocks1] = block_listener.run().await;
+        let [blocks0] = block_listener.run().await;
+        let [blocks1] = block_listener2.run().await;
 
         //let sealed_eras = eras.seal(merkle_roots.storage.proofs.clone());
         let authority_set_sync = authority_set_sync.run(blocks1);

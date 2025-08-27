@@ -162,7 +162,7 @@ lazy_static! {
         let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
 
         for i in 0..MAX_BLOCK_COUNT {
-            let serialized = std::fs::read(format!("verifier_only_circuit_data-{i}")).expect("Good file with serialized data");
+            let serialized = std::fs::read(format!("./variative-blake2-data/verifier_only_circuit_data-{i}")).expect("Good file with serialized data");
             verifier_data.push(VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data"));
         }
 

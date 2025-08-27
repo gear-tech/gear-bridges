@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { getPairHash } from 'gear-bridge-common';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
@@ -6,11 +7,7 @@ import { NetworkEnum, Pair } from '@/features/history/graphql/graphql';
 import { NETWORK } from '@/features/swap/consts';
 import { useVaraSymbol } from '@/hooks';
 
-type AddressToTokenKey = `${HexString}-${HexString}`;
-
 type Value = {
-  addressToToken: Record<AddressToTokenKey, Token> | undefined;
-
   tokens: {
     active: Token[] | undefined;
     vara: Token[] | undefined;
@@ -21,11 +18,12 @@ type Value = {
     vara: Token | undefined;
     eth: Token | undefined;
   };
+
+  getHistoryToken: ((sourceAddress: HexString, destinationAddress: HexString) => Token) | undefined;
+  getActiveToken: ((address: HexString) => Token) | undefined;
 };
 
 const DEFAULT_VALUE = {
-  addressToToken: undefined,
-
   tokens: {
     active: undefined,
     vara: undefined,
@@ -36,6 +34,9 @@ const DEFAULT_VALUE = {
     vara: undefined,
     eth: undefined,
   },
+
+  getActiveToken: undefined,
+  getHistoryToken: undefined,
 };
 
 const TokensContext = createContext<Value>(DEFAULT_VALUE);
@@ -54,12 +55,21 @@ type Token = {
   isActive: boolean;
 };
 
-// TODO: refactor
-const getAddressToTokenKey = (sourceAddress: HexString, destinationAddress: HexString): AddressToTokenKey =>
-  `${sourceAddress}-${destinationAddress}`;
+const TOKEN_PLACEHOLDER: Token = {
+  address: '0x00',
+  destinationAddress: '0x00',
+  name: 'Token',
+  symbol: 'Unit',
+  displaySymbol: 'Unit',
+  decimals: 0,
+  isNative: false,
+  network: 'vara',
+  isActive: false,
+};
 
 const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
-  const addressToToken: Record<AddressToTokenKey, Token> = {};
+  const addressToActiveToken: Record<HexString, Token> = {};
+  const pairHashToHistoryToken: Record<string, Token> = {};
 
   pairs.forEach((pair) => {
     const varaAddress = pair.varaToken as HexString;
@@ -96,25 +106,36 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isActive: pair.isActive,
     };
 
-    addressToToken[getAddressToTokenKey(varaAddress, ethAddress)] = varaToken;
-    addressToToken[getAddressToTokenKey(ethAddress, varaAddress)] = ethToken;
+    if (pair.isActive) {
+      addressToActiveToken[varaAddress] = varaToken;
+      addressToActiveToken[ethAddress] = ethToken;
+    }
+
+    pairHashToHistoryToken[getPairHash(varaAddress, ethAddress)] = varaToken;
+    pairHashToHistoryToken[getPairHash(ethAddress, varaAddress)] = ethToken;
   });
 
-  return addressToToken;
+  return { addressToActiveToken, pairHashToHistoryToken };
 };
 
 function TokensProvider({ children }: PropsWithChildren) {
   const { data: pairs } = usePairs();
+
   const varaSymbol = useVaraSymbol();
 
-  const addressToToken = useMemo(
-    () => (pairs && varaSymbol ? deriveTokens(pairs, varaSymbol) : undefined),
+  const { pairHashToHistoryToken, addressToActiveToken } = useMemo(
+    () =>
+      pairs && varaSymbol
+        ? deriveTokens(pairs, varaSymbol)
+        : { pairHashToHistoryToken: undefined, addressToActiveToken: undefined },
     [pairs, varaSymbol],
   );
 
-  const tokens = useMemo(() => (addressToToken ? Object.values(addressToToken) : undefined), [addressToToken]);
+  const activeTokens = useMemo(
+    () => (addressToActiveToken ? Object.values(addressToActiveToken) : undefined),
+    [addressToActiveToken],
+  );
 
-  const activeTokens = useMemo(() => tokens?.filter(({ isActive }) => isActive), [tokens]);
   const varaTokens = useMemo(() => activeTokens?.filter(({ network }) => network === NETWORK.VARA), [activeTokens]);
   const ethTokens = useMemo(() => activeTokens?.filter(({ network }) => network === NETWORK.ETH), [activeTokens]);
 
@@ -123,8 +144,6 @@ function TokensProvider({ children }: PropsWithChildren) {
 
   const value = useMemo(
     () => ({
-      addressToToken,
-
       tokens: {
         active: activeTokens,
         vara: varaTokens,
@@ -135,13 +154,30 @@ function TokensProvider({ children }: PropsWithChildren) {
         vara: nativeVaraToken,
         eth: nativeEthToken,
       },
+
+      getActiveToken: addressToActiveToken
+        ? (address: HexString) => addressToActiveToken[address] || TOKEN_PLACEHOLDER
+        : undefined,
+
+      getHistoryToken: pairHashToHistoryToken
+        ? (sourceAddress: HexString, destinationAddress: HexString) =>
+            pairHashToHistoryToken[getPairHash(sourceAddress, destinationAddress)] || TOKEN_PLACEHOLDER
+        : undefined,
     }),
-    [addressToToken, activeTokens, varaTokens, ethTokens, nativeVaraToken, nativeEthToken],
+    [
+      activeTokens,
+      varaTokens,
+      ethTokens,
+      nativeVaraToken,
+      nativeEthToken,
+      addressToActiveToken,
+      pairHashToHistoryToken,
+    ],
   );
 
   return <Provider value={value}>{children}</Provider>;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export { TokensProvider, useTokens, getAddressToTokenKey };
+export { TokensProvider, useTokens };
 export type { Token };

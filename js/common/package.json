@@ -1,0 +1,9 @@
+{
+  "name": "gear-bridge-common",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@tsconfig/recommended": "1.0.10"
+  }
+}

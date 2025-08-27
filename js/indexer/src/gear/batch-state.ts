@@ -1,7 +1,8 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
 import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model';
 import { Store } from '@subsquid/typeorm-store';
-import { BaseBatchState, hash, mapKeys, mapValues, setValues } from '../common';
+import { getPairHash } from 'gear-bridge-common';
+import { BaseBatchState, mapKeys, mapValues, setValues } from '../common';
 import { In } from 'typeorm';
 import {
   getEthTokenDecimals,
@@ -205,7 +206,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   public async addPair(varaToken: string, ethToken: string, supply: Network, blockHeader: BlockHeader) {
     const vara = varaToken.toLowerCase();
     const eth = ethToken.toLowerCase();
-    const id = hash(vara, eth);
+    const id = getPairHash(vara, eth);
 
     // Check if pair already exists or is being added in this block
     const existingPair = this._pairs.get(vara);
@@ -278,7 +279,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   public removePair(varaToken: string, ethToken: string, blockNumber: bigint) {
     const vftAddr = varaToken.toLowerCase();
     const erc20Addr = ethToken.toLowerCase();
-    this._removedPairs.set(hash(vftAddr, erc20Addr), blockNumber);
+    this._removedPairs.set(getPairHash(vftAddr, erc20Addr), blockNumber);
     this._log.info(
       {
         vftAddr,

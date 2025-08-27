@@ -18,7 +18,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     ThreadPoolBuilder,
 };
-use std::{iter, sync::mpsc::channel};
+use std::{iter, sync::mpsc::channel, env, str::FromStr};
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -65,6 +65,20 @@ pub struct ValidatorSignsChain {
     pub message: [u8; GRANDPA_VOTE_LENGTH],
 }
 
+fn get_stack_size() -> usize {
+    let Ok(rust_min_stack_size) = env::var("RUST_MIN_STACK") else {
+        log::trace!(r#"Environment variable "RUST_MIN_STACK" is not set. Use default stack size"#);
+        return 8_388_608;
+    };
+
+    let Ok(rust_min_stack_size) = usize::from_str(&rust_min_stack_size) else {
+        log::trace!(r#"Unable to parse "RUST_MIN_STACK" as usize. Use default stack size"#);
+        return 8_388_608;
+    };
+
+    rust_min_stack_size
+}
+
 impl ValidatorSignsChain {
     pub fn prove(self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::debug!("Proving validator signs chain...");
@@ -78,8 +92,9 @@ impl ValidatorSignsChain {
 
         let (sender, receiver) = channel();
 
+        
         let thread_pool = ThreadPoolBuilder::new()
-            .stack_size(VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE)
+            .stack_size(get_stack_size())
             .build()
             .expect("Failed to create ThreadPool");
 

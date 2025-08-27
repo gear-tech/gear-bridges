@@ -12391,6 +12391,7 @@ __metadata:
     pg: "npm:^8.12.0"
     postgraphile: "npm:^4.14.1"
     postgraphile-plugin-connection-filter: "npm:^2.3.0"
+    reflect-metadata: "npm:^0.2.2"
     sails-js: "npm:^0.4.3"
     sails-js-parser: "npm:^0.4.3"
     typeorm: "npm:^0.3.20"
@@ -16863,6 +16864,13 @@ __metadata:
     indent-string: "npm:^4.0.0"
     strip-indent: "npm:^3.0.0"
   checksum: 10c0/d64a6b5c0b50eb3ddce3ab770f866658a2b9998c678f797919ceb1b586bab9259b311407280bd80b804e2a7c7539b19238ae6a2a20c843f1a7fcff21d48c2eae
+  languageName: node
+  linkType: hard
+
+"reflect-metadata@npm:^0.2.2":
+  version: 0.2.2
+  resolution: "reflect-metadata@npm:0.2.2"
+  checksum: 10c0/1cd93a15ea291e420204955544637c264c216e7aac527470e393d54b4bb075f10a17e60d8168ec96600c7e0b9fcc0cb0bb6e91c3fbf5b0d8c9056f04e6ac1ec2
   languageName: node
   linkType: hard
 

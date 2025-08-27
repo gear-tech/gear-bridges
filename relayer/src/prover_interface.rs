@@ -1,4 +1,4 @@
-use std::{str::FromStr, time::Instant};
+use std::{str::FromStr, time::Instant, thread};
 
 use serde::{Deserialize, Serialize};
 use parity_scale_codec::Encode;
@@ -56,12 +56,20 @@ pub async fn prove_genesis(
     let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["genesis"]).start_timer();
 
-    let proof = prover::proving::prove_genesis(
-        parse_rpc_block_finality_proof(current_epoch_block_finality),
-        genesis_config,
-        next_validator_set_inclusion_proof,
-        next_validator_set_storage_data,
-    );
+    let builder = thread::Builder::new()
+        .stack_size(8_388_608)
+        .name("prover::proving::prove_genesis".into());
+
+    let handler = builder.spawn(move || {
+        prover::proving::prove_genesis(
+            parse_rpc_block_finality_proof(current_epoch_block_finality),
+            genesis_config,
+            next_validator_set_inclusion_proof,
+            next_validator_set_storage_data,
+        )
+    }).unwrap();
+
+    let proof = handler.join().unwrap();
 
     timer.stop_and_record();
     log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
@@ -97,12 +105,20 @@ pub async fn prove_validator_set_change(
         .with_label_values(&["validator_set_change"])
         .start_timer();
 
-    let proof = proving::prove_validator_set_change(
-        previous_proof,
-        parse_rpc_block_finality_proof(current_epoch_block_finality),
-        next_validator_set_inclusion_proof,
-        next_validator_set_storage_data,
-    );
+    let builder = thread::Builder::new()
+        .stack_size(8_388_608)
+        .name("proving::prove_validator_set_change".into());
+
+    let handler = builder.spawn(move || {
+        proving::prove_validator_set_change(
+            previous_proof,
+            parse_rpc_block_finality_proof(current_epoch_block_finality),
+            next_validator_set_inclusion_proof,
+            next_validator_set_storage_data,
+        )
+    }).unwrap();
+
+    let proof = handler.join().unwrap();
 
     timer.stop_and_record();
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
@@ -188,15 +204,23 @@ pub async fn prove_final_with_block_finality(
     let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
     let now = Instant::now();
 
-    let proof = proving::prove_message_sent(
-        previous_proof,
-        parse_rpc_block_finality_proof(block_finality),
-        genesis_config,
-        sent_message_inclusion_proof,
-        message_contents,
-    );
+    let builder = thread::Builder::new()
+        .stack_size(8_388_608)
+        .name("proving::prove_message_sent".into());
 
-    let proof = gnark::prove_circuit(&proof);
+    let handler = builder.spawn(move || {
+        let proof = proving::prove_message_sent(
+            previous_proof,
+            parse_rpc_block_finality_proof(block_finality),
+            genesis_config,
+            sent_message_inclusion_proof,
+            message_contents,
+        );
+
+        gnark::prove_circuit(&proof)
+    }).unwrap();
+
+    let proof = handler.join().unwrap();
 
     log::info!("prove_final_with_block_finality took: {}ms", now.elapsed().as_millis());
     timer.stop_and_record();

@@ -1,8 +1,13 @@
 .card {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 3fr) minmax(0, 1.5fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.25fr) minmax(0, 3fr) minmax(0, 1.25fr);
   align-items: center;
-  gap: 48px;
+  gap: 16px;
+
+  @include md {
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 .date {
@@ -20,9 +25,10 @@
   align-items: center;
   gap: 8px;
 
-  a {
+  .link {
     color: #f6f6f6e5;
     text-decoration: underline;
+    word-break: break-all;
 
     transition: 0.25s color;
 

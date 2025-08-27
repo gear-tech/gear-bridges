@@ -116,6 +116,9 @@ pub struct GearEthTokensArgs {
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,
+
+    #[arg(long = "storage-path", env = "GEAR_ETH_TX_STORAGE_PATH")]
+    pub storage_path: String,
 }
 
 #[derive(Subcommand)]

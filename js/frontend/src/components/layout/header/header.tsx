@@ -11,14 +11,8 @@ import { useEthAccount } from '@/hooks';
 
 import { Container } from '../container';
 
+import { LINKS } from './consts';
 import styles from './header.module.scss';
-
-const LINKS = {
-  [ROUTE.HOME]: 'Bridge',
-  [ROUTE.TRANSACTIONS]: 'Transactions',
-  [ROUTE.TOKEN_TRACKER]: 'My Tokens',
-  [ROUTE.FAQ]: 'FAQ',
-} as const;
 
 function Header() {
   const { account } = useAccount();
@@ -74,7 +68,7 @@ function Header() {
   return (
     <header className={styles.header}>
       <Container className={styles.mainContainer}>
-        <Link to={ROUTE.HOME}>
+        <Link to={ROUTE.HOME} className={styles.logo}>
           <LogoSVG />
         </Link>
 

@@ -4,16 +4,92 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - js/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  bridge-js:
+    runs-on: ubuntu-latest
+    environment: bridge-js-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          components: rustfmt
+
+      - name: 'Install: binaryen'
+        run: |
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
+
+      - name: Install golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20.1'
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: 'Install: NodeJS 20.x'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: 'Install dependencies'
+        run: yarn workspaces focus @gear-js/bridge gear-bridges
+
+      - name: 'Build @gear-js/bridge lib'
+        run: yarn build:bridge-js
+
+      - name: 'Build test packages'
+        run: cargo build -p js-test --release
+
+      - name: 'Run tests'
+        working-directory: js/bridge-js
+        run: yarn test
+        env:
+          HISTORICAL_PROXY_ID: ${{ secrets.HISTORICAL_PROXY_ID }}
+          CHECKPOINT_CLIENT_ID: ${{ secrets.CHECKPOINT_CLIENT_ID }}
+          BEACON_RPC_URL: ${{ secrets.BEACON_RPC_URL }}
+          VARA_WS_RPC: ${{ secrets.VARA_WS_RPC }}
+          ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+          VARA_TO_ETH_BLOCK_NUMBER: ${{ secrets.VARA_TO_ETH_BLOCK_NUMBER }}
+          VARA_TO_ETH_NONCE: ${{ secrets.VARA_TO_ETH_NONCE }}
+
+      - name: 'Lint'
+        run: yarn lint:bridge-js
+
+  check-files-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.changed.outputs.frontend }}
+      indexer_changed: ${{ steps.changed.outputs.indexer }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check changed files
+        id: changed
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'js/frontend/**'
+            indexer:
+              - 'js/indexer/**'
+
   build-indexer:
     runs-on: ubuntu-latest
+    needs: check-files-changed
+    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -37,8 +113,13 @@ jobs:
       - name: Build
         run: yarn build:indexer
 
+      - name: 'Lint'
+        run: yarn lint:indexer
+
   build-frontend:
     runs-on: ubuntu-latest
+    needs: check-files-changed
+    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' }}
 
     steps:
       - name: Checkout repository

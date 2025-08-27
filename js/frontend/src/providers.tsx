@@ -70,7 +70,8 @@ createAppKit({
   features: { analytics: false, email: false, socials: false },
   enableWalletGuide: false,
   allWallets: 'HIDE',
-  featuredWalletIds: [COINBASE_WALLET_ID, TRUST_WALLET_ID],
+  excludeWalletIds: [TRUST_WALLET_ID],
+  featuredWalletIds: [COINBASE_WALLET_ID],
   themeMode: 'dark',
   themeVariables: {
     '--w3m-font-family': 'Geist Variable',

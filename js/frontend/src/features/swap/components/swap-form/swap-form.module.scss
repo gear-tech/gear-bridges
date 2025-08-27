@@ -13,6 +13,10 @@
 
   position: relative; // for swap network button
 
+  @include sm {
+    padding: 16px 16px 24px;
+  }
+
   &:first-child {
     margin-bottom: 8px;
 
@@ -44,14 +48,21 @@
 
 .row {
   display: flex;
-  gap: 32px;
+  gap: 16px;
+  align-items: center;
   justify-content: space-between;
+
+  @include sm {
+    gap: 8px;
+  }
 }
 
 .balanceFooter,
 .priceFooter {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .priceFooter {
@@ -94,5 +105,11 @@
   input::spelling-error,
   input::grammar-error {
     color: #fff;
+  }
+}
+
+.price {
+  @include sm {
+    font-size: 12px;
   }
 }

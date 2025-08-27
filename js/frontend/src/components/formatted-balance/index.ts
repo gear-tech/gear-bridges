@@ -1,3 +1,3 @@
-import { FormattedBalance } from './fortmatted-balance';
+import { FormattedBalance } from './formatted-balance';
 
 export { FormattedBalance };

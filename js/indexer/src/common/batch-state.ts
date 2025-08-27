@@ -200,7 +200,6 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     transfer.destination = await this._getDestinationAddress(transfer.source, transfer.blockNumber);
     transfer.sender = transfer.sender.toLowerCase();
     transfer.receiver = transfer.receiver.toLowerCase();
-    transfer.nonce = transfer.nonce;
     this._transfers.set(transfer.nonce, transfer);
 
     this._log.info(`${transfer.nonce}: Transfer requested in block ${transfer.blockNumber}`);

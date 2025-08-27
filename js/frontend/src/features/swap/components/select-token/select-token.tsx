@@ -87,7 +87,7 @@ function SelectTokenModal({ close }: ModalProps) {
             onClick={handleClick}
             disabled={isActive}>
             <span className={styles.wallet}>
-              <TokenSVG symbol={symbol} network={networkName} sizes={[32, 20]} />
+              <TokenSVG symbol={symbol} network={networkName} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{displaySymbol}</span>

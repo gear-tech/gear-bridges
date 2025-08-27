@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import { getPairHash } from '@workspace/common';
+import { getPairHash } from 'gear-bridge-common';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';

@@ -1,7 +1,7 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
 import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model';
 import { Store } from '@subsquid/typeorm-store';
-import { getPairHash } from '@workspace/common';
+import { getPairHash } from 'gear-bridge-common';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common';
 import { In } from 'typeorm';
 import {

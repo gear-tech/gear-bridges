@@ -47,14 +47,6 @@ pub async fn prove_genesis(
         .fetch_next_session_keys_inclusion_proof(block)
         .await?;
 
-    log::info!("block = {}, current_epoch_block_finality = {}, next_validator_set_inclusion_proof = {}",
-        hex::encode(block.encode()),
-        hex::encode(current_epoch_block_finality.encode()),
-        hex::encode(next_validator_set_inclusion_proof.encode()),
-    );
-    log::info!("==================================================================================");
-    std::process::exit(100);
-
     let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
     let next_validator_set_inclusion_proof =
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);

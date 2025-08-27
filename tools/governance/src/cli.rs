@@ -40,15 +40,28 @@ pub enum DestinationCommand {
 #[command(rename_all = "verbatim")]
 pub enum GovernanceAdminCommand {
     /// Change governance address to `new_governance`
-    ChangeGovernance { new_governance: ActorId },
+    ChangeGovernance {
+        /// New governance address in 0x-prefixed hex or SS58 format (Vara Network)
+        new_governance: ActorId,
+    },
     /// Pause `proxy`
-    PauseProxy { proxy: ProxyType },
+    PauseProxy {
+        /// Which proxy to pause
+        proxy: ProxyType,
+    },
     /// Unpause `proxy`
-    UnpauseProxy { proxy: ProxyType },
+    UnpauseProxy {
+        /// Which proxy to unpause
+        proxy: ProxyType,
+    },
     /// Upgrade `proxy` to `new_implementation` and call `data` on it
     UpgradeProxy {
+        /// Which proxy to upgrade
         proxy: ProxyType,
+        /// New implementation address in 0x-prefixed hex format (Ethereum)
         new_implementation: Address,
+        /// Hex-encoded call data with 0x prefix to call on new implementation after upgrade
+        /// (use `0x` for no call)
         data: Data,
     },
 }
@@ -57,11 +70,20 @@ pub enum GovernanceAdminCommand {
 #[command(rename_all = "verbatim")]
 pub enum GovernancePauserCommand {
     /// Change governance address to `new_governance`
-    ChangeGovernance { new_governance: ActorId },
+    ChangeGovernance {
+        /// New governance address in 0x-prefixed hex or SS58 format (Vara Network)
+        new_governance: ActorId,
+    },
     /// Pause `proxy`
-    PauseProxy { proxy: ProxyType },
+    PauseProxy {
+        /// Which proxy to pause
+        proxy: ProxyType,
+    },
     /// Unpause `proxy`
-    UnpauseProxy { proxy: ProxyType },
+    UnpauseProxy {
+        /// Which proxy to unpause
+        proxy: ProxyType,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -104,13 +126,22 @@ impl FromStr for Data {
 #[command(rename_all = "verbatim")]
 pub enum ERC20ManagerCommand {
     /// Add new VFT manager
-    AddVftManager { vft_manager: ActorId },
+    AddVftManager {
+        /// VFT manager address in 0x-prefixed hex or SS58 format (Vara Network)
+        vft_manager: ActorId,
+    },
     /// Register Ethereum token
-    RegisterEthereumToken { token: Address },
+    RegisterEthereumToken {
+        /// Token address in 0x-prefixed hex format (Ethereum)
+        token: Address,
+    },
     /// Register Gear token
     RegisterGearToken {
+        /// Token name (1-31 characters)
         token_name: LimitedString,
+        /// Token symbol (1-31 characters)
         token_symbol: LimitedString,
+        /// Token decimals (0-255)
         token_decimals: u8,
     },
 }

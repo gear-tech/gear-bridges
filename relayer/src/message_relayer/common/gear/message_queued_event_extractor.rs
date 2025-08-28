@@ -1,5 +1,8 @@
-use crate::message_relayer::common::{
-    self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
+use std::sync::Arc;
+
+use crate::message_relayer::{
+    common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
+    gear_to_eth::storage::Storage,
 };
 use gear_common::ApiProviderConnection;
 use prometheus::IntCounter;
@@ -12,6 +15,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 pub struct MessageQueuedEventExtractor {
     api_provider: ApiProviderConnection,
     sender: UnboundedSender<MessageInBlock>,
+    storage: Arc<dyn Storage>,
 
     metrics: Metrics,
 }
@@ -35,10 +39,12 @@ impl MessageQueuedEventExtractor {
     pub fn new(
         api_provider: ApiProviderConnection,
         sender: UnboundedSender<MessageInBlock>,
+        storage: Arc<dyn Storage>,
     ) -> Self {
         Self {
             api_provider,
             sender,
+            storage,
             metrics: Metrics::new(),
         }
     }
@@ -98,9 +104,19 @@ impl MessageQueuedEventExtractor {
         block: GearBlock,
         authority_set_id: u64,
     ) -> anyhow::Result<()> {
-        let messages = common::message_queued_events_of(&block);
+        let messages = common::message_queued_events_of(&block).collect::<Vec<_>>();
         let block_hash = block.hash();
         let mut total = 0;
+
+        self.storage
+            .block_storage()
+            .add_block(
+                GearBlockNumber(block.number()),
+                block_hash,
+                messages.iter().map(|message| message.nonce_le),
+            )
+            .await;
+
         for message in messages {
             total += 1;
 

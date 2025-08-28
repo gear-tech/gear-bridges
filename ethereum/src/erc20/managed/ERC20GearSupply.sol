@@ -7,7 +7,7 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract ERC20GearSupply is ERC20, ERC20Burnable, Ownable, ERC20Permit {
-    uint8 private immutable _decimals;
+    uint8 private _decimals;
 
     /**
      * @dev Initializes the ERC20GearSupply contract with the token name and symbol.

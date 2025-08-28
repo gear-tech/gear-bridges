@@ -1,0 +1,25 @@
+.card {
+  padding: 16px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+
+  background-color: #ffffff03;
+  border: 1px solid #ffffff0a;
+  border-radius: 6px;
+}
+
+.balance {
+  --token-icon-size: 24px;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  font-weight: 500;
+  line-height: 24px;
+  color: #f6f6f6e5;
+}

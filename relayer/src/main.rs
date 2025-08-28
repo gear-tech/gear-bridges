@@ -204,6 +204,7 @@ async fn run() -> AnyResult<()> {
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.storage_path,
                     )
                     .await
                     .unwrap();
@@ -216,11 +217,6 @@ async fn run() -> AnyResult<()> {
 
                     provider.spawn();
                     relayer.run().await;
-
-                    loop {
-                        // relayer.run() spawns thread and exits, so we need to add this loop after calling run.
-                        time::sleep(Duration::from_secs(1)).await;
-                    }
                 }
 
                 GearEthTokensCommands::PaidTokenTransfers {
@@ -250,6 +246,7 @@ async fn run() -> AnyResult<()> {
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         excluded_from_fees,
                         receiver,
+                        args.storage_path.clone(),
                     )
                     .await
                     .unwrap();
@@ -262,8 +259,6 @@ async fn run() -> AnyResult<()> {
 
                     provider.spawn();
                     relayer.run().await;
-
-                    tokio::signal::ctrl_c().await?;
 
                     handle_server.stop(true).await;
                 }

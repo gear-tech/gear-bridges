@@ -1,0 +1,26 @@
+.container {
+  flex-shrink: 0; // curently only used in TransactionPair
+
+  display: flex;
+  align-items: flex-end;
+}
+
+.tokenSvg,
+.networkSvg {
+  flex-shrink: 0;
+
+  border-radius: 50%;
+}
+
+.tokenSvg {
+  width: var(--token-icon-size);
+  height: var(--token-icon-size);
+}
+
+.networkSvg {
+  width: var(--network-icon-size);
+  height: var(--network-icon-size);
+  margin-left: calc(var(--network-icon-size) / -2);
+
+  box-shadow: -1px 0 0px 0px #000;
+}

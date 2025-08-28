@@ -8,6 +8,7 @@ use sails_rs::{gstd::msg, prelude::*};
 pub struct BridgingPayment;
 
 /// Events emitted by Bridging Payment service.
+#[event]
 #[derive(Encode, Decode, TypeInfo)]
 pub enum BridgingPaymentEvents {
     /// Fee for the message processing by relayer was paid.
@@ -58,6 +59,7 @@ impl BridgingPayment {
     /// Set fee that this program will take from incoming requests.
     ///
     /// This method can be called only by admin.
+    #[export]
     pub fn set_fee(&mut self, fee: u128) {
         self.ensure_admin();
 
@@ -67,6 +69,7 @@ impl BridgingPayment {
     /// Withdraw fees that were collected from user requests.
     ///
     /// This method can be called only by admin.
+    #[export]
     pub fn reclaim_fee(&mut self) {
         self.ensure_admin();
 
@@ -77,6 +80,7 @@ impl BridgingPayment {
     /// Set new admin.
     ///
     /// This method can be called only by admin.
+    #[export]
     pub fn set_admin(&mut self, new_admin: ActorId) {
         self.ensure_admin();
 
@@ -95,6 +99,7 @@ impl BridgingPayment {
     /// be attached as a value when sending message to this method.
     ///
     /// Current fee amount can be retreived by calling `get_state`.
+    #[export]
     pub async fn pay_fees(&mut self, nonce: U256) {
         let fee = self.state().fee;
 
@@ -108,11 +113,13 @@ impl BridgingPayment {
     }
 
     /// Get current service [State].
+    #[export]
     pub fn get_state(&self) -> State {
         self.state().clone()
     }
 
     /// Upgrades the program to the provided new address.
+    #[export]
     pub async fn upgrade(&mut self, new: ActorId) {
         self.ensure_admin();
 

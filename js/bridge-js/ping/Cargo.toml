@@ -1,0 +1,12 @@
+[package]
+name = "ping"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sails-rs.workspace = true
+parity-scale-codec = { workspace = true, default-features = false, features = ["derive"] }
+scale-info = { workspace = true, default-features = false }
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["wasm-builder"] }

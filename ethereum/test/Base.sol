@@ -10,6 +10,7 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
+import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
@@ -54,6 +55,8 @@ library BaseConstants {
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
     DeploymentArguments public deploymentArguments;
+
+    IERC20Metadata public erc20GearSupply;
 
     IERC20Metadata public circleToken;
     IERC20Metadata public tetherToken;
@@ -138,6 +141,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         //////////////////////////////////////////////////////////////////////////////
 
         console.log("ERC20 tokens:");
+
+        // for verification purposes on Etherscan
+        erc20GearSupply = new ERC20GearSupply(deploymentArguments.deployerAddress, "MyToken", "MTK", 18);
 
         if (isTest) {
             deployTestTokens();

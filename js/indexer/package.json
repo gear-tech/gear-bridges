@@ -1,0 +1,40 @@
+{
+  "name": "indexer",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "build": "rm -rf lib && npx tsc",
+    "migration:generate": "npx typeorm migration:generate -d lib/model/dataSource.js -o db/migrations/$NAME",
+    "migration:run": "npx typeorm migration:run -d lib/model/dataSource.js",
+    "serve": "node lib/api.js",
+    "serve:dev": "npx ts-node-dev src/api.ts"
+  },
+  "dependencies": {
+    "@gear-js/api": "^0.43.0",
+    "@graphile/pg-pubsub": "^4.14.1",
+    "@polkadot/api": "^16.4.1",
+    "@polkadot/util": "13.5.5",
+    "@subsquid/evm-abi": "^0.3.1",
+    "@subsquid/evm-processor": "^1.27.1",
+    "@subsquid/scale-codec": "^4.0.1",
+    "@subsquid/substrate-processor": "^8.6.0",
+    "@subsquid/substrate-runtime": "^2.0.1",
+    "@subsquid/typeorm-store": "^1.5.1",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "express": "^4.21.2",
+    "gear-bridge-common": "0.1.0",
+    "pg": "^8.12.0",
+    "postgraphile": "^4.14.1",
+    "postgraphile-plugin-connection-filter": "^2.3.0",
+    "reflect-metadata": "^0.2.2",
+    "sails-js": "^0.4.3",
+    "sails-js-parser": "^0.4.3",
+    "typeorm": "^0.3.20"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.2.0",
+    "typescript": "^5.8.3"
+  }
+}

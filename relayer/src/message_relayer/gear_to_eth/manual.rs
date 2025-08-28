@@ -1,13 +1,29 @@
-use crate::message_relayer::common::{
-    ethereum::{accumulator::Accumulator, message_sender::MessageSender},
-    gear::merkle_proof_fetcher::MerkleProofFetcher,
-    AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
-};
-use alloy::providers::{PendingTransactionBuilder, Provider};
 use ethereum_client::EthApi;
 use gear_common::ApiProviderConnection;
 use primitive_types::U256;
+use std::sync::Arc;
 use tokio::sync::mpsc;
+
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            accumulator::Accumulator, message_sender::MessageSender, status_fetcher::StatusFetcher,
+        },
+        gear::merkle_proof_fetcher::MerkleProofFetcher,
+        AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+    },
+    gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
+};
+/*
+use crate::message_relayer::{
+    eth_to_gear::api_provider::ApiProviderConnection,
+    ethereum::{
+        accumulator::Accumulator, message_sender::MessageSender, status_fetcher::StatusFetcher,
+    },
+    gear::merkle_proof_fetcher::MerkleProofFetcher,
+    gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
+    AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+};*/
 
 pub async fn relay(
     api_provider: ApiProviderConnection,
@@ -101,32 +117,56 @@ pub async fn relay(
         }
     }
 
+    let storage = Arc::new(NoStorage::new());
+    let tx_manager = TransactionManager::new(storage.clone());
+
     let message_sender = MessageSender::new(1, eth_api.clone());
 
-    let (queued_messages_sender, queued_messages_receiver) = mpsc::unbounded_channel();
-    let accumulator = Accumulator::new(merkle_roots_receiver, queued_messages_receiver);
-    let channel_messages = accumulator.spawn();
-    let channel_message_data = MerkleProofFetcher::new(api_provider).spawn(channel_messages);
+    let (queued_messages_sender, mut queued_messages_receiver) = mpsc::unbounded_channel();
+    let accumulator = Accumulator::new(merkle_roots_receiver, tx_manager.merkle_roots.clone());
+    let mut accumulator_io = accumulator.spawn();
+    let mut proof_fetcher_io = MerkleProofFetcher::new(api_provider).spawn();
 
-    let (sender, mut receiver) = mpsc::unbounded_channel();
-    message_sender.spawn(channel_message_data, sender);
+    let mut message_sender_io = message_sender.spawn();
 
     queued_messages_sender
         .send(message_in_block)
         .expect("Failed to send message to channel");
 
-    let Some((tx_hash, _message)) = receiver.recv().await else {
-        log::info!("Unable to receive transaction data for a message {message_nonce:#x}");
-        return;
-    };
+    let status_fetcher = StatusFetcher::new(eth_api, confirmations);
+    let mut status_fetcher_io = status_fetcher.spawn();
 
-    let provider = eth_api.raw_provider().root().clone();
-    let result = PendingTransactionBuilder::new(provider, tx_hash)
-        .with_required_confirmations(confirmations)
-        .watch()
-        .await;
+    loop {
+        match tx_manager
+            .process(
+                &mut accumulator_io,
+                &mut queued_messages_receiver,
+                &mut proof_fetcher_io,
+                &mut message_sender_io,
+                &mut status_fetcher_io,
+            )
+            .await
+        {
+            Ok(res) => {
+                if !res {
+                    log::warn!("Trasaction manager exiting");
+                    return;
+                }
 
-    log::info!(
-        "Result for message {message_nonce:#x} after {confirmations} confirmation(s): {result:?}"
-    );
+                if !tx_manager.completed.read().await.is_empty() {
+                    log::info!("Transaction nonce={message_nonce}, block={gear_block} successfully relayed");
+                } else if !tx_manager.failed.read().await.is_empty() {
+                    log::error!(
+                        "Failed to relay transaction nonce={message_nonce}, block={gear_block}: {}",
+                        tx_manager.failed.read().await.first_key_value().unwrap().1
+                    );
+                }
+            }
+
+            Err(err) => {
+                log::error!("Error occurred while processing transaction manager: {err}");
+                return;
+            }
+        }
+    }
 }

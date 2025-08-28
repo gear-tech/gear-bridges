@@ -1,4 +1,4 @@
-use gtest::{Program, System, WasmProgram};
+use gtest::{Program, System};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
@@ -19,41 +19,8 @@ const ETH_TOKEN_RECEIVER: H160 = H160([6; 20]);
 const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
 const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
 
-#[derive(Debug)]
-struct GearBridgeBuiltinMock;
-
-impl WasmProgram for GearBridgeBuiltinMock {
-    fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
-        Ok(None)
-    }
-
-    fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
-        #[derive(Encode)]
-        enum Response {
-            MessageSent { nonce: U256, hash: H256 },
-        }
-
-        Ok(Some(
-            Response::MessageSent {
-                nonce: U256::from(1),
-                hash: [1; 32].into(),
-            }
-            .encode(),
-        ))
-    }
-
-    fn handle_reply(&mut self, _payload: Vec<u8>) -> Result<(), &'static str> {
-        unimplemented!()
-    }
-
-    fn handle_signal(&mut self, _payload: Vec<u8>) -> Result<(), &'static str> {
-        unimplemented!()
-    }
-
-    fn state(&mut self) -> Result<Vec<u8>, &'static str> {
-        unimplemented!()
-    }
-}
+// TODO: back to WasmProgram when it is available
+// https://github.com/gear-tech/gear/issues/4803
 
 struct Fixture {
     remoting: GTestRemoting,
@@ -71,8 +38,42 @@ async fn setup_for_test() -> Fixture {
     let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
 
     // Bridge Builtin
-    let gear_bridge_builtin =
-        Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
+
+    // #[derive(Encode)]
+    // enum Response {
+    //     MessageSent { nonce: U256, hash: H256 },
+    // }
+    //
+    // Response::MessageSent {
+    //     nonce: U256::from(1),
+    //     hash: [1; 32].into(),
+    // }
+    // .encode();
+
+    let wat = r#"
+    (module
+        (import "env" "memory" (memory 1))
+        (import "env" "gr_reply" (func $gr_reply (param i32 i32 i32 i32)))
+        (func $handle (export "handle")
+            (i32.store8 (i32.const 0x01) (i32.const 0x01))
+            (i64.store (i32.const 0x21) (i64.const 0x0101010101010101))
+            (i64.store (i32.const 0x29) (i64.const 0x0101010101010101))
+            (i64.store (i32.const 0x31) (i64.const 0x0101010101010101))
+            (i64.store (i32.const 0x39) (i64.const 0x0101010101010101))
+            (call $gr_reply
+                (i32.const 0x0000)
+                (i32.const 0x0041)
+                (i32.const 0x0100)
+                (i32.const 0x0200)
+            )
+        )
+    )
+    "#;
+    let gear_bridge_builtin = Program::from_binary_with_id(
+        remoting.system(),
+        BRIDGE_BUILTIN_ID,
+        wat::parse_str(wat).unwrap(),
+    );
     let _ = gear_bridge_builtin.send_bytes(REMOTING_ACTOR_ID, b"INIT");
 
     // Vft Manager

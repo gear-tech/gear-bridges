@@ -37,6 +37,8 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with: 
+          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -125,6 +127,8 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with: 
+          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -173,6 +177,8 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with: 
+          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -195,8 +201,8 @@ jobs:
 
       - name: Pull & run Gear node container
         run: |
-          docker pull ghcr.io/gear-tech/node:v1.8.1
-          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.8.1 gear --dev --tmp --rpc-external
+          docker pull ghcr.io/gear-tech/node:v1.9.0
+          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.9.0 gear --dev --tmp --rpc-external
 
       - name: Run tests
         run: cargo test --release --workspace

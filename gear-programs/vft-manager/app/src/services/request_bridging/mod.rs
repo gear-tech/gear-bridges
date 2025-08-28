@@ -2,7 +2,7 @@
 
 use sails_rs::prelude::*;
 
-use super::{error::Error, Event, TokenSupply, VftManager};
+use super::{error::Error, Event, TokenSupply, VftManager, VftManagerExposure};
 
 mod bridge_builtin_operations;
 mod msg_tracker;
@@ -24,7 +24,7 @@ pub fn seed() {
 /// request to the bridge built-in actor. If request is failed then tokens will be refunded back
 /// to the sender.
 pub async fn request_bridging(
-    service: &mut VftManager,
+    service: &mut VftManagerExposure<VftManager>,
     sender: ActorId,
     vara_token_id: ActorId,
     amount: U256,

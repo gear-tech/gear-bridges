@@ -1,0 +1,3 @@
+# TODO: remove when https://github.com/gear-tech/gear/pull/4798 is released
+[env]
+GEAR_WORKSPACE_DIR = { value = "", relative = true }

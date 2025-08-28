@@ -62,56 +62,67 @@ impl ErrorTrait for GClientError {
 }
 
 #[allow(dead_code)]
-struct ApiHolder<T, R, E>
+struct ApiHolder<T, R, B: ApiBuilder>
 where
-    T: Future<Output = Result<R, E>> + 'static,
-    E: ErrorTrait,
+    T: Future<Output = Result<R, B::Error>>,
 {
     future: T,
-    api: Pin<Box<gclient::GearApi>>,
+    api: Pin<Box<B::Api>>,
 }
 
-impl<T, R, E> ApiHolder<T, R, E>
+impl<T, R, B> ApiHolder<T, R, B>
 where
-    T: Future<Output = Result<R, E>> + 'static,
-    E: ErrorTrait,
+    T: Future<Output = Result<R, B::Error>>,
+    B: ApiBuilder,
 {
-    pub fn new<F>(api: gclient::GearApi, mut retry_future: F) -> Self
+    pub fn new<F>(api: B::Api, mut retry_future: F) -> Self
     where
-        F: FnMut(&'static gclient::GearApi) -> T,
+        F: FnMut(&B::Api) -> T,
     {
         let api = Box::pin(api);
-        let ptr = ptr::from_ref(&api);
 
         Self {
-            future: retry_future(
-                unsafe { ptr.as_ref() }
-                    .expect("Pointer has been just create from pinned boxed value; qed"),
-            ),
+            future: retry_future(&api),
             api,
         }
     }
 
-    pub async fn call(self) -> Result<R, E> {
+    pub async fn call(self) -> Result<R, B::Error> {
         self.future.await
     }
 }
 
-pub async fn retry_n<T, F, R, E>(
+pub async fn retry_n<T, F, R, B>(
     this: &mut Api,
     mut retry_future: F,
     retries_max: usize,
+    builder: B,
 ) -> AnyResult<R>
 where
-    F: FnMut(&'static gclient::GearApi) -> T,
-    T: Future<Output = Result<R, E>> + 'static,
-    E: ErrorTrait,
+    B: ApiBuilder,
+    F: FnMut(&B::Api) -> T,
+    T: Future<Output = Result<R, B::Error>>,
 {
     let mut retries_timeout = 0;
 
     loop {
-        let api = this.0.gclient();
-        let holder = ApiHolder::new(api, &mut retry_future);
+        let api = match builder.build(&mut this.0) {
+            Ok(api) => api,
+            Err(e) => {
+                if e.is_timeout() && retries_timeout < retries_max {
+                    retries_timeout += 1;
+                    continue;
+                }
+
+                if e.is_transport() {
+                    this.0.reconnect().await?;
+                    continue;
+                }
+
+                return Err(anyhow!("{e:?}"));
+            }
+        };
+        let holder = ApiHolder::<_, _, B>::new(api, &mut retry_future);
 
         let result = holder.call().await;
         match result {
@@ -142,12 +153,58 @@ impl Api {
         Self(connection)
     }
 
-    pub async fn retry_n<T, F, R, E>(&mut self, retry_future: F, retries_max: usize) -> AnyResult<R>
+    pub async fn retry_n<T, F, R, E, B: ApiBuilder>(
+        &mut self,
+        retry_future: F,
+        retries_max: usize,
+        builder: B,
+    ) -> AnyResult<R>
     where
-        F: FnMut(&'static gclient::GearApi) -> T,
-        T: Future<Output = Result<R, E>> + 'static,
-        E: ErrorTrait,
+        F: FnMut(&B::Api) -> T,
+        T: Future<Output = Result<R, B::Error>>,
     {
-        self::retry_n(self, retry_future, retries_max).await
+        self::retry_n(self, retry_future, retries_max, builder).await
+    }
+}
+
+pub trait ApiBuilder {
+    type Error: ErrorTrait;
+    type Api;
+
+    fn build(&self, conn: &mut ApiProviderConnection) -> Result<Self::Api, Self::Error>;
+}
+
+pub struct GClientApiBuilder;
+
+impl ApiBuilder for GClientApiBuilder {
+    type Error = GClientError;
+    type Api = gclient::GearApi;
+
+    fn build(&self, conn: &mut ApiProviderConnection) -> Result<Self::Api, Self::Error> {
+        Ok(conn.gclient())
+    }
+}
+
+pub struct GClientWithSuriBuilder<'a>(pub &'a str);
+
+impl<'a> ApiBuilder for GClientWithSuriBuilder<'a> {
+    type Error = GClientError;
+    type Api = gclient::GearApi;
+
+    fn build(&self, conn: &mut ApiProviderConnection) -> Result<Self::Api, Self::Error> {
+        gclient::GearApi::from(conn.client().api).with(self.0)
+    }
+}
+
+pub struct RemotingBuilder<'a>(pub &'a str);
+
+impl<'a> ApiBuilder for RemotingBuilder<'a> {
+    type Error = GClientError;
+    type Api = GClientRemoting;
+
+    fn build(&self, conn: &mut ApiProviderConnection) -> Result<Self::Api, Self::Error> {
+        let with_suri = GClientWithSuriBuilder(self.0).build(conn)?;
+
+        Ok(GClientRemoting::new(with_suri))
     }
 }

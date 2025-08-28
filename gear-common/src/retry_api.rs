@@ -25,27 +25,39 @@ impl ErrorTrait for sails_rs::errors::Error {
 
 impl ErrorTrait for GClientError {
     fn is_timeout(&self) -> bool {
-        let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
-            subxt::error::RpcError::ClientError(e),
-        ))) = self
-        else {
+        let GClientError::GearSDK(gsdk::Error::Subxt(subxt_error)) = self else {
             return false;
         };
 
-        let error_text = format!("{e:?}");
-        error_text == "RequestTimeout"
+        let subxt::Error::Rpc(subxt::error::RpcError::ClientError(e)) = &**subxt_error else {
+            return false;
+        };
+
+        let Some(err) = e.downcast_ref::<jsonrpsee_core::ClientError>() else {
+            return false;
+        };
+
+        matches!(err, jsonrpsee_core::ClientError::RequestTimeout)
     }
 
     fn is_transport(&self) -> bool {
-        let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
-            subxt::error::RpcError::ClientError(e),
-        ))) = self
-        else {
+        let GClientError::GearSDK(gsdk::Error::Subxt(subxt_error)) = self else {
             return false;
         };
 
-        let error_text = format!("{e:?}");
-        error_text.starts_with("RestartNeeded(") || error_text.starts_with("Transport(")
+        let subxt::Error::Rpc(subxt::error::RpcError::ClientError(e)) = &**subxt_error else {
+            return false;
+        };
+
+        let Some(err) = e.downcast_ref::<jsonrpsee_core::ClientError>() else {
+            return false;
+        };
+
+        matches!(
+            err,
+            jsonrpsee_core::ClientError::RestartNeeded(_)
+                | jsonrpsee_core::ClientError::Transport(_)
+        )
     }
 }
 

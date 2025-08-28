@@ -14,3 +14,4 @@ subxt.workspace = true
 tokio.workspace = true
 vft-client.workspace = true
 vft-manager-client.workspace = true
+jsonrpsee-core = { workspace = true, features = ["client"] }

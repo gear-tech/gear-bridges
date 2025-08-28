@@ -1,3 +1,3 @@
-import { Swap, PayVaraFeeButton } from './components';
+import { Swap, PayVaraFeeButton, RelayTxButton } from './components';
 
-export { Swap, PayVaraFeeButton };
+export { Swap, PayVaraFeeButton, RelayTxButton };

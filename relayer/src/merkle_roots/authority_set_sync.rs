@@ -244,6 +244,10 @@ impl AuthoritySetSync {
 
         if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
             self.metrics.latest_proven_era.set(latest_proven as i64);
+
+            if latest_proven > latest_authority_set_id {
+                return Ok((1, latest_authority_set_id));
+            }
         }
 
         Ok((

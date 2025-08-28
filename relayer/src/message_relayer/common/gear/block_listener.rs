@@ -4,10 +4,10 @@ use crate::message_relayer::common::{
 };
 use futures::StreamExt;
 use gear_common::{
-    retry_api::{retry_n, Api, GearApiBuilder},
+    retry_api::{Api, GearApiBuilder},
     ApiProviderConnection,
 };
-use gear_rpc_client::GearApi;
+
 use primitive_types::H256;
 use prometheus::IntGauge;
 use std::sync::Arc;
@@ -139,16 +139,13 @@ impl BlockListener {
     async fn run_inner(
         &mut self,
         tx: &broadcast::Sender<GearBlock>,
-        mut unprocessed: &Vec<(H256, u32)>,
+        unprocessed: &Vec<(H256, u32)>,
     ) -> anyhow::Result<()> {
         let mut api = Api::new(self.api_provider.clone());
-        /*self.api
-        .retry_n(
+        api.retry_n(
             |gear_api| async {
                 for &(block_hash, block_number) in unprocessed.iter() {
-                    log::trace!(
-                        "Fetching unprocessed block #{block_number} (hash: {block_hash})"
-                    );
+                    log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
                     let block = gear_api.api.blocks().at(block_hash).await?;
 
                     let gear_block = GearBlock::from_subxt_block(block).await?;
@@ -156,9 +153,7 @@ impl BlockListener {
                     match tx.send(gear_block) {
                         Ok(_) => (),
                         Err(broadcast::error::SendError(_)) => {
-                            log::error!(
-                                "No active receivers for Gear block listener, stopping"
-                            );
+                            log::error!("No active receivers for Gear block listener, stopping");
                             return Ok(());
                         }
                     }
@@ -166,10 +161,10 @@ impl BlockListener {
 
                 Ok(())
             },
-            1,
+            0,
             GearApiBuilder,
         )
-        .await?;*/
+        .await?;
 
         api.retry_n(
             |gear_api| async {

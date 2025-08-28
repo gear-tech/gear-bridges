@@ -11,7 +11,6 @@ import {
 import { hostname } from 'node:os';
 
 import { config } from './config.js';
-import { Database } from '@subsquid/util-internal-processor-tools';
 
 const processor = new SubstrateBatchProcessor()
   .setGateway(config.archiveUrl)
@@ -53,5 +52,4 @@ export type ProcessorContext = DataHandlerContext<Store, Fields>;
 
 export function getProcessor(): SubstrateBatchProcessor {
   return processor;
-  // .addGearUserMessageSent({ programId: programIds, extrinsic: true, call: true });
 }

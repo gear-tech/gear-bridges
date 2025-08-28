@@ -1,9 +1,10 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
-import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model';
 import { Store } from '@subsquid/typeorm-store';
-import { getPairHash } from 'gear-bridge-common';
-import { BaseBatchState, mapKeys, mapValues, setValues } from '../common';
+import { createPairHash } from 'gear-bridge-common';
 import { In } from 'typeorm';
+
+import { CheckpointSlot, GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model/index.js';
+import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
 import {
   getEthTokenDecimals,
   getEthTokenName,
@@ -12,7 +13,7 @@ import {
   getVaraTokenDecimals,
   getVaraTokenName,
   getVaraTokenSymbol,
-} from './rpc-queries';
+} from './rpc-queries.js';
 
 interface TokenMetadata {
   symbol: string;
@@ -36,6 +37,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private _initiatedTransfers: Map<string, InitiatedTransfer>;
   private _transfersToRemove: Set<Transfer>;
   private _ethBridgeMessages: Map<string, GearEthBridgeMessage>;
+  private _slots: Map<bigint, CheckpointSlot>;
 
   constructor() {
     super(NETWORK, COUNTERPART_NETWORK);
@@ -45,6 +47,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._initiatedTransfers = new Map();
     this._transfersToRemove = new Set();
     this._ethBridgeMessages = new Map();
+    this._slots = new Map();
   }
 
   protected _clear(): void {
@@ -54,6 +57,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._upgradedPairs.clear();
     this._initiatedTransfers.clear();
     this._ethBridgeMessages.clear();
+    this._slots.clear();
   }
 
   public async new(ctx: DataHandlerContext<Store, any>) {
@@ -158,12 +162,24 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await super._saveTransfers();
   }
 
+  private async _saveSlots() {
+    if (this._slots.size === 0) return;
+
+    await this._ctx.store.save(mapValues(this._slots));
+    this._log.info(`${this._slots.size} slots saved`);
+  }
+
   public async save() {
     if (this._transfersToRemove.size > 0) {
       await this._ctx.store.remove(setValues(this._transfersToRemove));
     }
 
-    await Promise.all([this._saveEthBridgeMessages(), this._saveCompletedTransfers(), this._savePairs()]);
+    await Promise.all([
+      this._saveEthBridgeMessages(),
+      this._saveCompletedTransfers(),
+      this._savePairs(),
+      this._saveSlots(),
+    ]);
     await this._processStatuses();
     await this._saveTransfers();
     await this._saveInitiatedTransfers();
@@ -206,7 +222,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   public async addPair(varaToken: string, ethToken: string, supply: Network, blockHeader: BlockHeader) {
     const vara = varaToken.toLowerCase();
     const eth = ethToken.toLowerCase();
-    const id = getPairHash(vara, eth);
+    const id = createPairHash(vara, eth);
 
     // Check if pair already exists or is being added in this block
     const existingPair = this._pairs.get(vara);
@@ -279,7 +295,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   public removePair(varaToken: string, ethToken: string, blockNumber: bigint) {
     const vftAddr = varaToken.toLowerCase();
     const erc20Addr = ethToken.toLowerCase();
-    this._removedPairs.set(getPairHash(vftAddr, erc20Addr), blockNumber);
+    this._removedPairs.set(createPairHash(vftAddr, erc20Addr), blockNumber);
     this._log.info(
       {
         vftAddr,
@@ -306,6 +322,20 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this.addPair(vftAddr, pair.ethToken, pair.tokenSupply, block);
 
     this._log.info(`Vara Token ${vftAddr} upgraded to ${newId}`);
+  }
+
+  public async newSlot(slot: bigint, treeHashRoot: string) {
+    if (this._slots.has(slot)) return;
+
+    this._log.info(`Received slot: ${slot}`);
+
+    this._slots.set(
+      slot,
+      new CheckpointSlot({
+        slot,
+        treeHashRoot,
+      }),
+    );
   }
 
   private async _fetchVaraMetadata(varaTokenId: string, blockHeader: BlockHeader): Promise<TokenMetadata> {

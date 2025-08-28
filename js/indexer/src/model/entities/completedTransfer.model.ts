@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryColumn } from 'typeorm';
-import { Network } from './_network';
+import { Network } from './_network.js';
 
 @Entity({ name: 'completed_transfer' })
 export class CompletedTransfer {

@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import { getPairHash } from 'gear-bridge-common';
+import { createPairHash } from 'gear-bridge-common';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
@@ -111,8 +111,8 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       addressToActiveToken[ethAddress] = ethToken;
     }
 
-    pairHashToHistoryToken[getPairHash(varaAddress, ethAddress)] = varaToken;
-    pairHashToHistoryToken[getPairHash(ethAddress, varaAddress)] = ethToken;
+    pairHashToHistoryToken[createPairHash(varaAddress, ethAddress)] = varaToken;
+    pairHashToHistoryToken[createPairHash(ethAddress, varaAddress)] = ethToken;
   });
 
   return { addressToActiveToken, pairHashToHistoryToken };
@@ -161,7 +161,7 @@ function TokensProvider({ children }: PropsWithChildren) {
 
       getHistoryToken: pairHashToHistoryToken
         ? (sourceAddress: HexString, destinationAddress: HexString) =>
-            pairHashToHistoryToken[getPairHash(sourceAddress, destinationAddress)] || TOKEN_PLACEHOLDER
+            pairHashToHistoryToken[createPairHash(sourceAddress, destinationAddress)] || TOKEN_PLACEHOLDER
         : undefined,
     }),
     [

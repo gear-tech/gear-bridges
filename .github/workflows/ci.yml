@@ -37,7 +37,7 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with: 
+        with:
           version: 'v1.2.3'
 
       - name: Install Node.js
@@ -81,6 +81,7 @@ jobs:
             "./api/gear/eth_events_electra.idl"
             "./api/gear/vft_manager.idl"
             "./api/gear/historical_proxy.idl"
+            "./api/gear/checkpoint_light_client.idl"
           )
 
           generated=(
@@ -97,6 +98,7 @@ jobs:
             "./target/wasm32-gear/release/eth_events_electra.idl"
             "./target/wasm32-gear/release/vft_manager.idl"
             "./target/wasm32-gear/release/historical_proxy.idl"
+            "./target/wasm32-gear/debug/checkpoint_light_client.idl"
           )
 
           for i in "${!stored[@]}"; do
@@ -127,7 +129,7 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with: 
+        with:
           version: 'v1.2.3'
 
       - name: Install Node.js
@@ -177,7 +179,7 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with: 
+        with:
           version: 'v1.2.3'
 
       - name: Install Node.js

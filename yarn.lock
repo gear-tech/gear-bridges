@@ -1003,8 +1003,6 @@ __metadata:
     "@gear-js/api": "npm:^0.43.0"
     "@lodestar/types": "npm:^1.33.0"
     "@polkadot/api": "npm:^16.4.1"
-    "@swc/cli": "npm:^0.7.8"
-    "@swc/core": "npm:^1.13.3"
     "@vitest/coverage-v8": "npm:^3.2.4"
     dotenv: "npm:^17.2.1"
     sails-js: "npm:^0.4.3"
@@ -3996,22 +3994,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@polkadot/util@npm:13.5.5":
-  version: 13.5.5
-  resolution: "@polkadot/util@npm:13.5.5"
-  dependencies:
-    "@polkadot/x-bigint": "npm:13.5.5"
-    "@polkadot/x-global": "npm:13.5.5"
-    "@polkadot/x-textdecoder": "npm:13.5.5"
-    "@polkadot/x-textencoder": "npm:13.5.5"
-    "@types/bn.js": "npm:^5.1.6"
-    bn.js: "npm:^5.2.1"
-    tslib: "npm:^2.8.0"
-  checksum: 10c0/9e4a743577a0c58cd0a9add46b0d86efeaeae085a1fa651747d8b5e6ac2487cb0257f35b3c6a8d741cd9e97663e4dce06b9e01017d30166212c6b42f3c7b9778
-  languageName: node
-  linkType: hard
-
-"@polkadot/util@npm:13.5.6, @polkadot/util@npm:^13.4.4, @polkadot/util@npm:^13.5.1, @polkadot/util@npm:^13.5.6":
+"@polkadot/util@npm:13.5.6, @polkadot/util@npm:^13.4.4, @polkadot/util@npm:^13.5.1, @polkadot/util@npm:^13.5.5, @polkadot/util@npm:^13.5.6":
   version: 13.5.6
   resolution: "@polkadot/util@npm:13.5.6"
   dependencies:
@@ -4116,16 +4099,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@polkadot/x-bigint@npm:13.5.5":
-  version: 13.5.5
-  resolution: "@polkadot/x-bigint@npm:13.5.5"
-  dependencies:
-    "@polkadot/x-global": "npm:13.5.5"
-    tslib: "npm:^2.8.0"
-  checksum: 10c0/922152140c3ae6e8497aa784640b4d5980b3126c3589a3f1223d47255c7f4033b078d256f1d601ed34ab895266eac6759f79341557f980e941363664b223f463
-  languageName: node
-  linkType: hard
-
 "@polkadot/x-bigint@npm:13.5.6, @polkadot/x-bigint@npm:^13.4.4, @polkadot/x-bigint@npm:^13.5.6":
   version: 13.5.6
   resolution: "@polkadot/x-bigint@npm:13.5.6"
@@ -4153,15 +4126,6 @@ __metadata:
   dependencies:
     tslib: "npm:^2.8.0"
   checksum: 10c0/9b2a55975871e85503ae7bf819dca9e25093a2b4b4c492986a8d2188068ccdb075b18746c21f23e4e2af070ed58f7ab0e9d7f58e28ff15cd10e8f202386d15d7
-  languageName: node
-  linkType: hard
-
-"@polkadot/x-global@npm:13.5.5":
-  version: 13.5.5
-  resolution: "@polkadot/x-global@npm:13.5.5"
-  dependencies:
-    tslib: "npm:^2.8.0"
-  checksum: 10c0/00b68b9bc5a23cd51f998b45400b04be4371fa3d66768893a2aadaf63001955536aec068a3e0fb4f7e2a659b7158bdf21f5fb9e67c3858e634ab0630dc0a86db
   languageName: node
   linkType: hard
 
@@ -4197,16 +4161,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@polkadot/x-textdecoder@npm:13.5.5":
-  version: 13.5.5
-  resolution: "@polkadot/x-textdecoder@npm:13.5.5"
-  dependencies:
-    "@polkadot/x-global": "npm:13.5.5"
-    tslib: "npm:^2.8.0"
-  checksum: 10c0/ad76d481358e85817e2d6c5dbb91a6ebc11dc478d03e2b448807280e66f7cac27586f686c576eb636738bf1296bf9fd87a497917e2c4058bae54c4789544b430
-  languageName: node
-  linkType: hard
-
 "@polkadot/x-textdecoder@npm:13.5.6":
   version: 13.5.6
   resolution: "@polkadot/x-textdecoder@npm:13.5.6"
@@ -4224,16 +4178,6 @@ __metadata:
     "@polkadot/x-global": "npm:13.4.4"
     tslib: "npm:^2.8.0"
   checksum: 10c0/8dbc8bda8fbd961e34a7712836c53b9e2f46cd0f8e682509e5baed23d14754a44a0654ae9928c8d34fb4f19c5441f778771a8827a7563ef7f7ea7f9a0bf02716
-  languageName: node
-  linkType: hard
-
-"@polkadot/x-textencoder@npm:13.5.5":
-  version: 13.5.5
-  resolution: "@polkadot/x-textencoder@npm:13.5.5"
-  dependencies:
-    "@polkadot/x-global": "npm:13.5.5"
-    tslib: "npm:^2.8.0"
-  checksum: 10c0/949ae16b7ffd824b9a6c3a78a632e221c228dcb458df2adc1f5c696c8fe424d8c377be25544640af8e8f548d1d898e469891defefa1cb2a094852a56b32cf9b3
   languageName: node
   linkType: hard
 
@@ -5538,7 +5482,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@swc/core@npm:^1.11.11, @swc/core@npm:^1.13.3":
+"@swc/core@npm:^1.11.11, @swc/core@npm:^1.13.5":
   version: 1.13.5
   resolution: "@swc/core@npm:1.13.5"
   dependencies:
@@ -5656,13 +5600,6 @@ __metadata:
   version: 0.3.0
   resolution: "@tokenizer/token@npm:0.3.0"
   checksum: 10c0/7ab9a822d4b5ff3f5bca7f7d14d46bdd8432528e028db4a52be7fbf90c7f495cc1af1324691dda2813c6af8dc4b8eb29de3107d4508165f9aa5b53e7d501f155
-  languageName: node
-  linkType: hard
-
-"@tsconfig/recommended@npm:1.0.10":
-  version: 1.0.10
-  resolution: "@tsconfig/recommended@npm:1.0.10"
-  checksum: 10c0/402ef03da7300ea0f9f9d6e0507dcb8782c6b764c1f45b946a6c34f2bd3153571a1a85f10659606c24d1052aed699c3e32dd0da876e8f7eea577374eeeb80d17
   languageName: node
   linkType: hard
 
@@ -11551,11 +11488,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"gear-bridge-common@npm:0.1.0, gear-bridge-common@workspace:*, gear-bridge-common@workspace:js/common":
+"gear-bridge-common@workspace:*, gear-bridge-common@workspace:js/common":
   version: 0.0.0-use.local
   resolution: "gear-bridge-common@workspace:js/common"
-  dependencies:
-    "@tsconfig/recommended": "npm:1.0.10"
   languageName: unknown
   linkType: soft
 
@@ -11564,6 +11499,8 @@ __metadata:
   resolution: "gear-bridges@workspace:."
   dependencies:
     "@eslint/js": "npm:^9.33.0"
+    "@swc/cli": "npm:^0.7.8"
+    "@swc/core": "npm:^1.13.5"
     "@typescript-eslint/eslint-plugin": "npm:^8.39.1"
     "@typescript-eslint/parser": "npm:^8.39.1"
     eslint: "npm:9.28.0"
@@ -11574,7 +11511,7 @@ __metadata:
     eslint-plugin-vitest: "npm:^0.5.4"
     lerna: "npm:8.2.3"
     prettier: "npm:^3.6.2"
-    rimraf: "npm:6.0.1"
+    rimraf: "npm:^6.0.1"
     typescript: "npm:5.9.2"
     typescript-eslint: "npm:^8.39.1"
   languageName: unknown
@@ -12483,7 +12420,7 @@ __metadata:
     "@gear-js/api": "npm:^0.43.0"
     "@graphile/pg-pubsub": "npm:^4.14.1"
     "@polkadot/api": "npm:^16.4.1"
-    "@polkadot/util": "npm:13.5.5"
+    "@polkadot/util": "npm:^13.5.5"
     "@subsquid/evm-abi": "npm:^0.3.1"
     "@subsquid/evm-processor": "npm:^1.27.1"
     "@subsquid/scale-codec": "npm:^4.0.1"
@@ -12495,7 +12432,7 @@ __metadata:
     dotenv: "npm:^16.4.5"
     ethers: "npm:^6.13.4"
     express: "npm:^4.21.2"
-    gear-bridge-common: "npm:0.1.0"
+    gear-bridge-common: "workspace:*"
     pg: "npm:^8.12.0"
     postgraphile: "npm:^4.14.1"
     postgraphile-plugin-connection-filter: "npm:^2.3.0"
@@ -17208,18 +17145,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"rimraf@npm:6.0.1":
-  version: 6.0.1
-  resolution: "rimraf@npm:6.0.1"
-  dependencies:
-    glob: "npm:^11.0.0"
-    package-json-from-dist: "npm:^1.0.0"
-  bin:
-    rimraf: dist/esm/bin.mjs
-  checksum: 10c0/b30b6b072771f0d1e73b4ca5f37bb2944ee09375be9db5f558fcd3310000d29dfcfa93cf7734d75295ad5a7486dc8e40f63089ced1722a664539ffc0c3ece8c6
-  languageName: node
-  linkType: hard
-
 "rimraf@npm:^4.4.1":
   version: 4.4.1
   resolution: "rimraf@npm:4.4.1"
@@ -17228,6 +17153,18 @@ __metadata:
   bin:
     rimraf: dist/cjs/src/bin.js
   checksum: 10c0/8c5e142d26d8b222be9dc9a1a41ba48e95d8f374e813e66a8533e87c6180174fcb3f573b9b592eca12740ebf8b78526d136acd971d4a790763d6f2232c34fa24
+  languageName: node
+  linkType: hard
+
+"rimraf@npm:^6.0.1":
+  version: 6.0.1
+  resolution: "rimraf@npm:6.0.1"
+  dependencies:
+    glob: "npm:^11.0.0"
+    package-json-from-dist: "npm:^1.0.0"
+  bin:
+    rimraf: dist/esm/bin.mjs
+  checksum: 10c0/b30b6b072771f0d1e73b4ca5f37bb2944ee09375be9db5f558fcd3310000d29dfcfa93cf7734d75295ad5a7486dc8e40f63089ced1722a664539ffc0c3ece8c6
   languageName: node
   linkType: hard
 

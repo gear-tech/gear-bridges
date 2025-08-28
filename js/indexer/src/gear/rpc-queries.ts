@@ -1,10 +1,11 @@
-import { RpcClient } from '@subsquid/rpc-client';
+import { encodeName } from '@subsquid/substrate-runtime/lib/runtime/storage.js';
 import { Runtime } from '@subsquid/substrate-runtime';
-import { encodeName } from '@subsquid/substrate-runtime/lib/runtime/storage';
+import { RpcClient } from '@subsquid/rpc-client';
 import { ZERO_ADDRESS } from 'sails-js';
 import { ethers } from 'ethers';
-import { config } from './config';
-import { getDecoder } from './decoders';
+
+import { config } from './config.js';
+import { getDecoder } from './decoders.js';
 
 // Helper function for querying VFT metadata
 async function queryVFTMetadata<T>(rpc: RpcClient, programId: string, blockhash: string, fn: string): Promise<T> {

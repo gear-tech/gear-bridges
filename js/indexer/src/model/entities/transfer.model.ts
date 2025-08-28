@@ -1,6 +1,6 @@
 import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
-import { Network } from './_network';
-import { Status } from './_status';
+import { Network } from './_network.js';
+import { Status } from './_status.js';
 
 @Entity({ name: 'transfer' })
 export class Transfer {

@@ -1,18 +1,18 @@
 import { TypeormDatabase } from '@subsquid/typeorm-store';
-import {
-  BridgingPaidEvent,
-  BridgingRequested,
-  HistoricalProxyAddressChanged,
-  Relayed,
-  TokenMappingAdded,
-  TokenMappingRemoved,
-} from './types';
-import { ethNonce, gearNonce, mapKeys } from '../common';
-import { ProcessorContext, getProcessor } from './processor';
-import { GearEthBridgeMessage, InitiatedTransfer, Network, Status, Transfer } from '../model';
+
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Status, Transfer } from '../model/index.js';
+import { ProcessorContext, getProcessor } from './processor.js';
+import { ethNonce, gearNonce } from '../common/index.js';
+import { getDecoder, initDecoders } from './decoders.js';
+import { getProgramInheritor } from './rpc-queries.js';
+import { init, updateId } from './programIds.js';
+import { BatchState } from './batch-state.js';
+import { config } from './config.js';
 import {
   BridgingPaymentMethods,
   BridgingPaymentServices,
+  CheckpointClientMethods,
+  CheckpointClientServices,
   HistoricalProxyMethods,
   HistoricalProxyServices,
   isEthBridgeMessageQueued,
@@ -22,16 +22,29 @@ import {
   ProgramName,
   VftManagerMethods,
   VftManagerServices,
-} from './util';
-import { config } from './config';
-import { init, updateId } from './programIds';
-import { getProgramInheritor } from './rpc-queries';
-import { BatchState } from './batch-state';
-import { getDecoder, initDecoders } from './decoders';
+} from './util.js';
+import {
+  BridgingPaidEvent,
+  BridgingRequested,
+  HistoricalProxyAddressChanged,
+  NewCheckpointEvent,
+  Relayed,
+  TokenMappingAdded,
+  TokenMappingRemoved,
+} from './types';
 
 const state = new BatchState();
 
 let programs: Map<string, ProgramName>;
+
+async function setPrograms() {
+  programs = await init({
+    [ProgramName.VftManager]: config.vftManager,
+    [ProgramName.HistoricalProxy]: config.historicalProxy,
+    [ProgramName.BridgingPayment]: config.bridgingPayment,
+    [ProgramName.CheckpointClient]: config.checkpointClient,
+  });
+}
 
 const handler = async (ctx: ProcessorContext) => {
   await state.new(ctx);
@@ -45,22 +58,26 @@ const handler = async (ctx: ProcessorContext) => {
         const { id, change } = event.args;
 
         if (change.__kind == 'Inactive') {
-          const vftTokens = state.getActiveVaraTokens();
-
           if (programs.has(id)) {
+            ctx.log.info(`Program ${programs.get(id)} (${id}) exited.`);
             const inheritor = await getProgramInheritor(ctx._chain.rpc, block.header._runtime, id, block.header.hash);
+            ctx.log.info(`Program inheritor ${inheritor}`);
             await updateId(programs.get(id)!, inheritor);
-            await state.save();
-            process.exit(0);
-          }
+            ctx.log.info(`Program id updated from ${id} to ${inheritor}`);
+            await setPrograms();
+          } else {
+            const vftTokens = state.getActiveVaraTokens();
 
-          if (vftTokens.includes(id.toLowerCase())) {
-            await state.upgradePair(id, block.header);
+            if (vftTokens.includes(id.toLowerCase())) {
+              await state.upgradePair(id, block.header);
+            }
           }
         }
         continue;
       }
       if (isUserMessageSent(event)) {
+        if (!programs.has(event.args.message.source)) continue;
+
         const msg = event.args.message;
         const name = programs.get(msg.source);
         if (!name) {
@@ -130,7 +147,8 @@ const handler = async (ctx: ProcessorContext) => {
                 ctx.log.info(`Historical proxy program changed to ${data.new}`);
                 await updateId(ProgramName.HistoricalProxy, data.new);
                 await state.save();
-                return process.exit(0);
+                await setPrograms();
+                continue;
               }
               case VftManagerMethods.RequestBridging: {
                 const data = decoder.decodeOutput<{ ok: [nonce: string] }>(service, method, msg.payload);
@@ -163,6 +181,15 @@ const handler = async (ctx: ProcessorContext) => {
 
             state.updateTransferStatus(gearNonce(BigInt(nonce)), Status.Bridging);
             break;
+          }
+          case ProgramName.CheckpointClient: {
+            if (service !== CheckpointClientServices.ServiceSyncUpdate) continue;
+            if (method !== CheckpointClientMethods.NewCheckpoint) continue;
+
+            const { slot, tree_hash_root } = decoder.decodeEvent<NewCheckpointEvent>(service, method, msg.payload);
+
+            state.newSlot(BigInt(slot), tree_hash_root);
+            continue;
           }
         }
       }
@@ -228,13 +255,8 @@ const runProcessor = async () => {
     stateSchema: 'gear_processor',
   });
 
-  programs = (await init({
-    [ProgramName.VftManager]: config.vftManager,
-    [ProgramName.HistoricalProxy]: config.historicalProxy,
-    [ProgramName.BridgingPayment]: config.bridgingPayment,
-  })) as Map<string, ProgramName>;
-
-  const processor = getProcessor(mapKeys(programs));
+  await setPrograms();
+  const processor = getProcessor();
 
   processor.run(db, handler);
 };

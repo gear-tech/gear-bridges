@@ -48,7 +48,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -93,7 +93,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -147,7 +147,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -189,7 +189,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         vm.expectEmit(address(messageQueue));
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
@@ -218,7 +218,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -260,7 +260,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         vm.expectEmit(address(messageQueue));
         emit PausableUpgradeable.Unpaused(address(governancePauser));
@@ -302,7 +302,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -433,7 +433,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -468,7 +468,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -504,7 +504,7 @@ contract MessageQueueTest is Test, Base {
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStop.selector));
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         VaraMessage memory message = VaraMessage({
             nonce: 0x11,
@@ -543,7 +543,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -628,7 +628,7 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;

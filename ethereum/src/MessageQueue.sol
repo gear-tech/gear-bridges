@@ -31,7 +31,10 @@ contract MessageQueue is
     using Hasher for VaraMessage;
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
-    uint256 public constant PROCESS_MESSAGE_DELAY = 5 minutes;
+
+    uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
+    uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 3 minutes;
+    uint256 public constant PROCESS_USER_MESSAGE_DELAY = 5 minutes;
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
@@ -247,8 +250,10 @@ contract MessageQueue is
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external {
-        bool isFromAdminOrPauser =
-            message.source == _governanceAdmin.governance() || message.source == _governancePauser.governance();
+        bytes32 governanceAdminAddress = _governanceAdmin.governance();
+        bytes32 governancePauserAddress = _governancePauser.governance();
+
+        bool isFromAdminOrPauser = message.source == governanceAdminAddress || message.source == governancePauserAddress;
         if (paused() && !isFromAdminOrPauser) {
             revert EnforcedPause();
         }
@@ -267,8 +272,17 @@ contract MessageQueue is
             revert MerkleRootNotFound(blockNumber);
         }
 
+        uint256 messageDelay;
+        if (message.source == governanceAdminAddress) {
+            messageDelay = PROCESS_ADMIN_MESSAGE_DELAY;
+        } else if (message.source == governancePauserAddress) {
+            messageDelay = PROCESS_PAUSER_MESSAGE_DELAY;
+        } else {
+            messageDelay = PROCESS_USER_MESSAGE_DELAY;
+        }
+
         uint256 timestamp = _merkleRootTimestamps[merkleRoot];
-        if (block.timestamp < timestamp + PROCESS_MESSAGE_DELAY) {
+        if (block.timestamp < timestamp + messageDelay) {
             revert MerkleRootDelayNotPassed();
         }
 

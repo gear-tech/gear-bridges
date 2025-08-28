@@ -50,7 +50,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -81,7 +81,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -112,7 +112,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -146,7 +146,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -180,7 +180,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -211,7 +211,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -243,7 +243,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -274,7 +274,7 @@ contract GovernancePauserTest is Test, Base {
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
-        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_MESSAGE_DELAY());
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;

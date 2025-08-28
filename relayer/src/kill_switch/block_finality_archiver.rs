@@ -1,12 +1,10 @@
 use futures::StreamExt;
+use gear_common::ApiProviderConnection;
+use gear_rpc_client::dto;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
-
-use gear_rpc_client::dto;
 use prometheus::IntGauge;
 use utils_prometheus::impl_metered_service;
-
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 
 impl_metered_service! {
     pub(crate) struct Metrics {

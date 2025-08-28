@@ -239,3 +239,4 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
     "json-rpc",
     "rpc-types",
 ] }
+jsonrpsee-core = "0.22"

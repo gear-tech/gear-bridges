@@ -1,4 +1,5 @@
 use ethereum_client::EthApi;
+use gear_common::ApiProviderConnection;
 use primitive_types::U256;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -11,9 +12,18 @@ use crate::message_relayer::{
         gear::merkle_proof_fetcher::MerkleProofFetcher,
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
     gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
 };
+/*
+use crate::message_relayer::{
+    eth_to_gear::api_provider::ApiProviderConnection,
+    ethereum::{
+        accumulator::Accumulator, message_sender::MessageSender, status_fetcher::StatusFetcher,
+    },
+    gear::merkle_proof_fetcher::MerkleProofFetcher,
+    gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
+    AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+};*/
 
 pub async fn relay(
     api_provider: ApiProviderConnection,

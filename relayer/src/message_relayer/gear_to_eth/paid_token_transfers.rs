@@ -7,8 +7,7 @@ use crate::{
                 message_sender::MessageSender, status_fetcher::StatusFetcher,
             },
             gear::{
-                block_listener::BlockListener as GearBlockListener,
-                merkle_proof_fetcher::MerkleProofFetcher,
+                block_listener::BlockListener, merkle_proof_fetcher::MerkleProofFetcher,
                 message_data_extractor::MessageDataExtractor,
                 message_paid_event_extractor::MessagePaidEventExtractor,
                 message_queued_event_extractor::MessageQueuedEventExtractor,
@@ -17,13 +16,13 @@ use crate::{
             web_request::Message,
             AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
         gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
     },
 };
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
+use gear_common::ApiProviderConnection;
 use primitive_types::H256;
 use std::{collections::HashSet, iter, path::Path, sync::Arc};
 use tokio::{
@@ -33,7 +32,7 @@ use tokio::{
 use utils_prometheus::MeteredService;
 
 pub struct Relayer {
-    gear_block_listener: GearBlockListener,
+    gear_block_listener: BlockListener,
 
     listener_message_queued: MessageQueuedEventExtractor,
     message_paid_listener: MessagePaidEventExtractor,
@@ -85,7 +84,7 @@ impl Relayer {
             log::warn!("Failed to load transaction manager state: {e}");
         }
 
-        let gear_block_listener = GearBlockListener::new(api_provider.clone(), storage.clone());
+        let gear_block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
         let listener_message_queued =

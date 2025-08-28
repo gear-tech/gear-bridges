@@ -1,6 +1,5 @@
-use crate::message_relayer::{
-    common::RelayedMerkleRoot, eth_to_gear::api_provider::ApiProviderConnection,
-};
+use crate::message_relayer::common::RelayedMerkleRoot;
+use gear_common::ApiProviderConnection;
 use gear_rpc_client::dto::MerkleProof;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;

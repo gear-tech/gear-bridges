@@ -11,10 +11,10 @@ use ethereum_common::{
         ReceiptEnvelope,
     },
 };
+use gear_common::ApiProvider;
 use relayer::message_relayer::{
     common::{EthereumSlotNumber, TxHashWithSlot},
     eth_to_gear::{
-        api_provider::ApiProvider,
         message_sender::{self, MessageSender, MessageSenderIo},
         proof_composer::{self, ProofComposerIo},
         storage::NoStorage,

@@ -13,11 +13,11 @@ use crate::{
             },
             MessageInBlock,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
         gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
     },
 };
 use ethereum_client::EthApi;
+use gear_common::ApiProviderConnection;
 use std::{iter, path::Path, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use utils_prometheus::MeteredService;

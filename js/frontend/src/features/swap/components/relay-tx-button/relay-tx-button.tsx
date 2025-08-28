@@ -7,14 +7,13 @@ import { getErrorMessage } from '@/utils';
 import { useRelayEthTx, useRelayVaraTx } from '../../hooks';
 
 type VaraProps = {
-  nonce: bigint;
+  nonce: bigint | HexString;
   blockNumber: bigint;
-  messageQueuedAddress: HexString;
 };
 
-function RelayVaraTxButton({ nonce, blockNumber, messageQueuedAddress }: VaraProps) {
+function RelayVaraTxButton({ nonce, blockNumber }: VaraProps) {
   const alert = useAlert();
-  const { mutateAsync, isPending } = useRelayVaraTx(nonce, blockNumber, messageQueuedAddress);
+  const { mutateAsync, isPending } = useRelayVaraTx(nonce, blockNumber);
 
   const handleClick = () =>
     mutateAsync()
@@ -23,7 +22,7 @@ function RelayVaraTxButton({ nonce, blockNumber, messageQueuedAddress }: VaraPro
       })
       .catch((error: Error) => alert.error(getErrorMessage(error)));
 
-  return <Button text="Manual Claim" onClick={handleClick} isLoading={isPending} />;
+  return <Button text="Manual Claim" size="x-small" onClick={handleClick} isLoading={isPending} />;
 }
 
 type EthProps = {
@@ -41,7 +40,7 @@ function RelayEthTxButton({ txHash }: EthProps) {
       })
       .catch((error: Error) => alert.error(getErrorMessage(error)));
 
-  return <Button text="Manual Claim" onClick={handleClick} isLoading={isPending} />;
+  return <Button text="Manual Claim" size="x-small" onClick={handleClick} isLoading={isPending} />;
 }
 
 const RelayTxButton = {

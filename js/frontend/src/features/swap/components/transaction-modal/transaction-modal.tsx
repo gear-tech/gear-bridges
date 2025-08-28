@@ -3,6 +3,7 @@ import { useAccount, getVaraAddress } from '@gear-js/react-hooks';
 import { Modal } from '@gear-js/vara-ui';
 import { JSX } from 'react';
 
+import ArrowSVG from '@/assets/arrow.svg?react';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { Address, FormattedBalance } from '@/components';
@@ -10,7 +11,6 @@ import { useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
 import { cx } from '@/utils';
 
-import ArrowSVG from '../../assets/arrow.svg?react';
 import { FeeAndTimeFooter } from '../fee-and-time-footer';
 
 import styles from './transaction-modal.module.scss';

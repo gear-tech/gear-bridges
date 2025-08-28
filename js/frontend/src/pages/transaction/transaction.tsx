@@ -3,13 +3,13 @@ import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
+import ArrowSVG from '@/assets/arrow.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
 import { useTokens } from '@/context';
 import { useTransaction } from '@/features/history';
-import ArrowSVG from '@/features/history/assets/arrow.svg?react';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
-import { PayVaraFeeButton } from '@/features/swap';
+import { PayVaraFeeButton, RelayTxButton } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
 import { Field } from './field';
@@ -130,7 +130,17 @@ function Transaction() {
         <div className={styles.sidebar}>
           <TransactionStatus status={status} />
 
-          {isPayFeeButtonVisible && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+          {isPayFeeButtonVisible && (
+            <>
+              <PayVaraFeeButton transactionId={id} nonce={rawNonce} />
+
+              {isVaraNetwork ? (
+                <RelayTxButton.Vara nonce={rawNonce as HexString} blockNumber={BigInt(blockNumber)} />
+              ) : (
+                <RelayTxButton.Eth txHash={txHash as HexString} />
+              )}
+            </>
+          )}
         </div>
       </header>
 

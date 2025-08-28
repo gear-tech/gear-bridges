@@ -58,9 +58,8 @@ contract MessageQueue is
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param emergencyStopAdmin_ The address of EOA (multi-sig) that will control `submitMerkleRoot` and `processMessage`
-     *                            in case of an emergency stop. This EOA will be able to disable the emergency stop at
-     *                            the same time along with the verifier change.
+     * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
+     *                            in case of an emergency stop.
      * @param verifier_ The address of the Verifier contract that will verify merkle roots.
      */
     function initialize(

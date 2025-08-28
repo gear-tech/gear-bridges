@@ -111,8 +111,8 @@ impl Relayer {
             eth_api,
         } = self;
 
-        let [blocks0] = block_listener.run().await;
-        let [blocks1] = block_listener2.run().await;
+        // let [blocks0] = block_listener.run().await;
+        let [blocks0, blocks1] = block_listener2.run().await;
 
         //let sealed_eras = eras.seal(merkle_roots.storage.proofs.clone());
         let authority_set_sync = authority_set_sync.run(blocks1);

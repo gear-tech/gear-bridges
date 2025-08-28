@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, Program, HexString, decodeAddress } from '@gear-js/api';
+import { GearApi, BaseGearProgram, HexString, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
@@ -33,7 +33,7 @@ export interface State {
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly bridgingPayment: BridgingPayment;
-  private _program!: Program;
+  private _program!: BaseGearProgram;
 
   constructor(
     public api: GearApi,
@@ -47,7 +47,7 @@ export class SailsProgram {
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
     if (programId) {
-      this._program = new Program(programId, api);
+      this._program = new BaseGearProgram(programId, api);
     }
 
     this.bridgingPayment = new BridgingPayment(this);
@@ -66,12 +66,14 @@ export class SailsProgram {
       this.api,
       this.registry,
       'upload_program',
-      ['New', initial_state],
-      '(String, State)',
+      undefined,
+      'New',
+      initial_state,
+      'State',
       'String',
       code,
       async (programId) => {
-        this._program = await Program.new(programId, this.api);
+        this._program = await BaseGearProgram.new(programId, this.api);
       },
     );
     return builder;
@@ -85,12 +87,14 @@ export class SailsProgram {
       this.api,
       this.registry,
       'create_program',
-      ['New', initial_state],
-      '(String, State)',
+      undefined,
+      'New',
+      initial_state,
+      'State',
       'String',
       codeId,
       async (programId) => {
-        this._program = await Program.new(programId, this.api);
+        this._program = await BaseGearProgram.new(programId, this.api);
       },
     );
     return builder;
@@ -114,8 +118,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'PayFees', nonce],
-      '(String, String, U256)',
+      'BridgingPayment',
+      'PayFees',
+      nonce,
+      'U256',
       'Null',
       this._program.programId,
     );
@@ -135,26 +141,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'PayPriorityFees', block, nonce],
-      '(String, String, H256, U256)',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  /**
-   * Withdraw fees that were collected from user requests.
-   *
-   * This method can be called only by admin.
-   */
-  public reclaimFee(): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      ['BridgingPayment', 'ReclaimFee'],
-      '(String, String)',
+      'BridgingPayment',
+      'PayPriorityFees',
+      [block, nonce],
+      '(H256, U256)',
       'Null',
       this._program.programId,
     );
@@ -171,8 +161,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'SetAdmin', new_admin],
-      '(String, String, [u8;32])',
+      'BridgingPayment',
+      'SetAdmin',
+      new_admin,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -189,8 +181,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'SetFee', fee],
-      '(String, String, u128)',
+      'BridgingPayment',
+      'SetFee',
+      fee,
+      'u128',
       'Null',
       this._program.programId,
     );
@@ -208,8 +202,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'SetPriorityFee', priority_fee],
-      '(String, String, u128)',
+      'BridgingPayment',
+      'SetPriorityFee',
+      priority_fee,
+      'u128',
       'Null',
       this._program.programId,
     );
@@ -224,8 +220,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'Upgrade', value],
-      '(String, String, [u8;32])',
+      'BridgingPayment',
+      'Upgrade',
+      value,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );

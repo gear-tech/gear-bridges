@@ -88,7 +88,10 @@ impl MessagePaidEventExtractor {
             .filter_map(|event| {
                 BridgingPaymentEvents::decode_event(event)
                     .ok()
-                    .map(|BridgingPaymentEvents::BridgingPaid { nonce }| nonce)
+                    .and_then(|event| match event {
+                        BridgingPaymentEvents::BridgingPaid { nonce } => Some(nonce),
+                        _ => None,
+                    })
             });
 
         let mut total = 0;

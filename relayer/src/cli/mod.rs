@@ -67,6 +67,9 @@ pub struct GearEthCoreArgs {
     /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
+
+    /// An address of bridging payment contract for priority processing of merkle-roots when needed.
+    pub bridging_payment_address: Option<String>,
 }
 
 #[derive(Args)]

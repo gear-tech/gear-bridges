@@ -2,7 +2,7 @@ name: Deploy Frontend to k8s
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "release"]
+    branches: ['main', 'release']
     paths:
       - js/frontend/**
 
@@ -16,7 +16,7 @@ env:
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   AWS_REGION: ${{ secrets.AWS_REGION }}
   KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
-  KUBECTL_VERSION: "v1.22.17"
+  KUBECTL_VERSION: 'v1.22.17'
   KUBE_NAMESPACE: zk-bridge
   KUBE_DEPLOYMENT_PREFIX: zk-bridge
   REGISTRY: ghcr.io/${{ github.repository }}
@@ -85,6 +85,9 @@ jobs:
             VITE_TOKEN_PRICE_API_URL=${{ secrets.VITE_TOKEN_PRICE_API_URL }}
             VITE_FAUCET_API_URL=${{ secrets.VITE_FAUCET_API_URL }}
             VITE_HCAPTCHA_SITEKEY=${{ secrets.VITE_HCAPTCHA_SITEKEY }}
+            VITE_ETH_BEACON_NODE_ADDRESS=${{ secrets.VITE_ETH_BEACON_NODE_ADDRESS }}
+            VITE_CHECKPOINT_CLIENT_CONTRACT_ADDRESS=${{ secrets.VITE_CHECKPOINT_CLIENT_CONTRACT_ADDRESS }}
+            VITE_HISTORICAL_PROXY_CONTRACT_ADDRESS=${{ secrets.VITE_HISTORICAL_PROXY_CONTRACT_ADDRESS }}
             VITE_GTM_ID=${{ secrets.VITE_GTM_ID }}
 
   deploy-to-k8s:

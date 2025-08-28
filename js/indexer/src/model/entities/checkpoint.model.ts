@@ -5,7 +5,7 @@ import * as crypto from 'crypto';
 export class CheckpointSlot {
   constructor(props?: Partial<CheckpointSlot>) {
     Object.assign(this, props);
-    this.id = crypto.randomBytes(10).toString('hex');
+    this.id = crypto.randomUUID();
   }
 
   @PrimaryColumn()

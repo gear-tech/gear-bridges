@@ -98,7 +98,7 @@ jobs:
             "./target/wasm32-gear/release/eth_events_electra.idl"
             "./target/wasm32-gear/release/vft_manager.idl"
             "./target/wasm32-gear/release/historical_proxy.idl"
-            "./target/wasm32-gear/debug/checkpoint_light_client.idl"
+            "./target/wasm32-gear/release/checkpoint_light_client.idl"
           )
 
           for i in "${!stored[@]}"; do

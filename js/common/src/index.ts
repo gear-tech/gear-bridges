@@ -1,3 +1,1 @@
-import { getPairHash } from './get-pair-hash';
-
-export { getPairHash };
+export { createPairHash } from './pair-hash.js';

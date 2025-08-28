@@ -5,7 +5,8 @@ import tsPlugin from '@typescript-eslint/eslint-plugin';
 import importPlugin from 'eslint-plugin-import';
 import prettierConfig from 'eslint-config-prettier';
 
-const files = ['js/bridge-js/{src,test,example}/**/*.ts', 'js/indexer/src/**/*.ts'];
+const files = ['js/bridge-js/{src,test,example}/**/*.ts', 'js/indexer/src/**/*.ts', 'js/common/src/**/*.ts'];
+const project = ['./js/bridge-js/tsconfig.json', './js/indexer/tsconfig.json', './js/common/tsconfig.json'];
 const noUnusedVars = [
   'error',
   {
@@ -30,7 +31,7 @@ export default [
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
-        project: ['./js/bridge-js/tsconfig.json', './js/indexer/tsconfig.json'],
+        project,
       },
       globals: {
         node: true,

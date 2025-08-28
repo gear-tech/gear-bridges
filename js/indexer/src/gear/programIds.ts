@@ -1,4 +1,5 @@
 import { Client } from 'pg';
+import { ProgramName } from './util.js';
 
 const createClient = () =>
   new Client({
@@ -9,7 +10,7 @@ const createClient = () =>
     database: process.env.DB_NAME,
   });
 
-export async function init(programs: Record<string, string>): Promise<Map<string, string>> {
+export async function init(programs: Record<string, string>): Promise<Map<string, ProgramName>> {
   const client = createClient();
 
   await client.connect();

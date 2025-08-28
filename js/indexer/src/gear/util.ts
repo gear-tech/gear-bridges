@@ -1,5 +1,5 @@
-import { Event } from './processor';
-import { EthBridgeMessageQueuedEvent, MessageQueuedEvent, UserMessageSentEvent } from './types';
+import { EthBridgeMessageQueuedEvent, MessageQueuedEvent, UserMessageSentEvent } from './types/index.js';
+import { Event } from './processor.js';
 
 export function isMessageQueued(event: Event): event is MessageQueuedEvent {
   return event.name === 'Gear.MessageQueued';
@@ -21,6 +21,7 @@ export const enum ProgramName {
   VftManager = 'vft_manager',
   HistoricalProxy = 'historical_proxy',
   BridgingPayment = 'bridging_payment',
+  CheckpointClient = 'checkpoint_client',
 }
 
 export const enum VftManagerServices {
@@ -49,4 +50,12 @@ export const enum BridgingPaymentServices {
 
 export const enum BridgingPaymentMethods {
   BridgingPaid = 'BridgingPaid',
+}
+
+export const enum CheckpointClientServices {
+  ServiceSyncUpdate = 'ServiceSyncUpdate',
+}
+
+export const enum CheckpointClientMethods {
+  NewCheckpoint = 'NewCheckpoint',
 }

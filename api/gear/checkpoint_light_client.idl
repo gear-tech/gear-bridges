@@ -1,0 +1,144 @@
+type Init = struct {
+  network: Network,
+  sync_committee_current_pub_keys: FixedArrayForArrOf96U8,
+  sync_committee_current_aggregate_pubkey: BytesFixed,
+  sync_committee_current_branch: vec [u8, 32],
+  update: Update,
+  sync_aggregate_encoded: vec u8,
+};
+
+type Network = enum {
+  Mainnet,
+  Sepolia,
+  Holesky,
+  Hoodi,
+};
+
+/// A homogenous collection of a fixed number of values.
+/// 
+/// NOTE: collection of length `0` is illegal.
+type FixedArrayForArrOf96U8 = struct {
+  [[u8, 96], 512],
+};
+
+
+/// A homogenous collection of a fixed number of byte values.
+type BytesFixed = struct {
+  FixedArrayForU8,
+};
+
+/// A homogenous collection of a fixed number of values.
+/// 
+/// NOTE: collection of length `0` is illegal.
+type FixedArrayForU8 = struct {
+  [u8, 48],
+};
+
+type Update = struct {
+  signature_slot: u64,
+  attested_header: BlockHeader,
+  finalized_header: BlockHeader,
+  sync_committee_signature: [u8, 192],
+  sync_committee_next_aggregate_pubkey: opt BytesFixed,
+  sync_committee_next_pub_keys: opt FixedArrayForArrOf96U8,
+  sync_committee_next_branch: opt vec [u8, 32],
+  finality_branch: vec [u8, 32],
+};
+
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#beaconblockheader).
+type BlockHeader = struct {
+  slot: u64,
+  proposer_index: u64,
+  parent_root: h256,
+  state_root: h256,
+  body_root: h256,
+};
+
+
+type CheckpointError = enum {
+  OutDated,
+  NotPresent,
+};
+
+type ReplayBackStatus = enum {
+  InProcess,
+  Finished,
+};
+
+type ReplayBackError = enum {
+  AlreadyStarted,
+  NotStarted,
+  Verify: Error,
+  NoFinalityUpdate,
+};
+
+type Error = enum {
+  InvalidTimestamp,
+  InvalidPeriod,
+  LowVoteCount,
+  NotActual,
+  InvalidSignature,
+  InvalidFinalityProof,
+  InvalidNextSyncCommitteeProof,
+  InvalidPublicKeys,
+  InvalidSyncAggregate,
+  ReplayBackRequired: struct {
+    replay_back: opt ReplayBack,
+    checkpoint: struct { u64, h256 },
+  },
+};
+
+/// The struct contains slots of the finalized and the last checked headers.
+/// This is the state of the checkpoint backfilling process.
+type ReplayBack = struct {
+  finalized_header: u64,
+  last_header: u64,
+};
+
+type Order = enum {
+  Direct,
+  Reverse,
+};
+
+type StateData = struct {
+  checkpoints: vec struct { u64, h256 },
+  /// The field contains the data if the program is
+  /// replaying checkpoints back.
+  replay_back: opt ReplayBack,
+};
+
+constructor {
+  Init : (init: Init);
+};
+
+service ServiceCheckpointFor {
+  query Get : (slot: u64) -> result (struct { u64, h256 }, CheckpointError);
+};
+
+service ServiceReplayBack {
+  Process : (headers: vec BlockHeader) -> result (ReplayBackStatus, ReplayBackError);
+  Start : (sync_update: Update, sync_aggregate_encoded: vec u8, headers: vec BlockHeader) -> result (ReplayBackStatus, ReplayBackError);
+
+  events {
+    NewCheckpoint: struct {
+      slot: u64,
+      tree_hash_root: h256,
+    };
+  }
+};
+
+service ServiceState {
+  query Get : (order: Order, index_start: u32, count: u32) -> StateData;
+};
+
+service ServiceSyncUpdate {
+  Process : (sync_update: Update, sync_aggregate_encoded: vec u8) -> result (null, Error);
+
+  events {
+    NewCheckpoint: struct {
+      slot: u64,
+      tree_hash_root: h256,
+    };
+  }
+};
+

@@ -35,10 +35,12 @@ async fn test_inner(port: u16, protocol: &str) {
 
     let result = api.total_balance(api.account_id()).await;
     println!(r#"({protocol}) connection reset error: "{result:?}""#);
-    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
-        subxt::error::RpcError::ClientError(e),
-    ))) = result.err().unwrap()
+    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(subxt_error))) =
+        result.err().unwrap()
     else {
+        panic!("Not a ClientError, expected reset error");
+    };
+    let subxt::error::RpcError::ClientError(e) = &*subxt_error else {
         panic!("Not a ClientError, expected reset error");
     };
     let error_text = format!("{e:?}");
@@ -56,12 +58,16 @@ async fn test_inner(port: u16, protocol: &str) {
     let result = api.total_balance(api.account_id()).await;
     docker_stop(&name);
     println!(r#"({protocol}) timeout error: "{result:?}""#);
-    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(
-        subxt::error::RpcError::ClientError(e),
-    ))) = result.err().unwrap()
+    let GClientError::GearSDK(gsdk::Error::Subxt(subxt::Error::Rpc(subxt_error))) =
+        result.err().unwrap()
     else {
         panic!("Not a ClientError, expected timeout error");
     };
+
+    let subxt::error::RpcError::ClientError(e) = &*subxt_error else {
+        panic!("Not a ClientError, expected timeout error");
+    };
+
     let error_text = format!("{e:?}");
     assert_eq!(error_text, "RequestTimeout");
 }

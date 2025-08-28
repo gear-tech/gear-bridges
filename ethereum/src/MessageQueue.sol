@@ -285,30 +285,6 @@ contract MessageQueue is
     }
 
     /**
-     * @dev Disables emergency stop status and sets new verifier.
-     *      This function can only be called by emergency stop admin.
-     * @param newVerifier New verifier address.
-     *
-     * @dev Reverts if:
-     *      - Emergency stop status is not enabled.
-     *      - Caller is not emergency stop admin.
-     */
-    function disableEmergencyStop(address newVerifier) external {
-        if (!_emergencyStop) {
-            revert EmergencyStopNotEnabled();
-        }
-
-        if (msg.sender != _emergencyStopAdmin) {
-            revert NotEmergencyStopAdmin();
-        }
-
-        _emergencyStop = false;
-        _verifier = IVerifier(newVerifier);
-
-        emit EmergencyStopDisabled();
-    }
-
-    /**
      * @dev Checks if message was already processed.
      * @param messageNonce Message nonce to check.
      * @return isProcessed `true` if message was already processed, `false` otherwise.

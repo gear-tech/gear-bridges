@@ -399,9 +399,6 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
         assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStopNotEnabled.selector));
-        messageQueue.disableEmergencyStop(address(verifier));
-
         bytes32 previousMerkleRoot = merkleRoot;
         merkleRoot = bytes32(uint256(0x33));
 
@@ -417,9 +414,6 @@ contract MessageQueueTest is Test, Base {
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStop.selector));
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
-
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopAdmin.selector));
-        messageQueue.disableEmergencyStop(address(verifier));
 
         vm.startPrank(deploymentArguments.emergencyStopAdmin);
 
@@ -450,13 +444,6 @@ contract MessageQueueTest is Test, Base {
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), true);
-
-        vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.EmergencyStopDisabled();
-
-        messageQueue.disableEmergencyStop(address(verifier));
-
-        assertEq(messageQueue.isEmergencyStopped(), false);
 
         vm.stopPrank();
     }

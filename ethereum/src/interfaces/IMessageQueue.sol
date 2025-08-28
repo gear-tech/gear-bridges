@@ -54,22 +54,13 @@ interface IMessageQueue is IPausable {
     error MerkleRootAlreadySet(uint256 blockNumber);
 
     /**
-     * @dev Emergency stop is not enabled.
-     */
-    error EmergencyStopNotEnabled();
-
-    /**
-     * @dev Caller is not emergency stop admin.
-     */
-    error NotEmergencyStopAdmin();
-
-    /**
      * @dev Emitted when emergency stop status is enabled.
      */
     event EmergencyStopEnabled();
 
     /**
      * @dev Emitted when emergency stop status is disabled.
+     *      Should be emitted on upgradeV2 function of the smart contract.
      */
     event EmergencyStopDisabled();
 
@@ -184,17 +175,6 @@ interface IMessageQueue is IPausable {
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external;
-
-    /**
-     * @dev Disables emergency stop status and sets new verifier.
-     *      This function can only be called by emergency stop admin.
-     * @param newVerifier New verifier address.
-     *
-     * @dev Reverts if:
-     *      - Emergency stop status is not enabled.
-     *      - Caller is not emergency stop admin.
-     */
-    function disableEmergencyStop(address newVerifier) external;
 
     /**
      * @dev Checks if message was already processed.

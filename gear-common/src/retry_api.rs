@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use super::*;
 
 pub trait ErrorTrait: std::fmt::Debug {
@@ -64,7 +66,7 @@ impl ErrorTrait for GClientError {
 #[allow(dead_code)]
 struct ApiHolder<T, R, B: ApiBuilder>
 where
-    T: Future<Output = Result<R, B::Error>>,
+    T: Future<Output = AnyResult<R>>,
 {
     future: T,
     api: Pin<Box<B::Api>>,
@@ -72,36 +74,40 @@ where
 
 impl<T, R, B> ApiHolder<T, R, B>
 where
-    T: Future<Output = Result<R, B::Error>>,
+    T: Future<Output = AnyResult<R>>,
     B: ApiBuilder,
 {
-    pub fn new<F>(api: B::Api, mut retry_future: F) -> Self
+    pub fn new<'a, F>(api: B::Api, mut retry_future: F) -> Self
     where
-        F: FnMut(&B::Api) -> T,
+        F: FnMut(&'a B::Api) -> T,
     {
         let api = Box::pin(api);
-
+        let ptr = unsafe {
+            (&*api as *const <B as ApiBuilder>::Api)
+                .as_ref()
+                .expect("invalid box")
+        };
         Self {
-            future: retry_future(&api),
+            future: retry_future(ptr),
             api,
         }
     }
 
-    pub async fn call(self) -> Result<R, B::Error> {
+    pub async fn call(self) -> AnyResult<R> {
         self.future.await
     }
 }
 
-pub async fn retry_n<T, F, R, B>(
-    this: &mut Api,
+pub async fn retry_n<'a, T, F, R, B>(
+    this: &'a mut Api,
     mut retry_future: F,
     retries_max: usize,
     builder: B,
 ) -> AnyResult<R>
 where
     B: ApiBuilder,
-    F: FnMut(&B::Api) -> T,
-    T: Future<Output = Result<R, B::Error>>,
+    F: FnMut(&'a B::Api) -> T,
+    T: Future<Output = AnyResult<R>> + 'a,
 {
     let mut retries_timeout = 0;
 
@@ -129,18 +135,20 @@ where
             Ok(v) => return Ok(v),
 
             Err(e) => {
-                if e.is_timeout() && retries_timeout < retries_max {
-                    retries_timeout += 1;
-                    // TODO: sleep
-                    continue;
+                if let Some(e) = e.downcast_ref::<B::Error>() {
+                    if e.is_timeout() && retries_timeout < retries_max {
+                        retries_timeout += 1;
+                        // TODO: sleep
+                        continue;
+                    }
+
+                    if e.is_transport() {
+                        this.0.reconnect().await?;
+                        continue;
+                    }
                 }
 
-                if e.is_transport() {
-                    this.0.reconnect().await?;
-                    continue;
-                }
-
-                return Err(anyhow!("{e:?}"));
+                return Err(e);
             }
         }
     }
@@ -153,25 +161,36 @@ impl Api {
         Self(connection)
     }
 
-    pub async fn retry_n<T, F, R, E, B: ApiBuilder>(
-        &mut self,
+    pub async fn retry_n<'a, T, F, R, B: ApiBuilder>(
+        &'a mut self,
         retry_future: F,
         retries_max: usize,
         builder: B,
     ) -> AnyResult<R>
     where
-        F: FnMut(&B::Api) -> T,
-        T: Future<Output = Result<R, B::Error>>,
+        F: FnMut(&'a B::Api) -> T,
+        T: 'a + Future<Output = AnyResult<R>>,
     {
         self::retry_n(self, retry_future, retries_max, builder).await
     }
 }
 
 pub trait ApiBuilder {
-    type Error: ErrorTrait;
-    type Api;
+    type Error: ErrorTrait + Send + Sync + Display + 'static;
+    type Api: 'static;
 
     fn build(&self, conn: &mut ApiProviderConnection) -> Result<Self::Api, Self::Error>;
+}
+
+pub struct GearApiBuilder;
+
+impl ApiBuilder for GearApiBuilder {
+    type Error = GClientError;
+    type Api = GearApi;
+
+    fn build(&self, conn: &mut ApiProviderConnection) -> Result<Self::Api, Self::Error> {
+        Ok(conn.client())
+    }
 }
 
 pub struct GClientApiBuilder;

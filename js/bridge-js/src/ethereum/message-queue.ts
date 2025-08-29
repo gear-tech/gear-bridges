@@ -236,7 +236,14 @@ export class MessageQueueClient {
         account: this._account,
       });
 
-      statusCb(`Sending processMessage transaction`, { args: request.args.map((a) => a.toString()) });
+      statusCb(`Sending processMessage transaction`, {
+        args: JSON.stringify(request.args, (_, value) => {
+          if (typeof value === 'bigint') {
+            return value.toString();
+          }
+          return value;
+        }),
+      });
 
       const hash = await this._walletClient.writeContract({
         address: this._address,

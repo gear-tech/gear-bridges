@@ -89,7 +89,9 @@ const main = async () => {
     PING_METHOD_NAME,
     account,
     undefined,
-    false,
+    (status, details) => {
+      console.log(`[relayEthToVara]: ${status}`, details);
+    },
   );
 
   if (error) {

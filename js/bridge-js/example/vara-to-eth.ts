@@ -8,7 +8,6 @@ import dotenv from 'dotenv';
 import assert from 'assert';
 
 import { decodeEthBridgeMessageResponse, relayVaraToEth, waitForMerkleRootAppearedInMessageQueue } from '../src';
-import { initLogger, logger } from '../src/util';
 
 dotenv.config({ quiet: true });
 
@@ -32,8 +31,6 @@ const [nonceArg, blockNumberArg] = process.argv.slice(2).map((arg) => {
 });
 
 const main = async () => {
-  initLogger(false);
-
   const ethTransport = webSocket(ETH_WS_RPC);
   const publicClient = createPublicClient({ transport: ethTransport });
   const gearApi = await GearApi.create({ providerAddress: VARA_WS_RPC, noInitWarn: true });
@@ -49,7 +46,9 @@ const main = async () => {
       ethAccount,
       gearApi,
       MESSAGE_QUEUE_ADDRESS,
-      false,
+      (status, details) => {
+        console.log(`[relayEthToVara]: ${status}`, details);
+      },
     );
   }
 
@@ -61,7 +60,7 @@ const main = async () => {
 
   const ethBridgePayload = concatBytes(Uint8Array.from([0]), destination, payload);
 
-  logger.info(`Sending message ${bytesToHex(ethBridgePayload)} to bridge builtin`);
+  console.log(`Sending message ${bytesToHex(ethBridgePayload)} to bridge builtin`);
 
   const tx = gearApi.message.send({
     destination: GEAR_BRIDGE_BUILTIN,
@@ -82,7 +81,7 @@ const main = async () => {
 
   const msgBn = await gearApi.blocks.getBlockNumber(blockHash);
 
-  logger.info(`Message sent in block ${msgBn.toNumber()} with id ${msgId}`);
+  console.log(`Message sent in block ${msgBn.toNumber()} with id ${msgId}`);
 
   const ethBridgeMessages = new Map<string, { nonce: bigint; blockhash: HexString }>();
 
@@ -103,7 +102,7 @@ const main = async () => {
       const hash = event.data[1].toHex();
       const nonce = event.data[0]['nonce'].toBigInt();
       ethBridgeMessages.set(hash, { nonce, blockhash });
-      logger.info(`Received new eth bridge message ${hash} with nonce ${nonce} in block ${bn.toNumber()}`);
+      console.log(`Received new eth bridge message ${hash} with nonce ${nonce} in block ${bn.toNumber()}`);
     }
   });
 
@@ -111,13 +110,13 @@ const main = async () => {
 
   const { nonce, hash, nonceLe } = decodeEthBridgeMessageResponse(reply.data.message.payload.toU8a());
 
-  logger.info(`Got reply with nonce ${nonce} (${nonceLe}) and hash ${hash}`);
+  console.log(`Got reply with nonce ${nonce} (${nonceLe}) and hash ${hash}`);
 
   let ethBridgeMessage: { nonce: bigint; blockhash: HexString } | undefined = undefined;
 
   while (!ethBridgeMessage) {
     if (!ethBridgeMessages.has(hash)) {
-      logger.info(`Waiting for eth bridge message ${hash}`);
+      console.log(`Waiting for eth bridge message ${hash}`);
     } else {
       ethBridgeMessage = ethBridgeMessages.get(hash);
     }
@@ -137,7 +136,9 @@ const main = async () => {
     ethAccount,
     gearApi,
     MESSAGE_QUEUE_ADDRESS,
-    false,
+    (status, details) => {
+      console.log(`[relayEthToVara]: ${status}`, details);
+    },
   );
 };
 

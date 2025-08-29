@@ -4,7 +4,12 @@ import { createServer } from 'node:http';
 import express from 'express';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
-import { DefaultLimitPlugin, PairsAliasPlugin, TransferAliasPlugin, TransferCountSubscriptionPlugin } from './plugins';
+import {
+  DefaultLimitPlugin,
+  PairsAliasPlugin,
+  TransferAliasPlugin,
+  TransferCountSubscriptionPlugin,
+} from './plugins/index.js';
 
 dotenv.config();
 
@@ -26,7 +31,7 @@ async function main() {
     extendedErrors: ['hint', 'detail', 'errcode'],
     allowExplain: isDev,
     legacyRelations: 'omit',
-    exportGqlSchemaPath: `${__dirname}/schema.graphql`,
+    exportGqlSchemaPath: `lib/schema.graphql`,
     sortExport: true,
     appendPlugins: [
       await TransferCountSubscriptionPlugin(dbPool),

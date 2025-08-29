@@ -236,7 +236,7 @@ export class MessageQueueClient {
         account: this._account,
       });
 
-      statusCb(`Sending processMessage transaction`, { args: request.args.map((a) => a.toString()).join(',') });
+      statusCb(`Sending processMessage transaction`, { args: request.args.map((a) => a.toString()) });
 
       const hash = await this._walletClient.writeContract({
         address: this._address,

@@ -37,5 +37,5 @@ class _EthereumClient implements EthereumClient {
 }
 
 export function createEthereumClient(client: PublicClient, beaconClient: BeaconClient): EthereumClient {
-  return new _EthereumClient(client, beaconClient.genesisBlockTime);
+  return new _EthereumClient(client, beaconClient);
 }

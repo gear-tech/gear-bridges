@@ -81,6 +81,79 @@ export type BooleanFilter = {
   notIn: InputMaybe<Array<Scalars['Boolean']['input']>>;
 };
 
+export type CheckpointSlot = Node & {
+  __typename?: 'CheckpointSlot';
+  id: Scalars['String']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  nodeId: Scalars['ID']['output'];
+  slot: Scalars['BigInt']['output'];
+  treeHashRoot: Scalars['String']['output'];
+};
+
+/**
+ * A condition to be used against `CheckpointSlot` object types. All fields are
+ * tested for equality and combined with a logical ‘and.’
+ */
+export type CheckpointSlotCondition = {
+  /** Checks for equality with the object’s `id` field. */
+  id: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `slot` field. */
+  slot: InputMaybe<Scalars['BigInt']['input']>;
+  /** Checks for equality with the object’s `treeHashRoot` field. */
+  treeHashRoot: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A filter to be used against `CheckpointSlot` object types. All fields are combined with a logical ‘and.’ */
+export type CheckpointSlotFilter = {
+  /** Checks for all expressions in this list. */
+  and: InputMaybe<Array<CheckpointSlotFilter>>;
+  /** Filter by the object’s `id` field. */
+  id: InputMaybe<StringFilter>;
+  /** Negates the expression. */
+  not: InputMaybe<CheckpointSlotFilter>;
+  /** Checks for any expressions in this list. */
+  or: InputMaybe<Array<CheckpointSlotFilter>>;
+  /** Filter by the object’s `slot` field. */
+  slot: InputMaybe<BigIntFilter>;
+  /** Filter by the object’s `treeHashRoot` field. */
+  treeHashRoot: InputMaybe<StringFilter>;
+};
+
+/** A connection to a list of `CheckpointSlot` values. */
+export type CheckpointSlotsConnection = {
+  __typename?: 'CheckpointSlotsConnection';
+  /** A list of edges which contains the `CheckpointSlot` and cursor to aid in pagination. */
+  edges: Array<CheckpointSlotsEdge>;
+  /** A list of `CheckpointSlot` objects. */
+  nodes: Array<CheckpointSlot>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `CheckpointSlot` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `CheckpointSlot` edge in the connection. */
+export type CheckpointSlotsEdge = {
+  __typename?: 'CheckpointSlotsEdge';
+  /** A cursor for use in pagination. */
+  cursor: Maybe<Scalars['Cursor']['output']>;
+  /** The `CheckpointSlot` at the end of the edge. */
+  node: CheckpointSlot;
+};
+
+/** Methods to use when ordering `CheckpointSlot`. */
+export enum CheckpointSlotsOrderBy {
+  IdAsc = 'ID_ASC',
+  IdDesc = 'ID_DESC',
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  SlotAsc = 'SLOT_ASC',
+  SlotDesc = 'SLOT_DESC',
+  TreeHashRootAsc = 'TREE_HASH_ROOT_ASC',
+  TreeHashRootDesc = 'TREE_HASH_ROOT_DESC',
+}
+
 /** A filter to be used against Datetime fields. All fields are combined with a logical ‘and.’ */
 export type DatetimeFilter = {
   /** Not equal to the specified value, treating null like an ordinary value. */
@@ -278,6 +351,79 @@ export type IntFilter = {
   /** Not included in the specified list. */
   notIn: InputMaybe<Array<Scalars['Int']['input']>>;
 };
+
+export type MerkleRootInMessageQueue = Node & {
+  __typename?: 'MerkleRootInMessageQueue';
+  blockNumber: Scalars['BigInt']['output'];
+  id: Scalars['String']['output'];
+  merkleRoot: Scalars['String']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  nodeId: Scalars['ID']['output'];
+};
+
+/**
+ * A condition to be used against `MerkleRootInMessageQueue` object types. All
+ * fields are tested for equality and combined with a logical ‘and.’
+ */
+export type MerkleRootInMessageQueueCondition = {
+  /** Checks for equality with the object’s `blockNumber` field. */
+  blockNumber: InputMaybe<Scalars['BigInt']['input']>;
+  /** Checks for equality with the object’s `id` field. */
+  id: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `merkleRoot` field. */
+  merkleRoot: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A filter to be used against `MerkleRootInMessageQueue` object types. All fields are combined with a logical ‘and.’ */
+export type MerkleRootInMessageQueueFilter = {
+  /** Checks for all expressions in this list. */
+  and: InputMaybe<Array<MerkleRootInMessageQueueFilter>>;
+  /** Filter by the object’s `blockNumber` field. */
+  blockNumber: InputMaybe<BigIntFilter>;
+  /** Filter by the object’s `id` field. */
+  id: InputMaybe<StringFilter>;
+  /** Filter by the object’s `merkleRoot` field. */
+  merkleRoot: InputMaybe<StringFilter>;
+  /** Negates the expression. */
+  not: InputMaybe<MerkleRootInMessageQueueFilter>;
+  /** Checks for any expressions in this list. */
+  or: InputMaybe<Array<MerkleRootInMessageQueueFilter>>;
+};
+
+/** A connection to a list of `MerkleRootInMessageQueue` values. */
+export type MerkleRootInMessageQueuesConnection = {
+  __typename?: 'MerkleRootInMessageQueuesConnection';
+  /** A list of edges which contains the `MerkleRootInMessageQueue` and cursor to aid in pagination. */
+  edges: Array<MerkleRootInMessageQueuesEdge>;
+  /** A list of `MerkleRootInMessageQueue` objects. */
+  nodes: Array<MerkleRootInMessageQueue>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `MerkleRootInMessageQueue` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `MerkleRootInMessageQueue` edge in the connection. */
+export type MerkleRootInMessageQueuesEdge = {
+  __typename?: 'MerkleRootInMessageQueuesEdge';
+  /** A cursor for use in pagination. */
+  cursor: Maybe<Scalars['Cursor']['output']>;
+  /** The `MerkleRootInMessageQueue` at the end of the edge. */
+  node: MerkleRootInMessageQueue;
+};
+
+/** Methods to use when ordering `MerkleRootInMessageQueue`. */
+export enum MerkleRootInMessageQueuesOrderBy {
+  BlockNumberAsc = 'BLOCK_NUMBER_ASC',
+  BlockNumberDesc = 'BLOCK_NUMBER_DESC',
+  IdAsc = 'ID_ASC',
+  IdDesc = 'ID_DESC',
+  MerkleRootAsc = 'MERKLE_ROOT_ASC',
+  MerkleRootDesc = 'MERKLE_ROOT_DESC',
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+}
 
 export enum NetworkEnum {
   Ethereum = 'ETHEREUM',
@@ -486,20 +632,31 @@ export enum PairsOrderBy {
 /** The root query type which gives access points into the data universe. */
 export type Query = Node & {
   __typename?: 'Query';
+  /** Reads and enables pagination through a set of `CheckpointSlot`. */
+  allCheckpointSlots: Maybe<CheckpointSlotsConnection>;
   /** Reads and enables pagination through a set of `GearEthBridgeMessage`. */
   allGearEthBridgeMessages: Maybe<GearEthBridgeMessagesConnection>;
   /** Reads and enables pagination through a set of `GearProgram`. */
   allGearPrograms: Maybe<GearProgramsConnection>;
+  /** Reads and enables pagination through a set of `MerkleRootInMessageQueue`. */
+  allMerkleRootInMessageQueues: Maybe<MerkleRootInMessageQueuesConnection>;
   /** Reads and enables pagination through a set of `Pair`. */
   allPairs: Maybe<PairsConnection>;
   /** Reads and enables pagination through a set of `Transfer`. */
   allTransfers: Maybe<TransfersConnection>;
+  /** Reads a single `CheckpointSlot` using its globally unique `ID`. */
+  checkpointSlot: Maybe<CheckpointSlot>;
+  checkpointSlotById: Maybe<CheckpointSlot>;
   /** Reads a single `GearEthBridgeMessage` using its globally unique `ID`. */
   gearEthBridgeMessage: Maybe<GearEthBridgeMessage>;
   gearEthBridgeMessageById: Maybe<GearEthBridgeMessage>;
   /** Reads a single `GearProgram` using its globally unique `ID`. */
   gearProgram: Maybe<GearProgram>;
   gearProgramByName: Maybe<GearProgram>;
+  /** Reads a single `MerkleRootInMessageQueue` using its globally unique `ID`. */
+  merkleRootInMessageQueue: Maybe<MerkleRootInMessageQueue>;
+  merkleRootInMessageQueueByBlockNumber: Maybe<MerkleRootInMessageQueue>;
+  merkleRootInMessageQueueById: Maybe<MerkleRootInMessageQueue>;
   /** Fetches an object given its globally unique `ID`. */
   node: Maybe<Node>;
   /** The root query type must be a `Node` to work well with Relay 1 mutations. This just resolves to `query`. */
@@ -517,6 +674,18 @@ export type Query = Node & {
   transfer: Maybe<Transfer>;
   transferById: Maybe<Transfer>;
   transfers: Array<Maybe<Transfer>>;
+};
+
+/** The root query type which gives access points into the data universe. */
+export type QueryAllCheckpointSlotsArgs = {
+  after: InputMaybe<Scalars['Cursor']['input']>;
+  before: InputMaybe<Scalars['Cursor']['input']>;
+  condition: InputMaybe<CheckpointSlotCondition>;
+  filter: InputMaybe<CheckpointSlotFilter>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  last: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<CheckpointSlotsOrderBy>>;
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -544,6 +713,18 @@ export type QueryAllGearProgramsArgs = {
 };
 
 /** The root query type which gives access points into the data universe. */
+export type QueryAllMerkleRootInMessageQueuesArgs = {
+  after: InputMaybe<Scalars['Cursor']['input']>;
+  before: InputMaybe<Scalars['Cursor']['input']>;
+  condition: InputMaybe<MerkleRootInMessageQueueCondition>;
+  filter: InputMaybe<MerkleRootInMessageQueueFilter>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  last: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<MerkleRootInMessageQueuesOrderBy>>;
+};
+
+/** The root query type which gives access points into the data universe. */
 export type QueryAllPairsArgs = {
   after: InputMaybe<Scalars['Cursor']['input']>;
   before: InputMaybe<Scalars['Cursor']['input']>;
@@ -568,6 +749,16 @@ export type QueryAllTransfersArgs = {
 };
 
 /** The root query type which gives access points into the data universe. */
+export type QueryCheckpointSlotArgs = {
+  nodeId: Scalars['ID']['input'];
+};
+
+/** The root query type which gives access points into the data universe. */
+export type QueryCheckpointSlotByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+/** The root query type which gives access points into the data universe. */
 export type QueryGearEthBridgeMessageArgs = {
   nodeId: Scalars['ID']['input'];
 };
@@ -585,6 +776,21 @@ export type QueryGearProgramArgs = {
 /** The root query type which gives access points into the data universe. */
 export type QueryGearProgramByNameArgs = {
   name: Scalars['String']['input'];
+};
+
+/** The root query type which gives access points into the data universe. */
+export type QueryMerkleRootInMessageQueueArgs = {
+  nodeId: Scalars['ID']['input'];
+};
+
+/** The root query type which gives access points into the data universe. */
+export type QueryMerkleRootInMessageQueueByBlockNumberArgs = {
+  blockNumber: Scalars['BigInt']['input'];
+};
+
+/** The root query type which gives access points into the data universe. */
+export type QueryMerkleRootInMessageQueueByIdArgs = {
+  id: Scalars['String']['input'];
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -1016,6 +1222,24 @@ export type TransfersCountQueryQuery = {
   allTransfers: { __typename?: 'TransfersConnection'; totalCount: number } | null;
 };
 
+export type CheckpointSlotsQueryQueryVariables = Exact<{
+  slot: Scalars['BigInt']['input'];
+}>;
+
+export type CheckpointSlotsQueryQuery = {
+  __typename?: 'Query';
+  allCheckpointSlots: { __typename?: 'CheckpointSlotsConnection'; totalCount: number } | null;
+};
+
+export type MerkelRootInMessageQueuesQueryQueryVariables = Exact<{
+  blockNumber: Scalars['BigInt']['input'];
+}>;
+
+export type MerkelRootInMessageQueuesQueryQuery = {
+  __typename?: 'Query';
+  allMerkleRootInMessageQueues: { __typename?: 'MerkleRootInMessageQueuesConnection'; totalCount: number } | null;
+};
+
 export const TransfersQueryDocument = {
   kind: 'Document',
   definitions: [
@@ -1239,3 +1463,113 @@ export const TransfersCountQueryDocument = {
     },
   ],
 } as unknown as DocumentNode<TransfersCountQueryQuery, TransfersCountQueryQueryVariables>;
+export const CheckpointSlotsQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'CheckpointSlotsQuery' },
+      variableDefinitions: [
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'slot' } },
+          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'BigInt' } } },
+        },
+      ],
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'allCheckpointSlots' },
+            arguments: [
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'filter' },
+                value: {
+                  kind: 'ObjectValue',
+                  fields: [
+                    {
+                      kind: 'ObjectField',
+                      name: { kind: 'Name', value: 'slot' },
+                      value: {
+                        kind: 'ObjectValue',
+                        fields: [
+                          {
+                            kind: 'ObjectField',
+                            name: { kind: 'Name', value: 'greaterThanOrEqualTo' },
+                            value: { kind: 'Variable', name: { kind: 'Name', value: 'slot' } },
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<CheckpointSlotsQueryQuery, CheckpointSlotsQueryQueryVariables>;
+export const MerkelRootInMessageQueuesQueryDocument = {
+  kind: 'Document',
+  definitions: [
+    {
+      kind: 'OperationDefinition',
+      operation: 'query',
+      name: { kind: 'Name', value: 'MerkelRootInMessageQueuesQuery' },
+      variableDefinitions: [
+        {
+          kind: 'VariableDefinition',
+          variable: { kind: 'Variable', name: { kind: 'Name', value: 'blockNumber' } },
+          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'BigInt' } } },
+        },
+      ],
+      selectionSet: {
+        kind: 'SelectionSet',
+        selections: [
+          {
+            kind: 'Field',
+            name: { kind: 'Name', value: 'allMerkleRootInMessageQueues' },
+            arguments: [
+              {
+                kind: 'Argument',
+                name: { kind: 'Name', value: 'filter' },
+                value: {
+                  kind: 'ObjectValue',
+                  fields: [
+                    {
+                      kind: 'ObjectField',
+                      name: { kind: 'Name', value: 'blockNumber' },
+                      value: {
+                        kind: 'ObjectValue',
+                        fields: [
+                          {
+                            kind: 'ObjectField',
+                            name: { kind: 'Name', value: 'greaterThanOrEqualTo' },
+                            value: { kind: 'Variable', name: { kind: 'Name', value: 'blockNumber' } },
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            selectionSet: {
+              kind: 'SelectionSet',
+              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
+            },
+          },
+        ],
+      },
+    },
+  ],
+} as unknown as DocumentNode<MerkelRootInMessageQueuesQueryQuery, MerkelRootInMessageQueuesQueryQueryVariables>;

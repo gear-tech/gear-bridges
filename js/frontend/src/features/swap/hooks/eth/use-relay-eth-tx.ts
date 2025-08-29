@@ -14,27 +14,30 @@ function useRelayEthTx(txHash: HexString) {
 
   const publicClient = usePublicClient();
 
-  const relay = () => {
+  const relay = async (onLog: (message: string) => void) => {
     definedAssert(api, 'API');
     definedAssert(account, 'Account');
     definedAssert(publicClient, 'Ethereum Public Client');
 
-    const clientId = '0x00';
-
-    return relayEthToVara(
+    const { error, ok, ...result } = await relayEthToVara(
       txHash,
       ETH_BEACON_NODE_ADDRESS,
       publicClient,
       api,
       CONTRACT_ADDRESS.CHECKPOINT_CLIENT,
       CONTRACT_ADDRESS.HISTORICAL_PROXY,
-      clientId,
-      'serviceName',
-      'methodName',
+      CONTRACT_ADDRESS.VFT_MANAGER,
+      'VftManager',
+      'SubmitReceipt',
       account.decodedAddress,
       { signer: account.signer },
-      false,
+      onLog,
     );
+
+    if (error) throw new Error(JSON.stringify(error));
+    if (!ok) throw new Error('Failed to relay Ethereum transaction');
+
+    return result;
   };
 
   return useMutation({ mutationFn: relay });

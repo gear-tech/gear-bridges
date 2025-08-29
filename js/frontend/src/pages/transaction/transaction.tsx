@@ -11,6 +11,7 @@ import { TransactionStatus } from '@/features/history/components/transaction-sta
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
 import { PayVaraFeeButton, RelayTxButton } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
+import { useEthAccount } from '@/hooks';
 
 import { Field } from './field';
 import { SectionCard } from './section-card';
@@ -79,6 +80,7 @@ function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
 
 function Transaction() {
   const { account } = useAccount();
+  const ethAccount = useEthAccount();
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
@@ -116,7 +118,8 @@ function Transaction() {
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
-  const isPayFeeButtonVisible = account?.decodedAddress === sender && status === StatusEnum.AwaitingPayment;
+  const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
+  const isOwner = account?.decodedAddress === sender;
   const rawNonce = isVaraNetwork ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
@@ -130,17 +133,15 @@ function Transaction() {
         <div className={styles.sidebar}>
           <TransactionStatus status={status} />
 
-          {isPayFeeButtonVisible && (
-            <>
-              <PayVaraFeeButton transactionId={id} nonce={rawNonce} />
+          {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
 
-              {isVaraNetwork ? (
-                <RelayTxButton.Vara nonce={rawNonce as HexString} blockNumber={BigInt(blockNumber)} />
-              ) : (
-                <RelayTxButton.Eth txHash={txHash as HexString} />
-              )}
-            </>
-          )}
+          {isAwaitingPayment &&
+            bridgingStartedAtBlock &&
+            (isVaraNetwork
+              ? ethAccount.address && (
+                  <RelayTxButton.Vara nonce={rawNonce as HexString} blockNumber={bridgingStartedAtBlock} />
+                )
+              : account && <RelayTxButton.Eth txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} />)}
         </div>
       </header>
 

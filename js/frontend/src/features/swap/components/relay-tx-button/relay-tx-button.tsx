@@ -1,46 +1,59 @@
 import { HexString } from '@gear-js/api';
-import { useAlert } from '@gear-js/react-hooks';
+import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 
 import { getErrorMessage } from '@/utils';
 
-import { useRelayEthTx, useRelayVaraTx } from '../../hooks';
+import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
 
 type VaraProps = {
-  nonce: bigint | HexString;
-  blockNumber: bigint;
+  nonce: HexString;
+  blockNumber: string;
 };
 
 function RelayVaraTxButton({ nonce, blockNumber }: VaraProps) {
   const alert = useAlert();
-  const { mutateAsync, isPending } = useRelayVaraTx(nonce, blockNumber);
 
-  const handleClick = () =>
-    mutateAsync()
-      .then((result) => {
-        console.log(result);
-      })
-      .catch((error: Error) => alert.error(getErrorMessage(error)));
+  const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
+  const { mutateAsync, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
 
-  return <Button text="Manual Claim" size="x-small" onClick={handleClick} isLoading={isPending} />;
+  const handleClick = () => {
+    const alertId = alert.loading('Relaying Vara transaction...');
+    const onLog = (message: string) => alert.update(alertId, message);
+
+    mutateAsync(onLog)
+      .then(() => alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS))
+      .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
+  };
+
+  return (
+    <Button text="Manual Claim" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
+  );
 }
 
 type EthProps = {
+  blockNumber: bigint;
   txHash: HexString;
 };
 
-function RelayEthTxButton({ txHash }: EthProps) {
+function RelayEthTxButton({ txHash, blockNumber }: EthProps) {
   const alert = useAlert();
+
+  const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
   const { mutateAsync, isPending } = useRelayEthTx(txHash);
 
-  const handleClick = () =>
-    mutateAsync()
-      .then((result) => {
-        console.log(result);
-      })
-      .catch((error: Error) => alert.error(getErrorMessage(error)));
+  const handleClick = () => {
+    const alertId = alert.loading('Relaying Ethereum transaction...');
+    const onLog = (message: string) => alert.update(alertId, message);
 
-  return <Button text="Manual Claim" size="x-small" onClick={handleClick} isLoading={isPending} />;
+    mutateAsync(onLog)
+      .then(() => alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS))
+      .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
+  };
+
+  return (
+    <Button text="Manual Claim" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
+  );
 }
 
 const RelayTxButton = {

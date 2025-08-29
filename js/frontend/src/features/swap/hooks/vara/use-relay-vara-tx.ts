@@ -8,17 +8,17 @@ import { definedAssert } from '@/utils';
 
 import { CONTRACT_ADDRESS } from '../../consts';
 
-function useRelayVaraTx(nonce: bigint | HexString, blockNumber: bigint) {
+function useRelayVaraTx(nonce: HexString, blockNumber: bigint) {
   const { api } = useApi();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
 
-  const relay = () => {
+  const relay = async (onLog: (message: string) => void) => {
     definedAssert(api, 'API');
     definedAssert(publicClient, 'Ethereum Public Client');
     definedAssert(walletClient, 'Wallet Client');
 
-    return relayVaraToEth(
+    const { error, success, ...result } = await relayVaraToEth(
       nonce,
       blockNumber,
       publicClient,
@@ -26,8 +26,13 @@ function useRelayVaraTx(nonce: bigint | HexString, blockNumber: bigint) {
       walletClient.account,
       api,
       CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
-      false,
+      onLog,
     );
+
+    if (error) throw new Error(error);
+    if (!success) throw new Error('Failed to relay Vara transaction');
+
+    return result;
   };
 
   return useMutation({ mutationFn: relay });

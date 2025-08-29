@@ -1,11 +1,11 @@
 import { Account, PublicClient, WalletClient, zeroHash, parseEventLogs } from 'viem';
 import { bytesToHex } from '@ethereumjs/util';
+import { bytesToBigint } from 'viem/utils';
 import { bnToU8a } from '@polkadot/util';
 
 import { MerkleRootLog, MerkleRootLogArgs, MessageProcessResult } from './types.js';
 import { Proof, VaraMessage } from '../vara/types.js';
-import { logger } from '../util.js';
-import { bytesToBigint } from 'viem/utils';
+import { StatusCb } from '../util.js';
 
 const MerkleRootEventAbi = [
   {
@@ -139,7 +139,7 @@ export class MessageQueueClient {
     }
   }
 
-  public async waitForMerkleRoot(bn: bigint): Promise<MerkleRootLogArgs> {
+  public async waitForMerkleRoot(bn: bigint, statusCb: StatusCb): Promise<MerkleRootLogArgs> {
     const result = await new Promise<MerkleRootLogArgs>((resolve, reject) => {
       const unwatch = this._client.watchContractEvent({
         address: this._address,
@@ -149,7 +149,7 @@ export class MessageQueueClient {
           for (const log of logs) {
             if ('args' in log) {
               const { blockNumber, merkleRoot } = log.args as MerkleRootLogArgs;
-              logger.info(`Received merkle root ${merkleRoot} for block ${blockNumber}`);
+              statusCb(`Received merkle root`, { blockNumber: blockNumber.toString(), merkleRoot });
               if (blockNumber >= bn) {
                 unwatch();
                 return resolve({ blockNumber, merkleRoot });
@@ -222,6 +222,7 @@ export class MessageQueueClient {
     blockNumber: bigint,
     varaMessage: VaraMessage,
     merkleProof: Proof,
+    statusCb: StatusCb,
   ): Promise<MessageProcessResult> {
     if (!this._walletClient || !this._account) {
       throw new Error('Wallet client must be provided');
@@ -235,14 +236,7 @@ export class MessageQueueClient {
         account: this._account,
       });
 
-      logger.info(
-        `Sending processMessage transaction ${JSON.stringify(request.args, (_, value) => {
-          if (typeof value === 'bigint') {
-            return value.toString();
-          }
-          return value;
-        })}`,
-      );
+      statusCb(`Sending processMessage transaction`, { args: request.args.map((a) => a.toString()).join(',') });
 
       const hash = await this._walletClient.writeContract({
         address: this._address,
@@ -253,11 +247,11 @@ export class MessageQueueClient {
         chain: this._walletClient.chain,
       });
 
-      logger.info(`Waiting for transaction receipt ${hash}`);
+      statusCb(`Waiting for transaction receipt`, { txHash: hash });
 
       const receipt = await this._client.waitForTransactionReceipt({ hash });
 
-      logger.info(`Transaction receipt received ${hash}`);
+      statusCb(`Transaction receipt received`, { txHash: hash });
 
       const [messageProcessed] = parseEventLogs({
         abi: MessageQueueAbi,
@@ -266,7 +260,7 @@ export class MessageQueueClient {
       });
 
       if (messageProcessed) {
-        logger.info(`Message processed event received ${hash}`);
+        statusCb(`Message processed event received`, { txHash: hash });
 
         const { args } = messageProcessed;
 
@@ -279,7 +273,7 @@ export class MessageQueueClient {
           messageDestination: args.messageDestination,
         };
       } else {
-        logger.info(`Message processed event not found in transaction receipt ${hash}`);
+        statusCb(`Message processed event not found in transaction receipt`, { txHash: hash });
         return {
           success: false,
           transactionHash: hash,
@@ -287,14 +281,15 @@ export class MessageQueueClient {
         };
       }
     } catch (error: any) {
-      logger.error(
-        `Error processing message queue transaction ${error}. args: ${JSON.stringify(error.args, (_, value) => {
+      statusCb(`Error processing message queue transaction`, {
+        error: error.message,
+        args: JSON.stringify(error.args, (_, value) => {
           if (typeof value === 'bigint') {
             return value.toString();
           }
           return value;
-        })}`,
-      );
+        }),
+      });
       return {
         success: false,
         transactionHash: '0x' as `0x${string}`,
@@ -325,8 +320,12 @@ export async function waitForMerkleRootAppearedInMessageQueue(
   blockNumber: bigint,
   publicClient: PublicClient,
   messageQueueAddress: `0x${string}`,
+  statusCb?: StatusCb,
 ): Promise<boolean> {
+  if (!statusCb) {
+    statusCb = () => {};
+  }
   const client = getMessageQueueClient(messageQueueAddress, publicClient);
-  await client.waitForMerkleRoot(blockNumber);
+  await client.waitForMerkleRoot(blockNumber, statusCb);
   return true;
 }

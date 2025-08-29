@@ -1,4 +1,4 @@
-export { relayEthToVara } from './eth-to-vara';
-export { relayVaraToEth } from './vara-to-eth';
-export { waitForMerkleRootAppearedInMessageQueue } from './ethereum';
-export { decodeEthBridgeMessageResponse } from './vara';
+export { waitForMerkleRootAppearedInMessageQueue, getSlotByBlockNumber } from './ethereum/index.js';
+export { decodeEthBridgeMessageResponse } from './vara/index.js';
+export { relayEthToVara } from './eth-to-vara/index.js';
+export { relayVaraToEth } from './vara-to-eth/index.js';

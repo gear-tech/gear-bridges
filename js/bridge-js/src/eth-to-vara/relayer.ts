@@ -3,10 +3,9 @@ import { SignerOptions } from '@polkadot/api/types';
 import { GearApi } from '@gear-js/api';
 import { PublicClient } from 'viem';
 
-import { CheckpointClient, encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError } from '../vara';
-import { createBeaconClient, createEthereumClient } from '../ethereum';
-import { composeProof } from './proof-composer';
-import { initLogger, logger } from '../util';
+import { CheckpointClient, encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError } from '../vara/index.js';
+import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
+import { composeProof } from './proof-composer.js';
 
 interface RelayResult {
   blockHash: string;
@@ -46,17 +45,20 @@ export async function relayEthToVara(
   clientMethodName: string,
   signer: string | KeyringPair,
   signerOptions?: Partial<SignerOptions>,
-  silent = true,
+  statusCb?: (status: string, details?: Record<string, string>) => void | Promise<void>,
 ): Promise<RelayResult> {
-  initLogger(silent);
+  if (!statusCb) {
+    statusCb = () => {};
+  }
   const beaconClient = await createBeaconClient(beaconRpcUrl);
   const ethClient = createEthereumClient(ethereumPublicClient, beaconClient);
 
   const checkpointClient = new CheckpointClient(gearApi, checkpointClientId);
 
-  const composeResult = await composeProof(beaconClient, ethClient, checkpointClient, transactionHash);
+  statusCb(`Composing proof`);
+  const composeResult = await composeProof(beaconClient, ethClient, checkpointClient, transactionHash, statusCb);
 
-  logger.info(`Building transaction to be sent to Historical Proxy program`);
+  statusCb(`Building transaction`);
   const encodedEthToVaraEvent = encodeEthToVaraEvent(composeResult);
 
   const historicalProxyClient = new HistoricalProxyClient(gearApi, historicalProxyId);
@@ -71,10 +73,10 @@ export async function relayEthToVara(
     .withAccount(signer, signerOptions)
     .calculateGas();
 
-  logger.info(`Sending transaction`);
+  statusCb(`Sending transaction`);
   const { blockHash, msgId, txHash, response, isFinalized } = await tx.signAndSend();
 
-  logger.info(`Transaction sent with hash ${txHash} in block ${blockHash}`);
+  statusCb(`Waiting for response`, { txHash, blockHash });
   const reply = await response();
 
   const txDetails = {

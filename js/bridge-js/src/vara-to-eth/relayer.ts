@@ -2,9 +2,9 @@ import { Account, PublicClient, WalletClient } from 'viem';
 import { GearApi, HexString } from '@gear-js/api';
 
 import { getMessageQueueClient } from '../ethereum/index.js';
-import { initLogger, logger } from '../util.js';
 import { GearClient } from '../vara/index.js';
 import { messageHash } from './util.js';
+import { StatusCb } from '../util.js';
 
 /**
  * Relays a message from Vara network to Ethereum by finding the queued message,
@@ -28,9 +28,12 @@ export async function relayVaraToEth(
   ethereumAccount: Account,
   gearApi: GearApi,
   messageQueueuAddress: `0x${string}`,
-  silent = true,
+  statusCb?: StatusCb,
 ) {
-  initLogger(silent);
+  if (!statusCb) {
+    statusCb = () => {};
+  }
+
   const gearClient = new GearClient(gearApi);
   const msgQClient = getMessageQueueClient(
     messageQueueuAddress,
@@ -45,8 +48,7 @@ export async function relayVaraToEth(
     nonce = BigInt(nonce);
   }
 
-  logger.info(`Fetching message with nonce ${nonce} from block ${blockNumber}`);
-
+  statusCb(`Fetching message from block`, { nonce: nonce.toString(), blockHash });
   const msg = await gearClient.findMessageQueuedEvent(blockHash, nonce);
 
   if (!msg) {
@@ -54,14 +56,13 @@ export async function relayVaraToEth(
   }
 
   const authoritySetId = await gearClient.getAuthoritySetIdByBlockNumber(blockNumber);
-  logger.info(`Authority set ID for block ${blockNumber}: ${authoritySetId}`);
+  statusCb(`Authority set ID for block ${blockNumber}: ${authoritySetId}`);
 
-  logger.info(`Fetching Merkle root for block ${blockNumber}`);
+  statusCb(`Fetching merkle root`, { blockNumber: blockNumber.toString() });
   let merkleRoot = await msgQClient.getMerkleRoot(blockNumber);
 
-  if (merkleRoot) {
-    logger.info(`Received merkle root ${merkleRoot} for block ${blockNumber}`);
-  } else {
+  if (!merkleRoot) {
+    statusCb(`Merkle root not found. Looking for suitable submitted merkle root`);
     const gearBlockTimestamp = (await gearApi.blocks.getBlockTimestamp(blockHash)).toNumber();
     const ethereumHead = await ethereumPublicClient.getBlock();
     const ethereumHeadTimestamp = Number(ethereumHead.timestamp);
@@ -70,21 +71,22 @@ export async function relayVaraToEth(
 
     const [from, to] = [ethereumHead.number - BigInt(Math.floor(diff / 12)), ethereumHead.number];
 
-    logger.info(`Requesting MerkleRoot logs from ${from} to ${to} blocks`);
+    statusCb(`Requesting MerkleRoot logs`, { fromBlock: from.toString(), toBlock: to.toString() });
 
     const merkleRootFromLogs = await msgQClient.findMerkleRootInRangeOfBlocks(from, to, blockNumber);
 
     if (merkleRootFromLogs.blockNumber === blockNumber) {
       merkleRoot = merkleRootFromLogs.merkleRoot;
-      logger.info(`Received merkle root ${merkleRoot} for block ${blockNumber}`);
+      statusCb(`Merkle root received`, { blockNumber: blockNumber.toString(), merkleRoot });
     } else {
       const authoritySetIdForClosestBlock = await gearClient.getAuthoritySetIdByBlockNumber(
         merkleRootFromLogs.blockNumber,
       );
 
-      logger.info(
-        `Received merkle root ${merkleRootFromLogs.merkleRoot} for block ${merkleRootFromLogs.blockNumber} with the same authority set id`,
-      );
+      statusCb(`Merkle root received for a different block`, {
+        blockNumber: merkleRootFromLogs.blockNumber.toString(),
+        merkleRoot: merkleRootFromLogs.merkleRoot,
+      });
 
       if (authoritySetIdForClosestBlock === authoritySetId) {
         merkleRoot = merkleRootFromLogs.merkleRoot;
@@ -95,8 +97,8 @@ export async function relayVaraToEth(
   }
 
   const msgHash = messageHash(msg);
-  logger.info(`Fetching merkle proof for block ${blockHash} and message hash ${msgHash}`);
+  statusCb(`Fetching merkle proof`, { blockNumber: blockNumber.toString(), msgHash });
   const merkleProof = await gearClient.fetchMerkleProof(blockHash, msgHash);
 
-  return msgQClient.processMessage(blockNumber, msg, merkleProof);
+  return msgQClient.processMessage(blockNumber, msg, merkleProof, statusCb);
 }

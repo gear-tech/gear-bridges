@@ -1,5 +1,6 @@
 import { GetBlockReturnType, PublicClient, TransactionReceipt } from 'viem';
-import { BeaconClient } from './beacon-client';
+
+import { BeaconClient } from './beacon-client.js';
 
 const BLOCK_TIME = 12;
 
@@ -10,10 +11,13 @@ export interface EthereumClient {
 }
 
 class _EthereumClient implements EthereumClient {
+  private beaconGenesisTime: number;
   constructor(
     private rpc: PublicClient,
-    private beaconGenesisTime: number,
-  ) {}
+    beaconClient: BeaconClient,
+  ) {
+    this.beaconGenesisTime = beaconClient.genesisBlockTime;
+  }
 
   public async getSlot(blockNumber: bigint | number) {
     const block = await this.rpc.getBlock({ blockNumber: BigInt(blockNumber) });

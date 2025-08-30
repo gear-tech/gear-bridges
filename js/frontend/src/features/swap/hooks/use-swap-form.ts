@@ -21,10 +21,9 @@ type Params = {
   ftBalance: bigint | undefined;
   requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
   onSubmit: (values: FormattedValues) => Promise<unknown>;
-  onValidation: () => void;
 };
 
-function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance, onValidation }: Params) {
+function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: Params) {
   const { api } = useApi();
   const { account } = useAccount();
   const ethAccount = useEthAccount();
@@ -78,7 +77,7 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance, onV
       alert.error(getErrorMessage(error));
     };
 
-    if (isUndefined(requiredBalance.data)) return validateBalance(values).then(onValidation).catch(onError);
+    if (isUndefined(requiredBalance.data)) return validateBalance(values).catch(onError);
 
     onSubmit(values).then(onSuccess).catch(onError);
   });

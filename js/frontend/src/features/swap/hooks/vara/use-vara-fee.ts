@@ -47,9 +47,19 @@ function useVaraFee() {
       : undefined,
   };
 
+  const priorityFee = {
+    value: !isUndefined(bridgingPaymentState.data?.priority_fee)
+      ? BigInt(bridgingPaymentState.data?.priority_fee)
+      : undefined,
+
+    formattedValue: !isUndefined(bridgingPaymentState.data?.priority_fee)
+      ? getFormattedBalanceValue(bridgingPaymentState.data.priority_fee.toString()).toFixed()
+      : undefined,
+  };
+
   const isLoading = vftManagerConfig.isPending || bridgingPaymentState.isPending;
 
-  return { bridgingFee, vftManagerFee, isLoading };
+  return { bridgingFee, vftManagerFee, priorityFee, isLoading };
 }
 
 export { useVaraFee };

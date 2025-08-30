@@ -1,23 +1,24 @@
 import { formatUnits } from 'viem';
 
 import ClockSVG from '@/assets/clock.svg?react';
+import { Skeleton } from '@/components';
 import { TOKEN_ID, TokenPrice } from '@/features/token-price';
 import { useVaraSymbol } from '@/hooks';
 import { cx } from '@/utils';
 
-import { Skeleton } from '../layout';
+import GasSVG from '../../assets/gas.svg?react';
 
 import styles from './fee-and-time-footer.module.scss';
-import GasSVG from './gas.svg?react';
 
 type Props = {
   feeValue: bigint | undefined;
+  time: string;
   isVaraNetwork: boolean;
   isLoading?: boolean;
   className?: string;
 };
 
-function FeeAndTimeFooter({ feeValue, isVaraNetwork, isLoading, className }: Props) {
+function FeeAndTimeFooter({ feeValue, time, isVaraNetwork, isLoading, className }: Props) {
   const varaSymbol = useVaraSymbol();
 
   const tokenId = isVaraNetwork ? TOKEN_ID.VARA : TOKEN_ID.ETH;
@@ -51,7 +52,7 @@ function FeeAndTimeFooter({ feeValue, isVaraNetwork, isLoading, className }: Pro
           <ClockSVG /> Bridge Time:
         </span>
 
-        <span className={styles.value}>~20 mins</span>
+        <span className={styles.value}>~{time}</span>
       </p>
     </footer>
   );

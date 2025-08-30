@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, Program, HexString, decodeAddress } from '@gear-js/api';
+import { GearApi, BaseGearProgram, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
@@ -18,7 +18,7 @@ export class SailsProgram {
   public readonly vftExtension: VftExtension;
   public readonly vftMetadata: VftMetadata;
   public readonly vftNativeExchange: VftNativeExchange;
-  private _program!: Program;
+  private _program!: BaseGearProgram;
 
   constructor(
     public api: GearApi,
@@ -30,7 +30,7 @@ export class SailsProgram {
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
     if (programId) {
-      this._program = new Program(programId, api);
+      this._program = new BaseGearProgram(programId, api);
     }
 
     this.vft = new Vft(this);
@@ -44,38 +44,6 @@ export class SailsProgram {
     if (!this._program) throw new Error(`Program ID is not set`);
     return this._program.id;
   }
-
-  newCtorFromCode(code: Uint8Array | Buffer | HexString): TransactionBuilder<null> {
-    const builder = new TransactionBuilder<null>(
-      this.api,
-      this.registry,
-      'upload_program',
-      'New',
-      'String',
-      'String',
-      code,
-      async (programId) => {
-        this._program = await Program.new(programId, this.api);
-      },
-    );
-    return builder;
-  }
-
-  newCtorFromCodeId(codeId: `0x${string}`) {
-    const builder = new TransactionBuilder<null>(
-      this.api,
-      this.registry,
-      'create_program',
-      'New',
-      'String',
-      'String',
-      codeId,
-      async (programId) => {
-        this._program = await Program.new(programId, this.api);
-      },
-    );
-    return builder;
-  }
 }
 
 export class Vft {
@@ -87,8 +55,10 @@ export class Vft {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['Vft', 'Approve', spender, value],
-      '(String, String, [u8;32], U256)',
+      'Vft',
+      'Approve',
+      [spender, value],
+      '([u8;32], U256)',
       'bool',
       this._program.programId,
     );
@@ -100,8 +70,10 @@ export class Vft {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['Vft', 'Transfer', to, value],
-      '(String, String, [u8;32], U256)',
+      'Vft',
+      'Transfer',
+      [to, value],
+      '([u8;32], U256)',
       'bool',
       this._program.programId,
     );
@@ -113,8 +85,10 @@ export class Vft {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['Vft', 'TransferFrom', from, to, value],
-      '(String, String, [u8;32], [u8;32], U256)',
+      'Vft',
+      'TransferFrom',
+      [from, to, value],
+      '([u8;32], [u8;32], U256)',
       'bool',
       this._program.programId,
     );
@@ -232,8 +206,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'AppendAllowancesShard', capacity],
-      '(String, String, u32)',
+      'VftAdmin',
+      'AppendAllowancesShard',
+      capacity,
+      'u32',
       'Null',
       this._program.programId,
     );
@@ -245,8 +221,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'AppendBalancesShard', capacity],
-      '(String, String, u32)',
+      'VftAdmin',
+      'AppendBalancesShard',
+      capacity,
+      'u32',
       'Null',
       this._program.programId,
     );
@@ -258,8 +236,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'ApproveFrom', owner, spender, value],
-      '(String, String, [u8;32], [u8;32], U256)',
+      'VftAdmin',
+      'ApproveFrom',
+      [owner, spender, value],
+      '([u8;32], [u8;32], U256)',
       'bool',
       this._program.programId,
     );
@@ -271,8 +251,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'Burn', from, value],
-      '(String, String, [u8;32], U256)',
+      'VftAdmin',
+      'Burn',
+      [from, value],
+      '([u8;32], U256)',
       'Null',
       this._program.programId,
     );
@@ -284,8 +266,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'Exit', inheritor],
-      '(String, String, [u8;32])',
+      'VftAdmin',
+      'Exit',
+      inheritor,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -297,8 +281,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'Mint', to, value],
-      '(String, String, [u8;32], U256)',
+      'VftAdmin',
+      'Mint',
+      [to, value],
+      '([u8;32], U256)',
       'Null',
       this._program.programId,
     );
@@ -310,8 +296,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'Pause'],
-      '(String, String)',
+      'VftAdmin',
+      'Pause',
+      undefined,
+      'Null',
       'Null',
       this._program.programId,
     );
@@ -323,8 +311,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'Resume'],
-      '(String, String)',
+      'VftAdmin',
+      'Resume',
+      undefined,
+      'Null',
       'Null',
       this._program.programId,
     );
@@ -336,8 +326,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'SetAdmin', admin],
-      '(String, String, [u8;32])',
+      'VftAdmin',
+      'SetAdmin',
+      admin,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -349,8 +341,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'SetBurner', burner],
-      '(String, String, [u8;32])',
+      'VftAdmin',
+      'SetBurner',
+      burner,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -362,8 +356,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'SetExpiryPeriod', period],
-      '(String, String, u32)',
+      'VftAdmin',
+      'SetExpiryPeriod',
+      period,
+      'u32',
       'Null',
       this._program.programId,
     );
@@ -375,8 +371,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'SetMinimumBalance', value],
-      '(String, String, U256)',
+      'VftAdmin',
+      'SetMinimumBalance',
+      value,
+      'U256',
       'Null',
       this._program.programId,
     );
@@ -388,8 +386,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'SetMinter', minter],
-      '(String, String, [u8;32])',
+      'VftAdmin',
+      'SetMinter',
+      minter,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -401,8 +401,10 @@ export class VftAdmin {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftAdmin', 'SetPauser', pauser],
-      '(String, String, [u8;32])',
+      'VftAdmin',
+      'SetPauser',
+      pauser,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -678,40 +680,16 @@ export class VftAdmin {
 export class VftExtension {
   constructor(private _program: SailsProgram) {}
 
-  public allocateNextAllowancesShard(): TransactionBuilder<boolean> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<boolean>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      ['VftExtension', 'AllocateNextAllowancesShard'],
-      '(String, String)',
-      'bool',
-      this._program.programId,
-    );
-  }
-
-  public allocateNextBalancesShard(): TransactionBuilder<boolean> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<boolean>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      ['VftExtension', 'AllocateNextBalancesShard'],
-      '(String, String)',
-      'bool',
-      this._program.programId,
-    );
-  }
-
   public removeExpiredAllowance(owner: ActorId, spender: ActorId): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<boolean>(
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftExtension', 'RemoveExpiredAllowance', owner, spender],
-      '(String, String, [u8;32], [u8;32])',
+      'VftExtension',
+      'RemoveExpiredAllowance',
+      [owner, spender],
+      '([u8;32], [u8;32])',
       'bool',
       this._program.programId,
     );
@@ -723,8 +701,10 @@ export class VftExtension {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftExtension', 'TransferAll', to],
-      '(String, String, [u8;32])',
+      'VftExtension',
+      'TransferAll',
+      to,
+      '[u8;32]',
       'bool',
       this._program.programId,
     );
@@ -736,8 +716,10 @@ export class VftExtension {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftExtension', 'TransferAllFrom', from, to],
-      '(String, String, [u8;32], [u8;32])',
+      'VftExtension',
+      'TransferAllFrom',
+      [from, to],
+      '([u8;32], [u8;32])',
       'bool',
       this._program.programId,
     );
@@ -974,8 +956,10 @@ export class VftNativeExchange {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftNativeExchange', 'Burn', value],
-      '(String, String, U256)',
+      'VftNativeExchange',
+      'Burn',
+      value,
+      'U256',
       'Null',
       this._program.programId,
     );
@@ -987,8 +971,10 @@ export class VftNativeExchange {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftNativeExchange', 'BurnAll'],
-      '(String, String)',
+      'VftNativeExchange',
+      'BurnAll',
+      undefined,
+      'Null',
       'Null',
       this._program.programId,
     );
@@ -1000,8 +986,10 @@ export class VftNativeExchange {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['VftNativeExchange', 'Mint'],
-      '(String, String)',
+      'VftNativeExchange',
+      'Mint',
+      undefined,
+      'Null',
       'Null',
       this._program.programId,
     );

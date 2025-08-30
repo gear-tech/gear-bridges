@@ -1,0 +1,41 @@
+import { HexString } from '@gear-js/api';
+import { relayVaraToEth } from '@gear-js/bridge';
+import { useApi } from '@gear-js/react-hooks';
+import { useMutation } from '@tanstack/react-query';
+import { usePublicClient, useWalletClient } from 'wagmi';
+
+import { definedAssert } from '@/utils';
+
+import { CONTRACT_ADDRESS } from '../../consts';
+
+function useRelayVaraTx(nonce: HexString, blockNumber: bigint) {
+  const { api } = useApi();
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
+
+  const relay = async (onLog: (message: string) => void) => {
+    definedAssert(api, 'API');
+    definedAssert(publicClient, 'Ethereum Public Client');
+    definedAssert(walletClient, 'Wallet Client');
+
+    const { error, success, ...result } = await relayVaraToEth(
+      nonce,
+      blockNumber,
+      publicClient,
+      walletClient,
+      walletClient.account,
+      api,
+      CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
+      onLog,
+    );
+
+    if (error) throw new Error(error);
+    if (!success) throw new Error('Failed to relay Vara transaction');
+
+    return result;
+  };
+
+  return useMutation({ mutationFn: relay });
+}
+
+export { useRelayVaraTx };

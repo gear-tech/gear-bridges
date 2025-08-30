@@ -1,0 +1,26 @@
+.settings {
+  padding: 20px 24px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+
+  background-color: #0e1217;
+  border-radius: 12px;
+}
+
+.heading {
+  font-weight: 600;
+  color: #f6f6f6cc;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 20px;
+
+  @include sm {
+    display: flex;
+    flex-direction: column;
+  }
+}

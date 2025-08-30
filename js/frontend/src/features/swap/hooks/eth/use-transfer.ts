@@ -18,7 +18,7 @@ function useTransfer(fee: bigint | undefined) {
   const { writeContractAsync } = useWriteContract();
   const config = useConfig();
 
-  const getGasLimit = ({ amount, accountAddress }: Parameters) => {
+  const getGasLimitWithFee = ({ amount, accountAddress }: Parameters) => {
     definedAssert(fee, 'Fee');
     definedAssert(token?.address, 'Fungible token address');
 
@@ -35,7 +35,7 @@ function useTransfer(fee: bigint | undefined) {
     });
   };
 
-  const transfer = async ({ amount, accountAddress, ...params }: Parameters | PermitParameters) => {
+  const transferWithFee = async ({ amount, accountAddress, ...params }: Parameters | PermitParameters) => {
     definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
 
@@ -58,7 +58,38 @@ function useTransfer(fee: bigint | undefined) {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  return { ...useMutation({ mutationFn: transfer }), getGasLimit };
+  const getGasLimitWithoutFee = ({ amount, accountAddress }: Parameters) => {
+    definedAssert(token?.address, 'Fungible token address');
+
+    const encodedData = encodeFunctionData({
+      abi: ERC20_MANAGER_ABI,
+      functionName: 'requestBridging',
+      args: [token.address, amount, accountAddress],
+    });
+
+    return estimateGas(config, {
+      to: CONTRACT_ADDRESS.ERC20_MANAGER,
+      data: encodedData,
+    });
+  };
+
+  const transferWithoutFee = async ({ amount, accountAddress }: Parameters) => {
+    definedAssert(token?.address, 'Fungible token address');
+
+    const hash = await writeContractAsync({
+      abi: ERC20_MANAGER_ABI,
+      address: CONTRACT_ADDRESS.ERC20_MANAGER,
+      functionName: 'requestBridging',
+      args: [token.address, amount, accountAddress],
+    });
+
+    return waitForTransactionReceipt(config, { hash });
+  };
+
+  return {
+    transferWithoutFee: { ...useMutation({ mutationFn: transferWithoutFee }), getGasLimit: getGasLimitWithoutFee },
+    transferWithFee: { ...useMutation({ mutationFn: transferWithFee }), getGasLimit: getGasLimitWithFee },
+  };
 }
 
 export { useTransfer };

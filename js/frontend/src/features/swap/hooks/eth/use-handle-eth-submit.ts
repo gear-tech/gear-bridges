@@ -34,7 +34,9 @@ function useHandleEthSubmit({
   const mint = useMint();
   const approve = useApprove();
   const permitUSDC = usePermitUSDC();
-  const transfer = useTransfer(bridgingFee);
+
+  const { transferWithoutFee, transferWithFee } = useTransfer(bridgingFee);
+  const transfer = shouldPayBridgingFee ? transferWithFee : transferWithoutFee;
 
   const config = useConfig();
 
@@ -62,15 +64,16 @@ function useHandleEthSubmit({
     // it can be avoided by using stateOverride,
     // but it requires the knowledge of the storage slot or state diff of the allowance for each token,
     // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
-
     const bridgeTx = {
       gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
-      value: bridgingFee,
+      value: shouldPayBridgingFee ? bridgingFee : undefined,
     };
 
     if (shouldApprove && isUSDC && shouldPayBridgingFee) {
       const call = () =>
-        permitUSDC.mutateAsync(amount).then((permit) => transfer.mutateAsync({ amount, accountAddress, permit }));
+        permitUSDC
+          .mutateAsync(amount)
+          .then((permit) => transferWithFee.mutateAsync({ amount, accountAddress, permit }));
 
       txs.push({ call, ...bridgeTx });
 
@@ -84,10 +87,8 @@ function useHandleEthSubmit({
       txs.push({ call, gasLimit });
     }
 
-    if (shouldPayBridgingFee) {
-      const call = () => transfer.mutateAsync({ amount, accountAddress });
-      txs.push({ call, ...bridgeTx });
-    }
+    const call = () => transfer.mutateAsync({ amount, accountAddress });
+    txs.push({ call, ...bridgeTx });
 
     return txs;
   };

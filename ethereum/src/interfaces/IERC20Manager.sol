@@ -231,6 +231,28 @@ interface IERC20Manager is IPausable, IMessageHandler {
         payable;
 
     /**
+     * @dev Requests bridging of tokens.
+     *      This function uses `permit` to approve spending of tokens to optimize gas costs.
+     *      (If token supports `permit` function).
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @param deadline Deadline for the transaction to be executed.
+     * @param v ECDSA signature parameter.
+     * @param r ECDSA signature parameter.
+     * @param s ECDSA signature parameter.
+     */
+    function requestBridgingWithPermit(
+        address token,
+        uint256 amount,
+        bytes32 to,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external;
+
+    /**
      * @dev Requests bridging of tokens and pays fee to one of the `bridgingPayment` contracts.
      *      This function uses `permit` to approve spending of tokens to optimize gas costs.
      *      (If token supports `permit` function).

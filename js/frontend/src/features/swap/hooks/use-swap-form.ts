@@ -7,6 +7,7 @@ import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
+import { usePendingTxsCount } from '@/features/history/hooks';
 import { useEthAccount, useVaraSymbol } from '@/hooks';
 import { isUndefined, logger, getErrorMessage, definedAssert } from '@/utils';
 
@@ -29,6 +30,7 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: P
   const ethAccount = useEthAccount();
   const { token, network } = useBridgeContext();
   const varaSymbol = useVaraSymbol();
+  const pendingTxsCount = usePendingTxsCount();
   const alert = useAlert();
 
   const valueSchema = getAmountSchema(
@@ -70,6 +72,9 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: P
       requiredBalance.reset();
 
       alert.success('Your transfer request was successful');
+
+      // to display warning asap
+      return pendingTxsCount.refetch();
     };
 
     const onError = (error: WriteContractErrorType | string) => {

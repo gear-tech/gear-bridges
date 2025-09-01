@@ -8,9 +8,9 @@ import {
 } from '@subsquid/evm-processor';
 import { Store } from '@subsquid/typeorm-store';
 
-import * as erc20TreasuryAbi from './abi/erc20-manager';
-import * as messageQueueAbi from './abi/message-queue';
-import { config } from './config';
+import * as erc20TreasuryAbi from './abi/erc20-manager.js';
+import * as messageQueueAbi from './abi/message-queue.js';
+import { config } from './config.js';
 
 export const processor = new EvmBatchProcessor()
   .setGateway(config.archiveUrl)

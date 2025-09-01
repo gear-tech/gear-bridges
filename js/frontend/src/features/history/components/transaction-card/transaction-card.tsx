@@ -30,7 +30,7 @@ type Props = Pick<
   | 'nonce'
   | 'blockNumber'
 > & {
-  addressToToken: Record<`${HexString}-${HexString}`, Token>;
+  getHistoryToken: (sourceAddress: HexString, destinationAddress: HexString) => Token;
 };
 
 function TransactionCard(props: Props) {

@@ -5,9 +5,15 @@ import { encode as rlpEncode } from '@ethereumjs/rlp';
 import { Trie } from '@ethereumjs/trie';
 import { ssz } from '@lodestar/types';
 
-import { BeaconClient, EthereumClient } from '../ethereum';
-import { BlockGenericForBlockBody, BlockHeader, BlockInclusionProof, CheckpointClient, ProofResult } from '../vara';
-import { logger } from '../util';
+import { BeaconClient, EthereumClient } from '../ethereum/index.js';
+import {
+  BlockGenericForBlockBody,
+  BlockHeader,
+  BlockInclusionProof,
+  CheckpointClient,
+  ProofResult,
+} from '../vara/index.js';
+import { StatusCb } from '../util.js';
 
 const MAX_ATTESTER_SLASHINGS = 1;
 const MAX_PROPOSER_SLASHINGS = 16;
@@ -56,26 +62,26 @@ export async function composeProof(
   ethClient: EthereumClient,
   checkpointClient: CheckpointClient,
   txHash: `0x${string}`,
+  statusCb: StatusCb,
 ): Promise<ProofResult> {
-  logger.info(`Requesting transaction receipt for ${txHash}.`);
+  statusCb(`Requesting transaction receipt`, { txHash });
   const receipt = await ethClient.getTransactionReceipt(txHash);
 
   const block = await ethClient.getBlockByHash(receipt.blockHash);
   const blockNumber = Number(block.number);
 
-  logger.info(`Transaction found in block ${blockNumber}. Requesting block transaction receipts...`);
+  statusCb(`Requesting block receipts`, { blockNumber: blockNumber.toString() });
   const receipts = await Promise.all(block.transactions.map((hash) => ethClient.getTransactionReceipt(hash)));
 
   const slot = await ethClient.getSlot(blockNumber);
 
-  logger.info(`Slot for block ${blockNumber} is ${slot}. Generating merkle proof...`);
+  statusCb(`Generating merkle proof`);
 
   const { proof, receiptRlp } = await generateMerkleProof(receipt.transactionIndex, receipts);
 
-  logger.info(`Merkle proof generated. Building inclusion proof...`);
-  const proofBlock = await buildInclusionProof(beaconClient, checkpointClient, slot);
+  statusCb(`Building inclusion proof`);
+  const proofBlock = await buildInclusionProof(beaconClient, checkpointClient, slot, statusCb);
 
-  logger.info(`Inclusion proof built`);
   return {
     proofBlock,
     proof,
@@ -88,6 +94,7 @@ async function buildInclusionProof(
   beaconClient: BeaconClient,
   checkpointClient: CheckpointClient,
   slot: number,
+  statusCb: StatusCb,
 ): Promise<BlockInclusionProof> {
   const beaconBlock = await beaconClient.getBlock(slot);
 
@@ -120,7 +127,7 @@ async function buildInclusionProof(
     },
   };
 
-  logger.info(`Requesting slot from Checkpoint Client program`);
+  statusCb(`Requesting slot from Checkpoint Client program`);
   const checkpointSlot = await checkpointClient.serviceCheckpointFor.get(slot);
 
   if (checkpointSlot[0] === slot) {

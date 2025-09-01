@@ -34,7 +34,7 @@ function Transactions() {
   const { data: pairs, isLoading } = usePairs();
   const assetOptions = useMemo(() => getAssetOptions(pairs || [], varaSymbol || 'TVARA'), [pairs, varaSymbol]);
 
-  const { addressToToken } = useTokens();
+  const { getHistoryToken } = useTokens();
 
   return (
     <Container>
@@ -67,9 +67,9 @@ function Transactions() {
       </header>
 
       <List
-        items={addressToToken ? transactions : undefined}
+        items={getHistoryToken ? transactions : undefined}
         hasMore={hasNextPage}
-        renderItem={(transaction) => <TransactionCard {...transaction} addressToToken={addressToToken!} />}
+        renderItem={(transaction) => <TransactionCard {...transaction} getHistoryToken={getHistoryToken!} />}
         fetchMore={fetchNextPage}
         skeleton={{
           rowsCount: TRANSACTIONS_LIMIT,

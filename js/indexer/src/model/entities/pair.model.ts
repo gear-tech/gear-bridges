@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
-import { Network } from './_network';
+import { Network } from './_network.js';
 
 @Entity({ name: 'pair' })
 export class Pair {

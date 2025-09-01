@@ -14,9 +14,10 @@ type VaraProps = {
   sender: string;
   nonce: HexString;
   blockNumber: string;
+  onSuccess: () => void;
 };
 
-function RelayVaraTxButton({ sender, nonce, blockNumber }: VaraProps) {
+function RelayVaraTxButton({ sender, nonce, blockNumber, onSuccess }: VaraProps) {
   const { account } = useAccount();
   const isOwner = account?.decodedAddress === sender;
 
@@ -35,7 +36,10 @@ function RelayVaraTxButton({ sender, nonce, blockNumber }: VaraProps) {
     const onLog = (message: string) => alert.update(alertId, message);
 
     mutateAsync(onLog)
-      .then(() => alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS))
+      .then(() => {
+        onSuccess();
+        alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+      })
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
   };
 
@@ -66,9 +70,10 @@ type EthProps = {
   sender: string;
   blockNumber: bigint;
   txHash: HexString;
+  onSuccess: () => void;
 };
 
-function RelayEthTxButton({ sender, txHash, blockNumber }: EthProps) {
+function RelayEthTxButton({ sender, txHash, blockNumber, onSuccess }: EthProps) {
   const { account } = useAccount();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
@@ -87,7 +92,10 @@ function RelayEthTxButton({ sender, txHash, blockNumber }: EthProps) {
     const onLog = (message: string) => alert.update(alertId, message);
 
     mutateAsync(onLog)
-      .then(() => alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS))
+      .then(() => {
+        onSuccess();
+        alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+      })
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
   };
 

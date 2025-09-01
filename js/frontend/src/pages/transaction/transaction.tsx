@@ -82,7 +82,7 @@ function Transaction() {
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
-  const { data } = useTransaction(id);
+  const { data, refetch } = useTransaction(id);
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
@@ -140,10 +140,16 @@ function Transaction() {
                   sender={sender}
                   nonce={rawNonce as HexString}
                   blockNumber={bridgingStartedAtBlock}
+                  onSuccess={refetch}
                 />
               )
             ) : (
-              <RelayTxButton.Eth sender={sender} txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} />
+              <RelayTxButton.Eth
+                sender={sender}
+                txHash={txHash as HexString}
+                blockNumber={BigInt(blockNumber)}
+                onSuccess={refetch}
+              />
             ))}
         </div>
       </header>

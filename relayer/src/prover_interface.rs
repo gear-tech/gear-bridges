@@ -1,8 +1,6 @@
-use std::{str::FromStr, time::Instant};
-
+use std::{str::FromStr, time::Instant, thread};
 use serde::{Deserialize, Serialize};
 use utils_prometheus::MeteredService;
-
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
@@ -52,15 +50,18 @@ pub async fn prove_genesis(
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
     let now = Instant::now();
-
     let timer = PROVING_TIME.with_label_values(&["genesis"]).start_timer();
 
-    let proof = prover::proving::prove_genesis(
-        parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
-        genesis_config,
-        next_validator_set_inclusion_proof,
-        next_validator_set_storage_data,
-    );
+    let handler = thread::spawn(move || {
+        proving::prove_genesis(
+            parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
+            genesis_config,
+            next_validator_set_inclusion_proof,
+            next_validator_set_storage_data,
+        )
+    });
+
+    let proof = handler.join().expect("prover::proving::prove_genesis handle should be joined");
 
     timer.stop_and_record();
     log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
@@ -93,17 +94,20 @@ pub async fn prove_validator_set_change(
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
     let now = Instant::now();
-
     let timer = PROVING_TIME
         .with_label_values(&["validator_set_change"])
         .start_timer();
 
-    let proof = proving::prove_validator_set_change(
-        previous_proof,
-        parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
-        next_validator_set_inclusion_proof,
-        next_validator_set_storage_data,
-    );
+    let handler = thread::spawn(move || {
+        proving::prove_validator_set_change(
+            previous_proof,
+            parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
+            next_validator_set_inclusion_proof,
+            next_validator_set_storage_data,
+        )
+    });
+
+    let proof = handler.join().expect("proving::prove_validator_set_change handle should be joined");
 
     timer.stop_and_record();
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
@@ -191,19 +195,25 @@ pub async fn prove_final_with_block_finality(
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
+    let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
 
-    let proof = proving::prove_message_sent(
-        previous_proof,
-        parse_rpc_block_finality_proof(block_finality, count_thread),
-        genesis_config,
-        sent_message_inclusion_proof,
-        message_contents,
-    );
+    let handler = thread::spawn(move || {
+        let proof = proving::prove_message_sent(
+            previous_proof,
+            parse_rpc_block_finality_proof(block_finality, count_thread),
+            genesis_config,
+            sent_message_inclusion_proof,
+            message_contents,
+        );
 
-    let proof = gnark::prove_circuit(&proof);
+        gnark::prove_circuit(&proof)
+    });
+
+    let proof = handler.join().expect("proving::prove_message_sent & gnark handle should be joined");
 
     timer.stop_and_record();
+    log::info!("Final prove time: {}ms", now.elapsed().as_millis());
 
     let public_inputs: [_; 2] = proof
         .public_inputs

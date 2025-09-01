@@ -20,7 +20,7 @@ function useIsEthRelayAvailable(blockNumber: bigint) {
   const publicClient = usePublicClient();
 
   const { data: slot } = useQuery({
-    queryKey: ['slotByBlockNumber', blockNumber],
+    queryKey: ['slotByBlockNumber', blockNumber.toString()],
     queryFn: () => getSlotByBlockNumber(ETH_BEACON_NODE_ADDRESS, publicClient!, blockNumber),
     enabled: Boolean(publicClient),
     select: (data) => data?.toString(),

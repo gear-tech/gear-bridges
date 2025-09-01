@@ -11,7 +11,6 @@ import { TransactionStatus } from '@/features/history/components/transaction-sta
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
 import { PayVaraFeeButton, RelayTxButton } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
-import { useEthAccount } from '@/hooks';
 
 import { Field } from './field';
 import { SectionCard } from './section-card';
@@ -80,7 +79,6 @@ function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
 
 function Transaction() {
   const { account } = useAccount();
-  const ethAccount = useEthAccount();
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
@@ -136,12 +134,17 @@ function Transaction() {
           {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
 
           {isAwaitingPayment &&
-            bridgingStartedAtBlock &&
-            (isVaraNetwork
-              ? ethAccount.address && (
-                  <RelayTxButton.Vara nonce={rawNonce as HexString} blockNumber={bridgingStartedAtBlock} />
-                )
-              : account && <RelayTxButton.Eth txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} />)}
+            (isVaraNetwork ? (
+              bridgingStartedAtBlock && (
+                <RelayTxButton.Vara
+                  sender={sender}
+                  nonce={rawNonce as HexString}
+                  blockNumber={bridgingStartedAtBlock}
+                />
+              )
+            ) : (
+              <RelayTxButton.Eth sender={sender} txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} />
+            ))}
         </div>
       </header>
 

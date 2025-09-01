@@ -63,6 +63,7 @@ pub struct ValidatorSignsChain {
     pub pre_commits: Vec<ProcessedPreCommit>,
     /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
+    pub count_thread: Option<usize>,
 }
 
 impl ValidatorSignsChain {
@@ -80,6 +81,7 @@ impl ValidatorSignsChain {
 
         let thread_pool = ThreadPoolBuilder::new()
             .stack_size(VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE)
+            .num_threads(self.count_thread.unwrap_or(0))
             .build()
             .expect("Failed to create ThreadPool");
 

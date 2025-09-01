@@ -31,6 +31,8 @@ lazy_static::lazy_static!(
 pub async fn prove_genesis(
     gear_api: &GearApi,
     genesis_config: GenesisConfig,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
         "Proving genesis authority set change {} -> {}",
@@ -54,7 +56,7 @@ pub async fn prove_genesis(
     let timer = PROVING_TIME.with_label_values(&["genesis"]).start_timer();
 
     let proof = prover::proving::prove_genesis(
-        parse_rpc_block_finality_proof(current_epoch_block_finality),
+        parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
         genesis_config,
         next_validator_set_inclusion_proof,
         next_validator_set_storage_data,
@@ -70,6 +72,8 @@ pub async fn prove_validator_set_change(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     previous_authority_set_id: u64,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
         "Proving authority set change {} -> {}",
@@ -96,7 +100,7 @@ pub async fn prove_validator_set_change(
 
     let proof = proving::prove_validator_set_change(
         previous_proof,
-        parse_rpc_block_finality_proof(current_epoch_block_finality),
+        parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
         next_validator_set_inclusion_proof,
         next_validator_set_storage_data,
     );
@@ -160,6 +164,8 @@ pub async fn prove_final(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     at_block: H256,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
     prove_final_with_block_finality(
@@ -167,6 +173,7 @@ pub async fn prove_final(
         previous_proof,
         genesis_config,
         (block, block_finality),
+        count_thread,
     )
     .await
 }
@@ -176,6 +183,8 @@ pub async fn prove_final_with_block_finality(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     (block, block_finality): (H256, dto::BlockFinalityProof),
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
 
@@ -186,7 +195,7 @@ pub async fn prove_final_with_block_finality(
 
     let proof = proving::prove_message_sent(
         previous_proof,
-        parse_rpc_block_finality_proof(block_finality),
+        parse_rpc_block_finality_proof(block_finality, count_thread),
         genesis_config,
         sent_message_inclusion_proof,
         message_contents,
@@ -233,7 +242,8 @@ fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclus
     }
 }
 
-fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof) -> BlockFinality {
+fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof, 
+    count_thread: Option<usize>,) -> BlockFinality {
     BlockFinality {
         validator_set: proof.validator_set,
         pre_commits: proof
@@ -248,6 +258,7 @@ fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof) -> BlockFinali
             .message
             .try_into()
             .expect("Unexpected GRANDPA message length"),
+        count_thread,
     }
 }
 

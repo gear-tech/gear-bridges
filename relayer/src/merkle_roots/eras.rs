@@ -24,6 +24,8 @@ pub struct Eras {
     eth_api: EthApi,
 
     genesis_config: GenesisConfig,
+
+    count_thread: Option<usize>,
 }
 
 impl Eras {
@@ -32,6 +34,8 @@ impl Eras {
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
         genesis_config: GenesisConfig,
+
+        count_thread: Option<usize>,
     ) -> anyhow::Result<Self> {
         let last_sealed = if let Some(l) = last_sealed {
             l
@@ -49,6 +53,7 @@ impl Eras {
             eth_api,
 
             genesis_config,
+            count_thread,
         })
     }
 
@@ -141,7 +146,7 @@ impl Eras {
 
         let instant = Instant::now();
         let proof =
-            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block)
+            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block, self.count_thread)
                 .await?;
         let elapsed_proof = instant.elapsed();
         log::info!("prover_interface::prove_final took {elapsed_proof:?} for block_number = #{block_number}, authority_set_id = #{authority_set_id}");

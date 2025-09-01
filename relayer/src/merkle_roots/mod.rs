@@ -66,10 +66,12 @@ impl Relayer {
         genesis_config: GenesisConfig,
         last_sealed: Option<u64>,
         confirmations: u64,
+
+        count_thread: Option<usize>,
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
-        let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone()).await;
+        let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone(), count_thread).await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
@@ -78,7 +80,7 @@ impl Relayer {
         )
         .await;
 
-        let prover = prover::FinalityProver::new(api_provider.clone(), genesis_config);
+        let prover = prover::FinalityProver::new(api_provider.clone(), genesis_config, count_thread);
 
         let submitter =
             submitter::MerkleRootSubmitter::new(eth_api.clone(), storage, confirmations);
@@ -141,12 +143,16 @@ pub struct MerkleRootRelayer {
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
     save_interval: Interval,
+
+    count_thread: Option<usize>,
 }
 
 impl MerkleRootRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         storage: Arc<MerkleRootStorage>,
+
+        count_thread: Option<usize>,
     ) -> MerkleRootRelayer {
         let mut save_interval = tokio::time::interval(Duration::from_secs(60));
         save_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -160,6 +166,7 @@ impl MerkleRootRelayer {
             waiting_for_authority_set_sync: BTreeMap::new(),
 
             save_interval,
+            count_thread,
         }
     }
 
@@ -385,6 +392,7 @@ impl MerkleRootRelayer {
             self.api_provider.clone(),
             eth_api,
             genesis_config,
+            self.count_thread,
         )
         .await?
         .seal(self.storage.proofs.clone());

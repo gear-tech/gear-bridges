@@ -80,14 +80,19 @@ impl FinalityProverIo {
 pub struct FinalityProver {
     api_provider: ApiProviderConnection,
     genesis_config: GenesisConfig,
+
+    count_thread: Option<usize>,
 }
 
 impl FinalityProver {
-    pub fn new(api_provider: ApiProviderConnection, genesis_config: GenesisConfig) -> Self {
+    pub fn new(api_provider: ApiProviderConnection, genesis_config: GenesisConfig, 
+    count_thread: Option<usize>,) -> Self {
         Self {
             api_provider,
 
             genesis_config,
+
+            count_thread,
         }
     }
 
@@ -232,7 +237,7 @@ impl FinalityProver {
 
         let start = Instant::now();
         let proof =
-            prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
+            prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash, self.count_thread)
                 .await?;
         log::info!(
             "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",

@@ -4,7 +4,7 @@ use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -82,6 +82,10 @@ async fn run() -> AnyResult<()> {
                 args.start_authority_set_id,
                 args.confirmations_merkle_root
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                match args.thread_count {
+                    None => Some(DEFAULT_COUNT_THREADS),
+                    Some(thread_count) => thread_count.into(),
+                },
             )
             .await;
 
@@ -122,6 +126,7 @@ async fn run() -> AnyResult<()> {
                 proof_storage,
                 args.from_eth_block,
                 block_finality_storage,
+                Some(DEFAULT_COUNT_THREADS),
             )
             .await;
 

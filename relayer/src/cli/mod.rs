@@ -330,5 +330,5 @@ fn parse_thread_count(s: &str) -> anyhow::Result<ThreadCount> {
         return Ok(ThreadCount::Auto);
     }
 
-    Ok(s.parse::<usize>().map(|count| ThreadCount::Manual(count))?)
+    Ok(s.parse::<usize>().map(ThreadCount::Manual)?)
 }

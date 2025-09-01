@@ -18,7 +18,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     ThreadPoolBuilder,
 };
-use std::{iter, sync::mpsc::channel, env};
+use std::{env, iter, sync::mpsc::channel};
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -78,7 +78,12 @@ impl ValidatorSignsChain {
         let (sender, receiver) = channel();
 
         let thread_pool = ThreadPoolBuilder::new()
-            .stack_size(env::var("RUST_MIN_STACK").expect("RUST_MIN_STACK should be set").parse::<usize>().expect("RUST_MIN_STACK should have the correct value"))
+            .stack_size(
+                env::var("RUST_MIN_STACK")
+                    .expect("RUST_MIN_STACK should be set")
+                    .parse::<usize>()
+                    .expect("RUST_MIN_STACK should have the correct value"),
+            )
             .num_threads(self.count_thread.unwrap_or(0))
             .build()
             .expect("Failed to create ThreadPool");

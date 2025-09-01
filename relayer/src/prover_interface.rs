@@ -1,6 +1,3 @@
-use std::{str::FromStr, time::Instant, thread};
-use serde::{Deserialize, Serialize};
-use utils_prometheus::MeteredService;
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
@@ -9,6 +6,9 @@ use prover::proving::{
     self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
     StorageInclusion,
 };
+use serde::{Deserialize, Serialize};
+use std::{str::FromStr, thread, time::Instant};
+use utils_prometheus::MeteredService;
 
 pub struct Metrics;
 
@@ -61,7 +61,9 @@ pub async fn prove_genesis(
         )
     });
 
-    let proof = handler.join().expect("prover::proving::prove_genesis handle should be joined");
+    let proof = handler
+        .join()
+        .expect("prover::proving::prove_genesis handle should be joined");
 
     timer.stop_and_record();
     log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
@@ -107,7 +109,9 @@ pub async fn prove_validator_set_change(
         )
     });
 
-    let proof = handler.join().expect("proving::prove_validator_set_change handle should be joined");
+    let proof = handler
+        .join()
+        .expect("proving::prove_validator_set_change handle should be joined");
 
     timer.stop_and_record();
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
@@ -210,7 +214,9 @@ pub async fn prove_final_with_block_finality(
         gnark::prove_circuit(&proof)
     });
 
-    let proof = handler.join().expect("proving::prove_message_sent & gnark handle should be joined");
+    let proof = handler
+        .join()
+        .expect("proving::prove_message_sent & gnark handle should be joined");
 
     timer.stop_and_record();
     log::info!("Final prove time: {}ms", now.elapsed().as_millis());
@@ -252,8 +258,10 @@ fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclus
     }
 }
 
-fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof, 
-    count_thread: Option<usize>,) -> BlockFinality {
+fn parse_rpc_block_finality_proof(
+    proof: dto::BlockFinalityProof,
+    count_thread: Option<usize>,
+) -> BlockFinality {
     BlockFinality {
         validator_set: proof.validator_set,
         pre_commits: proof

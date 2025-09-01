@@ -77,7 +77,7 @@ pub struct KillSwitchRelayer {
 
     metrics: Metrics,
     block_finality_metrics: BlockFinalityArchiverMetrics,
-    
+
     count_thread: Option<usize>,
 }
 
@@ -99,7 +99,7 @@ impl KillSwitchRelayer {
         proof_storage: Arc<dyn ProofStorage>,
         from_eth_block: Option<u64>,
         block_finality_storage: sled::Db,
-        
+
         count_thread: Option<usize>,
     ) -> Self {
         Self {

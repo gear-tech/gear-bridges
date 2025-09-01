@@ -145,9 +145,14 @@ impl Eras {
             .await?;
 
         let instant = Instant::now();
-        let proof =
-            prover_interface::prove_final(&gear_api, inner_proof, self.genesis_config, block, self.count_thread)
-                .await?;
+        let proof = prover_interface::prove_final(
+            &gear_api,
+            inner_proof,
+            self.genesis_config,
+            block,
+            self.count_thread,
+        )
+        .await?;
         let elapsed_proof = instant.elapsed();
         log::info!("prover_interface::prove_final took {elapsed_proof:?} for block_number = #{block_number}, authority_set_id = #{authority_set_id}");
 

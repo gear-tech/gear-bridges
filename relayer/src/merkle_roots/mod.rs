@@ -71,7 +71,8 @@ impl Relayer {
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
-        let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone(), count_thread).await;
+        let merkle_roots =
+            MerkleRootRelayer::new(api_provider.clone(), storage.clone(), count_thread).await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
@@ -80,7 +81,8 @@ impl Relayer {
         )
         .await;
 
-        let prover = prover::FinalityProver::new(api_provider.clone(), genesis_config, count_thread);
+        let prover =
+            prover::FinalityProver::new(api_provider.clone(), genesis_config, count_thread);
 
         let submitter =
             submitter::MerkleRootSubmitter::new(eth_api.clone(), storage, confirmations);

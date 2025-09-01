@@ -85,8 +85,11 @@ pub struct FinalityProver {
 }
 
 impl FinalityProver {
-    pub fn new(api_provider: ApiProviderConnection, genesis_config: GenesisConfig, 
-    count_thread: Option<usize>,) -> Self {
+    pub fn new(
+        api_provider: ApiProviderConnection,
+        genesis_config: GenesisConfig,
+        count_thread: Option<usize>,
+    ) -> Self {
         Self {
             api_provider,
 
@@ -236,9 +239,14 @@ impl FinalityProver {
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
         let start = Instant::now();
-        let proof =
-            prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash, self.count_thread)
-                .await?;
+        let proof = prover_interface::prove_final(
+            gear_api,
+            inner_proof,
+            self.genesis_config,
+            block_hash,
+            self.count_thread,
+        )
+        .await?;
         log::info!(
             "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",
             start.elapsed().as_secs_f64()

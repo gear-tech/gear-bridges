@@ -58,7 +58,9 @@ pub(crate) async fn sync_authority_set_id(
             .await?;
 
         for set_id in latest_proven..latest_authority_set_id {
-            proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id, count_thread).await?;
+            proof =
+                prover_interface::prove_validator_set_change(gear_api, proof, set_id, count_thread)
+                    .await?;
             proof_storage
                 .update(proof.proof.clone(), set_id + 1)
                 .await?;

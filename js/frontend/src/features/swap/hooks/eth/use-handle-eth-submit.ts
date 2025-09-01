@@ -60,35 +60,28 @@ function useHandleEthSubmit({
       });
     }
 
+    let permit: Awaited<ReturnType<typeof permitUSDC.mutateAsync>> | undefined;
+
+    if (shouldApprove) {
+      if (isUSDC) {
+        permit = await permitUSDC.mutateAsync(amount);
+      } else {
+        const call = () => approve.mutateAsync({ amount });
+        const gasLimit = await approve.getGasLimit(amount);
+
+        txs.push({ call, gasLimit });
+      }
+    }
+
     // if approve is not made, transfer gas estimate will fail.
     // it can be avoided by using stateOverride,
     // but it requires the knowledge of the storage slot or state diff of the allowance for each token,
     // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
-    const bridgeTx = {
+    txs.push({
+      call: () => transfer.mutateAsync({ amount, accountAddress, permit }),
       gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
       value: shouldPayBridgingFee ? bridgingFee : undefined,
-    };
-
-    if (shouldApprove && isUSDC && shouldPayBridgingFee) {
-      const call = () =>
-        permitUSDC
-          .mutateAsync(amount)
-          .then((permit) => transferWithFee.mutateAsync({ amount, accountAddress, permit }));
-
-      txs.push({ call, ...bridgeTx });
-
-      return txs;
-    }
-
-    if (shouldApprove) {
-      const call = () => approve.mutateAsync({ amount });
-      const gasLimit = await approve.getGasLimit(amount);
-
-      txs.push({ call, gasLimit });
-    }
-
-    const call = () => transfer.mutateAsync({ amount, accountAddress });
-    txs.push({ call, ...bridgeTx });
+    });
 
     return txs;
   };

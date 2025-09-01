@@ -9,8 +9,11 @@ import { definedAssert } from '@/utils';
 import { ERC20_MANAGER_ABI, CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 
-type Parameters = { amount: bigint; accountAddress: HexString };
-type PermitParameters = Parameters & { permit: { deadline: bigint; v: number; r: HexString; s: HexString } };
+type Parameters = {
+  amount: bigint;
+  accountAddress: HexString;
+  permit?: { deadline: bigint; v: number; r: HexString; s: HexString };
+};
 
 function useTransfer(fee: bigint | undefined) {
   const { token } = useBridgeContext();
@@ -35,12 +38,11 @@ function useTransfer(fee: bigint | undefined) {
     });
   };
 
-  const transferWithFee = async ({ amount, accountAddress, ...params }: Parameters | PermitParameters) => {
+  const transferWithFee = async ({ amount, accountAddress, permit }: Parameters) => {
     definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
 
     const tx = { abi: ERC20_MANAGER_ABI, address: CONTRACT_ADDRESS.ERC20_MANAGER, value: fee };
-    const permit = 'permit' in params ? params.permit : undefined;
     const permitArgs = permit ? ([permit.deadline, permit.v, permit.r, permit.s] as const) : undefined;
 
     const hash = permitArgs
@@ -73,15 +75,23 @@ function useTransfer(fee: bigint | undefined) {
     });
   };
 
-  const transferWithoutFee = async ({ amount, accountAddress }: Parameters) => {
+  const transferWithoutFee = async ({ amount, accountAddress, permit }: Parameters) => {
     definedAssert(token?.address, 'Fungible token address');
 
-    const hash = await writeContractAsync({
-      abi: ERC20_MANAGER_ABI,
-      address: CONTRACT_ADDRESS.ERC20_MANAGER,
-      functionName: 'requestBridging',
-      args: [token.address, amount, accountAddress],
-    });
+    const tx = { abi: ERC20_MANAGER_ABI, address: CONTRACT_ADDRESS.ERC20_MANAGER };
+    const permitArgs = permit ? ([permit.deadline, permit.v, permit.r, permit.s] as const) : undefined;
+
+    const hash = permitArgs
+      ? await writeContractAsync({
+          ...tx,
+          functionName: 'requestBridgingWithPermit',
+          args: [token.address, amount, accountAddress, ...permitArgs],
+        })
+      : await writeContractAsync({
+          ...tx,
+          functionName: 'requestBridging',
+          args: [token.address, amount, accountAddress],
+        });
 
     return waitForTransactionReceipt(config, { hash });
   };

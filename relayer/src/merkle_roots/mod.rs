@@ -11,13 +11,13 @@ use crate::{
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
-use ::prover::proving::GenesisConfig;
+use ::prover::proving::{GenesisConfig, ProofWithCircuitData};
 use anyhow::Context;
 use ethereum_client::EthApi;
-use primitive_types::H256;
+use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -742,7 +742,7 @@ impl MerkleRootRelayer {
                 if batch {
                     let now = Instant::now();
 
-                    if self.merkle_root_hash.is_empty() {
+                    if self.merkle_root_batch.is_empty() {
                         self.first_pending_timestamp = Some(now);
                     }
 
@@ -755,10 +755,11 @@ impl MerkleRootRelayer {
                         merkle_root,
                         inner_proof,
                         nonces_count: nonces_count,
+                        queue_id,
                     });
                     return Ok(true);
                 }
-                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{number}");
+                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{block_number}");
                 if !prover.prove(block_number, block_hash, merkle_root, inner_proof, queue_id) {
                     log::error!("Prover connection closed, exiting...");
                     return Ok(false);
@@ -832,7 +833,7 @@ pub struct MerkleRoot {
     pub block_number: u32,
     pub block_hash: H256,
     pub queue_id: u64,
-    pub message_nonces: Vec<[u8; 32]>,
+    pub message_nonces: Vec<U256>,
     pub status: MerkleRootStatus,
 }
 
@@ -874,4 +875,5 @@ pub struct PendingMerkleRoot {
     ///
     /// Used to check for spike.
     pub nonces_count: usize,
+    pub queue_id: u64,
 }

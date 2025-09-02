@@ -41,7 +41,7 @@
     "viem": "^2.33.2"
   },
   "dependencies": {
-    "@chainsafe/ssz": "1.2.1",
+    "@chainsafe/ssz": "1.2.2",
     "@ethereumjs/rlp": "10.0.0",
     "@ethereumjs/trie": "6.2.1",
     "@ethereumjs/util": "10.0.0",

@@ -11,7 +11,7 @@ import { StatusCb } from '../util.js';
  * This interface defines all the required configuration and optional settings
  * needed to relay cross-chain messages from Vara to Ethereum.
  */
-interface RelayVaraToEthParams {
+export interface RelayVaraToEthParams {
   /**
    * The message nonce to relay (bigint or hex string, little endian encoded if hex)
    */

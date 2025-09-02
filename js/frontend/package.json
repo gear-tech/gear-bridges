@@ -12,7 +12,7 @@
   "dependencies": {
     "@base-ui-components/react": "1.0.0-beta.2",
     "@gear-js/api": "0.44.0",
-    "@gear-js/react-hooks": "0.18.0",
+    "@gear-js/react-hooks": "0.18.1",
     "@gear-js/ui": "0.7.0",
     "@gear-js/vara-ui": "0.3.1",
     "@gear-js/wallet-connect": "0.4.1",

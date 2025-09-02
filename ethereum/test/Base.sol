@@ -290,6 +290,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         } else if (isScript) {
             vm.stopBroadcast();
         }
+
+        if (isTest) {
+            vm.warp(vm.unixTime() / 1000);
+        }
     }
 
     function deployTestTokens() public {

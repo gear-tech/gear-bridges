@@ -32,6 +32,8 @@ contract MessageQueue is
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
+    uint256 public constant CHALLENGE_ROOT_DELAY = 1 hours;
+
     uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
     uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 3 minutes;
     uint256 public constant PROCESS_USER_MESSAGE_DELAY = 5 minutes;
@@ -40,6 +42,7 @@ contract MessageQueue is
     IGovernance private _governancePauser;
     address private _emergencyStopAdmin;
     IVerifier private _verifier;
+    uint256 private _challengingRootTimestamp;
     bool private _emergencyStop;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
@@ -116,6 +119,14 @@ contract MessageQueue is
     }
 
     /**
+     * @dev Returns challenging root status.
+     * @return isChallengingRoot challenging root status.
+     */
+    function isChallengingRoot() public view returns (bool) {
+        return block.timestamp < _challengingRootTimestamp + CHALLENGE_ROOT_DELAY;
+    }
+
+    /**
      * @dev Returns emergency stop status.
      * @return isEmergencyStopped emergency stop status.
      */
@@ -142,6 +153,30 @@ contract MessageQueue is
      *      Called by {upgradeToAndCall}.
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+
+    /**
+     * @dev Puts MessageQueue into a high-priority paused state.
+     *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is already enabled with `ChallengeRoot` error.
+     *
+     * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
+     */
+    function challengeRoot() external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (isChallengingRoot()) {
+            revert ChallengeRoot();
+        }
+
+        _challengingRootTimestamp = block.timestamp;
+
+        emit ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY);
+    }
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
@@ -235,6 +270,7 @@ contract MessageQueue is
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
+     *      - MessageQueue is in challenging root status with `ChallengeRoot` error.
      *      - MessageQueue is paused and message source is not any governance address.
      *      - MessageQueue emergency stop status is set.
      *      - Message nonce is already processed.
@@ -249,6 +285,10 @@ contract MessageQueue is
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external {
+        if (isChallengingRoot()) {
+            revert ChallengeRoot();
+        }
+
         bytes32 governanceAdminAddress = _governanceAdmin.governance();
         bytes32 governancePauserAddress = _governancePauser.governance();
 

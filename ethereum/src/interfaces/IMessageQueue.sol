@@ -19,6 +19,11 @@ struct VaraMessage {
  */
 interface IMessageQueue is IPausable {
     /**
+     * @dev Challenge root status is enabled.
+     */
+    error ChallengeRoot();
+
+    /**
      * @dev Emergency stop status is enabled.
      */
     error EmergencyStop();
@@ -52,6 +57,16 @@ interface IMessageQueue is IPausable {
      * @dev Merkle root is already set.
      */
     error MerkleRootAlreadySet(uint256 blockNumber);
+
+    /**
+     * @dev Caller is not emergency stop admin.
+     */
+    error NotEmergencyStopAdmin();
+
+    /**
+     * @dev Emitted when challenging root status is enabled.
+     */
+    event ChallengeRootEnabled(uint256 untilTimestamp);
 
     /**
      * @dev Emitted when emergency stop status is enabled.
@@ -101,10 +116,28 @@ interface IMessageQueue is IPausable {
     function verifier() external view returns (address);
 
     /**
+     * @dev Returns challenging root status.
+     * @return isChallengingRoot challenging root status.
+     */
+    function isChallengingRoot() external view returns (bool);
+
+    /**
      * @dev Returns emergency stop status.
      * @return isEmergencyStopped emergency stop status.
      */
     function isEmergencyStopped() external view returns (bool);
+
+    /**
+     * @dev Puts MessageQueue into a high-priority paused state.
+     *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is already enabled with `ChallengeRoot` error.
+     *
+     * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
+     */
+    function challengeRoot() external;
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
@@ -161,6 +194,7 @@ interface IMessageQueue is IPausable {
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
+     *      - MessageQueue is in challenging root status with `ChallengeRoot` error.
      *      - MessageQueue is paused and message source is not any governance address.
      *      - MessageQueue emergency stop status is enabled and caller is not emergency stop admin.
      *      - Message nonce is already processed.

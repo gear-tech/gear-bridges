@@ -48,6 +48,15 @@ pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
     })
 }
 
+pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item = [u8; 32]> {
+    block.events().iter().filter_map(|event| match event {
+        gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
+            Some(message.nonce)
+        }
+        _ => None,
+    })
+}
+
 pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
     block
         .events()

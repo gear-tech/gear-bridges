@@ -67,6 +67,22 @@ pub struct GearEthCoreArgs {
     /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
+
+    #[arg(
+        help = "Spike window used to cutoff old events to not trigger false spikes",
+        value_parser = humantime::parse_duration, default_value="15m")]
+    pub spike_window: Duration,
+    #[arg(
+        help = "Timeout after which we start processing events",
+        value_parser = humantime::parse_duration, default_value="30m"
+    )]
+    pub spike_timeout: Duration,
+    #[arg(
+        help = "After threshold is reached we enter \"spike\" mode
+        where events are processed immediately",
+        default_value = "8"
+    )]
+    pub spike_threshold: usize,
 }
 
 #[derive(Args)]

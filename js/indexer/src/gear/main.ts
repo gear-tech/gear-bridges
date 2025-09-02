@@ -113,7 +113,7 @@ const handler = async (ctx: ProcessorContext) => {
                   status: Status.AwaitingPayment,
                   sender,
                   receiver,
-                  amount: BigInt(amount),
+                  amount: amount.toString(),
                 });
                 await state.addTransfer(transfer);
                 break;

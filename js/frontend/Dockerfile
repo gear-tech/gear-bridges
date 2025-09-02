@@ -8,9 +8,11 @@ COPY package.json yarn.lock lerna.json .yarnrc.yml /app/
 COPY .yarn /app/.yarn
 COPY js/frontend /app/js/frontend
 COPY js/common /app/js/common
+COPY js/bridge-js /app/js/bridge-js
 WORKDIR /app
-RUN yarn workspaces focus frontend gear-bridges gear-bridge-common
+RUN yarn workspaces focus frontend gear-bridges gear-bridge-common @gear-js/bridge
 RUN yarn build:common
+RUN yarn build:bridge-js
 
 ARG VITE_VARA_NODE_ADDRESS \
     VITE_ETH_NODE_ADDRESS \

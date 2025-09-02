@@ -253,79 +253,6 @@ export enum GearEthBridgeMessagesOrderBy {
   PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
 }
 
-export type GearProgram = Node & {
-  __typename?: 'GearProgram';
-  createdAt: Maybe<Scalars['Datetime']['output']>;
-  name: Scalars['String']['output'];
-  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
-  nodeId: Scalars['ID']['output'];
-  programId: Scalars['String']['output'];
-};
-
-/**
- * A condition to be used against `GearProgram` object types. All fields are tested
- * for equality and combined with a logical ‘and.’
- */
-export type GearProgramCondition = {
-  /** Checks for equality with the object’s `createdAt` field. */
-  createdAt: InputMaybe<Scalars['Datetime']['input']>;
-  /** Checks for equality with the object’s `name` field. */
-  name: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `programId` field. */
-  programId: InputMaybe<Scalars['String']['input']>;
-};
-
-/** A filter to be used against `GearProgram` object types. All fields are combined with a logical ‘and.’ */
-export type GearProgramFilter = {
-  /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<GearProgramFilter>>;
-  /** Filter by the object’s `createdAt` field. */
-  createdAt: InputMaybe<DatetimeFilter>;
-  /** Filter by the object’s `name` field. */
-  name: InputMaybe<StringFilter>;
-  /** Negates the expression. */
-  not: InputMaybe<GearProgramFilter>;
-  /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<GearProgramFilter>>;
-  /** Filter by the object’s `programId` field. */
-  programId: InputMaybe<StringFilter>;
-};
-
-/** A connection to a list of `GearProgram` values. */
-export type GearProgramsConnection = {
-  __typename?: 'GearProgramsConnection';
-  /** A list of edges which contains the `GearProgram` and cursor to aid in pagination. */
-  edges: Array<GearProgramsEdge>;
-  /** A list of `GearProgram` objects. */
-  nodes: Array<GearProgram>;
-  /** Information to aid in pagination. */
-  pageInfo: PageInfo;
-  /** The count of *all* `GearProgram` you could get from the connection. */
-  totalCount: Scalars['Int']['output'];
-};
-
-/** A `GearProgram` edge in the connection. */
-export type GearProgramsEdge = {
-  __typename?: 'GearProgramsEdge';
-  /** A cursor for use in pagination. */
-  cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `GearProgram` at the end of the edge. */
-  node: GearProgram;
-};
-
-/** Methods to use when ordering `GearProgram`. */
-export enum GearProgramsOrderBy {
-  CreatedAtAsc = 'CREATED_AT_ASC',
-  CreatedAtDesc = 'CREATED_AT_DESC',
-  NameAsc = 'NAME_ASC',
-  NameDesc = 'NAME_DESC',
-  Natural = 'NATURAL',
-  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-  ProgramIdAsc = 'PROGRAM_ID_ASC',
-  ProgramIdDesc = 'PROGRAM_ID_DESC',
-}
-
 /** A filter to be used against Int fields. All fields are combined with a logical ‘and.’ */
 export type IntFilter = {
   /** Not equal to the specified value, treating null like an ordinary value. */
@@ -636,8 +563,6 @@ export type Query = Node & {
   allCheckpointSlots: Maybe<CheckpointSlotsConnection>;
   /** Reads and enables pagination through a set of `GearEthBridgeMessage`. */
   allGearEthBridgeMessages: Maybe<GearEthBridgeMessagesConnection>;
-  /** Reads and enables pagination through a set of `GearProgram`. */
-  allGearPrograms: Maybe<GearProgramsConnection>;
   /** Reads and enables pagination through a set of `MerkleRootInMessageQueue`. */
   allMerkleRootInMessageQueues: Maybe<MerkleRootInMessageQueuesConnection>;
   /** Reads and enables pagination through a set of `Pair`. */
@@ -650,9 +575,6 @@ export type Query = Node & {
   /** Reads a single `GearEthBridgeMessage` using its globally unique `ID`. */
   gearEthBridgeMessage: Maybe<GearEthBridgeMessage>;
   gearEthBridgeMessageById: Maybe<GearEthBridgeMessage>;
-  /** Reads a single `GearProgram` using its globally unique `ID`. */
-  gearProgram: Maybe<GearProgram>;
-  gearProgramByName: Maybe<GearProgram>;
   /** Reads a single `MerkleRootInMessageQueue` using its globally unique `ID`. */
   merkleRootInMessageQueue: Maybe<MerkleRootInMessageQueue>;
   merkleRootInMessageQueueByBlockNumber: Maybe<MerkleRootInMessageQueue>;
@@ -698,18 +620,6 @@ export type QueryAllGearEthBridgeMessagesArgs = {
   last: InputMaybe<Scalars['Int']['input']>;
   offset: InputMaybe<Scalars['Int']['input']>;
   orderBy?: InputMaybe<Array<GearEthBridgeMessagesOrderBy>>;
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryAllGearProgramsArgs = {
-  after: InputMaybe<Scalars['Cursor']['input']>;
-  before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<GearProgramCondition>;
-  filter: InputMaybe<GearProgramFilter>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  last: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<GearProgramsOrderBy>>;
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -766,16 +676,6 @@ export type QueryGearEthBridgeMessageArgs = {
 /** The root query type which gives access points into the data universe. */
 export type QueryGearEthBridgeMessageByIdArgs = {
   id: Scalars['String']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryGearProgramArgs = {
-  nodeId: Scalars['ID']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryGearProgramByNameArgs = {
-  name: Scalars['String']['input'];
 };
 
 /** The root query type which gives access points into the data universe. */
@@ -955,7 +855,7 @@ export type Subscription = {
 
 export type Transfer = Node & {
   __typename?: 'Transfer';
-  amount: Scalars['BigInt']['output'];
+  amount: Scalars['String']['output'];
   blockNumber: Scalars['BigInt']['output'];
   bridgingStartedAtBlock: Maybe<Scalars['BigInt']['output']>;
   bridgingStartedAtMessageId: Maybe<Scalars['String']['output']>;
@@ -983,7 +883,7 @@ export type Transfer = Node & {
  */
 export type TransferCondition = {
   /** Checks for equality with the object’s `amount` field. */
-  amount: InputMaybe<Scalars['BigInt']['input']>;
+  amount: InputMaybe<Scalars['String']['input']>;
   /** Checks for equality with the object’s `blockNumber` field. */
   blockNumber: InputMaybe<Scalars['BigInt']['input']>;
   /** Checks for equality with the object’s `bridgingStartedAtBlock` field. */
@@ -1023,7 +923,7 @@ export type TransferCondition = {
 /** A filter to be used against `Transfer` object types. All fields are combined with a logical ‘and.’ */
 export type TransferFilter = {
   /** Filter by the object’s `amount` field. */
-  amount: InputMaybe<BigIntFilter>;
+  amount: InputMaybe<StringFilter>;
   /** Checks for all expressions in this list. */
   and: InputMaybe<Array<TransferFilter>>;
   /** Filter by the object’s `blockNumber` field. */

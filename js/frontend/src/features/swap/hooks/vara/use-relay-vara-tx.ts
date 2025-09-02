@@ -19,16 +19,16 @@ function useRelayVaraTx(nonce: HexString, blockNumber: bigint) {
     const archiveApi = await initArchiveApi();
 
     try {
-      const { error, success, ...result } = await relayVaraToEth(
+      const { error, success, ...result } = await relayVaraToEth({
         nonce,
         blockNumber,
-        publicClient,
-        walletClient,
-        walletClient.account,
-        archiveApi,
-        CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
-        onLog,
-      );
+        ethereumPublicClient: publicClient,
+        ethereumWalletClient: walletClient,
+        ethereumAccount: walletClient.account,
+        gearApi: archiveApi,
+        messageQueueAddress: CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
+        statusCb: onLog,
+      });
 
       if (error) throw new Error(error);
       if (!success) throw new Error('Failed to relay Vara transaction');

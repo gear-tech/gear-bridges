@@ -21,20 +21,20 @@ function useRelayEthTx(txHash: HexString) {
     const archiveApi = await initArchiveApi();
 
     try {
-      const { error, ok, ...result } = await relayEthToVara(
-        txHash,
-        ETH_BEACON_NODE_ADDRESS,
-        publicClient,
-        archiveApi,
-        CONTRACT_ADDRESS.CHECKPOINT_CLIENT,
-        CONTRACT_ADDRESS.HISTORICAL_PROXY,
-        CONTRACT_ADDRESS.VFT_MANAGER,
-        'VftManager',
-        'SubmitReceipt',
-        account.decodedAddress,
-        { signer: account.signer },
-        onLog,
-      );
+      const { error, ok, ...result } = await relayEthToVara({
+        transactionHash: txHash,
+        beaconRpcUrl: ETH_BEACON_NODE_ADDRESS,
+        ethereumPublicClient: publicClient,
+        gearApi: archiveApi,
+        checkpointClientId: CONTRACT_ADDRESS.CHECKPOINT_CLIENT,
+        historicalProxyId: CONTRACT_ADDRESS.HISTORICAL_PROXY,
+        clientId: CONTRACT_ADDRESS.VFT_MANAGER,
+        clientServiceName: 'VftManager',
+        clientMethodName: 'SubmitReceipt',
+        signer: account.decodedAddress,
+        signerOptions: { signer: account.signer },
+        statusCb: onLog,
+      });
 
       if (error) throw new Error(JSON.stringify(error));
       if (!ok) throw new Error('Failed to relay Ethereum transaction');

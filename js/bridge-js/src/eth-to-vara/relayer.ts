@@ -22,7 +22,7 @@ interface RelayResult {
  * This interface defines all the required configuration and optional settings
  * needed to relay cross-chain transactions from Ethereum to Vara.
  */
-export interface RelayEthToVaraParams {
+export type RelayEthToVaraParams = {
   /**
    * Transaction hash of the Ethereum transaction to relay
    */
@@ -75,7 +75,7 @@ export interface RelayEthToVaraParams {
    * Callback function to track the status of the transaction
    */
   statusCb?: StatusCb;
-}
+};
 
 /**
  * Relays an Ethereum transaction to the Vara network through the bridge infrastructure.

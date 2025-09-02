@@ -6,6 +6,7 @@ import { PublicClient } from 'viem';
 import { CheckpointClient, encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError } from '../vara/index.js';
 import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
 import { composeProof } from './proof-composer.js';
+import { StatusCb } from '../util.js';
 
 interface RelayResult {
   blockHash: string;
@@ -17,60 +18,150 @@ interface RelayResult {
 }
 
 /**
- * Relays an Ethereum transaction to the Vara network by creating a proof
- * and submitting it through historical proxy program.
- *
- * @param transactionHash - Transaction hash of the Ethereum transaction to relay
- * @param beaconRpcUrl - The RPC URL for the Ethereum beacon chain client
- * @param ethereumPublicClient - Viem public client for Ethereum network interactions
- * @param gearApi - Gear API instance for Vara network operations
- * @param checkpointClientId - ID of the checkpoint client program on Vara
- * @param historicalProxyId - ID of the historical proxy program on Vara
- * @param clientId - ID of the target client program on Vara
- * @param clientServiceName - Name of the service to call on the target client
- * @param clientMethodName - Name of the method to call on the target service
- * @param signer - Account signer, either as string address or KeyringPair for transaction signing
- * @param signerOptions - Optional signing configuration parameters
- * @returns Promise resolving to transaction details with either success data or error information
+ * Parameters for relaying an Ethereum transaction to the Vara network.
+ * This interface defines all the required configuration and optional settings
+ * needed to relay cross-chain transactions from Ethereum to Vara.
  */
-export async function relayEthToVara(
-  transactionHash: `0x${string}`,
-  beaconRpcUrl: string,
-  ethereumPublicClient: PublicClient,
-  gearApi: GearApi,
-  checkpointClientId: `0x${string}`,
-  historicalProxyId: `0x${string}`,
-  clientId: `0x${string}`,
-  clientServiceName: string,
-  clientMethodName: string,
-  signer: string | KeyringPair,
-  signerOptions?: Partial<SignerOptions>,
-  statusCb?: (status: string, details?: Record<string, string>) => void | Promise<void>,
-): Promise<RelayResult> {
-  if (!statusCb) {
-    statusCb = () => {};
-  }
-  const beaconClient = await createBeaconClient(beaconRpcUrl);
-  const ethClient = createEthereumClient(ethereumPublicClient, beaconClient);
+export interface RelayEthToVaraParams {
+  /**
+   * Transaction hash of the Ethereum transaction to relay
+   */
+  transactionHash: `0x${string}`;
+  /**
+   * The RPC URL for the Ethereum beacon chain client
+   */
+  beaconRpcUrl: string;
+  /**
+   * Viem public client for Ethereum network interactions
+   */
+  ethereumPublicClient: PublicClient;
+  /**
+   * Gear API instance for Vara network operations
+   */
+  gearApi: GearApi;
+  /**
+   * ID of the checkpoint client program on Vara
+   */
+  checkpointClientId: `0x${string}`;
+  /**
+   * ID of the historical proxy program on Vara
+   */
+  historicalProxyId: `0x${string}`;
+  /**
+   * ID of the target client program on Vara
+   */
+  clientId: `0x${string}`;
+  /**
+   * Name of the service to call on the target client
+   */
+  clientServiceName: string;
+  /**
+   * Name of the method to call on the target service
+   */
+  clientMethodName: string;
+  /**
+   * Flag indicating whether to wait for the slot to appear on the CheckpointClient contract
+   */
+  wait?: boolean;
+  /**
+   * Account signer, either as string address or KeyringPair for transaction signing
+   */
+  signer: string | KeyringPair;
+  /**
+   * Optional signing configuration parameters
+   */
+  signerOptions?: Partial<SignerOptions>;
+  /**
+   * Callback function to track the status of the transaction
+   */
+  statusCb?: StatusCb;
+}
 
-  const checkpointClient = new CheckpointClient(gearApi, checkpointClientId);
+/**
+ * Relays an Ethereum transaction to the Vara network through the bridge infrastructure.
+ *
+ * This function performs the complete relay process:
+ * 1. Creates beacon and Ethereum clients for proof generation
+ * 2. Composes cryptographic proof of the Ethereum transaction
+ * 3. Builds and submits a transaction to the Vara network
+ * 4. Waits for the transaction response and returns the result
+ *
+ * @param params - Configuration parameters for the relay operation
+ * @param params.transactionHash - Hash of the Ethereum transaction to relay
+ * @param params.beaconRpcUrl - RPC URL for the Ethereum beacon chain client
+ * @param params.ethereumPublicClient - Viem public client for Ethereum interactions
+ * @param params.gearApi - Gear API instance for Vara network operations
+ * @param params.checkpointClientId - ID of the checkpoint client program on Vara
+ * @param params.historicalProxyId - ID of the historical proxy program on Vara
+ * @param params.clientId - ID of the target client program on Vara
+ * @param params.clientServiceName - Name of the service to call on the target client
+ * @param params.clientMethodName - Name of the method to call on the target service
+ * @param params.wait - If true, waits for the slot to appear on CheckpointClient instead of returning error
+ * @param params.signer - Account signer for transaction signing (address string or KeyringPair)
+ * @param params.signerOptions - Optional signing configuration parameters
+ * @param params.statusCb - Optional callback function to track transaction status
+ *
+ * @returns Promise resolving to relay result with transaction details and either success data or error
+ *
+ * @throws {Error} When beacon client creation fails
+ * @throws {Error} When proof composition fails
+ * @throws {Error} When transaction building or submission fails
+ *
+ * @example
+ * ```typescript
+ * const result = await relayEthToVara({
+ *   transactionHash: '0x123...',
+ *   beaconRpcUrl: 'https://beacon-chain.example.com',
+ *   ethereumPublicClient: viemClient,
+ *   gearApi: api,
+ *   checkpointClientId: '0xabc...',
+ *   historicalProxyId: '0xdef...',
+ *   clientId: '0x456...',
+ *   clientServiceName: 'BridgeService',
+ *   clientMethodName: 'processTransfer',
+ *   signer: keyringPair,
+ *   statusCb: (status, details) => console.log(status, details)
+ * });
+ *
+ * if ('error' in result) {
+ *   console.error('Relay failed:', result.error);
+ * } else {
+ *   console.log('Relay succeeded:', result.ok);
+ * }
+ * ```
+ */
+export async function relayEthToVara(params: RelayEthToVaraParams): Promise<RelayResult> {
+  const wait = params.wait ?? false;
+  const statusCb = params.statusCb || (() => {});
+
+  const beaconClient = await createBeaconClient(params.beaconRpcUrl);
+  const ethClient = createEthereumClient(params.ethereumPublicClient, beaconClient);
+
+  const checkpointClient = new CheckpointClient(params.gearApi, params.checkpointClientId);
 
   statusCb(`Composing proof`);
-  const composeResult = await composeProof(beaconClient, ethClient, checkpointClient, transactionHash, statusCb);
+  const composeResult = await composeProof(
+    beaconClient,
+    ethClient,
+    checkpointClient,
+    params.transactionHash,
+    wait,
+    statusCb,
+  );
 
   statusCb(`Building transaction`);
   const encodedEthToVaraEvent = encodeEthToVaraEvent(composeResult);
 
-  const historicalProxyClient = new HistoricalProxyClient(gearApi, historicalProxyId);
+  const historicalProxyClient = new HistoricalProxyClient(params.gearApi, params.historicalProxyId);
 
   const tx = await historicalProxyClient.historicalProxy
     .redirect(
       composeResult.proofBlock.block.slot,
       encodedEthToVaraEvent,
-      clientId,
-      getPrefix(clientServiceName, clientMethodName),
+      params.clientId,
+      getPrefix(params.clientServiceName, params.clientMethodName),
     )
-    .withAccount(signer, signerOptions)
+    .withAccount(params.signer, params.signerOptions)
     .calculateGas();
 
   statusCb(`Sending transaction`);

@@ -62,7 +62,8 @@ export async function composeProof(
   ethClient: EthereumClient,
   checkpointClient: CheckpointClient,
   txHash: `0x${string}`,
-  statusCb: StatusCb,
+  wait = false,
+  statusCb: StatusCb = () => {},
 ): Promise<ProofResult> {
   statusCb(`Requesting transaction receipt`, { txHash });
   const receipt = await ethClient.getTransactionReceipt(txHash);
@@ -80,7 +81,7 @@ export async function composeProof(
   const { proof, receiptRlp } = await generateMerkleProof(receipt.transactionIndex, receipts);
 
   statusCb(`Building inclusion proof`);
-  const proofBlock = await buildInclusionProof(beaconClient, checkpointClient, slot, statusCb);
+  const proofBlock = await buildInclusionProof(beaconClient, checkpointClient, slot, wait, statusCb);
 
   return {
     proofBlock,
@@ -94,7 +95,8 @@ async function buildInclusionProof(
   beaconClient: BeaconClient,
   checkpointClient: CheckpointClient,
   slot: number,
-  statusCb: StatusCb,
+  wait = false,
+  statusCb: StatusCb = () => {},
 ): Promise<BlockInclusionProof> {
   const beaconBlock = await beaconClient.getBlock(slot);
 
@@ -128,7 +130,7 @@ async function buildInclusionProof(
   };
 
   statusCb(`Requesting slot from Checkpoint Client program`);
-  const checkpointSlot = await checkpointClient.serviceCheckpointFor.get(slot);
+  const checkpointSlot = await checkpointClient.serviceCheckpointFor.get(slot, wait, statusCb);
 
   if (checkpointSlot[0] === slot) {
     return { block, headers: [] };

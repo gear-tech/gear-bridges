@@ -139,12 +139,23 @@ export class MessageQueueClient {
     }
   }
 
-  public async waitForMerkleRoot(bn: bigint, statusCb: StatusCb): Promise<MerkleRootLogArgs> {
-    const result = await new Promise<MerkleRootLogArgs>((resolve, reject) => {
+  public async waitForMerkleRoot(
+    bn: bigint,
+    fromBlock?: bigint,
+    statusCb: StatusCb = () => {},
+  ): Promise<MerkleRootLogArgs> {
+    const merkleRoot = await this.getMerkleRoot(bn);
+    if (merkleRoot) return { blockNumber: bn, merkleRoot };
+
+    const latestBlock = await this._client.getBlockNumber();
+
+    return new Promise<MerkleRootLogArgs>((resolve, reject) => {
+      statusCb(`Subscribing to merkle root events`);
       const unwatch = this._client.watchContractEvent({
         address: this._address,
         abi: MerkleRootEventAbi,
         eventName: 'MerkleRoot',
+        fromBlock: fromBlock || latestBlock,
         onLogs: (logs) => {
           for (const log of logs) {
             if ('args' in log) {
@@ -165,8 +176,6 @@ export class MessageQueueClient {
         },
       });
     });
-
-    return result;
   }
 
   async getMerkleRootLogsInRange(fromBlock: bigint, toBlock: bigint) {
@@ -321,18 +330,17 @@ export function getMessageQueueClient(
  * @param blockNumber - The block number to wait for the Merkle root
  * @param publicClient - Ethereum public client for reading blockchain state
  * @param messageQueueAddress - The message queue contract address
+ * @param fromEthereumBlock - (optional) The block number to start searching for the Merkle root
  * @returns Promise that resolves to true when the Merkle root appears for the specified block or a block greater than specified
  */
 export async function waitForMerkleRootAppearedInMessageQueue(
   blockNumber: bigint,
   publicClient: PublicClient,
   messageQueueAddress: `0x${string}`,
-  statusCb?: StatusCb,
+  fromEthereumBlock?: bigint,
+  statusCb: StatusCb = () => {},
 ): Promise<boolean> {
-  if (!statusCb) {
-    statusCb = () => {};
-  }
   const client = getMessageQueueClient(messageQueueAddress, publicClient);
-  await client.waitForMerkleRoot(blockNumber, statusCb);
+  await client.waitForMerkleRoot(blockNumber, fromEthereumBlock, statusCb);
   return true;
 }

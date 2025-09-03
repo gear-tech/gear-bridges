@@ -36,7 +36,7 @@ const TEXT = {
   [SUBMIT_STATUS.PERMIT]: 'Requesting signature to permit token spending',
   [SUBMIT_STATUS.BRIDGE]: 'Requesting transfer',
   [SUBMIT_STATUS.FEE]: 'Paying fee',
-  [SUBMIT_STATUS.SUCCESS]: 'Your transfer request and fee payment have been successful',
+  [SUBMIT_STATUS.SUCCESS]: 'Your transfer request have been successful',
 } as const;
 
 const ERROR_TEXT = {

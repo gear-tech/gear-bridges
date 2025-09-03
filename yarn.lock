@@ -969,7 +969,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@gear-js/bridge@workspace:js/bridge-js":
+"@gear-js/bridge@workspace:*, @gear-js/bridge@workspace:js/bridge-js":
   version: 0.0.0-use.local
   resolution: "@gear-js/bridge@workspace:js/bridge-js"
   dependencies:
@@ -11386,6 +11386,7 @@ __metadata:
   dependencies:
     "@base-ui-components/react": "npm:1.0.0-beta.2"
     "@gear-js/api": "npm:0.44.0"
+    "@gear-js/bridge": "workspace:*"
     "@gear-js/frontend-configs": "npm:0.1.2"
     "@gear-js/react-hooks": "npm:0.18.1"
     "@gear-js/ui": "npm:0.7.0"

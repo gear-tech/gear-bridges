@@ -3,13 +3,13 @@ import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
+import ArrowSVG from '@/assets/arrow.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
 import { useTokens } from '@/context';
 import { useTransaction } from '@/features/history';
-import ArrowSVG from '@/features/history/assets/arrow.svg?react';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
-import { PayVaraFeeButton } from '@/features/swap';
+import { PayVaraFeeButton, RelayTxButton } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
 import { Field } from './field';
@@ -82,7 +82,7 @@ function Transaction() {
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
-  const { data } = useTransaction(id);
+  const { data, refetch } = useTransaction(id);
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
@@ -116,7 +116,8 @@ function Transaction() {
   const formattedSenderAddress = isVaraNetwork ? getVaraAddress(sender) : sender;
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
-  const isPayFeeButtonVisible = account?.decodedAddress === sender && status === StatusEnum.AwaitingPayment;
+  const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
+  const isOwner = account?.decodedAddress === sender;
   const rawNonce = isVaraNetwork ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
@@ -130,7 +131,26 @@ function Transaction() {
         <div className={styles.sidebar}>
           <TransactionStatus status={status} />
 
-          {isPayFeeButtonVisible && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+          {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+
+          {isAwaitingPayment &&
+            (isVaraNetwork ? (
+              bridgingStartedAtBlock && (
+                <RelayTxButton.Vara
+                  sender={sender}
+                  nonce={rawNonce as HexString}
+                  blockNumber={bridgingStartedAtBlock}
+                  onSuccess={refetch}
+                />
+              )
+            ) : (
+              <RelayTxButton.Eth
+                sender={sender}
+                txHash={txHash as HexString}
+                blockNumber={BigInt(blockNumber)}
+                onSuccess={refetch}
+              />
+            ))}
         </div>
       </header>
 

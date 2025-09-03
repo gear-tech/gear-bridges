@@ -1,7 +1,6 @@
 import { Address } from './address';
 import { Card } from './card';
 import { CopyButton } from './copy-button';
-import { FeeAndTimeFooter } from './fee-and-time-footer';
 import { Input, Checkbox, Radio, Select, Textarea } from './form';
 import { FormattedBalance } from './formatted-balance';
 import { Container, Header, ErrorBoundary, PrivateRoute, Skeleton, TruncatedText } from './layout';
@@ -25,7 +24,6 @@ export {
   Card,
   CopyButton,
   Tooltip,
-  FeeAndTimeFooter,
   FormattedBalance,
   Address,
   TokenSVG,

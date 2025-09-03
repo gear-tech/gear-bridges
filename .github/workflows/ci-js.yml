@@ -127,7 +127,7 @@ jobs:
           node-version: 20.x
 
       - name: Install dependencies
-        run: yarn workspaces focus gear-bridges gear-bridge-common frontend
+        run: yarn workspaces focus frontend gear-bridges gear-bridge-common @gear-js/bridge
 
       - name: Build
         run: yarn build:frontend

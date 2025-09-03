@@ -7,6 +7,7 @@ import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
+import { usePendingTxsCount } from '@/features/history/hooks';
 import { useEthAccount, useVaraSymbol } from '@/hooks';
 import { isUndefined, logger, getErrorMessage, definedAssert } from '@/utils';
 
@@ -21,15 +22,15 @@ type Params = {
   ftBalance: bigint | undefined;
   requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
   onSubmit: (values: FormattedValues) => Promise<unknown>;
-  onValidation: () => void;
 };
 
-function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance, onValidation }: Params) {
+function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: Params) {
   const { api } = useApi();
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const { token, network } = useBridgeContext();
   const varaSymbol = useVaraSymbol();
+  const pendingTxsCount = usePendingTxsCount();
   const alert = useAlert();
 
   const valueSchema = getAmountSchema(
@@ -71,6 +72,9 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance, onV
       requiredBalance.reset();
 
       alert.success('Your transfer request was successful');
+
+      // to display warning asap
+      return pendingTxsCount.refetch();
     };
 
     const onError = (error: WriteContractErrorType | string) => {
@@ -78,7 +82,7 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance, onV
       alert.error(getErrorMessage(error));
     };
 
-    if (isUndefined(requiredBalance.data)) return validateBalance(values).then(onValidation).catch(onError);
+    if (isUndefined(requiredBalance.data)) return validateBalance(values).catch(onError);
 
     onSubmit(values).then(onSuccess).catch(onError);
   });

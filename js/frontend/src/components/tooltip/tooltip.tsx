@@ -10,6 +10,8 @@ type Props = {
 };
 
 function Tooltip({ value, children, side }: Props) {
+  if (!value) return children;
+
   return (
     <BaseTooltip.Provider>
       <BaseTooltip.Root>

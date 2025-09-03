@@ -241,6 +241,7 @@ impl MerkleRootRelayer {
                             merkle_root.block_hash,
                             hash,
                             authority_set_proof,
+                            false,
                         ) {
                             log::error!("Prover connection closed, exiting...");
                             return Ok(());
@@ -326,6 +327,7 @@ impl MerkleRootRelayer {
                         merkle_root.block_hash,
                         hash,
                         inner_proof,
+                        false,
                     ) {
                         log::error!("Prover connection closed, exiting...");
                         return Ok(());
@@ -339,13 +341,19 @@ impl MerkleRootRelayer {
                         merkle_root.block_number
                     );
 
+                    let proof = merkle_root.proof.ok_or_else(|| {
+                        anyhow::anyhow!(
+                        "Proof should be available when status is SubmitProof; Check your storage"
+                    )
+                    })?;
+
                     self.roots.insert(
                         hash,
                         MerkleRoot {
                             block_number: merkle_root.block_number,
                             block_hash: merkle_root.block_hash,
                             status: MerkleRootStatus::SubmitProof,
-                            proof: merkle_root.proof,
+                            proof: Some(proof.clone()),
                             rpc_requests: Vec::new(),
                         },
                     );
@@ -541,7 +549,7 @@ impl MerkleRootRelayer {
                                 let block = api.get_block_at(block_hash).await?;
                                 let block = GearBlock::from_subxt_block(block).await?;
 
-                                match self.try_proof_merkle_root(prover, authority_set_sync, block).await {
+                                match self.try_proof_merkle_root(prover, authority_set_sync, block, true).await {
                                     Ok(Some(merkle_root)) => {
                                         self.roots.get_mut(&merkle_root).map(move |r| r.rpc_requests.push(response));
                                     }
@@ -575,7 +583,7 @@ impl MerkleRootRelayer {
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
-                        self.try_proof_merkle_root(prover, authority_set_sync, block).await?;
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, false).await?;
                     }
 
                     Err(RecvError::Lagged(n)) => {
@@ -680,7 +688,7 @@ impl MerkleRootRelayer {
 
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
-                            self.try_proof_merkle_root(prover, authority_set_sync, block).await?;
+                            self.try_proof_merkle_root(prover, authority_set_sync, block, false).await?;
                         }
                     }
                 }
@@ -771,6 +779,7 @@ impl MerkleRootRelayer {
         prover: &mut FinalityProverIo,
         authority_set_sync: &mut AuthoritySetSyncIo,
         block: GearBlock,
+        priority: bool,
     ) -> anyhow::Result<Option<H256>> {
         let Some(merkle_root) = storage::queue_merkle_root_changed(&block) else {
             return Ok(None);
@@ -818,7 +827,13 @@ impl MerkleRootRelayer {
                     },
                 );
                 log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{number}");
-                if !prover.prove(block.number(), block.hash(), merkle_root, inner_proof) {
+                if !prover.prove(
+                    block.number(),
+                    block.hash(),
+                    merkle_root,
+                    inner_proof,
+                    priority,
+                ) {
                     log::error!("Prover connection closed, exiting...");
                     return Err(anyhow::anyhow!("Prover connection closed"));
                 }

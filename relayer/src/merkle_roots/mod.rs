@@ -339,19 +339,13 @@ impl MerkleRootRelayer {
                         merkle_root.block_number
                     );
 
-                    let proof = merkle_root.proof.ok_or_else(|| {
-                        anyhow::anyhow!(
-                        "Proof should be available when status is SubmitProof; Check your storage"
-                    )
-                    })?;
-
                     self.roots.insert(
                         hash,
                         MerkleRoot {
                             block_number: merkle_root.block_number,
                             block_hash: merkle_root.block_hash,
                             status: MerkleRootStatus::SubmitProof,
-                            proof: Some(proof.clone()),
+                            proof: merkle_root.proof,
                             rpc_requests: Vec::new(),
                         },
                     );

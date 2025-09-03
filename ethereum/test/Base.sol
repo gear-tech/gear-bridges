@@ -41,6 +41,7 @@ struct DeploymentArguments {
     bytes32 governanceAdmin;
     bytes32 governancePauser;
     address emergencyStopAdmin;
+    address[] emergencyStopObservers;
     uint256 bridgingPaymentFee;
 }
 
@@ -52,6 +53,8 @@ library BaseConstants {
     bytes32 internal constant GOVERNANCE_ADMIN = 0x3333333333333333333333333333333333333333333333333333333333333333;
     bytes32 internal constant GOVERNANCE_PAUSER = 0x4444444444444444444444444444444444444444444444444444444444444444;
     address internal constant EMERGENCY_STOP_ADMIN = 0x5555555555555555555555555555555555555555;
+    address internal constant EMERGENCY_STOP_OBSERVER1 = 0x6666666666666666666666666666666666666666;
+    address internal constant EMERGENCY_STOP_OBSERVER2 = 0x7777777777777777777777777777777777777777;
     uint256 internal constant BRIDGING_PAYMENT_FEE = 1 wei;
 }
 
@@ -79,6 +82,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     NewImplementationMock public newImplementationMock;
 
     function deployBridgeFromConstants() public {
+        address[] memory emergencyStopObservers = new address[](2);
+
+        emergencyStopObservers[0] = BaseConstants.EMERGENCY_STOP_OBSERVER1;
+        emergencyStopObservers[1] = BaseConstants.EMERGENCY_STOP_OBSERVER2;
+
         deployBridge(
             DeploymentArguments({
                 privateKey: 0,
@@ -92,6 +100,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 governanceAdmin: BaseConstants.GOVERNANCE_ADMIN,
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
                 emergencyStopAdmin: BaseConstants.EMERGENCY_STOP_ADMIN,
+                emergencyStopObservers: emergencyStopObservers,
                 bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
             })
         );
@@ -114,6 +123,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 governanceAdmin: vm.envBytes32("GOVERNANCE_ADMIN"),
                 governancePauser: vm.envBytes32("GOVERNANCE_PAUSER"),
                 emergencyStopAdmin: vm.envAddress("EMERGENCY_STOP_ADMIN"),
+                emergencyStopObservers: vm.envAddress("EMERGENCY_STOP_OBSERVERS", ","),
                 bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE")
             })
         );
@@ -134,6 +144,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    bridgingPaymentFee:  ", deploymentArguments.bridgingPaymentFee, "wei");
 
         if (isTest) {
+            vm.warp(vm.unixTime() / 1000);
             vm.deal(deploymentArguments.deployerAddress, BaseConstants.DEPLOYER_INITIAL_BALANCE);
             vm.startPrank(deploymentArguments.deployerAddress, deploymentArguments.deployerAddress);
         } else if (isScript) {
@@ -210,7 +221,13 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 "MessageQueue.sol",
                 abi.encodeCall(
                     MessageQueue.initialize,
-                    (governanceAdmin, governancePauser, deploymentArguments.emergencyStopAdmin, verifier)
+                    (
+                        governanceAdmin,
+                        governancePauser,
+                        deploymentArguments.emergencyStopAdmin,
+                        deploymentArguments.emergencyStopObservers,
+                        verifier
+                    )
                 )
             )
         );
@@ -221,6 +238,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(messageQueue.governancePauser(), address(governancePauser));
         assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
         assertEq(messageQueue.verifier(), address(verifier));
+        assertEq(messageQueue.isChallengingRoot(), false);
         assertEq(messageQueue.isEmergencyStopped(), false);
 
         console.log();
@@ -289,10 +307,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             vm.stopPrank();
         } else if (isScript) {
             vm.stopBroadcast();
-        }
-
-        if (isTest) {
-            vm.warp(vm.unixTime() / 1000);
         }
     }
 

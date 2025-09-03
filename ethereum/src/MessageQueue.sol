@@ -5,6 +5,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IGovernance} from "./interfaces/IGovernance.sol";
 import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
 import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
@@ -28,11 +29,13 @@ contract MessageQueue is
     IPausable,
     IMessageQueue
 {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     using Hasher for VaraMessage;
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
-    uint256 public constant CHALLENGE_ROOT_DELAY = 1 hours;
+    uint256 public constant CHALLENGE_ROOT_DELAY = 1 days;
 
     uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
     uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 3 minutes;
@@ -41,6 +44,7 @@ contract MessageQueue is
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
     address private _emergencyStopAdmin;
+    EnumerableSet.AddressSet private _emergencyStopObservers;
     IVerifier private _verifier;
     uint256 private _challengingRootTimestamp;
     bool private _emergencyStop;
@@ -69,6 +73,7 @@ contract MessageQueue is
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
         address emergencyStopAdmin_,
+        address[] memory emergencyStopObservers_,
         IVerifier verifier_
     ) public initializer {
         __AccessControl_init();
@@ -83,6 +88,11 @@ contract MessageQueue is
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
         _emergencyStopAdmin = emergencyStopAdmin_;
+
+        for (uint256 i = 0; i < emergencyStopObservers_.length; i++) {
+            _emergencyStopObservers.add(emergencyStopObservers_[i]);
+        }
+
         _verifier = verifier_;
     }
 
@@ -108,6 +118,14 @@ contract MessageQueue is
      */
     function emergencyStopAdmin() external view returns (address) {
         return _emergencyStopAdmin;
+    }
+
+    /**
+     * @dev Returns list of emergency stop observers.
+     * @return emergencyStopObservers List of emergency stop observers.
+     */
+    function emergencyStopObservers() external view returns (address[] memory) {
+        return _emergencyStopObservers.values();
     }
 
     /**

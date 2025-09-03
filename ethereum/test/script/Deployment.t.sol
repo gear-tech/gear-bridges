@@ -10,6 +10,7 @@ contract DeploymentTest is Test {
 
     function test_DeploymentMainnet() public {
         vm.chainId(1);
+        vm.warp(vm.unixTime() / 1000);
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("CIRCLE_TOKEN", vm.toString(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48));
         vm.setEnv("TETHER_TOKEN", vm.toString(0xdAC17F958D2ee523a2206206994597C13D831ec7));
@@ -18,6 +19,14 @@ contract DeploymentTest is Test {
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
         vm.setEnv("GOVERNANCE_PAUSER", vm.toString(BaseConstants.GOVERNANCE_PAUSER));
         vm.setEnv("EMERGENCY_STOP_ADMIN", vm.toString(BaseConstants.EMERGENCY_STOP_ADMIN));
+        vm.setEnv(
+            "EMERGENCY_STOP_OBSERVERS",
+            string.concat(
+                vm.toString(BaseConstants.EMERGENCY_STOP_OBSERVER1),
+                ",",
+                vm.toString(BaseConstants.EMERGENCY_STOP_OBSERVER2)
+            )
+        );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.setUp();
@@ -26,11 +35,20 @@ contract DeploymentTest is Test {
 
     function test_DeploymentHoodi() public {
         vm.chainId(560048);
+        vm.warp(vm.unixTime() / 1000);
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
         vm.setEnv("GOVERNANCE_PAUSER", vm.toString(BaseConstants.GOVERNANCE_PAUSER));
         vm.setEnv("EMERGENCY_STOP_ADMIN", vm.toString(BaseConstants.EMERGENCY_STOP_ADMIN));
+        vm.setEnv(
+            "EMERGENCY_STOP_OBSERVERS",
+            string.concat(
+                vm.toString(BaseConstants.EMERGENCY_STOP_OBSERVER1),
+                ",",
+                vm.toString(BaseConstants.EMERGENCY_STOP_OBSERVER2)
+            )
+        );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.setUp();

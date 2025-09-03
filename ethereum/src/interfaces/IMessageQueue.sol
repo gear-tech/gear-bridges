@@ -108,6 +108,12 @@ interface IMessageQueue is IPausable {
     function emergencyStopAdmin() external view returns (address);
 
     /**
+     * @dev Returns list of emergency stop observers.
+     * @return emergencyStopObservers List of emergency stop observers.
+     */
+    function emergencyStopObservers() external view returns (address[] memory);
+
+    /**
      * @dev Returns verifier address.
      *      Verifier is smart contract that is responsible for verifying
      *      the validity of the Merkle proof.

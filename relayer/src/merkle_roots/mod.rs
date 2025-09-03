@@ -5,7 +5,11 @@ use crate::{
         prover::FinalityProverIo,
     },
     message_relayer::{
-        common::{gear::block_listener::BlockListener, GearBlock},
+        common::{
+            gear::block_listener::BlockListener,
+            web_request::{MerkleRootsRequest, MerkleRootsResponse},
+            GearBlock,
+        },
         eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorageError,
@@ -15,7 +19,6 @@ use ::prover::proving::GenesisConfig;
 use anyhow::Context;
 use ethereum_client::EthApi;
 use primitive_types::H256;
-use relayer_rpc::merkle_roots::{MerkleRootsRequest, MerkleRootsResponse};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -48,7 +51,7 @@ pub struct Relayer {
     last_sealed: Option<u64>,
     genesis_config: GenesisConfig,
     eth_api: EthApi,
-    rpc: UnboundedReceiver<MerkleRootsRequest>,
+    http: UnboundedReceiver<MerkleRootsRequest>,
 }
 
 impl MeteredService for Relayer {
@@ -64,7 +67,7 @@ impl Relayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
-        rpc: UnboundedReceiver<MerkleRootsRequest>,
+        http: UnboundedReceiver<MerkleRootsRequest>,
         storage: Arc<MerkleRootStorage>,
         genesis_config: GenesisConfig,
         last_sealed: Option<u64>,
@@ -95,7 +98,7 @@ impl Relayer {
             last_sealed,
             genesis_config,
             eth_api,
-            rpc,
+            http,
         }
     }
 
@@ -109,7 +112,7 @@ impl Relayer {
             genesis_config,
             last_sealed,
             eth_api,
-            rpc,
+            http,
         } = self;
 
         let [blocks0, blocks1] = block_listener.run().await;
@@ -125,7 +128,7 @@ impl Relayer {
                 submitter,
                 prover,
                 authority_set_sync,
-                rpc,
+                http,
                 last_sealed,
                 genesis_config,
                 eth_api,
@@ -176,7 +179,7 @@ impl MerkleRootRelayer {
         mut submitter: SubmitterIo,
         mut prover: FinalityProverIo,
         mut authority_set_sync: AuthoritySetSyncIo,
-        mut rpc: UnboundedReceiver<MerkleRootsRequest>,
+        mut http: UnboundedReceiver<MerkleRootsRequest>,
         last_sealed: Option<u64>,
         genesis_config: GenesisConfig,
         eth_api: EthApi,
@@ -427,7 +430,7 @@ impl MerkleRootRelayer {
                     &mut blocks_rx,
                     &mut authority_set_sync,
                     &mut sealed_eras,
-                    &mut rpc,
+                    &mut http,
                 )
                 .await
             {

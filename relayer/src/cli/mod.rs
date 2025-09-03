@@ -68,10 +68,13 @@ pub struct GearEthCoreArgs {
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
 
-    #[arg(long, env = "RPC_AUTH_TOKEN")]
-    pub rpc_auth_token: String,
-    #[arg(long, env = "RPC_ADDRESS")]
-    pub rpc_address: String,
+    /// Authorization token for web-server
+    #[arg(long, env)]
+    pub web_server_token: String,
+
+    /// Socket address for web-server
+    #[arg(long, env, default_value = "127.0.0.1:8443")]
+    pub web_server_address: String,
 }
 
 #[derive(Args)]

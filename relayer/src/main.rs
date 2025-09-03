@@ -74,9 +74,19 @@ async fn run() -> AnyResult<()> {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let tcp_listener = TcpListener::bind(&args.web_server_address)?;
+
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let web_server =
+                server::create(tcp_listener, args.web_server_token, None, Some(sender))
+                    .context("Failed to create web server")?;
+            let handle_server = web_server.handle();
+            tokio::spawn(web_server);
+
             let relayer = merkle_roots::Relayer::new(
                 api_provider.connection(),
                 eth_api,
+                receiver,
                 storage,
                 genesis_config,
                 args.start_authority_set_id,
@@ -92,7 +102,9 @@ async fn run() -> AnyResult<()> {
                 .await;
             api_provider.spawn();
 
-            relayer.run().await.expect("Merkle root relayer failed");
+            let res = relayer.run().await;
+            handle_server.stop(true).await;
+            return res;
         }
         CliCommands::KillSwitch(args) => {
             let api_provider = ApiProvider::new(
@@ -233,8 +245,9 @@ async fn run() -> AnyResult<()> {
                     // spawn web-server
                     let tcp_listener = TcpListener::bind(web_server_address)?;
                     let (sender, receiver) = mpsc::unbounded_channel();
-                    let web_server = server::create(tcp_listener, web_server_token, sender)
-                        .context("Failed to create web server")?;
+                    let web_server =
+                        server::create(tcp_listener, web_server_token, Some(sender), None)
+                            .context("Failed to create web server")?;
                     let handle_server = web_server.handle();
                     task::spawn(web_server);
 

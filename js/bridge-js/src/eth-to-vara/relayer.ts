@@ -154,7 +154,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
 
   const historicalProxyClient = new HistoricalProxyClient(params.gearApi, params.historicalProxyId);
 
-  const tx = await historicalProxyClient.historicalProxy
+  const tx = historicalProxyClient.historicalProxy
     .redirect(
       composeResult.proofBlock.block.slot,
       encodedEthToVaraEvent,
@@ -162,7 +162,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
       getPrefix(params.clientServiceName, params.clientMethodName),
     )
     .withAccount(params.signer, params.signerOptions)
-    .calculateGas();
+    .withGas('max');
 
   statusCb(`Sending transaction`);
   const { blockHash, msgId, txHash, response, isFinalized } = await tx.signAndSend();

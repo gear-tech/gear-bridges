@@ -47,7 +47,7 @@ const main = async () => {
       gearApi,
       messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
       statusCb: (status, details) => {
-        console.log(`[relayEthToVara]: ${status}`, details);
+        console.log(`[relayEthToVara]: ${status}`, details || '');
       },
     });
   }
@@ -136,8 +136,9 @@ const main = async () => {
     ethereumAccount: ethAccount,
     gearApi,
     messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
+    wait: true,
     statusCb: (status, details) => {
-      console.log(`[relayEthToVara]: ${status}`, details);
+      console.log(`[relayEthToVara]: ${status}`, details || '');
     },
   });
 };

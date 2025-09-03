@@ -28,7 +28,7 @@ assertEnv('VARA_WS_RPC');
 const VARA_WS_RPC = process.env.VARA_WS_RPC!;
 assertEnv('ETH_PRIVATE_KEY');
 const ETH_PRIVATE_KEY = process.env.ETH_PRIVATE_KEY! as `0x${string}`;
-const PING_SERVICE_NAME = 'PingReceiver';
+const PING_SERVICE_NAME = 'Ping';
 const PING_METHOD_NAME = 'SubmitReceipt';
 const PING_WASM_PATH = '../../target/wasm32-gear/release/ping.opt.wasm';
 
@@ -66,7 +66,7 @@ const main = async () => {
       clientMethodName: PING_METHOD_NAME,
       signer: account,
       statusCb: (status, details) => {
-        console.log(`[relayEthToVara]: ${status}`, details);
+        console.log(`[relayEthToVara]: ${status}`, details || '');
       },
     });
 
@@ -121,8 +121,9 @@ const main = async () => {
     clientServiceName: PING_SERVICE_NAME,
     clientMethodName: PING_METHOD_NAME,
     signer: account,
+    wait: true,
     statusCb: (status, details) => {
-      console.log(`[relayEthToVara]: ${status}`, details);
+      console.log(`[relayEthToVara]: ${status}`, details || '');
     },
   });
 

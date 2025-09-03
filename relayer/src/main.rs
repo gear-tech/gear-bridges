@@ -74,9 +74,15 @@ async fn run() -> AnyResult<()> {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let (rpc_tx, rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+
+            let rpc_server =
+                relayer_rpc::merkle_roots::server::MerkleRoots::new(rpc_tx, args.rpc_auth_token);
+
             let relayer = merkle_roots::Relayer::new(
                 api_provider.connection(),
                 eth_api,
+                rpc_rx,
                 storage,
                 genesis_config,
                 args.start_authority_set_id,
@@ -91,6 +97,21 @@ async fn run() -> AnyResult<()> {
                 .run(args.prometheus_args.endpoint)
                 .await;
             api_provider.spawn();
+
+            tokio::task::spawn(async move {
+                match tonic::transport::Server::builder()
+                    .add_service(relayer_rpc::merkle_roots::server::MerkleRootsServer::new(
+                        rpc_server,
+                    ))
+                    .serve(args.rpc_address.parse().expect("invalid address"))
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(e) => {
+                        log::error!("Failed to start gRPC server: {}", e);
+                    }
+                }
+            });
 
             relayer.run().await.expect("Merkle root relayer failed");
         }

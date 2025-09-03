@@ -67,6 +67,11 @@ pub struct GearEthCoreArgs {
     /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
+
+    #[arg(long, env = "RPC_AUTH_TOKEN")]
+    pub rpc_auth_token: String,
+    #[arg(long, env = "RPC_ADDRESS")]
+    pub rpc_address: String,
 }
 
 #[derive(Args)]

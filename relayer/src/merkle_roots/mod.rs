@@ -723,6 +723,22 @@ impl MerkleRootRelayer {
                         response.merkle_root,
                         response.merkle_root_block
                     );
+                    let proof = merkle_root
+                        .proof
+                        .as_ref()
+                        .map(|p| p.proof.clone())
+                        .expect("proof should be available if root is finalized");
+                    for req in merkle_root.rpc_requests.drain(..) {
+                        let Ok(_) = req.send(MerkleRootsResponse::MerkleRootProof {
+                            proof: proof.clone(),
+                            block_number: merkle_root.block_number,
+                            block_hash: merkle_root.block_hash,
+                            merkle_root: response.merkle_root,
+                        }) else {
+                            log::error!("RPC response send failed");
+                            return Err(anyhow::anyhow!("RPC response send failed"));
+                        };
+                    }
                 }
 
                 submitter::ResponseStatus::Failed(err) => {
@@ -733,6 +749,14 @@ impl MerkleRootRelayer {
                         response.merkle_root_block,
                         err
                     );
+                    for req in merkle_root.rpc_requests.drain(..) {
+                        let Ok(_) = req.send(MerkleRootsResponse::Failed {
+                            message: err.clone(),
+                        }) else {
+                            log::error!("RPC response send failed");
+                            return Err(anyhow::anyhow!("RPC response send failed"));
+                        };
+                    }
                 }
             }
         } else {

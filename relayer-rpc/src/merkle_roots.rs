@@ -23,6 +23,10 @@ pub enum MerkleRootsResponse {
     NoMerkleRootOnBlock {
         block_number: u32,
     },
+
+    Failed {
+        message: String,
+    },
 }
 
 #[cfg(feature = "server")]
@@ -112,6 +116,11 @@ pub mod server {
                         }
                         .into())
                     }
+
+                    MerkleRootsResponse::Failed { message } => Ok(MerkleRootProofResponse {
+                        response: Some(merkle_root_proof_response::Response::Failed(message)),
+                    }
+                    .into()),
                 },
 
                 Err(_) => Err(Status::unavailable("Service is unavailable")),

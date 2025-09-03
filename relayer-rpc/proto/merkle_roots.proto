@@ -14,6 +14,7 @@ message MerkleRootProofResponse {
     oneof response {
         MerkleRootProof proof = 1;
         uint32 no_merkle_root_on_block = 2;
+        string failed = 3;
     }
 
 }

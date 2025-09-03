@@ -32,11 +32,27 @@ impl_metered_service! {
     }
 }
 
+fn get_from_block() -> u32 {
+    const DEFAULT: u32 = 1;
+
+    let Ok(from_block) = std::env::var("FROM_BLOCK_LISTENER2") else {
+        log::trace!(r#"env::var("FROM_BLOCK_LISTENER2") failed. Return default value ({DEFAULT})."#);
+        return DEFAULT;
+    };
+
+    let Ok(from_block) = from_block.parse::<u32>() else {
+        log::trace!("from_block.parse::<u32>() failed. Return default value ({DEFAULT}).");
+        return DEFAULT;
+    };
+
+    from_block
+}
+
 impl BlockListener {
     pub fn new(api_provider: ApiProviderConnection) -> Self {
         Self {
             api_provider,
-            from_block: 1,
+            from_block: get_from_block(),
 
             metrics: Metrics::new(),
         }

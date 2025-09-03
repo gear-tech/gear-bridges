@@ -1,5 +1,5 @@
 [package]
-name = "js-proof-test"
+name = "js-test"
 version.workspace = true
 edition.workspace = true
 
@@ -13,3 +13,8 @@ hex.workspace = true
 gsdk.workspace = true
 sails-rs.workspace = true
 dotenv.workspace = true
+primitive-types.workspace = true
+keccak-hash.workspace = true
+gear-rpc-client.workspace = true
+alloy.workspace = true
+reqwest.workspace = true

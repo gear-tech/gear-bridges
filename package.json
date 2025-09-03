@@ -16,10 +16,13 @@
   "workspaces": [
     "js/indexer",
     "js/frontend",
-    "js/bridge-js"
+    "js/bridge-js",
+    "js/common"
   ],
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@swc/cli": "^0.7.8",
+    "@swc/core": "^1.13.5",
     "@typescript-eslint/eslint-plugin": "^8.39.1",
     "@typescript-eslint/parser": "^8.39.1",
     "eslint": "9.28.0",
@@ -30,19 +33,21 @@
     "eslint-plugin-vitest": "^0.5.4",
     "lerna": "8.2.3",
     "prettier": "^3.6.2",
-    "rimraf": "6.0.1",
+    "rimraf": "^6.0.1",
     "typescript": "5.9.2",
     "typescript-eslint": "^8.39.1"
   },
   "scripts": {
-    "build:frontend": "lerna run build --scope frontend --verbose",
-    "build:indexer": "lerna run build --scope indexer --verbose",
-    "build:bridge-js": "lerna run build --scope gear-bridge-js --verbose",
+    "build:frontend": "lerna run build --scope gear-bridge-common --scope frontend --verbose",
+    "build:indexer": "lerna run build --scope gear-bridge-common --scope indexer --verbose",
+    "build:bridge-js": "lerna run build --scope @gear-js/bridge --verbose",
+    "build:common": "lerna run build --scope gear-bridge-common --verbose",
     "clean": "lerna clean --yes",
     "lint:bridge-js": "eslint js/bridge-js",
     "lint:bridge-js:fix": "eslint js/bridge-js --fix",
     "lint:indexer": "eslint js/indexer",
     "lint:indexer:fix": "eslint js/indexer --fix",
-    "fmt": "prettier js/bridge-js/**/*.{ts,js,json} js/indexer/**/*.{ts,js,json} -w"
+    "fmt": "prettier js/bridge-js/**/*.{ts,js,json} js/indexer/**/*.{ts,js,json} -w",
+    "test": "lerna run test --scope @gear-js/bridge --verbose"
   }
 }

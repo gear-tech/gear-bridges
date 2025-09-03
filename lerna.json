@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/lerna/schemas/lerna-schema.json",
   "version": "independent",
-  "packages": ["js/frontend", "js/indexer", "js/bridge-js"],
+  "packages": ["js/frontend", "js/indexer", "js/bridge-js", "js/common"],
   "npmClient": "yarn"
 }

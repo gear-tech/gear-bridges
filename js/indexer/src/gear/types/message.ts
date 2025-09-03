@@ -1,4 +1,4 @@
-import { Event } from '../processor';
+import { Event } from '../processor.js';
 
 export type MessageQueuedEvent = Omit<Event, 'args'> & { args: MessageQueuedArgs };
 

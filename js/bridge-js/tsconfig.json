@@ -4,7 +4,6 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "outDir": "./lib",
-    "rootDir": "./src",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
@@ -12,5 +11,5 @@
     "skipLibCheck": true,
     "noEmit": false
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "example"]
 }

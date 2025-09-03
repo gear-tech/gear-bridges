@@ -49,6 +49,9 @@
   }
 
   .token {
+    --token-icon-size: 48px;
+    --network-icon-size: 28px;
+
     display: flex;
     align-items: center;
     gap: 16px;

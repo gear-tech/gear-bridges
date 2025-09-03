@@ -1,0 +1,22 @@
+{
+  "name": "gear-bridge-common",
+  "private": true,
+  "version": "0.1.0",
+  "files": [
+    "lib"
+  ],
+  "type": "module",
+  "module": "./lib/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./lib/index.js",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "clean": "npx rimraf lib",
+    "build": "yarn clean && yarn build:esm",
+    "build:esm": "npx swc ./src -d lib --strip-leading-paths"
+  }
+}

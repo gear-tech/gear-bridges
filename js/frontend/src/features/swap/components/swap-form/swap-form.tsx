@@ -140,7 +140,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     void openWalletModal();
   };
 
-  const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} />;
+  const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
 
   return (

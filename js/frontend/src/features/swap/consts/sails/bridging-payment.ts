@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, Program, HexString, decodeAddress } from '@gear-js/api';
+import { GearApi, BaseGearProgram, HexString, decodeAddress } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
+  H256,
   ActorId,
   throwOnErrorReply,
   getServiceNamePrefix,
@@ -11,7 +12,7 @@ import {
   ZERO_ADDRESS,
 } from 'sails-js';
 
-interface State {
+export interface State {
   /**
    * Admin of this service. Admin is in charge of:
    * - Changing fee
@@ -23,26 +24,30 @@ interface State {
    * Fee amount that will be charged from users.
    */
   fee: number | string | bigint;
+  /**
+   * Priority fee amount that will be charged from users.
+   */
+  priority_fee: number | string | bigint;
 }
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly bridgingPayment: BridgingPayment;
-  private _program!: Program;
+  private _program!: BaseGearProgram;
 
   constructor(
     public api: GearApi,
     programId?: `0x${string}`,
   ) {
     const types: Record<string, any> = {
-      State: { admin_address: '[u8;32]', fee: 'u128' },
+      State: { admin_address: '[u8;32]', fee: 'u128', priority_fee: 'u128' },
     };
 
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
     if (programId) {
-      this._program = new Program(programId, api);
+      this._program = new BaseGearProgram(programId, api);
     }
 
     this.bridgingPayment = new BridgingPayment(this);
@@ -61,12 +66,14 @@ export class SailsProgram {
       this.api,
       this.registry,
       'upload_program',
-      ['New', initial_state],
-      '(String, State)',
+      undefined,
+      'New',
+      initial_state,
+      'State',
       'String',
       code,
       async (programId) => {
-        this._program = await Program.new(programId, this.api);
+        this._program = await BaseGearProgram.new(programId, this.api);
       },
     );
     return builder;
@@ -80,12 +87,14 @@ export class SailsProgram {
       this.api,
       this.registry,
       'create_program',
-      ['New', initial_state],
-      '(String, State)',
+      undefined,
+      'New',
+      initial_state,
+      'State',
       'String',
       codeId,
       async (programId) => {
-        this._program = await Program.new(programId, this.api);
+        this._program = await BaseGearProgram.new(programId, this.api);
       },
     );
     return builder;
@@ -98,7 +107,7 @@ export class BridgingPayment {
   /**
    * Pay fees for message processing to the admin.
    *
-   * This method requires that **exactly** [Config::fee] must
+   * This method requires that **exactly** [State::fee] must
    * be attached as a value when sending message to this method.
    *
    * Current fee amount can be retreived by calling `get_state`.
@@ -109,26 +118,33 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'PayFees', nonce],
-      '(String, String, U256)',
+      'BridgingPayment',
+      'PayFees',
+      nonce,
+      'U256',
       'Null',
       this._program.programId,
     );
   }
 
   /**
-   * Withdraw fees that were collected from user requests.
+   * Pay fees for priority message processing to the admin.
    *
-   * This method can be called only by admin.
+   * This method requires that **exactly** [State::priority_fee] must be
+   * attached as a value when sending message to this method.
+   *
+   * Current fee amount can be retrieved by calling `get_state`.
    */
-  public reclaimFee(): TransactionBuilder<null> {
+  public payPriorityFees(block: H256, nonce: number | string | bigint): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'ReclaimFee'],
-      '(String, String)',
+      'BridgingPayment',
+      'PayPriorityFees',
+      [block, nonce],
+      '(H256, U256)',
       'Null',
       this._program.programId,
     );
@@ -145,8 +161,10 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'SetAdmin', new_admin],
-      '(String, String, [u8;32])',
+      'BridgingPayment',
+      'SetAdmin',
+      new_admin,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -163,8 +181,49 @@ export class BridgingPayment {
       this._program.api,
       this._program.registry,
       'send_message',
-      ['BridgingPayment', 'SetFee', fee],
-      '(String, String, u128)',
+      'BridgingPayment',
+      'SetFee',
+      fee,
+      'u128',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Set fee that this program will take for processing priority
+   * requests.
+   *
+   * This method can be called only by admin.
+   */
+  public setPriorityFee(priority_fee: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'BridgingPayment',
+      'SetPriorityFee',
+      priority_fee,
+      'u128',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Upgrades the program to the provided new address.
+   */
+  public upgrade(value: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'BridgingPayment',
+      'Upgrade',
+      value,
+      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -209,6 +268,29 @@ export class BridgingPayment {
           this._program.registry
             .createType('(String, String, {"nonce":"U256"})', message.payload)[2]
             .toJSON() as unknown as { nonce: number | string | bigint },
+        );
+      }
+    });
+  }
+
+  /**
+   * Fee for the message processing by relayer was paid
+   * and priority bridging was requested.
+   */
+  public subscribeToPriorityBridgingPaidEvent(
+    callback: (data: { block: H256; nonce: number | string | bigint }) => void | Promise<void>,
+  ): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'BridgingPayment' && getFnNamePrefix(payload) === 'PriorityBridgingPaid') {
+        callback(
+          this._program.registry
+            .createType('(String, String, {"block":"H256","nonce":"U256"})', message.payload)[2]
+            .toJSON() as unknown as { block: H256; nonce: number | string | bigint },
         );
       }
     });

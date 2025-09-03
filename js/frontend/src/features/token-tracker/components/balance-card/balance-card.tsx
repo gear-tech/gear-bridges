@@ -16,7 +16,7 @@ function BalanceCard({ value, decimals, symbol, network, children }: Props) {
   return (
     <div className={styles.card}>
       <span className={styles.balance}>
-        <TokenSVG symbol={symbol} network={network} sizes={[24]} />
+        <TokenSVG symbol={symbol} network={network} displayNetwork={false} />
         <FormattedBalance value={value} decimals={decimals} symbol={symbol} />
       </span>
 

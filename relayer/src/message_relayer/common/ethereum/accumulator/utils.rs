@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
-pub struct Messages(Vec<MessageInBlock>);
+pub struct Messages(Vec<accumulator::Request>);
 
 impl Messages {
     pub fn new(capacity: usize) -> Self {
@@ -24,8 +26,12 @@ impl Messages {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     // None -> the inner vector is full so the message is rejected
-    pub fn add(&mut self, message_new: MessageInBlock) -> Option<()> {
+    pub fn add(&mut self, message_new: accumulator::Request) -> Option<()> {
         if self.0.len() >= self.0.capacity() {
             return None;
         }
@@ -44,7 +50,7 @@ impl Messages {
         Some(())
     }
 
-    pub fn drain(&mut self, merkle_root: &RelayedMerkleRoot) -> Drain<'_, MessageInBlock> {
+    pub fn drain(&mut self, merkle_root: &RelayedMerkleRoot) -> Drain<'_, accumulator::Request> {
         let index_end = match self.0.binary_search_by(|message| {
             Self::compare(
                 message.authority_set_id,
@@ -85,6 +91,7 @@ pub enum Added {
     Overwritten(GearBlockNumber),
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MerkleRoots(Vec<RelayedMerkleRoot>);
 
 impl MerkleRoots {
@@ -140,6 +147,10 @@ impl MerkleRoots {
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     #[allow(dead_code)]
@@ -447,41 +458,41 @@ mod tests {
                 .into(),
         };
         let data = [
-            MessageInBlock {
+            accumulator::Request {
                 block: GearBlockNumber(16_883_172),
                 block_hash: hex!(
                     "38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85"
                 )
                 .into(),
                 authority_set_id: AuthoritySetId(1_180),
-                message: Default::default(),
+                tx_uuid: Uuid::now_v7(),
             },
-            MessageInBlock {
+            accumulator::Request {
                 block: GearBlockNumber(16_883_289),
                 block_hash: hex!(
                     "74dcef50f0cf4299a0774b147a748f3d5961d913afb9d0e74868a298255edea2"
                 )
                 .into(),
                 authority_set_id: AuthoritySetId(1_183),
-                message: Default::default(),
+                tx_uuid: Uuid::now_v7(),
             },
-            MessageInBlock {
+            accumulator::Request {
                 block: GearBlockNumber(16_881_824),
                 block_hash: hex!(
                     "24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2"
                 )
                 .into(),
                 authority_set_id: AuthoritySetId(1_183),
-                message: Default::default(),
+                tx_uuid: Uuid::now_v7(),
             },
-            MessageInBlock {
+            accumulator::Request {
                 block: GearBlockNumber(16_883_636),
                 block_hash: hex!(
                     "410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848"
                 )
                 .into(),
                 authority_set_id: AuthoritySetId(1_184),
-                message: Default::default(),
+                tx_uuid: Uuid::now_v7(),
             },
         ];
 

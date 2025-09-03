@@ -1,2 +1,4 @@
-export * from './ethereum-client';
-export * from './beacon-client';
+export * from './ethereum-client.js';
+export * from './beacon-client.js';
+export * from './message-queue.js';
+export { getSlotByBlockNumber } from './helpers.js';

@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
-    "target": "es2020",
+    "module": "ESNext",
+    "target": "es2022",
+    "moduleResolution": "node",
     "outDir": "lib",
     "rootDir": "src",
     "strict": true,
     "declaration": false,
     "sourceMap": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "skipLibCheck": true,

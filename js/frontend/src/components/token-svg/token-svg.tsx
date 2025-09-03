@@ -1,5 +1,3 @@
-import { CSSProperties } from 'react';
-
 import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import UsdcSVG from '@/assets/usdc.svg?react';
@@ -10,6 +8,7 @@ import VaraSVG from '@/assets/vara.svg?react';
 import WrappedEthSVG from '@/assets/wrapped-eth.svg?react';
 import WrappedVaraSVG from '@/assets/wrapped-vara.svg?react';
 import { NETWORK } from '@/features/swap/consts';
+import { cx } from '@/utils';
 
 import { Skeleton } from '../layout';
 
@@ -23,13 +22,11 @@ const NETWORK_SVG = {
 type Props = {
   symbol: string | undefined;
   network: 'vara' | 'eth';
-  sizes: [number, number?];
+  className?: string;
+  displayNetwork?: boolean;
 };
 
-function TokenSVG({ symbol, network, sizes }: Props) {
-  const [size, networkSize = 0] = sizes;
-  const style = { '--size': `${size}px`, '--network-size': `${networkSize}px` } as CSSProperties;
-
+function TokenSVG({ symbol, network, className, displayNetwork = true }: Props) {
   const getSVG = () => {
     if (!symbol) return Skeleton;
 
@@ -56,23 +53,20 @@ function TokenSVG({ symbol, network, sizes }: Props) {
   const NetworkSVG = NETWORK_SVG[network];
 
   return (
-    <div className={styles.container} style={style}>
+    <div className={cx(styles.container, className)}>
       <SVG className={styles.tokenSvg} />
 
-      {Boolean(networkSize) && <NetworkSVG className={styles.networkSvg} />}
+      {displayNetwork && <NetworkSVG className={styles.networkSvg} />}
     </div>
   );
 }
 
-function TokenSVGSkeleton({ sizes }: Pick<Props, 'sizes'>) {
-  const [size, networkSize = 0] = sizes;
-  const style = { '--size': `${size}px`, '--network-size': `${networkSize}px` } as CSSProperties;
-
+function TokenSVGSkeleton({ className, displayNetwork = true }: Pick<Props, 'displayNetwork' | 'className'>) {
   return (
-    <div className={styles.container} style={style}>
+    <div className={cx(styles.container, className)}>
       <Skeleton className={styles.tokenSvg} />
 
-      {Boolean(networkSize) && <Skeleton className={styles.networkSvg} />}
+      {displayNetwork && <Skeleton className={styles.networkSvg} />}
     </div>
   );
 }

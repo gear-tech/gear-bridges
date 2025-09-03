@@ -8,9 +8,9 @@ import {
 } from '@subsquid/evm-processor';
 import { Store } from '@subsquid/typeorm-store';
 
-import * as erc20TreasuryAbi from './abi/erc20-manager';
-import * as messageQueueAbi from './abi/message-queue';
-import { config } from './config';
+import * as erc20TreasuryAbi from './abi/erc20-manager.js';
+import * as messageQueueAbi from './abi/message-queue.js';
+import { config } from './config.js';
 
 export const processor = new EvmBatchProcessor()
   .setGateway(config.archiveUrl)
@@ -30,7 +30,7 @@ export const processor = new EvmBatchProcessor()
   })
   .addLog({
     address: [config.msgQ],
-    topic0: [messageQueueAbi.events.MessageProcessed.topic],
+    topic0: [messageQueueAbi.events.MessageProcessed.topic, messageQueueAbi.events.MerkleRoot.topic],
   })
   .setBlockRange({
     from: config.fromBlock,

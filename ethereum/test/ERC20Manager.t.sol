@@ -105,6 +105,9 @@ contract ERC20ManagerTest is Test, Base {
 
         (uint256 deadline, uint8 v, bytes32 r, bytes32 s) = (0, 0, 0, 0);
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        erc20Manager.requestBridgingWithPermit(token, amount, to, deadline, v, r, s);
+
+        vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
         erc20Manager.requestBridgingPayingFeeWithPermit(token, amount, to, deadline, v, r, s, bridgingPayment_);
 
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
@@ -153,6 +156,9 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridgingPayingFee(token, amount, to, bridgingPayment_);
 
         (uint256 deadline, uint8 v, bytes32 r, bytes32 s) = (0, 0, 0, 0);
+        vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        erc20Manager.requestBridgingWithPermit(token, amount, to, deadline, v, r, s);
+
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
         erc20Manager.requestBridgingPayingFeeWithPermit(token, amount, to, deadline, v, r, s, bridgingPayment_);
 

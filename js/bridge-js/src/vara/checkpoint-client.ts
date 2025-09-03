@@ -1,9 +1,25 @@
 import { GearApi, BaseGearProgram } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
 import { H256, throwOnErrorReply, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
-import { logger } from '../util';
+import { StatusCb } from '../util';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
+
+export type Order = 'Direct' | 'Reverse';
+
+export interface ReplayBack {
+  finalized_header: number | string | bigint;
+  last_header: number | string | bigint;
+}
+
+export interface StateData {
+  checkpoints: Array<[number | string | bigint, H256]>;
+  /**
+   * The field contains the data if the program is
+   * replaying checkpoints back.
+   */
+  replay_back: ReplayBack | null;
+}
 
 interface NewCheckpointEventData extends Struct {
   slot: u64;
@@ -14,6 +30,7 @@ export class CheckpointClient {
   public readonly registry: TypeRegistry;
   public readonly serviceCheckpointFor: ServiceCheckpointFor;
   public readonly serviceSyncUpdate: ServiceSyncUpdate;
+  public readonly serviceState: ServiceState;
   private _program: BaseGearProgram;
 
   constructor(
@@ -22,6 +39,9 @@ export class CheckpointClient {
   ) {
     const types: Record<string, any> = {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
+      ReplayBack: { finalized_header: 'u64', last_header: 'u64' },
+      Order: { _enum: ['Direct', 'Reverse'] },
+      StateData: { checkpoints: 'Vec<(u64, H256)>', replay_back: 'Option<ReplayBack>' },
     };
 
     this.registry = new TypeRegistry();
@@ -33,6 +53,7 @@ export class CheckpointClient {
 
     this.serviceCheckpointFor = new ServiceCheckpointFor(this);
     this.serviceSyncUpdate = new ServiceSyncUpdate(this);
+    this.serviceState = new ServiceState(this);
   }
 
   public get programId(): `0x${string}` {
@@ -44,7 +65,7 @@ export class CheckpointClient {
 export class ServiceCheckpointFor {
   constructor(private _program: CheckpointClient) {}
 
-  public async get(slot: number): Promise<[number, H256]> {
+  public async get(slot: number, wait = false, statusCb: StatusCb = () => {}): Promise<[number, H256]> {
     const payload = this._program.registry
       .createType('(String, String, u64)', ['ServiceCheckpointFor', 'Get', slot])
       .toHex();
@@ -65,13 +86,18 @@ export class ServiceCheckpointFor {
       const error = result.asErr.toString() as CheckpointError;
 
       if (error === 'NotPresent') {
+        if (!wait) {
+          throw new Error(`Slot ${slot} is not present yet`);
+        }
+
         let unsub: () => void;
-        logger.info(`Slot ${slot} hasn't been submitted yet. Subscribing for new slots`);
+        statusCb(`Slot hasn't been submitted yet.`, { slot: slot.toString() });
 
         const [_slot, _treeHashRoot] = await new Promise<[number, H256]>((resolve, reject) => {
+          statusCb('Subscribing for new slots');
           this._program.serviceSyncUpdate
             .subscribeToNewCheckpointEvent((event) => {
-              logger.info(`Received new slot ${event.slot}`);
+              statusCb(`Received new slot`, { slot: event.slot.toString() });
               if (event.slot >= slot) {
                 resolve([event.slot, event.tree_hash_root]);
               }
@@ -113,5 +139,25 @@ export class ServiceSyncUpdate {
         callback({ slot: payload['slot'].toNumber(), tree_hash_root: payload['tree_hash_root'].toHex() });
       }
     });
+  }
+}
+
+export class ServiceState {
+  constructor(private _program: CheckpointClient) {}
+
+  public async getLatestSlot(): Promise<StateData> {
+    const payload = this._program.registry
+      .createType('(String, String, Order, u32, u32)', ['ServiceState', 'Get', 'Reverse', 0, 1])
+      .toHex();
+    const reply = await this._program.api.message.calculateReply({
+      destination: this._program.programId,
+      origin: ZERO_ADDRESS,
+      payload,
+      value: 0,
+      gasLimit: this._program.api.blockGasLimit.toBigInt(),
+    });
+    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
+    const result = this._program.registry.createType('(String, String, StateData)', reply.payload);
+    return result[2].toJSON() as unknown as StateData;
   }
 }

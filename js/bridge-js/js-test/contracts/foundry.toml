@@ -1,0 +1,17 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+evm_version = "prague"
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+libs = ["../../../../ethereum/lib"]
+remappings = ["forge-std=../../../../ethereum/lib/forge-std/src/", "ethereum=../../../../ethereum"]
+
+[rpc_endpoints]
+hoodi = "${HOODI_RPC_URL}"
+
+[etherscan]
+hoodi = { key = "${ETHERSCAN_API_KEY}" }

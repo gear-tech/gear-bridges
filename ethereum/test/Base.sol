@@ -345,6 +345,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     }
 
     function bridgingPaymentAssertions() public view {
+        assertEq(bridgingPayment.erc20Manager(), address(erc20Manager));
         assertEq(erc20Manager.totalBridgingPayments(), 1);
         address[] memory bridgingPayments1 = erc20Manager.bridgingPayments();
         assertEq(bridgingPayments1.length, 1);

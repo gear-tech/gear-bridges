@@ -1,7 +1,7 @@
 use primitive_types::H256;
 use tokio::sync::oneshot::Sender;
 
-mod merkle_roots {
+mod proto {
     tonic::include_proto!("merkle_roots");
 }
 
@@ -42,12 +42,12 @@ pub mod server {
         Request, Response, Status,
     };
 
-    use crate::merkle_roots::merkle_roots::{
+    use crate::merkle_roots::proto::{
         merkle_root_proof_response, MerkleRootProof, MerkleRootProofRequest,
         MerkleRootProofResponse,
     };
 
-    pub use merkle_roots::merkle_roots_server::MerkleRootsServer;
+    pub use proto::merkle_roots_server::MerkleRootsServer;
 
     pub struct MerkleRoots {
         requests: mpsc::UnboundedSender<MerkleRootsRequest>,
@@ -68,7 +68,7 @@ pub mod server {
     }
 
     #[tonic::async_trait]
-    impl merkle_roots::merkle_roots_server::MerkleRoots for MerkleRoots {
+    impl proto::merkle_roots_server::MerkleRoots for MerkleRoots {
         async fn get_merkle_root_proof(
             &self,
             request: Request<MerkleRootProofRequest>,
@@ -131,7 +131,7 @@ pub mod server {
 
 #[cfg(feature = "client")]
 pub mod client {
-    pub use super::merkle_roots::{
+    pub use super::proto::{
         merkle_roots_client::MerkleRootsClient, MerkleRootProofRequest, MerkleRootProofResponse,
     };
 }

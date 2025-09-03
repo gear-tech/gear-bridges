@@ -526,21 +526,17 @@ impl MerkleRootRelayer {
                             } => {
                                 // filter by `proof.is_some()` since some old storage entries do not contain proofs in them.
                                 if let Some((hash, root)) = self.roots.iter().find(|(_, r)| r.block_number == block_number).filter(|(_, r)| r.proof.is_some()) {
-                                    match root.status {
-                                        MerkleRootStatus::Finalized => {
-                                            let Ok(_) = response.send(MerkleRootsResponse::MerkleRootProof {
-                                                proof: root.proof.as_ref().map(|p| p.proof.clone()).expect("proof availability is checked above"),
-                                                block_number: root.block_number,
-                                                block_hash: root.block_hash,
-                                                merkle_root: *hash,
-                                            }) else {
-                                                log::error!("RPC response send failed");
-                                                return Ok(false);
-                                            };
-                                            return Ok(true);
-                                        }
-
-                                        _ => ()
+                                    if let MerkleRootStatus::Finalized = root.status {
+                                        let Ok(_) = response.send(MerkleRootsResponse::MerkleRootProof {
+                                            proof: root.proof.as_ref().map(|p| p.proof.clone()).expect("proof availability is checked above"),
+                                            block_number: root.block_number,
+                                            block_hash: root.block_hash,
+                                            merkle_root: *hash,
+                                        }) else {
+                                            log::error!("RPC response send failed");
+                                            return Ok(false);
+                                        };
+                                        return Ok(true);
                                     }
                                 }
 
@@ -551,7 +547,7 @@ impl MerkleRootRelayer {
 
                                 match self.try_proof_merkle_root(prover, authority_set_sync, block, true).await {
                                     Ok(Some(merkle_root)) => {
-                                        self.roots.get_mut(&merkle_root).map(move |r| r.rpc_requests.push(response));
+                                        if let Some(r) = self.roots.get_mut(&merkle_root) { r.rpc_requests.push(response) }
                                     }
 
                                     Ok(None) => {

@@ -108,7 +108,7 @@ async fn run() -> AnyResult<()> {
                 {
                     Ok(_) => (),
                     Err(e) => {
-                        log::error!("Failed to start gRPC server: {}", e);
+                        log::error!("Failed to start gRPC server: {e}");
                     }
                 }
             });

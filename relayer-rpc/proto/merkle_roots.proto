@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package merkle_roots;
+
+service MerkleRoots {
+    rpc getMerkleRootProof(MerkleRootProofRequest) returns (MerkleRootProofResponse) {}
+}
+
+message MerkleRootProofRequest {
+    uint32 block_number = 1;
+}
+
+message MerkleRootProofResponse {
+    oneof response {
+        MerkleRootProof proof = 1;
+        uint32 no_merkle_root_on_block = 2;
+    }
+
+}
+
+message MerkleRootProof {
+    bytes proof = 1;
+    uint32 block_number = 2;
+    bytes block_hash = 3;
+    bytes merkle_root = 4;
+}

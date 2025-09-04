@@ -37,8 +37,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -129,8 +127,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -179,8 +175,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4

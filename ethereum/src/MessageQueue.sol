@@ -32,11 +32,20 @@ contract MessageQueue is
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
+    uint256 public constant CHALLENGE_ROOT_DELAY = 1 hours;
+
+    uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
+    uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 3 minutes;
+    uint256 public constant PROCESS_USER_MESSAGE_DELAY = 5 minutes;
+
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
+    address private _emergencyStopAdmin;
     IVerifier private _verifier;
+    uint256 private _challengingRootTimestamp;
     bool private _emergencyStop;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
+    mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
     /**
@@ -52,12 +61,16 @@ contract MessageQueue is
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
+     * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
+     *                            in case of an emergency stop.
      * @param verifier_ The address of the Verifier contract that will verify merkle roots.
      */
-    function initialize(IGovernance governanceAdmin_, IGovernance governancePauser_, IVerifier verifier_)
-        public
-        initializer
-    {
+    function initialize(
+        IGovernance governanceAdmin_,
+        IGovernance governancePauser_,
+        address emergencyStopAdmin_,
+        IVerifier verifier_
+    ) public initializer {
         __AccessControl_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
@@ -69,6 +82,7 @@ contract MessageQueue is
 
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
+        _emergencyStopAdmin = emergencyStopAdmin_;
         _verifier = verifier_;
     }
 
@@ -89,11 +103,27 @@ contract MessageQueue is
     }
 
     /**
+     * @dev Returns emergency stop admin address.
+     * @return emergencyStopAdmin Emergency stop admin address.
+     */
+    function emergencyStopAdmin() external view returns (address) {
+        return _emergencyStopAdmin;
+    }
+
+    /**
      * @dev Returns verifier address.
      * @return verifier Verifier address.
      */
     function verifier() external view returns (address) {
         return address(_verifier);
+    }
+
+    /**
+     * @dev Returns challenging root status.
+     * @return isChallengingRoot challenging root status.
+     */
+    function isChallengingRoot() public view returns (bool) {
+        return block.timestamp < _challengingRootTimestamp + CHALLENGE_ROOT_DELAY;
     }
 
     /**
@@ -125,6 +155,30 @@ contract MessageQueue is
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /**
+     * @dev Puts MessageQueue into a high-priority paused state.
+     *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is already enabled with `ChallengeRoot` error.
+     *
+     * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
+     */
+    function challengeRoot() external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (isChallengingRoot()) {
+            revert ChallengeRoot();
+        }
+
+        _challengingRootTimestamp = block.timestamp;
+
+        emit ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY);
+    }
+
+    /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
      *      Upon successfully storing data about block number and corresponding Merkle root,
@@ -140,7 +194,8 @@ contract MessageQueue is
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
-        if (_emergencyStop) {
+        bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
             revert EmergencyStop();
         }
 
@@ -153,19 +208,21 @@ contract MessageQueue is
             revert InvalidPlonkProof();
         }
 
-        // Check if the provided Merkle root is a duplicate.
-        // If it is a duplicate, set the emergency stop status, emit `EmergencyStopSet` event.
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
         if (previousMerkleRoot != 0) {
             if (previousMerkleRoot != merkleRoot) {
                 _emergencyStop = true;
 
-                emit EmergencyStopSet();
+                delete _blockNumbers[blockNumber];
+                delete _merkleRootTimestamps[previousMerkleRoot];
+
+                emit EmergencyStopEnabled();
             } else {
                 revert MerkleRootAlreadySet(blockNumber);
             }
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
+            _merkleRootTimestamps[merkleRoot] = block.timestamp;
 
             emit MerkleRoot(blockNumber, merkleRoot);
         }
@@ -179,6 +236,16 @@ contract MessageQueue is
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32) {
         return _blockNumbers[blockNumber];
+    }
+
+    /**
+     * @dev Returns timestamp when merkle root was set.
+     *      Returns `0` if merkle root was not provided for specified block number.
+     * @param merkleRoot Target merkle root.
+     * @return timestamp Timestamp when merkle root was set.
+     */
+    function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256) {
+        return _merkleRootTimestamps[merkleRoot];
     }
 
     /**
@@ -203,6 +270,7 @@ contract MessageQueue is
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
+     *      - MessageQueue is in challenging root status with `ChallengeRoot` error.
      *      - MessageQueue is paused and message source is not any governance address.
      *      - MessageQueue emergency stop status is set.
      *      - Message nonce is already processed.
@@ -217,13 +285,20 @@ contract MessageQueue is
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external {
-        bool isFromAdminOrPauser =
-            message.source == _governanceAdmin.governance() || message.source == _governancePauser.governance();
+        if (isChallengingRoot()) {
+            revert ChallengeRoot();
+        }
+
+        bytes32 governanceAdminAddress = _governanceAdmin.governance();
+        bytes32 governancePauserAddress = _governancePauser.governance();
+
+        bool isFromAdminOrPauser = message.source == governanceAdminAddress || message.source == governancePauserAddress;
         if (paused() && !isFromAdminOrPauser) {
             revert EnforcedPause();
         }
 
-        if (_emergencyStop) {
+        bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
             revert EmergencyStop();
         }
 
@@ -234,6 +309,20 @@ contract MessageQueue is
         bytes32 merkleRoot = _blockNumbers[blockNumber];
         if (merkleRoot == bytes32(0)) {
             revert MerkleRootNotFound(blockNumber);
+        }
+
+        uint256 messageDelay;
+        if (message.source == governanceAdminAddress) {
+            messageDelay = PROCESS_ADMIN_MESSAGE_DELAY;
+        } else if (message.source == governancePauserAddress) {
+            messageDelay = PROCESS_PAUSER_MESSAGE_DELAY;
+        } else {
+            messageDelay = PROCESS_USER_MESSAGE_DELAY;
+        }
+
+        uint256 timestamp = _merkleRootTimestamps[merkleRoot];
+        if (block.timestamp < timestamp + messageDelay) {
+            revert MerkleRootDelayNotPassed();
         }
 
         bytes32 messageHash = message.hashCalldata();

@@ -19,6 +19,8 @@ pub(crate) async fn sync_authority_set_id(
     genesis_config: GenesisConfig,
     latest_authority_set_id: u64,
     latest_proven_authority_set_id: Option<u64>,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<SyncStepCount> {
     let Some(latest_proven) = latest_proven_authority_set_id else {
         if latest_authority_set_id <= genesis_config.authority_set_id {
@@ -31,7 +33,7 @@ pub(crate) async fn sync_authority_set_id(
             return Ok(0);
         }
 
-        let proof = prover_interface::prove_genesis(gear_api, genesis_config).await?;
+        let proof = prover_interface::prove_genesis(gear_api, genesis_config, count_thread).await?;
         proof_storage
             .init(proof, genesis_config.authority_set_id)
             .await
@@ -56,7 +58,9 @@ pub(crate) async fn sync_authority_set_id(
             .await?;
 
         for set_id in latest_proven..latest_authority_set_id {
-            proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
+            proof =
+                prover_interface::prove_validator_set_change(gear_api, proof, set_id, count_thread)
+                    .await?;
             proof_storage
                 .update(proof.proof.clone(), set_id + 1)
                 .await?;

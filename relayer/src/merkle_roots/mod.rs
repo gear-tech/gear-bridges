@@ -790,9 +790,7 @@ impl MerkleRootRelayer {
             log::error!("Failed to save block storage state: {err:?}");
         }
 
-        if self.roots.contains_key(&merkle_root)
-            || self.storage.is_merkle_root_submitted(merkle_root).await
-        {
+        if self.storage.is_merkle_root_submitted(merkle_root).await {
             log::info!(
                 "Skipping merkle root {} for block #{} as there were no new messages",
                 merkle_root,

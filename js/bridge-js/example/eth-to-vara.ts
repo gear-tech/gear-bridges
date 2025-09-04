@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, http, webSocket, zeroAddress } 
 import { privateKeyToAccount } from 'viem/accounts';
 import { execSync } from 'child_process';
 import { Keyring } from '@polkadot/api';
-import { GearApi } from '@gear-js/api';
+import { GearApi, HexString } from '@gear-js/api';
 import { hoodi } from 'viem/chains';
 import dotenv from 'dotenv';
 import assert from 'assert';
@@ -32,7 +32,16 @@ const PING_SERVICE_NAME = 'Ping';
 const PING_METHOD_NAME = 'SubmitReceipt';
 const PING_WASM_PATH = '../../target/wasm32-gear/release/ping.opt.wasm';
 
-if (!fs.existsSync(PING_WASM_PATH)) {
+const [txHash, programId] = process.argv.slice(2).map((arg) => {
+  const match = arg.match(/^--(hash|program)=(0x[0-9a-f]+)$/);
+  return match ? (match[2] as HexString) : undefined;
+});
+
+console.log(process.argv.slice(2));
+
+console.log(txHash, programId);
+
+if (!programId && !fs.existsSync(PING_WASM_PATH)) {
   console.log(`Ping wasm wasn't found. Building the program...`);
   execSync('cargo build -p ping --release', { stdio: 'inherit' });
 }
@@ -43,6 +52,30 @@ const main = async () => {
 
   const keyring = new Keyring({ type: 'sr25519', ss58Format: 137 });
   const account = keyring.createFromUri('//Alice');
+
+  if (txHash && programId) {
+    const { error, ok } = await relayEthToVara({
+      transactionHash: txHash,
+      beaconRpcUrl: BEACON_RPC,
+      ethereumPublicClient: publicClient,
+      gearApi,
+      checkpointClientId: CHECKPOINT_CLIENT_ID,
+      historicalProxyId: HISTORICAL_PROXY_ID,
+      clientId: programId,
+      clientServiceName: PING_SERVICE_NAME,
+      clientMethodName: PING_METHOD_NAME,
+      signer: account,
+      statusCb: (status, details) => {
+        console.log(`[relayEthToVara]: ${status}`, details || '');
+      },
+    });
+
+    if (error) {
+      throw new Error(JSON.stringify(error));
+    }
+
+    console.log(`Done. Reply from client: ${ok}`);
+  }
 
   const pingClient = new PingClient(gearApi);
   const code = fs.readFileSync(PING_WASM_PATH);
@@ -77,22 +110,22 @@ const main = async () => {
 
   console.log(`Ethereum transaction confirmed. Starting relayer...`);
 
-  const { error, ok } = await relayEthToVara(
-    ethTxHash,
-    BEACON_RPC,
-    publicClient,
+  const { error, ok } = await relayEthToVara({
+    transactionHash: ethTxHash,
+    beaconRpcUrl: BEACON_RPC,
+    ethereumPublicClient: publicClient,
     gearApi,
-    CHECKPOINT_CLIENT_ID,
-    HISTORICAL_PROXY_ID,
-    pingProgramId,
-    PING_SERVICE_NAME,
-    PING_METHOD_NAME,
-    account,
-    undefined,
-    (status, details) => {
-      console.log(`[relayEthToVara]: ${status}`, details);
+    checkpointClientId: CHECKPOINT_CLIENT_ID,
+    historicalProxyId: HISTORICAL_PROXY_ID,
+    clientId: pingProgramId,
+    clientServiceName: PING_SERVICE_NAME,
+    clientMethodName: PING_METHOD_NAME,
+    signer: account,
+    wait: true,
+    statusCb: (status, details) => {
+      console.log(`[relayEthToVara]: ${status}`, details || '');
     },
-  );
+  });
 
   if (error) {
     throw new Error(JSON.stringify(error));

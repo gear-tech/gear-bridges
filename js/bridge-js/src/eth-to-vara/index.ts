@@ -1,1 +1,1 @@
-export { relayEthToVara } from './relayer.js';
+export { relayEthToVara, type RelayEthToVaraParams } from './relayer.js';

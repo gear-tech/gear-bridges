@@ -20,6 +20,7 @@ pub struct Request {
     pub merkle_root: H256,
     pub queue_id: u64,
     pub inner_proof: ProofWithCircuitData,
+    pub priority: bool,
 }
 
 pub enum Response {
@@ -62,6 +63,7 @@ impl FinalityProverIo {
         merkle_root: H256,
         inner_proof: ProofWithCircuitData,
         queue_id: u64,
+        priority: bool,
     ) -> bool {
         self.requests
             .send(Request {
@@ -70,6 +72,7 @@ impl FinalityProverIo {
                 merkle_root,
                 inner_proof,
                 queue_id,
+                priority,
             })
             .is_ok()
     }
@@ -127,6 +130,8 @@ impl FinalityProver {
         // Group requests by authority set ID and queue ID, storing all blocks for each set
         let mut request_groups: HashMap<(u64, u64), BatchProofRequest> = HashMap::new();
 
+        let mut priority_requests: HashMap<(u64, u64), BatchProofRequest> = HashMap::new();
+
         loop {
             // Receives messages into `batch_vec` but has one big downside requiring another `recv_many`
             // down below: will receive only one element first *and* only then will receive the full batch.
@@ -143,10 +148,11 @@ impl FinalityProver {
                     requests.recv_many(&mut batch_vec, BATCH_SIZE - 1),
                 )
                 .await;
+
                 match rest {
                     Err(_) => {
                         log::info!("Only one request received, processing it immediately");
-                        let request = batch_vec.pop().unwrap();
+                        let request = batch_vec.pop().expect("at least one request is received");
                         let proof = self
                             .generate_proof(
                                 &gear_api,
@@ -182,8 +188,13 @@ impl FinalityProver {
             log::info!("Received {n} requests, grouping by authority set...");
 
             for request in batch_vec.drain(..) {
+                let group = if request.priority {
+                    &mut priority_requests
+                } else {
+                    &mut request_groups
+                };
                 let authority_set_id = gear_api.authority_set_id(request.block_hash).await?;
-                match request_groups.entry((authority_set_id, request.queue_id)) {
+                match group.entry((authority_set_id, request.queue_id)) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().add_request(request);
                     }
@@ -193,17 +204,18 @@ impl FinalityProver {
                 }
             }
 
-            for ((authority_set_id, queue_id), request) in request_groups.drain() {
+            for ((authority_set_id, queue_id), request) in
+                priority_requests.drain().chain(request_groups.drain())
+            {
                 let BatchProofRequest {
                     block_number,
                     block_hash,
                     merkle_root,
                     inner_proof,
                     batch_roots,
-                    queue_id,
                 } = request;
                 log::info!(
-                    "Proving finality for latest block #{block_number} with authority set #{authority_set_id} and merkle-root {merkle_root} (will apply to {} blocks)",
+                    "Proving finality for latest block #{block_number} with authority set #{authority_set_id}, merkle-root {merkle_root} and queue #{queue_id} (will apply to {} blocks)",
                     batch_roots.len()
                 );
 
@@ -264,7 +276,7 @@ struct BatchProofRequest {
     block_hash: H256,
     merkle_root: H256,
     inner_proof: ProofWithCircuitData,
-    queue_id: u64,
+
     batch_roots: Vec<H256>,
 }
 
@@ -276,7 +288,6 @@ impl BatchProofRequest {
             merkle_root: init.merkle_root,
             inner_proof: init.inner_proof,
             batch_roots: Vec::new(),
-            queue_id: init.queue_id,
         }
     }
 

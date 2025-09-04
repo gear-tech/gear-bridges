@@ -205,6 +205,7 @@ pub fn message_hash(message: &Message) -> [u8; 32] {
 
 pub mod web_request {
     use super::*;
+    use tokio::sync::oneshot::Sender;
 
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Message {
@@ -215,5 +216,35 @@ pub mod web_request {
     #[derive(Clone, Debug, Default, Deserialize, Serialize)]
     pub struct Messages {
         pub messages: Vec<Message>,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+    pub struct MerkleRootBlocks {
+        pub blocks: Vec<u32>,
+    }
+
+    pub enum MerkleRootsRequest {
+        GetMerkleRootProof {
+            block_number: u32,
+            response: Sender<MerkleRootsResponse>,
+        },
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub enum MerkleRootsResponse {
+        MerkleRootProof {
+            proof: Vec<u8>,
+            merkle_root: H256,
+            block_number: u32,
+            block_hash: H256,
+        },
+
+        NoMerkleRootOnBlock {
+            block_number: u32,
+        },
+
+        Failed {
+            message: String,
+        },
     }
 }

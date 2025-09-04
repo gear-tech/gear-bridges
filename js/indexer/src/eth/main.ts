@@ -51,7 +51,7 @@ const handler = async (ctx: Context) => {
             status: Status.AwaitingPayment,
             sender: from,
             receiver: to,
-            amount,
+            amount: amount.toString(),
           });
           await state.addTransfer(transfer);
           break;

@@ -84,6 +84,14 @@ pub struct GearEthCoreArgs {
         default_value = "8"
     )]
     pub spike_threshold: usize,
+
+    /// Authorization token for web-server
+    #[arg(long, env)]
+    pub web_server_token: String,
+
+    /// Socket address for web-server
+    #[arg(long, env, default_value = "127.0.0.1:8443")]
+    pub web_server_address: String,
 }
 
 #[derive(Args)]

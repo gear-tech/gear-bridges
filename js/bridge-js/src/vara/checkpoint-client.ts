@@ -1,6 +1,7 @@
 import { GearApi, BaseGearProgram } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
 import { H256, throwOnErrorReply, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import { StatusCb } from '../util';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
 
@@ -64,7 +65,7 @@ export class CheckpointClient {
 export class ServiceCheckpointFor {
   constructor(private _program: CheckpointClient) {}
 
-  public async get(slot: number): Promise<[number, H256]> {
+  public async get(slot: number, wait = false, statusCb: StatusCb = () => {}): Promise<[number, H256]> {
     const payload = this._program.registry
       .createType('(String, String, u64)', ['ServiceCheckpointFor', 'Get', slot])
       .toHex();
@@ -85,7 +86,29 @@ export class ServiceCheckpointFor {
       const error = result.asErr.toString() as CheckpointError;
 
       if (error === 'NotPresent') {
-        throw new Error(`Slot ${slot} is not present yet`);
+        if (!wait) {
+          throw new Error(`Slot ${slot} is not present yet`);
+        }
+
+        let unsub: () => void;
+        statusCb(`Slot hasn't been submitted yet.`, { slot: slot.toString() });
+
+        const [_slot, _treeHashRoot] = await new Promise<[number, H256]>((resolve, reject) => {
+          statusCb('Subscribing for new slots');
+          this._program.serviceSyncUpdate
+            .subscribeToNewCheckpointEvent((event) => {
+              statusCb(`Received new slot`, { slot: event.slot.toString() });
+              if (event.slot >= slot) {
+                resolve([event.slot, event.tree_hash_root]);
+              }
+            })
+            .then((_unsub) => {
+              unsub = _unsub;
+            })
+            .catch((e) => reject(e));
+        }).finally(unsub!);
+
+        return [_slot, _treeHashRoot];
       }
     }
     return [result.asOk[0].toNumber(), H256(result.asOk[1])];

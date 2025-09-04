@@ -70,6 +70,13 @@ pub struct GearEthCoreArgs {
 
     /// An address of bridging payment contract for priority processing of merkle-roots when needed.
     pub bridging_payment_address: Option<String>,
+    /// Authorization token for web-server
+    #[arg(long, env)]
+    pub web_server_token: String,
+
+    /// Socket address for web-server
+    #[arg(long, env, default_value = "127.0.0.1:8443")]
+    pub web_server_address: String,
 }
 
 #[derive(Args)]
@@ -119,6 +126,9 @@ pub struct GearEthTokensArgs {
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,
+
+    #[arg(long = "storage-path", env = "GEAR_ETH_TX_STORAGE_PATH")]
+    pub storage_path: String,
 }
 
 #[derive(Subcommand)]

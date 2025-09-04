@@ -13,14 +13,14 @@
 }
 
 .tokenSvg {
-  width: var(--size);
-  height: var(--size);
+  width: var(--token-icon-size);
+  height: var(--token-icon-size);
 }
 
 .networkSvg {
-  width: var(--network-size);
-  height: var(--network-size);
-  margin-left: calc(var(--network-size) / -2);
+  width: var(--network-icon-size);
+  height: var(--network-icon-size);
+  margin-left: calc(var(--network-icon-size) / -2);
 
   box-shadow: -1px 0 0px 0px #000;
 }

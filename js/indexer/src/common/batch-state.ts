@@ -3,10 +3,11 @@ import { DataHandlerContext as EthereumContext } from '@subsquid/evm-processor';
 import { In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not } from 'typeorm';
 import { FindManyOptions, Store } from '@subsquid/typeorm-store';
 import { Logger } from '@subsquid/logger';
-import { CompletedTransfer, Network, Pair, Status, Transfer } from '../model';
-import { mapKeys, mapValues } from './map';
 
-const PAIR_RETRY_LIMIT = 30;
+import { CompletedTransfer, Network, Pair, Status, Transfer } from '../model/index.js';
+import { mapKeys, mapValues } from './map.js';
+
+const PAIR_RETRY_LIMIT = 5;
 const PAIR_RETRY_DELAY = 1000;
 
 export abstract class BaseBatchState<Context extends SubstrateContext<Store, any> | EthereumContext<Store, any>> {
@@ -40,19 +41,24 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     this._clear();
 
-    await this._loadPairs();
+    await this._loadPairs('latest');
   }
 
-  protected async _loadPairs(activeOnBlock: 'latest' | bigint = 'latest') {
-    const condition: FindManyOptions<Pair> =
-      activeOnBlock === 'latest'
-        ? { where: { isRemoved: false, upgradedTo: IsNull() } }
-        : {
-            where: [
-              { activeSinceBlock: LessThanOrEqual(activeOnBlock), activeToBlock: IsNull() },
-              { activeSinceBlock: LessThanOrEqual(activeOnBlock), activeToBlock: MoreThanOrEqual(activeOnBlock) },
-            ],
-          };
+  protected async _loadPairs(activeOnBlock?: 'latest' | bigint) {
+    let condition: FindManyOptions<Pair>;
+    if (activeOnBlock) {
+      condition =
+        activeOnBlock === 'latest'
+          ? { where: { isRemoved: false, upgradedTo: IsNull() } }
+          : {
+              where: [
+                { activeSinceBlock: LessThanOrEqual(activeOnBlock), activeToBlock: IsNull() },
+                { activeSinceBlock: LessThanOrEqual(activeOnBlock), activeToBlock: MoreThanOrEqual(activeOnBlock) },
+              ],
+            };
+    } else {
+      condition = {};
+    }
 
     const pairs = await this._ctx.store.find(Pair, condition);
 
@@ -65,7 +71,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     }
   }
 
-  protected async _getDestinationAddress(sourceId: string, blockNumber: bigint): Promise<string> {
+  protected async _getDestinationAddress(sourceId: string): Promise<string> {
     const src = sourceId.toLowerCase();
     let retryCount = 0;
 
@@ -73,12 +79,22 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     while (!pair) {
       this._log.warn(`Pair not found for ${src}, retrying...`);
       await new Promise((resolve) => setTimeout(resolve, PAIR_RETRY_DELAY));
-      await this._loadPairs(blockNumber);
-      pair = this._pairs.get(src);
+
+      if (this._network === Network.Ethereum) {
+        pair = await this._ctx.store.get(Pair, { where: { ethToken: src } });
+        if (pair) {
+          this._pairs.set(pair.ethToken, pair);
+        }
+      } else {
+        pair = await this._ctx.store.get(Pair, { where: { varaToken: src } });
+        if (pair) {
+          this._pairs.set(pair.varaToken, pair);
+        }
+      }
       retryCount++;
       if (retryCount >= PAIR_RETRY_LIMIT) {
         this._log.error(`Failed to load pair for ${src}. Exiting`);
-        process.exit(1);
+        throw new Error('Pair not found');
       }
     }
 
@@ -187,7 +203,11 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
   protected async _saveTransfers() {
     if (this._transfers.size === 0) return;
 
-    await this._ctx.store.save(mapValues(this._transfers));
+    const transfers = mapValues(this._transfers);
+
+    for (let i = 0; i < this._transfers.size; i += 1000) {
+      await this._ctx.store.save(transfers.slice(i, i + 1000));
+    }
 
     this._log.info(`Saved ${this._transfers.size} transfers`);
   }
@@ -197,9 +217,17 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
   public async addTransfer(transfer: Transfer) {
     transfer.txHash = transfer.txHash.toLowerCase();
     transfer.source = transfer.source.toLowerCase();
-    transfer.destination = await this._getDestinationAddress(transfer.source, transfer.blockNumber);
     transfer.sender = transfer.sender.toLowerCase();
     transfer.receiver = transfer.receiver.toLowerCase();
+    try {
+      transfer.destination = await this._getDestinationAddress(transfer.source);
+    } catch (error) {
+      this._log.error(
+        { block: transfer.blockNumber, tx: transfer.txHash, nonce: transfer.nonce },
+        `Destination token not found for ${transfer.source}`,
+      );
+      throw error;
+    }
     this._transfers.set(transfer.nonce, transfer);
 
     this._log.info(`${transfer.nonce}: Transfer requested in block ${transfer.blockNumber}`);

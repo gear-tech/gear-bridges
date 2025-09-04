@@ -1,4 +1,5 @@
 use parity_scale_codec::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 const ED25519_SIGNATURE_SIZE: usize = 64;
@@ -43,6 +44,7 @@ pub struct MessageSentProof {
     pub storage_inclusion_proof: StorageInclusionProof,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MerkleProof {
     pub root: [u8; KECCAK_HASH_SIZE],
     pub proof: Vec<[u8; KECCAK_HASH_SIZE]>,
@@ -50,7 +52,7 @@ pub struct MerkleProof {
     pub leaf_index: u64,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub nonce_le: [u8; 32],
     pub source: [u8; 32],

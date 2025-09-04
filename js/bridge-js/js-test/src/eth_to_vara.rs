@@ -3,47 +3,21 @@ use ethereum_client::PollingEthApi;
 use gclient::GearApi;
 use relayer::message_relayer::eth_to_gear::proof_composer::compose;
 use sails_rs::Encode;
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 
-fn get_var(name: &str) -> String {
-    env::var(name).expect("{name} env variable should be set")
-}
-
-#[tokio::main]
-async fn main() {
-    let _ = dotenv::dotenv().ok();
-    let gear_rpc_url = get_var("VARA_WS_RPC");
-    let beacon_rpc_url = get_var("BEACON_RPC_URL");
-    let eth_rpc_url = get_var("ETH_RPC_URL");
-    let historical_proxy_id_str = get_var("HISTORICAL_PROXY_ID")
-        .strip_prefix("0x")
-        .unwrap()
-        .to_string();
-    let tx_hash_str = std::env::args()
-        .nth(1)
-        .expect("Transaction hash should be provided")
-        .strip_prefix("0x")
-        .unwrap()
-        .to_string();
-
-    let gear_api = GearApi::builder()
-        .build(gclient::WSAddress::new(gear_rpc_url, None))
-        .await
-        .expect("GearApi client should be created");
-
-    let beacon_client = BeaconClient::new(beacon_rpc_url, None)
-        .await
-        .expect("Failed to create beacon client");
-
-    let eth_api = PollingEthApi::new(&eth_rpc_url)
-        .await
-        .expect("Failed to create Ethereum API");
-
+pub async fn eth_to_vara(
+    tx_hash_str: String,
+    historical_proxy_id_str: String,
+    beacon_client: &BeaconClient,
+    gear_api: &GearApi,
+    eth_api: &PollingEthApi,
+) -> () {
     let historical_proxy_id: [u8; 32] = hex::decode(historical_proxy_id_str)
         .unwrap()
         .as_slice()
         .try_into()
         .unwrap();
+
     let tx_hash: [u8; 32] = hex::decode(tx_hash_str)
         .unwrap()
         .as_slice()
@@ -51,9 +25,9 @@ async fn main() {
         .unwrap();
 
     let compose_result = compose(
-        &beacon_client,
-        &gear_api,
-        &eth_api,
+        beacon_client,
+        gear_api,
+        eth_api,
         tx_hash.into(),
         historical_proxy_id.into(),
     )

@@ -24,13 +24,16 @@ ethereum/lcov.info
 # js
 node_modules/
 js/bridge-js/lib/
+js/common/lib/
 js/indexer/lib/
 js/frontend/dist/
 js/indexer/assets/
 js/**/*.log
+*.log
 **/.yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+js/bridge-js/js-test/contracts/broadcast/

@@ -10,6 +10,9 @@
 }
 
 .tx {
+  --token-icon-size: 32px;
+  --network-icon-size: 20px;
+
   width: calc(50% - 24px);
 
   display: flex;

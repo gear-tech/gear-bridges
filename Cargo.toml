@@ -37,7 +37,8 @@ members = [
     "tests",
     "gear-common",
     "tools/vft-manager-tool",
-    "js/bridge-js/js-proof-test", "js/bridge-js/ping",
+    "js/bridge-js/js-test",
+    "js/bridge-js/ping",
 ]
 
 resolver = "2"
@@ -117,7 +118,7 @@ cgo_oligami = "0.3"
 circular-buffer = { version = "0.1.7", default-features = false, features = [
     "alloc",
 ] }
-clap = { version = "4.4.13", features = ["derive", "env"] }
+clap = { version = "4.5.41", features = ["derive", "env"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.9.0"
@@ -170,6 +171,7 @@ static_assertions = "1.1.0"
 thiserror = { version = "2.0.11", default-features = false }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.23.0", features = ["full"] }
+toml = "0.9"
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
 unroll = "0.1.5"
@@ -177,6 +179,7 @@ uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
 async-trait = "0.1.88"
 # Gear/Substrate deps
+gprimitives = "=1.9.0"
 gstd = { version = "=1.9.0", features = ["nightly"] }
 gtest = "=1.9.0"
 gear-wasm-builder = { version = "=1.9.0", default-features = false }

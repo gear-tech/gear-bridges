@@ -12,9 +12,15 @@ pub struct PingService;
 #[service(events = Event)]
 impl PingService {
     #[export]
-    pub fn submit_receipt(&mut self, slot: u64, transaction_index: u32, _receipt_rlp: Vec<u8>) {
+    pub fn submit_receipt(
+        &mut self,
+        slot: u64,
+        transaction_index: u32,
+        _receipt_rlp: Vec<u8>,
+    ) -> Result<(), String> {
         self.emit_event(Event::ReceiptSubmitted(slot, transaction_index))
             .expect("Failed to emit event");
+        Ok(())
     }
 }
 

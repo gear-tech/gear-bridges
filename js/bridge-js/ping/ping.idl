@@ -3,7 +3,7 @@ constructor {
 };
 
 service Ping {
-  SubmitReceipt : (slot: u64, transaction_index: u32, _receipt_rlp: vec u8) -> null;
+  SubmitReceipt : (slot: u64, transaction_index: u32, _receipt_rlp: vec u8) -> result (null, str);
 
   events {
     ReceiptSubmitted: struct {

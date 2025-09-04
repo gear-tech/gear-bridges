@@ -64,6 +64,7 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         api_provider: ApiProviderConnection,
         eth_api: EthApi,

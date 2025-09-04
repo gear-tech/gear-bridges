@@ -59,8 +59,8 @@ export class Transfer {
   @Column({ nullable: false })
   receiver!: string;
 
-  @Column('bigint', { nullable: false })
-  amount!: bigint;
+  @Column({ nullable: false })
+  amount!: string;
 
   @Column('bigint', { nullable: true, name: 'bridging_started_at_block' })
   bridgingStartedAtBlock?: bigint;

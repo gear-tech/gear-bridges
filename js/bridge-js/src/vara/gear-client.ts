@@ -3,7 +3,7 @@ import { GearApi, HexString } from '@gear-js/api';
 import { compactStripLength } from '@polkadot/util';
 import { Vec } from '@polkadot/types';
 
-import { EthBridgeMessageQueuedData, VaraMessage, Proof } from './types';
+import { EthBridgeMessageQueuedData, VaraMessage, Proof } from './types.js';
 
 export class GearClient {
   constructor(private _api: GearApi) {}

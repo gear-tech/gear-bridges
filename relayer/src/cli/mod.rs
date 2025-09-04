@@ -69,6 +69,14 @@ pub struct GearEthCoreArgs {
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
 
+    /// Authorization token for web-server
+    #[arg(long, env)]
+    pub web_server_token: String,
+
+    /// Socket address for web-server
+    #[arg(long, env, default_value = "127.0.0.1:8443")]
+    pub web_server_address: String,
+
     #[arg(
         long,
         help = format!("Count of worker threads for generating signing proofs.\n\nNote that each thread allocates memory, which can lead to an out-of-memory error with a large number of threads.\n\nDefault is: {DEFAULT_COUNT_THREADS}. The value is safe to run the relayer on a machine with 96 CPU cores and 256GiB of RAM."),

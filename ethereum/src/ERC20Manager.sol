@@ -474,6 +474,31 @@ contract ERC20Manager is
     }
 
     /**
+     * @dev Requests bridging of tokens.
+     *      This function uses `permit` to approve spending of tokens to optimize gas costs.
+     *      (If token supports `permit` function).
+     * @param token Token address.
+     * @param amount Amount of tokens to bridge.
+     * @param to Destination address.
+     * @param deadline Deadline for the transaction to be executed.
+     * @param v ECDSA signature parameter.
+     * @param r ECDSA signature parameter.
+     * @param s ECDSA signature parameter.
+     */
+    function requestBridgingWithPermit(
+        address token,
+        uint256 amount,
+        bytes32 to,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) public whenNotPaused {
+        try IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
+        requestBridging(token, amount, to);
+    }
+
+    /**
      * @dev Requests bridging of tokens and pays fee to one of the `bridgingPayment` contracts.
      *      This function uses `permit` to approve spending of tokens to optimize gas costs.
      *      (If token supports `permit` function).
@@ -501,8 +526,7 @@ contract ERC20Manager is
         }
 
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
-        try IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
-        requestBridging(token, amount, to);
+        requestBridgingWithPermit(token, amount, to, deadline, v, r, s);
     }
 
     /**

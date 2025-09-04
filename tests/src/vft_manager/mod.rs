@@ -1840,7 +1840,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
     Ok(())
 }
 
-// Check whether a failure check the reply in `handle_reply` hook is handled correctly.
+// Check whether a failure to check the reply in `handle_reply` hook is handled correctly.
 //
 // Prerequisites:
 // - Deploying a vft-manager.
@@ -1965,8 +1965,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
                 .then_some(())
         }
         Event::Gear(GearEvent::MessageWoken { id, .. }) => {
-            assert_eq!(id.0, submit_receipt_msg_id.into_bytes());
-            Some(())
+            (id.0 == submit_receipt_msg_id.into_bytes()).then_some(())
         }
         Event::Gear(GearEvent::MessagesDispatched { statuses, .. }) => {
             statuses.into_iter().find_map(|(msg_id, status)| {

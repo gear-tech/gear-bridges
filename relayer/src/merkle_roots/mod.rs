@@ -64,6 +64,7 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
@@ -72,10 +73,16 @@ impl Relayer {
         genesis_config: GenesisConfig,
         last_sealed: Option<u64>,
         confirmations: u64,
+        bridging_payment_address: Option<H256>,
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
-        let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone()).await;
+        let merkle_roots = MerkleRootRelayer::new(
+            api_provider.clone(),
+            storage.clone(),
+            bridging_payment_address,
+        )
+        .await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
@@ -148,6 +155,7 @@ pub struct MerkleRootRelayer {
 
     /// Set of blocks that are waiting for authority set sync.
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
+    bridging_payment_address: Option<H256>,
 
     save_interval: Interval,
 }
@@ -156,6 +164,7 @@ impl MerkleRootRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         storage: Arc<MerkleRootStorage>,
+        bridging_payment_address: Option<H256>,
     ) -> MerkleRootRelayer {
         let mut save_interval = tokio::time::interval(Duration::from_secs(60));
         save_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -167,6 +176,7 @@ impl MerkleRootRelayer {
             storage,
 
             waiting_for_authority_set_sync: BTreeMap::new(),
+            bridging_payment_address,
 
             save_interval,
         }
@@ -582,6 +592,15 @@ impl MerkleRootRelayer {
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
+                        if let Some(bridging_payment_address) = self.bridging_payment_address {
+                            for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
+                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
+                                let pblock = GearBlock::from_subxt_block(pblock).await?;
+                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root for block #{}", block.number(), pblock.number());
+                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, true).await?;
+                            }
+                        }
+
                         self.try_proof_merkle_root(prover, authority_set_sync, block, false).await?;
                     }
 

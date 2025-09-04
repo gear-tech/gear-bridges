@@ -16,6 +16,17 @@ pub enum BridgingPaymentEvents {
         /// Nonce of the message that was paid for.
         nonce: U256,
     },
+
+    /// Fee for the message processing by relayer was paid
+    /// and priority bridging was requested.
+    PriorityBridgingPaid {
+        /// Block at which message was queued.
+        ///
+        /// Used by merkle-root relayer to process requests faster.
+        block: H256,
+        /// Nonce of the message that was paid for.
+        nonce: U256,
+    },
 }
 
 static mut STATE: Option<State> = None;
@@ -30,6 +41,8 @@ pub struct State {
     pub admin_address: ActorId,
     /// Fee amount that will be charged from users.
     pub fee: u128,
+    /// Priority fee amount that will be charged from users.
+    pub priority_fee: u128,
 }
 
 impl BridgingPayment {
@@ -66,6 +79,17 @@ impl BridgingPayment {
         self.state_mut().fee = fee;
     }
 
+    /// Set fee that this program will take for processing priority
+    /// requests.
+    ///
+    /// This method can be called only by admin.
+    #[export]
+    pub fn set_priority_fee(&mut self, priority_fee: u128) {
+        self.ensure_admin();
+
+        self.state_mut().priority_fee = priority_fee;
+    }
+
     /// Withdraw fees that were collected from user requests.
     ///
     /// This method can be called only by admin.
@@ -95,7 +119,7 @@ impl BridgingPayment {
 
     /// Pay fees for message processing to the admin.
     ///
-    /// This method requires that **exactly** [Config::fee] must
+    /// This method requires that **exactly** [State::fee] must
     /// be attached as a value when sending message to this method.
     ///
     /// Current fee amount can be retreived by calling `get_state`.
@@ -109,6 +133,25 @@ impl BridgingPayment {
         }
 
         self.emit_event(BridgingPaymentEvents::BridgingPaid { nonce })
+            .expect("Error depositing event");
+    }
+
+    /// Pay fees for priority message processing to the admin.
+    ///
+    /// This method requires that **exactly** [State::priority_fee] must be
+    /// attached as a value when sending message to this method.
+    ///
+    /// Current fee amount can be retrieved by calling `get_state`.
+    #[export]
+    pub async fn pay_priority_fees(&mut self, block: H256, nonce: U256) {
+        let fee = self.state().priority_fee;
+
+        let attached_value = msg::value();
+        if attached_value != fee {
+            panic!("Please attach exactly {} value", fee);
+        }
+
+        self.emit_event(BridgingPaymentEvents::PriorityBridgingPaid { block, nonce })
             .expect("Error depositing event");
     }
 

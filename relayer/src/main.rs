@@ -74,6 +74,12 @@ async fn run() -> AnyResult<()> {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let bridging_payment_address = args
+                .bridging_payment_address
+                .as_ref()
+                .map(|x| hex_utils::decode_h256(x))
+                .transpose()
+                .context("Failed to parse bridging payment address")?;
             let tcp_listener = TcpListener::bind(&args.web_server_address)?;
 
             let (sender, receiver) = mpsc::unbounded_channel();
@@ -92,6 +98,7 @@ async fn run() -> AnyResult<()> {
                 args.start_authority_set_id,
                 args.confirmations_merkle_root
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                bridging_payment_address,
             )
             .await;
 

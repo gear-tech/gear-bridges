@@ -214,7 +214,6 @@ trie-db = { version = "0.29.0", default-features = false }
 sp-trie = { version = "37.0.0", default-features = false }
 sp-core = { version = "34.0.0", default-features = false }
 primitive-types = { version = "0.12.2", default-features = false }
-wat = "1.236.0"
 
 # Alloy deps
 alloy-consensus = { version = "=1.0.9", default-features = false }

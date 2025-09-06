@@ -511,7 +511,12 @@ impl MerkleRootRelayer {
                     .is_some_and(|t| t.elapsed() >= self.spike.timeout);
 
                 if is_spike || is_timeout {
+                    // consume the timestamp to not trigger timeout again immediately.
+                    self.first_pending_timestamp.take();
                     let batch_size = self.merkle_root_batch.len();
+                    if batch_size == 0 {
+                        return Ok(true);
+                    }
                     log::info!("Triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}");
                     // do not group blocks by authority set id, prover will do this for us.
                     for pending in self.merkle_root_batch.drain(..) {
@@ -561,7 +566,7 @@ impl MerkleRootRelayer {
                                 let block = GearBlock::from_subxt_block(block).await?;
 
                                 match self.try_proof_merkle_root(prover, authority_set_sync, block, false, true).await {
-                                    Ok(Some(merkle_root)) => {
+                                    Ok(Some((_queue_id, merkle_root))) => {
                                         if let Some(r) = self.roots.get_mut(&merkle_root) { r.http_requests.push(response) }
                                     }
 
@@ -791,13 +796,10 @@ impl MerkleRootRelayer {
         block: GearBlock,
         batch: bool,
         priority: bool,
-    ) -> anyhow::Result<Option<H256>> {
-        let Some(merkle_root) = storage::queue_merkle_root_changed(&block) else {
+    ) -> anyhow::Result<Option<(u64, H256)>> {
+        let Some((queue_id, merkle_root)) = storage::queue_merkle_root_changed(&block) else {
             return Ok(None);
         };
-
-        // TODO: Wait for @breathx to finish his pallet-eth-bridge refactor.
-        let queue_id = 0;
 
         let nonces = storage::message_queued_events_of(&block).collect::<Vec<_>>();
 
@@ -838,7 +840,7 @@ impl MerkleRootRelayer {
                 self.roots.insert(
                     merkle_root,
                     MerkleRoot {
-                        queue_id: 0,
+                        queue_id,
                         block_number,
                         block_hash,
                         status: MerkleRootStatus::GenerateProof,
@@ -854,7 +856,7 @@ impl MerkleRootRelayer {
                         self.first_pending_timestamp = Some(now);
                     }
 
-                    log::info!("Merkle-root #{merkle_root} at block #{block_number} is enqueued for batch processing");
+                    log::info!("Merkle-root #{merkle_root} at block #{block_number} with queue #{queue_id} is enqueued for batch processing");
 
                     self.queued_root_timestamps.push_back(now);
                     self.merkle_root_batch.push(PendingMerkleRoot {
@@ -865,9 +867,9 @@ impl MerkleRootRelayer {
                         nonces_count,
                         queue_id,
                     });
-                    return Ok(Some(merkle_root));
+                    return Ok(Some((queue_id, merkle_root)));
                 }
-                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{block_number}");
+                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{block_number} with queue #{queue_id}");
                 if !prover.prove(
                     block_number,
                     block_hash,
@@ -891,7 +893,7 @@ impl MerkleRootRelayer {
                 self.roots.insert(
                     merkle_root,
                     MerkleRoot {
-                        queue_id: 0,
+                        queue_id,
                         block_number: block.number(),
                         block_hash: block.hash(),
                         status: MerkleRootStatus::WaitForAuthoritySetSync(
@@ -927,7 +929,7 @@ impl MerkleRootRelayer {
                 self.roots.insert(
                     merkle_root,
                     MerkleRoot {
-                        queue_id: 0,
+                        queue_id,
                         block_number: block.number(),
                         block_hash: block.hash(),
                         status: MerkleRootStatus::Failed(err.to_string()),
@@ -943,7 +945,7 @@ impl MerkleRootRelayer {
             }
         }
 
-        Ok(Some(merkle_root))
+        Ok(Some((queue_id, merkle_root)))
     }
 }
 

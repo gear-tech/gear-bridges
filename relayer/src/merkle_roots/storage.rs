@@ -29,7 +29,7 @@ pub struct MerkleRootStorage {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Block {
     pub block_hash: H256,
-    pub merkle_root_changed: Option<H256>,
+    pub merkle_root_changed: Option<(u64, H256)>,
     pub authority_set_changed: bool,
 }
 
@@ -39,11 +39,12 @@ impl Block {
     }
 }
 
-pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
+pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)> {
     block.events().iter().find_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(hash)) => {
-            Some(*hash)
-        }
+        gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged {
+            queue_id,
+            root,
+        }) => Some((*queue_id, *root)),
         _ => None,
     })
 }

@@ -1840,7 +1840,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
     Ok(())
 }
 
-// Check whether a failure check the reply in `handle_reply` hook is handled correctly.
+// Check whether a failure to check the reply in `handle_reply` hook is handled correctly.
 //
 // Prerequisites:
 // - Deploying a vft-manager.
@@ -1892,12 +1892,20 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    let mut vft_msg_id: MessageId = Default::default();
     let mut submit_receipt_msg_id: MessageId = Default::default();
+    let mut token_operation_msg_id: MessageId = Default::default();
 
     // At this point expecting the vft-manager to have sent a `transfer_from` call,
     // to the token minter, while itself having been placed in the waitlist.
     let predicate = |e| match e {
+        Event::Gear(GearEvent::MessageQueued {
+            id,
+            source,
+            destination,
+            ..
+        }) if destination == vft_manager_id.into() && source.0 == user_id.into_bytes() => {
+            Some((MessageId::new(id.0), 0_usize))
+        }
         Event::Gear(GearEvent::UserMessageSent { message, .. })
             if message.destination == extended_vft_id.into()
                 && message.source == vft_manager_id.into() =>
@@ -1906,9 +1914,8 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
                 .payload
                 .0
                 .starts_with(vft_client::vft::io::TransferFrom::ROUTE)
-                .then_some((MessageId::new(message.id.0), 0_usize))
+                .then_some((MessageId::new(message.id.0), 1_usize))
         }
-        Event::Gear(GearEvent::MessageWaited { id, .. }) => Some((MessageId::new(id.0), 1_usize)),
         _ => None,
     };
 
@@ -1922,9 +1929,9 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         .unwrap()
     {
         if idx == 0 {
-            vft_msg_id = msg_id;
-        } else if idx == 1 {
             submit_receipt_msg_id = msg_id;
+        } else if idx == 1 {
+            token_operation_msg_id = msg_id;
         }
     }
 
@@ -1939,13 +1946,18 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
 
     let mut listener = api.subscribe().await.unwrap();
     let (reply_message_id, _, _) = match api
-        .send_reply_bytes(vft_msg_id, reply_payload, gas_limit / 100 * 95, 0)
+        .send_reply_bytes(
+            token_operation_msg_id,
+            reply_payload,
+            gas_limit / 100 * 95,
+            0,
+        )
         .await
     {
         Ok(reply) => reply,
         Err(err) => {
             let block = api.last_block_number().await.unwrap();
-            println!("Failed to send reply to {vft_msg_id:?}: {err:?}, block={block}");
+            println!("Failed to send reply to {token_operation_msg_id:?}: {err:?}, block={block}");
             let result = reply_ticket.recv().await.unwrap();
             println!("{result:?}");
             crate::panic!("{:?}", err);
@@ -1965,8 +1977,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
                 .then_some(())
         }
         Event::Gear(GearEvent::MessageWoken { id, .. }) => {
-            assert_eq!(id.0, submit_receipt_msg_id.into_bytes());
-            Some(())
+            (id.0 == submit_receipt_msg_id.into_bytes()).then_some(())
         }
         Event::Gear(GearEvent::MessagesDispatched { statuses, .. }) => {
             statuses.into_iter().find_map(|(msg_id, status)| {

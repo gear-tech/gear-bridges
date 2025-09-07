@@ -19,6 +19,8 @@ pub(crate) async fn sync_authority_set_id(
     genesis_config: GenesisConfig,
     latest_authority_set_id: u64,
     latest_proven_authority_set_id: Option<u64>,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<SyncStepCount> {
     log::trace!("pub(crate) async fn sync_authority_set_id( genesis_config = {genesis_config:?}");
 
@@ -36,7 +38,7 @@ pub(crate) async fn sync_authority_set_id(
             return Ok(0);
         }
 
-        let proof = prover_interface::prove_genesis(gear_api, genesis_config).await?;
+        let proof = prover_interface::prove_genesis(gear_api, genesis_config, count_thread).await?;
 
         log::trace!("Init storage with proofs");
         proof_storage
@@ -71,7 +73,10 @@ pub(crate) async fn sync_authority_set_id(
                 set_id + 1
             );
 
-            proof = prover_interface::prove_validator_set_change(gear_api, proof, set_id).await?;
+            proof =
+                prover_interface::prove_validator_set_change(gear_api, proof, set_id, count_thread)
+                    .await?;
+
             proof_storage
                 .update(proof.proof.clone(), set_id + 1)
                 .await?;

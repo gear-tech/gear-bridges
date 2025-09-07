@@ -1,9 +1,4 @@
-use std::{str::FromStr, time::Instant, thread};
-
-use serde::{Deserialize, Serialize};
 use parity_scale_codec::Encode;
-use utils_prometheus::MeteredService;
-
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
@@ -12,6 +7,9 @@ use prover::proving::{
     self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
     StorageInclusion,
 };
+use serde::{Deserialize, Serialize};
+use std::{str::FromStr, thread, time::Instant};
+use utils_prometheus::MeteredService;
 
 pub struct Metrics;
 
@@ -32,6 +30,8 @@ lazy_static::lazy_static!(
 pub async fn prove_genesis(
     gear_api: &GearApi,
     genesis_config: GenesisConfig,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
         "Proving genesis authority set change {} -> {}",
@@ -56,20 +56,18 @@ pub async fn prove_genesis(
     let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["genesis"]).start_timer();
 
-    let builder = thread::Builder::new()
-        .stack_size(8_388_608)
-        .name("prover::proving::prove_genesis".into());
-
-    let handler = builder.spawn(move || {
-        prover::proving::prove_genesis(
-            parse_rpc_block_finality_proof(current_epoch_block_finality),
+    let handler = thread::spawn(move || {
+        proving::prove_genesis(
+            parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
             genesis_config,
             next_validator_set_inclusion_proof,
             next_validator_set_storage_data,
         )
-    }).unwrap();
+    });
 
-    let proof = handler.join().unwrap();
+    let proof = handler
+        .join()
+        .expect("prover::proving::prove_genesis handle should be joined");
 
     timer.stop_and_record();
     log::info!("Genesis prove time: {}ms", now.elapsed().as_millis());
@@ -81,6 +79,8 @@ pub async fn prove_validator_set_change(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     previous_authority_set_id: u64,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
         "Proving authority set change {} -> {}",
@@ -100,25 +100,22 @@ pub async fn prove_validator_set_change(
         parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
 
     let now = Instant::now();
-
     let timer = PROVING_TIME
         .with_label_values(&["validator_set_change"])
         .start_timer();
 
-    let builder = thread::Builder::new()
-        .stack_size(8_388_608)
-        .name("proving::prove_validator_set_change".into());
-
-    let handler = builder.spawn(move || {
+    let handler = thread::spawn(move || {
         proving::prove_validator_set_change(
             previous_proof,
-            parse_rpc_block_finality_proof(current_epoch_block_finality),
+            parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
             next_validator_set_inclusion_proof,
             next_validator_set_storage_data,
         )
-    }).unwrap();
+    });
 
-    let proof = handler.join().unwrap();
+    let proof = handler
+        .join()
+        .expect("proving::prove_validator_set_change handle should be joined");
 
     timer.stop_and_record();
     log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
@@ -179,6 +176,8 @@ pub async fn prove_final(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     at_block: H256,
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
     prove_final_with_block_finality(
@@ -186,6 +185,7 @@ pub async fn prove_final(
         previous_proof,
         genesis_config,
         (block, block_finality),
+        count_thread,
     )
     .await
 }
@@ -195,35 +195,37 @@ pub async fn prove_final_with_block_finality(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     (block, block_finality): (H256, dto::BlockFinalityProof),
+
+    count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
+    let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
     let now = Instant::now();
 
-    let builder = thread::Builder::new()
-        .stack_size(8_388_608)
-        .name("proving::prove_message_sent".into());
-
-    let handler = builder.spawn(move || {
+    let handler = thread::spawn(move || {
         let proof = proving::prove_message_sent(
             previous_proof,
-            parse_rpc_block_finality_proof(block_finality),
+            parse_rpc_block_finality_proof(block_finality, count_thread),
             genesis_config,
             sent_message_inclusion_proof,
             message_contents,
         );
 
         gnark::prove_circuit(&proof)
-    }).unwrap();
+    });
 
-    let proof = handler.join().unwrap();
+    let proof = handler
+        .join()
+        .expect("proving::prove_message_sent & gnark handle should be joined");
 
     log::info!("prove_final_with_block_finality took: {}ms", now.elapsed().as_millis());
     timer.stop_and_record();
+    log::info!("Final prove time: {}ms", now.elapsed().as_millis());
 
     let public_inputs: [_; 2] = proof
         .public_inputs
@@ -262,7 +264,10 @@ fn parse_rpc_inclusion_proof(proof: dto::StorageInclusionProof) -> StorageInclus
     }
 }
 
-fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof) -> BlockFinality {
+fn parse_rpc_block_finality_proof(
+    proof: dto::BlockFinalityProof,
+    count_thread: Option<usize>,
+) -> BlockFinality {
     BlockFinality {
         validator_set: proof.validator_set,
         pre_commits: proof
@@ -277,6 +282,7 @@ fn parse_rpc_block_finality_proof(proof: dto::BlockFinalityProof) -> BlockFinali
             .message
             .try_into()
             .expect("Unexpected GRANDPA message length"),
+        count_thread,
     }
 }
 

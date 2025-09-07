@@ -9,13 +9,19 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, CircuitData, VerifierOnlyCircuitData, VerifierCircuitData, ProverCircuitData},
+        proof::ProofWithPublicInputs,
     },
 };
 use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
 };
 use plonky2_field::types::Field;
+use plonky2_u32::gates::{
+    add_many_u32::{U32AddManyGate, U32AddManyGenerator},
+    arithmetic_u32::{U32ArithmeticGate, U32ArithmeticGenerator},
+};
+use std::env;
 
 use crate::{
     common::{
@@ -26,9 +32,11 @@ use crate::{
 };
 
 use super::pad_byte_vec;
+use std::{sync::Arc, time::Instant, marker::PhantomData};
+
 
 /// Maximum amount of blake2 blocks.
-const MAX_BLOCK_COUNT: usize = 48;
+const MAX_BLOCK_COUNT: usize = 50;
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
@@ -144,26 +152,15 @@ impl GenericBlake2 {
 lazy_static! {
     /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
     static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
-        // let verifier_data: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
-        // ..=MAX_BLOCK_COUNT)
-        // .map(blake2_circuit_verifier_data)
-        // .collect::<Vec<_>>()
-        // .try_into()
-        // .expect("Correct max block count");
-
-        // for (i, data) in verifier_data.iter().enumerate() {
-        //     let serialized = data.to_bytes()
-        //         .expect("Successfully serialized");
-        //     std::fs::write(format!("verifier_only_circuit_data-{i}"), serialized).expect("Successfully written to file");
-        // }
-
-        // verifier_data
+        let path = env::var("PATH_DATA").expect("PATH_DATA");
 
         let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
+        let serializer_gate = CustomGateSerializer::default();
 
-        for i in 0..MAX_BLOCK_COUNT {
-            let serialized = std::fs::read(format!("./variative-blake2-data/verifier_only_circuit_data-{i}")).expect("Good file with serialized data");
-            verifier_data.push(VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data"));
+        for i in 1..=MAX_BLOCK_COUNT {
+            let serialized = std::fs::read(format!("{path}/verifier_circuit_data-{i}")).expect("Good file with serialized data");
+            let data = VerifierCircuitData::<F, C, D>::from_bytes(serialized, &serializer_gate).expect("Correctly formed serialized data");
+            verifier_data.push(data.verifier_only);
         }
 
         verifier_data
@@ -171,6 +168,35 @@ lazy_static! {
             .expect("Correct max block count")
     };
 }
+
+// lazy_static! {
+//     static ref PROVER_DATA_BY_BLOCK_COUNT: [(ProverCircuitData<F, C, D>, Vec<Target>); MAX_BLOCK_COUNT] = {
+//         let path = env::var("PATH_DATA").expect("PATH_DATA");
+
+//         let mut result = Vec::with_capacity(MAX_BLOCK_COUNT);
+//         let serializer_gate = CustomGateSerializer::default();
+//         let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
+
+//         for i in 1..=MAX_BLOCK_COUNT {
+//             let serialized = std::fs::read(format!("{path}/prover_circuit_data-{i}")).expect("Good file with serialized data");
+//             let data = ProverCircuitData::<F, C, D>::from_bytes(&serialized, &serializer_gate, &serializer_generator).expect("Correctly formed serialized data");
+
+//             let serialized = std::fs::read(format!("{path}/prover_circuit_data-targets-{i}")).expect("Good file with serialized data");
+//             let mut buffer_read = Buffer::new(&serialized[..]);
+//             let targets = buffer_read.read_target_vec()
+//                 .expect("buffer_read.read_target_vec()");
+
+//             result.push((data, targets));
+//         }
+
+//         match result
+//             .try_into()
+//             {
+//                 Ok(r) => r,
+//                 Err(_) => panic!("size is correct"),
+//             }
+//     };
+// }
 
 fn blake2_circuit_verifier_data(num_blocks: usize) -> VerifierOnlyCircuitData<C, D> {
     VariativeBlake2 {
@@ -199,6 +225,59 @@ struct VariativeBlake2 {
 impl VariativeBlake2 {
     pub fn prove(self) -> ProofWithCircuitData<VariativeBlake2Target> {
         log::trace!("VariativeBlake2; fn prove; self.data.len = {}", self.data.len());
+
+        // *if self.data.len() <= BLOCK_BYTES
+        {
+            let index = self.data.len().div_ceil(BLOCK_BYTES).max(1);
+            log::debug!("index = {index}, self.data.len() = {}", self.data.len());
+
+            let path = env::var("PATH_DATA").expect("PATH_DATA");
+            let serializer_gate = CustomGateSerializer::default();
+            let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
+
+            let now = Instant::now();
+
+            let serialized = std::fs::read(format!("{path}/prover_circuit_data-{index}")).expect("Good file with serialized data");
+            let prover_data = ProverCircuitData::<F, C, D>::from_bytes(&serialized, &serializer_gate, &serializer_generator).expect("Correctly formed serialized data");
+
+            let serialized = std::fs::read(format!("{path}/prover_circuit_data-targets-{index}")).expect("Good file with serialized data");
+            let mut buffer_read = Buffer::new(&serialized[..]);
+            let targets = buffer_read.read_target_vec()
+                .expect("buffer_read.read_target_vec()");
+
+            log::info!("Loading circuit data time: {}ms", now.elapsed().as_millis());
+
+            // let (prover_data, targets) = &PROVER_DATA_BY_BLOCK_COUNT[index];
+
+            let mut witness = PartialWitness::new();
+            witness.set_target(targets[0], F::from_canonical_usize(self.data.len()));
+            for i in 0..self.data.len() {
+                witness.set_target(targets[i + 1], F::from_canonical_u8(self.data[i]));
+            }
+            // zero the remaining tail
+            for i in (1 + self.data.len())..targets.len() {
+                witness.set_target(targets[i], F::from_canonical_u8(0));
+            }
+
+            let now = Instant::now();
+
+            let ProofWithPublicInputs {
+                proof,
+                public_inputs,
+            } = prover_data.prove(witness).unwrap();
+
+            log::info!("VariativeBlake2 prove time: {}ms", now.elapsed().as_millis());
+
+            return ProofWithCircuitData {
+                proof,
+                circuit_data: Arc::from(VerifierCircuitData {
+                    verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
+                    common: prover_data.common.clone(),
+                }),
+                public_inputs,
+                public_inputs_parser: PhantomData,
+            };
+        }
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -302,6 +381,203 @@ impl VariativeBlake2 {
 
         result
     }
+
+    pub fn build_circuit_data(&self) -> (CircuitData<F, C, D>, Vec<Target>) {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::new(config);
+
+        let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
+
+        let length_target = builder.add_virtual_target();
+
+        let mut targets = Vec::with_capacity(MAX_DATA_BYTES + 1);
+        targets.push(length_target);
+
+        let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec(self.data.clone()).map(|_byte| {
+            let target = builder.add_virtual_target();
+            targets.push(target);
+
+            ByteTarget::from_target_safe(target, &mut builder)
+        });
+
+        // Assert that padding is zeroed.
+        let mut data_end = builder._false();
+        let mut current_idx = builder.zero();
+        let zero = builder.zero();
+        for byte in data_target.iter().take(block_count * BLOCK_BYTES) {
+            let len_exceeded = builder.is_equal(current_idx, length_target);
+            data_end = builder.or(len_exceeded, data_end);
+
+            let byte_is_zero = builder.is_equal(byte.as_target(), zero);
+            let byte_is_not_zero = builder.not(byte_is_zero);
+
+            let byte_invalid = builder.and(data_end, byte_is_not_zero);
+            builder.assert_zero(byte_invalid.target);
+
+            current_idx = builder.add_const(current_idx, F::ONE);
+        }
+
+        // Assert upper bound for length.
+        let length_is_max = builder.is_equal(current_idx, length_target);
+        let length_valid = builder.or(length_is_max, data_end);
+        builder.assert_one(length_valid.target);
+
+        // Assert lower bound for length.
+        let max_length = builder.constant(F::from_canonical_usize(block_count * BLOCK_BYTES));
+        let padded_length = builder.sub(max_length, length_target);
+        let block_bytes_target = builder.constant(F::from_canonical_usize(BLOCK_BYTES));
+        let compare_with_zero = builder.sub(block_bytes_target, padded_length);
+        builder.range_check(compare_with_zero, 32);
+
+        let data_target = ArrayTarget(data_target);
+        let data_target_bits = data_target
+            .0
+            .iter()
+            .flat_map(|t| t.as_bit_targets(&mut builder).0.into_iter().rev());
+
+        let hasher_input = data_target_bits
+            .take(BLOCK_BITS * block_count)
+            .collect::<Vec<_>>();
+
+        let hash = blake2_circuit_from_message_targets_and_length_target(
+            &mut builder,
+            hasher_input,
+            length_target,
+        );
+        let hash = Blake2Target::parse_exact(&mut hash.into_iter().map(|t| t.target));
+
+        VariativeBlake2Target {
+            data: data_target,
+            length: length_target,
+            hash,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        log::trace!("VariativeBlake2; 10 builder.num_gates() = {}", builder.num_gates());
+
+        // Standardize degree.
+        // (2^19 + 2^17)
+        while builder.num_gates() < 655_360 {
+            builder.add_gate(NoopGate, vec![]);
+        }
+
+        (builder.build::<C>(), targets)
+    }
+}
+
+use plonky2::{get_generator_tag_impl, impl_generator_serializer, read_generator_impl, read_gate_impl, get_gate_tag_impl, impl_gate_serializer};
+use plonky2::plonk::config::GenericConfig;
+use plonky2::util::serialization::{WitnessGeneratorSerializer, GateSerializer, Write as _, Read, Buffer};
+use plonky2::hash::hash_types::RichField;
+use plonky2_field::extension::Extendable;
+use plonky2::plonk::config::AlgebraicHasher;
+use plonky2::gadgets::split_join::WireSplitGenerator;
+use plonky2::gadgets::split_join::SplitGenerator;
+use plonky2::gates::reducing::ReducingGenerator;
+use plonky2::gates::reducing_extension::ReducingGenerator as ReducingExtensionGenerator;
+use plonky2::iop::generator::RandomValueGenerator;
+use plonky2::gates::random_access::RandomAccessGenerator;
+use plonky2::gadgets::arithmetic_extension::QuotientGeneratorExtension;
+use plonky2::gates::poseidon_mds::PoseidonMdsGenerator;
+use plonky2::gates::poseidon::PoseidonGenerator;
+use plonky2::iop::generator::NonzeroTestGenerator;
+use plonky2::gates::multiplication_extension::MulExtensionGenerator;
+use plonky2::gadgets::range_check::LowHighGenerator;
+use plonky2::gates::lookup_table::LookupTableGenerator;
+use plonky2::gates::lookup::LookupGenerator;
+use plonky2::gates::coset_interpolation::InterpolationGenerator;
+use plonky2::gates::exponentiation::ExponentiationGenerator;
+use plonky2::gadgets::arithmetic::EqualityGenerator;
+use plonky2::recursion::dummy_circuit::DummyProofGenerator;
+use plonky2::iop::generator::CopyGenerator;
+use plonky2::iop::generator::ConstantGenerator;
+use plonky2::gadgets::split_base::BaseSumGenerator;
+use plonky2::gates::base_sum::BaseSplitGenerator;
+use plonky2::gates::arithmetic_extension::ArithmeticExtensionGenerator;
+use plonky2::gates::arithmetic_base::ArithmeticBaseGenerator;
+use plonky2::gates::reducing::ReducingGate;
+use plonky2::gates::reducing_extension::ReducingExtensionGate;
+use plonky2::gates::random_access::RandomAccessGate;
+use plonky2::gates::public_input::PublicInputGate;
+use plonky2::gates::poseidon::PoseidonGate;
+use plonky2::gates::poseidon_mds::PoseidonMdsGate;
+use plonky2::gates::multiplication_extension::MulExtensionGate;
+use plonky2::gates::lookup_table::LookupTableGate;
+use plonky2::gates::lookup::LookupGate;
+use plonky2::gates::exponentiation::ExponentiationGate;
+use plonky2::gates::coset_interpolation::CosetInterpolationGate;
+use plonky2::gates::constant::ConstantGate;
+use plonky2::gates::base_sum::BaseSumGate;
+use plonky2::gates::arithmetic_extension::ArithmeticExtensionGate;
+use plonky2::gates::arithmetic_base::ArithmeticGate;
+
+#[derive(Debug, Default)]
+pub struct CustomGeneratorSerializer<C: GenericConfig<D>, const D: usize> {
+    pub _phantom: PhantomData<C>,
+}
+
+impl<F, C, const D: usize> WitnessGeneratorSerializer<F, D> for CustomGeneratorSerializer<C, D>
+where
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F> + 'static,
+    C::Hasher: AlgebraicHasher<F>,
+{
+    impl_generator_serializer! {
+        CustomGeneratorSerializer,
+        ArithmeticBaseGenerator<F, D>,
+        ArithmeticExtensionGenerator<F, D>,
+        BaseSplitGenerator<2>,
+        BaseSumGenerator<2>,
+        ConstantGenerator<F>,
+        CopyGenerator,
+        DummyProofGenerator<F, C, D>,
+        EqualityGenerator,
+        ExponentiationGenerator<F, D>,
+        InterpolationGenerator<F, D>,
+        LookupGenerator,
+        LookupTableGenerator,
+        LowHighGenerator,
+        MulExtensionGenerator<F, D>,
+        NonzeroTestGenerator,
+        PoseidonGenerator<F, D>,
+        PoseidonMdsGenerator<D>,
+        QuotientGeneratorExtension<D>,
+        RandomAccessGenerator<F, D>,
+        RandomValueGenerator,
+        ReducingGenerator<D>,
+        ReducingExtensionGenerator<D>,
+        SplitGenerator,
+        WireSplitGenerator,
+        U32AddManyGenerator<F, D>,
+        U32ArithmeticGenerator<F, D>
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct CustomGateSerializer;
+
+impl<F: RichField + Extendable<D>, const D: usize> GateSerializer<F, D> for CustomGateSerializer {
+    impl_gate_serializer! {
+        CustomGateSerializer,
+        ArithmeticGate,
+        ArithmeticExtensionGate<D>,
+        BaseSumGate<2>,
+        ConstantGate,
+        CosetInterpolationGate<F, D>,
+        ExponentiationGate<F, D>,
+        LookupGate,
+        LookupTableGate,
+        MulExtensionGate<D>,
+        NoopGate,
+        PoseidonMdsGate<F, D>,
+        PoseidonGate<F, D>,
+        PublicInputGate,
+        RandomAccessGate<F, D>,
+        ReducingExtensionGate<D>,
+        ReducingGate<D>,
+        U32AddManyGate<F, D>,
+        U32ArithmeticGate<F, D>
+    }
 }
 
 #[cfg(test)]
@@ -314,10 +590,49 @@ mod tests {
 
     use super::*;
     use crate::common::{array_to_bits, targets::ParsableTargetSet};
+    use std::{env, fs};
+
+    #[test]
+    fn generate_circuit_data() {
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .filter_level(log::LevelFilter::Info)
+            .format_target(false)
+            .format_timestamp_secs()
+            .parse_default_env()
+            .try_init();
+
+        let path_out = env::var("PATH_OUT").expect("PATH_OUT");
+
+        let mut buffer = Vec::with_capacity(2_000_000_000);
+        for count_block in 1..=MAX_BLOCK_COUNT {
+            let (circuit_data, targets) = VariativeBlake2 { data: vec![0; count_block * BLOCK_BYTES ] }.build_circuit_data();
+
+            let serializer_gate = CustomGateSerializer::default();
+            let path_verifier_circuit_data = format!("{path_out}/verifier_circuit_data-{count_block}");
+            let serialized = circuit_data.verifier_data().to_bytes(&serializer_gate)
+                .expect("circuit_data.verifier_data().to_bytes(&serializer_gate)");
+            fs::write(path_verifier_circuit_data, serialized).expect("fs::write(path_verifier_circuit_data, serialized)");
+
+            let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
+            let prover_data = circuit_data.prover_data();
+            buffer.clear();
+            buffer.write_prover_circuit_data(
+                &prover_data,
+                &serializer_gate,
+                &serializer_generator,
+            ).expect("write_prover_circuit_data");
+            let path_prover_circuit_data = format!("{path_out}/prover_circuit_data-{count_block}");
+            fs::write(path_prover_circuit_data, &buffer).expect("fs::write(path_prover_circuit_data, buffer)");
+
+            buffer.clear();
+            buffer.write_target_vec(&targets).expect("buffer.write_target_vec(&targets)");
+            let path = format!("{path_out}/prover_circuit_data-targets-{count_block}");
+            fs::write(path, &buffer).expect("fs::write(path_prover_circuit_data, buffer)");
+        }
+    }
 
     #[test]
     fn test_generic_blake2_hasher() {
-
         let _ = pretty_env_logger::formatted_timed_builder()
             .filter_level(log::LevelFilter::Info)
             .format_target(false)
@@ -350,6 +665,8 @@ mod tests {
     }
 
     fn test_case(data: Vec<u8>) -> VerifierCircuitData<F, C, D> {
+        log::debug!("test_case; data.len = {}", data.len());
+
         let mut hasher = Blake2bVar::new(32).expect("Blake2bVar instantiated");
         hasher.update(&data);
         let mut real_hash = [0; 32];

@@ -19,6 +19,7 @@ pub struct Request {
     pub block_hash: H256,
     pub merkle_root: H256,
     pub inner_proof: ProofWithCircuitData,
+    pub priority: bool,
 }
 
 pub enum Response {
@@ -60,6 +61,7 @@ impl FinalityProverIo {
         block_hash: H256,
         merkle_root: H256,
         inner_proof: ProofWithCircuitData,
+        priority: bool,
     ) -> bool {
         self.requests
             .send(Request {
@@ -67,6 +69,7 @@ impl FinalityProverIo {
                 block_hash,
                 merkle_root,
                 inner_proof,
+                priority,
             })
             .is_ok()
     }
@@ -80,14 +83,22 @@ impl FinalityProverIo {
 pub struct FinalityProver {
     api_provider: ApiProviderConnection,
     genesis_config: GenesisConfig,
+
+    count_thread: Option<usize>,
 }
 
 impl FinalityProver {
-    pub fn new(api_provider: ApiProviderConnection, genesis_config: GenesisConfig) -> Self {
+    pub fn new(
+        api_provider: ApiProviderConnection,
+        genesis_config: GenesisConfig,
+        count_thread: Option<usize>,
+    ) -> Self {
         Self {
             api_provider,
 
             genesis_config,
+
+            count_thread,
         }
     }
 
@@ -128,6 +139,8 @@ impl FinalityProver {
         // Group requests by authority set ID, storing all blocks for each set
         let mut authority_groups: HashMap<u64, BatchProofRequest> = HashMap::new();
 
+        let mut priority_requests = Vec::new();
+
         loop {
             let n = requests.recv_many(&mut batch_vec, BATCH_SIZE).await;
             if n == 0 {
@@ -166,6 +179,10 @@ impl FinalityProver {
             log::info!("Received {n} requests, grouping by authority set...");
 
             for request in batch_vec.drain(..) {
+                if request.priority {
+                    priority_requests.push(request);
+                    continue;
+                }
                 let authority_set_id = gear_api.authority_set_id(request.block_hash).await?;
                 match authority_groups.entry(authority_set_id) {
                     Entry::Occupied(mut entry) => {
@@ -174,6 +191,35 @@ impl FinalityProver {
                     Entry::Vacant(entry) => {
                         entry.insert(BatchProofRequest::new(request));
                     }
+                }
+            }
+
+            for request in priority_requests.drain(..) {
+                log::info!(
+                    "Processing priority request for block #{}, merkle-root {}",
+                    request.block_number,
+                    request.merkle_root
+                );
+                let proof = self
+                    .generate_proof(
+                        &gear_api,
+                        request.block_number,
+                        request.block_hash,
+                        request.merkle_root,
+                        request.inner_proof,
+                    )
+                    .await?;
+
+                if responses
+                    .send(Response::Single {
+                        block_number: request.block_number,
+                        merkle_root: request.merkle_root,
+                        proof,
+                    })
+                    .is_err()
+                {
+                    log::warn!("Response channel closed, exiting");
+                    return Ok(());
                 }
             }
 
@@ -231,9 +277,14 @@ impl FinalityProver {
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
         let start = Instant::now();
-        let proof =
-            prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
-                .await?;
+        let proof = prover_interface::prove_final(
+            gear_api,
+            inner_proof,
+            self.genesis_config,
+            block_hash,
+            self.count_thread,
+        )
+        .await?;
         log::info!(
             "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",
             start.elapsed().as_secs_f64()
